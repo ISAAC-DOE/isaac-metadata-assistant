@@ -1,0 +1,17 @@
+# derived knowledge graph — rebuilt from the repo, never source of truth
+graphify-out/
+
+# user-supplied experiment artifacts may be sensitive (SLAC data governance):
+# keep them out of git by default
+examples/*
+!examples/README.md
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# os
+.DS_Store

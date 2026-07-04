@@ -1,0 +1,16 @@
+{
+  "field": "technique",
+  "version": "0.1.0-provisional",
+  "provisional": true,
+  "note": "Seeded from the SSRL web form and Excel template. Multi-technique records (e.g. 'XAS/EXAFS') are an open schema question — MVP uses a single primary term.",
+  "terms": [
+    "XAS",
+    "XANES",
+    "EXAFS",
+    "XRD",
+    "PDF",
+    "XPS",
+    "Raman",
+    "FTIR"
+  ]
+}

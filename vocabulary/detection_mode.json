@@ -1,0 +1,11 @@
+{
+  "field": "detection_mode",
+  "version": "0.1.0-provisional",
+  "provisional": true,
+  "terms": [
+    "transmission",
+    "fluorescence",
+    "total electron yield",
+    "partial electron yield"
+  ]
+}
