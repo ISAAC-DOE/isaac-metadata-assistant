@@ -51,10 +51,20 @@ extra keys.
 (`.claude/skills/`). `/graphify` (global) builds the optional graph; the core pipeline must keep
 working without it.
 
+## Reporting cadence (standing rule)
+
+After **every implementation slice and every phase**, provide a clear report — do not wait until
+the end of a large phase. Each report must include: files changed; what was implemented; what was
+intentionally not changed; verification commands/results; test results; safety/data-governance
+checks; whether truth/export/validation paths were touched; commit hash (if committed); push
+status; blockers or deferred items; recommendation for the next slice/phase. This holds for all
+future phases.
+
 ## Dev
 
-- Core: `src/isaac_records/` (`official`, `draft_validator`, `export`, `audit`, `ids`, `cli`),
-  venv at `.venv/`, tests `.venv/bin/pytest` (40 tests).
+- Core: `src/isaac_records/` (`official`, `draft_validator`, `export`, `audit`, `ids`, `cli`,
+  `review`; `extract/` is a Phase-2 interface seam), venv at `.venv/`, tests `.venv/bin/pytest`
+  (41 tests).
 - CLI: `.venv/bin/isaac validate|export|audit|new-id` — deterministic, zero-LLM.
 - Deps: `jsonschema`, `python-ulid`. (pint and the provisional-schema code were removed in the
   official-schema migration.)
