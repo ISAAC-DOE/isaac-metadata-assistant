@@ -10,7 +10,23 @@ Intern project (SSRL/SLAC, ISAAC): turn experiment metadata into validated, evid
   `schema/PROVENANCE.md` to refresh it. The upstream standard:
   https://github.com/ISAAC-DOE/isaac-ai-ready-record (+ its wiki).
 - Exported records must validate against it (`isaac validate <record> --official`).
-- Graphify output is leads, not facts. If it contradicts the schema or a record, the schema wins.
+
+## Two planes: truth vs. memory
+
+- **Truth plane** — official schema + validators + export decide validity. Deterministic and
+  Graphify-free (enforced by `test_core_never_imports_graphify`).
+- **Memory/query plane** — **Graphify is central** for project memory, relationship search,
+  similar-record lookup, prior-experiment/document queries, contextual drafting help,
+  documentation search, and "what changed?" history. Route memory/query questions through it.
+- **Graphify is central for memory and query, but never central for truth.** If a graph answer
+  conflicts with the schema, a validated record, or the audit, the deterministic source wins.
+
+## Validation stack (AI never overrides code)
+
+1. Draft no-guessing (`draft_validator.py`) → 2. Official schema (`official.py`) →
+3. Official `portal/validation.py` soft warnings (deferred) → 4. AI consistency review
+(`review.py`, **advisory only**, placeholder) → 5. Human review. Stage 4 must never mark records
+valid/invalid, mutate records, or be wired into export/validation.
 
 ## Trust rules (enforced by code)
 

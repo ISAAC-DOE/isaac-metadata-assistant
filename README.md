@@ -66,7 +66,37 @@ python3 -m venv .venv
 | `isaac new-id` | — | Print a fresh ULID `record_id` |
 | — | `/isaac-query` | Routed Q&A (schema / examples / audit / git / graph) |
 
-Graphify is **optional**: the draft → export → validate pipeline works with it entirely absent.
+## Two planes: truth vs. memory
+
+The system deliberately separates **what is true** from **what we remember**.
+
+- **Truth plane (deterministic, Graphify-free).** The official schema, the validators, and export
+  decide whether a record exists and is valid. This path never imports Graphify — enforced by a
+  test (`test_core_never_imports_graphify`). The official ISAAC schema and official validator are
+  the only authorities on validity.
+- **Memory/query plane (Graphify-central).** Graphify is a **major** part of the system for
+  memory and context, not a bolt-on: project memory, relationship search, similar-record lookup,
+  prior-experiment and document queries, contextual help while drafting, documentation search, and
+  "what changed?" history. `/isaac-query` routes here for those questions.
+
+**Graphify is central for memory and query, but never central for truth.** If a graph answer
+conflicts with the schema, a validated record, or the audit, the deterministic source wins. The
+draft → export → validate pipeline works with Graphify entirely absent.
+
+## Validation stack
+
+Records pass through staged checks; each stage has a fixed authority and the AI never overrides code:
+
+1. **Draft no-guessing validation** (`draft_validator.py`) — gates authoring.
+2. **Official ISAAC schema validation** (`official.py`, vendored v1.05) — gates export.
+3. **Official `portal/validation.py` soft-warning tier** (upstream; integration deferred) — warnings.
+4. **AI scientific consistency review** (`review.py`) — **advisory only**, placeholder today.
+5. **Human review** of anything flagged — the decider.
+
+Stage 4 is a placeholder interface (`src/isaac_records/review.py`): it is advisory, never marks a
+record valid/invalid, never mutates records, and is not wired into export or validation. A future
+Scientific/Consistency Review Agent would implement it and may consult Graphify for similar-record
+comparison — as advisory context, never as truth.
 
 ## Migration note
 

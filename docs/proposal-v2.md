@@ -89,13 +89,44 @@ The LLM touches only extraction and question-asking; everything downstream is de
 35 tests lock this in: all 10 official golden records validate; representative violations fail;
 the transform is gated; the sidecar's paths resolve; the core never imports Graphify.
 
-## 6. Graphify (right-sized, optional)
+## 6. Graphify: central for memory and query, not for truth
 
-Cross-experiment memory only. Query routing (`/isaac-query`): schema/vocab questions →
-`schema/isaac_record_v1.json` + `vocabulary/`; "how is X encoded" → the golden examples;
-completeness → `isaac audit`; history → `git log`; similarity/relationships → `graphify query`.
-The core pipeline is fully functional with Graphify absent (enforced by test). Data-governance
-note: Graphify runs key-less so no content is routed to an external API.
+The system separates two planes on purpose:
+
+- **Truth plane (deterministic, Graphify-free).** Schema, validators, and export decide whether a
+  record exists and is valid. This path never imports Graphify (enforced by
+  `test_core_never_imports_graphify`). The official schema and official validator are the only
+  authorities on validity.
+- **Memory/query plane (Graphify-central).** Graphify is a **major** component here, not an
+  optional add-on: project memory, relationship search, similar-record lookup, prior-experiment and
+  document queries, contextual help while drafting, documentation search, and "what changed?"
+  history. This is where the assistant becomes a living project memory, not just a record maker.
+
+`/isaac-query` routes each question to its owner: schema/vocab → `schema/isaac_record_v1.json` +
+`vocabulary/`; "how is X encoded" → golden examples; completeness → `isaac audit`; history →
+`git log`; **similarity/relationships/memory → `graphify query`**. If a graph answer conflicts with
+the schema, a validated record, or the audit, the deterministic source wins. The truth pipeline is
+fully functional with Graphify absent; the memory/query experience leans on it heavily.
+Data-governance note: Graphify runs key-less so no content is routed to an external API.
+
+## 6a. Validation stack and the future AI review layer
+
+Records pass through staged checks with fixed authorities; the AI never overrides code.
+
+1. **Draft no-guessing validation** (`draft_validator.py`) — gates authoring.
+2. **Official ISAAC schema validation** (`official.py`, vendored v1.05) — gates export.
+3. **Official `portal/validation.py` soft-warning tier** (upstream; integration deferred) — warnings.
+4. **AI scientific consistency review** (`review.py`) — **advisory only**; a placeholder interface today.
+5. **Human review** of flagged issues — the decider.
+
+**Stage 4 (advisory review).** A future Scientific / Consistency Review Agent would check
+scientific plausibility, record↔context consistency, descriptor↔technique mismatch, missing but
+important context, possible overclaiming beyond evidence, comparison to similar records (via
+Graphify, as advisory context), and suggest human-review questions. It **must not** replace the
+schema validator or `portal/validation.py`, silently modify records, override validation, or mark a
+record officially valid/invalid. Today it is a no-op interface (`src/isaac_records/review.py`,
+`NoOpReviewer`) that returns no findings, touches no record, and is not wired into export or
+validation — a stable seam for later work, with zero effect on current behavior.
 
 ## 7. MVP scope and demo
 
