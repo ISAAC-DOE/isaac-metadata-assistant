@@ -1,0 +1,28 @@
+{
+  "field": "descriptor_class",
+  "note": "The canonical descriptor 'class' tokens the official schema references (via the descriptors[].name regex) but does not enumerate inline. Transcribed from the ISAAC Controlled-Vocabulary wiki, 2026-07-06. The official schema + portal validator remain authoritative; this file is an extraction/authoring aid only. Verify against the wiki before relying on it.",
+  "source": "https://github.com/ISAAC-DOE/isaac-ai-ready-record/wiki/Controlled-Vocabulary",
+  "classes": {
+    "electrochemistry": [
+      "faradaic_efficiency", "partial_current_density", "production_rate",
+      "steady_state_current_density", "limiting_current_density", "turnover_frequency",
+      "total_faradaic_efficiency", "onset_potential", "half_wave_potential",
+      "tafel_slope", "overpotential", "exchange_current_density"
+    ],
+    "surface_characterization": [
+      "mass_activity", "specific_activity", "ecsa", "roughness_factor",
+      "electron_transfer_number", "stability_retention_percent", "cell_voltage",
+      "energy_efficiency"
+    ],
+    "computational": [
+      "adsorption_energy", "activation_barrier", "pourbaix_stability", "band_gap",
+      "surface_energy", "d_band_center", "work_function"
+    ],
+    "spectroscopy": [
+      "white_line_energy", "edge_shift", "oxidation_state", "edge_position",
+      "white_line_intensity", "inflection_point_energy"
+    ]
+  },
+  "products": ["H2", "CO", "CH4", "C2H4", "HCOO", "NH3", "C1", "C1plus", "C2plus", "C3plus", "C2plus_alcohols"],
+  "deprecated_aliases": { "HCOOH": "HCOO" }
+}

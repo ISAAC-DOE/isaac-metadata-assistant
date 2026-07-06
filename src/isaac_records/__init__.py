@@ -1,27 +1,34 @@
 """Deterministic core for ISAAC metadata records.
 
-Validation, audit, and export are plain code with zero LLM involvement:
-the trust rules of the project (no evidence → no finalized field) are
-enforced here, not by prompts.
+Two layers, both LLM-free:
+  - draft authoring   — `models` + `draft_validator`: the no-guessing envelope format
+  - export + validate — `export` (draft → official record + sidecar) and `official`
+                        (validation against the vendored official schema, v1.05)
+
+The official ISAAC schema is the source of truth; this package never redefines it.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
+from .draft_validator import DraftReport, validate_draft
+from .export import ExportResult, build_sidecar, export_draft, transform
+from .ids import is_record_id, new_record_id
 from .models import derivation, evidence, field_value, user_confirmation
-from .validator import (
-    ValidationReport,
-    load_schema,
-    load_vocabularies,
-    validate_record,
-)
+from .official import OfficialReport, validate_official
 
 __all__ = [
-    "ValidationReport",
+    "DraftReport",
+    "ExportResult",
+    "OfficialReport",
+    "build_sidecar",
     "derivation",
     "evidence",
+    "export_draft",
     "field_value",
-    "load_schema",
-    "load_vocabularies",
+    "is_record_id",
+    "new_record_id",
+    "transform",
     "user_confirmation",
-    "validate_record",
+    "validate_draft",
+    "validate_official",
 ]

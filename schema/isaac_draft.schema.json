@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "isaac_draft.schema.json",
+  "title": "ISAAC Draft (authoring format — NOT an ISAAC record)",
+  "description": "The pre-export working format. Scalar fields carry an evidence envelope so no value is finalized without a source. `isaac export` transforms a draft into the official ISAAC record shape (schema/isaac_record_v1.json) and moves evidence to a sidecar. This schema validates draft STRUCTURE only; the no-guessing rules are enforced by src/isaac_records/draft_validator.py, and vocabulary/units are enforced by the official schema post-transform.",
+  "x-draft-only": true,
+  "type": "object",
+  "required": ["meta"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["record_type", "record_domain", "source_type"],
+      "properties": {
+        "record_type": { "enum": ["evidence", "intent", "synthesis"] },
+        "record_domain": { "enum": ["characterization", "performance", "simulation", "theory", "derived"] },
+        "source_type": { "enum": ["facility", "laboratory", "computation", "literature", "database", "industrial"] }
+      }
+    },
+    "fields": {
+      "type": "object",
+      "description": "Map of dotted official JSON-path → field envelope. Scalars only.",
+      "additionalProperties": { "$ref": "#/$defs/envelope" }
+    },
+    "series": { "type": "array" },
+    "qc": { "type": "object" },
+    "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
+    "descriptors_outputs": { "type": "array" },
+    "links": { "type": "array" },
+    "attribution": { "type": "object" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "implicit": {
+      "type": "array",
+      "description": "Sidecar-only inferences (e.g. absorbing element from formula). Never become record fields.",
+      "items": {
+        "type": "object",
+        "required": ["about", "evidence"],
+        "properties": {
+          "about": { "type": "string" },
+          "value": {},
+          "evidence": { "type": "array" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "required": ["value", "status", "evidence"],
+      "properties": {
+        "value": {},
+        "unit": { "type": ["string", "null"], "description": "Informational in drafts; official records encode units in key names." },
+        "status": { "enum": ["verified", "inferred", "needs_confirmation", "missing", "rejected"] },
+        "evidence": { "type": "array" }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "required": ["asset_id", "content_role", "uri", "sha256"],
+      "properties": {
+        "evidence": { "type": "array" }
+      }
+    }
+  }
+}

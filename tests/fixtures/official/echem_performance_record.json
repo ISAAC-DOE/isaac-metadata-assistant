@@ -1,0 +1,260 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "01JFH4X9Y2R8G1YH4W8O5L3N9D",
+  "record_type": "evidence",
+  "record_domain": "performance",
+  "source_type": "laboratory",
+  "timestamps": {
+    "acquired_start_utc": "2025-12-15T09:00:00Z",
+    "acquired_end_utc": "2025-12-15T10:30:00Z",
+    "created_utc": "2025-12-15T11:45:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "Pt/C on RDE",
+      "formula": "Pt/C",
+      "provenance": "commercial",
+      "identifiers": [
+        {
+          "scheme": "internal",
+          "value": "Dev-2025-PtC-005"
+        }
+      ],
+      "notes": "40% Pt on Carbon. Commercial catalyst layer on RDE disk (carbon paper)."
+    },
+    "sample_form": "film",
+    "electrode_type": "RDE",
+    "composition": {
+      "loading_mg_pt_cm2": 0.4
+    },
+    "geometry": {
+      "geometric_area_cm2": 0.196
+    }
+  },
+  "context": {
+    "environment": "in_situ",
+    "temperature_K": 298.15,
+    "electrochemistry": {
+      "reaction": "ORR",
+      "cell_type": "three_electrode",
+      "control_mode": "potentiodynamic",
+      "potential_scale": "RHE",
+      "electrolyte": {
+        "name": "HClO4",
+        "concentration_M": 0.1
+      },
+      "pH": 1.0,
+      "pH_basis": "nominal",
+      "ir_compensation": {
+        "method": "post_hoc",
+        "percent": 100
+      },
+      "reference_electrode": {
+        "type": "other",
+        "model": "RHE_hydroflex"
+      }
+    },
+    "transport": {
+      "flow_mode": "rotating_disk",
+      "rotation_speed_rpm": 1600,
+      "feed": {
+        "phase": "gas",
+        "composition": "O2"
+      }
+    }
+  },
+  "system": {
+    "domain": "experimental",
+    "technique": "linear_sweep_voltammetry",
+    "facility": {
+      "facility_name": "SSRL",
+      "organization": "SLAC",
+      "laboratory": "Echem_Lab"
+    },
+    "instrument": {
+      "instrument_type": "potentiostat",
+      "instrument_name": "BioLogic_VMP3",
+      "vendor_or_project": "BioLogic"
+    },
+    "configuration": {
+      "channel_id": "1",
+      "electrode_configuration": "RDE_AFE",
+      "counter_electrode": "Pt_wire",
+      "scan_rate_mV_s": 10
+    }
+  },
+  "measurement": {
+    "processing": {
+      "steps": [
+        "iR_correction",
+        "averaging",
+        "steady_state_extraction"
+      ],
+      "recipe_link": {
+        "rel": "processing_recipe",
+        "target": "workflow://echem_orr_processing/v1.2"
+      }
+    },
+    "series": [
+      {
+        "series_id": "lsv_trace",
+        "independent_variables": [
+          {
+            "name": "potential",
+            "unit": "V_RHE",
+            "values": [
+              0.95,
+              0.9,
+              0.85,
+              0.8,
+              0.75,
+              0.7,
+              0.65,
+              0.6,
+              0.5,
+              0.4,
+              0.3
+            ]
+          }
+        ],
+        "channels": [
+          {
+            "name": "current_density",
+            "unit": "mA/cm2",
+            "role": "measured_response",
+            "values": [
+              -0.02,
+              -0.1,
+              -0.3,
+              -0.8,
+              -1.5,
+              -2.8,
+              -4.2,
+              -5.0,
+              -5.6,
+              -5.75,
+              -5.8
+            ]
+          }
+        ]
+      }
+    ],
+    "qc": {
+      "status": "valid",
+      "evidence": "Clean mass transport limited region observed. Stable limiting current."
+    }
+  },
+  "assets": [
+    {
+      "asset_id": "raw_biologic_log",
+      "content_role": "raw_data_pointer",
+      "uri": "lab-storage://echem/2025/dec/15/Dev-005_ORR_run.mpr",
+      "media_type": "application/octet-stream",
+      "sha256": "i3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b123",
+      "notes": "Binary BioLogic instrument file."
+    },
+    {
+      "asset_id": "reduced_polarization_table",
+      "content_role": "reduction_product",
+      "uri": "lab-storage://echem/2025/dec/15/Dev-005_ORR_reduced.csv",
+      "media_type": "text/csv",
+      "sha256": "j3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b234",
+      "notes": "Full resolution steady-state polarization table."
+    },
+    {
+      "asset_id": "echem_processing_script",
+      "content_role": "processing_script",
+      "uri": "workflow://echem_orr_processing/v1.2",
+      "media_type": "text/x-python",
+      "sha256": "k3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345",
+      "notes": "Python script for iR correction and steady-state averaging."
+    }
+  ],
+  "links": [],
+  "descriptors": {
+    "outputs": [
+      {
+        "label": "kinetic_analysis_v1",
+        "generated_utc": "2025-12-15T12:00:00Z",
+        "generated_by": {
+          "agent": "orbit_analysis_suite",
+          "version": "1.2"
+        },
+        "descriptors": [
+          {
+            "name": "half_wave_potential",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 0.84,
+            "unit": "V_RHE",
+            "definition": "Potential at half the limiting current density.",
+            "uncertainty": {
+              "sigma": 0.005,
+              "unit": "V"
+            }
+          },
+          {
+            "name": "onset_potential",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 0.95,
+            "unit": "V_RHE",
+            "definition": "Potential at which current density exceeds 0.1 mA/cm2.",
+            "uncertainty": {
+              "sigma": 0.01,
+              "unit": "V"
+            }
+          },
+          {
+            "name": "limiting_current_density",
+            "kind": "absolute",
+            "source": "auto",
+            "value": -5.8,
+            "unit": "mA/cm2",
+            "definition": "Plateau current density in the mass-transport limited region (0.2-0.4 V RHE).",
+            "uncertainty": {
+              "sigma": 0.1,
+              "unit": "mA/cm2"
+            }
+          },
+          {
+            "name": "tafel_slope",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 62.0,
+            "unit": "mV/dec",
+            "definition": "Linear fit to kinetic region (0.85-0.95 V RHE, iR-corrected).",
+            "uncertainty": {
+              "sigma": 2.5,
+              "unit": "mV/dec"
+            }
+          },
+          {
+            "name": "mass_activity",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 0.12,
+            "unit": "A/mg_Pt",
+            "definition": "Kinetic current density at 0.9 V RHE normalized by Pt mass loading.",
+            "uncertainty": {
+              "sigma": 0.01,
+              "unit": "A/mg_Pt"
+            }
+          },
+          {
+            "name": "electron_transfer_number",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 3.95,
+            "unit": "dimensionless",
+            "definition": "Average electron transfer number from Koutecky-Levich analysis at 0.5 V RHE.",
+            "uncertainty": {
+              "sigma": 0.05,
+              "unit": "dimensionless"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

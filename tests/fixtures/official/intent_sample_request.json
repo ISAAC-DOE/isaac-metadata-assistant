@@ -1,0 +1,58 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "01JFH9INTENT00000000000001",
+  "record_type": "intent",
+  "record_domain": "characterization",
+  "source_type": "computation",
+  "timestamps": {
+    "created_utc": "2026-06-01T08:00:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "Target: Low-index Copper facets",
+      "formula": "Cu",
+      "provenance": "synthesized",
+      "notes": "Requesting spectral data for ANY pure copper surface (111, 100, or 110). Must be performed at room temperature under vacuum or He. [sample_form flexible \u2014 film preferred] [intent: synthesis requested]"
+    },
+    "sample_form": "film"
+  },
+  "context": {
+    "environment": "in_situ",
+    "temperature_K": 300
+  },
+  "system": {
+    "domain": "experimental",
+    "technique": "DFT",
+    "configuration": {
+      "notes": "Requesting a beamline capability, not a specific instrument."
+    }
+  },
+  "measurement": {
+    "qc": {
+      "status": "pending"
+    },
+    "series": [
+      {
+        "series_id": "required_measurements",
+        "independent_variables": [
+          {
+            "name": "energy",
+            "unit": "eV",
+            "values": [
+              8900,
+              9100
+            ],
+            "notes": "Must cover Cu K-edge (8979 eV) with at least 50 eV post-edge."
+          }
+        ],
+        "channels": [
+          {
+            "name": "absorption",
+            "unit": "any",
+            "role": "primary_signal"
+          }
+        ]
+      }
+    ]
+  }
+}

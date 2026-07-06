@@ -1,0 +1,381 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "01JFH5Z0A3S9H2ZI5X9P6M4O0E",
+  "record_type": "evidence",
+  "record_domain": "performance",
+  "source_type": "laboratory",
+  "timestamps": {
+    "acquired_start_utc": "2025-12-16T14:00:00Z",
+    "acquired_end_utc": "2025-12-16T16:00:00Z",
+    "created_utc": "2025-12-16T17:30:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "Cu nanoparticles on GDE",
+      "formula": "Cu",
+      "provenance": "synthesized",
+      "identifiers": [
+        {
+          "scheme": "internal",
+          "value": "GDE-CuNP-2025-042"
+        }
+      ],
+      "notes": "7 nm Cu nanoparticles spray-coated on gas diffusion electrode (PTFE-treated carbon paper)."
+    },
+    "sample_form": "film",
+    "electrode_type": "GDE",
+    "composition": {
+      "catalyst_loading_mg_cm2": 1.5
+    },
+    "geometry": {
+      "geometric_area_cm2": 1.0
+    }
+  },
+  "context": {
+    "environment": "in_situ",
+    "temperature_K": 298.15,
+    "electrochemistry": {
+      "reaction": "CO2RR",
+      "cell_type": "flow_cell",
+      "control_mode": "potentiostatic",
+      "potential_setpoint_V": -1.0,
+      "potential_scale": "RHE",
+      "ir_compensation": {
+        "method": "automatic",
+        "percent": 85
+      },
+      "electrolyte": {
+        "name": "KHCO3",
+        "concentration_M": 1.0
+      },
+      "pH": 6.8,
+      "pH_basis": "nominal",
+      "reference_electrode": {
+        "type": "Ag/AgCl",
+        "filling_solution": "3.0 M KCl",
+        "offset_V_vs_SHE": 0.21,
+        "offset_basis": "tabulated"
+      },
+      "potential_vs_RHE": {
+        "value_V": -1.0,
+        "rhe_basis": "reported_as_RHE",
+        "ir_corrected": "yes",
+        "conversion": {
+          "input_path": "context.electrochemistry.potential_setpoint_V",
+          "from_scale": "RHE",
+          "formula": "identity (setpoint already on RHE scale; lab converted from Ag/AgCl at acquisition)",
+          "converted_by": "example_template",
+          "converted_utc": "2025-12-16T17:30:00Z"
+        }
+      }
+    },
+    "transport": {
+      "flow_mode": "gas_diffusion",
+      "feed": {
+        "phase": "gas",
+        "composition": "CO2",
+        "flow_rate": 20.0,
+        "flow_rate_unit": "sccm"
+      }
+    }
+  },
+  "system": {
+    "domain": "experimental",
+    "technique": "chronoamperometry",
+    "facility": {
+      "facility_name": "LBNL_MSD",
+      "organization": "LBNL",
+      "laboratory": "Flow_Cell_Lab"
+    },
+    "instrument": {
+      "instrument_type": "potentiostat",
+      "instrument_name": "Station-2_Biologic_VMP3",
+      "vendor_or_project": "BioLogic"
+    },
+    "configuration": {
+      "counter_electrode": "Pt_mesh",
+      "gc_column_type": "PLOT_Q",
+      "gc_model": "SRI_8610C",
+      "product_detection_gas": "GC",
+      "product_detection_liquid": "NMR"
+    }
+  },
+  "measurement": {
+    "processing": {
+      "steps": [
+        "gc_analysis",
+        "fe_calculation",
+        "steady_state_extraction"
+      ],
+      "recipe_link": {
+        "rel": "processing_recipe",
+        "target": "workflow://co2rr_fe_calculator/v3.0"
+      }
+    },
+    "series": [
+      {
+        "series_id": "chronoamperometry_trace",
+        "independent_variables": [
+          {
+            "name": "time",
+            "unit": "s",
+            "values": [
+              0,
+              600,
+              1200,
+              1800,
+              2400,
+              3000,
+              3600
+            ]
+          }
+        ],
+        "channels": [
+          {
+            "name": "current_density",
+            "unit": "mA/cm2",
+            "role": "measured_response",
+            "values": [
+              -150.1,
+              -150.3,
+              -150.8,
+              -150.5,
+              -150.2,
+              -150.5,
+              -150.4
+            ]
+          },
+          {
+            "name": "potential_readback",
+            "unit": "V_RHE",
+            "role": "control_readback",
+            "values": [
+              -1.0,
+              -1.0,
+              -1.0,
+              -1.0,
+              -1.0,
+              -1.0,
+              -1.0
+            ]
+          }
+        ]
+      },
+      {
+        "series_id": "gas_chromatography_samples",
+        "independent_variables": [
+          {
+            "name": "injection_time",
+            "unit": "s",
+            "values": [
+              900,
+              1800,
+              2700,
+              3600
+            ]
+          }
+        ],
+        "channels": [
+          {
+            "name": "co_concentration",
+            "unit": "ppm",
+            "role": "measured_response",
+            "values": [
+              450,
+              455,
+              448,
+              452
+            ]
+          },
+          {
+            "name": "ethylene_concentration",
+            "unit": "ppm",
+            "role": "measured_response",
+            "values": [
+              1200,
+              1250,
+              1240,
+              1260
+            ]
+          },
+          {
+            "name": "hydrogen_concentration",
+            "unit": "ppm",
+            "role": "measured_response",
+            "values": [
+              800,
+              810,
+              795,
+              805
+            ]
+          }
+        ]
+      }
+    ],
+    "qc": {
+      "status": "valid",
+      "evidence": "Stable current within 5% over hold duration. GC injections show consistent product concentrations."
+    }
+  },
+  "assets": [
+    {
+      "asset_id": "raw_echem_gc_log",
+      "content_role": "raw_data_pointer",
+      "uri": "facility-archive://LBNL/2025/projects/CO2RR/run_042/raw_data.zip",
+      "media_type": "application/zip",
+      "sha256": "f3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b123",
+      "notes": "Contains potentiostat logs (.mpt) and GC chromatography reports (.xls)."
+    },
+    {
+      "asset_id": "reduced_performance_summary",
+      "content_role": "reduction_product",
+      "uri": "facility-archive://LBNL/2025/projects/CO2RR/run_042/performance_summary.json",
+      "media_type": "application/json",
+      "sha256": "g3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b234",
+      "notes": "Aggregated inputs and calculated FE values."
+    },
+    {
+      "asset_id": "fe_calculation_script",
+      "content_role": "processing_script",
+      "uri": "workflow://co2rr_fe_calculator/v3.0",
+      "media_type": "text/x-python",
+      "sha256": "h3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345",
+      "notes": "Standard GC-to-FE conversion script."
+    }
+  ],
+  "links": [
+    {
+      "rel": "same_sample_as",
+      "target": "01JFH7K2W6P1D9A3R4ZQ2M8T5V",
+      "basis": "shared_material_batch",
+      "notes": "Characterization performed on identical GDE batch."
+    }
+  ],
+  "descriptors": {
+    "outputs": [
+      {
+        "label": "steady_state_metrics",
+        "generated_utc": "2025-12-16T18:00:00Z",
+        "generated_by": {
+          "agent": "flow_cell_analyzer",
+          "version": "1.0"
+        },
+        "descriptors": [
+          {
+            "name": "steady_state_current_density",
+            "kind": "absolute",
+            "source": "auto",
+            "value": -150.5,
+            "unit": "mA/cm2",
+            "definition": "Mean total current density during last 10 minutes of potentiostatic hold.",
+            "uncertainty": {
+              "sigma": 2.1,
+              "unit": "mA/cm2"
+            }
+          },
+          {
+            "name": "faradaic_efficiency.H2",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 0.105,
+            "unit": "fraction",
+            "definition": "Faradaic efficiency for Hydrogen (H2) evolution.",
+            "uncertainty": {
+              "sigma": 0.008,
+              "unit": "fraction"
+            }
+          },
+          {
+            "name": "faradaic_efficiency.CO",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 0.152,
+            "unit": "fraction",
+            "definition": "Faradaic efficiency for Carbon Monoxide (CO) production.",
+            "uncertainty": {
+              "sigma": 0.005,
+              "unit": "fraction"
+            }
+          },
+          {
+            "name": "faradaic_efficiency.C2H4",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 0.428,
+            "unit": "fraction",
+            "definition": "Faradaic efficiency for Ethylene (C2H4) production.",
+            "uncertainty": {
+              "sigma": 0.012,
+              "unit": "fraction"
+            }
+          },
+          {
+            "name": "faradaic_efficiency.C2H5OH",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 0.181,
+            "unit": "fraction",
+            "definition": "Faradaic efficiency for Ethanol (C2H5OH) production.",
+            "uncertainty": {
+              "sigma": 0.01,
+              "unit": "fraction"
+            }
+          },
+          {
+            "name": "total_faradaic_efficiency",
+            "kind": "absolute",
+            "source": "auto",
+            "value": 0.866,
+            "unit": "fraction",
+            "definition": "Sum of all measured product Faradaic efficiencies (H2 + CO + C2H4 + C2H5OH).",
+            "uncertainty": {
+              "sigma": 0.02,
+              "unit": "fraction"
+            }
+          },
+          {
+            "name": "partial_current_density.C2H4",
+            "kind": "absolute",
+            "source": "auto",
+            "value": -64.4,
+            "unit": "mA/cm2",
+            "definition": "Product-specific current density for C2H4 (FE_C2H4 * total current density).",
+            "uncertainty": {
+              "sigma": 2.5,
+              "unit": "mA/cm2"
+            }
+          },
+          {
+            "name": "partial_current_density.CO",
+            "kind": "absolute",
+            "source": "auto",
+            "value": -22.9,
+            "unit": "mA/cm2",
+            "definition": "Product-specific current density for CO (FE_CO * total current density).",
+            "uncertainty": {
+              "sigma": 1.2,
+              "unit": "mA/cm2"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "attribution": {
+    "contributors": [
+      {
+        "name": "Example PI",
+        "role": "data_owner",
+        "affiliation": "LBNL"
+      },
+      {
+        "name": "Example Curator",
+        "role": "curated_record"
+      }
+    ]
+  },
+  "tags": [
+    "lbnl-cu-au",
+    "co2rr-flowcell"
+  ]
+}

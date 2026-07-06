@@ -1,0 +1,137 @@
+{
+  "meta": {
+    "record_type": "evidence",
+    "record_domain": "characterization",
+    "source_type": "facility"
+  },
+  "fields": {
+    "sample.material.name": {
+      "value": "Copper(II) Oxide", "status": "verified",
+      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_sample_details.png", "locator": "Sample details → Sample name", "quote": "Copper(II) Oxide" }]
+    },
+    "sample.material.formula": {
+      "value": "CuO2", "status": "verified",
+      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_sample_details.png", "locator": "Details → Chemical formula", "quote": "CuO2" }]
+    },
+    "sample.sample_form": {
+      "value": "pellet", "status": "verified",
+      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_sample_details.png", "locator": "Details → Physical form (dropdown)", "quote": "pellet" }]
+    },
+    "sample.composition.CuO2_mass_fraction": {
+      "value": 0.001, "status": "verified",
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Sample', cell C4", "quote": "0.001" }]
+    },
+    "sample.geometry.pellet_diameter_mm": {
+      "value": 7.0, "unit": "mm", "status": "verified",
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Sample', cell C7", "quote": "7 mm" }]
+    },
+    "system.domain": {
+      "value": "experimental", "status": "inferred",
+      "evidence": [{ "source_type": "derivation", "rule": "synchrotron XAS measurement ⇒ system.domain = experimental" }, { "source_type": "screenshot", "source_file": "examples/webform_session.png", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
+    },
+    "system.technique": {
+      "value": "HERFD-XAS", "status": "verified",
+      "evidence": [{ "source_type": "screenshot", "source_file": "examples/webform_session.png", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
+    },
+    "system.facility.facility_name": {
+      "value": "SSRL", "status": "verified",
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Campaign Info', cell B2", "quote": "SSRL" }]
+    },
+    "system.facility.organization": {
+      "value": "SLAC", "status": "verified",
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Campaign Info', cell B3", "quote": "SLAC" }]
+    },
+    "system.facility.beamline": {
+      "value": "15-2", "status": "verified",
+      "evidence": [{ "source_type": "screenshot", "source_file": "examples/webform_session.png", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
+    },
+    "system.facility.site": {
+      "value": "SSRL", "status": "verified",
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Campaign Info', cell B2", "quote": "SSRL" }]
+    },
+    "system.facility.endstation": {
+      "value": "XES", "status": "verified",
+      "evidence": [{ "source_type": "user_confirmation", "question": "Which endstation?", "answer": "XES", "timestamp": "2026-07-06T15:00:00Z" }]
+    },
+    "system.configuration.spectrometer_geometry": {
+      "value": "Von_Hamos", "status": "verified",
+      "evidence": [{ "source_type": "user_confirmation", "question": "What spectrometer geometry / detection setup was used?", "answer": "Von Hamos", "timestamp": "2026-07-06T15:01:00Z" }]
+    },
+    "context.environment": {
+      "value": "ex_situ", "status": "verified",
+      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_conditions.png", "locator": "Environment (dropdown)", "quote": "ex_situ" }]
+    },
+    "context.temperature_K": {
+      "value": 298, "unit": "K", "status": "verified",
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Configurations', cell D14", "quote": "298 K" }]
+    },
+    "timestamps.acquired_start_utc": {
+      "value": "2025-12-10T18:30:00Z", "status": "verified",
+      "evidence": [{ "source_type": "file_listing", "source_file": "examples/raw_scan_listing.txt", "locator": "first scan mtime" }]
+    }
+  },
+  "series": [
+    {
+      "series_id": "averaged_spectrum",
+      "independent_variables": [
+        { "name": "incident_energy", "unit": "eV", "values": [8970, 8975, 8980, 8985, 8990, 8995, 9000] }
+      ],
+      "channels": [
+        { "name": "absorption", "unit": "mu_normalized", "role": "primary_signal", "values": [0.02, 0.03, 0.15, 0.85, 1.45, 1.1, 1.05] },
+        { "name": "i0_monitor", "unit": "counts", "role": "auxiliary_signal", "values": [50000, 50100, 49900, 50050, 50000, 49950, 50000] }
+      ]
+    }
+  ],
+  "qc": {
+    "status": "valid",
+    "evidence": "No beam damage evolution observed across 6 scans."
+  },
+  "assets": [
+    {
+      "asset_id": "raw_scans_archive_001",
+      "content_role": "raw_data_pointer",
+      "uri": "ssrl-archive://BL15-2/2025_run_001/raw.h5",
+      "media_type": "application/x-hdf5",
+      "sha256": "a3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b123",
+      "notes": "Full raw scan set including monitor channels.",
+      "evidence": [{ "source_type": "user_confirmation", "question": "Where are the raw scan files, and what is their sha256?", "answer": "ssrl-archive://BL15-2/2025_run_001/raw.h5 (sha256 a3b0c4...)", "timestamp": "2026-07-06T15:03:00Z" }]
+    }
+  ],
+  "descriptors_outputs": [
+    {
+      "label": "manual_review_2025-12-14",
+      "generated_utc": "2025-12-14T20:20:00Z",
+      "generated_by": { "agent": "manual_review", "version": "1.0" },
+      "descriptors": [
+        {
+          "name": "xanes_inflection_point_energy",
+          "kind": "absolute",
+          "source": "manual",
+          "value": 9001.2,
+          "unit": "eV",
+          "definition": "Inflection point derived from derivative maximum.",
+          "uncertainty": { "sigma": 0.01, "unit": "eV", "basis": "reported" },
+          "evidence": [{ "source_type": "user_confirmation", "question": "Inflection-point energy and its uncertainty?", "answer": "9001.2 eV ± 0.01 eV", "timestamp": "2026-07-06T15:05:00Z" }]
+        }
+      ]
+    }
+  ],
+  "links": [],
+  "attribution": {
+    "contributors": [
+      { "name": "Krish Verma", "role": "curated_record", "affiliation": "SSRL/SLAC" }
+    ]
+  },
+  "implicit": [
+    {
+      "about": "absorbing_element",
+      "value": "Cu",
+      "evidence": [{ "source_type": "derivation", "rule": "absorbing element = metal in sample.material.formula (CuO2 → Cu); confirmed by Cu K-edge energy range ~8979 eV" }]
+    },
+    {
+      "about": "edge",
+      "value": "K",
+      "evidence": [{ "source_type": "derivation", "rule": "edge inferred as K from incident_energy window 8970–9000 eV matching Cu K-edge (8979 eV)" }]
+    }
+  ]
+}

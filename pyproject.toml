@@ -9,7 +9,7 @@ description = "Deterministic core for ISAAC metadata records: schema validation,
 requires-python = ">=3.10"
 dependencies = [
     "jsonschema>=4.21",
-    "pint>=0.23",
+    "python-ulid>=2.0",
 ]
 
 [project.optional-dependencies]

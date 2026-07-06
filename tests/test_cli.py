@@ -1,8 +1,8 @@
-"""CLI behavior: export gating, audit, required-fields, graphify-independence."""
+"""CLI behavior: export writes record + sidecar, gating, audit, new-id."""
 
 import json
+import re
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
@@ -10,80 +10,54 @@ import pytest
 from isaac_records.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
-GOLDEN_PATH = ROOT / "tests" / "fixtures" / "golden_cuo_xas.json"
+DRAFT = ROOT / "tests" / "fixtures" / "cuo_xanes_draft.json"
 
 
-@pytest.fixture
-def draft(tmp_path):
-    path = tmp_path / "draft.json"
-    shutil.copy(GOLDEN_PATH, path)
-    return path
-
-
-def test_export_moves_valid_record(draft, tmp_path, capsys):
-    records_dir = tmp_path / "records"
-    code = main(["--root", str(ROOT), "export", str(draft), "--records-dir", str(records_dir)])
+def test_export_writes_record_and_sidecar(tmp_path, capsys):
+    records = tmp_path / "records"
+    code = main(["--root", str(ROOT), "export", str(DRAFT), "--records-dir", str(records)])
     assert code == 0, capsys.readouterr().out
-    assert not draft.exists()
-    assert (records_dir / "isaac-2026-cuo-xas-0001.json").exists()
+    jsons = list(records.glob("*.json"))
+    assert len(jsons) == 2
+    record = next(p for p in jsons if not p.name.endswith(".evidence.json"))
+    sidecar = next(p for p in jsons if p.name.endswith(".evidence.json"))
+    assert record.stem == sidecar.name[: -len(".evidence.json")]
+    data = json.loads(record.read_text())
+    assert data["isaac_record_version"] == "1.05"
 
 
-def test_export_blocked_by_validation_errors(draft, tmp_path, capsys):
-    record = json.loads(draft.read_text(encoding="utf-8"))
-    record["technique"]["xas"]["detection_mode"]["status"] = "needs_confirmation"
-    draft.write_text(json.dumps(record), encoding="utf-8")
-
-    records_dir = tmp_path / "records"
-    code = main(["--root", str(ROOT), "export", str(draft), "--records-dir", str(records_dir)])
+def test_blocked_export_writes_nothing(tmp_path, capsys):
+    bad = tmp_path / "bad_draft.json"
+    draft = json.loads(DRAFT.read_text())
+    draft["fields"]["context.temperature_K"]["evidence"] = []  # no-guessing violation
+    bad.write_text(json.dumps(draft))
+    records = tmp_path / "records"
+    code = main(["--root", str(ROOT), "export", str(bad), "--records-dir", str(records)])
     assert code == 1
-    assert draft.exists(), "a blocked export must leave the draft untouched"
-    assert not (records_dir / "isaac-2026-cuo-xas-0001.json").exists()
-    assert "Export blocked" in capsys.readouterr().out
+    assert not records.exists() or not list(records.glob("*.json"))
+    assert "nothing exported" in capsys.readouterr().out.lower()
 
 
-def test_export_refuses_to_overwrite_existing_record(draft, tmp_path):
-    records_dir = tmp_path / "records"
-    assert main(["--root", str(ROOT), "export", str(draft), "--records-dir", str(records_dir)]) == 0
-    duplicate = tmp_path / "draft2.json"
-    shutil.copy(GOLDEN_PATH, duplicate)
-    assert main(["--root", str(ROOT), "export", str(duplicate), "--records-dir", str(records_dir)]) == 1
-    assert duplicate.exists()
-
-
-def test_audit_reports_pass_and_fail(tmp_path, capsys):
-    records_dir = tmp_path / "records"
-    records_dir.mkdir()
-    shutil.copy(GOLDEN_PATH, records_dir / "good.json")
-    bad = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
-    bad["technique"]["xas"]["absorbing_element"] = {"value": None, "status": "missing", "evidence": []}
-    (records_dir / "bad.json").write_text(json.dumps(bad), encoding="utf-8")
-
-    code = main(["--root", str(ROOT), "audit", "--records-dir", str(records_dir)])
+def test_validate_autodetects_draft_vs_record(tmp_path, capsys):
+    assert main(["--root", str(ROOT), "validate", str(DRAFT)]) == 0
     out = capsys.readouterr().out
-    assert code == 1
-    assert "PASS  good.json" in out
-    assert "FAIL  bad.json" in out
-    assert "FINALIZATION_INCOMPLETE" in out
+    assert "Draft validation" in out
+
+    example = ROOT / "tests" / "fixtures" / "official" / "ex_situ_xanes_cuo2_record.json"
+    assert main(["--root", str(ROOT), "validate", str(example)]) == 0
+    assert "official ISAAC schema" in capsys.readouterr().out
 
 
-def test_validate_with_evidence_map(capsys):
-    code = main(["--root", str(ROOT), "validate", str(GOLDEN_PATH), "--finalize", "--evidence"])
+def test_audit_reports_official_validity_and_coverage(tmp_path, capsys):
+    records = tmp_path / "records"
+    main(["--root", str(ROOT), "export", str(DRAFT), "--records-dir", str(records)])
+    code = main(["--root", str(ROOT), "audit", "--records-dir", str(records)])
     out = capsys.readouterr().out
     assert code == 0
     assert "PASS" in out
-    assert "sample.formula" in out
-    assert "user_confirmation" in out
+    assert "evidence" in out
 
 
-def test_required_fields_matches_technique_case_insensitively(capsys):
-    code = main(["--root", str(ROOT), "required-fields", "--technique", "xas"])
-    out = capsys.readouterr().out
-    assert code == 0
-    assert "technique.xas.absorbing_element" in out
-    assert "raw_data.uris" in out
-
-
-def test_core_never_imports_graphify():
-    # The pipeline must work with Graphify entirely absent: the deterministic
-    # core is not allowed to depend on it, even optionally.
-    assert not any(name == "graphify" or name.startswith("graphify.") for name in sys.modules)
+def test_new_id_is_ulid(capsys):
+    assert main(["--root", str(ROOT), "new-id"]) == 0
+    assert re.fullmatch(r"[0-9A-Z]{26}", capsys.readouterr().out.strip())

@@ -1,0 +1,91 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "01D2Z6B3Y1K8M4P7Q2R5T9V0WX",
+  "record_type": "evidence",
+  "record_domain": "simulation",
+  "source_type": "database",
+  "timestamps": {
+    "created_utc": "2026-02-26T20:00:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "Cu(100) slab",
+      "formula": "Cu64",
+      "provenance": "theoretical",
+      "notes": "DFT-optimized Cu slab from Catalysis Hub. COOH* adsorbed at ontop site."
+    },
+    "sample_form": "slab_model"
+  },
+  "context": {
+    "environment": "in_silico",
+    "temperature_K": 0,
+    "simulation_assumptions": {
+      "solvation_model": "none"
+    }
+  },
+  "system": {
+    "domain": "computational",
+    "technique": "DFT",
+    "instrument": {
+      "instrument_type": "simulation_engine",
+      "instrument_name": "VASP",
+      "vendor_or_project": "VASP"
+    },
+    "configuration": {
+      "dft_code": "VASP",
+      "xc_functional": "RPBE_-0.413VSHE",
+      "facet": "100",
+      "surface_composition": "Cu",
+      "adsorption_site": "ontop"
+    }
+  },
+  "computation": {
+    "method": {
+      "family": "DFT",
+      "functional_class": "GGA",
+      "functional_name": "RPBE"
+    }
+  },
+  "descriptors": {
+    "outputs": [
+      {
+        "label": "catalysis_hub_co2rr_energetics",
+        "generated_utc": "2026-02-26T20:00:00Z",
+        "generated_by": {
+          "agent": "isaac_cathub_ingest",
+          "version": "1.0"
+        },
+        "descriptors": [
+          {
+            "name": "reaction_energy",
+            "kind": "absolute",
+            "source": "imported",
+            "value": 1.5441764750000004,
+            "unit": "eV",
+            "definition": "DFT reaction energy for: CO2(g) + 0.5H2(g) + * -> COOH*",
+            "uncertainty": {
+              "sigma": 0,
+              "unit": "eV"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "assets": [
+    {
+      "asset_id": "source_publication",
+      "content_role": "auxiliary_reference",
+      "uri": "https://doi.org/10.1021/acsenergylett.1c01485",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "media_type": "publication/journal_article",
+      "citation": {
+        "doi": "https://doi.org/10.1021/acsenergylett.1c01485",
+        "title": "The role of roughening in enhancing selectivity to C2+ products during CO2 electroreduction on copper",
+        "authors": "Gauthier, Joseph A.; Halldin Stenlid, Joakim; Abild-Pedersen, Frank; Head-Gordon, Martin; Bell, Alexis T.",
+        "year": 2021,
+        "catalysis_hub_pub_id": "Gauthierrole2021"
+      }
+    }
+  ]
+}

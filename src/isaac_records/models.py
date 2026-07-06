@@ -1,7 +1,25 @@
-"""Builders for record pieces.
+"""Builders for the draft-authoring format.
 
-Plain JSON-ready dicts. Structural truth lives in the schema and the
-validator — these helpers only keep drafts consistently shaped.
+A draft is NOT an ISAAC record. It is the pre-export working format where the
+no-guessing policy is enforced: scalar fields carry a `{value, unit?, status,
+evidence[]}` envelope so a value cannot be finalized without a source. Export
+(`export.py`) transforms a draft into the native official record shape and drops
+the envelope — evidence moves to a sidecar.
+
+Draft shape:
+    {
+      "meta":    {record_type, record_domain, source_type},
+      "fields":  {"<dotted.official.path>": <envelope>, ...},   # scalars only
+      "series":  [...],                # official measurement.series shape (verbatim)
+      "assets":  [{asset_id, content_role, uri, sha256, ..., "evidence":[...]}],
+      "descriptors_outputs": [{label, generated_by, ...,
+                               "descriptors":[{name, kind, source, value, ...,
+                                               "evidence":[...]}]}],
+      "links":   [...],
+      "attribution": {...},
+      "tags":    [...],
+      "implicit":[{about, value, "evidence":[...]}]   # sidecar-only, never a record field
+    }
 """
 
 from __future__ import annotations
@@ -61,5 +79,8 @@ def field_value(
     status: str = "missing",
     evidence: tuple | list = (),
 ) -> dict:
-    """A field envelope: {value, unit, status, evidence[]}."""
-    return {"value": value, "unit": unit, "status": status, "evidence": list(evidence)}
+    """A draft field envelope: {value, unit, status, evidence[]}."""
+    env = {"value": value, "status": status, "evidence": list(evidence)}
+    if unit is not None:
+        env["unit"] = unit
+    return env
