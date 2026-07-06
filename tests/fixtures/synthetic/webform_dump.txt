@@ -1,0 +1,34 @@
+# SYNTHETIC web-form dump - plain-text stand-in for SSRL web-form screenshots.
+# NOT real data. Lists the field: value pairs a screenshot would show, grouped
+# by the form's sections. Produced by scripts/make_synthetic_examples.py.
+
+[Session details]
+Session title: HERFD-XAS - BL15-2
+Facility: SSRL
+Beamline: 15-2
+Endstation: XES
+Proposal: SYN-2099-000
+Lead experimenter: Ada Lovelace
+Co-experimenter: Grace Hopper
+Acquired start (UTC): 2099-03-01 18:30
+Acquired end (UTC): 2099-03-01 18:45
+
+[Sample details]
+Sample name: Copper(II) Oxide
+Chemical formula: CuO2
+Physical form: pellet
+Provenance: commercial (synthetic vendor)
+CuO2 mass fraction: 0.001
+Sucrose mass fraction: 0.999
+Pellet diameter: 7 mm
+
+[Conditions]
+Environment: ex_situ
+Temperature: 298 K
+Atmosphere: air
+Monochromator crystal: Si(311)
+Spectrometer geometry: Von Hamos
+Detector: Pilatus 100K
+Incident energy range: 8970-9000 eV
+Number of scans: 6
+QC status: valid

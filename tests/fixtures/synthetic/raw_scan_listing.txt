@@ -1,0 +1,27 @@
+# SYNTHETIC file listing - fake `ls -R` output. NOT real SLAC data.
+# Produced by scripts/make_synthetic_examples.py for the ISAAC intake demo.
+# Archive root and run id are fictional (year 2099).
+
+ssrl-archive://BL15-2/2099_run_000/:
+metadata/
+notebooks/
+raw/
+reduced/
+
+ssrl-archive://BL15-2/2099_run_000/metadata/:
+mock_campaign.csv
+webform_dump.txt
+
+ssrl-archive://BL15-2/2099_run_000/notebooks/:
+xanes_reduction_v2.ipynb
+
+ssrl-archive://BL15-2/2099_run_000/raw/:
+CuO2_scan_001.h5
+CuO2_scan_002.h5
+CuO2_scan_003.h5
+CuO2_scan_004.h5
+CuO2_scan_005.h5
+CuO2_scan_006.h5
+
+ssrl-archive://BL15-2/2099_run_000/reduced/:
+CuO2_merged.xdi

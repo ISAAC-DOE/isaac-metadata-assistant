@@ -48,7 +48,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                                   # 35 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # 40 tests: golden records validate, transform is gated
 .venv/bin/isaac validate tests/fixtures/cuo_xanes_draft.json          # draft: no-guessing checks
 .venv/bin/isaac export  tests/fixtures/cuo_xanes_draft.json --records-dir /tmp/demo   # → record + sidecar
 .venv/bin/isaac validate /tmp/demo/*.json --official                  # official schema

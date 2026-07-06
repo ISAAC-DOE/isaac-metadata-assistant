@@ -54,7 +54,7 @@ working without it.
 ## Dev
 
 - Core: `src/isaac_records/` (`official`, `draft_validator`, `export`, `audit`, `ids`, `cli`),
-  venv at `.venv/`, tests `.venv/bin/pytest` (35 tests).
+  venv at `.venv/`, tests `.venv/bin/pytest` (40 tests).
 - CLI: `.venv/bin/isaac validate|export|audit|new-id` — deterministic, zero-LLM.
 - Deps: `jsonschema`, `python-ulid`. (pint and the provisional-schema code were removed in the
   official-schema migration.)

@@ -1,0 +1,31 @@
+section,field,value,unit,notes
+Campaign Info,facility_name,SSRL,,synthetic demo data - not real
+Campaign Info,organization,SLAC,,
+Campaign Info,site,SSRL,,
+Campaign Info,beamline,15-2,,
+Campaign Info,endstation,XES,,
+Campaign Info,technique,HERFD-XAS,,
+Campaign Info,proposal_id,SYN-2099-000,,fake proposal id
+Campaign Info,session_id,2099_run_000,,fake beamline session
+Campaign Info,lead_experimenter,Ada Lovelace,,fictional person
+Campaign Info,co_experimenter,Grace Hopper,,fictional person
+Campaign Info,acquired_start_utc,2099-03-01T18:30:00Z,,
+Campaign Info,acquired_end_utc,2099-03-01T18:45:00Z,,
+Campaign Info,created_utc,2099-03-05T20:15:00Z,,
+Sample,material_name,Copper(II) Oxide,,
+Sample,formula,CuO2,,
+Sample,provenance,commercial,,synthetic vendor
+Sample,sample_form,pellet,,
+Sample,CuO2_mass_fraction,0.001,,
+Sample,sucrose_mass_fraction,0.999,,diluent matrix
+Sample,pellet_diameter_mm,7.0,mm,
+Configurations,environment,ex_situ,,
+Configurations,temperature_K,298,K,
+Configurations,atmosphere,air,,
+Configurations,monochromator_crystal,Si(311),,
+Configurations,spectrometer_geometry,Von_Hamos,,
+Configurations,detector_model,Pilatus_100K,,
+Configurations,incident_energy_start_eV,8970,eV,
+Configurations,incident_energy_end_eV,9000,eV,
+Configurations,n_scans,6,,
+Configurations,qc_status,valid,,
