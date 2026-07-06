@@ -23,6 +23,23 @@
     },
     "series": { "type": "array" },
     "qc": { "type": "object" },
+    "pending": {
+      "type": "array",
+      "description": "Deterministic-pipeline blockers that need more input before export (the /isaac-complete question set): a sha256 for each asset candidate, the reduced spectrum for measurement.series, and at least one descriptor. Draft-only bookkeeping; never becomes a record field.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "blocker", "question"],
+        "properties": {
+          "kind": { "type": "string" },
+          "blocker": { "type": "string" },
+          "question": { "type": "string" },
+          "content_role": { "type": "string" },
+          "uri": { "type": "string" },
+          "media_type": { "type": ["string", "null"] },
+          "evidence": { "type": "array" }
+        }
+      }
+    },
     "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
     "descriptors_outputs": { "type": "array" },
     "links": { "type": "array" },

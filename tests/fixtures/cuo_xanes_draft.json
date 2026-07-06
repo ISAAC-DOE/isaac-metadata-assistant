@@ -7,47 +7,47 @@
   "fields": {
     "sample.material.name": {
       "value": "Copper(II) Oxide", "status": "verified",
-      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_sample_details.png", "locator": "Sample details → Sample name", "quote": "Copper(II) Oxide" }]
+      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_dump.txt", "locator": "Sample details → Sample name", "quote": "Copper(II) Oxide" }]
     },
     "sample.material.formula": {
       "value": "CuO2", "status": "verified",
-      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_sample_details.png", "locator": "Details → Chemical formula", "quote": "CuO2" }]
+      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_dump.txt", "locator": "Details → Chemical formula", "quote": "CuO2" }]
     },
     "sample.sample_form": {
       "value": "pellet", "status": "verified",
-      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_sample_details.png", "locator": "Details → Physical form (dropdown)", "quote": "pellet" }]
+      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_dump.txt", "locator": "Details → Physical form (dropdown)", "quote": "pellet" }]
     },
     "sample.composition.CuO2_mass_fraction": {
       "value": 0.001, "status": "verified",
-      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Sample', cell C4", "quote": "0.001" }]
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/mock_campaign.xlsx", "locator": "Sheet 'Sample', cell C4", "quote": "0.001" }]
     },
     "sample.geometry.pellet_diameter_mm": {
       "value": 7.0, "unit": "mm", "status": "verified",
-      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Sample', cell C7", "quote": "7 mm" }]
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/mock_campaign.xlsx", "locator": "Sheet 'Sample', cell C7", "quote": "7 mm" }]
     },
     "system.domain": {
       "value": "experimental", "status": "inferred",
-      "evidence": [{ "source_type": "derivation", "rule": "synchrotron XAS measurement ⇒ system.domain = experimental" }, { "source_type": "screenshot", "source_file": "examples/webform_session.png", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
+      "evidence": [{ "source_type": "derivation", "rule": "synchrotron XAS measurement ⇒ system.domain = experimental" }, { "source_type": "screenshot", "source_file": "examples/webform_dump.txt", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
     },
     "system.technique": {
       "value": "HERFD-XAS", "status": "verified",
-      "evidence": [{ "source_type": "screenshot", "source_file": "examples/webform_session.png", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
+      "evidence": [{ "source_type": "screenshot", "source_file": "examples/webform_dump.txt", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
     },
     "system.facility.facility_name": {
       "value": "SSRL", "status": "verified",
-      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Campaign Info', cell B2", "quote": "SSRL" }]
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/mock_campaign.xlsx", "locator": "Sheet 'Campaign Info', cell B2", "quote": "SSRL" }]
     },
     "system.facility.organization": {
       "value": "SLAC", "status": "verified",
-      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Campaign Info', cell B3", "quote": "SLAC" }]
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/mock_campaign.xlsx", "locator": "Sheet 'Campaign Info', cell B3", "quote": "SLAC" }]
     },
     "system.facility.beamline": {
       "value": "15-2", "status": "verified",
-      "evidence": [{ "source_type": "screenshot", "source_file": "examples/webform_session.png", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
+      "evidence": [{ "source_type": "screenshot", "source_file": "examples/webform_dump.txt", "locator": "Session title bar", "quote": "HERFD-XAS — BL15-2" }]
     },
     "system.facility.site": {
       "value": "SSRL", "status": "verified",
-      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Campaign Info', cell B2", "quote": "SSRL" }]
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/mock_campaign.xlsx", "locator": "Sheet 'Campaign Info', cell B2", "quote": "SSRL" }]
     },
     "system.facility.endstation": {
       "value": "XES", "status": "verified",
@@ -59,11 +59,11 @@
     },
     "context.environment": {
       "value": "ex_situ", "status": "verified",
-      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_conditions.png", "locator": "Environment (dropdown)", "quote": "ex_situ" }]
+      "evidence": [{ "source_type": "web_form", "source_file": "examples/webform_dump.txt", "locator": "Environment (dropdown)", "quote": "ex_situ" }]
     },
     "context.temperature_K": {
       "value": 298, "unit": "K", "status": "verified",
-      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/campaign_metadata.xlsx", "locator": "Sheet 'Configurations', cell D14", "quote": "298 K" }]
+      "evidence": [{ "source_type": "spreadsheet", "source_file": "examples/mock_campaign.xlsx", "locator": "Sheet 'Configurations', cell D14", "quote": "298 K" }]
     },
     "timestamps.acquired_start_utc": {
       "value": "2025-12-10T18:30:00Z", "status": "verified",

@@ -80,4 +80,22 @@ class Extractor(abc.ABC):
         raise NotImplementedError("Extractor.extract lands in Phase 3 (docs/extraction.md)")
 
 
-__all__ = ["ArtifactKind", "ExtractedField", "Extractor"]
+# Phase-3 deterministic parsers. Imported AFTER the seam types above so the
+# sub-modules can `from . import ExtractedField` without a circular import. These
+# import no LLM/network code and (via a lazy local import of openpyxl) do not force
+# openpyxl at import time. Still NOT imported by `isaac_records/__init__.py`.
+from .file_listing import AssetCandidate, archive_root, parse_file_listing
+from .structured import FIELD_MAP, parse_contributors, parse_rows, parse_structured
+
+__all__ = [
+    "ArtifactKind",
+    "ExtractedField",
+    "Extractor",
+    "AssetCandidate",
+    "FIELD_MAP",
+    "archive_root",
+    "parse_contributors",
+    "parse_file_listing",
+    "parse_rows",
+    "parse_structured",
+]

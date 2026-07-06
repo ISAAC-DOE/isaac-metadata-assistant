@@ -40,6 +40,41 @@ Evidence is captured at extraction time or the value does not go in. Each non-nu
 `evidence[]` cites where it came from: `source_type` ∈ document|spreadsheet|screenshot|
 web_form|file_listing, with a precise `locator` (sheet+cell, page, form field).
 
+## Deterministic build path (synthetic / structured inputs)
+
+When the inputs are the structured campaign sheet + raw file listing, the draft is assembled
+deterministically — no model, no network, no guessing:
+
+```
+examples/ ─▶ extract.parse_structured(mock_campaign.csv|.xlsx)   # scalar fields + evidence
+         └▶ extract.parse_file_listing(raw_scan_listing.txt)     # asset URIs (NO sha256)
+              ▼
+         extract.draft_builder.build_draft(structured_path, listing_path)  # pure, no writes
+              ▼
+         write drafts/<name>.draft.json
+              ▼
+         .venv/bin/isaac validate drafts/<name>.draft.json       # no-guessing checks
+```
+
+`build_draft` fills `fields` (each already evidenced), `attribution.contributors`, `qc.status`
+(read from the sheet's `qc_status` cell, never hardcoded), and two `implicit[]` inferences:
+`absorbing_element` (sole non-oxygen element in the formula) and `edge` as a **null**
+needs-confirmation candidate (the absorption edge needs a physics table, so it is not asserted).
+
+### `pending[]` — blockers surfaced by `/isaac-complete`, never guessed
+
+Things the deterministic pipeline knows it needs but cannot supply land in `pending[]`, not in
+fabricated values:
+
+- **sha256 per asset** — the listing gives asset URIs but no hash, so `assets` stays empty and
+  each candidate is a `pending` sha256 blocker (a sha256-less asset would fail validation).
+- **reduced spectrum** — `measurement.series` needs the reduced `.xdi` data points, which the
+  listing only names; a `pending` series blocker, never invented numbers.
+- **at least one descriptor** — an evidence record requires `descriptors.outputs[]`; a `pending`
+  descriptor blocker (e.g. inflection-point energy + uncertainty).
+
+`/isaac-complete` asks exactly these blockers; nothing here is ever filled with a guess.
+
 ## Status assignment
 
 | Situation | status | evidence |
@@ -64,8 +99,10 @@ web_form|file_listing, with a precise `locator` (sheet+cell, page, form field).
 ## Steps
 
 1. Read `schema/isaac_record_v1.json`. Choose meta (type/domain/source).
-2. Extract values into `fields` (dotted paths) + structured blocks, evidence per the table.
+2. Extract values into `fields` (dotted paths) + structured blocks, evidence per the table. For
+   structured campaign-sheet + file-listing inputs, use `extract.draft_builder.build_draft`
+   (deterministic build path above) instead of hand-mapping.
 3. Write `drafts/<name>.draft.json`.
 4. `.venv/bin/isaac validate drafts/<name>.draft.json` (no-guessing checks) and show output.
 5. Summarize verified / inferred / needs-confirmation / missing, and list what would block
-   export — but don't ask yet. Point the user to `/isaac-complete`.
+   export — read them from `pending[]` — but don't ask yet. Point the user to `/isaac-complete`.

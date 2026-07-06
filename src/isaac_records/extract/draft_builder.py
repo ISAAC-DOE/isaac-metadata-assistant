@@ -1,0 +1,210 @@
+"""Assemble a draft ENVELOPE deterministically from the Slice-3A parsers.
+
+``build_draft(structured_path, listing_path)`` wires the two deterministic Phase-3
+parsers (``structured`` + ``file_listing``) into the pre-export draft envelope the
+no-guessing validator (:mod:`isaac_records.draft_validator`) accepts. It is PURE:
+it only *reads* the two paths through the public parsers and returns a dict; it
+writes nothing and touches no truth-path code.
+
+The builder never guesses. Anything the deterministic pipeline knows is *required*
+but cannot supply without more input is surfaced in a ``pending`` list (the exact
+``/isaac-complete`` question set from ``docs/extraction.md`` §8), not fabricated:
+
+  - every raw/reduced/notebook asset needs a ``sha256`` the listing does not carry,
+    so ``assets`` stays EMPTY (a sha256-less asset would fail ``validate_draft``) and
+    each candidate becomes a ``pending`` sha256 blocker instead;
+  - ``measurement.series`` needs the reduced ``.xdi`` spectrum's actual data points,
+    which the listing only *names* — a ``pending`` series blocker, never invented;
+  - an evidence record requires at least one descriptor (schema ``allOf``), which no
+    source supplies — a ``pending`` descriptor blocker.
+
+Two implicit inferences are emitted deterministically: ``absorbing_element`` (the
+sole non-oxygen element in the formula — a defensible derivation) and ``edge`` as a
+NULL needs-confirmation candidate (inferring the absorption edge from an energy
+window needs a physics table the deterministic builder must not fake).
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from .file_listing import parse_file_listing
+from .structured import parse_contributors, parse_rows, parse_structured
+
+# The single supported path: XANES / characterization at a facility.
+_META = {
+    "record_type": "evidence",
+    "record_domain": "characterization",
+    "source_type": "facility",
+}
+
+# Element symbols: an uppercase letter optionally followed by one lowercase.
+_ELEMENT_RE = re.compile(r"[A-Z][a-z]?")
+
+
+def _absorbing_element(formula):
+    """The sole non-oxygen element in ``formula`` (e.g. ``"CuO2" -> "Cu"``).
+
+    Deterministic: tokenize element symbols and drop oxygen. Returns the element
+    only when exactly one non-oxygen element remains; otherwise ``None`` (ambiguous
+    or unparseable → no guess).
+    """
+    if not isinstance(formula, str) or not formula:
+        return None
+    non_oxygen = [tok for tok in _ELEMENT_RE.findall(formula) if tok != "O"]
+    unique = list(dict.fromkeys(non_oxygen))
+    return unique[0] if len(unique) == 1 else None
+
+
+def build_draft(structured_path, listing_path) -> dict:
+    """Build a draft envelope from the campaign sheet + the raw file listing.
+
+    Reads ``structured_path`` (``.csv``/``.xlsx``) via :func:`parse_structured` /
+    :func:`parse_contributors` / :func:`parse_rows`, and ``listing_path`` via
+    :func:`parse_file_listing`. Returns the draft dict; the caller validates it with
+    ``draft_validator.validate_draft`` and later exports it.
+    """
+    structured_path = Path(structured_path)
+    listing_path = Path(listing_path)
+
+    # 1. Scalar fields — each ExtractedField already carries its evidence.
+    fields: dict[str, dict] = {}
+    formula = None
+    for ef in parse_structured(structured_path):
+        env: dict = {
+            "value": ef.value,
+            "status": ef.status,
+            "evidence": list(ef.evidence),
+        }
+        if ef.unit is not None:
+            env["unit"] = ef.unit
+        fields[ef.path] = env
+        if ef.path == "sample.material.formula":
+            formula = ef.value
+
+    # 2. Attribution — contributors go in schema-clean (name + role only). Their
+    #    provenance evidence is deferred to the export sidecar (see report), so it is
+    #    dropped from the draft's attribution to keep it record-shaped.
+    contributors = [
+        {"name": c["name"], "role": c["role"]}
+        for c in parse_contributors(structured_path)
+    ]
+
+    # 3. Raw rows for the values the scalar map omits (qc_status, energy window).
+    by_field = {r["field"]: r for r in parse_rows(structured_path)}
+
+    # 4. qc — read the ACTUAL qc_status cell; never hardcode a status.
+    qc = None
+    qc_row = by_field.get("qc_status")
+    if qc_row is not None and qc_row.get("value") not in (None, ""):
+        qc = {"status": qc_row["value"]}
+
+    # 5. Implicit inferences (deterministic derivations only).
+    implicit: list[dict] = []
+    absorber = _absorbing_element(formula)
+    if absorber is not None:
+        implicit.append(
+            {
+                "about": "absorbing_element",
+                "value": absorber,
+                "evidence": [
+                    {
+                        "source_type": "derivation",
+                        "rule": (
+                            "absorbing element = sole non-oxygen element in "
+                            f"sample.material.formula ({formula} -> {absorber})"
+                        ),
+                    }
+                ],
+            }
+        )
+    # edge: do NOT assert a physics fact. Represent as a NULL needs-confirmation
+    # candidate whose derivation note records the incident-energy window only.
+    start = (by_field.get("incident_energy_start_eV") or {}).get("value")
+    end = (by_field.get("incident_energy_end_eV") or {}).get("value")
+    window = f"{start}–{end} eV" if start is not None and end is not None else "unrecorded"
+    implicit.append(
+        {
+            "about": "edge",
+            "value": None,
+            "evidence": [
+                {
+                    "source_type": "derivation",
+                    "rule": (
+                        "edge requires scientific confirmation; incident-energy "
+                        f"window {window} recorded from Configurations"
+                    ),
+                }
+            ],
+        }
+    )
+
+    # 6. Assets — ONLY assets with a real sha256 belong here. The synthetic listing
+    #    carries none, so this stays empty; the candidates become pending blockers.
+    assets: list[dict] = []
+
+    # 7. Pending — the deterministic /isaac-complete question set, never guessed.
+    pending: list[dict] = []
+    reduced_evidence: list[dict] = []
+    for cand in parse_file_listing(listing_path):
+        cand_evidence = list(cand.evidence)
+        pending.append(
+            {
+                "kind": "asset",
+                "content_role": cand.content_role,
+                "uri": cand.uri,
+                "media_type": cand.media_type,
+                "blocker": "sha256",
+                "question": f"What is the sha256 of {cand.uri}?",
+                "evidence": cand_evidence,
+            }
+        )
+        if cand.content_role == "reduction_product":
+            reduced_evidence = cand_evidence
+
+    pending.append(
+        {
+            "kind": "series",
+            "blocker": "reduced_spectrum",
+            "question": (
+                "Provide/point to the reduced spectrum (the .xdi reduction_product) "
+                "so measurement.series can be built."
+            ),
+            "evidence": reduced_evidence,
+        }
+    )
+    pending.append(
+        {
+            "kind": "descriptor",
+            "blocker": "required_for_evidence_record",
+            "question": (
+                "Provide at least one descriptor (e.g. XANES inflection-point energy "
+                "+ uncertainty) — an evidence record requires descriptors."
+            ),
+            "evidence": [
+                {
+                    "source_type": "derivation",
+                    "rule": (
+                        "evidence record requires descriptors.outputs[] "
+                        "(official schema allOf: evidence => descriptors)"
+                    ),
+                }
+            ],
+        }
+    )
+
+    draft: dict = {
+        "meta": dict(_META),
+        "fields": fields,
+        "attribution": {"contributors": contributors},
+        "implicit": implicit,
+        "assets": assets,
+        "pending": pending,
+    }
+    if qc is not None:
+        draft["qc"] = qc
+    return draft
+
+
+__all__ = ["build_draft"]
