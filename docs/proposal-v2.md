@@ -86,7 +86,7 @@ The LLM touches only extraction and question-asking; everything downstream is de
    anti-pattern descriptor names, and conditionally-required fields absent for the record's
    type/domain. Export writes nothing unless both pass. There is no `--force`.
 
-40 tests lock this in: all 10 official golden records validate; representative violations fail;
+69 tests lock this in: all 10 official golden records validate; representative violations fail;
 the transform is gated; the sidecar's paths resolve; the core never imports Graphify.
 
 ## 6. Graphify: central for memory and query, not for truth
@@ -145,7 +145,7 @@ recorded as `implicit` inferences (from formula + technique) in the sidecar only
 
 | Week | Milestone |
 |---|---|
-| — (done) | Vendor schema + 10 examples; deterministic core (validate/export/audit/new-id); XANES draft→record; 40 tests; skills + docs migrated |
+| — (done) | Vendor schema + 10 examples; deterministic core (validate/export/audit/new-id); XANES draft→record; 69 tests; skills + docs migrated |
 | Next | Run `/isaac-draft` on the **real** artifacts (needs `examples/` populated); tune extraction → path mapping |
 | + | Second domain (performance / electrochemistry) to exercise conditional requireds |
 | + | Optionally reuse official `portal/validation.py` for the soft-warning tier |
