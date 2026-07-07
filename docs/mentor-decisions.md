@@ -1,7 +1,12 @@
 # Mentor decision package — ISAAC Metadata Assistant
 
 **For:** Angel, Dean, and ISAAC mentors · **From:** Krish Verma (intern)
-**As of:** 2026-07-07 (post–Phase 8) · **Repo state:** `main`, clean, 80 tests passing.
+**As of:** 2026-07-07 · **Repo state:** `main`, clean, 80 tests passing.
+
+> For a shorter overview start with **[`mentor-brief.md`](mentor-brief.md)**; the live-meeting
+> walkthrough is **[`demo-script.md`](demo-script.md)**. This file remains the detailed decision
+> register (D1–D8). The decisions below are unchanged since Phase 8 — later phases (portal seam,
+> Graphify demo, docs) added no new decisions.
 
 This is a decision-oriented summary. It exists so you can review the prototype quickly and tell
 me which way to go next. Each open decision below lists **our recommended default**, the
@@ -225,7 +230,7 @@ docs, and an intern paper/poster. Explicitly **not** a production ingestion serv
    (`additionalProperties: false`) official schema.
 3. The **truth vs. memory two-plane** separation (deterministic validity; optional graph memory).
 
-Quotable numbers: 1 official record, 26 evidenced fields, 5 blockers refused-then-answered, 69
+Quotable numbers: 1 official record, 26 evidenced fields, 5 blockers refused-then-answered, 80
 passing tests, 0 audit failures. (See `docs/paper-notes.md` for the full draft.)
 
 - **Tradeoffs / risks.** Pro: the design ideas generalize beyond XANES and are the real research

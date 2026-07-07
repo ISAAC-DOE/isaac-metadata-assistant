@@ -67,6 +67,9 @@ for the full walkthrough and expected output.
 
 | Doc | For |
 |---|---|
+| [`docs/mentor-brief.md`](docs/mentor-brief.md) | **Start here for review** — five-minute mentor brief: what exists, what's deterministic, open decisions, next step |
+| [`docs/demo-script.md`](docs/demo-script.md) | Live-meeting demo script — what to run, what to point at, what not to overclaim, likely questions |
+| [`docs/final-deliverable-outline.md`](docs/final-deliverable-outline.md) | Paper/poster/report outline — titles, abstract, sections, figures/tables |
 | [`docs/claude-workflow.md`](docs/claude-workflow.md) | How a user drives the assistant through Claude — the five slash skills as a scripted conversation |
 | [`docs/demo.md`](docs/demo.md) | Reproducible synthetic demo — exact commands + expected output |
 | [`docs/architecture.md`](docs/architecture.md) | Pipeline + module map for reviewers |
