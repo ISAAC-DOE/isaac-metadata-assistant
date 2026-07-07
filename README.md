@@ -14,6 +14,28 @@ Core principle: **no guessing, no invented values, no finalized field without ev
 confirmation** — enforced structurally at authoring time, then re-checked against the official
 schema at export.
 
+## Status
+
+Working prototype (`v0.1.0`), **synthetic data only**.
+
+**Works today**
+
+- Deterministic pipeline: draft → complete → export → official-schema validation → audit, with a
+  per-field evidence sidecar.
+- No-guessing enforcement at authoring time — no finalized field without evidence or user confirmation.
+- One-command reproducible synthetic XANES demo (regenerates the committed sample byte-for-byte).
+- `isaac` CLI (`validate` / `export` / `audit` / `new-id`) and five Claude authoring skills.
+- Non-gating portal-style advisory soft-warnings (local seam) and a Graphify memory/query reviewer demo.
+- 80 passing tests, including a test that the truth plane never imports Graphify.
+
+**Not built yet**
+
+- No real SLAC/SSRL / private-data pipeline — synthetic only; real data is approval-gated.
+- Single XANES / characterization path only (no electrochemistry / theory / simulation domains).
+- No upstream portal-validator parity — `portal/validation.py` is not vendored.
+- The scientific-consistency review agent (`review.py`) is a placeholder interface, not implemented.
+- No web app, no MCP server, no CI.
+
 ## Two layers
 
 ```
@@ -71,12 +93,18 @@ for the full walkthrough and expected output.
 | [`docs/demo-script.md`](docs/demo-script.md) | Live-meeting demo script — what to run, what to point at, what not to overclaim, likely questions |
 | [`docs/final-deliverable-outline.md`](docs/final-deliverable-outline.md) | Paper/poster/report outline — titles, abstract, sections, figures/tables |
 | [`docs/claude-workflow.md`](docs/claude-workflow.md) | How a user drives the assistant through Claude — the five slash skills as a scripted conversation |
+| [`docs/cli.md`](docs/cli.md) | **CLI reference** — every `isaac` command, flags, outputs, exit codes, common mistakes |
 | [`docs/demo.md`](docs/demo.md) | Reproducible synthetic demo — exact commands + expected output |
 | [`docs/architecture.md`](docs/architecture.md) | Pipeline + module map for reviewers |
 | [`docs/query-demo.md`](docs/query-demo.md) | Graphify memory/query demo — what the graph answers vs. what stays deterministic |
 | [`docs/portal-warnings.md`](docs/portal-warnings.md) | Portal-style advisory soft-warnings — non-gating seam vs. the hard schema gate |
 | [`docs/paper-notes.md`](docs/paper-notes.md) | Motivation / methods / results notes for intern deliverables |
+| [`docs/data-governance.md`](docs/data-governance.md) | **Data-governance rules** — synthetic vs. real, what may/may not be committed, LLM-on-real-data policy |
 | [`docs/intake.md`](docs/intake.md) · [`docs/extraction.md`](docs/extraction.md) | Data-governance intake plan · extraction strategy |
+| [`docs/github-settings.md`](docs/github-settings.md) | Suggested GitHub repo settings (description, topics, visibility, branch protection) |
+
+Project workflow & policy: [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) ·
+[`CLAUDE.md`](CLAUDE.md) · [`AGENTS.md`](AGENTS.md).
 
 ## Commands
 
@@ -130,9 +158,44 @@ record valid/invalid, never mutates records, and is not wired into export or val
 Scientific/Consistency Review Agent would implement it and may consult Graphify for similar-record
 comparison — as advisory context, never as truth.
 
+## Data governance
+
+**Synthetic only by default. Never commit real or private data.**
+
+The committed demo data is deliberately fake (a year-2099 CuO / Cu K-edge XANES session). Real
+SLAC/SSRL artifacts, private spreadsheets, screenshots, PDFs, raw data, and raw file listings are
+**gitignored** (`examples/`) and must stay local. `graphify-out/` is a derived graph and is never
+committed. Sending real artifacts to an LLM (including Claude) is not allowed by default — real or
+sanitized data requires explicit approval. The deterministic core (`isaac validate` / `export` /
+`audit`) is LLM-free. Full rules: **[`docs/data-governance.md`](docs/data-governance.md)**.
+
 ## Migration note
 
 An earlier version of this repo authored its own provisional schema (before the official one was
 located). That is superseded — see `docs/proposal-v2.md` §"Migration". The provisional record
 schema, its pint unit checks, and its vocabulary files were removed; the evidence-envelope idea
 survives, now correctly positioned as a **draft** format that exports into the official shape.
+
+## Roadmap
+
+Next steps are **mentor-gated** — see [`docs/mentor-brief.md`](docs/mentor-brief.md) and
+[`docs/mentor-decisions.md`](docs/mentor-decisions.md) for the open decisions and options:
+
+- presentation/paper polish and a live demo pass;
+- a deeper Graphify query tier (graceful-degradation test coverage);
+- upstream portal-validator parity (vendoring the real `portal/validation.py`);
+- a second synthetic domain beyond XANES;
+- and — **only with explicit written data-governance approval** — a real / sanitized-data pilot.
+
+Whether the evidence sidecar becomes an official ISAAC convention (vs. an assistant-only audit
+artifact) is itself an open mentor decision.
+
+## License & provenance
+
+**License:** pending mentor/project decision — no license is asserted yet. Treat this as a private
+prototype; do not redistribute without the project owner's approval.
+
+**Provenance:** the vendored official schema (`schema/isaac_record_v1.json`, ISAAC v1.05) is copied
+verbatim from the [official ISAAC standard](https://github.com/ISAAC-DOE/isaac-ai-ready-record) — see
+`schema/PROVENANCE.md`. The ISAAC AI-Ready Record standard is a DOE BES AI Pathfinder effort; this
+assistant is an independent authoring tool, not an official ISAAC product.
