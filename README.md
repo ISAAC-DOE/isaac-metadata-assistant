@@ -67,6 +67,7 @@ for the full walkthrough and expected output.
 
 | Doc | For |
 |---|---|
+| [`docs/claude-workflow.md`](docs/claude-workflow.md) | How a user drives the assistant through Claude — the five slash skills as a scripted conversation |
 | [`docs/demo.md`](docs/demo.md) | Reproducible synthetic demo — exact commands + expected output |
 | [`docs/architecture.md`](docs/architecture.md) | Pipeline + module map for reviewers |
 | [`docs/query-demo.md`](docs/query-demo.md) | Graphify memory/query demo — what the graph answers vs. what stays deterministic |
