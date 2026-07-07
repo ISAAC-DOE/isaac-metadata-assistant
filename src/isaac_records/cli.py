@@ -17,6 +17,7 @@ from .draft_validator import validate_draft
 from .export import export_draft
 from .ids import new_record_id
 from .official import validate_official
+from .portal_warnings import portal_warnings
 
 
 def find_root(explicit: str | None) -> Path:
@@ -44,9 +45,16 @@ def cmd_validate(args, root: Path) -> int:
         report = validate_draft(obj)
         print("Draft validation (no-guessing checks):")
         print(report.render())
+        if args.warnings:
+            print("\n(Advisory portal warnings apply to official records — use --official --warnings.)")
         return 0 if report.ok else 1
     report = validate_official(obj, root)
     print(report.render())
+    if args.warnings:
+        # Advisory only: printed AFTER the hard official report and NEVER folded into the
+        # exit code below, so warnings can never gate validation or export.
+        print()
+        print(portal_warnings(obj).render())
     return 0 if report.ok else 1
 
 
@@ -102,6 +110,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("target")
     p.add_argument("--draft", action="store_true", help="force draft validation")
     p.add_argument("--official", action="store_true", help="force official-schema validation")
+    p.add_argument(
+        "--warnings",
+        action="store_true",
+        help="also print non-gating advisory portal-style soft-warnings (official records)",
+    )
     p.set_defaults(func=cmd_validate)
 
     p = sub.add_parser("export", help="transform a draft into an official record + evidence sidecar")

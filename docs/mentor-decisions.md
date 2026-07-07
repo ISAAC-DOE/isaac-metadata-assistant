@@ -1,7 +1,7 @@
 # Mentor decision package — ISAAC Metadata Assistant
 
 **For:** Angel, Dean, and ISAAC mentors · **From:** Krish Verma (intern)
-**As of:** 2026-07-07 (post–Phase 5) · **Repo state:** `main`, clean, 69 tests passing.
+**As of:** 2026-07-07 (post–Phase 8) · **Repo state:** `main`, clean, 80 tests passing.
 
 This is a decision-oriented summary. It exists so you can review the prototype quickly and tell
 me which way to go next. Each open decision below lists **our recommended default**, the
@@ -20,8 +20,9 @@ A working, synthetic, end-to-end prototype that turns scattered experiment metad
 - One path is complete end-to-end: **characterization / XANES-family (`record_type=evidence`)**.
 - The deterministic core (extract → draft → validate → export → audit) is **LLM-free and
   Graphify-free**, enforced by a test.
-- **69 passing tests**, including that all 10 official golden records validate, that export is
-  doubly gated, that sidecar paths resolve, and that the truth core never imports Graphify.
+- **80 passing tests**, including that all 10 official golden records validate, that export is
+  doubly gated, that sidecar paths resolve, and that the truth core never imports Graphify or the
+  advisory soft-warning seam.
 - A reproducible demo (`scripts/run_synthetic_demo.py`) regenerates a committed sample record
   **byte-for-byte**.
 
@@ -57,8 +58,9 @@ These are deliberate scope choices, not gaps we missed:
   (`docs/extraction.md`) but **not implemented** — no LLM extraction runs yet.
 - **Graphify (memory/query plane) is present but deferred.** The query-layer phase (routing polish
   + graceful-degradation tests) has not been built. The truth pipeline runs fully without it.
-- **Portal soft-warning tier** and the **advisory AI review** are stubs/deferred by design; neither
-  gates anything.
+- **Portal-style soft-warnings** now have a **non-gating local advisory seam** (`portal_warnings.py`,
+  `isaac validate --warnings`; Phase 8) — **not** upstream parity. The **advisory AI review** remains
+  a stub. Neither gates anything.
 
 ---
 
@@ -106,6 +108,14 @@ Integrate it, and if so, how?
 
 **Recommended default.** Vendor and integrate it as **validation stage 3 — non-gating advisory
 warnings** only. It never blocks export; it surfaces "you probably want to fix this" notes.
+
+**Status (Phase 8 — partial).** The non-gating advisory **seam** is now built: `portal_warnings.py`
+runs as validation stage 3, surfaced via `isaac validate --warnings`, with tests proving it never
+changes official pass/fail and is not imported by the truth path (see
+[`portal-warnings.md`](portal-warnings.md)). It emits two schema-grounded **local heuristics**
+(`NO_LINKS`, `QC_NONVALID_WITHOUT_EVIDENCE`) — **not** the real upstream rule set. The remaining open
+question is therefore narrower: **vendor the upstream `portal/validation.py` for true parity, or keep
+the local seam as-is?**
 
 - **Tradeoffs / risks.** Pro: parity with the official portal; catches soft issues before a human
   does. Con: a new upstream dependency to pin and refresh; its warnings must never be mistaken for

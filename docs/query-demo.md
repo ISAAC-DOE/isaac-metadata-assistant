@@ -170,7 +170,7 @@ route that actually owns the answer.
 | How does a draft become an official record? | memory | [`docs/architecture.md`](architecture.md) pipeline; the actual transform is `isaac export` |
 | What decisions are still open for mentors? | memory | [`docs/mentor-decisions.md`](mentor-decisions.md) (D1–D8) — **the doc + latest human decision are authoritative, not stale graph memory** |
 | What are the current limitations? | memory | [`docs/architecture.md`](architecture.md) "Not built yet"; §7 below |
-| Where is portal validation discussed? | memory | README "Validation stack" (stage 3), [`docs/architecture.md`](architecture.md), [`docs/proposal-v2.md`](proposal-v2.md) — Phase 8, not yet integrated |
+| Where is portal validation discussed? | memory | [`docs/portal-warnings.md`](portal-warnings.md) (the non-gating advisory seam), README "Validation stack" (stage 3) — hard gate stays `isaac validate --official` |
 | Truth plane vs memory/query plane? | memory | README "Two planes"; [`docs/architecture.md`](architecture.md); §1 above |
 | Which files explain the one-command demo? | memory | README "Quickstart"; [`docs/demo.md`](demo.md); `scripts/run_synthetic_demo.py` |
 | What is deterministic vs. future/optional? | memory | [`docs/architecture.md`](architecture.md) "deterministic vs. a human" + "Not built yet" |

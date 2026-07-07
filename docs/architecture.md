@@ -88,6 +88,7 @@ deterministic source wins.
 | `extract/file_listing.py` | truth-adjacent | Archive listing → asset URI candidates (**no sha256**) |
 | `extract/draft_builder.py` | truth-adjacent | Assemble the draft envelope, `implicit[]`, and `pending[]` blockers |
 | `complete.py` | authoring (non-truth) | `apply_answers` — fill `pending[]` from human answers as `user_confirmation` evidence; never invents values |
+| `portal_warnings.py` | advisory (isolated) | Non-gating portal-style **soft-warnings** (local heuristics: `NO_LINKS`, `QC_NONVALID_WITHOUT_EVIDENCE`) — read-only, no validity verdict, not imported by the truth path |
 | `review.py` | advisory (isolated) | **Placeholder** advisory reviewer — never marks valid/invalid, never mutates, not imported by the truth path |
 | `.claude/skills/isaac-*` | assistant | The `/isaac-draft`, `/isaac-complete`, `/isaac-validate`, `/isaac-export`, `/isaac-query` workflows |
 
@@ -116,8 +117,10 @@ mentors adopt it as an official ISAAC convention.
 - **Graphify memory/query layer** — the plane exists and `/isaac-query` routes to it; a reviewer
   demo is in [`query-demo.md`](query-demo.md). The deeper query-layer work (an automated
   graceful-degradation test tier) is **deferred**.
-- **Portal `validation.py` soft-warning tier** — evaluated, integration deferred; would only add
-  non-gating warnings.
+- **True portal parity** — a **non-gating advisory soft-warning seam** now exists
+  (`portal_warnings.py`, `isaac validate --warnings`; see [`portal-warnings.md`](portal-warnings.md)),
+  but it is **local heuristics, not** the upstream `portal/validation.py` (not vendored). Full parity
+  is future work.
 - **Advisory AI review** — `review.py` is a no-op placeholder by design.
 - **Real / sanitized data** — only synthetic fixtures are processed; real data requires explicit
   approval per `docs/intake.md`.

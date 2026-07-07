@@ -48,7 +48,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                                   # 69 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # 80 tests: golden records validate, transform is gated
 ```
 
 **Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →
@@ -70,6 +70,7 @@ for the full walkthrough and expected output.
 | [`docs/demo.md`](docs/demo.md) | Reproducible synthetic demo — exact commands + expected output |
 | [`docs/architecture.md`](docs/architecture.md) | Pipeline + module map for reviewers |
 | [`docs/query-demo.md`](docs/query-demo.md) | Graphify memory/query demo — what the graph answers vs. what stays deterministic |
+| [`docs/portal-warnings.md`](docs/portal-warnings.md) | Portal-style advisory soft-warnings — non-gating seam vs. the hard schema gate |
 | [`docs/paper-notes.md`](docs/paper-notes.md) | Motivation / methods / results notes for intern deliverables |
 | [`docs/intake.md`](docs/intake.md) · [`docs/extraction.md`](docs/extraction.md) | Data-governance intake plan · extraction strategy |
 
@@ -79,7 +80,7 @@ for the full walkthrough and expected output.
 |---|---|---|
 | — | `/isaac-draft` | Extract candidates + evidence into a draft mapped to official JSON-paths |
 | — | `/isaac-complete` | Ask only what blocks export (no-guessing gaps + official-schema gaps) |
-| `isaac validate` | `/isaac-validate` | Draft no-guessing checks, or official-schema validation |
+| `isaac validate` | `/isaac-validate` | Draft no-guessing checks, or official-schema validation (`--warnings` adds non-gating advisory soft-warnings) |
 | `isaac export` | `/isaac-export` | Transform draft → official record + evidence sidecar (gated) |
 | `isaac audit` | — | Validate every record in `records/` against the official schema |
 | `isaac new-id` | — | Print a fresh ULID `record_id` |
@@ -114,7 +115,9 @@ Records pass through staged checks; each stage has a fixed authority and the AI 
 
 1. **Draft no-guessing validation** (`draft_validator.py`) — gates authoring.
 2. **Official ISAAC schema validation** (`official.py`, vendored v1.05) — gates export.
-3. **Official `portal/validation.py` soft-warning tier** (upstream; integration deferred) — warnings.
+3. **Portal-style advisory soft-warnings** (`portal_warnings.py` · `isaac validate --warnings`) —
+   a **non-gating** local seam (Phase 8): structured warnings, never blocks export. Not upstream
+   parity — the real `portal/validation.py` is not vendored. See [`docs/portal-warnings.md`](docs/portal-warnings.md).
 4. **AI scientific consistency review** (`review.py`) — **advisory only**, placeholder today.
 5. **Human review** of anything flagged — the decider.
 

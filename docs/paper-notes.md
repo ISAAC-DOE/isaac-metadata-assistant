@@ -58,7 +58,8 @@ never authorize a record. The truth plane is verified to never import the graph 
 - A deterministic CLI: `isaac validate | export | audit | new-id`.
 - A reproducible synthetic end-to-end demo (`scripts/run_synthetic_demo.py`) that regenerates a
   committed sample record byte-for-byte.
-- **69 passing tests**, including that the truth core never imports the graph layer.
+- **80 passing tests**, including that the truth core never imports the graph layer or the advisory
+  soft-warning seam.
 
 ## 4. Validation strategy
 
@@ -67,7 +68,8 @@ Records pass through staged checks, each with a fixed authority (the AI never ov
 1. **Draft no-guessing validation** — gates authoring (evidence required, missing ⇒ null, assets need
    a real sha256).
 2. **Official ISAAC v1.05 schema validation** — gates export (jsonschema, Draft 2020-12).
-3. **Portal soft-warning tier** — upstream; **integration deferred** (would add non-gating warnings).
+3. **Portal-style advisory soft-warnings** (`portal_warnings.py` · `--warnings`) — a **non-gating**
+   local seam (never blocks export); **not** upstream parity. See `docs/portal-warnings.md`.
 4. **Advisory AI scientific review** — **placeholder only**; advisory, never marks valid/invalid,
    never mutates, not wired into export.
 5. **Human review** — the final decider for ambiguous science or policy.
@@ -99,7 +101,7 @@ On the synthetic XANES-family campaign, the pipeline produces official record
 - Every scientific value traces to a committed synthetic fixture — a test asserts nothing is fabricated.
 
 *(Numbers to quote on a poster: 1 official record, 26 evidenced fields, 5 blockers correctly refused
-then human-answered, 69 passing tests, 0 audit failures.)*
+then human-answered, 80 passing tests, 0 audit failures.)*
 
 ## 7. Limitations (state these honestly)
 
@@ -119,7 +121,8 @@ then human-answered, 69 passing tests, 0 audit failures.)*
   no-guessing (screenshots/PDF/notes/web-form).
 - Stand up the Graphify memory/query layer with explicit routing and graceful degradation when the
   graph is absent (the deferred query-layer phase).
-- Evaluate and, if approved, integrate the portal soft-warning tier (non-gating).
+- A non-gating advisory soft-warning seam now exists (`portal_warnings.py`); if approved, replace the
+  local heuristics with **true portal parity** by vendoring the upstream `portal/validation.py`.
 - Grow the advisory scientific review from placeholder to real checks (still advisory-only).
 - With explicit approval, add a sanitized real-data path and additional record domains beyond XANES.
 

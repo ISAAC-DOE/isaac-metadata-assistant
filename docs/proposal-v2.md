@@ -86,7 +86,7 @@ The LLM touches only extraction and question-asking; everything downstream is de
    anti-pattern descriptor names, and conditionally-required fields absent for the record's
    type/domain. Export writes nothing unless both pass. There is no `--force`.
 
-69 tests lock this in: all 10 official golden records validate; representative violations fail;
+80 tests lock this in: all 10 official golden records validate; representative violations fail;
 the transform is gated; the sidecar's paths resolve; the core never imports Graphify.
 
 ## 6. Graphify: central for memory and query, not for truth
@@ -115,7 +115,9 @@ Records pass through staged checks with fixed authorities; the AI never override
 
 1. **Draft no-guessing validation** (`draft_validator.py`) — gates authoring.
 2. **Official ISAAC schema validation** (`official.py`, vendored v1.05) — gates export.
-3. **Official `portal/validation.py` soft-warning tier** (upstream; integration deferred) — warnings.
+3. **Portal-style advisory soft-warnings** (`portal_warnings.py` · `isaac validate --warnings`) —
+   a **non-gating** local seam (Phase 8); never blocks export. Not upstream parity — the real
+   `portal/validation.py` is not vendored. See [`portal-warnings.md`](portal-warnings.md).
 4. **AI scientific consistency review** (`review.py`) — **advisory only**; a placeholder interface today.
 5. **Human review** of flagged issues — the decider.
 
@@ -145,10 +147,11 @@ recorded as `implicit` inferences (from formula + technique) in the sidecar only
 
 | Week | Milestone |
 |---|---|
-| — (done) | Vendor schema + 10 examples; deterministic core (validate/export/audit/new-id); XANES draft→record; 69 tests; skills + docs migrated |
+| — (done) | Vendor schema + 10 examples; deterministic core (validate/export/audit/new-id); XANES draft→record; 80 tests; skills + docs migrated |
+| — (done) | Non-gating portal-style **advisory soft-warning seam** (`portal_warnings.py`, `--warnings`) — local heuristics, not upstream parity |
 | Next | Run `/isaac-draft` on the **real** artifacts (needs `examples/` populated); tune extraction → path mapping |
 | + | Second domain (performance / electrochemistry) to exercise conditional requireds |
-| + | Optionally reuse official `portal/validation.py` for the soft-warning tier |
+| + | True portal parity: vendor + reconcile official `portal/validation.py` (replaces the local seam) |
 | + | Graphify build over `records/`; `/isaac-query` against real questions |
 
 ## 9. Migration from v2 (honest record of discarded work)
@@ -166,7 +169,8 @@ and the evidence envelope — now a **draft** format that exports into the offic
   should evidence map only into native slots (`qc.assumptions`, `uncertainty.basis`,
   `descriptors…generated_by`)? Current choice: sidecar, for full auditability.
 - **Vendored-schema drift.** We pin v1.05; need a refresh cadence vs upstream.
-- **Portal parity.** We cover all hard/400 rules via jsonschema but not the soft-warning tier;
-  decide whether to depend on `portal/validation.py`.
+- **Portal parity.** We cover all hard/400 rules via jsonschema, and Phase 8 added a **non-gating
+  local advisory soft-warning seam** (`portal_warnings.py`). It is **not** upstream parity — decide
+  whether to vendor + reconcile the real `portal/validation.py`. See [`portal-warnings.md`](portal-warnings.md).
 - **Real artifacts + data governance.** `examples/` is gitignored; confirm what may leave SLAC
   machines at all.
