@@ -48,11 +48,29 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                                   # 40 tests: golden records validate, transform is gated
-.venv/bin/isaac validate tests/fixtures/cuo_xanes_draft.json          # draft: no-guessing checks
-.venv/bin/isaac export  tests/fixtures/cuo_xanes_draft.json --records-dir /tmp/demo   # → record + sidecar
-.venv/bin/isaac validate /tmp/demo/*.json --official                  # official schema
+.venv/bin/pytest                                   # 69 tests: golden records validate, transform is gated
 ```
+
+**Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →
+official record + sidecar, on committed synthetic fixtures — no real data):
+
+```bash
+.venv/bin/python scripts/run_synthetic_demo.py                        # build → complete → export
+.venv/bin/isaac validate /tmp/isaac-demo/*.json --official            # official schema
+.venv/bin/isaac audit --records-dir /tmp/isaac-demo                   # record + evidence sidecar
+```
+
+The demo regenerates the committed sample (`docs/samples/`) byte-for-byte. See **[`docs/demo.md`](docs/demo.md)**
+for the full walkthrough and expected output.
+
+### Documentation
+
+| Doc | For |
+|---|---|
+| [`docs/demo.md`](docs/demo.md) | Reproducible synthetic demo — exact commands + expected output |
+| [`docs/architecture.md`](docs/architecture.md) | Pipeline + module map for reviewers |
+| [`docs/paper-notes.md`](docs/paper-notes.md) | Motivation / methods / results notes for intern deliverables |
+| [`docs/intake.md`](docs/intake.md) · [`docs/extraction.md`](docs/extraction.md) | Data-governance intake plan · extraction strategy |
 
 ## Commands
 
@@ -82,6 +100,10 @@ The system deliberately separates **what is true** from **what we remember**.
 **Graphify is central for memory and query, but never central for truth.** If a graph answer
 conflicts with the schema, a validated record, or the audit, the deterministic source wins. The
 draft → export → validate pipeline works with Graphify entirely absent.
+
+> Status: the truth plane (draft → export → validate → audit) is implemented and demo-ready. The
+> dedicated Graphify **query-layer** work (routing polish + graceful-degradation tests) is **deferred/
+> future** — the memory plane is optional and the deterministic pipeline does not depend on it.
 
 ## Validation stack
 
