@@ -1,0 +1,143 @@
+"""Apply simulated human answers to a draft's ``pending[]`` blockers.
+
+This is a NON-truth authoring module: it turns a draft with open ``pending``
+blockers (from :func:`isaac_records.extract.draft_builder.build_draft`) into a
+completed draft that the existing, unchanged export/validate machinery can carry
+to an official record. It decides nothing about validity or exportability — that
+stays with ``draft_validator`` / ``official`` / ``export`` (the truth plane).
+
+Hard rule — NO GUESSING BY THE SYSTEM: :func:`apply_answers` may only apply values
+that are literally present in the ``answers`` mapping (which represents simulated
+human answers). It never invents a value, sha256, spectrum point, or descriptor on
+its own. Every applied answer is recorded as ``user_confirmation`` evidence, added
+alongside (never replacing) the deterministic evidence the draft already carries.
+An unanswered blocker is left in ``pending`` and therefore keeps blocking export.
+
+The module imports nothing but ``copy`` (stdlib): no graphify, no truth-plane code.
+"""
+
+from __future__ import annotations
+
+import copy
+
+# A stable ``asset_id`` per ``content_role``. The ``pending`` asset blockers carry
+# a ``content_role`` but no ``asset_id`` (build_draft drops the parser's implied id),
+# so completion derives a deterministic, human-readable id from the role. Anything
+# not in this map falls back to the role string itself (still deterministic).
+_ASSET_ID_BY_ROLE = {
+    "raw_data_pointer": "raw_scan_set",
+    "reduction_product": "reduced_spectrum",
+    "processing_script": "processing_notebook",
+}
+
+
+def _user_confirmation(question, answer, timestamp) -> dict:
+    """One ``user_confirmation`` evidence entry recording a simulated human answer."""
+    return {
+        "source_type": "user_confirmation",
+        "question": question,
+        "answer": answer,
+        "timestamp": timestamp,
+    }
+
+
+def apply_answers(draft: dict, answers: dict) -> dict:
+    """Return a NEW completed draft with ``answers`` applied to ``draft['pending']``.
+
+    Pure and non-mutating: deep-copies ``draft`` and only ever adds values that are
+    present in ``answers``. Resolved ``pending`` entries are removed; unanswered ones
+    are kept so export stays blocked. See the module docstring for the no-guessing
+    contract.
+    """
+    draft = copy.deepcopy(draft)
+    answers = answers or {}
+    timestamp = answers.get("timestamp")
+    asset_sha256 = answers.get("asset_sha256") or {}
+
+    draft.setdefault("assets", [])
+    remaining_pending: list[dict] = []
+
+    for entry in draft.get("pending") or []:
+        kind = entry.get("kind")
+
+        if kind == "asset":
+            uri = entry.get("uri")
+            sha256 = asset_sha256.get(uri)
+            if sha256 is None:
+                # No answer for this asset -> stays pending, still blocks export.
+                remaining_pending.append(entry)
+                continue
+            content_role = entry.get("content_role")
+            asset = {
+                "asset_id": _ASSET_ID_BY_ROLE.get(content_role, content_role),
+                "content_role": content_role,
+                "uri": uri,
+                "media_type": entry.get("media_type"),
+                "sha256": sha256,
+                # file_listing evidence (from the blocker) + the simulated answer.
+                "evidence": list(entry.get("evidence") or [])
+                + [_user_confirmation(entry.get("question"), sha256, timestamp)],
+            }
+            if asset["media_type"] is None:
+                del asset["media_type"]  # never emit a null media_type
+            draft["assets"].append(asset)
+            # resolved -> not re-added to pending
+            continue
+
+        if kind == "series":
+            series = answers.get("series")
+            if series is None:
+                remaining_pending.append(entry)
+                continue
+            draft["series"] = copy.deepcopy(series)
+            # qc stays exactly as build_draft read it from the sheet.
+            continue
+
+        if kind == "descriptor":
+            descriptor = answers.get("descriptor")
+            if descriptor is None:
+                remaining_pending.append(entry)
+                continue
+            desc = copy.deepcopy(descriptor)
+            desc["evidence"] = [
+                _user_confirmation(
+                    "Descriptor value + uncertainty?",
+                    str(desc.get("value")),
+                    timestamp,
+                )
+            ]
+            draft["descriptors_outputs"] = [
+                {
+                    "label": answers.get("descriptor_label", "completion_demo"),
+                    "generated_utc": timestamp,
+                    "generated_by": {"agent": "isaac-complete-demo", "version": "0.1"},
+                    "descriptors": [desc],
+                }
+            ]
+            continue
+
+        # Unknown blocker kind: leave it untouched (never silently dropped).
+        remaining_pending.append(entry)
+
+    draft["pending"] = remaining_pending
+
+    # Optional edge confirmation. The edge lives in implicit[] as a null
+    # needs-confirmation candidate (not a pending blocker); if the answer supplies
+    # it, record the confirmed value and append user_confirmation evidence while
+    # keeping the original derivation note.
+    edge = answers.get("edge")
+    if edge is not None:
+        for imp in draft.get("implicit") or []:
+            if imp.get("about") == "edge":
+                imp["value"] = edge
+                imp.setdefault("evidence", [])
+                imp["evidence"].append(
+                    _user_confirmation(
+                        "What is the absorption edge (e.g. K, L3)?", edge, timestamp
+                    )
+                )
+
+    return draft
+
+
+__all__ = ["apply_answers"]

@@ -83,6 +83,29 @@ def build_draft(structured_path, listing_path) -> dict:
         if ef.path == "sample.material.formula":
             formula = ef.value
 
+    # 1b. system.domain — a deterministic derivation, NOT a guess. The official
+    #     schema requires system.domain whenever a system block exists, and one does
+    #     here (technique + facility), so omitting it would make the draft
+    #     un-exportable. A facility-source record is by definition an experiment: the
+    #     enum is experimental|computational and a physical facility is never
+    #     computational. Surface it as an inferred field (mirrors the golden draft's
+    #     inferred domain) rather than fabricating it or letting export fail.
+    if _META["source_type"] == "facility":
+        fields["system.domain"] = {
+            "value": "experimental",
+            "status": "inferred",
+            "evidence": [
+                {
+                    "source_type": "derivation",
+                    "rule": (
+                        "system.domain = experimental for a facility-source record "
+                        "(meta.source_type=facility ⇒ physical experiment, not "
+                        "computation)"
+                    ),
+                }
+            ],
+        }
+
     # 2. Attribution — contributors go in schema-clean (name + role only). Their
     #    provenance evidence is deferred to the export sidecar (see report), so it is
     #    dropped from the draft's attribution to keep it record-shaped.

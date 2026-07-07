@@ -37,8 +37,9 @@ def test_meta_is_the_xanes_characterization_path():
 
 def test_representative_fields_present_with_precise_evidence():
     fields = _draft()["fields"]
-    # ~25 evidenced scalar fields.
-    assert len(fields) == 25
+    # 25 evidenced scalar fields from the sheet + 1 deterministically-inferred
+    # system.domain (required by the official schema once a system block exists).
+    assert len(fields) == 26
 
     beamline = fields["system.facility.beamline"]
     assert beamline["value"] == "15-2"
@@ -51,6 +52,14 @@ def test_representative_fields_present_with_precise_evidence():
     assert isinstance(temp["value"], int) and not isinstance(temp["value"], bool)
     assert len(temp["evidence"]) == 1
     assert temp["evidence"][0]["locator"] == "Sheet 'Configurations', field=temperature_K"
+
+    # system.domain is inferred (facility ⇒ experimental) with a derivation rule,
+    # never guessed — the official schema requires it whenever system exists.
+    domain = fields["system.domain"]
+    assert domain["value"] == "experimental"
+    assert domain["status"] == "inferred"
+    assert domain["evidence"][0]["source_type"] == "derivation"
+    assert domain["evidence"][0]["rule"]
 
 
 def test_assets_empty_and_pending_blockers_present():

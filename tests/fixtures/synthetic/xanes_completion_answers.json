@@ -1,0 +1,49 @@
+{
+  "_synthetic": true,
+  "_note": "SIMULATED human answers for the Phase 4 end-to-end demo. These stand in for what a person would type in /isaac-complete. Every value here is clearly fake (year-2099 session, obviously-synthetic sha256s mirrored from the golden fixture) and is NOT real experimental data. complete.apply_answers records each of these as user_confirmation evidence; nothing here is guessed by the system.",
+  "timestamp": "2099-03-05T21:00:00Z",
+  "asset_sha256": {
+    "ssrl-archive://BL15-2/2099_run_000/raw/": "a3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b123",
+    "ssrl-archive://BL15-2/2099_run_000/reduced/CuO2_merged.xdi": "b3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b234",
+    "ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb": "c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345"
+  },
+  "series": [
+    {
+      "series_id": "averaged_spectrum",
+      "independent_variables": [
+        {
+          "name": "incident_energy",
+          "unit": "eV",
+          "values": [8970, 8975, 8980, 8985, 8990, 8995, 9000]
+        }
+      ],
+      "channels": [
+        {
+          "name": "absorption",
+          "unit": "mu_normalized",
+          "role": "primary_signal",
+          "values": [0.02, 0.03, 0.15, 0.85, 1.45, 1.1, 1.05]
+        },
+        {
+          "name": "i0_monitor",
+          "unit": "counts",
+          "role": "auxiliary_signal",
+          "values": [50000, 50100, 49900, 50050, 50000, 49950, 50000]
+        }
+      ]
+    }
+  ],
+  "descriptor": {
+    "name": "xanes_inflection_point_energy",
+    "kind": "absolute",
+    "source": "manual",
+    "value": 9001.2,
+    "unit": "eV",
+    "uncertainty": {
+      "sigma": 0.01,
+      "unit": "eV",
+      "basis": "reported"
+    }
+  },
+  "edge": "K"
+}

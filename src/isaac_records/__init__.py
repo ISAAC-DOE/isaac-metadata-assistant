@@ -10,6 +10,7 @@ The official ISAAC schema is the source of truth; this package never redefines i
 
 __version__ = "0.2.0"
 
+from .complete import apply_answers
 from .draft_validator import DraftReport, validate_draft
 from .export import ExportResult, build_sidecar, export_draft, transform
 from .ids import is_record_id, new_record_id
@@ -20,6 +21,7 @@ __all__ = [
     "DraftReport",
     "ExportResult",
     "OfficialReport",
+    "apply_answers",
     "build_sidecar",
     "derivation",
     "evidence",

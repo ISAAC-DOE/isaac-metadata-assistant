@@ -1,0 +1,287 @@
+{
+  "record_id": "01JQZ0SYNTHXANESDEMO000000",
+  "schema_version": "1.05",
+  "generated_utc": "2026-07-06T23:05:48Z",
+  "evidence": {
+    "system.facility.facility_name": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=facility_name",
+        "quote": "SSRL"
+      }
+    ],
+    "system.facility.organization": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=organization",
+        "quote": "SLAC"
+      }
+    ],
+    "system.facility.site": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=site",
+        "quote": "SSRL"
+      }
+    ],
+    "system.facility.beamline": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=beamline",
+        "quote": "15-2"
+      }
+    ],
+    "system.facility.endstation": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=endstation",
+        "quote": "XES"
+      }
+    ],
+    "system.technique": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=technique",
+        "quote": "HERFD-XAS"
+      }
+    ],
+    "system.configuration.proposal_id": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=proposal_id",
+        "quote": "SYN-2099-000"
+      }
+    ],
+    "system.configuration.session_id": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=session_id",
+        "quote": "2099_run_000"
+      }
+    ],
+    "timestamps.acquired_start_utc": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=acquired_start_utc",
+        "quote": "2099-03-01T18:30:00Z"
+      }
+    ],
+    "timestamps.acquired_end_utc": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=acquired_end_utc",
+        "quote": "2099-03-01T18:45:00Z"
+      }
+    ],
+    "timestamps.created_utc": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=created_utc",
+        "quote": "2099-03-05T20:15:00Z"
+      }
+    ],
+    "sample.material.name": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Sample', field=material_name",
+        "quote": "Copper(II) Oxide"
+      }
+    ],
+    "sample.material.formula": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Sample', field=formula",
+        "quote": "CuO2"
+      }
+    ],
+    "sample.material.provenance": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Sample', field=provenance",
+        "quote": "commercial"
+      }
+    ],
+    "sample.sample_form": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Sample', field=sample_form",
+        "quote": "pellet"
+      }
+    ],
+    "sample.composition.CuO2_mass_fraction": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Sample', field=CuO2_mass_fraction",
+        "quote": "0.001"
+      }
+    ],
+    "sample.composition.sucrose_mass_fraction": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Sample', field=sucrose_mass_fraction",
+        "quote": "0.999"
+      }
+    ],
+    "sample.geometry.pellet_diameter_mm": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Sample', field=pellet_diameter_mm",
+        "quote": "7.0"
+      }
+    ],
+    "context.environment": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Configurations', field=environment",
+        "quote": "ex_situ"
+      }
+    ],
+    "context.temperature_K": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Configurations', field=temperature_K",
+        "quote": "298"
+      }
+    ],
+    "context.thermodynamics.atmosphere": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Configurations', field=atmosphere",
+        "quote": "air"
+      }
+    ],
+    "system.configuration.monochromator_crystal": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Configurations', field=monochromator_crystal",
+        "quote": "Si(311)"
+      }
+    ],
+    "system.configuration.spectrometer_geometry": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Configurations', field=spectrometer_geometry",
+        "quote": "Von_Hamos"
+      }
+    ],
+    "system.configuration.detector_model": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Configurations', field=detector_model",
+        "quote": "Pilatus_100K"
+      }
+    ],
+    "system.configuration.n_scans": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Configurations', field=n_scans",
+        "quote": "6"
+      }
+    ],
+    "system.domain": [
+      {
+        "source_type": "derivation",
+        "rule": "system.domain = experimental for a facility-source record (meta.source_type=facility \u21d2 physical experiment, not computation)"
+      }
+    ],
+    "assets:processing_notebook": [
+      {
+        "source_type": "file_listing",
+        "source_file": "raw_scan_listing.txt",
+        "locator": "line 16, ssrl-archive://BL15-2/2099_run_000/notebooks/",
+        "quote": "xanes_reduction_v2.ipynb"
+      },
+      {
+        "source_type": "user_confirmation",
+        "question": "What is the sha256 of ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb?",
+        "answer": "c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345",
+        "timestamp": "2099-03-05T21:00:00Z"
+      }
+    ],
+    "assets:reduced_spectrum": [
+      {
+        "source_type": "file_listing",
+        "source_file": "raw_scan_listing.txt",
+        "locator": "line 27, ssrl-archive://BL15-2/2099_run_000/reduced/",
+        "quote": "CuO2_merged.xdi"
+      },
+      {
+        "source_type": "user_confirmation",
+        "question": "What is the sha256 of ssrl-archive://BL15-2/2099_run_000/reduced/CuO2_merged.xdi?",
+        "answer": "b3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b234",
+        "timestamp": "2099-03-05T21:00:00Z"
+      }
+    ],
+    "assets:raw_scan_set": [
+      {
+        "source_type": "file_listing",
+        "source_file": "raw_scan_listing.txt",
+        "locator": "line 18, ssrl-archive://BL15-2/2099_run_000/raw/",
+        "quote": "CuO2_scan_001.h5"
+      },
+      {
+        "source_type": "user_confirmation",
+        "question": "What is the sha256 of ssrl-archive://BL15-2/2099_run_000/raw/?",
+        "answer": "a3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b123",
+        "timestamp": "2099-03-05T21:00:00Z"
+      }
+    ],
+    "descriptors:xanes_inflection_point_energy": [
+      {
+        "source_type": "user_confirmation",
+        "question": "Descriptor value + uncertainty?",
+        "answer": "9001.2",
+        "timestamp": "2099-03-05T21:00:00Z"
+      }
+    ],
+    "implicit:absorbing_element": {
+      "value": "Cu",
+      "evidence": [
+        {
+          "source_type": "derivation",
+          "rule": "absorbing element = sole non-oxygen element in sample.material.formula (CuO2 -> Cu)"
+        }
+      ]
+    },
+    "implicit:edge": {
+      "value": "K",
+      "evidence": [
+        {
+          "source_type": "derivation",
+          "rule": "edge requires scientific confirmation; incident-energy window 8970\u20139000 eV recorded from Configurations"
+        },
+        {
+          "source_type": "user_confirmation",
+          "question": "What is the absorption edge (e.g. K, L3)?",
+          "answer": "K",
+          "timestamp": "2099-03-05T21:00:00Z"
+        }
+      ]
+    }
+  }
+}

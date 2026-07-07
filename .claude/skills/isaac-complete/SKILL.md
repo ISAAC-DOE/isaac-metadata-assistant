@@ -10,7 +10,13 @@ nothing optional.
 
 ## Where the questions come from (never from memory)
 
-Two deterministic sources:
+The question set is **exactly `draft["pending"]`** — the blockers `build_draft` emitted
+deterministically. There is one question per pending entry, and it is that entry's
+`question` string verbatim (e.g. `"What is the sha256 of <uri>?"`, the reduced-spectrum
+`series` blocker, the required-descriptor blocker). Nothing is asked from memory, and no
+extra questions are invented beyond what `pending[]` lists.
+
+Cross-check the same two deterministic gates if you want to confirm the list is complete:
 
 1. **No-guessing gaps:** `.venv/bin/isaac validate <draft>` — any finalized field missing
    evidence, any asset missing `sha256`, any descriptor missing a value.
@@ -19,8 +25,27 @@ Two deterministic sources:
    is blocked, the reported errors — missing required blocks for this `record_type`/`domain`,
    bad vocabulary, conditional requirements — are the exact remaining questions.
 
-The union of those two lists is the complete question set. If both pass, say so and point to
-`/isaac-export`.
+If `pending[]` is empty and both gates pass, say so and point to `/isaac-export`.
+
+## How answers are applied
+
+Answers are applied by `isaac_records.complete.apply_answers(draft, answers)` (a pure,
+non-truth authoring function — it imports only stdlib, never graphify or the truth plane).
+It consumes `draft["pending"]`:
+
+- an `asset` blocker resolves when `answers["asset_sha256"]` has the candidate `uri`; a
+  schema-shaped asset (`asset_id`, `content_role`, `uri`, `media_type`, `sha256`) is appended
+  to `assets`;
+- the `series` blocker resolves when `answers["series"]` supplies the measurement series;
+- the `descriptor` blocker resolves when `answers["descriptor"]` supplies a descriptor;
+- the implicit `edge` candidate is confirmed when `answers["edge"]` is given.
+
+**Every applied answer becomes `user_confirmation` evidence** (`{source_type:
+"user_confirmation", question, answer, timestamp}`), added alongside the deterministic
+`file_listing`/`derivation` evidence already present — never replacing it. A resolved
+blocker is removed from `pending`; an **unanswered blocker stays in `pending` and keeps
+blocking export**. `apply_answers` never adds a value that is not in `answers` — no sha256,
+series point, descriptor, or edge is guessed by the system.
 
 ## Asking
 
