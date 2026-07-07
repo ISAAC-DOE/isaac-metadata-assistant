@@ -1,9 +1,10 @@
 # Security & data-incident policy
 
-This is a **private research prototype** built for a domain with real data-governance obligations
-(SLAC/SSRL beamline metadata). The primary risk here is not a software vulnerability but the
-**accidental exposure of real or sensitive experimental data**. This policy is intentionally simple
-and appropriate for a prototype repo.
+This is a **research prototype** built for a domain with real data-governance obligations
+(SLAC/SSRL beamline metadata). The repository is public, but **public visibility does not grant
+reuse rights** and there is no formal security-response team. The primary risk here is not a
+software vulnerability but the **accidental exposure of real or sensitive experimental data**. This
+policy is intentionally simple and appropriate for a prototype repo.
 
 ---
 
@@ -22,8 +23,8 @@ and appropriate for a prototype repo.
 
 ## Reporting a data or security issue
 
-This is an internal prototype, so there is no public disclosure process. If you discover exposed
-data, a leaked secret, or a security concern:
+This is a research prototype with no formal security-response or public disclosure process. If you
+discover exposed data, a leaked secret, or a security concern:
 
 1. **Do not** open a public issue that contains or points to the sensitive content.
 2. Notify the **project owner / mentor directly and privately**.

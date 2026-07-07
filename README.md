@@ -77,9 +77,10 @@ python3 -m venv .venv
 official record + sidecar, on committed synthetic fixtures — no real data):
 
 ```bash
-.venv/bin/python scripts/run_synthetic_demo.py                        # build → complete → export
-.venv/bin/isaac validate /tmp/isaac-demo/*.json --official            # official schema
-.venv/bin/isaac audit --records-dir /tmp/isaac-demo                   # record + evidence sidecar
+.venv/bin/python scripts/run_synthetic_demo.py   # build → complete → export
+# validate the RECORD, not the sidecar — the .evidence.json sidecar is not an official ISAAC record
+.venv/bin/isaac validate /tmp/isaac-demo/01JQZ0SYNTHXANESDEMO000000.json --official
+.venv/bin/isaac audit --records-dir /tmp/isaac-demo   # audits the record + reports sidecar coverage
 ```
 
 The demo regenerates the committed sample (`docs/samples/`) byte-for-byte. See **[`docs/demo.md`](docs/demo.md)**
@@ -103,8 +104,10 @@ for the full walkthrough and expected output.
 | [`docs/intake.md`](docs/intake.md) · [`docs/extraction.md`](docs/extraction.md) | Data-governance intake plan · extraction strategy |
 | [`docs/github-settings.md`](docs/github-settings.md) | Suggested GitHub repo settings (description, topics, visibility, branch protection) |
 
-Project workflow & policy: [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) ·
-[`CLAUDE.md`](CLAUDE.md) · [`AGENTS.md`](AGENTS.md).
+Contributor & security policy: [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md).
+
+> Maintainer note: [`CLAUDE.md`](CLAUDE.md) and [`AGENTS.md`](AGENTS.md) are internal AI-assistant
+> working conventions (how this repo is developed with Claude), not public policy documents.
 
 ## Commands
 
@@ -192,8 +195,9 @@ artifact) is itself an open mentor decision.
 
 ## License & provenance
 
-**License:** pending mentor/project decision — no license is asserted yet. Treat this as a private
-prototype; do not redistribute without the project owner's approval.
+**License:** pending mentor/project decision — no license is asserted yet. This is a research
+prototype; **public visibility does not grant reuse rights.** Do not redistribute or reuse without
+the project owner's approval.
 
 **Provenance:** the vendored official schema (`schema/isaac_record_v1.json`, ISAAC v1.05) is copied
 verbatim from the [official ISAAC standard](https://github.com/ISAAC-DOE/isaac-ai-ready-record) — see

@@ -21,9 +21,11 @@ Suggested topics: `isaac`, `metadata`, `scientific-data`, `data-validation`, `js
 
 ## Visibility
 
-Keep the repository **private** for now. It targets a domain with real data governance, and the
-license is still undecided. Do not make it public without explicit project-owner approval and a
-governance review confirming no sensitive data exists anywhere in history.
+The repository is currently **public**. Public visibility does **not** grant reuse rights — the
+license is still pending (see the README "License & provenance" section). Because it targets a
+domain with real data governance, keep every real artifact out of git and confirm that no sensitive
+data exists anywhere in history; all committed data must be clearly synthetic (see
+[`data-governance.md`](data-governance.md)).
 
 ## Default branch & protection
 
@@ -61,6 +63,6 @@ Skip heavier automation (multiple templates, actions bots) unless the project ex
 ## Not recommended for this phase
 
 - CI/CD workflows (`.github/workflows/`) — defer until explicitly approved.
-- Dependabot / security-scanning bots — defer for a private prototype.
+- Dependabot / security-scanning bots — defer for an early-stage research prototype.
 - A license file — **pending mentor/project decision** (see the README "License & provenance"
   section). Do not add MIT/Apache/etc. without approval.
