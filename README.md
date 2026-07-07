@@ -69,6 +69,7 @@ for the full walkthrough and expected output.
 |---|---|
 | [`docs/demo.md`](docs/demo.md) | Reproducible synthetic demo — exact commands + expected output |
 | [`docs/architecture.md`](docs/architecture.md) | Pipeline + module map for reviewers |
+| [`docs/query-demo.md`](docs/query-demo.md) | Graphify memory/query demo — what the graph answers vs. what stays deterministic |
 | [`docs/paper-notes.md`](docs/paper-notes.md) | Motivation / methods / results notes for intern deliverables |
 | [`docs/intake.md`](docs/intake.md) · [`docs/extraction.md`](docs/extraction.md) | Data-governance intake plan · extraction strategy |
 
@@ -102,8 +103,10 @@ conflicts with the schema, a validated record, or the audit, the deterministic s
 draft → export → validate pipeline works with Graphify entirely absent.
 
 > Status: the truth plane (draft → export → validate → audit) is implemented and demo-ready. The
-> dedicated Graphify **query-layer** work (routing polish + graceful-degradation tests) is **deferred/
-> future** — the memory plane is optional and the deterministic pipeline does not depend on it.
+> Graphify memory/query plane now has a **reviewer demo** — see [`docs/query-demo.md`](docs/query-demo.md)
+> — with `/isaac-query` routing each question to the source that owns it. The deeper query-layer work
+> (an automated graceful-degradation test tier) remains **deferred/future**. The memory plane is
+> optional and the deterministic pipeline does not depend on it — Graphify never decides validity.
 
 ## Validation stack
 

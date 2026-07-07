@@ -113,8 +113,9 @@ mentors adopt it as an official ISAAC convention.
 
 - **LLM-assisted extraction** of screenshots, PDFs, notes, and web-form dumps — designed in
   `docs/extraction.md`, not implemented. Today's extraction covers the structured sheet + listing.
-- **Graphify memory/query layer** — the plane exists conceptually and `/isaac-query` routes to it,
-  but the dedicated query-layer phase (routing polish + graceful-degradation tests) is **deferred**.
+- **Graphify memory/query layer** — the plane exists and `/isaac-query` routes to it; a reviewer
+  demo is in [`query-demo.md`](query-demo.md). The deeper query-layer work (an automated
+  graceful-degradation test tier) is **deferred**.
 - **Portal `validation.py` soft-warning tier** — evaluated, integration deferred; would only add
   non-gating warnings.
 - **Advisory AI review** — `review.py` is a no-op placeholder by design.
