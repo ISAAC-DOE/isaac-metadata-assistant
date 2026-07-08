@@ -1,7 +1,7 @@
 # Mentor decision package — ISAAC Metadata Assistant
 
 **For:** Angel, Dean, and ISAAC mentors · **From:** Krish Verma (intern)
-**As of:** 2026-07-07 · **Repo state:** `main`, clean, 80 tests passing.
+**Repo state:** `main`, clean, full test suite passing (see git history for the exact commit).
 
 > For a shorter overview start with **[`mentor-brief.md`](mentor-brief.md)**; the live-meeting
 > walkthrough is **[`demo-script.md`](demo-script.md)**. This file remains the detailed decision

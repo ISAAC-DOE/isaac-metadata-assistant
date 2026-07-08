@@ -1,7 +1,7 @@
 # ISAAC Metadata Assistant — mentor brief
 
 **For:** Angel, Dean, and ISAAC mentors · **From:** Krish Verma (intern)
-**As of:** 2026-07-07 · **Repo:** `main`, clean, **80 tests passing** · **HEAD:** `e7420dd`
+**Repo:** `main`, clean, full test suite passing · see git history for the exact commit
 
 A five-minute read. It says what exists, what the demo proves, what is deterministic vs.
 assistant-driven, what is still synthetic, and which decisions I need from you. Nothing here

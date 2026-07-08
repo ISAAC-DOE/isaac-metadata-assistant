@@ -1,7 +1,7 @@
 # Final deliverable outline — paper / poster / report
 
 A skeleton for the intern write-up (paper, poster, or short report). Every claim below is what the
-repo actually does today (Phase 10, `main`, 80 tests passing) — future work is labeled as such.
+repo actually does today (`main`; see README.md and git history for current status) — future work is labeled as such.
 Do **not** present future work as a current result.
 
 Source material to reuse: [`docs/paper-notes.md`](paper-notes.md) (fuller prose),

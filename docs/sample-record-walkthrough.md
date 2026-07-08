@@ -136,7 +136,10 @@ covers every hard (HTTP-400) rule the official portal enforces.
 It does **not** check **scientific plausibility**. Schema validation is about shape and vocabulary,
 not chemistry or physics — it does not verify, for example, that `sample.material.name` and
 `sample.material.formula` are mutually consistent, or that a descriptor value is reasonable. Those
-are questions for a human reviewer (validation stage 5), not the schema.
+are questions for a human reviewer (validation stage 5), not the schema. The committed sample
+demonstrates this deliberately: its material name `Copper(II) Oxide` is paired with the formula
+`CuO2` (real copper(II) oxide is `CuO`) — a chemically inconsistent, unmistakably synthetic
+combination that schema validation accepts, because chemical plausibility is outside its scope.
 
 ## What evidence audit checks
 

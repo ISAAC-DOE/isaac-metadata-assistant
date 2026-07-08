@@ -1,7 +1,7 @@
 # Architecture overview (for reviewers)
 
 A one-page map of how the ISAAC Metadata Assistant turns experiment metadata into an official,
-evidence-grounded ISAAC v1.05 record. It is accurate to the code in this repo as of Phase 5;
+evidence-grounded ISAAC v1.05 record. It is kept accurate to the code in this repo;
 where something is designed but not yet built, it says so.
 
 ## The pipeline

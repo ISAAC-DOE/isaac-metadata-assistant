@@ -18,7 +18,7 @@ def _sidecar_coverage(record: dict, sidecar_path: Path) -> tuple[int, int, list[
     """Return (resolved, total_pathlike, dangling) for a record's sidecar.
 
     Only dotted keys (no ':' prefix) are literal JSON-paths into the record;
-    asset:/descriptors:/implicit: keys are namespaced and not checked here.
+    assets:/descriptors:/implicit: keys are namespaced and not checked here.
     """
     if not sidecar_path.exists():
         return (0, 0, [])

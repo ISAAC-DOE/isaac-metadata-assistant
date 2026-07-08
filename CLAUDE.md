@@ -356,12 +356,11 @@ For this project:
 
 Current state:
 
-- GitHub public-readiness cleanup is complete.
-- Phase 12B local/remote/public consistency reconciliation is complete: local disk, `main`, `origin/main`, and public raw GitHub are verified byte-consistent.
-- Working tree is clean.
-- No feature phase is active. The next step is mentor review; start any further phase only after explicit user approval.
+- The deterministic truth/export/validation/audit core and the synthetic XANES draft→export→sidecar→audit flow are in place and passing.
+- Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
+- Start any further phase only after explicit user approval.
 
-The deterministic truth/export/validation/audit core and the synthetic XANES draft→export→sidecar→audit flow are in place and passing. Do not treat this note as a work authorization — confirm the actual head, branch, and status with the commands below before continuing.
+Do not treat this note as a work authorization — confirm the actual head, branch, and status with the commands below before continuing.
 
 Before continuing, verify repo state with:
 
