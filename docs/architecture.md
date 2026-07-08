@@ -92,6 +92,9 @@ deterministic source wins.
 | `review.py` | advisory (isolated) | **Placeholder** advisory reviewer — never marks valid/invalid, never mutates, not imported by the truth path |
 | `.claude/skills/isaac-*` | assistant | The `/isaac-draft`, `/isaac-complete`, `/isaac-validate`, `/isaac-export`, `/isaac-query` workflows |
 
+For a concept→file quick map that complements this table, see
+[`project-memory-map.md`](project-memory-map.md).
+
 ## Why the sidecar exists
 
 The official record schema is `additionalProperties: false` — it has **no room for per-field

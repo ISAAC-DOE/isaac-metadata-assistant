@@ -94,6 +94,9 @@ The same two artifacts are committed so reviewers can read them without running 
 | `docs/samples/01JQZ0SYNTHXANESDEMO000000.evidence.json` | The evidence sidecar — official JSON-path → source/evidence |
 | `docs/samples/README.md` | States they are synthetic and how they were produced |
 
+For a field-by-field tour of these two files — what was extracted, what a human confirmed, and what
+the pipeline refused to guess — see [`sample-record-walkthrough.md`](sample-record-walkthrough.md).
+
 You can validate the committed copies directly:
 
 ```bash
@@ -118,7 +121,7 @@ You can validate the committed copies directly:
 - **Human-supplied (not guessed):** file `sha256`s, the reduced spectrum (`measurement.series`),
   at least one descriptor, and the absorption edge. The demo supplies these from the answers
   fixture; in real use they come through `/isaac-complete`.
-- **Not covered here (future/optional):** LLM-assisted extraction of screenshots/PDFs/notes/
-  web-form dumps (designed in `docs/extraction.md`, not implemented); the Graphify memory/query
-  plane; the portal soft-warning tier; and the advisory AI review — see `README.md` and
-  `docs/architecture.md`.
+- **Not covered in this demo run:** LLM-assisted extraction of screenshots/PDFs/notes/web-form
+  dumps (designed in `docs/extraction.md`, **not implemented**); the Graphify memory/query plane;
+  the non-gating portal soft-warning tier (`isaac validate --warnings` — built, but not exercised
+  here); and the advisory AI review placeholder — see `README.md` and `docs/architecture.md`.

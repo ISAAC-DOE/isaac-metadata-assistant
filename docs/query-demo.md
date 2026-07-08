@@ -232,3 +232,5 @@ experiments.
 
 *Reproduce the deterministic proof this doc sits on top of:* [`docs/demo.md`](demo.md).
 *See the plane boundary in code:* `test_core_never_imports_graphify`.
+*Which source owns which question:* [`query-cookbook.md`](query-cookbook.md).
+*Build / query / refresh the graph (and the freshness policy):* [`graphify-workflow.md`](graphify-workflow.md).

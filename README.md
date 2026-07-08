@@ -96,8 +96,12 @@ for the full walkthrough and expected output.
 | [`docs/claude-workflow.md`](docs/claude-workflow.md) | How a user drives the assistant through Claude — the five slash skills as a scripted conversation |
 | [`docs/cli.md`](docs/cli.md) | **CLI reference** — every `isaac` command, flags, outputs, exit codes, common mistakes |
 | [`docs/demo.md`](docs/demo.md) | Reproducible synthetic demo — exact commands + expected output |
+| [`docs/sample-record-walkthrough.md`](docs/sample-record-walkthrough.md) | Field-by-field tour of the committed sample record + evidence sidecar — what was extracted, confirmed, and refused |
 | [`docs/architecture.md`](docs/architecture.md) | Pipeline + module map for reviewers |
+| [`docs/project-memory-map.md`](docs/project-memory-map.md) | Concept → file/command map — where each part of the system lives (a stable landmark for Graphify) |
 | [`docs/query-demo.md`](docs/query-demo.md) | Graphify memory/query demo — what the graph answers vs. what stays deterministic |
+| [`docs/graphify-workflow.md`](docs/graphify-workflow.md) | Graphify how-to — build/query/refresh commands, the freshness policy, leads-not-truth |
+| [`docs/query-cookbook.md`](docs/query-cookbook.md) | Routed question patterns — which source (schema / CLI / docs / Graphify) owns each question |
 | [`docs/portal-warnings.md`](docs/portal-warnings.md) | Portal-style advisory soft-warnings — non-gating seam vs. the hard schema gate |
 | [`docs/paper-notes.md`](docs/paper-notes.md) | Motivation / methods / results notes for intern deliverables |
 | [`docs/data-governance.md`](docs/data-governance.md) | **Data-governance rules** — synthetic vs. real, what may/may not be committed, LLM-on-real-data policy |
@@ -139,10 +143,14 @@ conflicts with the schema, a validated record, or the audit, the deterministic s
 draft → export → validate pipeline works with Graphify entirely absent.
 
 > Status: the truth plane (draft → export → validate → audit) is implemented and demo-ready. The
-> Graphify memory/query plane now has a **reviewer demo** — see [`docs/query-demo.md`](docs/query-demo.md)
-> — with `/isaac-query` routing each question to the source that owns it. The deeper query-layer work
-> (an automated graceful-degradation test tier) remains **deferred/future**. The memory plane is
-> optional and the deterministic pipeline does not depend on it — Graphify never decides validity.
+> Graphify memory/query plane now has a **reviewer demo** ([`docs/query-demo.md`](docs/query-demo.md)),
+> a concept→file **memory map** ([`docs/project-memory-map.md`](docs/project-memory-map.md)), a routed
+> **query cookbook** ([`docs/query-cookbook.md`](docs/query-cookbook.md)), a **Graphify workflow +
+> freshness policy** ([`docs/graphify-workflow.md`](docs/graphify-workflow.md)), and a **sample-record
+> walkthrough** ([`docs/sample-record-walkthrough.md`](docs/sample-record-walkthrough.md)) — with
+> `/isaac-query` routing each question to the source that owns it. The deeper query-layer work (an
+> automated graceful-degradation test tier) remains **deferred/future**. The memory plane is optional
+> and the deterministic pipeline does not depend on it — Graphify never decides validity.
 
 ## Validation stack
 
@@ -187,7 +195,9 @@ Next steps are **mentor-gated** — see [`docs/mentor-brief.md`](docs/mentor-bri
 - presentation/paper polish and a live demo pass;
 - a deeper Graphify query tier (graceful-degradation test coverage);
 - upstream portal-validator parity (vendoring the real `portal/validation.py`);
-- a second synthetic domain beyond XANES;
+- a second synthetic domain beyond XANES (electrochemistry / performance) — **back burner** for now;
+- a web UI — **back burner**; if built, likely **before** the second domain;
+- CI / GitHub Actions — a **later, separate phase**;
 - and — **only with explicit written data-governance approval** — a real / sanitized-data pilot.
 
 Whether the evidence sidecar becomes an official ISAAC convention (vs. an assistant-only audit

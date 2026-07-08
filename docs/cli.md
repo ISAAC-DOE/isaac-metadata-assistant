@@ -94,6 +94,20 @@ heuristic seam, not upstream portal parity).
 
 **Exit codes:** `0` valid · `1` invalid · `2` file not found / invalid JSON / no schema root.
 
+### How to interpret validation output
+
+Three signals, three different jobs — don't conflate them:
+
+| Signal | Comes from | What it means |
+|---|---|---|
+| **PASS / FAIL** | `isaac validate --official` | The **deterministic verdict**. PASS = valid against the vendored official ISAAC v1.05 schema; FAIL = invalid. This is the hard gate that also gates export. |
+| **`evidence N/N`** | `isaac audit` | Sidecar **coverage**, not a validity re-vote — every evidence path resolves to a real field (0 dangling). It adds provenance assurance on top of a PASS. |
+| **`⚠ [CODE] …` lines** | `isaac validate --warnings` | **Advisory, non-gating.** A soft note a human may want to look at; it does not change the exit code and never blocks export. |
+
+- A **warning does not mean the record is invalid** — a record can be officially valid, audit-clean, and still carry advisory warnings.
+- **Absence of warnings does not prove upstream portal acceptance.** These are two local heuristics ([`portal-warnings.md`](portal-warnings.md)), **not** the upstream `portal/validation.py` (not vendored) — a clean local run is not a portal sign-off.
+- Only `--official` (and the export gate it backs) decides validity; `audit` reports coverage; `--warnings` is context for a reviewer.
+
 ---
 
 ## `isaac export`
