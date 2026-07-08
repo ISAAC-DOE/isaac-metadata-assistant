@@ -153,21 +153,18 @@ Do not dump full passing logs.
 
 ## 6. Current Phase State
 
-Current phase:
-
-```text
-Phase 3 — XANES draft implementation
-```
-
 Current status:
 
-- Phase 3 (Slices 3A + 3B) is COMPLETE, committed, and pushed (`dea4a7a`).
-- Deterministic parsers (`extract/structured.py`, `extract/file_listing.py`) and the
-  `extract/draft_builder.py` envelope assembler are in place; the synthetic XANES draft
-  passes `validate_draft` (25 fields, 0 assets, 5 `pending[]` blockers).
-- 60 tests pass. Truth-plane files were not touched.
-- Phase 4 (synthetic complete → export → `validate_official` → sidecar → audit-clean) is
-  NEXT but NOT yet approved — wait for explicit user approval before starting it.
+- GitHub public-readiness cleanup is complete.
+- Phase 12B local/remote/public consistency reconciliation is complete: local disk,
+  `main`, `origin/main`, and public raw GitHub are verified byte-consistent.
+- Working tree is clean.
+- No feature phase is active. The next step is mentor review; start any further phase
+  only after explicit user approval.
+
+The deterministic truth/export/validation/audit core and the synthetic
+XANES draft→export→sidecar→audit flow are in place and passing. Treat this as status,
+not a work authorization — confirm the actual head, branch, and status below first.
 
 Before continuing, run:
 
