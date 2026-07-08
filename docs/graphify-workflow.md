@@ -210,6 +210,32 @@ and `export.py` gates on `validate_official` + `validate_draft` — but it is a 
 
 ---
 
+## 7. Graceful degradation (unavailable, missing, stale, or noisy)
+
+Graphify is an **optional convenience**. Every situation below shares one backbone: **never fail
+the task for lack of the graph, never invent a graph result, and always ground the final answer in
+the actual repo files or a deterministic CLI check.** State which situation you were in.
+
+| Situation | How you know | What to do |
+|---|---|---|
+| **Graphify unavailable** (CLI missing / a command errors) | `graphify --help` fails, or a query errors out | Do **not** fail the workflow. Answer from the repo docs/code directly (grep/read the files named in [`project-memory-map.md`](project-memory-map.md)), and say the memory layer was unavailable. **Never fabricate graph output.** |
+| **`graphify-out/` missing** (no `graph.json`) | `graphify-out/graph.json` absent | The memory layer is simply not built. Build it only if safe and useful (`graphify update .`); otherwise answer by inspecting the files directly and offer to build it. |
+| **Stale graph** | the §5 `find` check prints a path (a tracked source is newer than the build) | Refresh (`graphify update .`) **only** when a tracked source changed **and** the question depends on freshness. Otherwise disclose the caveat and verify the specific claim against the actual file. |
+| **Weak / noisy results** | traversal starts from adjacent nodes, output is `--budget`-truncated, or no exact node label matches | Treat results as **leads only**: open the cited source before answering; narrow the question or read the owning doc directly. |
+
+**Route truth / policy questions off Graphify entirely — even when the graph is fresh:**
+
+- **Is a record valid? / can a draft export?** → `.venv/bin/isaac validate <r> --official` · `isaac export` — never Graphify.
+- **Is a record complete? do sidecar paths resolve?** → `.venv/bin/isaac audit` — never Graphify.
+- **Real / private-data question?** → route to [`data-governance.md`](data-governance.md) plus the latest human decision. **Never index real or private artifacts** (anything real under `examples/`) to produce a graph answer — that needs explicit written approval first (§4).
+- **Conceptual question** ("what is the sidecar / the no-guessing policy?") → Graphify may *locate* the doc or code, but the final answer must come from the actual file, not a graph node.
+
+If the graph and a deterministic source disagree, the deterministic source wins — and the graph may
+be stale (§5). Say so. Quick reference: [`query-safety-checklist.md`](query-safety-checklist.md).
+
+---
+
 *Reviewer demo of these commands:* [`query-demo.md`](query-demo.md). *Which source owns which
 question:* [`query-cookbook.md`](query-cookbook.md). *Concept → file map:*
-[`project-memory-map.md`](project-memory-map.md).
+[`project-memory-map.md`](project-memory-map.md). *One-screen safety checklist:*
+[`query-safety-checklist.md`](query-safety-checklist.md).

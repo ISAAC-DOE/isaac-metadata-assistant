@@ -176,4 +176,5 @@ reviewer narrative is in [`query-demo.md`](query-demo.md); concept→file map is
 
 *How to build/refresh/interpret Graphify:* [`graphify-workflow.md`](graphify-workflow.md).
 *Reviewer demo:* [`query-demo.md`](query-demo.md). *Concept → file map:*
-[`project-memory-map.md`](project-memory-map.md).
+[`project-memory-map.md`](project-memory-map.md). *One-screen safety checklist:*
+[`query-safety-checklist.md`](query-safety-checklist.md).

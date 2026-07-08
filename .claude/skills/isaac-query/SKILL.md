@@ -17,6 +17,7 @@ The reviewer-facing walkthrough of this split is [`docs/query-demo.md`](../../..
 worked routing patterns are in [`docs/query-cookbook.md`](../../../docs/query-cookbook.md), the
 Graphify how-to + freshness policy in [`docs/graphify-workflow.md`](../../../docs/graphify-workflow.md),
 and the concept→file map in [`docs/project-memory-map.md`](../../../docs/project-memory-map.md).
+The one-screen safety checklist is [`docs/query-safety-checklist.md`](../../../docs/query-safety-checklist.md).
 
 ## Routing table
 
@@ -36,6 +37,18 @@ and the concept→file map in [`docs/project-memory-map.md`](../../../docs/proje
 | Roadmap / mentor decisions / "what's next?" | memory | [`docs/mentor-decisions.md`](../../../docs/mentor-decisions.md), roadmap docs — **the latest human/mentor decision overrides stale graph memory** | "What decisions are open?" |
 | "Can we use real data?" / real-vs-synthetic policy | policy | [`data-governance.md`](../../../docs/data-governance.md) (+ [`intake.md`](../../../docs/intake.md)) — a **policy** question: do **not** guess, do **not** ask the graph. Real / sanitized data needs explicit **written** approval. | "Can we index a real beamline export?" |
 
+## Fallback order (check availability first)
+
+1. **Truth / policy question?** (valid · required · complete · warning · vocabulary · real-data) →
+   go straight to the deterministic source in the table above. **Skip Graphify.**
+2. **Memory / navigation question?** → check the graph is usable: `graphify-out/graph.json` exists
+   and `graphify` runs.
+   - **Usable** → query for leads, then **open and confirm the cited file** before answering.
+   - **Missing or erroring** → fall back to direct repo search (grep/read, anchored by
+     [`project-memory-map.md`](../../../docs/project-memory-map.md)) and say the memory layer was
+     unavailable. **Never invent graph output**; offer to build it (`graphify update .`).
+3. **Name the source you actually used** (graph + file, file only, or CLI).
+
 ## Rules
 
 - **Truth beats memory, always.** If the graph or a golden example seems to contradict the official
@@ -49,7 +62,11 @@ and the concept→file map in [`docs/project-memory-map.md`](../../../docs/proje
 - **Graph freshness — treat the graph as a point-in-time snapshot.** Before leaning on it, check
   staleness with the dependency-free `find` check in
   [`graphify-workflow.md` §5](../../../docs/graphify-workflow.md); if it may be stale, say so and
-  verify the claim against the actual files. Do **not** auto-refresh on every question.
+  verify the claim against the actual files. Refresh (`graphify update .`) **only** when a *tracked
+  source* actually changed (`README.md` · `CLAUDE.md` · `AGENTS.md` · `pyproject.toml` · `docs/` ·
+  `schema/` · `src/` · `scripts/` · `tests/` · `.claude/skills/`) **and** the answer depends on it —
+  **never** because of `/tmp` output, `.venv`, caches, or `graphify-out/` itself (none are tracked
+  source). Do **not** auto-refresh on every question.
 - **Never index real / private data without explicit approval.** Graphify runs on the repo's own
   source, docs, and synthetic fixtures only; anything real (e.g. real artifacts under `examples/`)
   needs approval first — `graphify-out/` is derived and inherits the sensitivity of whatever it

@@ -255,6 +255,7 @@ The deterministic `isaac` CLI (`src/isaac_records/cli.py`), documented in [`cli.
 | [`query-demo.md`](query-demo.md) | Graphify memory/query reviewer demo |
 | [`graphify-workflow.md`](graphify-workflow.md) | Graphify workflow (build/query/refresh, leads vs. truth) |
 | [`query-cookbook.md`](query-cookbook.md) | Routed question patterns (which source owns which question) |
+| [`query-safety-checklist.md`](query-safety-checklist.md) | One-screen query-safety checklist (graceful degradation, truth routing) |
 | [`portal-warnings.md`](portal-warnings.md) | Non-gating advisory soft-warning seam |
 | [`data-governance.md`](data-governance.md) | Synthetic vs. real data rules, LLM-on-real-data policy |
 | [`intake.md`](intake.md) · [`extraction.md`](extraction.md) | Intake plan · extraction strategy |

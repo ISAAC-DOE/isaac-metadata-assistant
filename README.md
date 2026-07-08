@@ -106,6 +106,7 @@ on every push and pull request to `main`: install, tests, synthetic demo, offici
 | [`docs/query-demo.md`](docs/query-demo.md) | Graphify memory/query demo — what the graph answers vs. what stays deterministic |
 | [`docs/graphify-workflow.md`](docs/graphify-workflow.md) | Graphify how-to — build/query/refresh commands, the freshness policy, leads-not-truth |
 | [`docs/query-cookbook.md`](docs/query-cookbook.md) | Routed question patterns — which source (schema / CLI / docs / Graphify) owns each question |
+| [`docs/query-safety-checklist.md`](docs/query-safety-checklist.md) | One-screen query-safety checklist — when Graphify helps, when to ignore it, which source owns the truth |
 | [`docs/portal-warnings.md`](docs/portal-warnings.md) | Portal-style advisory soft-warnings — non-gating seam vs. the hard schema gate |
 | [`docs/paper-notes.md`](docs/paper-notes.md) | Motivation / methods / results notes for intern deliverables |
 | [`docs/data-governance.md`](docs/data-governance.md) | **Data-governance rules** — synthetic vs. real, what may/may not be committed, LLM-on-real-data policy |
