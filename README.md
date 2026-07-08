@@ -26,7 +26,7 @@ Working prototype (`v0.1.0`), **synthetic data only**.
 - One-command reproducible synthetic XANES demo (regenerates the committed sample byte-for-byte).
 - `isaac` CLI (`validate` / `export` / `audit` / `new-id`) and five Claude authoring skills.
 - Non-gating portal-style advisory soft-warnings (local seam) and a Graphify memory/query reviewer demo.
-- 80 passing tests, including a test that the truth plane never imports Graphify.
+- 105 passing tests, including a test that the truth plane never imports Graphify.
 
 **Not built yet**
 
@@ -70,7 +70,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                                   # 80 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # 105 tests: golden records validate, transform is gated
 ```
 
 **Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →
@@ -153,9 +153,10 @@ draft → export → validate pipeline works with Graphify entirely absent.
 > **query cookbook** ([`docs/query-cookbook.md`](docs/query-cookbook.md)), a **Graphify workflow +
 > freshness policy** ([`docs/graphify-workflow.md`](docs/graphify-workflow.md)), and a **sample-record
 > walkthrough** ([`docs/sample-record-walkthrough.md`](docs/sample-record-walkthrough.md)) — with
-> `/isaac-query` routing each question to the source that owns it. The deeper query-layer work (an
-> automated graceful-degradation test tier) remains **deferred/future**. The memory plane is optional
-> and the deterministic pipeline does not depend on it — Graphify never decides validity.
+> `/isaac-query` routing each question to the source that owns it. The graceful-degradation policy is
+> now pinned by automated tests (docs/skill invariant checks plus a dependency-free graph-freshness
+> helper). The memory plane is optional and the deterministic pipeline does not depend on it —
+> Graphify never decides validity.
 
 ## Validation stack
 
@@ -198,7 +199,7 @@ Next steps are **mentor-gated** — see [`docs/mentor-brief.md`](docs/mentor-bri
 [`docs/mentor-decisions.md`](docs/mentor-decisions.md) for the open decisions and options:
 
 - presentation/paper polish and a live demo pass;
-- a deeper Graphify query tier (graceful-degradation test coverage);
+- deeper Graphify query-layer behavioral simulation (a docs-invariant + graph-freshness test tier now exists);
 - upstream portal-validator parity (vendoring the real `portal/validation.py`);
 - a second synthetic domain beyond XANES (electrochemistry / performance) — **back burner** for now;
 - a web UI — **back burner**; if built, likely **before** the second domain;

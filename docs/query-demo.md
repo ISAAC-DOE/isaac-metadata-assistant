@@ -222,9 +222,11 @@ experiments.
 - **Lossy + point-in-time.** The graph is an LLM extraction from a past snapshot; refresh with
   `graphify update .` after significant changes. Do not commit `graphify-out/`.
 - **Synthetic only.** Every record/fixture in the graph is synthetic demo data.
-- **No graceful-degradation test suite yet.** `/isaac-query` routes to the graph when present and
-  degrades to deterministic sources when absent, but a dedicated automated test tier for that
-  fallback is deferred (future query-layer work).
+- **Graceful-degradation tests pin the policy, not live routing.** `/isaac-query` routes to the
+  graph when present and degrades to deterministic sources when absent.
+  `tests/test_query_safety_docs.py` pins the documented fallback/routing safety rules and
+  `tests/test_graphify_freshness.py` covers the freshness helper; a live behavioral simulation of
+  the skill's routing is not automated (skills are operator workflows).
 - **Not truth, by design.** Graphify is intentionally excluded from validation/export/audit. This is
   a feature, not a gap.
 

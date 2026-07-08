@@ -118,8 +118,9 @@ mentors adopt it as an official ISAAC convention.
 - **LLM-assisted extraction** of screenshots, PDFs, notes, and web-form dumps — designed in
   `docs/extraction.md`, not implemented. Today's extraction covers the structured sheet + listing.
 - **Graphify memory/query layer** — the plane exists and `/isaac-query` routes to it; a reviewer
-  demo is in [`query-demo.md`](query-demo.md). The deeper query-layer work (an automated
-  graceful-degradation test tier) is **deferred**.
+  demo is in [`query-demo.md`](query-demo.md). The graceful-degradation policy is pinned by
+  automated tests (`tests/test_query_safety_docs.py`, `tests/test_graphify_freshness.py`); deeper
+  behavioral routing simulation remains future work.
 - **True portal parity** — a **non-gating advisory soft-warning seam** now exists
   (`portal_warnings.py`, `isaac validate --warnings`; see [`portal-warnings.md`](portal-warnings.md)),
   but it is **local heuristics, not** the upstream `portal/validation.py` (not vendored). Full parity

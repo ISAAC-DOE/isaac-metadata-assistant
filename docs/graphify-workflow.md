@@ -151,10 +151,25 @@ find README.md CLAUDE.md AGENTS.md pyproject.toml docs schema src scripts tests 
 - **Prints a path** → at least that file is newer than the graph → the graph is **stale** → run
   `graphify update .`.
 
-It needs only `find`, no helper script. It assumes `graphify-out/graph.json` exists; if that file
+It needs only `find`. It assumes `graphify-out/graph.json` exists; if that file
 is missing, skip the check and build with `graphify update .` (step 1 above). Verified in this repo
 on 2026-07-08: with the graph built 2026-07-06, the command prints a tracked path (a doc newer than
 the graph), correctly flagging the graph as stale.
+
+### Supported helper: `scripts/check_graphify_freshness.py`
+
+The same staleness semantics are also available as a tiny stdlib-only script that additionally
+handles the missing-graph case and never needs the `graphify` CLI:
+
+```bash
+python scripts/check_graphify_freshness.py        # from the repo root
+```
+
+It prints exactly one of `fresh` / `stale` / `missing` and exits `0` / `1` / `2`. It compares
+mtimes only (never file contents), skips `graphify-out/`, `.venv/`, caches, and `examples/`, and
+**never refreshes the graph itself** — refreshing stays a deliberate `graphify update .` decision
+per the policy above. It is covered by `tests/test_graphify_freshness.py` and is a **memory-plane
+convenience only**: it has no role in validation, export, or audit.
 
 ---
 
