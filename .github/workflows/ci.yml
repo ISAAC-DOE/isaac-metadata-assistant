@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests and synthetic demo
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Run synthetic demo
+        run: python scripts/run_synthetic_demo.py
+
+      - name: Validate generated official record
+        run: isaac validate /tmp/isaac-demo/01JQZ0SYNTHXANESDEMO000000.json --official
+
+      - name: Validate generated official record with advisory warnings
+        run: isaac validate /tmp/isaac-demo/01JQZ0SYNTHXANESDEMO000000.json --official --warnings
+
+      - name: Audit generated record evidence
+        run: isaac audit --records-dir /tmp/isaac-demo

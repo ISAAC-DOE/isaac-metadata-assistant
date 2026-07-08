@@ -1,9 +1,11 @@
 # GitHub settings — recommendations
 
 Suggested repository configuration for presenting this prototype to mentors/reviewers. These are
-**recommendations** to apply in the GitHub UI, not automation — this phase deliberately adds no CI
-or workflow files. Confirm visibility and any public exposure with the project owner first, given
-the data-governance obligations.
+**recommendations** to apply in the GitHub UI, not automation. The repo's only automation is a
+single CI workflow (`.github/workflows/ci.yml`) that runs the synthetic
+test/demo/validate/audit pipeline on push and pull request — no secrets, no deployment. Confirm
+visibility and any public exposure with the project owner first, given the data-governance
+obligations.
 
 ---
 
@@ -33,7 +35,7 @@ data exists anywhere in history; all committed data must be clearly synthetic (s
 - Suggested branch protection on `main` once collaborators are added:
   - require a pull request before merging,
   - require at least one review,
-  - require the test suite to pass (once CI is approved and added),
+  - require the CI workflow ("tests and synthetic demo") to pass,
   - disallow force-pushes to `main`.
 
 These are suggestions for when the repo has more than one contributor; a solo prototype can defer
@@ -41,8 +43,9 @@ them.
 
 ## README badges
 
-None yet. Badges should be **meaningful**, and there is no CI to report on. Add a build/test badge
-only after CI is approved and wired up — a badge that points at nothing is worse than no badge.
+None yet. Badges should be **meaningful**. CI now exists (`.github/workflows/ci.yml`), so a
+build/test badge is possible — add one only if the repo's visibility and workflow name stay
+stable; a badge that points at nothing (or at a private repo) is worse than no badge.
 
 ## Releases & versioning
 
@@ -62,7 +65,8 @@ Skip heavier automation (multiple templates, actions bots) unless the project ex
 
 ## Not recommended for this phase
 
-- CI/CD workflows (`.github/workflows/`) — defer until explicitly approved.
+- Deployment / release / publishing workflows — defer; the only approved automation is the
+  test/demo CI workflow.
 - Dependabot / security-scanning bots — defer for an early-stage research prototype.
 - A license file — **pending mentor/project decision** (see the README "License & provenance"
   section). Do not add MIT/Apache/etc. without approval.

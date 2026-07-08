@@ -34,7 +34,7 @@ Working prototype (`v0.1.0`), **synthetic data only**.
 - Single XANES / characterization path only (no electrochemistry / theory / simulation domains).
 - No upstream portal-validator parity — `portal/validation.py` is not vendored.
 - The scientific-consistency review agent (`review.py`) is a placeholder interface, not implemented.
-- No web app, no MCP server, no CI.
+- No web app, no MCP server.
 
 ## Two layers
 
@@ -85,6 +85,10 @@ official record + sidecar, on committed synthetic fixtures — no real data):
 
 The demo regenerates the committed sample (`docs/samples/`) byte-for-byte. See **[`docs/demo.md`](docs/demo.md)**
 for the full walkthrough and expected output.
+
+CI (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs this same pipeline
+on every push and pull request to `main`: install, tests, synthetic demo, official validation
+(plus advisory warnings), and evidence audit. Synthetic data only; no secrets.
 
 ### Documentation
 
@@ -197,7 +201,6 @@ Next steps are **mentor-gated** — see [`docs/mentor-brief.md`](docs/mentor-bri
 - upstream portal-validator parity (vendoring the real `portal/validation.py`);
 - a second synthetic domain beyond XANES (electrochemistry / performance) — **back burner** for now;
 - a web UI — **back burner**; if built, likely **before** the second domain;
-- CI / GitHub Actions — a **later, separate phase**;
 - and — **only with explicit written data-governance approval** — a real / sanitized-data pilot.
 
 Whether the evidence sidecar becomes an official ISAAC convention (vs. an assistant-only audit

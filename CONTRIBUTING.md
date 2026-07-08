@@ -25,6 +25,11 @@ That installs the deterministic core plus the `isaac` CLI entry point. Python **
 
 Tests are the fast feedback loop and part of the truth plane. Keep them green.
 
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same checks on
+every push and pull request to `main`: install, tests, the synthetic demo, official validation
+(with advisory warnings), and the evidence audit. It uses only committed synthetic data and no
+secrets.
+
 ## Run the synthetic demo
 
 ```bash
