@@ -28,5 +28,5 @@ on the draft, then the official schema on the produced record. There is no overr
 4. Offer to commit: `git add records/ && git commit` naming the ULID. Git is the trust
    hierarchy — records enter history at export.
 5. Best-effort graph refresh, **never blocking**: if `graphify-out/graph.json` exists, run
-   `/graphify . --update`. If Graphify is absent or fails, note it and stop — the export
+   `graphify update .`. If Graphify is absent or fails, note it and stop — the export
    already succeeded and must not be rolled back.

@@ -1,7 +1,7 @@
 # Paper / poster notes — ISAAC Metadata Assistant
 
 Working notes for an intern paper, poster, or presentation. Written to be readable and reusable,
-but every claim here matches what the repo actually does today (Phase 5). Where something is future
+but every claim here matches what the repo actually does today. Where something is future
 work, it is labeled as such — do not present future work as a current result.
 
 ## Title / one-liner
@@ -58,7 +58,7 @@ never authorize a record. The truth plane is verified to never import the graph 
 - A deterministic CLI: `isaac validate | export | audit | new-id`.
 - A reproducible synthetic end-to-end demo (`scripts/run_synthetic_demo.py`) that regenerates a
   committed sample record byte-for-byte.
-- **80 passing tests**, including that the truth core never imports the graph layer or the advisory
+- **The full test suite passes**, including a test that the truth core never imports the graph layer or the advisory
   soft-warning seam.
 
 ## 4. Validation strategy
@@ -101,7 +101,7 @@ On the synthetic XANES-family campaign, the pipeline produces official record
 - Every scientific value traces to a committed synthetic fixture — a test asserts nothing is fabricated.
 
 *(Numbers to quote on a poster: 1 official record, 26 evidenced fields, 5 blockers correctly refused
-then human-answered, 80 passing tests, 0 audit failures.)*
+then human-answered, 105 passing tests, 0 audit failures.)*
 
 ## 7. Limitations (state these honestly)
 
@@ -113,14 +113,14 @@ then human-answered, 80 passing tests, 0 audit failures.)*
 - **The sidecar is an assistant convention,** not (yet) an official ISAAC artifact — pending mentor
   input.
 - **The advisory review layer is a placeholder;** it performs no scientific checks yet.
-- **Graphify is optional** and its dedicated query-layer phase is deferred.
+- **Graphify is optional.** Its query/memory layer (routing, `/isaac-query`, graceful-degradation + freshness tests) is built; a deeper behavioral routing simulation is still future work.
 
 ## 8. Next work
 
 - Wire real (LLM-assisted) extraction for unstructured artifacts, still evidence-cited and
   no-guessing (screenshots/PDF/notes/web-form).
-- Stand up the Graphify memory/query layer with explicit routing and graceful degradation when the
-  graph is absent (the deferred query-layer phase).
+- Extend the Graphify memory/query layer beyond the current routing + graceful-degradation tests to
+  a deeper behavioral routing simulation.
 - A non-gating advisory soft-warning seam now exists (`portal_warnings.py`); if approved, replace the
   local heuristics with **true portal parity** by vendoring the upstream `portal/validation.py`.
 - Grow the advisory scientific review from placeholder to real checks (still advisory-only).

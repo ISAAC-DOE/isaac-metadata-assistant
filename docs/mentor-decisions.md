@@ -25,7 +25,7 @@ A working, synthetic, end-to-end prototype that turns scattered experiment metad
 - One path is complete end-to-end: **characterization / XANES-family (`record_type=evidence`)**.
 - The deterministic core (extract → draft → validate → export → audit) is **LLM-free and
   Graphify-free**, enforced by a test.
-- **80 passing tests**, including that all 10 official golden records validate, that export is
+- **The full test suite passes**, including that all 10 official golden records validate, that export is
   doubly gated, that sidecar paths resolve, and that the truth core never imports Graphify or the
   advisory soft-warning seam.
 - A reproducible demo (`scripts/run_synthetic_demo.py`) regenerates a committed sample record
@@ -61,8 +61,9 @@ These are deliberate scope choices, not gaps we missed:
   `/isaac-complete`.
 - **Extraction is structured-only.** Screenshots, PDFs, notes, and web-form dumps are **designed**
   (`docs/extraction.md`) but **not implemented** — no LLM extraction runs yet.
-- **Graphify (memory/query plane) is present but deferred.** The query-layer phase (routing polish
-  + graceful-degradation tests) has not been built. The truth pipeline runs fully without it.
+- **Graphify (memory/query plane) is present.** The query-layer phase (routing, `/isaac-query`,
+  graceful-degradation + freshness tests) has since been built; a deeper behavioral routing
+  simulation remains future work. The truth pipeline runs fully without it.
 - **Portal-style soft-warnings** now have a **non-gating local advisory seam** (`portal_warnings.py`,
   `isaac validate --warnings`; Phase 8) — **not** upstream parity. The **advisory AI review** remains
   a stub. Neither gates anything.
@@ -184,6 +185,12 @@ memory/query phase.
 - **If no (defer).** No change; Graphify stays optional and the truth pipeline is unaffected. It
   becomes a strong "next phase" talking point.
 
+**Status (Phases 13–16 — built).** The query-layer slice was subsequently implemented: explicit
+routing, the `/isaac-query` skill, a query cookbook, a graceful-degradation + freshness test tier
+(`tests/test_query_safety_docs.py`, `tests/test_graphify_freshness.py`), and a freshness helper —
+all non-authoritative (never validates or authorizes export). The open question is now narrower:
+how much further to invest (e.g. a live behavioral routing simulation).
+
 ### D6 — Which domain comes after the XANES-family path?
 
 **Question.** The one complete path is characterization/XANES. What is the second domain?
@@ -260,7 +267,7 @@ Assuming the recommended defaults, the highest-value next slice is **D6 → the 
 (performance / electrochemistry)**, because it proves new schema coverage (conditional-required
 rules) using only synthetic data — no data-governance approval required. If mentors instead
 prioritize realism, the gating decision is **D3/D4** (approve a bounded real/sanitized path). Either
-way, we recommend keeping **D5 (Graphify)** deferred and **D2 (portal tier)** as a small non-gating
-add whenever convenient.
+way, we recommended keeping **D5 (Graphify)** deferred (since built — see the D5 status note above)
+and **D2 (portal tier)** as a small non-gating add whenever convenient.
 
 We are ready to proceed on whichever decision you make first.

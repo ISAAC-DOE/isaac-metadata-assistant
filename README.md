@@ -100,6 +100,7 @@ on every push and pull request to `main`: install, tests, synthetic demo, offici
 | [`docs/claude-workflow.md`](docs/claude-workflow.md) | How a user drives the assistant through Claude — the five slash skills as a scripted conversation |
 | [`docs/cli.md`](docs/cli.md) | **CLI reference** — every `isaac` command, flags, outputs, exit codes, common mistakes |
 | [`docs/demo.md`](docs/demo.md) | Reproducible synthetic demo — exact commands + expected output |
+| [`docs/operator-playbook.md`](docs/operator-playbook.md) | Step-by-step operator guide (CLI + Claude-assisted) — shortest safe route from files to an official record |
 | [`docs/sample-record-walkthrough.md`](docs/sample-record-walkthrough.md) | Field-by-field tour of the committed sample record + evidence sidecar — what was extracted, confirmed, and refused |
 | [`docs/architecture.md`](docs/architecture.md) | Pipeline + module map for reviewers |
 | [`docs/project-memory-map.md`](docs/project-memory-map.md) | Concept → file/command map — where each part of the system lives (a stable landmark for Graphify) |

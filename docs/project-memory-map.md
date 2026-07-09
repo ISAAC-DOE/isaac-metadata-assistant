@@ -264,9 +264,6 @@ The deterministic `isaac` CLI (`src/isaac_records/cli.py`), documented in [`cli.
 | [`proposal-v2.md`](proposal-v2.md) | Proposal + migration note (old provisional schema) |
 | [`github-settings.md`](github-settings.md) | Suggested GitHub repo settings |
 
-`docs/graphify-workflow.md` and `docs/query-cookbook.md` are created in this same documentation
-phase; the rows above point to their final names.
-
 ---
 
 ## Data governance
@@ -290,7 +287,7 @@ overview in [`mentor-brief.md`](mentor-brief.md)). In brief:
 | D2 | Vendor the upstream **portal soft-warning** validator for true parity, or keep the local seam? |
 | D3 | Data-governance boundary for **real / sanitized** data |
 | D4 | May **LLMs inspect real** experiment artifacts? |
-| D5 | Bring **Graphify** into the near-term demo, or keep it deferred? |
+| D5 | Bring **Graphify** into the near-term demo, or keep it deferred? (since built — Phases 13–16) |
 | D6 | Which **domain** comes after XANES-family (recommended: performance / electrochemistry)? |
 | D7 | What is the **final summer deliverable**? |
 | D8 | What should the **paper/poster** emphasize? |
@@ -305,7 +302,7 @@ Project-owner direction as of July 2026:
 |---|---|
 | Second domain — electrochemistry / performance | **Back burner** (recommended next domain when resumed; exercises conditional-required rules) |
 | Web UI | **Back burner**; if built, likely **before** the electrochem/performance domain |
-| CI / GitHub Actions | Deferred to a **later separate phase** (not this documentation phase) |
+| CI / GitHub Actions | **Implemented** — `.github/workflows/ci.yml` runs tests, the synthetic demo, official validation, advisory warnings, and the evidence audit on push/PR to `main` |
 | License | **Pending** mentor/project decision — no license is asserted yet |
 | Real / sanitized-data pilot | Requires **explicit written data-governance approval** first |
 | Full upstream portal-validator parity | **Not implemented**; only an evaluation-only local seam exists |

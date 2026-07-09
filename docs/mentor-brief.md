@@ -62,13 +62,15 @@ output: [`docs/demo.md`](demo.md). Live-meeting version: [`docs/demo-script.md`]
 
 ## 5. What has been verified
 
-- **80 passing tests**, including: all 10 official golden records validate; export is doubly gated
-  (no-guessing **and** official schema); every sidecar evidence path resolves; and the truth core
-  **never imports Graphify** or the advisory warning seam (enforced by test).
+- **The full test suite passes**, including: all 10 official golden records validate; export is
+  doubly gated (no-guessing **and** official schema); every sidecar evidence path resolves; and the
+  truth core **never imports Graphify** or the advisory warning seam (enforced by test).
 - The demo regenerates the committed sample record `01JQZ0SYNTHXANESDEMO000000` **byte-for-byte**
   (`scripts/run_synthetic_demo.py`, step [5] asserts it).
 - Result: 26 evidenced fields, 5 blockers refused-then-answered, valid against v1.05, clean audit
   (`evidence 26/26`, 0 failures).
+- **GitHub Actions CI** runs the test suite, the synthetic demo, official validation, advisory
+  warnings, and the evidence audit on every push and PR to `main`.
 
 ## 6. Deterministic vs. assistant — who decides what
 
@@ -98,8 +100,8 @@ These are deliberate scope choices, not missed gaps:
 - **Second domain** (e.g. electrochemistry/performance) — not built; one XANES path only.
 - **Web app / MCP server / portal integration** — not built.
 - **Advisory AI scientific review** — placeholder interface only, wired into nothing.
-- **Graphify** — present as a memory/query demo; the deeper query-layer (auto graceful-degradation
-  test tier) is deferred.
+- **Graphify deeper query-layer** — the memory/query demo, routing, and graceful-degradation +
+  freshness test tier exist; a deeper behavioral routing simulation is not built yet.
 
 ## 8. Decisions I need from you
 

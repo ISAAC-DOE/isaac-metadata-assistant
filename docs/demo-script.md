@@ -17,7 +17,7 @@ Companion docs: [`docs/demo.md`](demo.md) (full expected output), [`docs/mentor-
 
 ```bash
 git status -sb            # expect: clean, on main
-.venv/bin/pytest -q       # expect: 80 passed
+.venv/bin/pytest -q       # expect: all tests pass
 ```
 
 If `.venv` doesn't exist yet:
@@ -133,4 +133,4 @@ the mentor brief."*
 - **"Can it validate against the real ISAAC portal?"** Against the official **schema**, yes (the hard
   gate). The portal's **soft-warning** tier is a local stand-in until we vendor the real one (D2).
 - **"Is any of this reproducible for a paper?"** Yes — one command regenerates the sample
-  byte-for-byte; 80 tests; outline in [`docs/final-deliverable-outline.md`](final-deliverable-outline.md).
+  byte-for-byte; the full test suite passes; outline in [`docs/final-deliverable-outline.md`](final-deliverable-outline.md).

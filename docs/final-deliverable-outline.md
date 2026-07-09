@@ -35,7 +35,7 @@ Source material to reuse: [`docs/paper-notes.md`](paper-notes.md) (fuller prose)
   JSON-path.
 - **Result.** On a synthetic XANES-family campaign, the pipeline produces one official v1.05 record
   (26 evidenced fields; 5 blockers refused then human-answered; clean audit, `evidence 26/26`),
-  reproducible byte-for-byte, with 80 passing tests.
+  reproducible byte-for-byte, with the full test suite passing.
 - **Contribution.** A design pattern for trustworthy AI-assisted scientific metadata: evidence-first
   authoring, structural refusal to guess, and separation of *validity* (deterministic) from *memory*
   (AI/graph).
@@ -92,7 +92,7 @@ The **audit** ties 1–2 together on stored records (schema-valid + every sideca
   answered; **3** assets resolved from human answers; validates against v1.05; clean audit
   (`evidence 26/26`, 0 dangling); **byte-identical reproducible**.
 - **Quotable poster numbers:** 1 official record · 26 evidenced fields · 5 blockers refused-then-answered
-  · 10 official golden records validating · **80 passing tests** · 0 audit failures.
+  · 10 official golden records validating · **105 passing tests** · 0 audit failures.
 - A test asserts every scientific value traces to a committed synthetic fixture (nothing fabricated).
 
 ## 7. Limitations (state honestly)
@@ -103,7 +103,7 @@ The **audit** ties 1–2 together on stored records (schema-valid + every sideca
 - The evidence sidecar is an assistant convention, not (yet) an official ISAAC artifact.
 - Portal soft-warnings are a local non-gating stand-in, not upstream parity.
 - The advisory AI review is a placeholder.
-- Graphify is optional; its dedicated query-layer phase is deferred.
+- Graphify is optional; the query/memory layer (routing, `/isaac-query`, graceful-degradation + freshness tests) is built, but a deeper behavioral routing simulation is still future work.
 
 ## 8. Future work
 
@@ -112,7 +112,7 @@ Tie each to a mentor decision where relevant ([`docs/mentor-decisions.md`](mento
 - Second record domain — performance/electrochemistry — to exercise conditional-required rules (D6).
 - True portal-validator parity by vendoring upstream `portal/validation.py`, still non-gating (D2).
 - Grow the advisory scientific review from placeholder to real checks (advisory-only).
-- Deeper Graphify query/memory layer with graceful-degradation tests (D5).
+- Deeper Graphify query/memory layer — behavioral routing simulation beyond the current graceful-degradation + freshness test tier (D5).
 - Real/sanitized data pilot — **only** with written governance approval (D3/D4).
 
 ## Figures / tables to include

@@ -86,7 +86,7 @@ The LLM touches only extraction and question-asking; everything downstream is de
    anti-pattern descriptor names, and conditionally-required fields absent for the record's
    type/domain. Export writes nothing unless both pass. There is no `--force`.
 
-80 tests lock this in: all 10 official golden records validate; representative violations fail;
+The test suite locks this in: all 10 official golden records validate; representative violations fail;
 the transform is gated; the sidecar's paths resolve; the core never imports Graphify.
 
 ## 6. Graphify: central for memory and query, not for truth
