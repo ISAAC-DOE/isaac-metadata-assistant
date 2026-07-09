@@ -113,6 +113,7 @@ on every push and pull request to `main`: install, tests, synthetic demo, offici
 | [`docs/data-governance.md`](docs/data-governance.md) | **Data-governance rules** — synthetic vs. real, what may/may not be committed, LLM-on-real-data policy |
 | [`docs/intake.md`](docs/intake.md) · [`docs/extraction.md`](docs/extraction.md) | Data-governance intake plan · extraction strategy |
 | [`docs/github-settings.md`](docs/github-settings.md) | Suggested GitHub repo settings (description, topics, visibility, branch protection) |
+| [`docs/ui-handoff/README.md`](docs/ui-handoff/README.md) | UI design handoff package — product context, screens, design direction, and the Claude Design brief (no UI is built yet) |
 
 Contributor & security policy: [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md).
 
