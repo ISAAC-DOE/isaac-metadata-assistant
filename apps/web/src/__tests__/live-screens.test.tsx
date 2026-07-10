@@ -78,6 +78,19 @@ describe('S2 · Load Materials', () => {
     expect(getByText(/Synthetic mode\./)).toBeInTheDocument();
   });
 
+  it('uploads with the backend down → Backend Not Running with the run command, never governance copy', async () => {
+    stubFetchDown();
+    const { findByText, getByText, queryByText } = renderAt('/load');
+
+    fireEvent.click(getByText(/structured formats only/));
+
+    expect(await findByText('Backend Not Running')).toBeInTheDocument();
+    expect(getByText(RUN_COMMAND)).toBeInTheDocument();
+    // an unreachable backend must never masquerade as a governance refusal
+    expect(queryByText(/Blocked by governance/)).toBeNull();
+    expect(queryByText(new RegExp(uploadsBlocked.reason))).toBeNull();
+  });
+
   it('Run Demo renders the real POST /api/demo/run steps — the old mock figures are gone', async () => {
     stubFetchRoutes({ 'POST /api/demo/run': { body: demoRunDraftOnly } });
     const { findByText, getByText, queryByText } = renderAt('/load');

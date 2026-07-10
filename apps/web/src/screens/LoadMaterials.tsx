@@ -20,7 +20,12 @@ type RunPhase =
   | { name: 'error'; error: ApiError }
   | { name: 'done'; result: ApiDemoRunResponse };
 
-// Shown if the governance endpoint cannot be reached — same stance, no invention.
+type UploadPhase =
+  | { name: 'idle' }
+  | { name: 'blocked'; reason: string } // the server's 403 governance refusal, verbatim
+  | { name: 'down'; error: ApiError }; // backend unreachable — show BackendDown, never stand-in copy
+
+// Shown only when the server responded but its refusal body carried no reason.
 const UPLOADS_GATED_FALLBACK =
   'Uploads are approval-gated and not enabled in this synthetic prototype.';
 
@@ -34,7 +39,7 @@ const UPLOADS_GATED_FALLBACK =
 export function LoadMaterials() {
   const navigate = useNavigate();
   const [run, setRun] = useState<RunPhase>({ name: 'idle' });
-  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [upload, setUpload] = useState<UploadPhase>({ name: 'idle' });
 
   const startDemo = () => {
     setRun({ name: 'running' });
@@ -48,8 +53,15 @@ export function LoadMaterials() {
     // Governance seam: the backend always refuses (403); no file is ever sent.
     api
       .blockUpload()
-      .then((body) => setUploadNotice(body.reason || UPLOADS_GATED_FALLBACK))
-      .catch(() => setUploadNotice(UPLOADS_GATED_FALLBACK));
+      .then((body) => setUpload({ name: 'blocked', reason: body.reason || UPLOADS_GATED_FALLBACK }))
+      .catch((error: unknown) => {
+        // Backend down is NOT a governance refusal — show the honest down state.
+        if (error instanceof ApiError && error.unreachable) {
+          setUpload({ name: 'down', error });
+        } else {
+          setUpload({ name: 'blocked', reason: UPLOADS_GATED_FALLBACK });
+        }
+      });
   };
 
   return (
@@ -99,18 +111,22 @@ export function LoadMaterials() {
               </div>
               <span className="onramp-tag">Local-First</span>
             </div>
-            {uploadNotice === null ? (
+            {upload.name === 'idle' && (
               <button type="button" className="drop-target" onClick={tryLocalFiles}>
                 Drop <span className="mono">.csv</span> / <span className="mono">.xlsx</span> or an
                 archive listing — structured formats only, unstructured extraction is not built yet.
               </button>
-            ) : (
+            )}
+            {upload.name === 'blocked' && (
               <div className="upload-blocked" role="note">
                 <ShieldCheck size={14} strokeWidth={2.1} aria-hidden="true" />
                 <span>
-                  <strong>Blocked by governance.</strong> {uploadNotice}
+                  <strong>Blocked by governance.</strong> {upload.reason}
                 </span>
               </div>
+            )}
+            {upload.name === 'down' && (
+              <BackendDown error={upload.error} onRetry={tryLocalFiles} />
             )}
             <p className="onramp-warn">
               <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
