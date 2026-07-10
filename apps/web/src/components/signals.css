@@ -1,0 +1,207 @@
+/*
+ * The four signal components — StatusChip, VerdictCard, CoverageBadge,
+ * AdvisoryChip. They keep DISTINCT class prefixes and palettes so verdict,
+ * coverage, advisory, and per-field status can never share styling
+ * (status-system.md). No border-left/right accents anywhere.
+ */
+
+/* ---- StatusChip ----------------------------------------------------- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--radius-pill);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.chip svg {
+  flex: none;
+}
+.chip-verified  { color: var(--verified-text);  background: var(--verified-bg);  border-color: var(--verified-border); }
+.chip-confirmed { color: var(--confirmed-text); background: var(--confirmed-bg); border-color: var(--confirmed-border); }
+.chip-inferred  { color: var(--inferred-text);  background: var(--inferred-bg);  border-color: var(--inferred-border); }
+.chip-missing   { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border); border-style: dashed; }
+.chip-needsyou  { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border); }
+.chip-pass      { color: var(--pass-text);      background: var(--pass-bg);      border-color: var(--pass-border); font-weight: 600; letter-spacing: 0.02em; }
+.chip-fail      { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border); font-weight: 600; letter-spacing: 0.02em; }
+.chip-exported  { color: var(--text-muted);     background: var(--surface-subtle); border-color: var(--border); }
+.chip-mentor    { color: var(--action-hover);   background: var(--action-tint);  border-color: var(--action-selected-border); }
+.chip-draft     { color: var(--text-muted);     background: var(--screen-base);  border-color: var(--border-input); }
+
+/* ---- VerdictCard — the hard gate (largest, most saturated) ---------- */
+.verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 22px 24px;
+  border-radius: var(--radius-card);
+  border: 1px solid;
+}
+.verdict-pass { background: var(--pass-bg); border-color: var(--pass-border); }
+.verdict-fail { background: var(--fail-bg); border-color: var(--fail-border); box-shadow: 0 10px 26px rgba(178, 58, 48, 0.1); }
+
+.verdict-tile {
+  flex: none;
+  width: 54px;
+  height: 54px;
+  border-radius: var(--radius-inner);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.verdict-pass .verdict-tile { background: var(--pass-solid); }
+.verdict-fail .verdict-tile { background: var(--fail-solid); box-shadow: 0 6px 16px rgba(178, 58, 48, 0.28); }
+
+.verdict-body { flex: 1; min-width: 0; }
+.verdict-word {
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+.verdict-fail .verdict-word { font-size: 30px; }
+.verdict-pass .verdict-word { color: var(--pass-text); }
+.verdict-fail .verdict-word { color: var(--fail-text); }
+
+.verdict-claim {
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+.verdict-cmd {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-slate);
+}
+.verdict-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.verdict-hint {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  margin-top: 10px;
+}
+
+/* Schema Errors card (FAIL) */
+.schema-errors {
+  margin-top: 14px;
+  padding: 16px 18px;
+}
+.schema-errors h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fail-text);
+  margin-bottom: 10px;
+}
+.schema-error-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--border-hair);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.schema-error-row:first-of-type { border-top: 0; }
+.schema-error-path { color: var(--fail-text); }
+
+/* ---- CoverageBadge — neutral slate, NOT a verdict ------------------- */
+.coverage {
+  padding: 16px 18px;
+  border-radius: var(--radius-card);
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+}
+.coverage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--cover-text);
+}
+.coverage-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.coverage-note {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.coverage-figure {
+  margin-top: 10px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--cover-text);
+  letter-spacing: 0.01em;
+}
+.coverage-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-slate);
+}
+.coverage-cmd {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.coverage-dangling {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--advisory-text);
+}
+
+/* ---- AdvisoryChip — soft amber, non-gating ------------------------- */
+.advisory {
+  padding: 16px 18px;
+  border-radius: var(--radius-card);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+}
+.advisory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.advisory-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--advisory-text);
+}
+.advisory-nongating {
+  font-size: 10.5px;
+  color: var(--advisory-text);
+  opacity: 0.85;
+}
+.advisory-code {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--advisory-text);
+}
+.advisory-code .code {
+  font-weight: 600;
+}
+.advisory-explain {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.advisory-none {
+  font-size: 12.5px;
+  color: var(--advisory-text);
+}

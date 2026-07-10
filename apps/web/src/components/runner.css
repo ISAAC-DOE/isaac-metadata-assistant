@@ -1,0 +1,175 @@
+/*
+ * Staged runner (S2). Each stage names the REAL command beneath it; progress
+ * reflects command results only — no decorative bar. The blocker stage is amber
+ * "needs you" (attention, not failure), never red; no colored vertical rail.
+ */
+.runner-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.runner-status-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.runner-status-note {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.runner {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.stage {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border-hair);
+}
+.stage:first-child { border-top: 0; }
+.stage.upcoming { opacity: 0.5; }
+.stage.blocker {
+  background: var(--advisory-bg);
+}
+.stage-disc {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+.stage.done .stage-disc {
+  background: var(--cover-bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.stage.blocker .stage-disc {
+  background: var(--needsyou-bg);
+  border: 1px solid var(--needsyou-border);
+  color: var(--advisory-icon);
+}
+.stage.upcoming .stage-disc {
+  border: 1px dashed var(--border-strong);
+  color: var(--text-disabled);
+}
+.stage-main { flex: 1; min-width: 0; }
+.stage-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.stage.upcoming .stage-label { font-weight: 500; color: var(--text-secondary); }
+.stage-cmd {
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+}
+.stage-detail {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.stage-right {
+  flex: none;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.stage-result {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.stage-subresult {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+.stage-cta {
+  margin-top: 10px;
+}
+
+/* ---- On-ramp cards -------------------------------------------------- */
+.onramps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 16px 0 22px;
+}
+.onramp {
+  padding: 18px;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.onramp.emphasis {
+  border-color: var(--action-selected-border);
+  box-shadow: var(--shadow-emphasis);
+}
+.onramp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.onramp-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--action-tint);
+  color: var(--action-hover);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.onramp-icon.neutral { background: var(--cover-bg); color: var(--text-slate); }
+.onramp-title { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.onramp-tagline { font-size: 11px; color: var(--text-tertiary); }
+.onramp-tag {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-slate);
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+}
+.onramp-body {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-bottom: 14px;
+}
+.onramp .btn { width: 100%; justify-content: center; }
+.drop-target {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-inner);
+  padding: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+}
+.onramp-warn {
+  margin-top: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--advisory-text);
+}
+.onramp-warn svg { flex: none; margin-top: 1px; }

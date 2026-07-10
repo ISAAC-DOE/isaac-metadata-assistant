@@ -1,0 +1,76 @@
+/*
+ * ArtifactCard (S6) — the two export artifacts as two separate cards: the
+ * official record and the evidence sidecar (a convention, never branded
+ * official). The record card carries the PASS chip; the sidecar card never
+ * carries a verdict. No "export anyway"/force; no hand-edit control.
+ */
+.artifact {
+  padding: 16px 18px;
+  border-radius: 13px;
+}
+.artifact-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.artifact-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.artifact-icon.record { background: var(--pass-bg); color: var(--pass-solid); }
+.artifact-icon.sidecar { background: var(--confirmed-bg); color: var(--src-userconf); }
+.artifact-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.artifact-sub {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+.artifact-badge { margin-left: auto; flex: none; }
+.artifact-pathcount {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex: none;
+}
+.artifact-path {
+  margin: 12px 0;
+  padding: 8px 11px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-token);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.artifact-actions {
+  display: flex;
+  gap: 10px;
+}
+.artifact-actions .btn { flex: 1; justify-content: center; }
+
+/* Sidecar-review note */
+.sidecar-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 16px;
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-inner);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.sidecar-note strong { color: var(--text-strong); }

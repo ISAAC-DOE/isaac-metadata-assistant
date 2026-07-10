@@ -1,0 +1,92 @@
+/*
+ * WorkflowSpine — a progress spine of step discs + thin connector segments,
+ * NOT a colored status rail. The only vertical line is the 2px connector BETWEEN
+ * step discs (a background line, never a border on a content-card edge). The
+ * active step is a soft-tinted step background + ringed disc + colored label.
+ */
+.spine {
+  flex: none;
+  width: 212px;
+  background: var(--surface-subtle);
+  border-right: 1px solid var(--border);
+  padding: 16px 12px;
+}
+.spine-eyebrow {
+  padding: 0 8px 12px;
+}
+.spine-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.spine-step {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-inner);
+}
+.spine-step.active {
+  background: var(--action-tint);
+}
+/* connector between discs — 2px neutral background line, not a rail */
+.spine-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 21px;
+  top: 32px;
+  bottom: -8px;
+  width: 2px;
+  background: var(--border-strong);
+}
+.spine-disc {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+}
+.spine-step.done .spine-disc {
+  background: var(--cover-bg);
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+.spine-step.active .spine-disc {
+  background: var(--action);
+  color: #fff;
+  box-shadow: var(--ring-active);
+  font-size: 12px;
+  font-weight: 600;
+}
+.spine-step.locked .spine-disc {
+  background: var(--screen-base);
+  border-color: var(--border-input);
+  color: var(--text-faint);
+}
+.spine-text {
+  min-width: 0;
+  padding-top: 2px;
+}
+.spine-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.spine-step.active .spine-label {
+  color: var(--action-hover);
+  font-weight: 600;
+}
+.spine-step.locked .spine-label {
+  color: var(--text-quaternary);
+}
+.spine-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}

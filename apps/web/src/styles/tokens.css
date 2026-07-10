@@ -1,0 +1,112 @@
+/*
+ * Scientific Clarity — color tokens.
+ * The :root block below is lifted VERBATIM from
+ * design-handoff/05-design-system/color-tokens.md. Do not edit values here;
+ * refresh from the handoff if the design system changes.
+ */
+:root {
+  /* neutrals — cool */
+  --app-canvas:      #e7ebf0;  /* app background behind screens */
+  --screen-base:     #f4f6f9;  /* screen background */
+  --surface:         #ffffff;  /* cards, top bar */
+  --surface-subtle:  #fbfcfd;  /* nav, right panel, status bar */
+
+  /* borders */
+  --border-strong:   #d3dae2;  /* screen card, inputs */
+  --border:          #e4e9ef;  /* default card border */
+  --border-faint:    #eef2f6;  /* group dividers */
+  --border-hair:     #f0f3f6;  /* row separators (also #f1f4f7 / #f2f5f8) */
+  --border-input:    #e0e6ec;
+
+  /* text */
+  --text-heading:    #111a24;
+  --text-primary:    #1b2430;
+  --text-strong:     #33404e;
+  --text-secondary:  #46515f;
+  --text-muted:      #5b6570;  /* also #55606c */
+  --text-slate:      #5b6b7d;  /* coverage + mono eyebrows/labels */
+  --text-tertiary:   #78838f;
+  --text-quaternary: #9aa4af;
+  --text-faint:      #aab2bb;
+  --text-disabled:   #c0c8d0;  /* disabled chevrons/icons */
+
+  /* action — primary blue */
+  --action:          #2c6ab0;
+  --action-hover:    #21568f;  /* also text-on-tint */
+  --action-tint:     #e8f0f8;  /* nav-active / info tint (also #eaf1fa) */
+  --action-selected-border: #cfe0f2;
+  --selected-row-bg: #f5f9fd;
+  --cited-line-bg:   #eaf1fb;  /* highlighted source line */
+
+  /* assistant — indigo (advisory only) */
+  --assist:          #4a54d6;  /* icon/stroke */
+  --assist-text:     #3b41a8;
+  --assist-tint:     #ecebfb;  /* icon square */
+  --assist-panel-bg: #f8f8fd;  /* also #f7f7fd */
+  --assist-border:   #e6e6f4;  /* also #d3d3f2 / #e0e0f5 */
+
+  /* signal 1 — validation verdict (RESERVED, hard gate) */
+  --pass-solid:      #2f8557;  /* disc / dot */
+  --pass-text:       #256b46;  /* also #22643f */
+  --pass-text-soft:  #3f7a5c;  /* also #5f8770 / #6b9680 */
+  --pass-bg:         #e9f4ee;  /* also #eaf5ef */
+  --pass-border:     #bfe0cd;
+  --fail-solid:      #b23a30;
+  --fail-text:       #8f2c24;  /* also #a24339 */
+  --fail-bg:         #fbece9;
+  --fail-border:     #f0c5be;
+
+  /* signal 2 — evidence audit coverage (neutral slate) */
+  --cover-text:      #5b6b7d;  /* also #495866 */
+  --cover-bg:        #eef2f6;
+  --cover-border:    #d5dde5;
+
+  /* signal 3 — advisory warning (soft amber, non-gating) */
+  --advisory-solid:  #c0842b;  /* dot */
+  --advisory-icon:   #b07d2b;  /* stroke */
+  --advisory-text:   #9a6f24;  /* also #8a6420 / #9a7d43 / #a78846 */
+  --advisory-bg:     #f9f1df;  /* also #f8efdd / #fdf8ef */
+  --advisory-border: #ecd8ac;  /* also #f0e2c2 */
+
+  /* other status dots */
+  --processing:      #3b7dd8;  /* a command is running (pulses) */
+  --idle:            #9aa4af;  /* draft / idle / archived */
+
+  /* field evidence status chips */
+  --verified-text:   #2f7d78;  --verified-bg:   #e6f1f0;  --verified-border:   #c4e0dd; /* teal */
+  --confirmed-text:  #6f5c3f;  --confirmed-bg:  #f5f1ea;  --confirmed-border:  #e6ddcd; /* warm tan = human motif */
+  --inferred-text:   #5b6b7d;  --inferred-bg:   #eef1f5;  --inferred-border:   #d5dde5; /* slate */
+  --missing-text:    #78838f;  --missing-bg:    #f6f8fa;  --missing-border:    #c3ccd5; /* DASHED border */
+  --needsyou-text:   #9a6f24;  --needsyou-bg:   #f8efdd;  --needsyou-border:   #ecd8ac; /* amber */
+
+  /* evidence source-type icon strokes (chip bg #f6f8fa, border #e4e9ef, text #55606c) */
+  --src-spreadsheet: #4a7fb0;  /* blue */
+  --src-filelisting: #6b7684;  /* gray */
+  --src-derivation:  #7a6bb0;  /* purple */
+  --src-userconf:    #8a6d4a;  /* tan (chip bg #f5f1ea, text #6f5c3f) */
+}
+
+/*
+ * Design tokens beyond color: fonts, radii, elevation.
+ * No external fonts / CDNs (offline, local-first): a neutral system grotesk
+ * substitutes for IBM Plex Sans and a legible system mono for IBM Plex Mono,
+ * per typography.md's documented fallback pairing.
+ */
+:root {
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* radius scale (spacing-layout.md) */
+  --radius-screen: 14px;
+  --radius-card: 12px;
+  --radius-inner: 10px;
+  --radius-control: 9px;
+  --radius-token: 7px;
+  --radius-pill: 999px;
+
+  /* elevation (spacing-layout.md) — quiet; depth is a whisper */
+  --shadow-screen: 0 1px 2px rgba(20, 30, 45, 0.05), 0 18px 40px rgba(20, 30, 45, 0.09);
+  --shadow-card: 0 1px 2px rgba(20, 30, 45, 0.04);
+  --shadow-emphasis: 0 8px 22px rgba(44, 106, 176, 0.08);
+  --ring-active: 0 0 0 4px rgba(44, 106, 176, 0.15);
+}

@@ -1,0 +1,330 @@
+/*
+ * App shell chrome — AppShell frame, TopBar, LeftNav, StatusBar,
+ * GovernanceBanner. No colored vertical rails: the active nav item and every
+ * banner use tint + full border + icon/label, never a colored left edge.
+ */
+
+/* ---- AppShell frame ------------------------------------------------- */
+.app {
+  min-height: 100vh;
+  background: var(--app-canvas);
+  padding: 16px;
+}
+.screen-card {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 32px);
+  background: var(--screen-base);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-screen);
+  box-shadow: var(--shadow-screen);
+  overflow: hidden;
+}
+.screen-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.screen-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+.screen-main.pad {
+  padding: 22px 26px;
+}
+.screen-main.centered {
+  display: flex;
+  justify-content: center;
+}
+.centered-col {
+  width: 100%;
+  max-width: 1040px;
+  padding: 24px 26px;
+}
+.centered-col.narrow {
+  max-width: 720px;
+}
+
+/* ---- TopBar (60px) -------------------------------------------------- */
+.topbar {
+  flex: none;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-heading);
+}
+.brand-tile {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--action);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 6px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+.avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--action-tint);
+  color: var(--action-hover);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+}
+.topbar-search {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  max-width: 460px;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--screen-base);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  color: var(--text-quaternary);
+  font-size: 12.5px;
+}
+.search .kbd {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  border: 1px solid var(--border-input);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.topbar-spacer { flex: 1; }
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+}
+.record-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.record-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.record-file {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+}
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Mode chip (Synthetic) — persistent, load-bearing. */
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--radius-pill);
+  background: var(--screen-base);
+  border: 1px solid var(--border-input);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ---- LeftNav (230px) ----------------------------------------------- */
+.leftnav {
+  flex: none;
+  width: 230px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-subtle);
+  border-right: 1px solid var(--border);
+  padding: 14px 12px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+}
+.nav-item:hover { background: var(--border-faint); }
+.nav-item.active {
+  background: var(--action-tint);
+  color: var(--action-hover);
+  font-weight: 600;
+}
+.nav-item svg { flex: none; color: var(--text-tertiary); }
+.nav-item.active svg { color: var(--action-hover); }
+.nav-footer {
+  margin-top: auto;
+  padding: 12px 11px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nav-memory {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--text-slate);
+}
+.nav-version {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+
+/* ---- StatusBar (52px) ---------------------------------------------- */
+.statusbar {
+  flex: none;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 18px;
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--border-input);
+  font-size: 12px;
+}
+.statusbar-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.statusbar-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  color: var(--text-muted);
+}
+.statusbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border-input);
+  flex: none;
+}
+.statusbar-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-slate);
+}
+.statusbar-pending {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.statusbar-note {
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  padding: 0 16px;
+}
+.statusbar-cover {
+  font-family: var(--font-mono);
+  color: var(--cover-text);
+}
+.statusbar-advisory {
+  color: var(--advisory-text);
+}
+.statusbar-right {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+
+/* ---- GovernanceBanner ---------------------------------------------- */
+.gov-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-inner);
+}
+.gov-banner .gov-icon {
+  flex: none;
+  color: var(--text-slate);
+  margin-top: 1px;
+}
+.gov-banner .gov-body {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.gov-banner .gov-body strong { color: var(--text-strong); }
+.gov-banner .gov-action {
+  flex: none;
+  color: var(--action);
+  font-weight: 600;
+  font-size: 12.5px;
+  background: none;
+  border: 0;
+  align-self: center;
+}

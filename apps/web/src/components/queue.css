@@ -1,0 +1,105 @@
+/*
+ * ExperimentQueue / ExperimentRow (S1). A calm, scannable "what needs me next?"
+ * list — never a KPI dashboard. Coverage and verdict stay two distinct tokens on
+ * ready rows; no colored left edge on rows, sections, or hover.
+ */
+.queue {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.queue-group + .queue-group {
+  margin-top: 2px;
+}
+.queue-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 10px;
+}
+.queue-group-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.queue-group-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+}
+.dot-review { background: var(--processing); }
+
+.queue-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.exp-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  color: inherit;
+}
+.exp-row:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+.exp-row.done {
+  border-color: var(--border-faint);
+  opacity: 0.82;
+}
+.exp-main {
+  flex: 1;
+  min-width: 0;
+}
+.exp-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.exp-sub {
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.exp-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-slate);
+  background: var(--cover-bg);
+  border-radius: var(--radius-token);
+  padding: 2px 8px;
+}
+.exp-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+}
+.exp-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.exp-trailing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.exp-coverage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--cover-text);
+}
+.exp-chevron {
+  color: var(--text-disabled);
+  flex: none;
+}

@@ -1,0 +1,313 @@
+/*
+ * Assistant surfaces — AssistantPanel + GuidedPrompt. Subordinate everywhere,
+ * INDIGO ONLY (never a verdict green/red), never renders PASS/FAIL. Every reply
+ * carries an `answered from:` chip. No colored vertical rail; no typing-dots
+ * "deep thought" theater; no "verified by AI" badge.
+ */
+
+/* ---- AssistantPanel ------------------------------------------------- */
+.assistant {
+  padding: 14px 16px;
+}
+.assistant-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+.assistant-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--assist-tint);
+  color: var(--assist);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.assistant-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--assist-text);
+}
+.assistant-memory {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-slate);
+}
+.assistant-reply {
+  padding: 12px 13px;
+  background: var(--assist-panel-bg);
+  border: 1px solid var(--assist-border);
+  border-radius: var(--radius-inner);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.answered-from {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-token);
+  background: var(--assist-tint);
+  border: 1px solid var(--assist-border);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--assist-text);
+}
+.assistant-note {
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+.assistant-suggested-eyebrow {
+  margin: 16px 0 8px;
+}
+.assistant-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.assistant-prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  text-align: left;
+}
+.assistant-prompt:hover { border-color: var(--assist-border); background: var(--assist-panel-bg); }
+.assistant-prompt .chev { margin-left: auto; color: var(--text-disabled); flex: none; }
+.assistant-input {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 12px;
+  height: 40px;
+  background: var(--screen-base);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+}
+.assistant-input input {
+  flex: 1;
+  border: 0;
+  background: none;
+  outline: none;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+.assistant-send {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  border: 0;
+  background: var(--assist);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---- GuidedPrompt (S4) --------------------------------------------- */
+.guided {
+  background: var(--surface);
+  border: 1px solid var(--action-selected-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-emphasis);
+  padding: 20px 22px;
+}
+.guided-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.guided-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--action);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex: none;
+}
+.guided-index {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.guided-path {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-slate);
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-token);
+  padding: 2px 8px;
+}
+.guided-question {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.guided-context {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.guided-suggestion {
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: var(--assist-panel-bg);
+  border: 1px solid var(--assist-border);
+  border-radius: var(--radius-inner);
+}
+.guided-suggestion-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--assist-text);
+  margin-bottom: 6px;
+}
+.guided-suggestion-not {
+  font-weight: 400;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+}
+.guided-suggestion-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.guided-suggestion-src {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.guided-suggestion-loc {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-slate);
+}
+.guided-field {
+  margin-top: 14px;
+}
+.guided-field-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-slate);
+  margin-bottom: 6px;
+}
+.guided-input-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.guided-input-row .input { flex: 1; }
+.guided-unit {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.guided-footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-hair);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.guided-dontknow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.guided-dontknow svg { color: var(--text-tertiary); }
+.guided-blank {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* Answered + upcoming rows (S4) */
+.answered-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+.answered-row + .answered-row,
+.answered-row + .guided,
+.guided + .upcoming-row,
+.upcoming-row + .upcoming-row {
+  margin-top: 10px;
+}
+.answered-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--cover-bg);
+  border: 1px solid var(--border-strong);
+  color: var(--pass-solid);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.answered-label { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.answered-stored { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.answered-trailing { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; }
+.answered-edit { background: none; border: 0; color: var(--action); font-size: 12px; font-weight: 500; }
+.upcoming-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  opacity: 0.72;
+}
+.upcoming-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border-input);
+  color: var(--text-quaternary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex: none;
+}
+.upcoming-label { font-size: 13px; color: var(--text-secondary); }
+.upcoming-path { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-quaternary); }
