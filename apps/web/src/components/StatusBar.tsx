@@ -11,7 +11,8 @@ interface StatusBarProps {
   validation?: ValidationResult | 'pending';
   coverage?: AuditResult | 'pending';
   advisory?: AdvisoryResult | 'pending';
-  validationPendingNote?: string; // e.g. "runs after export"
+  validationPendingNote?: string; // e.g. "runs after export" / "dry-run · 3 errors"
+  coveragePendingNote?: string; // e.g. "not exported yet"
   // Alternative content when a screen shows an explanatory note instead of signals (S4).
   note?: string;
 }
@@ -28,6 +29,7 @@ export function StatusBar({
   coverage,
   advisory,
   validationPendingNote,
+  coveragePendingNote,
   note,
 }: StatusBarProps) {
   const segments: ReactNode[] = [];
@@ -79,7 +81,7 @@ export function StatusBar({
         ) : (
           <>
             {eyebrow(LABELS.signalCoverage)}
-            <span className="statusbar-pending">— pending</span>
+            <span className="statusbar-pending">— {coveragePendingNote ?? 'pending'}</span>
           </>
         )}
       </span>,

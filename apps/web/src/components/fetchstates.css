@@ -1,0 +1,65 @@
+/* Shared loading / backend-down states. Calm, neutral — never alarming red. */
+
+.fetch-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 22px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.fetch-state.error {
+  align-items: flex-start;
+  gap: 14px;
+  max-width: 640px;
+  margin: 12px auto 0;
+  padding: 22px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.fetch-state-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-slate);
+  margin-top: 2px;
+}
+
+.fetch-state-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fetch-state-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.fetch-state-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.fetch-state-cmd {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.fetch-state.error .btn {
+  align-self: flex-start;
+}

@@ -1,39 +1,29 @@
 /*
- * Synthetic mock data derived from the committed sample record + sidecar
+ * Synthetic SAMPLE data derived from the committed sample record + sidecar
  * (docs/samples/01JQZ0SYNTHXANESDEMO000000.{json,evidence.json}).
  *
- * This is a STATIC skeleton: each screen renders a fixed, faithful state. A
- * later task replaces these getters with the typed API client (lib/api.ts).
- * Every value here traces to the committed synthetic fixtures — nothing invented.
- *
- * The 5 pending blockers follow the S4 spec set (edge · series · 2 sha256 ·
- * descriptor); they are distributed across the S3 groups so the needs-you total
- * is exactly 5.
+ * S1/S2/S3 are wired to the live FastAPI backend (lib/api.ts) and must NOT read
+ * this module. What remains here serves only the still-static surfaces:
+ * S4 (pending blockers + completion answers), S5 (evidence trail + source
+ * preview), S6 (signals + artifacts + graph status), and their shared demo
+ * constants. Every value traces to the committed synthetic fixtures — nothing
+ * invented. A later task replaces these with live endpoints too.
  */
 
 import type {
   Artifact,
   CompletionAnswer,
   EvidenceTrailEntry,
-  ExperimentDetail,
-  ExperimentSummary,
-  FieldGroupData,
   GraphStatus,
   PendingBlocker,
-  QueueGroup,
-  RunnerStage,
   Signals,
   SourcePreview,
 } from './types';
 
-export const MODE = 'synthetic' as const;
 export const DEMO_RECORD_ID = '01JQZ0SYNTHXANESDEMO000000';
 
-// The record opened by the queue's demo row and shown on S3–S6.
-export const DEMO_ID = 'cuo2-2099-spring';
+// The sample record shown on the still-static S4–S6 surfaces.
 export const DEMO_TITLE = 'CuO / Cu K-edge XANES — 2099 spring campaign';
-export const DEMO_TECHNIQUE = 'Cu K-edge XANES';
-export const DEMO_DRAFT_FILE = 'CuO2_campaign.draft.json';
 export const DEMO_RECORD_FILE = `${DEMO_RECORD_ID}.json`;
 export const DEMO_SIDECAR_FILE = `${DEMO_RECORD_ID}.evidence.json`;
 
@@ -41,310 +31,6 @@ const FULL_SHA_PROCESSING =
   'c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345';
 const FULL_SHA_MERGED =
   'b3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b234';
-
-// --- S1 queue ---------------------------------------------------------
-
-export function getQueueGroups(): QueueGroup[] {
-  const rows: ExperimentSummary[] = [
-    {
-      id: DEMO_ID,
-      title: 'CuO / Cu K-edge XANES — 2099 spring campaign',
-      technique: DEMO_TECHNIQUE,
-      idOrDraft: 'draft · cu2o_campaign',
-      meta: 'updated 2099-04-02',
-      group: 'needsAttention',
-      trailing: { needsYouCount: 5 },
-    },
-    {
-      id: 'cu-foil-ref',
-      title: 'Cu-foil reference — energy calibration',
-      technique: DEMO_TECHNIQUE,
-      idOrDraft: 'draft · cu_foil_ref',
-      meta: 'updated 2099-04-01',
-      group: 'needsAttention',
-      trailing: { needsYouCount: 2 },
-    },
-    {
-      id: 'cuo-thinfilm-1',
-      title: 'CuO thin-film — replicate 1',
-      technique: DEMO_TECHNIQUE,
-      idOrDraft: '01JQZ0FILM1',
-      meta: 'with G. Hopper',
-      group: 'inReview',
-      trailing: { mentorReview: true },
-    },
-    {
-      id: 'cuo2-pellet-r2',
-      title: 'CuO₂ pellet — Cu K-edge XANES (rep 2)',
-      technique: DEMO_TECHNIQUE,
-      idOrDraft: 'draft · cuo2_pellet_r2',
-      group: 'ready',
-      trailing: { coverage: { resolved: 24, total: 24 }, verdict: 'pass' },
-    },
-    {
-      id: DEMO_RECORD_ID,
-      title: 'Cu-oxide baseline — Cu K-edge (2099-01)',
-      technique: DEMO_TECHNIQUE,
-      idOrDraft: DEMO_RECORD_ID,
-      group: 'done',
-      trailing: { coverage: { resolved: 26, total: 26 }, exported: true },
-    },
-    {
-      id: '01JQ0Y8BARCHIVE0000000000',
-      title: 'Cu-oxide baseline — Cu K-edge (2098-11)',
-      technique: DEMO_TECHNIQUE,
-      idOrDraft: '01JQ0Y8BARCHIVE0000000000',
-      group: 'done',
-      trailing: { coverage: { resolved: 22, total: 22 }, exported: true },
-    },
-  ];
-
-  const groupDefs: { key: QueueGroup['key']; label: string }[] = [
-    { key: 'needsAttention', label: 'Needs Attention' },
-    { key: 'inReview', label: 'In Review' },
-    { key: 'ready', label: 'Ready to Export' },
-    { key: 'done', label: 'Done' },
-  ];
-
-  return groupDefs
-    .map(({ key, label }) => {
-      const groupRows = rows.filter((r) => r.group === key);
-      return { key, label, count: groupRows.length, rows: groupRows };
-    })
-    .filter((g) => g.count > 0);
-}
-
-// --- S3 field groups --------------------------------------------------
-
-export function getFieldGroups(): FieldGroupData[] {
-  return [
-    {
-      block: 'system',
-      humanLabel: 'Facility & Beamline',
-      summary: '4 fields · verified & inferred',
-      needsYouCount: 0,
-      collapsedByDefault: false,
-      fields: [
-        {
-          path: 'system.facility.beamline',
-          label: 'Beamline',
-          value: '15-2',
-          status: 'verified',
-          evidence_count: 1,
-          source_types: ['spreadsheet'],
-          evidence: [
-            {
-              source_type: 'spreadsheet',
-              source_file: 'mock_campaign.csv',
-              locator: "Sheet 'Campaign Info', field=beamline",
-              quote: '15-2',
-            },
-          ],
-        },
-        {
-          path: 'system.facility.facility_name',
-          label: 'Facility',
-          value: 'SSRL',
-          status: 'verified',
-          evidence_count: 1,
-          source_types: ['spreadsheet'],
-          evidence: [
-            {
-              source_type: 'spreadsheet',
-              source_file: 'mock_campaign.csv',
-              locator: "Sheet 'Campaign Info', field=facility_name",
-              quote: 'SSRL',
-            },
-          ],
-        },
-        {
-          path: 'system.technique',
-          label: 'Technique',
-          value: 'HERFD-XAS',
-          status: 'verified',
-          evidence_count: 1,
-          source_types: ['spreadsheet'],
-          evidence: [
-            {
-              source_type: 'spreadsheet',
-              source_file: 'mock_campaign.csv',
-              locator: "Sheet 'Campaign Info', field=technique",
-              quote: 'HERFD-XAS',
-            },
-          ],
-        },
-        {
-          path: 'system.domain',
-          label: 'Domain',
-          value: 'experimental',
-          status: 'inferred',
-          evidence_count: 1,
-          source_types: ['derivation'],
-          helper:
-            'Inferred experimental from meta.source_type=facility — a physical experiment, not computation.',
-          evidence: [
-            {
-              source_type: 'derivation',
-              rule:
-                'system.domain = experimental for a facility-source record (meta.source_type=facility ⇒ physical experiment)',
-            },
-          ],
-        },
-      ],
-    },
-    {
-      block: 'sample',
-      humanLabel: 'Composition',
-      summary: '1 field needs you',
-      needsYouCount: 1,
-      collapsedByDefault: false,
-      fields: [
-        {
-          path: 'sample.material.formula',
-          label: 'Formula',
-          value: 'CuO2',
-          status: 'verified',
-          evidence_count: 1,
-          source_types: ['spreadsheet'],
-          evidence: [
-            {
-              source_type: 'spreadsheet',
-              source_file: 'mock_campaign.csv',
-              locator: "Sheet 'Sample', field=formula",
-              quote: 'CuO2',
-            },
-          ],
-        },
-        {
-          path: 'implicit · absorbing_element',
-          label: 'Absorbing Element',
-          value: 'Cu',
-          status: 'inferred',
-          evidence_count: 1,
-          source_types: ['derivation'],
-          helper:
-            'Inferred Cu as the sole non-oxygen element in the formula — confirm if this looks wrong.',
-          evidence: [
-            {
-              source_type: 'derivation',
-              rule:
-                'absorbing element = sole non-oxygen element in sample.material.formula (CuO2 -> Cu)',
-            },
-          ],
-        },
-        {
-          path: 'implicit · edge',
-          label: 'Absorption Edge',
-          value: null,
-          status: 'needs_confirmation',
-          evidence_count: 1,
-          source_types: ['derivation'],
-          helper:
-            'Proposed K from the Cu K-edge technique — confirm to store as your evidence.',
-          evidence: [
-            {
-              source_type: 'derivation',
-              rule:
-                'edge requires scientific confirmation; incident-energy window 8970–9000 eV recorded from Configurations',
-            },
-          ],
-        },
-      ],
-    },
-    {
-      block: 'measurement',
-      humanLabel: 'Reduced Spectrum',
-      summary: '1 field needs you',
-      needsYouCount: 1,
-      collapsedByDefault: true,
-      fields: [
-        {
-          path: 'measurement.series',
-          label: 'Reduced-Spectrum Pointer',
-          value: null,
-          status: 'needs_confirmation',
-          evidence_count: 1,
-          source_types: ['file_listing'],
-          helper:
-            'Point this record at the reduced spectrum in the archive listing — the system will not guess it.',
-          evidence: [
-            {
-              source_type: 'file_listing',
-              source_file: 'raw_scan_listing.txt',
-              locator: 'line 27, ssrl-archive://BL15-2/2099_run_000/reduced/',
-              quote: 'CuO2_merged.xdi',
-            },
-          ],
-        },
-      ],
-    },
-    {
-      block: 'assets',
-      humanLabel: 'Files & Hashes',
-      summary: '2 fields need you',
-      needsYouCount: 2,
-      collapsedByDefault: true,
-      fields: [
-        {
-          path: 'assets.processing_notebook.sha256',
-          label: 'Processing Notebook',
-          value: null,
-          status: 'needs_confirmation',
-          evidence_count: 1,
-          source_types: ['file_listing'],
-          helper:
-            'The archive listing identifies the notebook; paste its sha256 to confirm.',
-          evidence: [
-            {
-              source_type: 'file_listing',
-              source_file: 'raw_scan_listing.txt',
-              locator: 'line 16, ssrl-archive://BL15-2/2099_run_000/notebooks/',
-              quote: 'xanes_reduction_v2.ipynb',
-            },
-          ],
-        },
-        {
-          path: 'assets.merged_spectrum.sha256',
-          label: 'Merged Spectrum',
-          value: null,
-          status: 'needs_confirmation',
-          evidence_count: 1,
-          source_types: ['file_listing'],
-          helper:
-            'The archive listing identifies the merged spectrum; paste its sha256 to confirm.',
-          evidence: [
-            {
-              source_type: 'file_listing',
-              source_file: 'raw_scan_listing.txt',
-              locator: 'line 27, ssrl-archive://BL15-2/2099_run_000/reduced/',
-              quote: 'CuO2_merged.xdi',
-            },
-          ],
-        },
-      ],
-    },
-    {
-      block: 'descriptors',
-      humanLabel: 'XANES Features',
-      summary: '1 field needs you',
-      needsYouCount: 1,
-      collapsedByDefault: true,
-      fields: [
-        {
-          path: 'descriptors.xanes_inflection_point_energy',
-          label: 'Inflection-Point Energy',
-          value: null,
-          unit: 'eV',
-          status: 'needs_confirmation',
-          evidence_count: 0,
-          source_types: [],
-          helper:
-            'Enter the XANES inflection-point energy with its uncertainty (eV, σ) — the system will never generate this value.',
-        },
-      ],
-    },
-  ];
-}
 
 // --- S4 pending blockers (verbatim order: edge · series · 2 sha256 · descriptor)
 
@@ -703,74 +389,8 @@ export const SIDECAR_ENTRY_SNIPPET = {
   timestamp: '2099-03-05T21:00:00Z',
 };
 
-// --- S2 staged runner -------------------------------------------------
-
-export function getRunnerStages(): RunnerStage[] {
-  return [
-    {
-      key: 'load',
-      label: 'Load Synthetic Inputs',
-      command: 'run_synthetic_demo.py · load fixtures',
-      state: 'done',
-      result: '2 sources',
-      subResult: 'mock_campaign.csv · raw_scan_listing.txt',
-    },
-    {
-      key: 'draft',
-      label: 'Build Evidence-Tagged Draft',
-      command: 'extract.draft_builder → {value, status, evidence[]}',
-      state: 'done',
-      result: '26 fields',
-      subResult: '12 verified · 3 inferred',
-    },
-    {
-      key: 'blockers',
-      label: '5 Fields Need Confirmation',
-      command: 'draft.pending[] · nothing invented',
-      state: 'current',
-      isBlocker: true,
-      detail:
-        '3 asset sha256 · 1 spectrum pointer · 1 descriptor. This is the product working as intended — answer them to continue.',
-    },
-    {
-      key: 'export',
-      label: 'Export Official Record + Sidecar',
-      command: 'isaac export · doubly gated',
-      state: 'upcoming',
-    },
-    {
-      key: 'validate',
-      label: 'Validate Against ISAAC v1.05',
-      command: 'isaac validate --official',
-      state: 'upcoming',
-    },
-    {
-      key: 'audit',
-      label: 'Audit Evidence Coverage',
-      command: 'isaac audit',
-      state: 'upcoming',
-    },
-  ];
-}
-
-// --- memory -----------------------------------------------------------
+// --- memory (S6 still-static freshness dot) -----------------------------
 
 export function getGraphStatus(): GraphStatus {
   return { status: 'fresh', plane: 'memory' };
-}
-
-// --- record detail (record surfaces) ----------------------------------
-
-export function getExperimentDetail(id: string): ExperimentDetail {
-  return {
-    id,
-    title: DEMO_TITLE,
-    technique: DEMO_TECHNIQUE,
-    draftName: DEMO_DRAFT_FILE,
-    mode: MODE,
-    groups: getFieldGroups(),
-    pending: getPendingBlockers(),
-    signals: getSignals(),
-    artifacts: getArtifacts(),
-  };
 }

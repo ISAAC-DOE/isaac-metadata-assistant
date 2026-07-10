@@ -13,9 +13,15 @@ import { AssistantPanel } from '../components/AssistantPanel';
 import { Shield } from '../components/icons';
 import { ROUTES } from '../lib/routes';
 import { LABELS } from '../lib/labels';
-import { api } from '../lib/api';
 import { ASSISTANT_SAMPLES, ROUTE_TO_CLI_NOTE } from '../lib/assistant';
-import { DEMO_RECORD_FILE, DEMO_TITLE } from '../lib/mock';
+// S6 stays on committed synthetic sample data this slice; a later task wires it live.
+import {
+  DEMO_RECORD_FILE,
+  DEMO_TITLE,
+  getArtifacts,
+  getGraphStatus,
+  getSignals,
+} from '../lib/mock';
 
 /**
  * S6 · Ready to Export — the trust readout. The deterministic verdict is the
@@ -26,9 +32,9 @@ import { DEMO_RECORD_FILE, DEMO_TITLE } from '../lib/mock';
 export function ExportReadiness() {
   const navigate = useNavigate();
   const { id = '' } = useParams();
-  const signals = api.getSignals();
-  const artifacts = api.getArtifacts();
-  const graph = api.getGraphStatus();
+  const signals = getSignals();
+  const artifacts = getArtifacts();
+  const graph = getGraphStatus();
 
   const validation = signals.validation;
   const coverage = signals.coverage;

@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
+import { bundleRoutes, experimentSummary, stubFetchRoutes } from '../test/apiFixtures';
 
 function renderAt(path: string) {
   return render(
@@ -14,10 +15,17 @@ function renderAt(path: string) {
   );
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('router-level smoke: each surface renders without error', () => {
-  it('S1 · My Experiments (/experiments)', () => {
-    const { getByText } = renderAt('/experiments');
-    expect(getByText('Cu-foil reference — energy calibration')).toBeInTheDocument();
+  it('S1 · My Experiments (/experiments) — live queue', async () => {
+    stubFetchRoutes({
+      'GET /api/experiments': { body: { experiments: [experimentSummary] } },
+    });
+    const { findByText } = renderAt('/experiments');
+    expect(await findByText('Synthetic XANES — CuO (Cu K-edge) Demo')).toBeInTheDocument();
   });
 
   it('S2 · Load Materials (/load)', () => {
@@ -25,9 +33,10 @@ describe('router-level smoke: each surface renders without error', () => {
     expect(getByText('Run the Synthetic Demo')).toBeInTheDocument();
   });
 
-  it('S3 · Review Record (/record/:id)', () => {
-    const { getByText } = renderAt('/record/demo');
-    expect(getByText('5 Fields Need Your Confirmation')).toBeInTheDocument();
+  it('S3 · Review Record (/record/:id) — live bundle', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { findByText } = renderAt('/record/demo');
+    expect(await findByText('5 Fields Need Your Confirmation')).toBeInTheDocument();
   });
 
   it('S4 · Complete Missing Fields (/record/:id/complete)', () => {
@@ -50,8 +59,11 @@ describe('router-level smoke: each surface renders without error', () => {
     expect(getByText('Memory / Query Plane')).toBeInTheDocument();
   });
 
-  it('the index route redirects into the queue', () => {
-    const { getByText } = renderAt('/');
-    expect(getByText('Cu-foil reference — energy calibration')).toBeInTheDocument();
+  it('the index route redirects into the queue', async () => {
+    stubFetchRoutes({
+      'GET /api/experiments': { body: { experiments: [experimentSummary] } },
+    });
+    const { findByText } = renderAt('/');
+    expect(await findByText('Synthetic XANES — CuO (Cu K-edge) Demo')).toBeInTheDocument();
   });
 });

@@ -103,3 +103,10 @@
   color: var(--text-disabled);
   flex: none;
 }
+
+/* Live-queue empty state: honest and quiet, pointing at the demo on-ramp. */
+.queue-empty {
+  padding: 26px 4px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}

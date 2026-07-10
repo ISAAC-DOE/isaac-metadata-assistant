@@ -9,8 +9,13 @@ import { GuidedPrompt } from '../components/GuidedPrompt';
 import { StatusChip } from '../components/StatusChip';
 import { Check } from '../components/icons';
 import { ROUTES } from '../lib/routes';
-import { api } from '../lib/api';
-import { COMPLETION_CURRENT_INDEX, DEMO_TITLE } from '../lib/mock';
+// S4 stays on committed synthetic sample data this slice; a later task wires it live.
+import {
+  COMPLETION_CURRENT_INDEX,
+  DEMO_TITLE,
+  getCompletionAnswers,
+  getPendingBlockers,
+} from '../lib/mock';
 
 /**
  * S4 · Complete Missing Fields — guided, one-question-at-a-time completion of the
@@ -20,8 +25,8 @@ import { COMPLETION_CURRENT_INDEX, DEMO_TITLE } from '../lib/mock';
 export function GuidedCompletion() {
   const navigate = useNavigate();
   const { id = '' } = useParams();
-  const pending = api.getPending();
-  const answers = api.getCompletionAnswers();
+  const pending = getPendingBlockers();
+  const answers = getCompletionAnswers();
   const currentIndex = COMPLETION_CURRENT_INDEX;
   const total = pending.length;
   const current = pending[currentIndex];

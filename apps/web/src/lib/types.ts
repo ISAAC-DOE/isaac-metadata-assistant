@@ -262,3 +262,150 @@ export interface ExperimentDetail {
   signals: Signals;
   artifacts: Artifact[];
 }
+
+// --- API wire types (exact Task 1 FastAPI serializations) -------------
+// These mirror apps/api/isaac_api/{routes,serialize}.py 1:1. The typed client
+// (lib/api.ts) returns these raw shapes; adapters (lib/adapt.ts) map them onto
+// the UI types above. Truth (verdict / coverage / advisory / status) is
+// server-derived — the client parses, it never computes.
+
+export type ApiExperimentStatus =
+  | 'needs_attention'
+  | 'in_review'
+  | 'ready_to_export'
+  | 'done';
+
+export interface ApiExperimentSummary {
+  id: string;
+  title: string;
+  status: ApiExperimentStatus;
+  created_utc: string;
+  pending_count: number;
+  evidenced_field_count: number;
+  exported: boolean;
+  record_id: string | null;
+}
+
+export interface ApiExperimentDetail extends ApiExperimentSummary {
+  draft_ok: boolean;
+  artifact_refs: { record_path: string | null; sidecar_path: string | null };
+  source_files: string[];
+}
+
+export interface ApiDraftField {
+  path: string;
+  label: string;
+  value: unknown;
+  status: FieldStatus;
+  evidence_count: number;
+  source_types: SourceType[];
+}
+
+export interface ApiDraftGroup {
+  title: string;
+  fields: ApiDraftField[];
+}
+
+export interface ApiDraftResponse {
+  groups: ApiDraftGroup[];
+}
+
+export interface ApiDemoAnswer {
+  value: string;
+  label: string; // "Demo answer (synthetic)"
+}
+
+export interface ApiPendingItem {
+  id: string; // uri for assets, else kind
+  kind: BlockerKind;
+  question: string;
+  about?: string | null;
+  demo_answer?: ApiDemoAnswer | null;
+}
+
+export interface ApiPendingResponse {
+  pending: ApiPendingItem[];
+}
+
+export interface ApiValidateResult {
+  ok: boolean;
+  errors: { path: string; message: string }[];
+  schema: string; // "ISAAC v1.05"
+  dry_run: boolean; // true until the record is exported
+}
+
+export interface ApiAuditRecord {
+  name: string;
+  ok: boolean;
+  schema_errors: { path: string; message: string }[];
+  evidence_present: number;
+  evidence_expected: number;
+}
+
+export interface ApiAuditResponse {
+  records: ApiAuditRecord[];
+  text: string;
+  message?: string; // present when nothing is exported yet
+}
+
+// Advisory, non-gating channel. Deliberately no ok/valid/passed field.
+export interface ApiWarningsResponse {
+  advisory: true;
+  gating: false;
+  warnings: AdvisoryWarning[];
+  dry_run?: boolean;
+}
+
+export interface ApiEvidenceEntry {
+  path: string; // dotted path OR namespaced (assets: / descriptors: / implicit:)
+  value?: unknown;
+  status: FieldStatus;
+  evidence: FieldEvidence[]; // raw entries, passed through faithfully
+}
+
+export interface ApiEvidenceResponse {
+  evidence: ApiEvidenceEntry[];
+}
+
+export interface ApiDemoStep {
+  name: string; // build_draft | validate_draft | apply_answers | export_draft
+  detail: string;
+  ok: boolean;
+}
+
+export interface ApiDemoRunResponse {
+  experiment_id: string;
+  steps: ApiDemoStep[];
+  status: ApiExperimentStatus;
+}
+
+export interface ApiUploadsBlocked {
+  blocked: boolean;
+  reason: string;
+}
+
+export interface ApiGraphStatus {
+  status: GraphFreshness;
+  plane: 'memory';
+  note?: string;
+}
+
+export interface ApiHealth {
+  status: string;
+  mode: string;
+  core: string;
+  version: string;
+}
+
+// Everything S3 needs, fetched concurrently but kept as separate values so the
+// three signals are never merged (each still renders in its own component).
+export interface RecordBundle {
+  detail: ApiExperimentDetail;
+  groups: ApiDraftGroup[];
+  pending: ApiPendingItem[];
+  validate: ApiValidateResult;
+  audit: ApiAuditResponse;
+  warnings: ApiWarningsResponse;
+  evidence: ApiEvidenceEntry[];
+  graph: ApiGraphStatus;
+}

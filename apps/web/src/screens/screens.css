@@ -140,3 +140,26 @@
   padding: 18px 20px;
 }
 .placeholder-card .dot { margin-right: 8px; }
+
+/* Live pending blockers listed inside the needs-you banner (S3). */
+.needsyou-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.needsyou-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.needsyou-q { line-height: 1.45; }
+.needsyou-about {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  word-break: break-all;
+}

@@ -5,13 +5,15 @@ import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
 import { SourcePreview } from '../components/SourcePreview';
 import { StatusBar } from '../components/StatusBar';
-import { api } from '../lib/api';
+// S5 stays on committed synthetic sample data this slice; a later task wires it live.
 import {
   DEMO_SIDECAR_FILE,
   EVIDENCE_DIRECT_TOTAL,
   SIDECAR_ENTRY_SNIPPET,
   SIDECAR_META,
   SOURCE_PROVENANCE,
+  getEvidenceTrail,
+  getSourcePreview,
 } from '../lib/mock';
 
 const RECORD_JSON = `{
@@ -38,8 +40,8 @@ const SIDECAR_JSON = `"assets:processing_notebook": [
  * The sidecar is labeled an assistant convention throughout.
  */
 export function EvidenceExplorer() {
-  const entries = api.getEvidenceTrail();
-  const preview = api.getSourcePreview();
+  const entries = getEvidenceTrail();
+  const preview = getSourcePreview();
   const [selectedKey, setSelectedKey] = useState('assets:processing_notebook');
   const selected = entries.find((e) => e.key === selectedKey) ?? entries[0];
 
