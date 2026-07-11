@@ -660,6 +660,32 @@ railway ssh -- rm -rf /data/isaac-workspace
 The backend auto-seeds a fresh synthetic demo experiment on the next request.
 Nuclear option: delete and re-create the volume in the Railway dashboard.
 
+## Rollback and failure recovery
+
+Both platforms deploy from the same `main` commit, so the primary recovery
+path is deterministic: **`git revert` the offending commit and push** — both
+auto-deploys converge on the same known-good code. Platform rollbacks are the
+fast stopgap while a revert is prepared:
+
+- **Vercel**: Instant Rollback (dashboard) or `vercel rollback` repoints
+  production at the previous immutable deployment. The frontend is stateless;
+  rollback is always safe.
+- **Railway**: redeploy a previous deployment from the dashboard's deploy
+  history. A failed deploy (build or `GET /api/health` health-check failure)
+  never replaces the running healthy one — a broken push degrades to "old
+  backend keeps serving", not downtime.
+
+**If one platform deploys a push and the other fails** (split-brain), the old
+side keeps serving against the new side — an API-contract version mismatch.
+The UI's explicit error states make this degraded, not corrupting. Recover by
+revert-and-push so both converge; do not fix-forward one platform by hand.
+
+**Outside git rollbacks:** the volume is untouched by any rollback — if a
+newer backend wrote workspace state an older one cannot parse, reset the
+workspace (above) and it re-seeds. Env vars (key, CORS origins) do not roll
+back with code; after any rollback confirm both platforms' env vars still
+match the running code.
+
 ## Deployed URLs and project names
 
 Recorded after deployment (kept here, not hardcoded in code):

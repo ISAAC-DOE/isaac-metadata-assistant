@@ -106,6 +106,35 @@ The deployment question was investigated before choosing hosts:
 - No rate limiting on write endpoints — key holders could still spam demo
   runs. Deferred to Phase 21 alongside volume-size monitoring.
 
+## Rollback strategy
+
+Both platforms deploy from the same `main` commit, so the primary recovery
+path is deterministic: **`git revert` the offending commit and push** — both
+auto-deploys converge on the same known-good code. Platform-level rollbacks
+are the fast stopgap while a revert is prepared:
+
+- **Vercel**: deployments are immutable; Instant Rollback (dashboard) or
+  `vercel rollback` repoints production at the previous deployment. The
+  frontend is stateless — rollback is always safe.
+- **Railway**: redeploy a previous deployment from the dashboard's deploy
+  history. A *failed* deploy (build or health-check failure on
+  `GET /api/health`) never replaces the running healthy one, so a broken push
+  degrades to "old backend keeps serving", not downtime.
+
+**Split-brain (one platform deploys a push, the other fails):** the surviving
+old side keeps serving while the new side runs — a version mismatch across
+the API contract. Every screen has explicit error states, so mismatch shows
+as degraded UI, not corruption. Recovery: revert-and-push to converge both;
+don't fix-forward one platform by hand.
+
+**State and config are outside git rollbacks:**
+- The volume is untouched by any rollback. If a newer backend wrote workspace
+  state an older one cannot parse, reset the synthetic workspace
+  (`railway ssh -- rm -rf /data/isaac-workspace`); it re-seeds. Demo state is
+  disposable by design.
+- Env vars (key, CORS origins) do not roll back with code — after any
+  rollback, confirm both platforms' env vars still match the running code.
+
 ## Environment variables
 
 | Variable | Where | Value | Purpose |
