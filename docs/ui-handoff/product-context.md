@@ -81,7 +81,7 @@ Concretely:
   changed?", documentation search). It gives *leads*, never *truth* — it cannot validate, export, or fill a
   scientific value. See [`../architecture.md`](../architecture.md) "The two planes".
 - **CI.** GitHub Actions runs the test suite, the synthetic demo, official validation, advisory warnings,
-  and the audit on every push/PR. 105 tests pass, including one that the truth core never imports Graphify.
+  and the audit on every push/PR. 137 Python tests pass, including one that the truth core never imports Graphify.
 - **Reproducible demo.** `.venv/bin/python scripts/run_synthetic_demo.py` regenerates the committed sample
   record byte-for-byte: 26 evidenced fields, 5 blockers refused-then-answered, PASS against v1.05, audit
   clean (`evidence 26/26`), exactly 1 advisory warning. See [`../demo.md`](../demo.md).
@@ -118,7 +118,7 @@ Graphify authorize anything. Those boundaries are load-bearing and are covered i
 - Official schema validation and an evidence audit (schema re-check + sidecar coverage).
 - A non-gating advisory soft-warning seam (`--warnings`, two local heuristic codes).
 - An optional Graphify memory/query plane with a routed query cookbook and a freshness helper.
-- 105 passing tests and green CI on the full synthetic pipeline.
+- 137 passing Python tests and green CI on the full synthetic pipeline.
 
 ## Current limitations (honest)
 

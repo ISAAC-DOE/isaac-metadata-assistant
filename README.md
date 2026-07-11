@@ -26,7 +26,7 @@ Working prototype (`v0.1.0`), **synthetic data only**.
 - One-command reproducible synthetic XANES demo (regenerates the committed sample byte-for-byte).
 - `isaac` CLI (`validate` / `export` / `audit` / `new-id`) and five Claude authoring skills.
 - Non-gating portal-style advisory soft-warnings (local seam) and a Graphify memory/query reviewer demo.
-- 105 passing tests, including a test that the truth plane never imports Graphify.
+- 137 passing Python tests (plus 66 frontend tests), including a test that the truth plane never imports Graphify.
 
 **Not built yet**
 
@@ -71,7 +71,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                                   # 105 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # 137 tests: golden records validate, transform is gated
 ```
 
 **Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →

@@ -92,7 +92,7 @@ The **audit** ties 1–2 together on stored records (schema-valid + every sideca
   answered; **3** assets resolved from human answers; validates against v1.05; clean audit
   (`evidence 26/26`, 0 dangling); **byte-identical reproducible**.
 - **Quotable poster numbers:** 1 official record · 26 evidenced fields · 5 blockers refused-then-answered
-  · 10 official golden records validating · **105 passing tests** · 0 audit failures.
+  · 10 official golden records validating · **137 passing Python tests** · 0 audit failures.
 - A test asserts every scientific value traces to a committed synthetic fixture (nothing fabricated).
 
 ## 7. Limitations (state honestly)

@@ -101,7 +101,7 @@ On the synthetic XANES-family campaign, the pipeline produces official record
 - Every scientific value traces to a committed synthetic fixture — a test asserts nothing is fabricated.
 
 *(Numbers to quote on a poster: 1 official record, 26 evidenced fields, 5 blockers correctly refused
-then human-answered, 105 passing tests, 0 audit failures.)*
+then human-answered, 137 passing Python tests, 0 audit failures.)*
 
 ## 7. Limitations (state these honestly)
 
