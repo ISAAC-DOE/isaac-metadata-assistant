@@ -34,7 +34,8 @@ Working prototype (`v0.1.0`), **synthetic data only**.
 - Single XANES / characterization path only (no electrochemistry / theory / simulation domains).
 - No upstream portal-validator parity — `portal/validation.py` is not vendored.
 - The scientific-consistency review agent (`review.py`) is a placeholder interface, not implemented.
-- No web app, no MCP server.
+- No production web app — the Phase 19 UI (`apps/api` + `apps/web`) is a local, synthetic-only
+  prototype, not deployed anywhere (see [`docs/ui-local-dev.md`](docs/ui-local-dev.md)). No MCP server.
 
 ## Two layers
 
@@ -113,7 +114,7 @@ on every push and pull request to `main`: install, tests, synthetic demo, offici
 | [`docs/data-governance.md`](docs/data-governance.md) | **Data-governance rules** — synthetic vs. real, what may/may not be committed, LLM-on-real-data policy |
 | [`docs/intake.md`](docs/intake.md) · [`docs/extraction.md`](docs/extraction.md) | Data-governance intake plan · extraction strategy |
 | [`docs/github-settings.md`](docs/github-settings.md) | Suggested GitHub repo settings (description, topics, visibility, branch protection) |
-| [`docs/ui-handoff/README.md`](docs/ui-handoff/README.md) | UI design handoff package — product context, screens, design direction, and the Claude Design brief (no UI is built yet) |
+| [`docs/ui-handoff/README.md`](docs/ui-handoff/README.md) | UI design handoff package — product context, screens, design direction, and the Claude Design brief (the design source behind the Phase 19 prototype) |
 | [`docs/ui-local-dev.md`](docs/ui-local-dev.md) | Local UI prototype — install, run, browser demo walkthrough, tests/build, honest limitations |
 
 ## Local UI Prototype (Phase 19)
@@ -216,7 +217,9 @@ Next steps are **mentor-gated** — see [`docs/mentor-brief.md`](docs/mentor-bri
 - deeper Graphify query-layer behavioral simulation (a docs-invariant + graph-freshness test tier now exists);
 - upstream portal-validator parity (vendoring the real `portal/validation.py`);
 - a second synthetic domain beyond XANES (electrochemistry / performance) — **back burner** for now;
-- a web UI — **back burner**; if built, likely **before** the second domain;
+- web UI iteration beyond the Phase 19 local synthetic-only prototype
+  ([`docs/ui-local-dev.md`](docs/ui-local-dev.md)) — production hardening and any deployment are
+  not planned;
 - and — **only with explicit written data-governance approval** — a real / sanitized-data pilot.
 
 Whether the evidence sidecar becomes an official ISAAC convention (vs. an assistant-only audit
