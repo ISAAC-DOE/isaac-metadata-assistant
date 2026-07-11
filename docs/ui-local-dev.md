@@ -92,7 +92,7 @@ curl -s http://127.0.0.1:8000/api/health
 
 The backend persists UI state (experiments, exported records/sidecars) under a
 workspace directory **outside the repo**: `ISAAC_UI_WORKSPACE` (default
-`/tmp/isaac-ui-workspace`). It is a thin wrapper — 16 endpoints under
+`/tmp/isaac-ui-workspace`). It is a thin wrapper — 17 endpoints under
 `/api/*` — that imports and calls the same `isaac_records` functions the CLI
 uses (`draft_validator`, `official`, `export`, `audit`); it adds no validation
 logic of its own. See `apps/api/README.md` for the full endpoint list and
