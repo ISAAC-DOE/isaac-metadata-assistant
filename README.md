@@ -114,6 +114,18 @@ on every push and pull request to `main`: install, tests, synthetic demo, offici
 | [`docs/intake.md`](docs/intake.md) · [`docs/extraction.md`](docs/extraction.md) | Data-governance intake plan · extraction strategy |
 | [`docs/github-settings.md`](docs/github-settings.md) | Suggested GitHub repo settings (description, topics, visibility, branch protection) |
 | [`docs/ui-handoff/README.md`](docs/ui-handoff/README.md) | UI design handoff package — product context, screens, design direction, and the Claude Design brief (no UI is built yet) |
+| [`docs/ui-local-dev.md`](docs/ui-local-dev.md) | Local UI prototype — install, run, browser demo walkthrough, tests/build, honest limitations |
+
+## Local UI Prototype (Phase 19)
+
+`apps/api` (FastAPI) and `apps/web` (React + Vite + TypeScript) are a **local-first,
+synthetic-only web UI prototype** over the deterministic core — **not production**. It calls the
+same `isaac_records` functions the CLI uses, so verdicts are byte-identical; real/private data
+upload is not approved and is blocked (`403`) by the backend; portal submission and
+portal-validator parity are not built; Graphify's UI chip is status-only, never a validator; and
+the assistant panel is advisory with static, source-labeled sample answers (freeform chat is not
+wired). See **[`docs/ui-local-dev.md`](docs/ui-local-dev.md)** for setup, the browser demo
+walkthrough, and the full list of honest limitations.
 
 Contributor & security policy: [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md).
 

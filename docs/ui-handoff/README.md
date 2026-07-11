@@ -4,6 +4,13 @@ This is the entry point for a future **Claude Design** session on the ISAAC Meta
 orients a designer who has never seen the project, then points to the rest of the package for depth.
 **No UI is being built now.** This is a design handoff only.
 
+> **Implementation note (Phase 19):** a first implementation of this handoff now exists under
+> `apps/` — a local-first, synthetic-only prototype (FastAPI backend + React/Vite/TypeScript
+> frontend) covering the six core screens of the workflow below. It is a prototype, not
+> production, and does not change the status of this document: this package remains the design
+> source, and the rest of this file (below) describes the original handoff scope, not the build.
+> See [`docs/ui-local-dev.md`](../ui-local-dev.md) for how to run it and its honest limitations.
+
 ## What ISAAC Metadata Assistant is
 
 ISAAC Metadata Assistant turns scattered experiment metadata (campaign spreadsheets, file listings,
