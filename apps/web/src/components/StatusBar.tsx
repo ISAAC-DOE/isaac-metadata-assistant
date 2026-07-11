@@ -15,6 +15,8 @@ interface StatusBarProps {
   coveragePendingNote?: string; // e.g. "not exported yet"
   // Alternative content when a screen shows an explanatory note instead of signals (S4).
   note?: string;
+  // Right-tail slot, e.g. the GraphStatusChip (memory plane; advisory, never gates).
+  graph?: ReactNode;
 }
 
 /**
@@ -31,6 +33,7 @@ export function StatusBar({
   validationPendingNote,
   coveragePendingNote,
   note,
+  graph,
 }: StatusBarProps) {
   const segments: ReactNode[] = [];
 
@@ -111,7 +114,10 @@ export function StatusBar({
           {seg}
         </span>
       ))}
-      <span className="statusbar-right">local · offline · no telemetry</span>
+      <span className="statusbar-tail">
+        {graph}
+        <span className="statusbar-right">local · offline · no telemetry</span>
+      </span>
     </footer>
   );
 }

@@ -465,6 +465,39 @@ def get_source_preview(experiment_id: str, source: str = ""):
         )
 
 
+# --- 13b. artifacts (exported record + sidecar content, read-only) ------------
+
+
+@router.get("/experiments/{experiment_id}/artifacts")
+def get_artifacts(experiment_id: str):
+    """Return the written record + sidecar JSON for an exported experiment.
+
+    Read-only: it reads ONLY the two files ``export`` wrote inside the workspace,
+    resolved from the record id (never a query-controlled path). A non-exported
+    experiment returns null payloads (200, not an error); an unknown id is 404.
+    """
+    exp = ws.load_experiment(experiment_id)
+    if exp is None:
+        return _not_found(experiment_id)
+    if not exp.exported():
+        return {
+            "record": None,
+            "sidecar": None,
+            "record_path": None,
+            "sidecar_path": None,
+        }
+    record_path = exp.record_path()
+    sidecar_path = exp.sidecar_path()
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    return {
+        "record": record,
+        "sidecar": sidecar,
+        "record_path": str(record_path),
+        "sidecar_path": str(sidecar_path),
+    }
+
+
 # --- 14. graph status (memory plane) ------------------------------------------
 
 

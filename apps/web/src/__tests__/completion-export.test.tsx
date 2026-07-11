@@ -9,6 +9,7 @@ import {
   exportConflict,
   exportReadyRoutes,
   exportSuccess,
+  exportedReadyRoutes,
   pendingResponse,
   seriesDemoValue,
   stubFetchRoutes,
@@ -242,6 +243,25 @@ describe('S6 · Ready to Export (live)', () => {
     expect(container.textContent).not.toMatch(
       /(submit(ted)?|send|sent) to .{0,12}portal|portal[- ](validated|accepted|certified)/i,
     );
+  });
+
+  it('a fresh load of an exported record can View + Download via the artifacts endpoint', async () => {
+    stubFetchRoutes(exportedReadyRoutes('demo'));
+    const { container, findByText, getByText } = renderAt('/record/demo/export');
+
+    // the real post-export verdict shows (no re-export needed)
+    expect(await findByText('Valid against official ISAAC schema v1.05.')).toBeInTheDocument();
+    expect(container.querySelectorAll('.artifact')).toHaveLength(2);
+
+    // View/Download are live from the fetched content, not disabled with a "session" hint
+    const viewJson = getByText('View JSON').closest('button')!;
+    expect(viewJson).not.toBeDisabled();
+    expect(getByText(/Loaded from the immutable record \+ sidecar on disk/)).toBeInTheDocument();
+
+    // View opens the real fetched record JSON
+    fireEvent.click(viewJson);
+    await waitFor(() => expect(container.querySelector('.artifact-modal')).not.toBeNull());
+    expect(container.querySelector('.artifact-modal-body')!.textContent).toContain('asset_id');
   });
 
   it('a 409 (already exported) shows a clear immutability message, never an overwrite', async () => {

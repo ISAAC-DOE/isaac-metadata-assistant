@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { bundleRoutes, experimentSummary, stubFetchRoutes } from '../test/apiFixtures';
+import {
+  bundleRoutes,
+  evidenceBundleRoutes,
+  experimentSummary,
+  stubFetchRoutes,
+} from '../test/apiFixtures';
 
 function renderAt(path: string) {
   return render(
@@ -45,9 +50,10 @@ describe('router-level smoke: each surface renders without error', () => {
     expect(await findByText('Answer 5 Questions to Finish This Record')).toBeInTheDocument();
   });
 
-  it('S5 · Evidence & File Preview (/record/:id/evidence)', () => {
-    const { getByText } = renderAt('/record/demo/evidence');
-    expect(getByText('Direct Fields')).toBeInTheDocument();
+  it('S5 · Evidence & File Preview (/record/:id/evidence) — live evidence trail', async () => {
+    stubFetchRoutes(evidenceBundleRoutes('demo'));
+    const { findByText } = renderAt('/record/demo/evidence');
+    expect(await findByText('Direct Fields')).toBeInTheDocument();
   });
 
   it('S6 · Ready to Export (/record/:id/export) — live gate state', async () => {

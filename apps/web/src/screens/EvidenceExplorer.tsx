@@ -1,49 +1,106 @@
 import './screens.css';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
 import { SourcePreview } from '../components/SourcePreview';
+import { AssistantPanel } from '../components/AssistantPanel';
+import { GraphStatusChip } from '../components/GraphStatusChip';
 import { StatusBar } from '../components/StatusBar';
-// S5 stays on committed synthetic sample data this slice; a later task wires it live.
+import { LoadingPanel, BackendDown } from '../components/FetchStates';
+import { LABELS } from '../lib/labels';
+import { api } from '../lib/api';
+import { useFetch } from '../lib/useFetch';
 import {
-  DEMO_SIDECAR_FILE,
-  EVIDENCE_DIRECT_TOTAL,
-  SIDECAR_ENTRY_SNIPPET,
-  SIDECAR_META,
-  SOURCE_PROVENANCE,
-  getEvidenceTrail,
-  getSourcePreview,
-} from '../lib/mock';
-
-const RECORD_JSON = `{
-  "asset_id": "processing_notebook",
-  "content_role": "processing_script",
-  "uri": "ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb",
-  "media_type": "application/x-ipynb+json",
-  "sha256": "c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345"
-}`;
-
-const SIDECAR_JSON = `"assets:processing_notebook": [
-  { "source_type": "file_listing", "source_file": "raw_scan_listing.txt",
-    "locator": "line 16, ssrl-archive://BL15-2/2099_run_000/notebooks/",
-    "quote": "xanes_reduction_v2.ipynb" },
-  { "source_type": "user_confirmation",
-    "question": "What is the sha256 of the processing notebook?",
-    "answer": "c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345",
-    "timestamp": "2099-03-05T21:00:00Z" }
-]`;
+  citedLinesForEntry,
+  evidenceEntriesToTrail,
+  primarySourceFile,
+  provenanceFor,
+} from '../lib/adapt';
+import { ASSISTANT_SAMPLES } from '../lib/assistant';
+import type { EvidenceBundle } from '../lib/types';
 
 /**
- * S5 · Evidence & File Preview — "where did this come from?" answered in-app. The
- * Evidence Trail drives a live source preview with the cited line highlighted.
- * The sidecar is labeled an assistant convention throughout.
+ * S5 · Evidence & File Preview — "where did this come from?" answered in-app,
+ * live from the record bundle (evidence trail + exported record/sidecar +
+ * cited-source previews + memory freshness). Selecting an evidence entry drives
+ * the source preview, highlighting the exact cited line in the real fixture. The
+ * sidecar is labeled an assistant convention throughout. Handles both pre-export
+ * (draft evidence, no written artifacts) and post-export (real sidecar) honestly.
  */
 export function EvidenceExplorer() {
-  const entries = getEvidenceTrail();
-  const preview = getSourcePreview();
-  const [selectedKey, setSelectedKey] = useState('assets:processing_notebook');
+  const { id = '' } = useParams();
+  const bundle = useFetch(() => api.getEvidenceBundle(id), [id]);
+
+  if (bundle.status !== 'data') {
+    return (
+      <AppShell
+        variant="record"
+        topBar={<TopBar variant="record" title={LABELS.screenEvidence} />}
+        mainPad="pad"
+      >
+        {bundle.status === 'loading' ? (
+          <LoadingPanel label="Loading the evidence trail from the local backend…" />
+        ) : (
+          <BackendDown error={bundle.error} onRetry={bundle.reload} />
+        )}
+      </AppShell>
+    );
+  }
+
+  return <LoadedEvidence data={bundle.data} />;
+}
+
+function LoadedEvidence({ data }: { data: EvidenceBundle }) {
+  const { detail, evidence, artifacts, graph, sourcePreviews } = data;
+
+  const entries = useMemo(() => evidenceEntriesToTrail(evidence), [evidence]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selected = entries.find((e) => e.key === selectedKey) ?? entries[0];
+
+  const exported = artifacts.sidecar !== null;
+  const directTotal = entries.filter((e) => !e.namespaced).length;
+
+  const sidecar = artifacts.sidecar;
+  const meta = sidecar
+    ? {
+        schema_version: String(sidecar.schema_version ?? '1.05'),
+        generated_utc: String(sidecar.generated_utc ?? ''),
+      }
+    : { schema_version: '1.05 · target', generated_utc: 'not exported yet' };
+
+  const recordJson = artifacts.record ? JSON.stringify(artifacts.record, null, 2) : null;
+  const sidecarJson = sidecar ? JSON.stringify(sidecar, null, 2) : null;
+
+  if (!selected) {
+    return (
+      <AppShell
+        variant="record"
+        topBar={<TopBar variant="record" title={detail.title} />}
+        mainPad="pad"
+      >
+        <p className="preview-empty" role="note">
+          No evidence has been recorded for this experiment yet.
+        </p>
+      </AppShell>
+    );
+  }
+
+  const sourceFile = primarySourceFile(selected);
+  const preview = sourceFile ? (sourcePreviews[sourceFile] ?? null) : null;
+  const citedLines = citedLinesForEntry(selected, sourceFile);
+  const provenance = provenanceFor(selected);
+
+  const rightPanel = (
+    <aside className="record-right narrow" aria-label="Assistant">
+      <AssistantPanel
+        reply={ASSISTANT_SAMPLES.evidence.reply}
+        prompts={ASSISTANT_SAMPLES.evidence.prompts}
+        freshness={graph.status}
+      />
+    </aside>
+  );
 
   return (
     <AppShell
@@ -51,36 +108,42 @@ export function EvidenceExplorer() {
       topBar={
         <TopBar
           variant="record"
-          title="CuO / Cu K-edge XANES — evidence"
-          filename={DEMO_SIDECAR_FILE}
+          title={detail.title}
+          filename={
+            exported && detail.record_id
+              ? `${detail.record_id}.evidence.json`
+              : `draft · ${detail.id}`
+          }
+          stateChip={exported ? 'exported' : 'draft'}
         />
       }
       sidebar={
         <EvidenceTrailPanel
           entries={entries}
-          directTotal={EVIDENCE_DIRECT_TOTAL}
-          selectedKey={selectedKey}
+          directTotal={directTotal}
+          selectedKey={selected.key}
           onSelect={setSelectedKey}
-          meta={SIDECAR_META}
+          meta={meta}
         />
       }
+      rightPanel={rightPanel}
       statusBar={
         <StatusBar
-          phase="Evidence Trail"
+          phase={LABELS.evidenceTrail}
           phaseDot="idle"
-          note="sidecar · assistant convention, not an official ISAAC standard · 26 direct paths counted in coverage"
+          note={`sidecar · assistant convention, not an official ISAAC standard · ${directTotal} direct paths counted in coverage`}
+          graph={<GraphStatusChip status={graph.status} note={graph.note} />}
         />
       }
       mainPad="none"
     >
       <SourcePreview
-        entryTitle={selected.label}
-        entryKey={selected.key}
-        provenance={SOURCE_PROVENANCE}
+        entry={selected}
+        provenance={provenance}
         preview={preview}
-        recordJson={RECORD_JSON}
-        sidecarJson={SIDECAR_JSON}
-        sidecarEntry={SIDECAR_ENTRY_SNIPPET}
+        citedLines={citedLines}
+        recordJson={recordJson}
+        sidecarJson={sidecarJson}
       />
     </AppShell>
   );

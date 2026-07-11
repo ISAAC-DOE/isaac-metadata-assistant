@@ -246,6 +246,26 @@ export const graphStatusMissing = {
   note: 'Graphify is a memory/query layer — never a validator.',
 };
 
+export const graphStatusFresh = {
+  status: 'fresh',
+  plane: 'memory',
+  note: 'Graphify is a memory/query layer — never a validator.',
+};
+
+export const graphStatusStale = {
+  status: 'stale',
+  plane: 'memory',
+  note: 'Graphify is a memory/query layer — never a validator.',
+};
+
+/** Artifacts before export: all null (200, not an error). */
+export const artifactsNull = {
+  record: null,
+  sidecar: null,
+  record_path: null,
+  sidecar_path: null,
+};
+
 export const demoRunDraftOnly = {
   experiment_id: EXP_ID,
   steps: [
@@ -277,6 +297,7 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
     [`GET ${base}/evidence`]: { body: evidenceResponse },
+    [`GET ${base}/artifacts`]: { body: artifactsNull },
     'GET /api/graph/status': { body: graphStatusMissing },
   };
 }
@@ -359,6 +380,154 @@ export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRo
     [`POST ${base}/validate`]: { body: validateReadyDryRun },
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
+    [`GET ${base}/artifacts`]: { body: artifactsNull },
+    'GET /api/graph/status': { body: graphStatusMissing },
+  };
+}
+
+// --- S5 evidence explorer fixtures (post-export) -------------------------
+
+const NOTEBOOK_SHA = 'c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345';
+
+/** Live /evidence for an exported experiment: dotted CSV field + asset + implicit. */
+export const evidenceExported = {
+  evidence: [
+    {
+      path: 'system.technique',
+      value: 'HERFD-XAS',
+      status: 'verified',
+      evidence: [
+        {
+          source_type: 'spreadsheet',
+          source_file: 'mock_campaign.csv',
+          locator: "Sheet 'Campaign Info', field=technique",
+          quote: 'HERFD-XAS',
+        },
+      ],
+    },
+    {
+      path: 'assets:processing_notebook',
+      value: NOTEBOOK_SHA,
+      status: 'verified',
+      evidence: [
+        {
+          source_type: 'file_listing',
+          source_file: 'raw_scan_listing.txt',
+          locator: 'line 16, ssrl-archive://BL15-2/2099_run_000/notebooks/',
+          quote: 'xanes_reduction_v2.ipynb',
+        },
+        {
+          source_type: 'user_confirmation',
+          question:
+            'What is the sha256 of ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb?',
+          answer: NOTEBOOK_SHA,
+          timestamp: '2099-03-05T21:00:00Z',
+        },
+      ],
+    },
+    {
+      path: 'implicit:absorbing_element',
+      value: 'Cu',
+      status: 'inferred',
+      evidence: [
+        {
+          source_type: 'derivation',
+          rule: 'absorbing element = sole non-oxygen element in sample.material.formula',
+        },
+      ],
+    },
+  ],
+};
+
+export const artifactsExported = {
+  record: {
+    record_id: EXP_ID,
+    schema_version: '1.05',
+    system: { technique: 'HERFD-XAS' },
+    assets: [{ asset_id: 'processing_notebook', sha256: NOTEBOOK_SHA }],
+  },
+  sidecar: {
+    record_id: EXP_ID,
+    schema_version: '1.05',
+    generated_utc: '2099-03-05T21:05:48Z',
+    evidence: { 'system.technique': [{ source_type: 'spreadsheet' }] },
+  },
+  record_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.json`,
+  sidecar_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.evidence.json`,
+};
+
+export const sourcePreviewListing = {
+  name: 'raw_scan_listing.txt',
+  media_type: 'text/plain',
+  lines: [
+    { n: 14, text: '2099-03-15 09:20 1.1M raw/scan_0045.dat' },
+    { n: 15, text: '2099-03-15 09:21 240K notebooks/' },
+    { n: 16, text: '2099-03-15 09:22  88K notebooks/xanes_reduction_v2.ipynb' },
+    { n: 17, text: '2099-03-15 09:40 240K reduced/CuO2_merged.xdi' },
+    { n: 18, text: '2099-03-15 09:41 4.0K raw/ (directory)' },
+  ],
+  cited_lines: [16, 18],
+};
+
+export const sourcePreviewCsv = {
+  name: 'mock_campaign.csv',
+  media_type: 'text/csv',
+  lines: [
+    { n: 1, text: 'section,field,value' },
+    { n: 2, text: 'Campaign Info,technique,HERFD-XAS' },
+  ],
+  cited_lines: [],
+};
+
+/** S5 routes for an exported experiment (evidence + artifacts + both source previews). */
+export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+  const base = `/api/experiments/${encodeURIComponent(id)}`;
+  return {
+    [`GET ${base}`]: {
+      body: {
+        ...experimentDetail,
+        id,
+        status: 'done',
+        pending_count: 0,
+        exported: true,
+        record_id: id,
+        artifact_refs: {
+          record_path: artifactsExported.record_path,
+          sidecar_path: artifactsExported.sidecar_path,
+        },
+      },
+    },
+    [`GET ${base}/evidence`]: { body: evidenceExported },
+    [`GET ${base}/artifacts`]: { body: { ...artifactsExported, record: { ...artifactsExported.record, record_id: id }, sidecar: { ...artifactsExported.sidecar, record_id: id } } },
+    [`GET ${base}/source-preview?source=mock_campaign.csv`]: { body: sourcePreviewCsv },
+    [`GET ${base}/source-preview?source=raw_scan_listing.txt`]: { body: sourcePreviewListing },
+    'GET /api/graph/status': { body: graphStatusMissing },
+  };
+}
+
+/** S6 routes for an ALREADY-exported experiment on fresh load (View/Download live). */
+export function exportedReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+  const base = `/api/experiments/${encodeURIComponent(id)}`;
+  return {
+    [`GET ${base}`]: {
+      body: {
+        ...experimentDetail,
+        id,
+        status: 'done',
+        pending_count: 0,
+        exported: true,
+        record_id: id,
+        artifact_refs: {
+          record_path: artifactsExported.record_path,
+          sidecar_path: artifactsExported.sidecar_path,
+        },
+      },
+    },
+    [`GET ${base}/pending`]: { body: { pending: [] } },
+    [`POST ${base}/validate`]: { body: validateExported },
+    [`POST ${base}/audit`]: { body: auditExported },
+    [`GET ${base}/warnings`]: { body: warningsDryRun },
+    [`GET ${base}/artifacts`]: { body: artifactsExported },
     'GET /api/graph/status': { body: graphStatusMissing },
   };
 }

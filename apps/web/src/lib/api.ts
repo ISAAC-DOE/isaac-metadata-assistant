@@ -12,8 +12,10 @@
 
 import type {
   ApiAnswersResponse,
+  ApiArtifactsResponse,
   ApiAuditResponse,
   ApiDraftResponse,
+  ApiEvidenceEntry,
   ApiEvidenceResponse,
   ApiExperimentDetail,
   ApiExperimentSummary,
@@ -21,10 +23,12 @@ import type {
   ApiGraphStatus,
   ApiHealth,
   ApiPendingResponse,
+  ApiSourcePreview,
   ApiDemoRunResponse,
   ApiUploadsBlocked,
   ApiValidateResult,
   ApiWarningsResponse,
+  EvidenceBundle,
   ExportReadinessBundle,
   RecordBundle,
 } from './types';
@@ -143,6 +147,19 @@ export const api = {
     return (await getJson<ApiEvidenceResponse>(`/experiments/${enc(id)}/evidence`)).evidence;
   },
 
+  // S5 — one cited source fixture, read-only (governance-gated to the allowlist).
+  getSourcePreview(id: string, source: string): Promise<ApiSourcePreview> {
+    return getJson<ApiSourcePreview>(
+      `/experiments/${enc(id)}/source-preview?source=${enc(source)}`,
+    );
+  },
+
+  // S5/S6 — the written record + sidecar content (null before export). Read-only:
+  // the backend reads only the two files export wrote inside the workspace.
+  getArtifacts(id: string): Promise<ApiArtifactsResponse> {
+    return getJson<ApiArtifactsResponse>(`/experiments/${enc(id)}/artifacts`);
+  },
+
   // Memory plane (advisory only; never gates).
   getGraphStatus(): Promise<ApiGraphStatus> {
     return getJson<ApiGraphStatus>('/graph/status');
@@ -178,17 +195,51 @@ export const api = {
 
   // S6 — the export readiness view: the three signals + the gate inputs, each
   // from its own endpoint, fetched together but kept separate (never merged).
+  // `artifacts` lets View/Download work on a fresh load of an exported record.
   async getExportReadiness(id: string): Promise<ExportReadinessBundle> {
-    const [detail, pending, validate, audit, warnings, graph] = await Promise.all([
+    const [detail, pending, validate, audit, warnings, graph, artifacts] =
+      await Promise.all([
+        this.getExperiment(id),
+        this.getPending(id),
+        this.validate(id),
+        this.audit(id),
+        this.getWarnings(id),
+        this.getGraphStatus(),
+        this.getArtifacts(id),
+      ]);
+    return { detail, pending, validate, audit, warnings, graph, artifacts };
+  },
+
+  // S5 — the evidence explorer: the trail + the exported artifacts + memory
+  // freshness, then the previews of every source fixture the evidence cites
+  // (fetched after so we know which fixtures are actually referenced).
+  async getEvidenceBundle(id: string): Promise<EvidenceBundle> {
+    const [detail, evidence, artifacts, graph] = await Promise.all([
       this.getExperiment(id),
-      this.getPending(id),
-      this.validate(id),
-      this.audit(id),
-      this.getWarnings(id),
+      this.getEvidence(id),
+      this.getArtifacts(id),
       this.getGraphStatus(),
     ]);
-    return { detail, pending, validate, audit, warnings, graph };
+    const files = citedSourceFiles(evidence);
+    const previews = await Promise.all(files.map((f) => this.getSourcePreview(id, f)));
+    const sourcePreviews: Record<string, ApiSourcePreview> = {};
+    files.forEach((f, i) => {
+      sourcePreviews[f] = previews[i];
+    });
+    return { detail, evidence, artifacts, graph, sourcePreviews };
   },
 } as const;
+
+/** Distinct source-file basenames referenced by any evidence entry (order kept). */
+function citedSourceFiles(evidence: ApiEvidenceEntry[]): string[] {
+  const seen: string[] = [];
+  for (const entry of evidence) {
+    for (const ev of entry.evidence ?? []) {
+      const file = ev.source_file;
+      if (file && !seen.includes(file)) seen.push(file);
+    }
+  }
+  return seen;
+}
 
 export type IsaacApi = typeof api;

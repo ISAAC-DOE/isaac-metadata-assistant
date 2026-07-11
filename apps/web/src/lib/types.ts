@@ -164,11 +164,15 @@ export type AssistantSource = 'schema' | 'audit' | 'git' | 'graph' | 'files';
 export interface AssistantMessage {
   text: string; // sentence case; never renders PASS/FAIL
   answeredFrom: AssistantSource;
+  sourceDoc?: string; // the doc the sample answer is grounded in, e.g. "docs/…md"
 }
 
 export interface SuggestedPrompt {
   text: string;
   answeredFrom: AssistantSource;
+  // The STATIC, source-labeled sample answer shown when this prompt is clicked.
+  // A guided prompt with no answer stays display-only (never fabricates one).
+  answer?: AssistantMessage;
 }
 
 // --- export artifacts (S6) --------------------------------------------
@@ -355,6 +359,24 @@ export interface ApiEvidenceResponse {
   evidence: ApiEvidenceEntry[];
 }
 
+// GET /source-preview?source= — the real fixture lines + the line numbers cited
+// by the experiment's evidence (empty for a fixture cited by field, not by line).
+export interface ApiSourcePreview {
+  name: string;
+  media_type: string;
+  lines: SourcePreviewLine[];
+  cited_lines: number[];
+}
+
+// GET /artifacts — the written record + sidecar JSON for an exported experiment;
+// all null for a non-exported experiment (200, not an error).
+export interface ApiArtifactsResponse {
+  record: Record<string, unknown> | null;
+  sidecar: Record<string, unknown> | null;
+  record_path: string | null;
+  sidecar_path: string | null;
+}
+
 export interface ApiDemoStep {
   name: string; // build_draft | validate_draft | apply_answers | export_draft
   detail: string;
@@ -426,7 +448,9 @@ export interface ApiExportResponse {
 }
 
 // Everything S6 needs to render the three signals + the export gate, fetched
-// concurrently but kept as separate values (signals never merged).
+// concurrently but kept as separate values (signals never merged). `artifacts`
+// carries the written record + sidecar so View/Download work on a fresh load of
+// an already-exported experiment (null before export).
 export interface ExportReadinessBundle {
   detail: ApiExperimentDetail;
   pending: ApiPendingItem[];
@@ -434,4 +458,16 @@ export interface ExportReadinessBundle {
   audit: ApiAuditResponse;
   warnings: ApiWarningsResponse;
   graph: ApiGraphStatus;
+  artifacts: ApiArtifactsResponse;
+}
+
+// Everything S5 needs: the evidence trail, the exported record/sidecar content
+// (null pre-export), the previews of every cited source fixture, and the memory
+// freshness. Source previews are keyed by fixture basename.
+export interface EvidenceBundle {
+  detail: ApiExperimentDetail;
+  evidence: ApiEvidenceEntry[];
+  artifacts: ApiArtifactsResponse;
+  graph: ApiGraphStatus;
+  sourcePreviews: Record<string, ApiSourcePreview>;
 }

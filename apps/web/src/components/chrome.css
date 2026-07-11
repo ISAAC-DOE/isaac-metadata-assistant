@@ -290,12 +290,48 @@
 .statusbar-advisory {
   color: var(--advisory-text);
 }
-.statusbar-right {
+.statusbar-tail {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+.statusbar-right {
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-quaternary);
 }
+
+/* ---- GraphStatusChip (memory plane · advisory, never a validator) --- */
+.graph-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--cover-border);
+  background: var(--cover-bg);
+  color: var(--cover-text);
+  font-size: 11px;
+}
+.graph-chip svg { color: var(--text-slate); flex: none; }
+.graph-chip-plane {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-quaternary);
+}
+.graph-chip.graph-stale {
+  background: var(--advisory-bg);
+  border-color: var(--advisory-border);
+  color: var(--advisory-text);
+}
+.graph-chip.graph-stale svg { color: var(--advisory-icon); }
+.graph-chip.graph-missing {
+  background: var(--surface-subtle);
+  border-color: var(--border);
+  color: var(--text-tertiary);
+}
+.graph-chip.graph-missing svg { color: var(--text-quaternary); }
 
 /* ---- GovernanceBanner ---------------------------------------------- */
 .gov-banner {

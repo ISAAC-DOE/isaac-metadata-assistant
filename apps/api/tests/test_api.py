@@ -367,6 +367,44 @@ def test_source_preview_rejects_traversal_and_absolute(client):
         assert resp.status_code == 400
 
 
+# --- 13b. artifacts -----------------------------------------------------------
+
+
+def test_artifacts_before_export_are_null(client):
+    exp_id = _seed_id(client)
+    body = client.get(f"/api/experiments/{exp_id}/artifacts").json()
+    assert body == {
+        "record": None,
+        "sidecar": None,
+        "record_path": None,
+        "sidecar_path": None,
+    }
+
+
+def test_artifacts_after_export_returns_record_and_sidecar(client):
+    exp_id = _seed_id(client)
+    _complete_seed(client, exp_id)
+    export = client.post(f"/api/experiments/{exp_id}/export").json()
+    body = client.get(f"/api/experiments/{exp_id}/artifacts").json()
+    # Both payloads present and distinct.
+    assert body["record"] is not None and body["sidecar"] is not None
+    assert body["record"] != body["sidecar"]
+    assert body["record"]["record_id"] == exp_id
+    assert body["sidecar"]["record_id"] == exp_id
+    # Read from disk matches exactly what export returned/wrote.
+    assert body["record"] == export["record"]
+    assert body["sidecar"] == export["sidecar"]
+    # The two artifacts live at distinct paths.
+    assert body["record_path"] != body["sidecar_path"]
+    assert body["record_path"].endswith(f"{exp_id}.json")
+    assert body["sidecar_path"].endswith(f"{exp_id}.evidence.json")
+
+
+def test_artifacts_unknown_id_404(client):
+    resp = client.get("/api/experiments/NOPE/artifacts")
+    assert resp.status_code == 404
+
+
 # --- 14. graph status ---------------------------------------------------------
 
 

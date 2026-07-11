@@ -109,7 +109,7 @@ function LoadedExport({
   onRefresh: () => void;
 }) {
   const navigate = useNavigate();
-  const { detail, pending, validate, audit, warnings, graph } = data;
+  const { detail, pending, validate, audit, warnings, graph, artifacts } = data;
   const [phase, setPhase] = useState<ExportPhase>({ name: 'idle' });
   const [viewing, setViewing] = useState<null | 'record' | 'sidecar'>(null);
 
@@ -164,6 +164,26 @@ function LoadedExport({
 
   // --- the three signals, each from its own endpoint (never merged) -----------
   const inSession = phase.name === 'done' ? phase.artifacts : null;
+  // On a FRESH load of an already-exported record, the content comes from the
+  // read-only /artifacts endpoint so View/Download work without re-exporting.
+  const freshArtifacts =
+    !inSession && detail.exported && artifacts.record && artifacts.sidecar
+      ? {
+          record: artifacts.record,
+          sidecar: artifacts.sidecar,
+          recordPath: artifacts.record_path ?? '',
+          sidecarPath: artifacts.sidecar_path ?? '',
+        }
+      : null;
+  // The artifacts to View/Download: this session's export, else the fetched files.
+  const viewArtifacts = inSession
+    ? {
+        record: inSession.record,
+        sidecar: inSession.sidecar,
+        recordPath: inSession.recordPath,
+        sidecarPath: inSession.sidecarPath,
+      }
+    : freshArtifacts;
   const realValidation: ValidationResult | null = inSession
     ? inSession.validation
     : detail.exported && !validate.dry_run
@@ -272,16 +292,16 @@ function LoadedExport({
               <div className="artifact-row">
                 <ArtifactCard
                   artifact={{ kind: 'record', path: recordPath, verdict: 'pass' }}
-                  onView={inSession ? () => setViewing('record') : undefined}
+                  onView={viewArtifacts ? () => setViewing('record') : undefined}
                   onDownload={
-                    inSession ? () => download(inSession.record, recordPath) : undefined
+                    viewArtifacts ? () => download(viewArtifacts.record, recordPath) : undefined
                   }
                 />
                 <ArtifactCard
                   artifact={{ kind: 'sidecar', path: sidecarPath, pathCount: coverageTotal }}
-                  onView={inSession ? () => setViewing('sidecar') : undefined}
+                  onView={viewArtifacts ? () => setViewing('sidecar') : undefined}
                   onDownload={
-                    inSession ? () => download(inSession.sidecar, sidecarPath) : undefined
+                    viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarPath) : undefined
                   }
                 />
               </div>
@@ -301,10 +321,16 @@ function LoadedExport({
                 </span>
               </div>
 
-              {!inSession && (
+              {!inSession && viewArtifacts && (
                 <p className="artifact-hint">
-                  Open or download the artifact content from the session where it was exported, or
-                  read them from the workspace paths above.
+                  Loaded from the immutable record + sidecar on disk (read-only) — View and
+                  Download show the exact written content.
+                </p>
+              )}
+              {!viewArtifacts && (
+                <p className="artifact-hint">
+                  The artifact content could not be read from the workspace — open the files at the
+                  paths above.
                 </p>
               )}
             </>
@@ -424,7 +450,7 @@ function LoadedExport({
         </div>
       )}
 
-      {viewing && inSession && (
+      {viewing && viewArtifacts && (
         <div
           className="artifact-modal-backdrop"
           role="dialog"
@@ -450,7 +476,7 @@ function LoadedExport({
             </div>
             <pre className="artifact-modal-body mono">
               {JSON.stringify(
-                viewing === 'record' ? inSession.record : inSession.sidecar,
+                viewing === 'record' ? viewArtifacts.record : viewArtifacts.sidecar,
                 null,
                 2,
               )}

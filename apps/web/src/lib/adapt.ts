@@ -21,13 +21,16 @@ import type {
   BlockerKind,
   CompletionInputType,
   DraftField,
+  EvidenceTrailEntry,
   ExperimentSummary,
   ExperimentTrailing,
+  FieldEvidence,
   FieldGroupData,
   PendingBlocker,
   QueueGroup,
   QueueGroupKey,
   RunnerStage,
+  SourceType,
   ValidationResult,
 } from './types';
 
@@ -246,6 +249,104 @@ export function answerValuePreview(kind: BlockerKind, value: unknown): string {
     return `${String(d.value)}${unit}${sigma}`;
   }
   return 'structured value';
+}
+
+// --- S5 evidence trail --------------------------------------------------
+// The live /evidence entries (dotted JSON-paths + namespaced assets:/descriptors:/
+// implicit: keys) become the browsable Evidence Trail. Values, statuses and the
+// raw citations are server-derived and passed through faithfully — nothing here
+// invents provenance. Namespaced keys are explicitly outside the N/N coverage set.
+
+const _LINE_RE = /\bline\s+(\d+)\b/i;
+
+function distinctSourceTypes(evidence: FieldEvidence[]): SourceType[] {
+  const seen: SourceType[] = [];
+  for (const ev of evidence) {
+    if (ev.source_type && !seen.includes(ev.source_type)) seen.push(ev.source_type);
+  }
+  return seen;
+}
+
+function trailLabel(path: string, namespaced: boolean): string {
+  if (!namespaced) return path; // dotted JSON-paths render mono, verbatim
+  const name = path.slice(path.indexOf(':') + 1);
+  return titleCase(name.replace(/_/g, ' '));
+}
+
+function trailValue(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/** Map the live /evidence entries onto the browsable Evidence Trail entries. */
+export function evidenceEntriesToTrail(entries: ApiEvidenceEntry[]): EvidenceTrailEntry[] {
+  return entries.map((e) => {
+    const namespaced = e.path.includes(':');
+    const evidence = e.evidence ?? [];
+    return {
+      key: e.path,
+      label: trailLabel(e.path, namespaced),
+      value: trailValue(e.value),
+      status: e.status,
+      sourceTypes: distinctSourceTypes(evidence),
+      evidence,
+      namespaced,
+      // A dotted path with no resolved value is a dangling/integrity case; every
+      // path we render here resolves, so "resolved" tracks a non-null value.
+      resolved: e.value !== null && e.value !== undefined,
+    };
+  });
+}
+
+/** The source fixture a trail entry's evidence cites (first one with a file). */
+export function primarySourceFile(entry: EvidenceTrailEntry): string | undefined {
+  return entry.evidence.find((ev) => ev.source_file)?.source_file;
+}
+
+/**
+ * 1-based line numbers the entry's evidence cites in `sourceFile`. A spreadsheet
+ * fixture cites by field (no line), so it yields none — expected, not an error.
+ */
+export function citedLinesForEntry(entry: EvidenceTrailEntry, sourceFile?: string): number[] {
+  if (!sourceFile) return [];
+  const lines = new Set<number>();
+  for (const ev of entry.evidence) {
+    if (ev.source_file !== sourceFile) continue;
+    const m = _LINE_RE.exec(ev.locator ?? '');
+    if (m) lines.add(Number(m[1]));
+  }
+  return [...lines].sort((a, b) => a - b);
+}
+
+const _SOURCE_PHRASE: Record<string, string> = {
+  spreadsheet: 'read from the campaign spreadsheet (spreadsheet)',
+  file_listing: 'identified in the archive listing (file_listing)',
+  derivation: 'derived by a documented rule (derivation)',
+  user_confirmation: 'confirmed by you (user_confirmation)',
+};
+
+/**
+ * A short, honest provenance sentence from the entry's source types — never a
+ * verdict. When machine evidence and a human confirmation both appear, it names
+ * that both are preserved side by side (the machine lead and the human confirm).
+ */
+export function provenanceFor(entry: EvidenceTrailEntry): string {
+  const phrases = entry.sourceTypes
+    .map((st) => _SOURCE_PHRASE[st] ?? `cited from ${st}`)
+    .filter(Boolean);
+  if (phrases.length === 0) return 'This entry carries no citation.';
+  const joined =
+    phrases.length === 1
+      ? `${phrases[0][0].toUpperCase()}${phrases[0].slice(1)}.`
+      : `${phrases[0][0].toUpperCase()}${phrases[0].slice(1)}, and ${phrases
+          .slice(1)
+          .join(', and ')}.`;
+  const hasBoth =
+    entry.sourceTypes.includes('user_confirmation') &&
+    entry.sourceTypes.some((st) => st !== 'user_confirmation');
+  return hasBoth
+    ? `${joined} Two sources are preserved side by side — the machine lead and the human confirmation.`
+    : joined;
 }
 
 // --- S2 demo runner -----------------------------------------------------
