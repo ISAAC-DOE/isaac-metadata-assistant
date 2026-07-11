@@ -14,13 +14,17 @@ import type {
   ApiEvidenceEntry,
   ApiExperimentStatus,
   ApiExperimentSummary,
+  ApiPendingItem,
   ApiValidateResult,
   ApiWarningsResponse,
   AuditResult,
+  BlockerKind,
+  CompletionInputType,
   DraftField,
   ExperimentSummary,
   ExperimentTrailing,
   FieldGroupData,
+  PendingBlocker,
   QueueGroup,
   QueueGroupKey,
   RunnerStage,
@@ -164,6 +168,84 @@ export function toAuditResult(a: ApiAuditResponse): AuditResult {
 
 export function toAdvisoryResult(w: ApiWarningsResponse): AdvisoryResult {
   return { advisory: true, gating: false, warnings: w.warnings };
+}
+
+// --- S4 completion blockers ---------------------------------------------
+// The /pending items (id / kind / question / about / demo_answer) become the
+// render blockers. Asset blockers take a pasted sha256; series/descriptor carry
+// a structured value the user can only *confirm* from the labeled demo answer —
+// the UI never lets the assistant type a scientific value.
+
+const KIND_LABEL: Record<string, string> = {
+  asset: 'Asset Hash',
+  series: 'Reduced Spectrum',
+  descriptor: 'Scientific Descriptor',
+  edge: 'Absorption Edge',
+};
+
+// Sentence-case helper copy (never a scientific value) explaining each blocker
+// and reinforcing the no-guessing contract.
+const KIND_CONTEXT: Record<string, string> = {
+  asset:
+    'An asset can only be cited once it carries a hash. Paste the sha256 — the system will never generate this value for you.',
+  series:
+    'A structured reduced-spectrum value the system will never generate for you. Confirm the synthetic demo value, or leave it honestly missing.',
+  descriptor:
+    'A structured scientific descriptor the system will never generate for you. Confirm the synthetic demo value, or leave it honestly missing.',
+};
+
+function inputTypeForKind(kind: BlockerKind): CompletionInputType {
+  if (kind === 'asset') return 'hash';
+  if (kind === 'series' || kind === 'descriptor') return 'structured';
+  return 'text';
+}
+
+function pathTokenFor(item: ApiPendingItem): string {
+  if (item.kind === 'asset') return item.about || item.id; // the asset uri
+  if (item.kind === 'series') return 'measurement.series';
+  if (item.kind === 'descriptor') return 'descriptors';
+  return item.about || item.id;
+}
+
+/** Map one live /pending item onto the render blocker the GuidedPrompt consumes. */
+export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
+  return {
+    id: item.id,
+    kind: item.kind,
+    question: item.question,
+    label: KIND_LABEL[item.kind] ?? titleCase(String(item.kind)),
+    path: pathTokenFor(item),
+    about: item.about ?? undefined,
+    context: KIND_CONTEXT[item.kind],
+    inputType: inputTypeForKind(item.kind),
+    demo_answer: item.demo_answer
+      ? { value: item.demo_answer.value, label: item.demo_answer.label }
+      : undefined,
+  };
+}
+
+/**
+ * A short, honest one-line summary of a confirmed/demo value — never invented.
+ * A pasted sha256 is truncated; a structured series/descriptor object is
+ * summarized from its own fields.
+ */
+export function answerValuePreview(kind: BlockerKind, value: unknown): string {
+  if (typeof value === 'string') {
+    return value.length > 20 ? `${value.slice(0, 16)}…` : value;
+  }
+  if (kind === 'series' && Array.isArray(value)) {
+    const first = value[0] as { series_id?: string; channels?: unknown[] } | undefined;
+    const id = first?.series_id ?? 'series';
+    const channels = Array.isArray(first?.channels) ? first.channels.length : 0;
+    return `${id} · ${channels} channel${channels === 1 ? '' : 's'}`;
+  }
+  if (kind === 'descriptor' && value && typeof value === 'object') {
+    const d = value as { value?: unknown; unit?: string; uncertainty?: { sigma?: unknown } };
+    const unit = d.unit ? ` ${d.unit}` : '';
+    const sigma = d.uncertainty?.sigma != null ? ` · σ ${d.uncertainty.sigma}` : '';
+    return `${String(d.value)}${unit}${sigma}`;
+  }
+  return 'structured value';
 }
 
 // --- S2 demo runner -----------------------------------------------------

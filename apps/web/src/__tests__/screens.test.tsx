@@ -39,9 +39,10 @@ describe('router-level smoke: each surface renders without error', () => {
     expect(await findByText('5 Fields Need Your Confirmation')).toBeInTheDocument();
   });
 
-  it('S4 · Complete Missing Fields (/record/:id/complete)', () => {
-    const { getByText } = renderAt('/record/demo/complete');
-    expect(getByText('Answer 5 Questions to Finish This Record')).toBeInTheDocument();
+  it('S4 · Complete Missing Fields (/record/:id/complete) — live pending', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { findByText } = renderAt('/record/demo/complete');
+    expect(await findByText('Answer 5 Questions to Finish This Record')).toBeInTheDocument();
   });
 
   it('S5 · Evidence & File Preview (/record/:id/evidence)', () => {
@@ -49,9 +50,10 @@ describe('router-level smoke: each surface renders without error', () => {
     expect(getByText('Direct Fields')).toBeInTheDocument();
   });
 
-  it('S6 · Ready to Export (/record/:id/export)', () => {
-    const { getByText } = renderAt('/record/demo/export');
-    expect(getByText('Valid against official ISAAC schema v1.05.')).toBeInTheDocument();
+  it('S6 · Ready to Export (/record/:id/export) — live gate state', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { findByText } = renderAt('/record/demo/export');
+    expect(await findByText('5 fields still block export')).toBeInTheDocument();
   });
 
   it('Project Memory (/memory) is a separate destination', () => {

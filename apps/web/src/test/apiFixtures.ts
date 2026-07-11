@@ -280,3 +280,85 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     'GET /api/graph/status': { body: graphStatusMissing },
   };
 }
+
+// --- S4/S6 completion + export fixtures ----------------------------------
+
+const SYNTH_SHA = 'c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345';
+
+/** POST /answers response after confirming the processing-notebook sha256. */
+export const answersAfterNotebook = {
+  pending: pendingResponse.pending.slice(1),
+  status: 'needs_attention',
+};
+
+/** Structured demo answer for the series blocker (shape-faithful, synthetic). */
+export const seriesDemoValue = [
+  {
+    series_id: 'averaged_spectrum',
+    independent_variables: [{ name: 'incident_energy', unit: 'eV', values: [8970, 9000] }],
+    channels: [
+      { name: 'absorption', unit: 'mu_normalized', role: 'primary_signal', values: [0.02, 1.05] },
+    ],
+  },
+];
+
+/** Dry-run validation that WOULD pass (0 pending, pre-export). */
+export const validateReadyDryRun = {
+  ok: true,
+  errors: [],
+  schema: 'ISAAC v1.05',
+  dry_run: true,
+};
+
+/** Real (post-export) validation of the written record. */
+export const validateExported = {
+  ok: true,
+  errors: [],
+  schema: 'ISAAC v1.05',
+  dry_run: false,
+};
+
+export const auditExported = {
+  records: [
+    {
+      name: `${EXP_ID}.json`,
+      ok: true,
+      schema_errors: [],
+      evidence_present: 26,
+      evidence_expected: 26,
+    },
+  ],
+  text: `${EXP_ID}.json: schema OK, evidence 26/26`,
+};
+
+export const exportSuccess = {
+  ok: true,
+  draft_report: { ok: true, errors: [], warnings: [] },
+  official_report: { ok: true, errors: [] },
+  record: { record_id: EXP_ID, schema_version: '1.05', assets: [{ sha256: SYNTH_SHA }] },
+  sidecar: { record_id: EXP_ID, schema_version: '1.05', evidence: {} },
+  record_id: EXP_ID,
+  artifact_refs: {
+    record_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.json`,
+    sidecar_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.evidence.json`,
+  },
+};
+
+export const exportConflict = {
+  error: 'record_exists',
+  message: `${EXP_ID}.json already exists; records are immutable.`,
+  record_id: EXP_ID,
+};
+
+/** S6 routes: all blockers resolved, dry-run would pass, nothing exported yet. */
+export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+  const base = `/api/experiments/${encodeURIComponent(id)}`;
+  return {
+    [`GET ${base}`]: { body: { ...experimentDetail, id, status: 'ready_to_export', pending_count: 0 } },
+    [`GET ${base}/pending`]: { body: { pending: [] } },
+    [`POST ${base}/validate`]: { body: validateReadyDryRun },
+    [`POST ${base}/audit`]: { body: auditNotExported },
+    [`GET ${base}/warnings`]: { body: warningsDryRun },
+    'GET /api/graph/status': { body: graphStatusMissing },
+  };
+}

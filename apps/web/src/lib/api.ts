@@ -11,11 +11,13 @@
  */
 
 import type {
+  ApiAnswersResponse,
   ApiAuditResponse,
   ApiDraftResponse,
   ApiEvidenceResponse,
   ApiExperimentDetail,
   ApiExperimentSummary,
+  ApiExportResponse,
   ApiGraphStatus,
   ApiHealth,
   ApiPendingResponse,
@@ -23,6 +25,7 @@ import type {
   ApiUploadsBlocked,
   ApiValidateResult,
   ApiWarningsResponse,
+  ExportReadinessBundle,
   RecordBundle,
 } from './types';
 
@@ -104,6 +107,25 @@ export const api = {
     return (await getJson<ApiPendingResponse>(`/experiments/${enc(id)}/pending`)).pending;
   },
 
+  // S4 — apply a confirmed answer to one blocker. The user has explicitly
+  // confirmed (`confirmed_by_user:true`); the backend recomputes and returns the
+  // remaining pending list + fresh status. Never called for "leave missing".
+  submitAnswer(
+    id: string,
+    answersById: Record<string, unknown>,
+  ): Promise<ApiAnswersResponse> {
+    return postJson<ApiAnswersResponse>(`/experiments/${enc(id)}/answers`, {
+      answers: answersById,
+      confirmed_by_user: true,
+    });
+  },
+
+  // S6 — the schema-gated export. A 409 (record already exists) is thrown as an
+  // ApiError(status:409); records are immutable and never overwritten.
+  exportRecord(id: string): Promise<ApiExportResponse> {
+    return postJson<ApiExportResponse>(`/experiments/${enc(id)}/export`);
+  },
+
   // The three signals — each fetched from its own endpoint, never merged here.
   validate(id: string): Promise<ApiValidateResult> {
     return postJson<ApiValidateResult>(`/experiments/${enc(id)}/validate`);
@@ -152,6 +174,20 @@ export const api = {
         this.getGraphStatus(),
       ]);
     return { detail, groups, pending, validate, audit, warnings, evidence, graph };
+  },
+
+  // S6 — the export readiness view: the three signals + the gate inputs, each
+  // from its own endpoint, fetched together but kept separate (never merged).
+  async getExportReadiness(id: string): Promise<ExportReadinessBundle> {
+    const [detail, pending, validate, audit, warnings, graph] = await Promise.all([
+      this.getExperiment(id),
+      this.getPending(id),
+      this.validate(id),
+      this.audit(id),
+      this.getWarnings(id),
+      this.getGraphStatus(),
+    ]);
+    return { detail, pending, validate, audit, warnings, graph };
   },
 } as const;
 

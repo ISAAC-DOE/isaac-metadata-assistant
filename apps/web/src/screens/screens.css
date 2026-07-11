@@ -163,3 +163,192 @@
   color: var(--text-tertiary);
   word-break: break-all;
 }
+
+/* ---- S4 live completion states -------------------------------------- */
+.completion-done {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.completion-done .dot { margin-top: 4px; }
+.completion-done-title { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.completion-done-text {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.completion-actions {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+}
+/* "That answer could not be applied" — calm, factual, nothing changed. */
+.completion-submit-error {
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+/* Every remaining question honestly left missing — a note, not an error. */
+.completion-allskipped {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.completion-allskipped-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.completion-allskipped-text {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* "Left honestly missing" list — visibly non-penalized (neutral, never red). */
+.leftmissing { margin-top: 16px; }
+.leftmissing-eyebrow { margin-bottom: 8px; }
+.leftmissing-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+}
+.leftmissing-row + .leftmissing-row { margin-top: 8px; }
+.leftmissing-q { color: var(--text-secondary); }
+.leftmissing-answer {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  color: var(--action);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ---- S6 pre-export gate / readiness --------------------------------- */
+.preexport-gate {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.preexport-icon { color: var(--text-tertiary); flex: none; margin-top: 2px; }
+.preexport-title { font-size: 14.5px; font-weight: 600; color: var(--text-heading); }
+.preexport-text {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.preexport-ready {
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.preexport-ready-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.preexport-ready-title { font-size: 14.5px; font-weight: 600; color: var(--text-heading); }
+.preexport-ready-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.preexport-ready .btn { margin-top: 12px; }
+.preexport-blocked { padding: 16px 18px; }
+.preexport-blocked h3 { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.preexport-errors {
+  margin: 10px 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.preexport-error-path { color: var(--text-muted); }
+.preexport-coverage { padding: 14px 16px; }
+.preexport-coverage-title { font-size: 13px; font-weight: 600; color: var(--text-slate); }
+.coverage-loading { padding: 14px 16px; font-size: 12.5px; color: var(--text-tertiary); }
+
+/* Immutability / refused-export message (factual, never an overwrite path). */
+.export-conflict {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px 16px;
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-inner);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.export-conflict svg { flex: none; margin-top: 1px; color: var(--text-slate); }
+
+.artifact-hint {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* View JSON modal — read-only artifact content, fetched from the export call. */
+.artifact-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 32, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  padding: 40px;
+}
+.artifact-modal {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.artifact-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.artifact-modal-title { font-size: 13.5px; font-weight: 600; color: var(--text-heading); }
+.artifact-modal-sub { font-weight: 400; font-size: 11.5px; color: var(--text-tertiary); }
+.artifact-modal-body {
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+}

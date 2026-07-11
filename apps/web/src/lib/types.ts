@@ -65,17 +65,15 @@ export interface FieldGroupData {
 // --- pending blockers (draft.pending[] → S4 questions) ----------------
 
 export type BlockerKind = 'asset' | 'series' | 'descriptor' | 'edge' | string;
-export type CompletionInputType = 'hash' | 'enum' | 'number';
+// hash → paste a sha256 (asset). structured → confirm a synthetic demo value the
+// user can't type (series/descriptor objects). text → a short free-text value.
+export type CompletionInputType = 'hash' | 'text' | 'structured';
 
 export interface DemoAnswer {
-  value: string;
+  // A sha256 string for assets; a structured object (series list / descriptor
+  // dict) for series/descriptor blockers — sent back verbatim on confirm.
+  value: unknown;
   label: string; // "Demo answer (synthetic)"
-}
-
-export interface AssistantSuggestion {
-  text: string;
-  answeredFrom: AssistantSource;
-  locator?: string; // e.g. raw_scan_listing.txt · L12
 }
 
 export interface PendingBlocker {
@@ -87,18 +85,7 @@ export interface PendingBlocker {
   about?: string;
   context?: string; // sentence-case context for the question card
   inputType: CompletionInputType;
-  enumOptions?: string[]; // from schema/isaac_record_v1.json
-  unit?: string;
   demo_answer?: DemoAnswer;
-  suggestion?: AssistantSuggestion;
-}
-
-// A confirmed answer (stored as user_confirmation evidence).
-export interface CompletionAnswer {
-  id: string;
-  label: string;
-  storedValue: string;
-  confirmed: boolean;
 }
 
 // --- the three signals (never merged) ---------------------------------
@@ -311,7 +298,8 @@ export interface ApiDraftResponse {
 }
 
 export interface ApiDemoAnswer {
-  value: string;
+  // string sha256 for assets; structured object for series/descriptor blockers.
+  value: unknown;
   label: string; // "Demo answer (synthetic)"
 }
 
@@ -407,5 +395,43 @@ export interface RecordBundle {
   audit: ApiAuditResponse;
   warnings: ApiWarningsResponse;
   evidence: ApiEvidenceEntry[];
+  graph: ApiGraphStatus;
+}
+
+// POST /answers response — the recomputed pending list + fresh derived status.
+export interface ApiAnswersResponse {
+  pending: ApiPendingItem[];
+  status: ApiExperimentStatus;
+}
+
+export interface ApiReportError {
+  path?: string;
+  where?: string;
+  message: string;
+}
+
+// POST /export response (export_result_to_dict + route enrichment). On success
+// `ok:true` with record/sidecar/record_id/artifact_refs; on a gated failure
+// `ok:false` with a flat `errors` list. A 409 (already exported) is thrown as an
+// ApiError(status:409) by the client and never reaches this shape.
+export interface ApiExportResponse {
+  ok: boolean;
+  draft_report: { ok: boolean; errors: ApiReportError[]; warnings: ApiReportError[] };
+  official_report: { ok: boolean; errors: { path: string; message: string }[] } | null;
+  record?: Record<string, unknown>;
+  sidecar?: Record<string, unknown>;
+  errors?: { path: string; message: string }[];
+  record_id?: string;
+  artifact_refs?: { record_path: string; sidecar_path: string };
+}
+
+// Everything S6 needs to render the three signals + the export gate, fetched
+// concurrently but kept as separate values (signals never merged).
+export interface ExportReadinessBundle {
+  detail: ApiExperimentDetail;
+  pending: ApiPendingItem[];
+  validate: ApiValidateResult;
+  audit: ApiAuditResponse;
+  warnings: ApiWarningsResponse;
   graph: ApiGraphStatus;
 }

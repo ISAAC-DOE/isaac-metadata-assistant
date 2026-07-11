@@ -311,3 +311,34 @@
 }
 .upcoming-label { font-size: 13px; color: var(--text-secondary); }
 .upcoming-path { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-quaternary); }
+
+/* The labeled synthetic demo value — visibly the assistant's, never prefilled. */
+.guided-suggestion-value {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  word-break: break-all;
+}
+.guided-suggestion-use {
+  margin-top: 10px;
+}
+/* Structured blockers: helper copy + the staged-for-confirm state. */
+.guided-structured-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+  margin-bottom: 10px;
+}
+.guided-staged {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  margin-bottom: 10px;
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-token);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.guided-staged .mono { font-size: 11.5px; color: var(--text-muted); }

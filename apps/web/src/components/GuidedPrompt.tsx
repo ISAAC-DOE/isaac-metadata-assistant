@@ -1,23 +1,54 @@
 import './assistant.css';
-import { MessageSquare, CircleHelp } from './icons';
+import { useState } from 'react';
+import { Check, CircleHelp, MessageSquare } from './icons';
 import { LABELS } from '../lib/labels';
+import { answerValuePreview } from '../lib/adapt';
 import type { PendingBlocker } from '../lib/types';
 
 interface GuidedPromptProps {
   blocker: PendingBlocker;
   index: number; // 0-based
   total: number;
-  onConfirm?: (value: string) => void;
-  onDontKnow?: () => void;
+  onConfirm: (value: unknown) => void;
+  onDontKnow: () => void;
+  submitting?: boolean;
 }
 
 /**
- * The one-question-at-a-time completion card — propose → confirm → evidence, the
- * single place AI touches a value. The input is the primary control; the
- * assistant suggestion is subordinate indigo, labeled "— not a value" and never
- * a prefilled answer. "I don't know" is calm and legitimate, never red.
+ * The one-question-at-a-time completion card — the single place AI touches a
+ * value, made a two-step human-owned gate. The assistant never prefills a
+ * scientific value: an asset hash is pasted by the user; a structured
+ * series/descriptor value can only be *confirmed* from the labeled synthetic
+ * demo answer ("Demo answer (synthetic) — not a value until you confirm"),
+ * never auto-filled and never auto-submitted. "I don't know" is calm and
+ * legitimate — it writes nothing and leaves the field honestly missing.
+ *
+ * Rendered with `key={blocker.id}` by the parent, so its input state resets
+ * cleanly for each question.
  */
-export function GuidedPrompt({ blocker, index, total, onConfirm, onDontKnow }: GuidedPromptProps) {
+export function GuidedPrompt({
+  blocker,
+  index,
+  total,
+  onConfirm,
+  onDontKnow,
+  submitting = false,
+}: GuidedPromptProps) {
+  const [text, setText] = useState(''); // pasted value for hash/text inputs
+  const [staged, setStaged] = useState(false); // structured: demo value accepted for confirm
+
+  const demo = blocker.demo_answer;
+  const structured = blocker.inputType === 'structured';
+
+  const canConfirm = structured
+    ? staged && demo !== undefined
+    : text.trim().length > 0;
+
+  const handleConfirm = () => {
+    if (!canConfirm) return;
+    onConfirm(structured ? demo!.value : text.trim());
+  };
+
   return (
     <section className="guided" aria-label={`Question ${index + 1} of ${total}`}>
       <div className="guided-head">
@@ -33,66 +64,99 @@ export function GuidedPrompt({ blocker, index, total, onConfirm, onDontKnow }: G
       <h2 className="guided-question">{blocker.question}</h2>
       {blocker.context && <p className="guided-context">{blocker.context}</p>}
 
-      {blocker.suggestion && (
-        <div className="guided-suggestion">
+      {demo && (
+        <div className="guided-suggestion" aria-label="Demo answer suggestion">
           <div className="guided-suggestion-head">
             <MessageSquare size={14} strokeWidth={2} aria-hidden="true" />
-            {LABELS.assistantSuggestion}
-            <span className="guided-suggestion-not">— not a value</span>
+            {demo.label}
+            <span className="guided-suggestion-not">— not a value until you confirm</span>
           </div>
-          <p className="guided-suggestion-text">{blocker.suggestion.text}</p>
-          <div className="guided-suggestion-src">
-            <span className="answered-from">answered from: {blocker.suggestion.answeredFrom}</span>
-            {blocker.suggestion.locator && (
-              <span className="guided-suggestion-loc">{blocker.suggestion.locator}</span>
-            )}
-          </div>
+          <p className="guided-suggestion-value mono">
+            {typeof demo.value === 'string'
+              ? demo.value
+              : answerValuePreview(blocker.kind, demo.value)}
+          </p>
+          <button
+            type="button"
+            className="btn btn-secondary guided-suggestion-use"
+            onClick={() => (structured ? setStaged(true) : setText(String(demo.value)))}
+          >
+            {structured ? 'Use This Value' : 'Use This Suggestion'}
+          </button>
         </div>
       )}
 
       <div className="guided-field">
-        <div className="guided-field-label">
-          {blocker.inputType === 'hash' ? 'sha256' : blocker.inputType === 'number' ? 'number' : blocker.path}
-        </div>
-        <div className="guided-input-row">
-          {blocker.inputType === 'enum' ? (
-            <select className="input" aria-label={blocker.label} defaultValue="">
-              <option value="" disabled>
-                Select a value…
-              </option>
-              {blocker.enumOptions?.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          ) : blocker.inputType === 'number' ? (
-            <>
+        {structured ? (
+          <>
+            <div className="guided-field-label">{blocker.path}</div>
+            {demo ? (
+              staged ? (
+                <div className="guided-staged" role="status">
+                  <Check size={14} strokeWidth={2.4} aria-hidden="true" />
+                  Ready to confirm{' '}
+                  <span className="mono">{answerValuePreview(blocker.kind, demo.value)}</span>
+                </div>
+              ) : (
+                <p className="guided-structured-hint">
+                  A structured value from the reduced pipeline. Confirm the synthetic demo value
+                  above, or leave it honestly missing — the assistant will not type it for you.
+                </p>
+              )
+            ) : (
+              <p className="guided-structured-hint">
+                No synthetic value is available for this field — leave it honestly missing.
+              </p>
+            )}
+            {demo && (
+              <div className="guided-input-row">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleConfirm}
+                  disabled={!canConfirm || submitting}
+                >
+                  {submitting ? 'Confirming…' : LABELS.actionConfirm}
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="guided-field-label">
+              {blocker.inputType === 'hash' ? 'sha256' : blocker.path}
+            </div>
+            <div className="guided-input-row">
               <input
                 className="input input-mono"
                 type="text"
-                inputMode="decimal"
-                placeholder="value"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={
+                  blocker.inputType === 'hash' ? 'paste 64-character sha256…' : 'type a value…'
+                }
                 aria-label={blocker.label}
               />
-              {blocker.unit && <span className="guided-unit">{blocker.unit} · σ</span>}
-            </>
-          ) : (
-            <input
-              className="input input-mono"
-              type="text"
-              placeholder="paste 64-character sha256…"
-              aria-label={blocker.label}
-            />
-          )}
-          <button type="button" className="btn btn-primary" onClick={() => onConfirm?.('')}>
-            {LABELS.actionConfirm}
-          </button>
-        </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirm}
+                disabled={!canConfirm || submitting}
+              >
+                {submitting ? 'Confirming…' : LABELS.actionConfirm}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="guided-footer">
-        <button type="button" className="guided-dontknow" onClick={onDontKnow}>
+        <button
+          type="button"
+          className="guided-dontknow"
+          onClick={onDontKnow}
+          disabled={submitting}
+        >
           <CircleHelp size={15} strokeWidth={2} aria-hidden="true" />
           {LABELS.actionDontKnow}
         </button>
