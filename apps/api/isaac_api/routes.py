@@ -129,7 +129,7 @@ def demo_run(body: dict = Body(default=None)) -> dict:
     steps.append(
         {
             "name": "validate_draft",
-            "detail": f"draft ok: {draft_report.ok}",
+            "detail": f"draft ok: {str(draft_report.ok).lower()}",
             "ok": draft_report.ok,
         }
     )

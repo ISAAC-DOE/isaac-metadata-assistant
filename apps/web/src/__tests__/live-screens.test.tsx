@@ -101,7 +101,7 @@ describe('S2 · Load Materials', () => {
     expect(await findByText('Build Draft')).toBeInTheDocument();
     expect(getByText('26 evidenced fields, 5 pending blocker(s)')).toBeInTheDocument();
     expect(getByText('Validate Draft')).toBeInTheDocument();
-    expect(getByText('draft ok: True')).toBeInTheDocument();
+    expect(getByText('draft ok: true')).toBeInTheDocument();
 
     // paused honestly + a route into the new record
     expect(getByText('paused for your input · your turn')).toBeInTheDocument();

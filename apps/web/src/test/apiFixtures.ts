@@ -274,7 +274,7 @@ export const demoRunDraftOnly = {
       detail: '26 evidenced fields, 5 pending blocker(s)',
       ok: true,
     },
-    { name: 'validate_draft', detail: 'draft ok: True', ok: true },
+    { name: 'validate_draft', detail: 'draft ok: true', ok: true },
   ],
   status: 'needs_attention',
 };

@@ -368,7 +368,7 @@ function LoadedExport({
             <section className="preexport-ready" role="status">
               <div className="preexport-ready-head">
                 <span className="dot dot-ready" aria-hidden="true" />
-                <span className="preexport-ready-title">Ready to export</span>
+                <span className="preexport-ready-title">{LABELS.groupReady}</span>
                 <span className="preexport-ready-note">dry-run · would validate</span>
               </div>
               <p className="preexport-text">

@@ -110,7 +110,7 @@
 .ready-heading .ready-note { font-size: 12px; color: var(--text-tertiary); }
 .artifact-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
   margin-bottom: 14px;
 }
