@@ -5,7 +5,6 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
 import { SourcePreview } from '../components/SourcePreview';
-import { AssistantPanel } from '../components/AssistantPanel';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { StatusBar } from '../components/StatusBar';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
@@ -18,7 +17,6 @@ import {
   primarySourceFile,
   provenanceFor,
 } from '../lib/adapt';
-import { ASSISTANT_SAMPLES } from '../lib/assistant';
 import type { EvidenceBundle } from '../lib/types';
 
 /**
@@ -90,17 +88,9 @@ function LoadedEvidence({ data }: { data: EvidenceBundle }) {
   const sourceFile = primarySourceFile(selected);
   const preview = sourceFile ? (sourcePreviews[sourceFile] ?? null) : null;
   const citedLines = citedLinesForEntry(selected, sourceFile);
+  // Per the S5 screen spec, there is NO dedicated assistant panel here — the
+  // provenance copy carries the explanation.
   const provenance = provenanceFor(selected);
-
-  const rightPanel = (
-    <aside className="record-right narrow" aria-label="Assistant">
-      <AssistantPanel
-        reply={ASSISTANT_SAMPLES.evidence.reply}
-        prompts={ASSISTANT_SAMPLES.evidence.prompts}
-        freshness={graph.status}
-      />
-    </aside>
-  );
 
   return (
     <AppShell
@@ -126,7 +116,6 @@ function LoadedEvidence({ data }: { data: EvidenceBundle }) {
           meta={meta}
         />
       }
-      rightPanel={rightPanel}
       statusBar={
         <StatusBar
           phase={LABELS.evidenceTrail}

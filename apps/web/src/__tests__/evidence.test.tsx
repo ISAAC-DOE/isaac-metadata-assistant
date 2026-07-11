@@ -23,7 +23,7 @@ afterEach(() => {
 describe('S5 · Evidence & File Preview (live)', () => {
   it('renders the live evidence trail: direct + namespaced entries in two sections', async () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
-    const { findByText, getByText } = renderAt('/record/demo/evidence');
+    const { container, findByText, getByText } = renderAt('/record/demo/evidence');
 
     // both coverage sections, from /evidence
     expect(await findByText('Direct Fields')).toBeInTheDocument();
@@ -45,6 +45,10 @@ describe('S5 · Evidence & File Preview (live)', () => {
         selector: '.trail-flag',
       }),
     ).toBeInTheDocument();
+
+    // per the S5 screen spec there is NO dedicated assistant panel here —
+    // the provenance copy carries the explanation (design authority, D1 review)
+    expect(container.querySelector('.assistant')).toBeNull();
   });
 
   it('selecting an entry drives the preview and highlights the cited line', async () => {
