@@ -38,7 +38,12 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS" or request.url.path in _OPEN_PATHS:
             return await call_next(request)
         supplied = request.headers.get("authorization", "")
-        if supplied and secrets.compare_digest(supplied, self._expected):
+        # Compare as bytes: compare_digest raises TypeError on non-ASCII str,
+        # and header values arrive latin-1 decoded — bytes keeps malformed
+        # input a clean constant-time False (401) instead of a 500.
+        if supplied and secrets.compare_digest(
+            supplied.encode("utf-8"), self._expected.encode("utf-8")
+        ):
             return await call_next(request)
         return JSONResponse(
             status_code=401,

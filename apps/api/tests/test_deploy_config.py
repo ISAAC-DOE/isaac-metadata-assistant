@@ -109,3 +109,28 @@ def test_401_carries_cors_headers(tmp_path, monkeypatch):
     res = client.get("/api/experiments", headers={"Origin": "http://localhost:5173"})
     assert res.status_code == 401
     assert res.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_auth_rejects_non_ascii_header_with_401(tmp_path, monkeypatch):
+    """Malformed/non-ASCII credentials must fail closed as 401, never 500.
+
+    Sent as raw latin-1 bytes: httpx refuses non-ASCII *str* header values
+    client-side, but on the wire header values are bytes and starlette decodes
+    them latin-1 — so this is exactly what dispatch() sees in production.
+    """
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    client = _make_client(tmp_path, monkeypatch)
+    res = client.get(
+        "/api/experiments",
+        headers={b"Authorization": "Bearer caf\xe9".encode("latin-1")},
+    )
+    assert res.status_code == 401
+
+
+def test_auth_rejects_near_miss_header_forms(tmp_path, monkeypatch):
+    """Pin the exact-match contract the frontend header must satisfy."""
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    client = _make_client(tmp_path, monkeypatch)
+    for bad in ("bearer demo-secret", "Bearer  demo-secret"):
+        res = client.get("/api/experiments", headers={"Authorization": bad})
+        assert res.status_code == 401
