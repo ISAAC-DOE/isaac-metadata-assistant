@@ -5,7 +5,8 @@ any route. Adds no validation logic and never touches the truth plane
 (``isaac_records``). Auth is DISABLED when ``ISAAC_UI_API_KEY`` is unset or
 empty, so local dev needs zero configuration.
 
-Kept open on purpose:
+When enabled, this covers every route in the app — including FastAPI's auto
+``/docs`` and ``/openapi.json`` — not just ``/api/*``. Kept open on purpose:
 - ``GET /api/health`` — platform health checks; exposes a liveness banner only.
 - ``OPTIONS`` — CORS preflight carries no credentials by spec.
 """
@@ -23,7 +24,8 @@ _OPEN_PATHS = frozenset({"/api/health"})
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
-    """Require ``Authorization: Bearer <ISAAC_UI_API_KEY>`` on every /api route."""
+    """Require ``Authorization: Bearer <ISAAC_UI_API_KEY>`` on every route except
+    ``GET /api/health`` and ``OPTIONS``."""
 
     def __init__(self, app) -> None:
         super().__init__(app)

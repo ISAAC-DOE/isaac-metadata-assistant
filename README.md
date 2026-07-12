@@ -26,7 +26,7 @@ Working prototype (`v0.1.0`), **synthetic data only**.
 - One-command reproducible synthetic XANES demo (regenerates the committed sample byte-for-byte).
 - `isaac` CLI (`validate` / `export` / `audit` / `new-id`) and five Claude authoring skills.
 - Non-gating portal-style advisory soft-warnings (local seam) and a Graphify memory/query reviewer demo.
-- 137 passing Python tests (plus 66 frontend tests), including a test that the truth plane never imports Graphify.
+- 148 passing Python tests (plus 68 frontend tests), including a test that the truth plane never imports Graphify.
 
 **Not built yet**
 
@@ -73,7 +73,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                                   # 137 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # 148 tests: golden records validate, transform is gated
 ```
 
 **Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →
@@ -118,6 +118,7 @@ on every push and pull request to `main`: install, tests, synthetic demo, offici
 | [`docs/github-settings.md`](docs/github-settings.md) | Suggested GitHub repo settings (description, topics, visibility, branch protection) |
 | [`docs/ui-handoff/README.md`](docs/ui-handoff/README.md) | UI design handoff package — product context, screens, design direction, and the Claude Design brief (the design source behind the Phase 19 prototype) |
 | [`docs/ui-local-dev.md`](docs/ui-local-dev.md) | Local UI prototype — install, run, browser demo walkthrough, tests/build, honest limitations |
+| [`docs/deployment.md`](docs/deployment.md) | Phase 20 synthetic demo hosting — architecture, env vars, auth model, workspace reset, rollback |
 
 ## Local UI Prototype (Phase 19)
 

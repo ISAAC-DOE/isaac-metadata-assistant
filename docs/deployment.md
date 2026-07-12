@@ -30,17 +30,26 @@ core in a container.
 | `VITE_API_BASE` | Vercel (build-time) | Backend origin + `/api` |
 | `VITE_API_KEY` | Vercel (build-time) | Same value as `ISAAC_UI_API_KEY` |
 
+`ISAAC_UI_CORS_ORIGINS` values must be exact origins — scheme://host with no
+trailing slash and no path (e.g. `https://app.vercel.app`, NOT
+`https://app.vercel.app/`) — because browsers match origins exactly and a
+trailing slash silently breaks CORS.
+
 Local dev needs none of these — defaults reproduce the pre-Phase-20 behavior
 exactly (localhost CORS, `/tmp/isaac-ui-workspace`, auth off, no header).
 
 ## Auth model (honest scope)
 
-Every `/api` route except `GET /api/health` requires
-`Authorization: Bearer <ISAAC_UI_API_KEY>`. The key is baked into the frontend
-bundle at build time, so it is exactly as secret as frontend access — which is
-gated by Vercel Deployment Protection. This is nuisance-abuse prevention for a
-synthetic demo, not cryptographic access control. Rotate by changing the env
-var on both platforms and redeploying. Rate limiting is deferred to Phase 21.
+When `ISAAC_UI_API_KEY` is set, every route requires
+`Authorization: Bearer <ISAAC_UI_API_KEY>` except `GET /api/health` (kept open
+for Railway health checks) and `OPTIONS` requests (CORS preflight carries no
+credentials). That includes FastAPI's auto-generated `/docs` and
+`/openapi.json` — intentional, so the deployed demo has no public schema
+browsing. The key is baked into the frontend bundle at build time, so it is
+exactly as secret as frontend access — which is gated by Vercel Deployment
+Protection. This is nuisance-abuse prevention for a synthetic demo, not
+cryptographic access control. Rotate by changing the env var on both
+platforms and redeploying. Rate limiting is deferred to Phase 21.
 
 ## Resetting the synthetic workspace
 
