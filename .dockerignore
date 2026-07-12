@@ -1,0 +1,10 @@
+**/__pycache__
+**/*.pyc
+.venv
+.git
+node_modules
+examples
+drafts
+records
+graphify-out
+apps/web
