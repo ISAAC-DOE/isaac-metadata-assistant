@@ -4,12 +4,17 @@ Local-first and synthetic-only. Run it with::
 
     .venv/bin/uvicorn isaac_api.app:app --app-dir apps/api --host 127.0.0.1 --port 8000
 
-It binds 127.0.0.1 by design (no remote listener in v1) and only permits CORS from the
-Vite dev server (localhost:5173 / 127.0.0.1:5173). It imports and calls the deterministic
-core (``isaac_records``) in-process, so the UI gets byte-identical verdicts to the CLI.
+By default it permits CORS only from the Vite dev server (localhost:5173 /
+127.0.0.1:5173); deployed environments override the allowlist with the
+ISAAC_UI_CORS_ORIGINS env var (comma-separated origins). Remote binding is a
+deployment concern (the container CMD passes --host 0.0.0.0); local runs keep
+127.0.0.1. It imports and calls the deterministic core (``isaac_records``) in-process,
+so the UI gets byte-identical verdicts to the CLI.
 """
 
 from __future__ import annotations
+
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,11 +22,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import __version__
 from .routes import router
 
-# The Vite dev server origins the browser client is served from.
-CORS_ORIGINS = (
+# Default: the Vite dev server origins. Deployed environments override via
+# ISAAC_UI_CORS_ORIGINS (comma-separated full origins, e.g. the Vercel domain).
+DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 )
+
+
+def _cors_origins() -> list[str]:
+    raw = os.environ.get("ISAAC_UI_CORS_ORIGINS", "")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or list(DEFAULT_CORS_ORIGINS)
 
 
 def create_app() -> FastAPI:
@@ -32,7 +44,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=list(CORS_ORIGINS),
+        allow_origins=_cors_origins(),
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
