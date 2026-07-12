@@ -16,8 +16,9 @@ locally and what it honestly does and does not do.
 
 Read this before demoing it to anyone:
 
-- **Not production.** No auth, no deployment target, no hosting story. It binds
-  `127.0.0.1` only and is meant to run on one developer's machine.
+- **Not production.** No auth by default; binds `127.0.0.1` when run locally.
+  A protection-gated synthetic demo deployment exists — see
+  [`docs/deployment.md`](deployment.md). Local runs remain the primary flow.
 - **Real or private data is not approved for this prototype.** The backend
   blocks every upload attempt with `403` (`POST /api/uploads`); only the two
   committed synthetic fixtures (`tests/fixtures/synthetic/mock_campaign.csv`,
@@ -107,9 +108,11 @@ cd apps/web
 npm run dev
 ```
 
-Open `http://localhost:5173`. The dev server proxies/talks to the backend at
-`http://127.0.0.1:8000`; if the backend is not running, screens show an honest
-"backend not running" state rather than silently failing.
+Open `http://localhost:5173`. The frontend makes direct cross-origin fetches
+to the backend at `http://127.0.0.1:8000`, allowed by the backend's CORS
+allowlist (`apps/web/vite.config.ts` has no `server.proxy`); if the backend is
+not running, screens show an honest "backend not running" state rather than
+silently failing.
 
 ## Browser demo walkthrough
 

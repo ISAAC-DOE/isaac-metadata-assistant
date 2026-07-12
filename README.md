@@ -34,8 +34,10 @@ Working prototype (`v0.1.0`), **synthetic data only**.
 - Single XANES / characterization path only (no electrochemistry / theory / simulation domains).
 - No upstream portal-validator parity — `portal/validation.py` is not vendored.
 - The scientific-consistency review agent (`review.py`) is a placeholder interface, not implemented.
-- No production web app — the Phase 19 UI (`apps/api` + `apps/web`) is a local, synthetic-only
-  prototype, not deployed anywhere (see [`docs/ui-local-dev.md`](docs/ui-local-dev.md)). No MCP server.
+- No production web app — the Phase 19 UI (`apps/api` + `apps/web`) is a synthetic-only
+  prototype. A protection-gated demo deployment exists (Phase 20, see
+  [`docs/deployment.md`](docs/deployment.md)); local dev per
+  [`docs/ui-local-dev.md`](docs/ui-local-dev.md). No MCP server.
 
 ## Two layers
 
@@ -217,8 +219,9 @@ Next steps are **mentor-gated** — see [`docs/mentor-brief.md`](docs/mentor-bri
 - deeper Graphify query-layer behavioral simulation (a docs-invariant + graph-freshness test tier now exists);
 - upstream portal-validator parity (vendoring the real `portal/validation.py`);
 - a second synthetic domain beyond XANES (electrochemistry / performance) — **back burner** for now;
-- web UI iteration beyond the Phase 19 local synthetic-only prototype
-  ([`docs/ui-local-dev.md`](docs/ui-local-dev.md)) — production hardening and any deployment are
+- web UI iteration beyond the Phase 19 synthetic-only prototype
+  ([`docs/ui-local-dev.md`](docs/ui-local-dev.md)) — a protection-gated synthetic demo deployment
+  exists (Phase 20, [`docs/deployment.md`](docs/deployment.md)); production hardening is still
   not planned;
 - and — **only with explicit written data-governance approval** — a real / sanitized-data pilot.
 
