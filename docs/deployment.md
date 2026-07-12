@@ -90,7 +90,8 @@ match the running code.
 
 Recorded after deployment (kept here, not hardcoded in code):
 
-- Railway project: _TBD at deploy time_
-- Backend URL: _TBD at deploy time_
-- Vercel project: _TBD at deploy time_
-- Frontend URL: _TBD at deploy time_
+- Railway project: `isaac-metadata-assistant` (service `isaac-metadata-assistant`,
+  region sfo; volume `isaac-metadata-assistant-volume` at `/data/isaac-workspace`)
+- Backend URL: https://isaac-metadata-assistant-production.up.railway.app
+- Vercel project: `isaac-demo-web` (root directory `apps/web`)
+- Frontend URL: https://isaac-demo-web.vercel.app
