@@ -48,3 +48,64 @@ def test_cors_env_supports_comma_separated_list(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     res = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
     assert res.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+# --- shared-secret bearer auth --------------------------------------------------
+
+
+def test_auth_disabled_when_key_unset(tmp_path, monkeypatch):
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    client = _make_client(tmp_path, monkeypatch)
+    assert client.get("/api/experiments").status_code == 200
+
+
+def test_auth_rejects_missing_and_wrong_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    client = _make_client(tmp_path, monkeypatch)
+
+    missing = client.get("/api/experiments")
+    assert missing.status_code == 401
+    assert missing.json()["error"] == "unauthorized"
+
+    wrong = client.get(
+        "/api/experiments", headers={"Authorization": "Bearer not-the-key"}
+    )
+    assert wrong.status_code == 401
+
+
+def test_auth_accepts_correct_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    client = _make_client(tmp_path, monkeypatch)
+    res = client.get(
+        "/api/experiments", headers={"Authorization": "Bearer demo-secret"}
+    )
+    assert res.status_code == 200
+
+
+def test_health_stays_open_with_auth_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    client = _make_client(tmp_path, monkeypatch)
+    assert client.get("/api/health").status_code == 200
+
+
+def test_cors_preflight_passes_with_auth_enabled(tmp_path, monkeypatch):
+    """Preflight OPTIONS carries no credentials by spec — auth must not eat it."""
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    client = _make_client(tmp_path, monkeypatch)
+    res = client.options(
+        "/api/experiments",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert res.status_code == 200
+
+
+def test_401_carries_cors_headers(tmp_path, monkeypatch):
+    """Browsers must see a readable 401, not an opaque CORS failure."""
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    client = _make_client(tmp_path, monkeypatch)
+    res = client.get("/api/experiments", headers={"Origin": "http://localhost:5173"})
+    assert res.status_code == 401
+    assert res.headers["access-control-allow-origin"] == "http://localhost:5173"

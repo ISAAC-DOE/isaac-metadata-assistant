@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
+from .auth import ApiKeyAuthMiddleware
 from .routes import router
 
 # Default: the Vite dev server origins. Deployed environments override via
@@ -42,6 +43,10 @@ def create_app() -> FastAPI:
         version=__version__,
         summary="Synthetic-only FastAPI wrapper over the deterministic isaac_records core.",
     )
+    # Order matters: Starlette treats the LAST-added middleware as outermost.
+    # Auth is added first so CORSMiddleware wraps it — preflight short-circuits
+    # in CORS, and auth 401s still get CORS headers the browser can read.
+    app.add_middleware(ApiKeyAuthMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
