@@ -132,3 +132,37 @@ describe('ApiError', () => {
     expect(new ApiError('x', { status: 409 }).status).toBe(409);
   });
 });
+
+describe('bearer auth header', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  function captureFetch(): RequestInit[] {
+    const seen: RequestInit[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(init ?? {});
+        return { ok: true, status: 200, json: async () => ({}) } as Response;
+      }),
+    );
+    return seen;
+  }
+
+  it('attaches Authorization: Bearer when VITE_API_KEY is set', async () => {
+    vi.stubEnv('VITE_API_KEY', 'demo-secret');
+    const seen = captureFetch();
+    await api.health();
+    const headers = seen[0].headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer demo-secret');
+  });
+
+  it('sends no Authorization header when VITE_API_KEY is unset', async () => {
+    const seen = captureFetch();
+    await api.health();
+    const headers = seen[0].headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+  });
+});

@@ -38,6 +38,16 @@ const RAW_BASE =
 
 export const API_BASE = RAW_BASE.replace(/\/+$/, '');
 
+/**
+ * Optional shared-secret for the deployed demo backend. Read lazily per request
+ * (not a module constant) so tests can stub the env. Unset locally → no header,
+ * matching the auth-disabled local backend.
+ */
+function apiKey(): string | undefined {
+  const key = (import.meta.env.VITE_API_KEY as string | undefined)?.trim();
+  return key ? key : undefined;
+}
+
 /** The exact command that starts the local backend (shown in the down state). */
 export const RUN_COMMAND =
   '.venv/bin/uvicorn isaac_api.app:app --app-dir apps/api --host 127.0.0.1 --port 8000';
@@ -56,11 +66,13 @@ export class ApiError extends Error {
 }
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
+  const key = apiKey();
   try {
     return await fetch(`${API_BASE}${path}`, {
       ...init,
       headers: {
         Accept: 'application/json',
+        ...(key !== undefined ? { Authorization: `Bearer ${key}` } : {}),
         ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...init?.headers,
       },
