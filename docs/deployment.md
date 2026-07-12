@@ -86,6 +86,24 @@ workspace (above) and it re-seeds. Env vars (key, CORS origins) do not roll
 back with code; after any rollback confirm both platforms' env vars still
 match the running code.
 
+### Verifying backend/frontend version compatibility
+
+Both platforms build from the same `main` commit, so compatibility is a
+property of the commit, not of runtime coordination: the API client and the
+backend are tested together on every push (`.venv/bin/pytest` backend suite +
+`npm test` frontend suite in CI). After any deploy or rollback, confirm the
+running pair:
+
+1. Both dashboards show the same deployed commit SHA (Railway service →
+   latest deployment; Vercel project → production deployment).
+2. `GET /api/health` on the Railway domain returns 200 with the
+   `synthetic-only` banner.
+3. Load the frontend and run one synthetic demo cycle — this exercises the
+   live API contract end to end (list, demo run, pending, evidence).
+
+If the two SHAs differ (split-brain), recover by revert-and-push as above —
+do not fix forward one platform by hand.
+
 ## Deployed URLs and project names
 
 Recorded after deployment (kept here, not hardcoded in code):
