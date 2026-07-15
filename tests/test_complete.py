@@ -115,3 +115,34 @@ def test_unanswered_blocker_stays_pending():
     # Nothing was invented to fill the gap.
     for a in completed["assets"]:
         assert a["sha256"] in partial["asset_sha256"].values()
+
+
+def test_series_answer_writes_block_evidence():
+    draft = _draft()
+    answers = _answers()
+    completed = apply_answers(draft, answers)
+
+    be = completed["block_evidence"]
+    key = "series:averaged_spectrum"
+    assert key in be, sorted(be)
+    entries = be[key]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["source_type"] == "user_confirmation"
+    assert entry["timestamp"] == answers["timestamp"]
+
+
+def test_valid_sha256_accepted():
+    # A well-formed 64-char lowercase hex sha256 applies successfully and carries a
+    # user_confirmation entry (guard for the next slice's rejection logic).
+    import re
+
+    draft = _draft()
+    answers = _answers()
+    completed = apply_answers(draft, answers)
+
+    assert len(completed["assets"]) == 3
+    for asset in completed["assets"]:
+        assert re.fullmatch(r"[0-9a-f]{64}", asset["sha256"])
+        uc = next(e for e in asset["evidence"] if e["source_type"] == "user_confirmation")
+        assert uc["answer"] == asset["sha256"]

@@ -133,3 +133,29 @@ def test_nothing_guessed():
     assert "series" not in draft
     # descriptors_outputs absent or empty.
     assert not draft.get("descriptors_outputs")
+
+
+def test_contributor_evidence_reaches_block_evidence():
+    # Contributors stay record-shaped (name + role); their spreadsheet provenance is
+    # ALSO routed into block_evidence under the attribution natural key.
+    be = _draft()["block_evidence"]
+    for name in ("Ada Lovelace", "Grace Hopper"):
+        key = f"attribution:{name}|curated_record"
+        assert key in be, sorted(be)
+        entries = be[key]
+        assert len(entries) == 1
+        assert entries[0]["source_type"] == "spreadsheet"
+        assert entries[0]["quote"] == name  # the contributor value, verbatim
+
+
+def test_qc_evidence_reaches_block_evidence():
+    # The qc_status row provenance lands in block_evidence["qc:status"] (singleton
+    # key; the colon marks it namespaced for the audit, never a dotted record path).
+    be = _draft()["block_evidence"]
+    assert "qc:status" in be
+    entries = be["qc:status"]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["source_type"] == "spreadsheet"
+    assert entry["locator"] == "Sheet 'Configurations', field=qc_status"
+    assert entry["quote"] == "valid"

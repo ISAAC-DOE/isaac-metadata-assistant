@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from isaac_records import validate_draft
-from isaac_records.export import export_draft, get_path, transform
+from isaac_records.export import build_sidecar, export_draft, get_path, transform
 from isaac_records.ids import is_record_id
 from isaac_records.official import validate_official
 
@@ -106,6 +106,41 @@ def test_implicit_inferences_stay_out_of_record(draft):
     # absorbing element / edge are implicit — must not appear as invented fields.
     assert "absorbing_element" not in blob
     assert '"edge"' not in blob
+
+
+def test_sidecar_harvests_series_qc_links_attribution():
+    # block_evidence entries pass through verbatim (keys + values) into the sidecar.
+    block_evidence = {
+        "series:averaged_spectrum": [
+            {"source_type": "user_confirmation", "question": "Reduced spectrum?",
+             "answer": "averaged_spectrum", "timestamp": "2099-03-05T21:00:00Z"}
+        ],
+        "qc:status": [
+            {"source_type": "spreadsheet", "source_file": "mock_campaign.csv",
+             "locator": "Sheet 'Configurations', field=qc_status", "quote": "valid"}
+        ],
+        "links:derived_from|urn:isaac:synthetic|manual": [
+            {"source_type": "user_confirmation", "question": "How is this linked?",
+             "answer": "derived_from", "timestamp": "2099-03-05T21:00:00Z"}
+        ],
+        "attribution:Ada Lovelace|curated_record": [
+            {"source_type": "spreadsheet", "source_file": "mock_campaign.csv",
+             "locator": "Sheet 'Campaign Info', field=lead_experimenter", "quote": "Ada Lovelace"}
+        ],
+    }
+    sidecar = build_sidecar({"block_evidence": block_evidence}, {"record_id": RID})
+    ev = sidecar["evidence"]
+    for key, entries in block_evidence.items():
+        assert key in ev, sorted(ev)
+        assert ev[key] == entries  # verbatim, keys and values unchanged
+
+
+def test_qc_native_evidence_preserved(draft):
+    # measurement.qc.evidence is a native schema string field — the transform must
+    # keep it, not strip it as an envelope key.
+    draft["qc"] = {"status": "valid", "evidence": "no beam damage across 6 scans (synthetic)"}
+    record = transform(draft, record_id=RID)
+    assert record["measurement"]["qc"]["evidence"] == "no beam damage across 6 scans (synthetic)"
 
 
 def test_core_never_imports_graphify():

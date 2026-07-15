@@ -90,6 +90,16 @@ def apply_answers(draft: dict, answers: dict) -> dict:
                 remaining_pending.append(entry)
                 continue
             draft["series"] = copy.deepcopy(series)
+            # Record the human confirmation as block_evidence, keyed per series_id
+            # (the official measurement.series has no per-series evidence slot).
+            block_evidence = draft.setdefault("block_evidence", {})
+            for s in draft["series"]:
+                series_id = s.get("series_id")
+                if series_id is None:
+                    continue
+                block_evidence[f"series:{series_id}"] = [
+                    _user_confirmation(entry.get("question"), series_id, timestamp)
+                ]
             # qc stays exactly as build_draft read it from the sheet.
             continue
 

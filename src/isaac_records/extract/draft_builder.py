@@ -106,22 +106,41 @@ def build_draft(structured_path, listing_path) -> dict:
             ],
         }
 
-    # 2. Attribution — contributors go in schema-clean (name + role only). Their
-    #    provenance evidence is deferred to the export sidecar (see report), so it is
-    #    dropped from the draft's attribution to keep it record-shaped.
-    contributors = [
-        {"name": c["name"], "role": c["role"]}
-        for c in parse_contributors(structured_path)
-    ]
+    # Block-level provenance the official record cannot carry per-field lands in
+    #   ``block_evidence`` (assistant natural-key map), harvested into the export
+    #   sidecar. Keys: ``attribution:<name>|<role>`` / ``qc:status`` / ``series:<id>``
+    #   / ``links:<rel>|<target>|<basis>``.
+    block_evidence: dict[str, list[dict]] = {}
+
+    # 2. Attribution — contributors go in schema-clean (name + role only). Each
+    #    contributor's spreadsheet provenance is preserved in block_evidence (under
+    #    the attribution natural key), NOT dropped, keeping attribution record-shaped.
+    contributors = []
+    for c in parse_contributors(structured_path):
+        contributors.append({"name": c["name"], "role": c["role"]})
+        if c.get("evidence"):
+            block_evidence[f"attribution:{c['name']}|{c['role']}"] = list(c["evidence"])
 
     # 3. Raw rows for the values the scalar map omits (qc_status, energy window).
     by_field = {r["field"]: r for r in parse_rows(structured_path)}
 
-    # 4. qc — read the ACTUAL qc_status cell; never hardcode a status.
+    # 4. qc — read the ACTUAL qc_status cell; never hardcode a status. The row's
+    #    spreadsheet provenance is routed into block_evidence["qc:status"] (the
+    #    official qc block has no per-field evidence slot for a native ``status``
+    #    value). Sidecar keys must contain ':' so the audit treats them as namespaced,
+    #    not dotted record paths; this one reads "provenance of measurement.qc.status".
     qc = None
     qc_row = by_field.get("qc_status")
     if qc_row is not None and qc_row.get("value") not in (None, ""):
         qc = {"status": qc_row["value"]}
+        block_evidence["qc:status"] = [
+            {
+                "source_type": "spreadsheet",
+                "source_file": qc_row["source_file"],
+                "locator": qc_row["locator"],
+                "quote": qc_row["value"],
+            }
+        ]
 
     # 5. Implicit inferences (deterministic derivations only).
     implicit: list[dict] = []
@@ -227,6 +246,8 @@ def build_draft(structured_path, listing_path) -> dict:
     }
     if qc is not None:
         draft["qc"] = qc
+    if block_evidence:
+        draft["block_evidence"] = block_evidence
     return draft
 
 

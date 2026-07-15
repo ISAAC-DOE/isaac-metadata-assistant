@@ -83,7 +83,10 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
     if draft.get("series"):
         record.setdefault("measurement", {})["series"] = strip_evidence(draft["series"])
         if draft.get("qc"):
-            record["measurement"]["qc"] = strip_evidence(draft["qc"])
+            # qc goes through verbatim (a shallow copy of its entries), NOT
+            # strip_evidence: the schema defines measurement.qc.evidence as a native
+            # string field, so blanket-stripping "evidence" would delete it.
+            record["measurement"]["qc"] = dict(draft["qc"])
         elif "qc" not in record["measurement"]:
             record["measurement"]["qc"] = {"status": "valid"}
     if draft.get("assets"):
@@ -118,6 +121,11 @@ def build_sidecar(draft: dict, record: dict) -> dict:
             "value": imp.get("value"),
             "evidence": imp.get("evidence", []),
         }
+    # Block-level provenance (series/qc/links/attribution natural keys) passes through
+    # verbatim: its namespaces cannot collide with dotted paths or assets:/descriptors:/
+    # implicit: keys.
+    for key, entries in (draft.get("block_evidence") or {}).items():
+        ev[key] = entries
     return {
         "record_id": record["record_id"],
         "schema_version": ISAAC_VERSION,
