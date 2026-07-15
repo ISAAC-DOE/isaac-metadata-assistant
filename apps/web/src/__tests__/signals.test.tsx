@@ -56,4 +56,28 @@ describe('the three signals are separate components with distinct treatments', (
     const classes = [v?.className, c?.className, a?.className];
     expect(new Set(classes).size).toBe(3);
   });
+
+  it('CoverageBadge lists uncovered AND dangling targets separately, never merged into one list', () => {
+    const partial: AuditResult = {
+      resolved: 30,
+      total: 33,
+      uncovered: ['qc.completeness_score', 'links'],
+      dangling: ['assets:legacy_notebook'],
+    };
+    const { getByText, container } = render(<CoverageBadge audit={partial} />);
+    expect(getByText('30 / 33')).toBeInTheDocument();
+    // every uncovered target renders
+    expect(getByText('qc.completeness_score')).toBeInTheDocument();
+    expect(getByText('links')).toBeInTheDocument();
+    // every dangling target renders too
+    expect(getByText('assets:legacy_notebook')).toBeInTheDocument();
+    // two distinct lists (uncovered, dangling), same neutral treatment
+    expect(container.querySelectorAll('.coverage-dangling')).toHaveLength(2);
+  });
+
+  it('CoverageBadge at full coverage renders no uncovered/dangling section', () => {
+    const { container, getByText } = render(<CoverageBadge audit={AUDIT} />);
+    expect(getByText('33 / 33')).toBeInTheDocument();
+    expect(container.querySelectorAll('.coverage-dangling')).toHaveLength(0);
+  });
 });

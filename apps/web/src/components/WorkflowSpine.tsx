@@ -46,9 +46,12 @@ export function buildSpine(
   active: 'draft' | 'complete' | 'export' | 'validate' | 'audit',
   overrides?: Partial<Record<string, Partial<SpineStep>>>,
 ): SpineStep[] {
+  // Default meta is the skeleton shown before live data (or a caller override)
+  // arrives — shape only, never a fabricated count. Screens that know the real
+  // numbers pass them in via `overrides`.
   const order: { key: string; label: string; meta: string }[] = [
-    { key: 'draft', label: LABELS.stepDraft, meta: 'reviewing 26 fields' },
-    { key: 'complete', label: LABELS.stepComplete, meta: '5 fields need you' },
+    { key: 'draft', label: LABELS.stepDraft, meta: 'reviewing fields' },
+    { key: 'complete', label: LABELS.stepComplete, meta: 'fields need you' },
     { key: 'export', label: LABELS.stepExport, meta: 'unlocks when 0 remain' },
     { key: 'validate', label: LABELS.stepValidate, meta: 'the hard gate' },
     { key: 'audit', label: LABELS.stepAudit, meta: 'evidence coverage' },

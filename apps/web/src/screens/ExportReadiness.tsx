@@ -198,7 +198,10 @@ function LoadedExport({
     inSession?.sidecarPath ||
     detail.artifact_refs.sidecar_path ||
     `records/${detail.record_id}.evidence.json`;
-  const coverageTotal = coverage === 'pending' ? 26 : coverage.total;
+  // Never invent a coverage total: while audit data hasn't arrived yet, the
+  // sidecar card simply omits the path-count badge (ArtifactCard renders
+  // nothing when pathCount is undefined) rather than guessing a number.
+  const coverageTotal = coverage === 'pending' ? undefined : coverage.total;
 
   const download = (content: unknown, path: string) => {
     const name = path.split('/').pop() || 'artifact.json';

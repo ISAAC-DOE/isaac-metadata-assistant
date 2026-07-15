@@ -5,6 +5,7 @@ import { AppRoutes } from '../App';
 import {
   answersAfterNotebook,
   auditExported,
+  auditNotExported,
   bundleRoutes,
   exportConflict,
   exportReadyRoutes,
@@ -262,6 +263,24 @@ describe('S6 · Ready to Export (live)', () => {
     fireEvent.click(viewJson);
     await waitFor(() => expect(container.querySelector('.artifact-modal')).not.toBeNull());
     expect(container.querySelector('.artifact-modal-body')!.textContent).toContain('asset_id');
+  });
+
+  it('exported + validation pass but audit not yet available: no fabricated coverage number renders', async () => {
+    stubFetchRoutes({
+      ...exportedReadyRoutes('demo'),
+      'POST /api/experiments/demo/audit': { body: auditNotExported },
+    });
+    const { container, findByText, getByText } = renderAt('/record/demo/export');
+
+    // the real verdict still renders (post-export, from the fetched validation)
+    expect(await findByText('Valid against official ISAAC schema v1.05.')).toBeInTheDocument();
+    // the honest "coverage loading" state shows instead of a guessed number
+    expect(getByText('Coverage loading…')).toBeInTheDocument();
+    // the sidecar artifact card renders with NO invented path-count badge (it
+    // used to fall back to a hardcoded 26 while audit data was unavailable)
+    const sidecarCard = getByText('Evidence Trail').closest('.artifact')!;
+    expect(sidecarCard.querySelector('.artifact-pathcount')).toBeNull();
+    expect(container.querySelectorAll('.artifact-pathcount')).toHaveLength(0);
   });
 
   it('a 409 (already exported) shows a clear immutability message, never an overwrite', async () => {

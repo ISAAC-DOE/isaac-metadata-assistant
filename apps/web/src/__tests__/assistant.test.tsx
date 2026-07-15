@@ -64,6 +64,34 @@ describe('assistant sample messages never contain verdict language', () => {
   });
 });
 
+describe('assistant copy cannot contradict live audit/pending truth (P21E)', () => {
+  const allSampleText = () =>
+    Object.values(ASSISTANT_SAMPLES)
+      .flatMap((ctx) => [
+        ctx.reply.text,
+        ...ctx.prompts.flatMap((p) => [p.text, p.answer?.text ?? '']),
+      ])
+      .join(' \n ');
+
+  it('no static sample states the old fixed 26-field coverage denominator', () => {
+    expect(allSampleText()).not.toMatch(/\b26\b/);
+  });
+
+  it('no static sample hardcodes a specific pending-field count that could contradict a live record', () => {
+    expect(allSampleText()).not.toMatch(/\b5 fields\b/i);
+    expect(allSampleText()).not.toMatch(/\bfive values\b/i);
+  });
+
+  it('the evidence-coverage prompt answers qualitatively and defers exact numbers to the live audit view', () => {
+    const prompt = ASSISTANT_SAMPLES.evidence.prompts.find((p) => /coverage/i.test(p.text));
+    expect(prompt).toBeDefined();
+    expect(prompt!.answer!.text).toMatch(
+      /fields, assets, descriptors, series, QC, links, and attribution/,
+    );
+    expect(prompt!.answer!.text).not.toMatch(/\b26\b/);
+  });
+});
+
 describe('assistant final placeholder form: guided prompts + source-labeled answers', () => {
   it('every clickable prompt answer names a source doc and carries no verdict language', () => {
     for (const ctx of Object.values(ASSISTANT_SAMPLES)) {

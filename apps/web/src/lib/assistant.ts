@@ -67,11 +67,11 @@ export const ASSISTANT_SAMPLES: Record<'review' | 'export' | 'evidence', Assista
     },
     prompts: [
       {
-        text: 'Explain the 5 fields that need me',
+        text: 'Explain the fields that need me',
         answeredFrom: 'files',
         answer: {
           text:
-            'Those five values were left blank on purpose — the system refuses to guess a hash, a reduced spectrum, or a scientific descriptor. Confirm each in Complete Missing Fields, or leave it honestly missing.',
+            'Those values were left blank on purpose — the system refuses to guess a hash, a reduced spectrum, or a scientific descriptor. Confirm each in Complete Missing Fields, or leave it honestly missing.',
           answeredFrom: 'files',
           sourceDoc: 'docs/ui-handoff/user-workflows.md',
         },
@@ -155,11 +155,11 @@ export const ASSISTANT_SAMPLES: Record<'review' | 'export' | 'evidence', Assista
         },
       },
       {
-        text: 'What does evidence 26/26 coverage mean?',
+        text: 'What does evidence coverage mean?',
         answeredFrom: 'audit',
         answer: {
           text:
-            'Coverage counts only the dotted JSON-paths that resolve to a value — 26 of 26. Namespaced keys (assets:, descriptors:, implicit:) are deliberately outside that count, so it is never a whole-record completeness score.',
+            'Every value in the record traces to evidence — fields, assets, descriptors, series, QC, links, and attribution. The exact N / N count is live, from isaac audit — see the Coverage badge on Ready to Export for the current numbers.',
           answeredFrom: 'audit',
           sourceDoc: 'docs/ui-handoff/validation-audit-warning-model.md',
         },

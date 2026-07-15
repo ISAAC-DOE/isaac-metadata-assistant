@@ -10,10 +10,24 @@ interface CoverageBadgeProps {
 /**
  * Evidence-audit coverage `N / N` in neutral slate — information, NOT a verdict.
  * Deliberately not green so it can never be mistaken for a PASS; namespaced
- * sidecar keys are excluded from the count upstream.
+ * sidecar keys are excluded from the count upstream. `uncovered` (an expected
+ * target with no evidence yet) and `dangling` (a sidecar key that doesn't
+ * resolve) are different truth-gap shapes — listed in their own sections, same
+ * neutral treatment, never merged into one undifferentiated list.
  */
 export function CoverageBadge({ audit }: CoverageBadgeProps) {
-  const clean = audit.dangling.length === 0;
+  const uncoveredCount = audit.uncovered.length;
+  const danglingCount = audit.dangling.length;
+  const clean = uncoveredCount === 0 && danglingCount === 0;
+
+  const segments: string[] = [];
+  if (uncoveredCount > 0) {
+    segments.push(`${uncoveredCount} uncovered — resolve in ${LABELS.screenComplete}`);
+  }
+  if (danglingCount > 0) {
+    segments.push(`${danglingCount} dangling — fix by re-export, not invalidity`);
+  }
+
   return (
     <section className="coverage" aria-label="Evidence audit coverage · not a verdict">
       <div className="coverage-head">
@@ -26,14 +40,17 @@ export function CoverageBadge({ audit }: CoverageBadgeProps) {
       <div className="coverage-figure mono">
         {audit.resolved} / {audit.total}
       </div>
-      <div className="coverage-sub">
-        {clean
-          ? 'paths resolve · 0 dangling'
-          : `${audit.dangling.length} dangling — fix by re-export, not invalidity`}
-      </div>
+      <div className="coverage-sub">{clean ? 'paths resolve · 0 dangling' : segments.join(' · ')}</div>
       <div className="coverage-cmd mono">isaac audit</div>
-      {!clean && (
-        <ul className="coverage-dangling mono">
+      {uncoveredCount > 0 && (
+        <ul className="coverage-dangling mono" aria-label="Uncovered targets">
+          {audit.uncovered.map((key) => (
+            <li key={key}>{key}</li>
+          ))}
+        </ul>
+      )}
+      {danglingCount > 0 && (
+        <ul className="coverage-dangling mono" aria-label="Dangling targets">
           {audit.dangling.map((key) => (
             <li key={key}>{key}</li>
           ))}

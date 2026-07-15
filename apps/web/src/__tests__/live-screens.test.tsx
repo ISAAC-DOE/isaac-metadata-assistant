@@ -159,4 +159,17 @@ describe('S3 · Review Record (live bundle)', () => {
     expect(await findByText('Backend Not Running')).toBeInTheDocument();
     expect(queryByText(/Fields Need Your Confirmation/)).toBeNull();
   });
+
+  it('the WorkflowSpine loading skeleton never fabricates field counts before live data arrives', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    // assert synchronously, before the stubbed fetch promises resolve — this is
+    // the skeleton the spine renders while the bundle is still loading
+    const { findByText, queryByText } = renderAt('/record/demo');
+    expect(queryByText(/26 fields/)).toBeNull();
+    expect(queryByText(/reviewing \d+ fields/)).toBeNull();
+    expect(queryByText(/5 fields need you/)).toBeNull();
+    expect(queryByText(/\d+ fields need you/)).toBeNull();
+    // let the stubbed fetch settle so the effect update happens inside act()
+    await findByText('5 Fields Need Your Confirmation');
+  });
 });
