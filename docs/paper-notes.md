@@ -95,13 +95,18 @@ On the synthetic XANES-family campaign, the pipeline produces official record
 - **26** evidenced fields extracted deterministically; **5** blockers surfaced (never guessed).
 - After completion: **0** blockers remaining, **3** assets resolved (hashes from human answers).
 - The record **validates against the official ISAAC v1.05 schema** and passes a clean audit
-  (`evidence 26/26`, 0 dangling sidecar paths).
+  (`evidence 33/33`, 0 dangling sidecar paths).
 - The record is **byte-identical reproducible** via `scripts/run_synthetic_demo.py`; the sidecar is
   identical except its wall-clock `generated_utc` field.
 - Every scientific value traces to a committed synthetic fixture — a test asserts nothing is fabricated.
+- A later hardening pass closed a truth gap the audit could not previously see: the evidence
+  denominator now comes from the record's own content (25 scalar fields + 8 block targets — the
+  spectrum, the QC verdict, every asset, the descriptor, every contributor) instead of the sidecar's
+  own keys, so a spectrum or QC verdict with no evidence can no longer export undetected. The same
+  pass removed a silent `qc.status = "valid"` default and added strict `sha256` format checking.
 
 *(Numbers to quote on a poster: 1 official record, 26 evidenced fields, 5 blockers correctly refused
-then human-answered, 137 passing Python tests, 0 audit failures.)*
+then human-answered, 174 passing Python tests, 0 audit failures.)*
 
 ## 7. Limitations (state these honestly)
 

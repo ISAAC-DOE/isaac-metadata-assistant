@@ -158,10 +158,17 @@ sidecar coverage.
 
 ```bash
 .venv/bin/isaac audit --records-dir /tmp/isaac-demo
-# PASS  01JQZ0SYNTHXANESDEMO000000.json  (0 schema errors, evidence 26/26)
+# PASS  01JQZ0SYNTHXANESDEMO000000.json  (0 schema errors, evidence 33/33)
 #
 # 1 records audited, 0 failing official validation
 ```
+
+The `evidence covered/expected` count is derived from the record's own content — every scalar leaf
+plus one block target per series, QC verdict, link, asset, descriptor, and contributor — not from
+the sidecar's own keys, so a spectrum or QC verdict with no evidence shows up as `uncovered` instead
+of silently inflating the ratio. A record with no evidence targets at all (nothing to evidence)
+renders `no sidecar`; a record with content but no sidecar file renders an honest `evidence 0/N`.
+Coverage is completeness reporting, not a pass/fail verdict.
 
 **Exit codes:** `0` all records pass · `1` at least one record fails official validation.
 

@@ -67,14 +67,16 @@ would validate anywhere the official schema is used."*
 ```bash
 .venv/bin/isaac audit --records-dir /tmp/isaac-demo
 ```
-→ `PASS  01JQZ0SYNTHXANESDEMO000000.json  (0 schema errors, evidence 26/26)`
+→ `PASS  01JQZ0SYNTHXANESDEMO000000.json  (0 schema errors, evidence 33/33)`
 → `1 records audited, 0 failing official validation`
 
 Open `…​.evidence.json`. Say: *"The official record has no slot for per-field provenance — its schema
 is `additionalProperties: false`. So evidence lives in a **sidecar** keyed by the record's own
-JSON-paths. `evidence 26/26` means every evidence entry points at a real field — zero dangling. The
-audit is the deterministic check that the record is schema-valid **and** its evidence trail is
-intact."* (Flag: the sidecar is an **assistant convention**, pending mentor approval — decision D1.)
+JSON-paths. `evidence 33/33` — 25 scalar fields plus 8 block targets (the spectrum, the QC verdict,
+each asset, the descriptor, each contributor) — means every one of those 33 targets, enumerated from
+the record itself, has a real evidence entry. The audit is the deterministic check that the record is
+schema-valid **and** its evidence trail is intact; it's coverage, not a validity verdict."* (Flag: the
+sidecar is an **assistant convention**, pending mentor approval — decision D1.)
 
 ## 4. Show the advisory portal warnings (~30s)
 

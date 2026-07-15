@@ -159,9 +159,11 @@ Everything the assistant "decides" is really the CLI deciding:
 - **Validity** is `isaac validate`'s exit code, not the assistant's opinion.
 - **Exportability** is `isaac export`'s two gates (no-guessing, then official schema).
 - **Completeness / dangling evidence** is `isaac audit` — it re-validates every record against the
-  official schema **and** checks that each sidecar evidence entry resolves to a real field
-  (`evidence 26/26` = 0 dangling). The assistant runs it and reports its output; it does not
-  compute audit results itself.
+  official schema **and** compares the record's own content (every scalar field plus one block
+  target per series/QC/link/asset/descriptor/contributor) against the sidecar's evidence, reporting
+  `evidence covered/expected` plus any uncovered or dangling keys (`evidence 33/33` = every target on
+  the committed sample is covered, 0 dangling). The assistant runs it and reports its output; it does
+  not compute audit results itself.
 
 Because these run offline and never import Graphify, the whole draft → export → validate → audit
 path works with the memory plane completely absent.

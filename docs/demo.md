@@ -75,14 +75,18 @@ Expected output:
 ```
 PASS — valid against official ISAAC schema v1.05
 
-PASS  01JQZ0SYNTHXANESDEMO000000.json  (0 schema errors, evidence 26/26)
+PASS  01JQZ0SYNTHXANESDEMO000000.json  (0 schema errors, evidence 33/33)
 
 1 records audited, 0 failing official validation
 ```
 
-`evidence 26/26` means every dotted-path evidence entry in the sidecar resolves to a real field
-in the record (0 dangling). The audit is the deterministic check that the record is schema-valid
-**and** its evidence trail is intact.
+`evidence 33/33` means all 33 targets *enumerated from the record itself* have a sidecar entry — 25
+scalar fields (dotted JSON-paths) plus 8 block targets (the spectrum, the QC verdict, each of the 3
+assets, the 1 descriptor, and each of the 2 contributors). The denominator comes from what the
+record actually contains, not from the sidecar's own keys, so a spectrum or QC verdict with no
+evidence would show up as `uncovered`, not silently pass. Coverage is completeness reporting, not a
+pass/fail verdict; the audit is the deterministic check that the record is schema-valid **and** its
+evidence trail is intact.
 
 ## The committed sample (`docs/samples/`)
 

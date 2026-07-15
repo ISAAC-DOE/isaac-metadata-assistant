@@ -34,7 +34,7 @@ Source material to reuse: [`docs/paper-notes.md`](paper-notes.md) (fuller prose)
   `additionalProperties: false`, provenance is preserved in an **evidence sidecar** keyed by official
   JSON-path.
 - **Result.** On a synthetic XANES-family campaign, the pipeline produces one official v1.05 record
-  (26 evidenced fields; 5 blockers refused then human-answered; clean audit, `evidence 26/26`),
+  (26 evidenced fields; 5 blockers refused then human-answered; clean audit, `evidence 33/33`),
   reproducible byte-for-byte, with the full test suite passing.
 - **Contribution.** A design pattern for trustworthy AI-assisted scientific metadata: evidence-first
   authoring, structural refusal to guess, and separation of *validity* (deterministic) from *memory*
@@ -90,10 +90,16 @@ The **audit** ties 1–2 together on stored records (schema-valid + every sideca
 
 - Official record `01JQZ0SYNTHXANESDEMO000000`: **26** evidenced fields; **5** blockers refused then
   answered; **3** assets resolved from human answers; validates against v1.05; clean audit
-  (`evidence 26/26`, 0 dangling); **byte-identical reproducible**.
+  (`evidence 33/33`, 0 dangling); **byte-identical reproducible**.
 - **Quotable poster numbers:** 1 official record · 26 evidenced fields · 5 blockers refused-then-answered
-  · 10 official golden records validating · **137 passing Python tests** · 0 audit failures.
+  · 10 official golden records validating · **174 passing Python tests** · 0 audit failures.
 - A test asserts every scientific value traces to a committed synthetic fixture (nothing fabricated).
+- **Truth-gap closure (Phase 21).** The audit denominator is now derived entirely from record
+  content — 25 scalar fields plus 8 block targets (spectrum, QC verdict, each asset, the descriptor,
+  each contributor) — instead of the sidecar's own keys, so an unevidenced spectrum or QC verdict can
+  no longer pass silently. Export now refuses a `qc.status` the system did not observe or a human did
+  not confirm (no more defaulting to `"valid"`), and asset `sha256` values are checked against a
+  strict 64-character hex pattern rather than accepted as any non-empty string.
 
 ## 7. Limitations (state honestly)
 

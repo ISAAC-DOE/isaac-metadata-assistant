@@ -354,3 +354,31 @@ Run P21B→C→D as one tight arc in a single sitting — the three slices are o
 **UI/copy requirement:** when the denominator changes, the UI must explain it — e.g. "Evidence Audit — 34 / 34 targets covered. Includes fields, assets, descriptors, series, QC, links, and attribution." Keep the three-signal separation: audit = coverage (not a verdict), validation = hard PASS/FAIL gate, advisory warnings = non-gating; never merge them.
 
 **Model rule:** Fable 5 orchestrates/plans/reviews/verifies only; Opus 4.8 implements truth-path/QC/sha256/audit/high-risk test design and final review; Sonnet 5 implements narrow frontend truth alignment, docs updates, grep audits, copy fixes.
+
+## Post-implementation corrections (appended 2026-07-15, after P21F)
+
+The plan body above is left as originally approved. These three points correct estimates/spec typos
+that implementation resolved differently — verified against the shipped code and tests, not rewritten
+into the sections above:
+
+**(a) The qc sidecar key is `qc:status`, not the colon-less `qc` shown in §5's example and §6's spec.**
+The shipped `_block_targets` (`src/isaac_records/audit.py`) and `build_sidecar` (`export.py`) both use
+`qc:status` — required so the key participates in the audit's colon-namespacing convention (`":" in
+key` gates namespaced-vs-dotted handling in `_sidecar_coverage`). Semantics are unchanged: it is still
+the one singleton QC-verdict-provenance target per record.
+
+**(b) Derived denominators are 33 golden / 29-of-33 legacy, not the §5/§7/§15 estimates of 34/30.**
+The committed demo record enumerates to **25 scalar + 8 block = 33** expected targets (verified:
+`.venv/bin/isaac audit --records-dir docs/samples` → `evidence 33/33`), not the 34 estimated in §7's
+render example and the UI-copy line, nor the "30/34" pre-regeneration baseline named in §7/§15/"If this
+were my own project." The frozen legacy fixture (`tests/fixtures/legacy/`, pre-Phase-21 sidecar) audits
+at **29/33** (verified: `.venv/bin/isaac audit --records-dir tests/fixtures/legacy` → `evidence 29/33`,
+uncovered: `series:averaged_spectrum`, `qc:status`, both `attribution:` keys), not the "30/34" estimated.
+`tests/test_audit.py::test_legacy_sidecar_backward_compat` pins 33 expected / 29 covered as the
+regression baseline.
+
+**(c) The missing-sidecar audit render now shows honest `evidence 0/N`, not "no sidecar."** Per
+`render_audit` (`audit.py`): `"no sidecar"` only renders when a record has **zero** expected evidence
+targets (a content-less record — nothing to evidence, not merely a missing sidecar *file*). Any record
+with actual content whose sidecar file is missing now renders `evidence 0/<expected>` — an honest
+zero, not a special-cased string that could be mistaken for "not applicable."

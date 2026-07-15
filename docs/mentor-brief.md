@@ -53,7 +53,7 @@ synthetic sheet + file listing
    → 5 pending blockers          (3 file sha256 hashes, the reduced spectrum, ≥1 descriptor — refused, not guessed)
    → human-confirmed answers     (the demo supplies these from a fixture; normally typed into /isaac-complete)
    → official ISAAC v1.05 record + evidence sidecar
-   → schema validation + audit   (valid, evidence 26/26, 0 dangling)
+   → schema validation + audit   (valid, evidence 33/33, 0 dangling)
 ```
 
 The **5 refused blockers are the whole demo**: the extractor *knows* it needs three hashes, a reduced
@@ -68,7 +68,8 @@ output: [`docs/demo.md`](demo.md). Live-meeting version: [`docs/demo-script.md`]
 - The demo regenerates the committed sample record `01JQZ0SYNTHXANESDEMO000000` **byte-for-byte**
   (`scripts/run_synthetic_demo.py`, step [5] asserts it).
 - Result: 26 evidenced fields, 5 blockers refused-then-answered, valid against v1.05, clean audit
-  (`evidence 26/26`, 0 failures).
+  (`evidence 33/33` — 25 scalar fields + 8 block targets: spectrum, QC verdict, 3 assets, 1
+  descriptor, 2 contributors — 0 failures).
 - **GitHub Actions CI** runs the test suite, the synthetic demo, official validation, advisory
   warnings, and the evidence audit on every push and PR to `main`.
 

@@ -1,7 +1,7 @@
 {
   "record_id": "01JQZ0SYNTHXANESDEMO000000",
   "schema_version": "1.05",
-  "generated_utc": "2026-07-06T23:05:48Z",
+  "generated_utc": "2026-07-15T23:20:42Z",
   "evidence": {
     "system.facility.facility_name": [
       {
@@ -282,6 +282,38 @@
           "timestamp": "2099-03-05T21:00:00Z"
         }
       ]
-    }
+    },
+    "attribution:Ada Lovelace|curated_record": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=lead_experimenter",
+        "quote": "Ada Lovelace"
+      }
+    ],
+    "attribution:Grace Hopper|curated_record": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Campaign Info', field=co_experimenter",
+        "quote": "Grace Hopper"
+      }
+    ],
+    "qc:status": [
+      {
+        "source_type": "spreadsheet",
+        "source_file": "mock_campaign.csv",
+        "locator": "Sheet 'Configurations', field=qc_status",
+        "quote": "valid"
+      }
+    ],
+    "series:averaged_spectrum": [
+      {
+        "source_type": "user_confirmation",
+        "question": "Provide/point to the reduced spectrum (the .xdi reduction_product) so measurement.series can be built.",
+        "answer": "averaged_spectrum",
+        "timestamp": "2099-03-05T21:00:00Z"
+      }
+    ]
   }
 }

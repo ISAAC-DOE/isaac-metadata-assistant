@@ -114,11 +114,29 @@ nothing scientific is filled in without evidence or a human answer.
 The official ISAAC schema is `additionalProperties: false` throughout — there is **no slot for
 per-field provenance** inside the record. So the record stays 100% schema-clean, and the evidence
 lives alongside it in `…​.evidence.json`, keyed by official JSON-path (plus the namespaced
-`assets:` / `descriptors:` / `implicit:` prefixes for the structured blocks). This is how
-auditability survives export without bending the standard. The sidecar is an assistant audit
-artifact unless mentors adopt it as an official convention (decision D1 in
+`assets:` / `descriptors:` / `implicit:` prefixes for the structured blocks, and — since Phase 21 —
+`series:` / `qc:status` / `attribution:` prefixes for the block-level scientific claims, see below).
+This is how auditability survives export without bending the standard. The sidecar is an assistant
+audit artifact unless mentors adopt it as an official convention (decision D1 in
 [`mentor-decisions.md`](mentor-decisions.md)). It is **not** an ISAAC record — do not validate it
 with `--official`.
+
+## Block-level evidence (series, QC, attribution)
+
+Beyond the dotted scalar fields, four more sidecar keys carry evidence for **block-shaped** claims
+that no single dotted path can express — a spectrum, a QC verdict, and each contributor:
+
+| Sidecar key | What it evidences | Evidence in this sample |
+|---|---|---|
+| `series:averaged_spectrum` | `measurement.series[0]` — the reduced spectrum itself | `user_confirmation` — answer names the `.xdi` reduction it came from |
+| `qc:status` | `measurement.qc.status` — the QC verdict | `spreadsheet` · `mock_campaign.csv` · `Sheet 'Configurations', field=qc_status` · quote `"valid"` |
+| `attribution:Ada Lovelace\|curated_record` | first contributor in `attribution.contributors` | `spreadsheet` · `mock_campaign.csv` · `Sheet 'Campaign Info', field=lead_experimenter` |
+| `attribution:Grace Hopper\|curated_record` | second contributor | `spreadsheet` · `mock_campaign.csv` · `Sheet 'Campaign Info', field=co_experimenter` |
+
+Before Phase 21, none of these four were tracked: a spectrum, a QC verdict, and every contributor
+could reach an exported record with zero evidence, and the audit had no way to notice. They are now
+first-class **evidence targets** — the audit denominator below counts them, and export refuses if
+any of them is uncovered (see `docs/superpowers/plans/2026-07-15-phase-21-close-truth-gap.md`).
 
 ## What official schema validation checks
 
@@ -145,18 +163,31 @@ combination that schema validation accepts, because chemical plausibility is out
 
 ```bash
 .venv/bin/isaac audit --records-dir docs/samples
-# PASS  01JQZ0SYNTHXANESDEMO000000.json  (0 schema errors, evidence 26/26)
+# PASS  01JQZ0SYNTHXANESDEMO000000.json  (0 schema errors, evidence 33/33)
 #
 # 1 records audited, 0 failing official validation
 ```
 
 `audit_records` (`src/isaac_records/audit.py`) does two things per record: (1) re-run official
-schema validation, and (2) report **sidecar coverage**. Coverage counts only the dotted JSON-path
-keys in the sidecar (the 26 direct field entries) and confirms each resolves to a real field in the
-record — `evidence 26/26` means all 26 resolve, 0 dangling. The namespaced `assets:` /
-`descriptors:` / `implicit:` keys (6 more in this sidecar) are not counted by coverage. The audit
-proves the record is schema-valid **and** its evidence trail is intact; it does not judge the
-science.
+schema validation, and (2) report **sidecar coverage**. Since Phase 21, coverage is an **honest,
+record-derived** count: the denominator is enumerated from the record's own content, not from
+whatever the sidecar happens to contain. It is **33 targets total** — **25 scalar** leaves (dotted
+JSON-paths such as `system.facility.facility_name`, reached by walking the record and skipping
+system-stamped/identity fields) **+ 8 block** targets (one each for `measurement.series[0]`,
+`measurement.qc`, the 3 `assets[]`, the 1 descriptor, and the 2 `attribution.contributors[]`).
+`evidence 33/33` means every one of those 33 targets has a sidecar entry — including the spectrum,
+the QC verdict, and both contributors, which the pre-Phase-21 model never checked at all (see
+[Block-level evidence](#block-level-evidence-series-qc-attribution) above). Coverage is **completeness
+reporting, not a pass/fail verdict** — a record can be officially valid with lower coverage, and a
+low-coverage record is not "invalid," just less audited. `implicit:` keys stay informational and are
+never counted, expected, or dangling. The audit proves the record is schema-valid **and** its
+evidence trail is intact against its own content; it does not judge the science.
+
+A sidecar frozen from before Phase 21 (the legacy fixture at `tests/fixtures/legacy/`) audits the
+same record honestly lower — `evidence 29/33`, uncovered: `series:averaged_spectrum`, `qc:status`,
+and both `attribution:` keys — because those four block claims had no sidecar representation yet.
+That is the intended behavior: an old sidecar is read without error, just scored against today's
+fuller definition of "covered."
 
 ## What the advisory warning layer flags
 

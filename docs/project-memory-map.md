@@ -193,10 +193,12 @@ Run it via `isaac validate <target> [--draft|--official] [--warnings]` — see [
 ## Evidence audit
 
 `src/isaac_records/audit.py` re-validates every record in a directory against the official schema
-**and** reports evidence-sidecar coverage: for each dotted JSON-path key in the sidecar it confirms
-the path resolves to a real field in the record (namespaced `assets:` / `descriptors:` / `implicit:`
-keys are not counted). A clean audit reads e.g. `evidence 26/26` (0 dangling). See
-`isaac audit` in [`cli.md`](cli.md).
+**and** reports evidence-sidecar coverage. Since Phase 21 the denominator is enumerated from the
+**record's own content** — every scalar leaf plus one block target per series / QC verdict / link /
+asset / descriptor / contributor (only `implicit:` keys stay informational and are never counted) —
+not from whatever keys happen to be in the sidecar, so an unevidenced spectrum or QC verdict shows up
+as `uncovered` instead of silently passing. A clean audit on the committed sample reads
+`evidence 33/33` (0 dangling). See `isaac audit` in [`cli.md`](cli.md).
 
 ## Evidence sidecar
 
