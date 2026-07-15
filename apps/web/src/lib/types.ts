@@ -103,6 +103,7 @@ export interface ValidationResult {
 export interface AuditResult {
   resolved: number;
   total: number;
+  uncovered: string[];
   dangling: string[];
 }
 
@@ -332,6 +333,8 @@ export interface ApiAuditRecord {
   schema_errors: { path: string; message: string }[];
   evidence_present: number;
   evidence_expected: number;
+  uncovered: string[];
+  dangling: string[];
 }
 
 export interface ApiAuditResponse {

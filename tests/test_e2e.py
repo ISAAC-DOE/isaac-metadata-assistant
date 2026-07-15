@@ -75,10 +75,14 @@ def test_audit_is_clean(tmp_path):
     results = audit_records(records_dir, REPO_ROOT)
     assert results, "audit found no records"
     assert all(report.ok for _name, report, _cov in results)
-    # the sidecar's dotted paths all resolve (0 dangling).
-    for _name, _report, (resolved, total, dangling) in results:
+    # The freshly exported golden record audits at FULL honest coverage: 33 expected
+    # targets (25 scalar leaves + 8 block targets: 1 series, qc, 0 links, 3 assets,
+    # 1 descriptor, 2 contributors), every one covered — nothing uncovered or dangling.
+    for _name, _report, (covered, expected, uncovered, dangling) in results:
+        assert expected == 33
+        assert covered == 33
+        assert uncovered == []
         assert dangling == []
-        assert resolved == total and total > 0
 
 
 def test_no_fabrication_values_trace_to_fixture():

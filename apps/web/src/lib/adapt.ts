@@ -164,9 +164,11 @@ export function toValidationResult(v: ApiValidateResult): ValidationResult {
 export function toAuditResult(a: ApiAuditResponse): AuditResult {
   const resolved = a.records.reduce((n, r) => n + r.evidence_present, 0);
   const total = a.records.reduce((n, r) => n + r.evidence_expected, 0);
-  // The audit endpoint reports counts, not the dangling path names, so the list is
-  // empty; unresolved coverage still shows as resolved < total in the figure.
-  return { resolved, total, dangling: [] };
+  // The audit endpoint reports the honest record-derived denominator plus the
+  // uncovered/dangling target names; both are passed through faithfully.
+  const uncovered = a.records.flatMap((r) => r.uncovered);
+  const dangling = a.records.flatMap((r) => r.dangling);
+  return { resolved, total, uncovered, dangling };
 }
 
 export function toAdvisoryResult(w: ApiWarningsResponse): AdvisoryResult {

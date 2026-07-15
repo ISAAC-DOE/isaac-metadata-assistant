@@ -345,11 +345,13 @@ export const auditExported = {
       name: `${EXP_ID}.json`,
       ok: true,
       schema_errors: [],
-      evidence_present: 26,
-      evidence_expected: 26,
+      evidence_present: 33,
+      evidence_expected: 33,
+      uncovered: [],
+      dangling: [],
     },
   ],
-  text: `${EXP_ID}.json: schema OK, evidence 26/26`,
+  text: `${EXP_ID}.json: schema OK, evidence 33/33`,
 };
 
 export const exportSuccess = {

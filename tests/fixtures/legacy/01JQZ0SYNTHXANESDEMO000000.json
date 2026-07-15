@@ -1,0 +1,169 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "01JQZ0SYNTHXANESDEMO000000",
+  "record_type": "evidence",
+  "record_domain": "characterization",
+  "source_type": "facility",
+  "system": {
+    "facility": {
+      "facility_name": "SSRL",
+      "organization": "SLAC",
+      "site": "SSRL",
+      "beamline": "15-2",
+      "endstation": "XES"
+    },
+    "technique": "HERFD-XAS",
+    "configuration": {
+      "proposal_id": "SYN-2099-000",
+      "session_id": "2099_run_000",
+      "monochromator_crystal": "Si(311)",
+      "spectrometer_geometry": "Von_Hamos",
+      "detector_model": "Pilatus_100K",
+      "n_scans": 6
+    },
+    "domain": "experimental"
+  },
+  "timestamps": {
+    "acquired_start_utc": "2099-03-01T18:30:00Z",
+    "acquired_end_utc": "2099-03-01T18:45:00Z",
+    "created_utc": "2099-03-05T20:15:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "Copper(II) Oxide",
+      "formula": "CuO2",
+      "provenance": "commercial"
+    },
+    "sample_form": "pellet",
+    "composition": {
+      "CuO2_mass_fraction": 0.001,
+      "sucrose_mass_fraction": 0.999
+    },
+    "geometry": {
+      "pellet_diameter_mm": 7.0
+    }
+  },
+  "context": {
+    "environment": "ex_situ",
+    "temperature_K": 298,
+    "thermodynamics": {
+      "atmosphere": "air"
+    }
+  },
+  "measurement": {
+    "series": [
+      {
+        "series_id": "averaged_spectrum",
+        "independent_variables": [
+          {
+            "name": "incident_energy",
+            "unit": "eV",
+            "values": [
+              8970,
+              8975,
+              8980,
+              8985,
+              8990,
+              8995,
+              9000
+            ]
+          }
+        ],
+        "channels": [
+          {
+            "name": "absorption",
+            "unit": "mu_normalized",
+            "role": "primary_signal",
+            "values": [
+              0.02,
+              0.03,
+              0.15,
+              0.85,
+              1.45,
+              1.1,
+              1.05
+            ]
+          },
+          {
+            "name": "i0_monitor",
+            "unit": "counts",
+            "role": "auxiliary_signal",
+            "values": [
+              50000,
+              50100,
+              49900,
+              50050,
+              50000,
+              49950,
+              50000
+            ]
+          }
+        ]
+      }
+    ],
+    "qc": {
+      "status": "valid"
+    }
+  },
+  "assets": [
+    {
+      "asset_id": "processing_notebook",
+      "content_role": "processing_script",
+      "uri": "ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb",
+      "media_type": "application/x-ipynb+json",
+      "sha256": "c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345"
+    },
+    {
+      "asset_id": "reduced_spectrum",
+      "content_role": "reduction_product",
+      "uri": "ssrl-archive://BL15-2/2099_run_000/reduced/CuO2_merged.xdi",
+      "media_type": "text/plain",
+      "sha256": "b3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b234"
+    },
+    {
+      "asset_id": "raw_scan_set",
+      "content_role": "raw_data_pointer",
+      "uri": "ssrl-archive://BL15-2/2099_run_000/raw/",
+      "media_type": "application/x-hdf5",
+      "sha256": "a3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b123"
+    }
+  ],
+  "descriptors": {
+    "outputs": [
+      {
+        "label": "completion_demo",
+        "generated_utc": "2099-03-05T21:00:00Z",
+        "generated_by": {
+          "agent": "isaac-complete-demo",
+          "version": "0.1"
+        },
+        "descriptors": [
+          {
+            "name": "xanes_inflection_point_energy",
+            "kind": "absolute",
+            "source": "manual",
+            "value": 9001.2,
+            "unit": "eV",
+            "uncertainty": {
+              "sigma": 0.01,
+              "unit": "eV",
+              "basis": "reported"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "attribution": {
+    "contributors": [
+      {
+        "name": "Ada Lovelace",
+        "role": "curated_record"
+      },
+      {
+        "name": "Grace Hopper",
+        "role": "curated_record"
+      }
+    ]
+  }
+}

@@ -271,7 +271,7 @@ def test_validate_corrupt_draft_returns_errors_not_exception(client, tmp_path):
 # --- 10. audit ----------------------------------------------------------------
 
 
-def test_audit_evidence_26_of_26_after_export(client):
+def test_audit_full_coverage_after_export(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
     client.post(f"/api/experiments/{exp_id}/export")
@@ -279,8 +279,11 @@ def test_audit_evidence_26_of_26_after_export(client):
     assert len(body["records"]) == 1
     rec = body["records"][0]
     assert rec["ok"] is True
-    assert rec["evidence_present"] == 26
-    assert rec["evidence_expected"] == 26
+    # Honest record-derived denominator: 25 scalar + 8 block targets, all covered.
+    assert rec["evidence_present"] == 33
+    assert rec["evidence_expected"] == 33
+    assert rec["uncovered"] == []
+    assert rec["dangling"] == []
     assert "PASS" in body["text"]
 
 

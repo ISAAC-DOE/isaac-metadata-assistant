@@ -69,9 +69,14 @@ def export_result_to_dict(result: ExportResult) -> dict:
 
 
 def audit_to_dict(results, text: str) -> dict:
-    """``audit_records`` returns [(name, OfficialReport, (resolved, total, dangling))]."""
+    """``audit_records`` returns [(name, OfficialReport, (covered, expected, uncovered, dangling))].
+
+    Coverage is completeness reporting, never a verdict: ``evidence_present`` /
+    ``evidence_expected`` are the honest record-derived denominator, and the
+    ``uncovered`` / ``dangling`` key lists are passed through faithfully.
+    """
     records = []
-    for name, report, (resolved, total, _dangling) in results:
+    for name, report, (covered, expected, uncovered, dangling) in results:
         records.append(
             {
                 "name": name,
@@ -79,8 +84,10 @@ def audit_to_dict(results, text: str) -> dict:
                 "schema_errors": [
                     {"path": e.path, "message": e.message} for e in report.errors
                 ],
-                "evidence_present": resolved,
-                "evidence_expected": total,
+                "evidence_present": covered,
+                "evidence_expected": expected,
+                "uncovered": list(uncovered),
+                "dangling": list(dangling),
             }
         )
     return {"records": records, "text": text}

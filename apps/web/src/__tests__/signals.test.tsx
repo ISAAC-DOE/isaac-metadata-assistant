@@ -12,7 +12,7 @@ const PASS: ValidationResult = {
   exitCode: 0,
   errors: [],
 };
-const AUDIT: AuditResult = { resolved: 26, total: 26, dangling: [] };
+const AUDIT: AuditResult = { resolved: 33, total: 33, uncovered: [], dangling: [] };
 const ADVISORY: AdvisoryResult = {
   advisory: true,
   gating: false,
@@ -32,7 +32,7 @@ describe('the three signals are separate components with distinct treatments', (
   it('CoverageBadge is neutral slate N/N — labeled "not a verdict", never a PASS', () => {
     const { container, getByText } = render(<CoverageBadge audit={AUDIT} />);
     expect(container.querySelector('.coverage')).not.toBeNull();
-    expect(getByText('26 / 26')).toBeInTheDocument();
+    expect(getByText('33 / 33')).toBeInTheDocument();
     expect(getByText(/coverage · not a verdict/)).toBeInTheDocument();
     // coverage must not borrow verdict classes or say PASS
     expect(container.querySelector('.verdict-pass')).toBeNull();
