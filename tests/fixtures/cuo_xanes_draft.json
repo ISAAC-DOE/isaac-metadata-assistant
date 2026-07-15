@@ -133,5 +133,16 @@
       "value": "K",
       "evidence": [{ "source_type": "derivation", "rule": "edge inferred as K from incident_energy window 8970–9000 eV matching Cu K-edge (8979 eV)" }]
     }
-  ]
+  ],
+  "block_evidence": {
+    "series:averaged_spectrum": [
+      { "source_type": "user_confirmation", "question": "Point to the reduced spectrum measurement.series was built from.", "answer": "averaged_spectrum (from reduced CuO2_merged.xdi)", "timestamp": "2026-07-06T15:06:00Z" }
+    ],
+    "qc:status": [
+      { "source_type": "spreadsheet", "source_file": "examples/mock_campaign.xlsx", "locator": "Sheet 'Configurations', cell C30", "quote": "valid" }
+    ],
+    "attribution:Krish Verma|curated_record": [
+      { "source_type": "spreadsheet", "source_file": "examples/mock_campaign.xlsx", "locator": "Sheet 'Campaign Info', field=lead_experimenter", "quote": "Krish Verma" }
+    ]
+  }
 }

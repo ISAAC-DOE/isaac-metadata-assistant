@@ -143,5 +143,28 @@ def test_qc_native_evidence_preserved(draft):
     assert record["measurement"]["qc"]["evidence"] == "no beam damage across 6 scans (synthetic)"
 
 
+def test_qc_status_never_fabricated(draft):
+    # A series-present/qc-absent draft: transform must NOT invent a verdict, and
+    # export must refuse (no default 'valid').
+    del draft["qc"]
+    record = transform(draft, record_id=RID)
+    assert "series" in record.get("measurement", {})  # series still emitted
+    assert "qc" not in record.get("measurement", {})  # never fabricated
+    result = export_draft(draft, ROOT, record_id=RID)
+    assert result.ok is False
+
+
+def test_tags_need_no_evidence(draft):
+    # tags are user-authored labels (authorship is the confirmation) — an otherwise
+    # fully-covered draft with tags and no tag evidence still exports.
+    draft["tags"] = ["synthetic", "demo"]
+    result = export_draft(draft, ROOT, record_id=RID)
+    assert result.ok, (
+        result.draft_report.render(),
+        result.official_report and result.official_report.render(),
+    )
+    assert result.record["tags"] == ["synthetic", "demo"]
+
+
 def test_core_never_imports_graphify():
     assert not any(n == "graphify" or n.startswith("graphify.") for n in sys.modules)

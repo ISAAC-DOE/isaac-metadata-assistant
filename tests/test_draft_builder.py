@@ -159,3 +159,20 @@ def test_qc_evidence_reaches_block_evidence():
     assert entry["source_type"] == "spreadsheet"
     assert entry["locator"] == "Sheet 'Configurations', field=qc_status"
     assert entry["quote"] == "valid"
+
+
+def test_qc_blocker_when_sheet_lacks_qc(tmp_path):
+    # A sheet with no qc_status row cannot source a qc verdict, so the builder emits a
+    # pending qc blocker (never a default 'valid') — deterministic from what's absent.
+    src = CSV_PATH.read_text(encoding="utf-8")
+    lines = [ln for ln in src.splitlines() if not ln.startswith("Configurations,qc_status,")]
+    no_qc_csv = tmp_path / "no_qc.csv"
+    no_qc_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    draft = build_draft(no_qc_csv, LISTING_PATH)
+
+    assert "qc" not in draft  # nothing sourced -> no qc block
+    assert "qc:status" not in (draft.get("block_evidence") or {})
+    qc_blocks = [p for p in draft["pending"] if p.get("kind") == "qc"]
+    assert len(qc_blocks) == 1
+    assert "QC verdict" in qc_blocks[0]["question"]

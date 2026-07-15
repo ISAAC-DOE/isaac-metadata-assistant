@@ -19,6 +19,13 @@ The module imports nothing but ``copy`` (stdlib): no graphify, no truth-plane co
 from __future__ import annotations
 
 import copy
+import re
+
+# A well-formed sha256 answer: 64 lowercase hex chars (mirrors draft_validator).
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# The official measurement.qc.status enum — a qc answer outside this set is rejected.
+_QC_STATUSES = {"valid", "compromised", "failed", "pending"}
 
 # A stable ``asset_id`` per ``content_role``. The ``pending`` asset blockers carry
 # a ``content_role`` but no ``asset_id`` (build_draft drops the parser's implied id),
@@ -63,8 +70,10 @@ def apply_answers(draft: dict, answers: dict) -> dict:
         if kind == "asset":
             uri = entry.get("uri")
             sha256 = asset_sha256.get(uri)
-            if sha256 is None:
-                # No answer for this asset -> stays pending, still blocks export.
+            if sha256 is None or not _SHA256_RE.match(str(sha256)):
+                # No answer OR a malformed sha256 -> NOT applied. The blocker stays
+                # pending (still blocks export) and the bad value is never written into
+                # the draft. Same visible signal as an unanswered blocker, by design.
                 remaining_pending.append(entry)
                 continue
             content_role = entry.get("content_role")
@@ -101,6 +110,26 @@ def apply_answers(draft: dict, answers: dict) -> dict:
                     _user_confirmation(entry.get("question"), series_id, timestamp)
                 ]
             # qc stays exactly as build_draft read it from the sheet.
+            continue
+
+        if kind == "qc":
+            qc_answer = answers.get("qc")
+            status = qc_answer.get("status") if isinstance(qc_answer, dict) else None
+            if status not in _QC_STATUSES:
+                # No answer OR an off-enum verdict -> NOT applied; stays pending. The
+                # system never invents a qc status (no default 'valid').
+                remaining_pending.append(entry)
+                continue
+            qc = draft.setdefault("qc", {})
+            qc["status"] = status
+            evidence_note = qc_answer.get("evidence")
+            if evidence_note:
+                # Native measurement.qc.evidence is a free-text string field.
+                qc["evidence"] = evidence_note
+            block_evidence = draft.setdefault("block_evidence", {})
+            block_evidence.setdefault("qc:status", []).append(
+                _user_confirmation(entry.get("question"), status, timestamp)
+            )
             continue
 
         if kind == "descriptor":

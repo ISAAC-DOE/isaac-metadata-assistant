@@ -216,6 +216,20 @@ def build_draft(structured_path, listing_path) -> dict:
             "evidence": reduced_evidence,
         }
     )
+    # qc verdict: if the sheet carried no qc_status cell we cannot source it, and a
+    # measurement with series needs one — surface a pending blocker (never a default
+    # 'valid'). Deterministic: fires only when qc could not be read above.
+    if qc is None:
+        pending.append(
+            {
+                "kind": "qc",
+                "blocker": "qc_status",
+                "question": (
+                    "What is the QC verdict for this measurement "
+                    "(valid/compromised/failed/pending) and how was it determined?"
+                ),
+            }
+        )
     pending.append(
         {
             "kind": "descriptor",

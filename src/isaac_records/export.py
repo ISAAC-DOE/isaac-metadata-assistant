@@ -87,8 +87,9 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
             # strip_evidence: the schema defines measurement.qc.evidence as a native
             # string field, so blanket-stripping "evidence" would delete it.
             record["measurement"]["qc"] = dict(draft["qc"])
-        elif "qc" not in record["measurement"]:
-            record["measurement"]["qc"] = {"status": "valid"}
+        # No qc fallback: a verdict is never invented. A series-present/qc-absent draft
+        # is refused upstream by validate_draft (and would fail official validation,
+        # which requires measurement.qc); export_draft gates on both.
     if draft.get("assets"):
         record["assets"] = [strip_evidence(a) for a in draft["assets"]]
     if draft.get("descriptors_outputs"):

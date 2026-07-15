@@ -146,3 +146,54 @@ def test_valid_sha256_accepted():
         assert re.fullmatch(r"[0-9a-f]{64}", asset["sha256"])
         uc = next(e for e in asset["evidence"] if e["source_type"] == "user_confirmation")
         assert uc["answer"] == asset["sha256"]
+
+
+def test_bad_sha256_answer_rejected_at_completion():
+    # A malformed sha256 answer must NOT be applied: no asset is created, the blocker
+    # stays pending, and the bad value never lands in the draft.
+    draft = _draft()
+    before = copy.deepcopy(draft)
+    answers = _answers()
+
+    bad_uri = "ssrl-archive://BL15-2/2099_run_000/raw/"
+    partial = copy.deepcopy(answers)
+    partial["asset_sha256"][bad_uri] = "asdf"
+
+    completed = apply_answers(draft, partial)
+
+    # No asset created for the malformed answer.
+    assert bad_uri not in {a["uri"] for a in completed["assets"]}
+    # Blocker stays pending.
+    still_pending = [p for p in completed["pending"] if p.get("uri") == bad_uri]
+    assert len(still_pending) == 1
+    assert still_pending[0]["blocker"] == "sha256"
+    # The malformed value is never written anywhere in the draft.
+    assert "asdf" not in json.dumps(completed)
+    # Input draft is not mutated.
+    assert draft == before
+
+
+def test_qc_answer_applies_with_confirmation():
+    # A valid qc answer sets status (+ native evidence) and appends a
+    # user_confirmation entry under block_evidence["qc:status"].
+    draft = {"pending": [{"kind": "qc", "question": "What is the QC verdict?"}]}
+    answers = {
+        "timestamp": "2099-03-05T21:00:00Z",
+        "qc": {"status": "compromised", "evidence": "beam damage after scan 4 (synthetic)"},
+    }
+    completed = apply_answers(draft, answers)
+
+    assert completed["qc"]["status"] == "compromised"
+    assert completed["qc"]["evidence"] == "beam damage after scan 4 (synthetic)"
+    assert completed["pending"] == []
+    entries = completed["block_evidence"]["qc:status"]
+    assert entries[-1]["source_type"] == "user_confirmation"
+    assert entries[-1]["answer"] == "compromised"
+    assert entries[-1]["timestamp"] == answers["timestamp"]
+
+    # An off-enum status is rejected: not applied, blocker stays pending.
+    draft2 = {"pending": [{"kind": "qc", "question": "What is the QC verdict?"}]}
+    completed2 = apply_answers(draft2, {"timestamp": "2099-03-05T21:00:00Z", "qc": {"status": "bogus"}})
+    assert completed2.get("qc", {}).get("status") != "bogus"
+    assert len(completed2["pending"]) == 1
+    assert completed2["pending"][0]["kind"] == "qc"
