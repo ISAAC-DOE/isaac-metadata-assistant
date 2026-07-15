@@ -40,6 +40,12 @@ export function CoverageBadge({ audit }: CoverageBadgeProps) {
       <div className="coverage-figure mono">
         {audit.resolved} / {audit.total}
       </div>
+      {/* Static denominator explanation: the live count must be self-explanatory
+          where it is shown. Only this line is static — the numbers above are
+          always the live audit payload. */}
+      <div className="coverage-sub">
+        Includes fields, assets, descriptors, series, QC, links, and attribution.
+      </div>
       <div className="coverage-sub">{clean ? 'paths resolve · 0 dangling' : segments.join(' · ')}</div>
       <div className="coverage-cmd mono">isaac audit</div>
       {uncoveredCount > 0 && (

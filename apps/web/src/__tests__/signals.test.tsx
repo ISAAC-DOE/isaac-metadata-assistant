@@ -80,4 +80,17 @@ describe('the three signals are separate components with distinct treatments', (
     expect(getByText('33 / 33')).toBeInTheDocument();
     expect(container.querySelectorAll('.coverage-dangling')).toHaveLength(0);
   });
+
+  it('CoverageBadge explains its denominator with a static line next to the live count', () => {
+    // the count must be self-explanatory where it is shown — a user seeing
+    // "N / N" must not have to guess what is counted (P21E copy requirement)
+    const partial: AuditResult = { resolved: 30, total: 33, uncovered: ['links'], dangling: [] };
+    for (const audit of [AUDIT, partial]) {
+      const { getByText, unmount } = render(<CoverageBadge audit={audit} />);
+      expect(
+        getByText('Includes fields, assets, descriptors, series, QC, links, and attribution.'),
+      ).toBeInTheDocument();
+      unmount();
+    }
+  });
 });
