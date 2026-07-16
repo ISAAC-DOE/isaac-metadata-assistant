@@ -83,7 +83,7 @@ export function ExportReadiness() {
     return (
       <AppShell
         variant="record"
-        topBar={<TopBar variant="record" title={LABELS.screenExport} />}
+        topBar={<TopBar variant="record" title={LABELS.screenExport} recordId={id} />}
         sidebar={<WorkflowSpine steps={buildSpine('export')} recordId={id} />}
         mainPad="pad"
       >

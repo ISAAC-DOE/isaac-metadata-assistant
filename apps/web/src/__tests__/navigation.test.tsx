@@ -4,7 +4,13 @@ import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import { WorkflowSpine, buildSpine } from '../components/WorkflowSpine';
-import { bundleRoutes, evidenceBundleRoutes, stubFetchRoutes } from '../test/apiFixtures';
+import {
+  bundleRoutes,
+  evidenceBundleRoutes,
+  exportReadyRoutes,
+  stubFetchDown,
+  stubFetchRoutes,
+} from '../test/apiFixtures';
 
 function renderAt(path: string) {
   return render(
@@ -126,5 +132,62 @@ describe('P22B · navigation / no dead ends', () => {
     const draft = stepLi(container, 'Draft');
     // draft is active (not exported fixture) -> active step with a route is a link.
     expect(draft.querySelector('a.spine-step-link')?.getAttribute('href')).toBe('/record/demo');
+  });
+});
+
+describe('P23B · breadcrumb is a real link during loading/error, not just once loaded', () => {
+  it('S6 Ready to Export: the breadcrumb links back to Review Record while the bundle is still loading', async () => {
+    stubFetchRoutes(exportReadyRoutes('demo'));
+    // assert synchronously, before the stubbed fetch promises resolve — this is
+    // the loading branch's TopBar, not the loaded one.
+    const { container, getByText, findByText } = renderAt('/record/demo/export');
+    expect(
+      getByText('Loading validation, coverage and advisory from the local backend…'),
+    ).toBeInTheDocument();
+    const back = container.querySelector('a.record-title-link');
+    expect(back).not.toBeNull();
+    expect(back!.getAttribute('href')).toBe('/record/demo');
+    // let the stubbed fetch settle so the effect update happens inside act()
+    await findByText('Export Official Record + Sidecar');
+  });
+
+  it('S6 Ready to Export: the breadcrumb still links back to Review Record when the backend is down', async () => {
+    stubFetchDown();
+    const { container, findByText } = renderAt('/record/demo/export');
+    await findByText('Backend Not Running');
+    const back = container.querySelector('a.record-title-link');
+    expect(back).not.toBeNull();
+    expect(back!.getAttribute('href')).toBe('/record/demo');
+  });
+
+  it('S4 Complete: the breadcrumb links back to Review Record while the bundle is still loading', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { container, getByText, findByText } = renderAt('/record/demo/complete');
+    expect(getByText('Loading the blockers from the local backend…')).toBeInTheDocument();
+    const back = container.querySelector('a.record-title-link');
+    expect(back).not.toBeNull();
+    expect(back!.getAttribute('href')).toBe('/record/demo');
+    // let the stubbed fetch settle so the effect update happens inside act()
+    await findByText('Answer 5 Questions to Finish This Record');
+  });
+
+  it('S5 Evidence: the breadcrumb links back to Review Record while the bundle is still loading', async () => {
+    stubFetchRoutes(evidenceBundleRoutes('demo'));
+    const { container, getByText, findByText } = renderAt('/record/demo/evidence');
+    expect(getByText('Loading the evidence trail from the local backend…')).toBeInTheDocument();
+    const back = container.querySelector('a.record-title-link');
+    expect(back).not.toBeNull();
+    expect(back!.getAttribute('href')).toBe('/record/demo');
+    // let the stubbed fetch settle so the effect update happens inside act()
+    await findByText('Direct Fields');
+  });
+
+  it('S3 Review Record (hub): the loading branch has no ancestor link — it IS the record home, matching the loaded state', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { container, getByText, findByText } = renderAt('/record/demo');
+    expect(getByText('Loading the record from the local backend…')).toBeInTheDocument();
+    expect(container.querySelector('a.record-title-link')).toBeNull();
+    // let the stubbed fetch settle so the effect update happens inside act()
+    await findByText('5 Fields Need Your Confirmation');
   });
 });

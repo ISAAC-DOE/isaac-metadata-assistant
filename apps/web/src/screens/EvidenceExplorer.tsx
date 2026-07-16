@@ -35,7 +35,7 @@ export function EvidenceExplorer() {
     return (
       <AppShell
         variant="record"
-        topBar={<TopBar variant="record" title={LABELS.screenEvidence} />}
+        topBar={<TopBar variant="record" title={LABELS.screenEvidence} recordId={id} />}
         mainPad="pad"
       >
         {bundle.status === 'loading' ? (

@@ -41,7 +41,7 @@ export function GuidedCompletion() {
     return (
       <AppShell
         variant="record"
-        topBar={<TopBar variant="record" title={LABELS.screenComplete} />}
+        topBar={<TopBar variant="record" title={LABELS.screenComplete} recordId={id} />}
         sidebar={<WorkflowSpine steps={buildSpine('complete')} recordId={id} />}
         mainPad="centered"
       >
