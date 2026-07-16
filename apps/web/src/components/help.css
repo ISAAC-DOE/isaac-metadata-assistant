@@ -43,7 +43,7 @@
 .help-panel-close {
   width: 26px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--radius-token);
   border: 1px solid transparent;
   background: none;
   color: var(--text-tertiary);

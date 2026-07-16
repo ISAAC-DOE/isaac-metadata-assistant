@@ -120,9 +120,13 @@ function LoadedExport({
   const modalTitleId = useId();
 
   // Capture the opener so focus can return to it on close (standard dialog
-  // pattern — the trigger is focused when it's activated).
-  const openViewer = (kind: 'record' | 'sidecar') => {
-    modalTriggerRef.current = document.activeElement as HTMLElement | null;
+  // pattern — the trigger is focused when it's activated). Prefer the element
+  // the ArtifactCard "View" button passes via e.currentTarget: a mouse click
+  // doesn't reliably focus the button first on macOS Safari/Firefox, so
+  // document.activeElement alone can land the restore on <body>. Fall back to
+  // document.activeElement for any non-click activation path.
+  const openViewer = (kind: 'record' | 'sidecar', trigger?: HTMLElement | null) => {
+    modalTriggerRef.current = trigger ?? (document.activeElement as HTMLElement | null);
     setViewing(kind);
   };
   const closeViewer = () => setViewing(null);
@@ -367,14 +371,14 @@ function LoadedExport({
               <div className="artifact-row">
                 <ArtifactCard
                   artifact={{ kind: 'record', path: recordPath, verdict: 'pass' }}
-                  onView={viewArtifacts ? () => openViewer('record') : undefined}
+                  onView={viewArtifacts ? (e) => openViewer('record', e.currentTarget) : undefined}
                   onDownload={
                     viewArtifacts ? () => download(viewArtifacts.record, recordPath) : undefined
                   }
                 />
                 <ArtifactCard
                   artifact={{ kind: 'sidecar', path: sidecarPath, pathCount: coverageTotal }}
-                  onView={viewArtifacts ? () => openViewer('sidecar') : undefined}
+                  onView={viewArtifacts ? (e) => openViewer('sidecar', e.currentTarget) : undefined}
                   onDownload={
                     viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarPath) : undefined
                   }

@@ -3,10 +3,14 @@ import { FileText, FileJson, Download } from './icons';
 import { StatusChip } from './StatusChip';
 import { LABELS } from '../lib/labels';
 import type { Artifact } from '../lib/types';
+import type { MouseEvent } from 'react';
 
 interface ArtifactCardProps {
   artifact: Artifact;
-  onView?: () => void;
+  // Receives the click event so the caller can capture e.currentTarget as the
+  // focus-restore target — a mouse click doesn't reliably focus the button
+  // first (macOS Safari/Firefox), so document.activeElement alone isn't safe.
+  onView?: (e: MouseEvent<HTMLButtonElement>) => void;
   onDownload?: () => void;
 }
 
