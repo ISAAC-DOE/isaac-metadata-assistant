@@ -41,7 +41,7 @@ export function RecordWorkbench() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenReview} />}
-        sidebar={<WorkflowSpine steps={buildSpine('draft')} />}
+        sidebar={<WorkflowSpine steps={buildSpine('draft')} recordId={id} />}
         mainPad="pad"
       >
         {bundle.status === 'loading' ? (
@@ -199,7 +199,7 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
           stateChip={detail.exported ? 'exported' : 'draft'}
         />
       }
-      sidebar={<WorkflowSpine steps={spine} />}
+      sidebar={<WorkflowSpine steps={spine} recordId={id} />}
       rightPanel={rightPanel}
       statusBar={
         <StatusBar

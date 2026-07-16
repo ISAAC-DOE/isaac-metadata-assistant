@@ -42,7 +42,7 @@ export function GuidedCompletion() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenComplete} />}
-        sidebar={<WorkflowSpine steps={buildSpine('complete')} />}
+        sidebar={<WorkflowSpine steps={buildSpine('complete')} recordId={id} />}
         mainPad="centered"
       >
         {load.status === 'loading' ? (
@@ -159,8 +159,16 @@ function LoadedCompletion({
   const shell = (children: ReactNode) => (
     <AppShell
       variant="record"
-      topBar={<TopBar variant="record" title={detail.title} filename={`draft · ${detail.id}`} />}
-      sidebar={<WorkflowSpine steps={spine} />}
+      topBar={
+        <TopBar
+          variant="record"
+          title={detail.title}
+          filename={`draft · ${detail.id}`}
+          recordId={id}
+          surface={LABELS.screenComplete}
+        />
+      }
+      sidebar={<WorkflowSpine steps={spine} recordId={id} />}
       statusBar={statusBar}
       mainPad="centered"
     >

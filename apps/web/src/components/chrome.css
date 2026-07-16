@@ -64,6 +64,7 @@
   font-weight: 700;
   font-size: 14px;
   color: var(--text-heading);
+  text-decoration: none;
 }
 .brand-tile {
   width: 30px;
@@ -152,6 +153,19 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* When the record title is an ancestor breadcrumb crumb it links back to Review
+ * Record — keep it looking like the title (visual polish is a later slice). */
+.record-title-link {
+  text-decoration: none;
+  color: inherit;
+}
+/* Leaf crumb: the current sub-surface, non-link. */
+.record-surface {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  white-space: nowrap;
 }
 .record-file {
   font-family: var(--font-mono);

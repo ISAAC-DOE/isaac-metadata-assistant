@@ -47,10 +47,10 @@ export function EvidenceExplorer() {
     );
   }
 
-  return <LoadedEvidence data={bundle.data} />;
+  return <LoadedEvidence id={id} data={bundle.data} />;
 }
 
-function LoadedEvidence({ data }: { data: EvidenceBundle }) {
+function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
   const { detail, evidence, artifacts, graph, sourcePreviews } = data;
 
   const entries = useMemo(() => evidenceEntriesToTrail(evidence), [evidence]);
@@ -75,7 +75,14 @@ function LoadedEvidence({ data }: { data: EvidenceBundle }) {
     return (
       <AppShell
         variant="record"
-        topBar={<TopBar variant="record" title={detail.title} />}
+        topBar={
+          <TopBar
+            variant="record"
+            title={detail.title}
+            recordId={id}
+            surface={LABELS.screenEvidence}
+          />
+        }
         mainPad="pad"
       >
         <p className="preview-empty" role="note">
@@ -105,6 +112,8 @@ function LoadedEvidence({ data }: { data: EvidenceBundle }) {
               : `draft · ${detail.id}`
           }
           stateChip={exported ? 'exported' : 'draft'}
+          recordId={id}
+          surface={LABELS.screenEvidence}
         />
       }
       sidebar={

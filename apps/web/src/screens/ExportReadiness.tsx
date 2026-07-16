@@ -84,7 +84,7 @@ export function ExportReadiness() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenExport} />}
-        sidebar={<WorkflowSpine steps={buildSpine('export')} />}
+        sidebar={<WorkflowSpine steps={buildSpine('export')} recordId={id} />}
         mainPad="pad"
       >
         {load.name === 'loading' ? (
@@ -242,9 +242,11 @@ function LoadedExport({
           title={detail.title}
           filename={exported ? recordPath.split('/').pop() : `draft · ${detail.id}`}
           stateChip={exported ? 'exported' : undefined}
+          recordId={id}
+          surface={LABELS.screenExport}
         />
       }
-      sidebar={<WorkflowSpine steps={spine} />}
+      sidebar={<WorkflowSpine steps={spine} recordId={id} />}
       rightPanel={rightPanel}
       statusBar={
         <StatusBar

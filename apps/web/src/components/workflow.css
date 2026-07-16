@@ -29,6 +29,15 @@
 .spine-step.active {
   background: var(--action-tint);
 }
+/* A reached step links back to its surface. display:contents keeps the disc +
+ * text as the step's own flex children, so the row layout and connector are
+ * unchanged — the anchor only adds navigation (link styling is a later slice). */
+.spine-step-link {
+  display: contents;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
 /* connector between discs — 2px neutral background line, not a rail */
 .spine-step:not(:last-child)::before {
   content: '';
