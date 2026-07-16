@@ -165,12 +165,15 @@ reviewer narrative is in [`query-demo.md`](query-demo.md); concept→file map is
 - **Expect:** doc — the current back-burner list.
 - **Verify against:** [`project-memory-map.md`](project-memory-map.md) "Roadmap / back-burner items",
   [`mentor-decisions.md`](mentor-decisions.md) (D6 domain), [`../README.md`](../README.md) status:
-  second domain (electrochemistry / performance) — back burner; Web UI — back burner; CI / GitHub
-  Actions — implemented (`.github/workflows/ci.yml`); license — pending; real/sanitized-data pilot —
-  needs written approval; full upstream portal-validator parity — not implemented (evaluation-only seam).
+  second domain (electrochemistry / performance) — back burner; Web UI — **built** (synthetic-only
+  prototype, protection-gated demo deployment since Phase 20, see [`deployment.md`](deployment.md));
+  CI / GitHub Actions — implemented, two jobs (`.github/workflows/ci.yml`: backend + frontend);
+  license — pending; real/sanitized-data pilot — needs written approval; full upstream
+  portal-validator parity — not implemented (evaluation-only seam).
 - **Caveat:** roadmap changes; the latest human decision is authoritative, not stale graph memory.
-  There is **no web app and no MCP server** in this repo, and portal parity / real-data support are
-  **not built** — do not claim otherwise.
+  There is **no MCP server** in this repo (the web app is built and deployed, but as a
+  synthetic-only, non-production prototype), and portal parity / real-data support are **not
+  built** — do not claim otherwise.
 
 ---
 

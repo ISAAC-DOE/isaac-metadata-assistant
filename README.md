@@ -26,7 +26,7 @@ Working prototype (`v0.1.0`), **synthetic data only**.
 - One-command reproducible synthetic XANES demo (regenerates the committed sample byte-for-byte).
 - `isaac` CLI (`validate` / `export` / `audit` / `new-id`) and five Claude authoring skills.
 - Non-gating portal-style advisory soft-warnings (local seam) and a Graphify memory/query reviewer demo.
-- 174 passing Python tests (plus 76 frontend tests), including a test that the truth plane never imports Graphify.
+- 178 passing Python tests (plus 115 frontend tests), including a test that the truth plane never imports Graphify.
 
 **Not built yet**
 
@@ -73,7 +73,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,api]'
-.venv/bin/pytest                                   # 174 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # 178 tests: golden records validate, transform is gated
 ```
 
 **Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →
@@ -89,9 +89,10 @@ official record + sidecar, on committed synthetic fixtures — no real data):
 The demo regenerates the committed sample (`docs/samples/`) byte-for-byte. See **[`docs/demo.md`](docs/demo.md)**
 for the full walkthrough and expected output.
 
-CI (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs this same pipeline
-on every push and pull request to `main`: install, tests, synthetic demo, official validation
-(plus advisory warnings), and evidence audit. Synthetic data only; no secrets.
+CI (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs two jobs on every
+push and pull request to `main`: a backend job (install, tests, synthetic demo, official validation
+plus advisory warnings, evidence audit) and a frontend job (`apps/web`: install, `npm test`, `npm
+run build`). Synthetic data only; no secrets.
 
 ### Documentation
 

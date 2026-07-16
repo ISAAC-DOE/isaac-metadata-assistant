@@ -62,6 +62,23 @@ Read this before demoing it to anyone:
   new-id` behave exactly as before; the UI calls the same core functions
   in-process and gets byte-identical results.
 
+## Navigation & chrome (Phase 22)
+
+- **Brand mark is a real home link** — clicking it (`TopBar` → `Brand`) navigates back to
+  **My Experiments**; it is not decorative.
+- **Breadcrumbs are real links, not labels.** On record sub-surfaces (Complete, Evidence, Export)
+  the record-title crumb links back to Review Record; on the record surface itself the current
+  crumb is the non-link leaf. Reached workflow-spine steps (`WorkflowSpine`) link back to their
+  surface — only locked (not-yet-reached) steps stay non-interactive.
+- **Help is a real, static popover** (`HelpPanel`) — a small honest explainer of the five pipeline
+  steps, opened from the Help button, closable via Escape or click-outside. It is not chat and not
+  search.
+- **The "Memory: Fresh / Stale / Missing" chip is live** — it reflects `GET /api/graph/status`, not
+  a hardcoded placeholder; still status-only and never a verdict.
+- **There is no search box and no user/account chip.** An earlier iteration of the chrome had
+  placeholder versions of both; they were removed (Phase 22D) because this prototype has no search
+  and no user accounts, and a fake affordance would misrepresent that.
+
 ## Prerequisites
 
 - Python virtualenv already set up per the repo root `README.md` Quickstart

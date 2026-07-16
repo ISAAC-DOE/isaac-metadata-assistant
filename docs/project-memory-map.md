@@ -303,14 +303,15 @@ Project-owner direction as of July 2026:
 | Item | Status |
 |---|---|
 | Second domain — electrochemistry / performance | **Back burner** (recommended next domain when resumed; exercises conditional-required rules) |
-| Web UI | **Back burner**; if built, likely **before** the electrochem/performance domain |
-| CI / GitHub Actions | **Implemented** — `.github/workflows/ci.yml` runs tests, the synthetic demo, official validation, advisory warnings, and the evidence audit on push/PR to `main` |
+| Web UI | **Built** — `apps/api` (FastAPI) + `apps/web` (React/Vite), a synthetic-only prototype since Phase 19, with a protection-gated demo deployment since Phase 20 (see [`deployment.md`](deployment.md)); production hardening is not planned |
+| CI / GitHub Actions | **Implemented** — `.github/workflows/ci.yml` runs two jobs on push/PR to `main`: a backend job (tests, the synthetic demo, official validation, advisory warnings, the evidence audit) and a frontend job (`apps/web`: vitest, build) |
 | License | **Pending** mentor/project decision — no license is asserted yet |
 | Real / sanitized-data pilot | Requires **explicit written data-governance approval** first |
 | Full upstream portal-validator parity | **Not implemented**; only an evaluation-only local seam exists |
 
-There is no web app and no MCP server in this repo. LLM-assisted extraction of screenshots/PDFs/
-notes is designed ([`extraction.md`](extraction.md)) but not built.
+There is a synthetic-only web app prototype (`apps/api` + `apps/web`, deployed since Phase 20 — see
+[`deployment.md`](deployment.md)) but no MCP server in this repo. LLM-assisted extraction of
+screenshots/PDFs/notes is designed ([`extraction.md`](extraction.md)) but not built.
 
 ---
 

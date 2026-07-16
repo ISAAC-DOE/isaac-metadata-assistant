@@ -142,6 +142,8 @@ touch git, an LLM, or any external service. Never index real or private data int
 ## 12. Current limitations
 
 Single XANES / characterization path; synthetic data only. No upstream portal parity — only a
-local, non-gating advisory seam. No web UI, no MCP server, no electrochemistry/performance domain
-yet. License pending. See the [`../README.md`](../README.md) status section and
+local, non-gating advisory seam. A synthetic-only web UI prototype exists (`apps/api` + `apps/web`,
+protection-gated demo deployment since Phase 20 — see [`ui-local-dev.md`](ui-local-dev.md) and
+[`deployment.md`](deployment.md)), but there is no MCP server and no electrochemistry/performance
+domain yet. License pending. See the [`../README.md`](../README.md) status section and
 [`mentor-decisions.md`](mentor-decisions.md) for the open decisions that gate what comes next.

@@ -64,7 +64,9 @@ browsing. The key is baked into the frontend bundle at build time, so it is
 exactly as secret as frontend access — which is gated by Vercel Deployment
 Protection. This is nuisance-abuse prevention for a synthetic demo, not
 cryptographic access control. Rotate by changing the env var on both
-platforms and redeploying. Rate limiting is deferred to Phase 21.
+platforms and redeploying. Rate limiting is not implemented — it is a
+back-burner item with no phase currently scheduled to add it (not a
+Phase 21 commitment).
 
 ## Resetting the synthetic workspace
 
