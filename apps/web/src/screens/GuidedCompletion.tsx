@@ -135,7 +135,10 @@ function LoadedCompletion({
     draft: { meta: `${detail.evidenced_field_count} fields reviewed` },
     complete: {
       number: answered.length,
-      meta: `${answered.length} of ${total} answered`,
+      // Only claim a real ratio — `total === 0` (no blockers ever existed) has
+      // nothing honest to count, so leave meta unset rather than render the
+      // same dishonest "0 of 0" the counter above was fixed to avoid.
+      ...(total > 0 ? { meta: `${answered.length} of ${total} answered` } : {}),
     },
     export: {
       meta: remaining === 0 ? 'ready to export' : `${remaining} to go`,
@@ -196,7 +199,7 @@ function LoadedCompletion({
       <>
         <div className="completion-header">
           <h1 className="completion-title">All Fields Resolved</h1>
-          <span className="completion-counter">
+          <span className={`completion-counter${total === 0 ? ' completion-counter-prose' : ''}`}>
             {total === 0 ? 'No open questions.' : `${answered.length} / ${total}`}
           </span>
         </div>

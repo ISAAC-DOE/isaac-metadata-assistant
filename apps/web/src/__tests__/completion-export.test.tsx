@@ -180,6 +180,9 @@ describe('S4 · Guided Completion (live)', () => {
     expect(getByText('No open questions.')).toBeInTheDocument();
     expect(queryByText('0 / 0')).toBeNull();
     expect(getByText('This record is ready to export.')).toBeInTheDocument();
+    // the sidebar spine's "Complete" step must not repeat the same dishonest
+    // zero-count in its meta line either
+    expect(queryByText('0 of 0 answered')).toBeNull();
   });
 });
 

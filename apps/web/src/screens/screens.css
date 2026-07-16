@@ -79,6 +79,9 @@
 }
 .completion-title { font-size: 17px; font-weight: 600; color: var(--text-heading); }
 .completion-counter { font-family: var(--font-mono); font-size: 13px; color: var(--text-tertiary); }
+/* Prose (e.g. "No open questions.") isn't a numeric ratio — render it in the
+   UI font, not the mono font meant for digit/slash counters. */
+.completion-counter.completion-counter-prose { font-family: var(--font-ui); }
 .progress {
   display: flex;
   gap: 6px;
