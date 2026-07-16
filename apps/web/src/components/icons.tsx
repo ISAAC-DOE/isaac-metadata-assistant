@@ -35,6 +35,7 @@ import {
   Circle,
   Download,
   LayoutList,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import type { SourceType } from '../lib/types';
@@ -97,5 +98,6 @@ export {
   Circle,
   Download,
   LayoutList,
+  X,
 };
 export type { LucideIcon };

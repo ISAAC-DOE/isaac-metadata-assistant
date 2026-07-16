@@ -1,0 +1,105 @@
+/*
+ * HelpPanel — a small, honest, anchored popover off the TopBar Help button.
+ * No dialog library: hand-rolled per project dependency discipline. Static
+ * content only — matches project truth language, never overstates.
+ */
+.help-anchor {
+  position: relative;
+}
+
+.help-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(340px, 90vw);
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-screen);
+}
+.help-panel:focus {
+  outline: none;
+}
+
+.help-panel-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.help-panel-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.help-panel-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.help-panel-close:hover {
+  background: var(--border-faint);
+  color: var(--text-secondary);
+}
+.help-panel-close:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.help-panel-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.help-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+  margin-bottom: 6px;
+}
+.help-section p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.help-section p strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.help-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.help-steps li {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.help-steps strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}

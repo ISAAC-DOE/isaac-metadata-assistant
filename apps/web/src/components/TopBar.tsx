@@ -1,9 +1,10 @@
 import './chrome.css';
 import { Link } from 'react-router-dom';
-import { AudioWaveform, Search, CircleHelp, Shield, ChevronRight } from './icons';
+import { AudioWaveform, Shield, ChevronRight } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { StatusChip } from './StatusChip';
+import { HelpPanel } from './HelpPanel';
 import type { ChipKind } from '../lib/status';
 
 function SyntheticChip() {
@@ -42,8 +43,9 @@ interface TopBarProps {
   surface?: string;
 }
 
-/** Identity, context/breadcrumb, global search, and the persistent Synthetic
- * mode chip. The mode chip is always mounted — it is load-bearing. */
+/** Identity, context/breadcrumb, the persistent Synthetic mode chip, and Help.
+ * The mode chip is always mounted — it is load-bearing. There is no search:
+ * this prototype doesn't have one, so the chrome doesn't pretend to. */
 export function TopBar({ variant, breadcrumb, title, filename, stateChip, recordId, surface }: TopBarProps) {
   return (
     <header className="topbar">
@@ -51,24 +53,10 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
 
       {variant === 'home' && (
         <>
-          <span className="account">
-            <span className="avatar" aria-hidden="true">
-              AL
-            </span>
-            Ada Lovelace · SSRL
-          </span>
-          <div className="topbar-search">
-            <div className="search" role="search">
-              <Search size={15} strokeWidth={2} aria-hidden="true" />
-              <span>Search records, evidence &amp; project memory…</span>
-              <span className="kbd">⌘K</span>
-            </div>
-          </div>
+          <div className="topbar-spacer" />
           <div className="topbar-right">
             <SyntheticChip />
-            <button type="button" className="icon-btn" aria-label="Help">
-              <CircleHelp size={16} strokeWidth={2} />
-            </button>
+            <HelpPanel />
           </div>
         </>
       )}

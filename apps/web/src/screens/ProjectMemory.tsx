@@ -2,15 +2,23 @@ import './screens.css';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
+import { GraphStatusChip } from '../components/GraphStatusChip';
+import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Network } from '../components/icons';
 import { LABELS } from '../lib/labels';
+import { api } from '../lib/api';
+import { useFetch } from '../lib/useFetch';
 
 /**
  * Project Memory — a deliberately separate destination from the experiment queue
  * (never blended into S1). This is the memory/query plane (Graphify + docs);
  * it returns leads to verify, never verdicts. Minimal placeholder for this build.
+ * The freshness readout is live from `GET /api/graph/status` — never a
+ * hardcoded claim.
  */
 export function ProjectMemory() {
+  const graph = useFetch(() => api.getGraphStatus(), []);
+
   return (
     <AppShell
       variant="full"
@@ -28,15 +36,17 @@ export function ProjectMemory() {
           verify — it never validates, completes, or supplies a value.
         </p>
         <div className="card placeholder-card">
-          <span className="dot dot-memory" aria-hidden="true" />
-          <span className="mono" style={{ fontSize: 12, color: 'var(--text-slate)' }}>
-            project memory: fresh
-          </span>
-          <p>
-            Search across records, evidence, and project memory from the top bar (<span className="mono">⌘K</span>).
-            Graphify is a memory plane, not a truth plane — every lead points back to a cited file to
-            confirm.
-          </p>
+          {graph.status === 'loading' && <LoadingPanel label="Checking memory status…" />}
+          {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
+          {graph.status === 'data' && (
+            <>
+              <GraphStatusChip status={graph.data.status} note={graph.data.note} />
+              <p>
+                Graphify is a memory plane, not a truth plane — every lead points back to a cited
+                file to confirm.
+              </p>
+            </>
+          )}
         </div>
         <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
           <Network size={15} strokeWidth={2} aria-hidden="true" />

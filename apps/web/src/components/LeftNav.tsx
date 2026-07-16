@@ -42,10 +42,6 @@ export function LeftNav({ active }: LeftNavProps) {
       })}
 
       <div className="nav-footer">
-        <span className="nav-memory">
-          <span className="dot dot-memory" aria-hidden="true" />
-          project memory: fresh
-        </span>
         <span className="nav-version">{LABELS.version}</span>
       </div>
     </nav>
