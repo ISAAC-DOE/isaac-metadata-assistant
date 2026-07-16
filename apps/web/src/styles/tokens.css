@@ -3,6 +3,9 @@
  * The :root block below is lifted VERBATIM from
  * design-handoff/05-design-system/color-tokens.md. Do not edit values here;
  * refresh from the handoff if the design system changes.
+ * Exception: --advisory-text / --needsyou-text were darkened in P23C for
+ * WCAG AA contrast (see inline comments below); the handoff doc still has
+ * the original #9a6f24 and should be reconciled with this value.
  */
 :root {
   /* neutrals — cool */
@@ -66,7 +69,7 @@
   /* signal 3 — advisory warning (soft amber, non-gating) */
   --advisory-solid:  #c0842b;  /* dot */
   --advisory-icon:   #b07d2b;  /* stroke */
-  --advisory-text:   #9a6f24;  /* also #8a6420 / #9a7d43 / #a78846 */
+  --advisory-text:   #8a6420;  /* P23C: darkened from #9a6f24 for WCAG AA (was ~3.99:1 on advisory-bg); also #9a7d43 / #a78846 (lighter, non-AA alternates) */
   --advisory-bg:     #f9f1df;  /* also #f8efdd / #fdf8ef */
   --advisory-border: #ecd8ac;  /* also #f0e2c2 */
 
@@ -79,7 +82,7 @@
   --confirmed-text:  #6f5c3f;  --confirmed-bg:  #f5f1ea;  --confirmed-border:  #e6ddcd; /* warm tan = human motif */
   --inferred-text:   #5b6b7d;  --inferred-bg:   #eef1f5;  --inferred-border:   #d5dde5; /* slate */
   --missing-text:    #78838f;  --missing-bg:    #f6f8fa;  --missing-border:    #c3ccd5; /* DASHED border */
-  --needsyou-text:   #9a6f24;  --needsyou-bg:   #f8efdd;  --needsyou-border:   #ecd8ac; /* amber */
+  --needsyou-text:   #8a6420;  --needsyou-bg:   #f8efdd;  --needsyou-border:   #ecd8ac; /* amber; text darkened P23C for WCAG AA (was #9a6f24, ~3.93:1) */
 
   /* evidence source-type icon strokes (chip bg #f6f8fa, border #e4e9ef, text #55606c) */
   --src-spreadsheet: #4a7fb0;  /* blue */
