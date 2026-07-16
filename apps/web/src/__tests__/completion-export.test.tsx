@@ -162,12 +162,24 @@ describe('S4 · Guided Completion (live)', () => {
     // 0 remaining -> the finished state routes forward to S6
     expect(await findByText('This record is ready to export.')).toBeInTheDocument();
     expect(getByText('Go to Ready to Export →')).toBeInTheDocument();
+    // non-zero total (1 question, now answered): the real counter still renders
+    expect(getByText('1 / 1')).toBeInTheDocument();
     const posts = answerPosts();
     expect(posts).toHaveLength(1);
     expect(posts[0].body).toEqual({
       answers: { series: seriesDemoValue },
       confirmed_by_user: true,
     });
+  });
+
+  it('zero blockers on arrival shows honest empty-state copy, never the meaningless "0 / 0"', async () => {
+    stubFetchRoutes(exportReadyRoutes('demo')); // pending: [] from the very first load
+    const { findByText, getByText, queryByText } = renderAt('/record/demo/complete');
+
+    expect(await findByText('All Fields Resolved')).toBeInTheDocument();
+    expect(getByText('No open questions.')).toBeInTheDocument();
+    expect(queryByText('0 / 0')).toBeNull();
+    expect(getByText('This record is ready to export.')).toBeInTheDocument();
   });
 });
 

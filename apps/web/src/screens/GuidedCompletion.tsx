@@ -197,7 +197,7 @@ function LoadedCompletion({
         <div className="completion-header">
           <h1 className="completion-title">All Fields Resolved</h1>
           <span className="completion-counter">
-            {answered.length} / {total}
+            {total === 0 ? 'No open questions.' : `${answered.length} / ${total}`}
           </span>
         </div>
         {answeredRows}
