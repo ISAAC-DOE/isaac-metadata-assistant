@@ -65,6 +65,14 @@
   font-size: 14px;
   color: var(--text-heading);
   text-decoration: none;
+  border-radius: 6px;
+  transition: color 0.12s ease;
+}
+.brand:hover { color: var(--action-hover); }
+.brand:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 .brand-tile {
   width: 30px;
@@ -159,6 +167,13 @@
 .record-title-link {
   text-decoration: none;
   color: inherit;
+  border-radius: 4px;
+  transition: color 0.12s ease;
+}
+.record-title-link:hover { color: var(--action-hover); }
+.record-title-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
 }
 /* Leaf crumb: the current sub-surface, non-link. */
 .record-surface {
@@ -376,5 +391,14 @@
   font-size: 12.5px;
   background: none;
   border: 0;
+  border-radius: var(--radius-token);
   align-self: center;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.gov-banner .gov-action:hover {
+  background: var(--action-tint);
+  color: var(--action-hover);
+}
+.gov-banner .gov-action:active {
+  background: var(--action-selected-border);
 }

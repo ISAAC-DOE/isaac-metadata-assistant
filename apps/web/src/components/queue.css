@@ -43,10 +43,20 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-inner);
   color: inherit;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
 }
 .exp-row:hover {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-card);
+}
+/* Keyboard focus gets the same visible lift as hover, plus the global
+ * :focus-visible outline (base.css) — a keyboard user is never stranded. */
+.exp-row:focus-visible {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+.exp-row:active {
+  background: var(--selected-row-bg);
 }
 .exp-row.done {
   border-color: var(--border-faint);

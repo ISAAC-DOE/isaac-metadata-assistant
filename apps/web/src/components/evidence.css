@@ -167,8 +167,10 @@
   background: transparent;
   text-align: left;
   color: var(--text-secondary);
+  transition: background 0.12s ease;
 }
 .trail-entry:hover { background: var(--border-faint); }
+.trail-entry:active { background: var(--selected-row-bg); }
 .trail-entry.selected {
   background: var(--selected-row-bg);
   border-color: var(--action-selected-border);
@@ -396,4 +398,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.copy-btn:hover {
+  background: var(--border-faint);
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+.copy-btn:active {
+  background: var(--screen-base);
+}
+.copy-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
 }

@@ -120,7 +120,8 @@ a:hover {
   font-size: 12.5px;
   padding: 9px 15px;
   border: 1px solid transparent;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease,
+    box-shadow 0.12s ease, transform 0.12s ease;
   white-space: nowrap;
 }
 .btn-primary {
@@ -129,24 +130,41 @@ a:hover {
   border-color: var(--action);
   font-weight: 600;
 }
+/* Primary: subtle lift + tint + shadow on hover; pressed settles back flat. */
 .btn-primary:hover {
   background: var(--action-hover);
   border-color: var(--action-hover);
+  box-shadow: var(--shadow-emphasis);
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  background: var(--action-pressed);
+  border-color: var(--action-pressed);
+  box-shadow: none;
+  transform: translateY(0);
 }
 .btn-primary:disabled {
   background: #b7c6d8;
   border-color: #b7c6d8;
   color: #eef2f6;
   cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 .btn-secondary {
   background: var(--surface);
   border-color: var(--border-strong);
   color: var(--text-secondary);
 }
+/* Secondary: border/background shift on hover; a clear, slightly deeper tint when pressed. */
 .btn-secondary:hover {
   border-color: var(--text-quaternary);
   color: var(--text-strong);
+  background: var(--border-faint);
+}
+.btn-secondary:active {
+  background: var(--screen-base);
+  border-color: var(--text-tertiary);
 }
 
 /* Input — spacing-layout.md primitive. */
@@ -187,6 +205,23 @@ a:hover {
 }
 @media (prefers-reduced-motion: reduce) {
   .dot-processing { animation: none; }
+
+  /* P22C: every hover/focus/pressed transition & lift added across the app
+   * (buttons, nav links, icon/copy buttons, the spine, the guided prompt)
+   * collapses to an instant, motionless state change. */
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.001ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+  .btn-primary:hover,
+  .btn-primary:active {
+    transform: none !important;
+  }
 }
 
 /* Mono meta line (paths, filenames). */

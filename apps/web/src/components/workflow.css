@@ -21,22 +21,47 @@
 }
 .spine-step {
   position: relative;
-  display: flex;
-  gap: 12px;
-  padding: 8px 10px;
   border-radius: var(--radius-inner);
 }
 .spine-step.active {
   background: var(--action-tint);
 }
-/* A reached step links back to its surface. display:contents keeps the disc +
- * text as the step's own flex children, so the row layout and connector are
- * unchanged — the anchor only adds navigation (link styling is a later slice). */
+/* The disc + text flex row. Rendered as either a <span> (locked/unreached
+ * steps) or the <a> itself (reached steps) — same box, same layout, either
+ * way — so the connector line and row alignment never move. */
+.spine-step-row {
+  display: flex;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-inner);
+}
+/* A reached step links back to its surface. Previously `display: contents`
+ * kept the disc+text as the li's own flex children, but anchors with
+ * display:contents do not reliably paint a focus outline — keyboard focus
+ * became invisible (P22C fix). The anchor is now itself the flex row
+ * (.spine-step-row), so it is a normal focusable box with a real outline,
+ * and the row layout / connector line are unchanged. */
 .spine-step-link {
-  display: contents;
   color: inherit;
   text-decoration: none;
   cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.spine-step:not(.active) .spine-step-link:hover {
+  background: var(--border-faint);
+}
+/* The active step is already tinted — hover adds a ring instead of a flat
+ * background swap so the active/hover states stay visually distinct. */
+.spine-step.active .spine-step-link:hover {
+  box-shadow: inset 0 0 0 1px var(--action-selected-border);
+}
+.spine-step-link:active {
+  background: var(--action-tint);
+}
+.spine-step-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner);
 }
 /* connector between discs — 2px neutral background line, not a rail */
 .spine-step:not(:last-child)::before {

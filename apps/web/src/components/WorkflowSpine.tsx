@@ -62,15 +62,15 @@ export function WorkflowSpine({ steps, recordId }: WorkflowSpineProps) {
               aria-disabled={step.state === 'locked' ? true : undefined}
             >
               {href ? (
-                <Link className="spine-step-link" to={href}>
+                <Link className="spine-step-row spine-step-link" to={href}>
                   {disc}
                   {text}
                 </Link>
               ) : (
-                <>
+                <span className="spine-step-row">
                   {disc}
                   {text}
-                </>
+                </span>
               )}
             </li>
           );
