@@ -146,6 +146,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.icon-btn:hover {
+  background: var(--border-faint);
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+.icon-btn:active {
+  background: var(--screen-base);
 }
 
 /* Mode chip (Synthetic) — persistent, load-bearing. */

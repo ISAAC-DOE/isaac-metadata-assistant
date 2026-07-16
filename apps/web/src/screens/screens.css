@@ -332,6 +332,12 @@
   border-radius: var(--radius-card);
   overflow: hidden;
 }
+/* The dialog container takes programmatic focus on open (tabIndex -1); it is a
+ * container, not a control, so it shows no outline — focus is visible on the
+ * Close button and any inner control via the global :focus-visible rule. */
+.artifact-modal:focus {
+  outline: none;
+}
 .artifact-modal-head {
   display: flex;
   align-items: center;

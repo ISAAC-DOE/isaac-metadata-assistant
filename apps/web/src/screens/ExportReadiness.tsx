@@ -1,6 +1,6 @@
 import './screens.css';
 import '../components/artifact.css';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -112,6 +112,76 @@ function LoadedExport({
   const { detail, pending, validate, audit, warnings, graph, artifacts } = data;
   const [phase, setPhase] = useState<ExportPhase>({ name: 'idle' });
   const [viewing, setViewing] = useState<null | 'record' | 'sidecar'>(null);
+
+  // --- artifact "View JSON" modal: a real, focus-trapping dialog --------------
+  const modalRef = useRef<HTMLDivElement>(null);
+  const modalTriggerRef = useRef<HTMLElement | null>(null); // element to restore focus to
+  const wasViewing = useRef(false);
+  const modalTitleId = useId();
+
+  // Capture the opener so focus can return to it on close (standard dialog
+  // pattern — the trigger is focused when it's activated).
+  const openViewer = (kind: 'record' | 'sidecar') => {
+    modalTriggerRef.current = document.activeElement as HTMLElement | null;
+    setViewing(kind);
+  };
+  const closeViewer = () => setViewing(null);
+
+  // Escape closes; Tab / Shift+Tab wrap inside the dialog (hand-rolled focus
+  // containment — this is a true modal, not the lighter Help popover). Capture
+  // phase so the dialog handles the keys before any ancestor.
+  useEffect(() => {
+    if (!viewing) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    const focusable = () =>
+      Array.from(
+        modal.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea, input:not([disabled]), select, [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeViewer();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = focusable();
+      if (items.length === 0) {
+        e.preventDefault();
+        modal!.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first || active === modal || !modal!.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [viewing]);
+
+  // Move focus into the dialog on open; return it to the trigger on close.
+  useEffect(() => {
+    if (viewing) {
+      modalRef.current?.focus();
+    } else if (wasViewing.current) {
+      modalTriggerRef.current?.focus();
+    }
+    wasViewing.current = !!viewing;
+  }, [viewing]);
 
   const pendingCount = pending.length;
   const pendingZero = pendingCount === 0;
@@ -297,14 +367,14 @@ function LoadedExport({
               <div className="artifact-row">
                 <ArtifactCard
                   artifact={{ kind: 'record', path: recordPath, verdict: 'pass' }}
-                  onView={viewArtifacts ? () => setViewing('record') : undefined}
+                  onView={viewArtifacts ? () => openViewer('record') : undefined}
                   onDownload={
                     viewArtifacts ? () => download(viewArtifacts.record, recordPath) : undefined
                   }
                 />
                 <ArtifactCard
                   artifact={{ kind: 'sidecar', path: sidecarPath, pathCount: coverageTotal }}
-                  onView={viewArtifacts ? () => setViewing('sidecar') : undefined}
+                  onView={viewArtifacts ? () => openViewer('sidecar') : undefined}
                   onDownload={
                     viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarPath) : undefined
                   }
@@ -456,26 +526,24 @@ function LoadedExport({
       )}
 
       {viewing && viewArtifacts && (
-        <div
-          className="artifact-modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-label={viewing === 'record' ? LABELS.officialRecord : LABELS.evidenceTrail}
-          onClick={() => setViewing(null)}
-        >
-          <div className="artifact-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="artifact-modal-backdrop" onClick={closeViewer}>
+          <div
+            ref={modalRef}
+            className="artifact-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={modalTitleId}
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="artifact-modal-head">
-              <span className="artifact-modal-title">
+              <span id={modalTitleId} className="artifact-modal-title">
                 {viewing === 'record' ? LABELS.officialRecord : LABELS.evidenceTrail}
                 {viewing === 'sidecar' && (
                   <span className="artifact-modal-sub"> · {LABELS.sidecarNotOfficial}</span>
                 )}
               </span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setViewing(null)}
-              >
+              <button type="button" className="btn btn-secondary" onClick={closeViewer}>
                 Close
               </button>
             </div>
