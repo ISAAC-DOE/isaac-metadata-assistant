@@ -8,6 +8,7 @@ boundary. It adds no validation logic and never mutates the truth path.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body
@@ -87,6 +88,19 @@ def _detail(exp: Experiment) -> dict:
 # --- 1. health ----------------------------------------------------------------
 
 
+def _build_commit() -> str | None:
+    """Deploy identity, read live (not cached) so it reflects the running env.
+
+    ``ISAAC_BUILD_COMMIT`` takes precedence when set; else Railway's
+    auto-injected ``RAILWAY_GIT_COMMIT_SHA``; else ``None`` — never guessed.
+    """
+    return (
+        os.environ.get("ISAAC_BUILD_COMMIT", "").strip()
+        or os.environ.get("RAILWAY_GIT_COMMIT_SHA", "").strip()
+        or None
+    )
+
+
 @router.get("/health")
 def health() -> dict:
     return {
@@ -94,6 +108,7 @@ def health() -> dict:
         "mode": "synthetic-only",
         "core": "isaac_records",
         "version": __version__,
+        "commit": _build_commit(),
     }
 
 

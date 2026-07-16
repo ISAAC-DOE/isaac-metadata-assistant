@@ -51,13 +51,16 @@ def _complete_seed(client, exp_id: str) -> dict:
 # --- 1. health ----------------------------------------------------------------
 
 
-def test_health(client):
+def test_health(client, monkeypatch):
+    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     body = client.get("/api/health").json()
     assert body == {
         "status": "ok",
         "mode": "synthetic-only",
         "core": "isaac_records",
         "version": body["version"],
+        "commit": None,
     }
     assert body["version"]
 

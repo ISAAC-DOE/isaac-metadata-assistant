@@ -134,3 +134,41 @@ def test_auth_rejects_near_miss_header_forms(tmp_path, monkeypatch):
     for bad in ("bearer demo-secret", "Bearer  demo-secret"):
         res = client.get("/api/experiments", headers={"Authorization": bad})
         assert res.status_code == 401
+
+
+# --- build/commit identity (P23D) ----------------------------------------------
+
+
+def test_health_commit_null_when_neither_env_set(tmp_path, monkeypatch):
+    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    client = _make_client(tmp_path, monkeypatch)
+    body = client.get("/api/health").json()
+    assert body == {
+        "status": "ok",
+        "mode": "synthetic-only",
+        "core": "isaac_records",
+        "version": body["version"],
+        "commit": None,
+    }
+
+
+def test_health_commit_from_isaac_build_commit_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "explicit-sha-123")
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    client = _make_client(tmp_path, monkeypatch)
+    assert client.get("/api/health").json()["commit"] == "explicit-sha-123"
+
+
+def test_health_commit_falls_back_to_railway_sha(tmp_path, monkeypatch):
+    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "railway-sha-456")
+    client = _make_client(tmp_path, monkeypatch)
+    assert client.get("/api/health").json()["commit"] == "railway-sha-456"
+
+
+def test_health_commit_isaac_build_commit_wins_over_railway(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "explicit-sha-123")
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "railway-sha-456")
+    client = _make_client(tmp_path, monkeypatch)
+    assert client.get("/api/health").json()["commit"] == "explicit-sha-123"

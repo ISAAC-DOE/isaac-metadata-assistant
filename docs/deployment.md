@@ -27,8 +27,23 @@ core in a container.
 | `ISAAC_UI_CORS_ORIGINS` | Railway | Comma-separated browser origins (the Vercel domain) |
 | `ISAAC_UI_API_KEY` | Railway | Shared-secret bearer key; unset → auth disabled (local dev) |
 | `PORT` | Railway (injected) | Container listen port |
+| `ISAAC_BUILD_COMMIT` | Railway (optional) | Explicit build/commit identity for `GET /api/health` |
+| `RAILWAY_GIT_COMMIT_SHA` | Railway (injected) | Fallback build/commit identity for `GET /api/health` |
 | `VITE_API_BASE` | Vercel (build-time) | Backend origin + `/api` |
 | `VITE_API_KEY` | Vercel (build-time) | Same value as `ISAAC_UI_API_KEY` |
+
+### Build/commit identity on `/api/health`
+
+`GET /api/health` includes an additive `commit` field so a deployed backend's
+running commit can be confirmed without a shell into the container:
+`ISAAC_BUILD_COMMIT` wins if set and non-empty; else `RAILWAY_GIT_COMMIT_SHA`
+if set and non-empty; else `null`. All other health fields are unchanged.
+Both env vars are read per-request, not cached at import time.
+
+Railway provides `RAILWAY_GIT_COMMIT_SHA` automatically for GitHub-connected
+deploys. If it turns out not to be exposed at runtime, `commit` is `null` and
+that is the honest state — do not change Railway config to force it; set
+`ISAAC_BUILD_COMMIT` explicitly instead if a guaranteed value is needed.
 
 `ISAAC_UI_CORS_ORIGINS` values must be exact origins — scheme://host with no
 trailing slash and no path (e.g. `https://app.vercel.app`, NOT
