@@ -1,6 +1,5 @@
 import './screens.css';
 import { useCallback, useState } from 'react';
-import type { KeyboardEvent } from 'react';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
@@ -267,18 +266,11 @@ function SourceIndexRow({ file, expanded, onToggle, onActivateFile }: SourceInde
   const community = communityLabel(file);
   const Chevron = expanded ? ChevronDown : ChevronRight;
 
-  // Real <button>s activate on Enter/Space natively in a browser; this
-  // explicit handler makes that keyboard path exercisable under jsdom too
-  // (this project pins no user-event dependency) and is a harmless no-op
-  // duplicate in real browsers because preventDefault suppresses the
-  // default key-activation.
-  function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
-      event.preventDefault();
-      onToggle();
-    }
-  }
-
+  // Keyboard accessibility comes from the native <button>: real browsers
+  // synthesize a click from Enter (keydown) and Space (keyup), so onClick
+  // alone covers pointer and keyboard activation. No custom onKeyDown — a
+  // duplicate handler would double-toggle (open, then the native synthesized
+  // click immediately closes) for keyboard users.
   return (
     <li className="source-index-row">
       <button
@@ -287,7 +279,6 @@ function SourceIndexRow({ file, expanded, onToggle, onActivateFile }: SourceInde
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={onToggle}
-        onKeyDown={handleKeyDown}
       >
         <Chevron className="source-index-chevron" size={14} strokeWidth={2} aria-hidden="true" />
         <span className="source-index-path mono">{file.path}</span>

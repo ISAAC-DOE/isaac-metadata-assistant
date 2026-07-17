@@ -112,8 +112,17 @@ describe('P24.4 · Source Index — detail (real leads)', () => {
     fireEvent.click(row);
     expect(row).toHaveAttribute('aria-expanded', 'false');
 
-    // reopen via keyboard (Enter) — no user-event dependency in this project
+    // Reopen via the keyboard path: on a native <button>, Enter/Space
+    // activation is a browser-synthesized click on the FOCUSED button — so
+    // the honest jsdom equivalent is focus + click (there is no custom
+    // onKeyDown; one would double-toggle in a real browser). A raw keydown
+    // alone must NOT toggle: that would prove a duplicate handler exists.
     fireEvent.keyDown(row, { key: 'Enter' });
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+
+    row.focus();
+    expect(document.activeElement).toBe(row);
+    fireEvent.click(row);
     expect(row).toHaveAttribute('aria-expanded', 'true');
     await findByText('Deterministic, doubly-gated export transform.');
   });
