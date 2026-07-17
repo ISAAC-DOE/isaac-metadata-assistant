@@ -23,6 +23,7 @@ from isaac_records.official import EXPECTED_VERSION, validate_official
 from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
+from . import memory
 from . import serialize
 from . import sources
 from . import workspace as ws
@@ -528,6 +529,19 @@ def _graph_freshness() -> str:
     return module.check(REPO_ROOT)
 
 
+#: Additive /graph/status fields sourced from the memory reader's overview
+#: (spec §3.1). Kept separate from the freshness computation above: `status`
+#: always reflects the real repo's checked-in graphify-out/ (unchanged logic),
+#: while these fields reflect whatever ISAAC_MEMORY_DIR resolves to (normally
+#: the same directory; a test/dev seam can point it elsewhere). Present with
+#: real values when the reader is available; explicit `null` (not omitted,
+#: for shape stability) otherwise.
+_STATUS_ADDITIVE_FIELDS = (
+    "built_at_commit", "node_count", "edge_count",
+    "community_count", "file_count", "concept_count", "graph_mtime",
+)
+
+
 @router.get("/graph/status")
 def graph_status() -> dict:
     note = "Graphify is a memory/query layer — never a validator."
@@ -535,7 +549,22 @@ def graph_status() -> dict:
         status = _graph_freshness()
     except Exception:
         status = "missing"
-    return {"status": status, "plane": "memory", "note": note}
+
+    body = {"status": status, "plane": "memory", "note": note}
+    overview = memory.get_default_reader().overview()
+    if overview["available"]:
+        body.update(
+            built_at_commit=overview["built_at_commit"],
+            node_count=overview["node_count"],
+            edge_count=overview["edge_count"],
+            community_count=overview["community_count"],
+            file_count=overview["served_file_count"],
+            concept_count=overview["concept_count"],
+            graph_mtime=overview["graph_mtime"],
+        )
+    else:
+        body.update({key: None for key in _STATUS_ADDITIVE_FIELDS})
+    return body
 
 
 # --- 15. uploads (always blocked) ---------------------------------------------
@@ -545,3 +574,123 @@ def graph_status() -> dict:
 def uploads():
     # Governance seam: no multipart is declared or parsed; no file is read or stored.
     return JSONResponse(status_code=403, content=_UPLOAD_BLOCKED)
+
+
+# --- 16. memory (project memory plane over HTTP) -------------------------------
+#
+# Thin HTTP wrapper around the read-only ``isaac_api.memory`` reader (P24.1).
+# Handlers call ONLY the reader (plus FastAPI plumbing) — no isaac_records
+# imports, no verdict computation. The reader never raises for artifact
+# problems, so these handlers never need a try/except to avoid a 500.
+
+MEMORY_NOTE = "Project memory returns leads to verify — never a validation verdict."
+
+
+def _memory_error(status_code: int, error: str, **extra) -> JSONResponse:
+    content = {"error": error, "plane": "memory", "note": MEMORY_NOTE}
+    content.update(extra)
+    return JSONResponse(status_code=status_code, content=content)
+
+
+@router.get("/memory/concepts")
+def get_memory_concepts() -> dict:
+    reader = memory.get_default_reader()
+    overview = reader.overview()
+    if not overview["available"]:
+        return {
+            "plane": "memory",
+            "note": MEMORY_NOTE,
+            "available": False,
+            "reason": overview["reason"],
+            "concepts": [],
+        }
+    return {
+        "plane": "memory",
+        "note": MEMORY_NOTE,
+        "available": True,
+        "concepts": reader.concepts(),
+    }
+
+
+@router.get("/memory/concepts/{concept_id}")
+def get_memory_concept(concept_id: str):
+    reader = memory.get_default_reader()
+    overview = reader.overview()
+    if not overview["available"]:
+        return {
+            "plane": "memory",
+            "note": MEMORY_NOTE,
+            "available": False,
+            "reason": overview["reason"],
+            "concept": None,
+            "related": {"files": [], "concepts": []},
+        }
+    # Availability wins over 404 — we cannot know the id set without a graph,
+    # so an unknown id is only ever reported once we know the graph is readable.
+    detail = reader.concept(concept_id)
+    if detail is None:
+        return _memory_error(404, "concept_not_found", id=concept_id)
+    related = detail.pop("related")
+    return {
+        "plane": "memory",
+        "note": MEMORY_NOTE,
+        "available": True,
+        "concept": detail,
+        "related": related,
+    }
+
+
+@router.get("/memory/files")
+def get_memory_files() -> dict:
+    reader = memory.get_default_reader()
+    overview = reader.overview()
+    if not overview["available"]:
+        return {
+            "plane": "memory",
+            "note": MEMORY_NOTE,
+            "available": False,
+            "reason": overview["reason"],
+            "files": [],
+        }
+    return {
+        "plane": "memory",
+        "note": MEMORY_NOTE,
+        "available": True,
+        "files": reader.files(),
+    }
+
+
+@router.get("/memory/file")
+def get_memory_file(path: str = ""):
+    reader = memory.get_default_reader()
+    # Unsafe path is a deterministic, availability-independent guard: it wins
+    # even when the graph is absent (spec §3.5).
+    classification = reader.classify_path(path)
+    if classification == "unsafe":
+        return _memory_error(400, "unsafe_source_path", path=path)
+
+    overview = reader.overview()
+    if not overview["available"]:
+        return {
+            "plane": "memory",
+            "note": MEMORY_NOTE,
+            "available": False,
+            "reason": overview["reason"],
+            "file": None,
+            "related": {"files": [], "concepts": []},
+            "rationales": [],
+        }
+    if classification == "not_indexed":
+        return _memory_error(404, "source_not_indexed", path=path)
+
+    detail = reader.file(path)
+    related = detail.pop("related")
+    rationales = detail.pop("rationales")
+    return {
+        "plane": "memory",
+        "note": MEMORY_NOTE,
+        "available": True,
+        "file": detail,
+        "related": related,
+        "rationales": rationales,
+    }
