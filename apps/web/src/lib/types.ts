@@ -397,10 +397,20 @@ export interface ApiUploadsBlocked {
   reason: string;
 }
 
+// P24.2 additive fields on GET /api/graph/status: present with real values when
+// the graph is available; explicit `null` (not omitted) when missing/unreadable
+// — single-source, so these always describe the same graph as `status`.
 export interface ApiGraphStatus {
   status: GraphFreshness;
   plane: 'memory';
   note?: string;
+  built_at_commit?: string | null;
+  node_count?: number | null;
+  edge_count?: number | null;
+  community_count?: number | null;
+  file_count?: number | null;
+  concept_count?: number | null;
+  graph_mtime?: number | null;
 }
 
 export interface ApiHealth {
