@@ -18,9 +18,20 @@ Design contract (see docs/superpowers/specs/2026-07-16-phase-24-project-memory-d
 * **Served allowlist** (spec §4). The set of surfaced files is computed once per
   graph load from ``manifest.json`` keys, minus governance-sensitive prefixes
   (``examples/``, ``.superpowers/``, ``apps/web/.vercel/``), the exact file
-  ``.claude/settings.local.json``, and binary extensions (``BINARY_EXTS``, incl.
-  ``.png``). ``.claude/skills/**`` is kept. Traversal safety is closed-set
-  membership in this allowlist; the path guard is defense-in-depth only.
+  ``.claude/settings.local.json``, binary extensions (``BINARY_EXTS``, incl.
+  ``.png``), and (P24.8 Item 1, defense-in-depth — closes no live leak today,
+  since ``.claude/settings.local.json`` is the only sensitive key ever seen in a
+  real manifest) secret-shaped extensions/basenames (``SECRET_EXTS`` /
+  ``SECRET_BASENAMES``: keys, certs, keystores, ``id_rsa``-style, credential
+  files) plus any ``.env``/``.env.*`` or ``*.local.json`` basename.
+  ``.claude/skills/**`` is kept: its ``SKILL.md`` files are served as
+  project-knowledge metadata only (path + graph metadata, never file contents);
+  they were inspected and contain only generic skill definitions with
+  repo-relative paths — no secrets, no machine-local/home paths. Local settings
+  and the secret patterns above remain excluded regardless. Skills are
+  memory/navigation material, never scientific evidence or validation (P24.8
+  Item 3). Traversal safety is closed-set membership in this allowlist; the path
+  guard is defense-in-depth only.
 * **Honest degradation.** No exception ever escapes for an artifact problem.
   Absent artifacts dir / missing ``graph.json`` -> ``available: False,
   reason: "graph_absent"``. Invalid JSON, a structurally-wrong graph, or a
@@ -81,6 +92,14 @@ EXCLUDED_PREFIXES = ("examples/", ".superpowers/", "apps/web/.vercel/")
 EXCLUDED_EXACT = frozenset({".claude/settings.local.json"})
 #: Binary extensions filtered out (no textual provenance value); ``.png`` required.
 BINARY_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf"})
+#: P24.8 defense-in-depth: secret-shaped extensions (keys/certs/keystores) filtered
+#: out of the served allowlist; closes no live leak, guards future manifest entries.
+SECRET_EXTS = frozenset({".key", ".pem", ".p12", ".pfx", ".pkcs12", ".p8", ".keystore", ".jks"})
+#: P24.8 defense-in-depth: secret-shaped basenames (private keys / credential files).
+SECRET_BASENAMES = frozenset({
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".netrc", ".pgpass", ".pypirc",
+    ".htpasswd", "credentials", "credentials.json",
+})
 
 MAX_RELATED = 25
 MAX_RATIONALES = 10
@@ -154,7 +173,21 @@ def _is_served(path: str) -> bool:
         return False
     if path in EXCLUDED_EXACT:
         return False
-    if os.path.splitext(path)[1].lower() in BINARY_EXTS:
+    # ``base``/``ext`` are computed on the "/"-joined manifest key (never a native
+    # OS path), so this is OS-independent regardless of host path semantics.
+    base = path.rsplit("/", 1)[-1]
+    ext = os.path.splitext(path)[1].lower()
+    if ext in BINARY_EXTS or ext in SECRET_EXTS:
+        return False
+    # ``.env`` / ``.env.local`` / ``.env.production`` / ... — precise basename
+    # match, not a substring check, so ``environment.py`` is unaffected.
+    if base == ".env" or base.startswith(".env."):
+        return False
+    if base in SECRET_BASENAMES:
+        return False
+    # Local-only settings, generalizing the ``.claude/settings.local.json`` exact
+    # match above; ``local.json`` (no leading dot-segment) is deliberately kept.
+    if base.endswith(".local.json"):
         return False
     return True
 

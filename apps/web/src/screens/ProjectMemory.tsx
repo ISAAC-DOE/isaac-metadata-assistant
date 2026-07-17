@@ -52,8 +52,8 @@ export function ProjectMemory() {
         <p>
           Project Memory is the assistant's memory and navigation surface — Graphify plus project
           docs. It is deliberately separate from the experiment queue and never appears inside it. It
-          surfaces related records, prior documents, and "how is this connected?" answers as leads to
-          verify — it never validates, completes, or supplies a value.
+          surfaces related files and concepts, prior documents, and "how is this connected?" answers
+          as leads to verify — it never validates, completes, or supplies a value.
         </p>
         <div className="card placeholder-card">
           {graph.status === 'loading' && <LoadingPanel label="Checking memory status…" />}

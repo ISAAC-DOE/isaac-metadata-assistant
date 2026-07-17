@@ -410,6 +410,27 @@ Files in the allowlist but missing on disk return provenance with
 `"on_disk": false` (the graph is the index; the disk may have moved on). The UI
 then shows provenance but offers no "open locally" affordance.
 
+### `.claude/skills/**` served-metadata decision (P24.8)
+
+Following up on the allowlist decision above (§4's "`.claude/skills/**` is
+**kept**"), P24.8 confirms and documents the scope of that inclusion:
+
+- `.claude/skills/**` (the 5 `SKILL.md` files) may appear in the Source Index
+  as project-knowledge **metadata** (path + graph metadata only), same as any
+  other served-allowlist file.
+- Raw file **contents are never served** — no `content` or `lines` key exists
+  anywhere in the memory-plane response shapes (§4's metadata-only decision
+  applies uniformly; skills get no special content path).
+- Local settings and other sensitive files remain excluded from the allowlist:
+  `.claude/settings.local.json`, `.env*`, `*.key`/`.pem`/`.p12`/`.pfx`,
+  credential/private-key files, and `*.local.json` generally.
+- Skills are memory/navigation material — like any other served file, they are
+  leads to verify, never scientific evidence or a validation input.
+- **Inspection finding:** all 5 `SKILL.md` files (`isaac-draft`, `isaac-complete`,
+  `isaac-validate`, `isaac-export`, `isaac-query`) were reviewed directly and
+  contain only generic skill definitions with repo-relative paths — no secrets,
+  no absolute/home (`/Users/...`) paths, no machine-local material.
+
 ---
 
 ## 5. Degraded-state behavior matrix

@@ -242,6 +242,86 @@ def test_file_detail_excluded_paths_not_indexed(reader, excluded):
     assert reader.classify_path(excluded) == "not_indexed"
 
 
+# --- 2a. P24.8 Item 1: secret / local-settings defense-in-depth exclusions ----
+#
+# These patterns close NO currently-indexed leak — the only sensitive key ever
+# seen in a real manifest is ``.claude/settings.local.json`` (already covered
+# above); this is pure defense-in-depth against a future secret-shaped path
+# landing in the manifest. Checks must be precise ext/basename/suffix matches,
+# never overbroad substrings: harmless lookalikes (``environment.py``,
+# ``token_utils.py``, ``credentials_form.tsx``, dotted doc names, bare
+# ``local.json``) must still be served.
+
+_SECRET_MANIFEST_KEYS = [
+    ".env",
+    ".env.local",
+    ".env.production",
+    "secrets/app.key",
+    "certs/server.pem",
+    "keys/client.p12",
+    "keys/client.pfx",
+    "keys/apns.p8",
+    "keystores/app.jks",
+    ".netrc",
+    ".pypirc",
+    "config/id_rsa",
+    "config/id_ed25519",
+    "aws/credentials",
+    "gcp/credentials.json",
+    "config/settings.local.json",
+]
+
+_HARMLESS_LOOKALIKE_KEYS = [
+    "src/environment.py",
+    "src/token_utils.py",
+    "apps/web/credentials_form.tsx",
+    "docs/my.notes.md",
+    "apps/web/vite.config.ts",
+    "data/metadata.json",
+    "docs/local.json",
+]
+
+
+@pytest.fixture()
+def governed_reader(tmp_path):
+    """Reader whose manifest carries P24.8 secret-pattern + harmless-lookalike
+    probe keys alongside one normal approved-source key. Independent of the
+    ``reader`` fixture's fixed synthetic set so the new probes don't disturb
+    the existing happy-path assertions."""
+    keys = ["src/isaac_records/official.py", *_SECRET_MANIFEST_KEYS,
+            *_HARMLESS_LOOKALIKE_KEYS]
+    manifest = {k: {"mtime": 1.0, "ast_hash": "fake", "semantic_hash": ""} for k in keys}
+    art = _write_artifacts(tmp_path, manifest=manifest)
+    return LocalGraphArtifactSource(art)
+
+
+@pytest.mark.parametrize("secret_key", _SECRET_MANIFEST_KEYS)
+def test_files_exclude_sensitive_patterns(governed_reader, secret_key):
+    paths = {f["path"] for f in governed_reader.files()}
+    assert secret_key not in paths
+    assert governed_reader.file(secret_key) is None
+    assert governed_reader.classify_path(secret_key) == "not_indexed"
+
+
+@pytest.mark.parametrize("harmless_key", _HARMLESS_LOOKALIKE_KEYS)
+def test_harmless_dotted_filenames_still_served(governed_reader, harmless_key):
+    paths = {f["path"] for f in governed_reader.files()}
+    assert harmless_key in paths
+    assert governed_reader.file(harmless_key) is not None
+    assert governed_reader.classify_path(harmless_key) == "served"
+
+
+@pytest.mark.parametrize("bad", ["../etc/passwd", "foo/../../bar", "/abs/path", "~/x"])
+def test_traversal_still_blocked(governed_reader, bad):
+    assert governed_reader.classify_path(bad) == "unsafe"
+
+
+def test_approved_source_still_served(governed_reader):
+    paths = {f["path"] for f in governed_reader.files()}
+    assert "src/isaac_records/official.py" in paths
+    assert governed_reader.classify_path("src/isaac_records/official.py") == "served"
+
+
 # --- 3. path guard ------------------------------------------------------------
 
 
