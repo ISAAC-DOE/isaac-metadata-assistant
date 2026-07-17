@@ -63,13 +63,20 @@ def _iter_source_files(root: Path):
                 yield path
 
 
-def check(root: Path) -> str:
+def check(root: Path, graph: Path | None = None) -> str:
     """Return 'fresh', 'stale', or 'missing' for the graph under root.
 
     'missing' if graphify-out/graph.json is absent; 'stale' if any tracked source
     is strictly newer than the graph (matching `find -newer`); else 'fresh'.
+
+    ``graph`` optionally anchors the graph FILE somewhere other than
+    ``root/graphify-out/graph.json`` (e.g. an ``ISAAC_MEMORY_DIR`` mounted-volume
+    artifacts dir) while the tracked SOURCE material stays anchored at ``root``.
+    The fresh/stale determination itself is unchanged; only the graph location
+    is parameterized. Default (``None``) is byte-identical to the old behavior.
     """
-    graph = root.joinpath(*GRAPH)
+    if graph is None:
+        graph = root.joinpath(*GRAPH)
     if not graph.is_file():
         return MISSING
     graph_mtime = graph.stat().st_mtime

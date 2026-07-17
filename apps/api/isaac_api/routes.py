@@ -517,25 +517,36 @@ def get_artifacts(experiment_id: str):
 # --- 14. graph status (memory plane) ------------------------------------------
 
 
-def _graph_freshness() -> str:
+# Resolved once at import so the freshness helper stays loadable even when
+# tests patch this module's REPO_ROOT attribute (which anchors source scans,
+# not the location of our own scripts).
+_FRESHNESS_SCRIPT = REPO_ROOT / "scripts" / "check_graphify_freshness.py"
+
+
+def _graph_freshness(artifacts_dir) -> str:
     """Call scripts/check_graphify_freshness.check() by file path (scripts/ is not a
-    package). Any failure degrades to 'missing' — the memory plane is optional."""
+    package). Any failure degrades to 'missing' — the memory plane is optional.
+
+    ``artifacts_dir`` anchors the graph FILE (the same directory the memory
+    reader resolved, honoring ISAAC_MEMORY_DIR); tracked SOURCE material stays
+    anchored at REPO_ROOT. The fresh/stale determination is unchanged."""
     import importlib.util
 
-    script = REPO_ROOT / "scripts" / "check_graphify_freshness.py"
-    spec = importlib.util.spec_from_file_location("check_graphify_freshness", script)
+    spec = importlib.util.spec_from_file_location(
+        "check_graphify_freshness", _FRESHNESS_SCRIPT
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.check(REPO_ROOT)
+    return module.check(REPO_ROOT, graph=artifacts_dir / "graph.json")
 
 
 #: Additive /graph/status fields sourced from the memory reader's overview
-#: (spec §3.1). Kept separate from the freshness computation above: `status`
-#: always reflects the real repo's checked-in graphify-out/ (unchanged logic),
-#: while these fields reflect whatever ISAAC_MEMORY_DIR resolves to (normally
-#: the same directory; a test/dev seam can point it elsewhere). Present with
-#: real values when the reader is available; explicit `null` (not omitted,
-#: for shape stability) otherwise.
+#: (spec §3.1). Single-source guarantee: `status` and these fields describe the
+#: SAME graph — the handler resolves the reader once and anchors the freshness
+#: check's graph file at that reader's artifacts dir (ISAAC_MEMORY_DIR-aware),
+#: so the body can never read status:"missing" alongside populated counts.
+#: Present with real values when the reader is available; explicit `null`
+#: (not omitted, for shape stability) otherwise.
 _STATUS_ADDITIVE_FIELDS = (
     "built_at_commit", "node_count", "edge_count",
     "community_count", "file_count", "concept_count", "graph_mtime",
@@ -545,13 +556,14 @@ _STATUS_ADDITIVE_FIELDS = (
 @router.get("/graph/status")
 def graph_status() -> dict:
     note = "Graphify is a memory/query layer — never a validator."
+    reader = memory.get_default_reader()
     try:
-        status = _graph_freshness()
+        status = _graph_freshness(reader.artifacts_dir)
     except Exception:
         status = "missing"
 
     body = {"status": status, "plane": "memory", "note": note}
-    overview = memory.get_default_reader().overview()
+    overview = reader.overview()
     if overview["available"]:
         body.update(
             built_at_commit=overview["built_at_commit"],

@@ -227,10 +227,10 @@ def test_memory_endpoints_available_false_when_graph_absent(tmp_path, monkeypatc
 
 def test_graph_status_additive_fields_absent_when_missing(tmp_path, monkeypatch):
     memory_dir = tmp_path / "graphify-out"  # never created
-    # Also point REPO_ROOT (used only by the freshness check) at the same empty
-    # tmp tree so `status` itself is deterministically "missing" in this test,
-    # matching the additive-fields-absent case exactly. Scoped to this single
-    # test function; no other handler is exercised here.
+    # Also point REPO_ROOT (the freshness check's source anchor) at the same
+    # empty tmp tree so `status` itself is deterministically "missing" in this
+    # test, matching the additive-fields-absent case exactly. Scoped to this
+    # single test function; no other handler is exercised here.
     monkeypatch.setattr("isaac_api.routes.REPO_ROOT", tmp_path)
     client = _client(tmp_path, monkeypatch, memory_dir)
     body = client.get("/api/graph/status").json()
@@ -238,6 +238,29 @@ def test_graph_status_additive_fields_absent_when_missing(tmp_path, monkeypatch)
     for key in ("built_at_commit", "node_count", "edge_count",
                 "community_count", "file_count", "concept_count", "graph_mtime"):
         assert body[key] is None
+
+
+def test_graph_status_single_source_when_env_overrides(tmp_path, monkeypatch):
+    """ISAAC_MEMORY_DIR points at a populated graph while the repo-local
+    graphify-out is guaranteed absent (REPO_ROOT patched to an empty tmp tree,
+    as in the missing-test above): `status` and the additive counts must
+    describe the SAME graph — never a self-contradictory body reading
+    status:"missing" alongside populated counts (the documented future
+    mounted-volume case)."""
+    art = _write_artifacts(tmp_path / "volume")
+    empty_root = tmp_path / "empty-repo"
+    empty_root.mkdir()
+    monkeypatch.setattr("isaac_api.routes.REPO_ROOT", empty_root)
+    client = _client(tmp_path, monkeypatch, art)
+    body = client.get("/api/graph/status").json()
+    # Counts describe the env-pointed graph...
+    assert body["built_at_commit"] == "fakecommit0000"
+    assert body["node_count"] == 5
+    # ...and status must describe that same graph, so it cannot be "missing".
+    assert body["status"] != "missing"
+    # Pin the honest value: the env-pointed graph file exists, and no tracked
+    # source under the (empty) root is newer than it -> "fresh".
+    assert body["status"] == "fresh"
 
 
 # --- 3. malformed graph ---------------------------------------------------------
@@ -268,17 +291,21 @@ def test_memory_endpoints_available_false_when_graph_unreadable(tmp_path, monkey
 # --- 4. auth ---------------------------------------------------------------------
 
 
-def test_memory_endpoints_require_bearer_when_key_set(tmp_path, monkeypatch):
+@pytest.mark.parametrize("route", [
+    "/api/memory/concepts",
+    "/api/memory/concepts/concept_alpha",
+    "/api/memory/files",
+    "/api/memory/file?path=src/fake_mod.py",
+])
+def test_memory_endpoints_require_bearer_when_key_set(tmp_path, monkeypatch, route):
     art = _write_artifacts(tmp_path)
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     client = _client(tmp_path, monkeypatch, art)
 
-    missing = client.get("/api/memory/concepts")
+    missing = client.get(route)
     assert missing.status_code == 401
 
-    ok = client.get(
-        "/api/memory/concepts", headers={"Authorization": "Bearer demo-secret"}
-    )
+    ok = client.get(route, headers={"Authorization": "Bearer demo-secret"})
     assert ok.status_code == 200
 
 
@@ -360,6 +387,8 @@ def test_no_forbidden_verdict_keys_in_any_memory_response(tmp_path, monkeypatch)
     bodies.append(
         degraded_client.get("/api/memory/file", params={"path": "src/fake_mod.py"}).json()
     )
+    # Degraded /api/graph/status (additive fields nulled) is swept too.
+    bodies.append(degraded_client.get("/api/graph/status").json())
 
     for body in bodies:
         keys = set(_walk_keys(body))

@@ -78,3 +78,18 @@ def test_main_prints_single_word_and_returns_exit_code(tmp_path, capsys):
     out = capsys.readouterr().out.strip()
     assert out == "fresh"
     assert code == 0
+
+
+def test_check_graph_kwarg_anchors_graph_file_elsewhere(tmp_path):
+    """The optional ``graph`` kwarg (P24.2) moves only the graph FILE anchor
+    (e.g. an ISAAC_MEMORY_DIR volume); sources stay anchored at root, and the
+    fresh/stale determination is unchanged."""
+    root = tmp_path / "repo"
+    _write(root, "README.md", 100)  # no root/graphify-out/graph.json at all
+    volume_graph = _write(tmp_path, "volume/graph.json", 200)
+
+    assert freshness.check(root) == "missing"  # default anchor: unchanged
+    assert freshness.check(root, graph=volume_graph) == "fresh"
+    # A tracked source newer than the volume graph still flips it to stale.
+    _write(root, "docs/x.md", 300)
+    assert freshness.check(root, graph=volume_graph) == "stale"
