@@ -329,6 +329,25 @@ def test_type_corrupt_graph_is_unreadable(tmp_path):
     assert reader.classify_path("src/fake_mod.py") == "not_indexed"
 
 
+def test_string_link_weight_normalizes_and_never_raises(tmp_path):
+    """A JSON-valid graph with a non-numeric link weight (e.g. ``"weight": "9"``)
+    stays available AND request-time reads return normally: the weight is
+    normalized to 0.0 at build, so the corrupt edge sorts last among differing
+    weights instead of raising in related-ordering arithmetic."""
+    graph = _synthetic_graph()
+    mentions = next(l for l in graph["links"] if l["relation"] == "mentions")
+    mentions["weight"] = "9"  # truthy string: kept verbatim it would sort first
+    art = _write_artifacts(tmp_path, graph=graph)
+    reader = LocalGraphArtifactSource(art)
+
+    assert reader.overview()["available"] is True
+    detail = reader.concept("concept_alpha")  # must not raise
+    files = detail["related"]["files"]
+    # src_fake_mod keeps its real 5.0; the corrupt "9" degrades to 0.0 -> last.
+    assert [f["path"] for f in files] == ["src/fake_mod.py", "src/other_mod.py"]
+    assert reader.file("src/fake_mod.py") is not None  # must not raise either
+
+
 @pytest.mark.parametrize("manifest", ["{broken manifest", None],
                          ids=["corrupt", "missing"])
 def test_bad_manifest_alone_stays_available(tmp_path, manifest):

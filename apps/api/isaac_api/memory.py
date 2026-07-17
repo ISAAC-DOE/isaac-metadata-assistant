@@ -284,7 +284,12 @@ class LocalGraphArtifactSource:
             if src is None or tgt is None:
                 continue
             relation = link.get("relation")
-            weight = link.get("weight") or 0.0
+            # Normalize once at build so ALL downstream weight arithmetic
+            # (dedup max, related ordering) operates on real numbers: any
+            # non-numeric weight (str, None, list, ...) degrades to 0.0.
+            # bool is deliberately excluded — JSON true/false is not a weight.
+            w = link.get("weight")
+            weight = w if isinstance(w, (int, float)) and not isinstance(w, bool) else 0.0
             adjacency[src].append((tgt, relation, weight))
             adjacency[tgt].append((src, relation, weight))
 
