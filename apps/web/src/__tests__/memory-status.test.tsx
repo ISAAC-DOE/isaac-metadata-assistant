@@ -8,6 +8,7 @@ import {
   graphStatusMissing,
   memoryFilesAvailable,
   memoryFilesUnavailable,
+  memoryConceptsUnavailable,
 } from '../test/apiFixtures';
 
 /*
@@ -53,6 +54,7 @@ describe('P24.3 · status detail card — available (fresh)', () => {
 
   it('renders every real figure, the short commit sha, and the derived relative age — no verdict language', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: freshStatus },
       'GET /api/memory/files': { body: memoryFilesAvailable },
     });
@@ -72,6 +74,7 @@ describe('P24.3 · status detail card — available (fresh)', () => {
 
   it('describes what memory indexes honestly, without inventing counts the API did not return', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: freshStatus },
       'GET /api/memory/files': { body: memoryFilesAvailable },
     });
@@ -81,6 +84,7 @@ describe('P24.3 · status detail card — available (fresh)', () => {
 
   it('does not show the stale advisory caption when fresh', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: freshStatus },
       'GET /api/memory/files': { body: memoryFilesAvailable },
     });
@@ -106,6 +110,7 @@ describe('P24.3 · status detail card — stale', () => {
 
   it('shows the Stale chip, an advisory re-verify caption, and still renders real figures', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: staleStatus },
       'GET /api/memory/files': { body: memoryFilesAvailable },
     });
@@ -122,6 +127,7 @@ describe('P24.3 · status detail card — stale', () => {
 describe('P24.3 · status detail card — unavailable (missing)', () => {
   it('renders an honest unavailable panel with hosted + future-wiring copy, no counts, no error styling', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusMissing },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
     });
@@ -154,6 +160,7 @@ describe('P24.3 · status detail card — backend down', () => {
 describe('P24.3 · no fake search input on Project Memory', () => {
   it('has no search input or searchbox role anywhere on the screen', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusMissing },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
     });

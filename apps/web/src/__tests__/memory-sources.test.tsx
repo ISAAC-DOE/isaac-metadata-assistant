@@ -9,6 +9,7 @@ import {
   memoryFilesUnavailable,
   memoryFileDetailWithLeads,
   memoryFileDetailEmptyLeads,
+  memoryConceptsUnavailable,
 } from '../test/apiFixtures';
 
 /*
@@ -42,6 +43,7 @@ afterEach(() => {
 describe('P24.4 · Source Index — list', () => {
   it('renders exactly the stubbed files, grouped by humanized file_type, with community + node count context', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusMissing },
       'GET /api/memory/files': { body: memoryFilesAvailable },
     });
@@ -84,6 +86,7 @@ describe('P24.4 · Source Index — list', () => {
 describe('P24.4 · Source Index — detail (real leads)', () => {
   it('activating a row (click, then keyboard) fetches its provenance and renders related concepts, related files, rationales, and local_reference', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusMissing },
       'GET /api/memory/files': { body: memoryFilesAvailable },
       [filePath('src/fake_mod.py')]: { body: memoryFileDetailWithLeads },
@@ -131,6 +134,7 @@ describe('P24.4 · Source Index — detail (real leads)', () => {
 describe('P24.4 · Source Index — on_disk:false', () => {
   it('shows "not present locally" with no open-style affordance, never invented content', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusMissing },
       'GET /api/memory/files': { body: memoryFilesAvailable },
       [filePath('docs/fake-note.md')]: { body: memoryFileDetailEmptyLeads },
@@ -154,6 +158,7 @@ describe('P24.4 · Source Index — on_disk:false', () => {
 describe('P24.4 · Source Index — unavailable', () => {
   it('renders a compact honest unavailable note, zero rows, no fake content, no error styling', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusMissing },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
     });
@@ -170,6 +175,7 @@ describe('P24.4 · Source Index — unavailable', () => {
 describe('P24.4 · Source Index — accessibility basics', () => {
   it('rows are real buttons with accessible names, aria-expanded toggles, the card has a heading, and there is still no search input', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusMissing },
       'GET /api/memory/files': { body: memoryFilesAvailable },
       [filePath('src/fake_mod.py')]: { body: memoryFileDetailWithLeads },
@@ -196,6 +202,7 @@ describe('P24.4 · Source Index — accessibility basics', () => {
 describe('P24.4 · Source Index — empty-leads honesty', () => {
   it('renders the honest empty-leads note for rationales, related files, and related concepts — never hidden, never invented', async () => {
     stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusMissing },
       'GET /api/memory/files': { body: memoryFilesAvailable },
       [filePath('docs/fake-note.md')]: { body: memoryFileDetailEmptyLeads },

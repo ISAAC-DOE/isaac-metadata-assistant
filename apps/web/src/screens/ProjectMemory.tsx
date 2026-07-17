@@ -11,6 +11,8 @@ import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import type {
   ApiGraphStatus,
+  ApiMemoryConceptResponse,
+  ApiMemoryConceptSummary,
   ApiMemoryFileResponse,
   ApiMemoryFileSummary,
 } from '../lib/types';
@@ -28,7 +30,11 @@ import type {
  * `GET /api/memory/files`, with a lazy per-row provenance detail fetched from
  * `GET /api/memory/file?path=`. It is a provenance navigator, not a file
  * browser or content viewer — no file bytes are ever fetched or rendered.
- * P24.5 (concept lookup) is a separate, later slice.
+ *
+ * P24.5 adds the Concept Lookup card: the 19 curated concepts Graphify
+ * anchored in project docs, from `GET /api/memory/concepts`, with a lazy
+ * per-concept provenance detail from `GET /api/memory/concepts/{id}`. This is
+ * the last UI slice for Phase 24 — nothing beyond concepts is built here.
  */
 export function ProjectMemory() {
   const graph = useFetch(() => api.getGraphStatus(), []);
@@ -54,10 +60,11 @@ export function ProjectMemory() {
           {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
           {graph.status === 'data' && <MemoryStatusDetail data={graph.data} />}
         </div>
-        {/* Skip the second fetch when the screen already knows the backend is
-            unreachable — one screen-level BackendDown, not two, mirroring how
-            P24.3 owns that state for the whole page. */}
+        {/* Skip the second/third fetch when the screen already knows the backend
+            is unreachable — one screen-level BackendDown, not three, mirroring
+            how P24.3 owns that state for the whole page. */}
         {graph.status !== 'error' && <SourceIndexCard />}
+        {graph.status !== 'error' && <ConceptLookupCard />}
         <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
           <Network size={15} strokeWidth={2} aria-hidden="true" />
           Browse depth is out of scope for this first build.
@@ -416,6 +423,245 @@ function SourceIndexDetail({
           </ul>
         ) : (
           <p className="source-index-empty-note">no recorded leads for this file</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- Concept Lookup card (P24.5) ------------------------------------------
+// A browsable list of the 19 curated concepts Graphify anchored in project
+// docs — memory leads, not scientific conclusions. Reuses the Source Index
+// card's accordion pattern above (native-button activation, one-open-at-a-
+// time, inline loading/error-with-retry) rather than inventing a second
+// interaction language. Against the real local graph every concept currently
+// has zero edges, so `related.files`/`related.concepts` are honestly empty
+// for every real concept; the empty-leads note below is not a bug, it is the
+// current graph's honest state.
+
+function ConceptLookupCard() {
+  const list = useFetch(() => api.getMemoryConcepts(), []);
+  const headingId = 'concept-lookup-heading';
+  return (
+    <div className="card placeholder-card concept-lookup-card">
+      <h3 id={headingId} className="concept-lookup-heading">
+        Concept Lookup
+      </h3>
+      <p className="concept-lookup-subtitle">
+        Concepts Graphify anchored in project docs — memory leads, not scientific conclusions.
+      </p>
+      {list.status === 'loading' && <LoadingPanel label="Loading concepts…" />}
+      {list.status === 'error' && <BackendDown error={list.error} onRetry={list.reload} />}
+      {list.status === 'data' && (
+        <ConceptLookupList
+          available={list.data.available}
+          concepts={list.data.concepts}
+          headingId={headingId}
+        />
+      )}
+    </div>
+  );
+}
+
+interface ConceptLookupListProps {
+  available: boolean;
+  concepts: ApiMemoryConceptSummary[];
+  headingId: string;
+}
+
+/**
+ * The concept list — a flat, ungrouped set of chips/rows (the design calls
+ * for 19 concepts total, too few to need grouping the way 190 files did).
+ * Only one concept's provenance panel is open at a time (accordion); a
+ * related-concept lead inside an open panel can activate a different concept
+ * the same way a click on that concept would.
+ */
+function ConceptLookupList({ available, concepts, headingId }: ConceptLookupListProps) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const toggle = useCallback((id: string) => {
+    setExpandedId((current) => (current === id ? null : id));
+  }, []);
+  const activate = useCallback((id: string) => {
+    setExpandedId(id);
+  }, []);
+
+  if (!available) {
+    return (
+      <p className="concept-lookup-unavailable">
+        Concept lookup is unavailable — the memory graph is not present on this backend (see
+        Project memory status above).
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <ul className="concept-lookup-rows" aria-labelledby={headingId}>
+        {concepts.map((concept) => (
+          <ConceptLookupRow
+            key={concept.id}
+            concept={concept}
+            expanded={expandedId === concept.id}
+            onToggle={() => toggle(concept.id)}
+            onActivateConcept={activate}
+          />
+        ))}
+      </ul>
+      <p className="concept-lookup-caption">leads — open the cited file to verify</p>
+    </>
+  );
+}
+
+interface ConceptLookupRowProps {
+  concept: ApiMemoryConceptSummary;
+  expanded: boolean;
+  onToggle: () => void;
+  onActivateConcept: (id: string) => void;
+}
+
+function ConceptLookupRow({ concept, expanded, onToggle, onActivateConcept }: ConceptLookupRowProps) {
+  const panelId = domId('concept-panel', concept.id);
+  const community = communityLabel(concept);
+  const Chevron = expanded ? ChevronDown : ChevronRight;
+
+  // Keyboard accessibility comes from the native <button>, same as the Source
+  // Index rows above: no custom onKeyDown — a duplicate handler would
+  // double-toggle for keyboard users (Enter/Space already synthesize a click
+  // on the focused button). `aria-controls` only points at the panel id while
+  // the panel actually exists in the DOM.
+  return (
+    <li className="concept-lookup-row">
+      <button
+        type="button"
+        className="concept-lookup-row-btn"
+        aria-expanded={expanded}
+        aria-controls={expanded ? panelId : undefined}
+        onClick={onToggle}
+      >
+        <Chevron className="concept-lookup-chevron" size={14} strokeWidth={2} aria-hidden="true" />
+        <span className="concept-lookup-label">{concept.label}</span>
+        {community && <span className="concept-lookup-community">{community}</span>}
+      </button>
+      {expanded && (
+        <div id={panelId} className="concept-lookup-panel">
+          <ConceptLookupPanelBody id={concept.id} onActivateConcept={onActivateConcept} />
+        </div>
+      )}
+    </li>
+  );
+}
+
+function ConceptLookupPanelBody({
+  id,
+  onActivateConcept,
+}: {
+  id: string;
+  onActivateConcept: (id: string) => void;
+}) {
+  const detail = useFetch(() => api.getMemoryConcept(id), [id]);
+  return (
+    <>
+      {detail.status === 'loading' && <LoadingPanel label="Loading provenance…" />}
+      {detail.status === 'error' && (
+        <div className="concept-lookup-panel-error">
+          <p>Could not load provenance for this concept.</p>
+          <button type="button" className="btn btn-secondary" onClick={detail.reload}>
+            Retry
+          </button>
+        </div>
+      )}
+      {detail.status === 'data' && (
+        <ConceptLookupDetail data={detail.data} onActivateConcept={onActivateConcept} />
+      )}
+    </>
+  );
+}
+
+function ConceptLookupDetail({
+  data,
+  onActivateConcept,
+}: {
+  data: ApiMemoryConceptResponse;
+  onActivateConcept: (id: string) => void;
+}) {
+  if (!data.available || !data.concept) {
+    return (
+      <p className="concept-lookup-panel-note">
+        Concept lookup is unavailable — the memory graph is not present on this backend.
+      </p>
+    );
+  }
+  const { concept, related } = data;
+  const community = communityLabel(concept);
+  const hasLeads = related.files.length > 0 || related.concepts.length > 0;
+
+  return (
+    <div className="concept-lookup-detail">
+      <p className="concept-lookup-anchor">
+        <span className="concept-lookup-anchor-label">anchor source</span>
+        <span className="mono">{concept.source_file}</span>
+      </p>
+      {!concept.on_disk && (
+        <p className="concept-lookup-anchor-missing">not present locally on this backend</p>
+      )}
+
+      <dl className="concept-lookup-panel-figures">
+        <div className="concept-lookup-panel-figure">
+          <dt>Community</dt>
+          <dd>{community ?? '—'}</dd>
+        </div>
+      </dl>
+
+      <div className="concept-lookup-section">
+        <h5 className="concept-lookup-section-heading">Related leads</h5>
+        {hasLeads ? (
+          <>
+            {related.files.length > 0 && (
+              <div className="concept-lookup-subsection">
+                <h6 className="concept-lookup-subsection-heading">Files</h6>
+                {/* Related files are inert labeled text in this slice — no
+                    cross-card navigation into the Source Index card, per the
+                    P24.5 scope boundary. */}
+                <ul className="concept-lookup-related-list">
+                  {related.files.map((rf) => (
+                    <li key={rf.path}>
+                      <span className="mono">{rf.path}</span>
+                      {rf.relation && <span className="concept-lookup-relation">{rf.relation}</span>}
+                      {rf.file_type && (
+                        <span className="concept-lookup-relation">{rf.file_type}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {related.concepts.length > 0 && (
+              <div className="concept-lookup-subsection">
+                <h6 className="concept-lookup-subsection-heading">Concepts</h6>
+                <ul className="concept-lookup-related-list">
+                  {related.concepts.map((rc) => (
+                    <li key={rc.id}>
+                      <button
+                        type="button"
+                        className="concept-lookup-related-link"
+                        onClick={() => onActivateConcept(rc.id)}
+                      >
+                        <span>{rc.label ?? rc.id}</span>
+                        {rc.relation && (
+                          <span className="concept-lookup-relation">{rc.relation}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="concept-lookup-empty-note">
+            no recorded leads for this concept in the current graph
+          </p>
         )}
       </div>
     </div>

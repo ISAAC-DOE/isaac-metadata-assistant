@@ -22,6 +22,8 @@ import type {
   ApiExportResponse,
   ApiGraphStatus,
   ApiHealth,
+  ApiMemoryConceptResponse,
+  ApiMemoryConceptsResponse,
   ApiMemoryFileResponse,
   ApiMemoryFilesResponse,
   ApiPendingResponse,
@@ -187,6 +189,16 @@ export const api = {
 
   getMemoryFile(path: string): Promise<ApiMemoryFileResponse> {
     return getJson<ApiMemoryFileResponse>(`/memory/file?path=${enc(path)}`);
+  },
+
+  // P24.5 — Concept Lookup: the 19 curated concepts + one concept's anchor
+  // provenance and leads. Metadata/provenance only — never file content.
+  getMemoryConcepts(): Promise<ApiMemoryConceptsResponse> {
+    return getJson<ApiMemoryConceptsResponse>('/memory/concepts');
+  },
+
+  getMemoryConcept(id: string): Promise<ApiMemoryConceptResponse> {
+    return getJson<ApiMemoryConceptResponse>(`/memory/concepts/${enc(id)}`);
   },
 
   // S2 — run the synthetic pipeline; `draft_only` stops at the blockers.

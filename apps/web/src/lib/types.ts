@@ -468,6 +468,39 @@ export interface ApiMemoryFileResponse {
   rationales: string[];
 }
 
+// P24.5 — Concept Lookup (memory plane; metadata/provenance only). Mirrors
+// GET /api/memory/concepts and GET /api/memory/concepts/{id}
+// (apps/api/isaac_api/routes.py "16. memory") 1:1. `related` reuses the exact
+// `ApiMemoryRelated` shape the file endpoints already emit (files/concepts
+// leads, each ≤25). Against the real local graph all 19 concepts currently
+// have zero edges, so `related.files`/`related.concepts` are both empty for
+// every real concept — the UI must render that honestly, never invent leads.
+export interface ApiMemoryConceptSummary {
+  id: string;
+  label: string;
+  community_id: string | null;
+  community_name: string | null;
+  source_file: string;
+  on_disk: boolean;
+}
+
+export interface ApiMemoryConceptsResponse {
+  plane: 'memory';
+  note: string;
+  available: boolean;
+  reason?: ApiMemoryUnavailableReason;
+  concepts: ApiMemoryConceptSummary[];
+}
+
+export interface ApiMemoryConceptResponse {
+  plane: 'memory';
+  note: string;
+  available: boolean;
+  reason?: ApiMemoryUnavailableReason;
+  concept: ApiMemoryConceptSummary | null;
+  related: ApiMemoryRelated;
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;

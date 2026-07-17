@@ -352,6 +352,88 @@ export const memoryFileDetailEmptyLeads = {
   rationales: [],
 };
 
+// --- P24.5 Concept Lookup fixtures (memory plane; synthetic, shape-faithful
+// to apps/api/isaac_api/routes.py "16. memory" / memory.py) --------------
+
+/** GET /api/memory/concepts — available, 3 concepts (name / id-fallback / no-community). */
+export const memoryConceptsAvailable = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: true,
+  concepts: [
+    {
+      id: 'concept-provenance',
+      label: 'Provenance',
+      community_id: '131',
+      community_name: 'Export Pipeline',
+      source_file: 'src/fake_mod.py',
+      on_disk: true,
+    },
+    {
+      id: 'concept-governance',
+      label: 'Governance allowlist',
+      community_id: '55',
+      community_name: null,
+      source_file: 'docs/fake-note.md',
+      on_disk: false,
+    },
+    {
+      id: 'concept-two-layer',
+      label: 'Two-layer architecture',
+      community_id: null,
+      community_name: null,
+      source_file: 'README.md',
+      on_disk: true,
+    },
+  ],
+};
+
+/** GET /api/memory/concepts — degraded (graph absent). */
+export const memoryConceptsUnavailable = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: false,
+  reason: 'graph_absent' as const,
+  concepts: [],
+};
+
+/** GET /api/memory/concepts/concept-provenance — real leads (related file + related concept). */
+export const memoryConceptDetailWithLeads = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: true,
+  concept: {
+    id: 'concept-provenance',
+    label: 'Provenance',
+    community_id: '131',
+    community_name: 'Export Pipeline',
+    source_file: 'src/fake_mod.py',
+    on_disk: true,
+  },
+  related: {
+    files: [{ path: 'src/other_mod.py', relation: 'imports', file_type: 'code' }],
+    concepts: [
+      { id: 'concept-governance', label: 'Governance allowlist', relation: 'relates_to' },
+    ],
+  },
+};
+
+/** GET /api/memory/concepts/concept-governance — on_disk:false, no leads (matches real-graph reality). */
+export const memoryConceptDetailEmptyLeads = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: true,
+  concept: {
+    id: 'concept-governance',
+    label: 'Governance allowlist',
+    community_id: '55',
+    community_name: null,
+    source_file: 'docs/fake-note.md',
+    on_disk: false,
+  },
+  related: { files: [], concepts: [] },
+};
+
 /** Artifacts before export: all null (200, not an error). */
 export const artifactsNull = {
   record: null,
