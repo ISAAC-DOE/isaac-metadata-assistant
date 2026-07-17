@@ -288,6 +288,34 @@ def test_memory_endpoints_available_false_when_graph_unreadable(tmp_path, monkey
     assert file_.json()["reason"] == "graph_unreadable"
 
 
+def test_graph_status_coherent_when_graph_exists_but_malformed(tmp_path, monkeypatch):
+    """P24.6 Item 2 (coverage): pin ``/api/graph/status`` when ``graph.json``
+    EXISTS but is malformed. The shape must be internally coherent and
+    non-crashing: status is decided by mtime (the file is present) so it is
+    ``fresh``/``stale`` — never ``missing`` and never a 500 — while every
+    additive count is ``null`` (a malformed graph yields no honest counts, so
+    there is no populated-count + parse-failure contradiction). The memory
+    envelope stays intact.
+
+    REPO_ROOT (the freshness check's tracked-source anchor) is patched to the
+    empty tmp tree so ``status`` is deterministic and independent of the
+    developer's working tree; the graph FILE stays anchored at the malformed
+    ISAAC_MEMORY_DIR artifact.
+    """
+    art = _write_artifacts(tmp_path, graph="{not valid json")
+    monkeypatch.setattr("isaac_api.routes.REPO_ROOT", tmp_path)
+    client = _client(tmp_path, monkeypatch, art)
+    resp = client.get("/api/graph/status")
+    assert resp.status_code == 200  # never 500
+    body = resp.json()
+    assert body["status"] in {"fresh", "stale"}  # file exists -> mtime-based
+    for key in ("node_count", "edge_count", "community_count", "file_count",
+                "concept_count", "built_at_commit", "graph_mtime"):
+        assert body[key] is None
+    assert body["plane"] == "memory"
+    assert "note" in body and body["note"]
+
+
 # --- 4. auth ---------------------------------------------------------------------
 
 

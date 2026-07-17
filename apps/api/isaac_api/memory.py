@@ -522,7 +522,13 @@ class LocalGraphArtifactSource:
             return True
         if path.startswith("/") or path.startswith("~"):
             return True
-        if "\\" in path or ".." in path:
+        if "\\" in path:
+            return True
+        # Segment-based traversal check: reject ``..`` only when it is its own
+        # ``/``-delimited segment (real traversal), not merely a substring of a
+        # benign filename like ``docs/my..note.md``. Backslash-separated paths are
+        # already rejected above, so a ``..\`` segment can never slip past the split.
+        if ".." in path.split("/"):
             return True
         return False
 

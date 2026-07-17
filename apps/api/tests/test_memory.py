@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from isaac_api import memory
 from isaac_api.memory import LocalGraphArtifactSource
@@ -261,6 +262,75 @@ def test_classify_path_clean_unknown_is_not_indexed(reader):
 
 def test_classify_path_served(reader):
     assert reader.classify_path("src/fake_mod.py") == "served"
+
+
+# --- 3a. P24.6 Item 1: segment-based `..` guard (no substring over-match) ------
+#
+# A benign filename that merely CONTAINS two consecutive dots (e.g.
+# ``docs/my..note.md``) is a safe relative path, not traversal — it must
+# classify ``not_indexed`` (404), not ``unsafe`` (400). Real traversal (``..``
+# as its own ``/``-delimited segment, leading/trailing/interior) must still be
+# ``unsafe``. RED before the segment-based fix in ``_is_unsafe``.
+
+
+@pytest.mark.parametrize("benign", [
+    "docs/my..note.md",
+    "data/v1..2/table.csv",
+    "reports/2024..2025-summary.md",
+])
+def test_classify_path_benign_double_dot_is_not_indexed(reader, benign):
+    # Pre-fix, the substring test ``".." in path`` wrongly flags these unsafe.
+    assert reader.classify_path(benign) == "not_indexed"
+
+
+@pytest.mark.parametrize("bad", [
+    "../etc/passwd",
+    "a/../b",
+    "..",
+    "docs/../secret",
+    "x/..",
+])
+def test_classify_path_traversal_segment_is_unsafe(reader, bad):
+    assert reader.classify_path(bad) == "unsafe"
+
+
+# --- 3b. P24.6 Item 1: endpoint tier — benign `..` is 404, traversal is 400 ----
+#
+# Confirms the reader classification propagates to the HTTP tier: a benign
+# ``..``-containing name returns 404 ``source_not_indexed`` (a safe relative path
+# not in the served allowlist), while real traversal returns 400
+# ``unsafe_source_path``. The graph is available here so the not_indexed branch
+# (404) is reached rather than the graph-absent degraded (200) branch.
+
+
+def _api_client(tmp_path, monkeypatch, memory_dir) -> TestClient:
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("ISAAC_MEMORY_DIR", str(memory_dir))
+    from isaac_api.app import create_app
+
+    return TestClient(create_app())
+
+
+@pytest.mark.parametrize("benign", ["docs/my..note.md", "data/v1..2/table.csv"])
+def test_memory_file_benign_double_dot_is_404_not_400(tmp_path, monkeypatch, benign):
+    art = _write_artifacts(tmp_path)
+    client = _api_client(tmp_path, monkeypatch, art)
+    resp = client.get("/api/memory/file", params={"path": benign})
+    assert resp.status_code == 404  # RED pre-fix: substring guard returned 400
+    body = resp.json()
+    assert body["error"] == "source_not_indexed"
+    assert body["path"] == benign
+
+
+@pytest.mark.parametrize("bad", ["../etc/passwd", "docs/../secret", "a/../b", "x/.."])
+def test_memory_file_traversal_is_400(tmp_path, monkeypatch, bad):
+    art = _write_artifacts(tmp_path)
+    client = _api_client(tmp_path, monkeypatch, art)
+    resp = client.get("/api/memory/file", params={"path": bad})
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["error"] == "unsafe_source_path"
+    assert body["path"] == bad
 
 
 # --- 4. absent artifacts ------------------------------------------------------
