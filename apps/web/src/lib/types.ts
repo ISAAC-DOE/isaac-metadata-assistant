@@ -413,6 +413,61 @@ export interface ApiGraphStatus {
   graph_mtime?: number | null;
 }
 
+// P24.4 — Source Index (memory plane; metadata/provenance only, never file
+// content). Mirrors GET /api/memory/files and GET /api/memory/file?path=
+// (apps/api/isaac_api/routes.py "16. memory") 1:1. `file_type` is `null` when
+// a served file carries no graph nodes of its own kind (present in the
+// manifest but zero indexed nodes) — never invented, rendered as "Other".
+export interface ApiMemoryFileSummary {
+  path: string;
+  file_type: string | null;
+  community_id: string | null;
+  community_name: string | null;
+  node_count: number;
+  on_disk: boolean;
+}
+
+export interface ApiMemoryFileDetail extends ApiMemoryFileSummary {
+  local_reference: string;
+}
+
+export interface ApiMemoryRelatedFile {
+  path: string;
+  relation: string | null;
+  file_type: string | null;
+}
+
+export interface ApiMemoryRelatedConcept {
+  id: string;
+  label: string | null;
+  relation: string | null;
+}
+
+export interface ApiMemoryRelated {
+  files: ApiMemoryRelatedFile[];
+  concepts: ApiMemoryRelatedConcept[];
+}
+
+export type ApiMemoryUnavailableReason = 'graph_absent' | 'graph_unreadable';
+
+export interface ApiMemoryFilesResponse {
+  plane: 'memory';
+  note: string;
+  available: boolean;
+  reason?: ApiMemoryUnavailableReason;
+  files: ApiMemoryFileSummary[];
+}
+
+export interface ApiMemoryFileResponse {
+  plane: 'memory';
+  note: string;
+  available: boolean;
+  reason?: ApiMemoryUnavailableReason;
+  file: ApiMemoryFileDetail | null;
+  related: ApiMemoryRelated;
+  rationales: string[];
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;

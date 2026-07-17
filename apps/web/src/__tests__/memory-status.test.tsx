@@ -2,7 +2,13 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ProjectMemory } from '../screens/ProjectMemory';
-import { stubFetchRoutes, stubFetchDown, graphStatusMissing } from '../test/apiFixtures';
+import {
+  stubFetchRoutes,
+  stubFetchDown,
+  graphStatusMissing,
+  memoryFilesAvailable,
+  memoryFilesUnavailable,
+} from '../test/apiFixtures';
 
 /*
  * P24.3 — the real Project Memory status detail card. Every assertion here is
@@ -46,7 +52,10 @@ describe('P24.3 · status detail card — available (fresh)', () => {
   });
 
   it('renders every real figure, the short commit sha, and the derived relative age — no verdict language', async () => {
-    stubFetchRoutes({ 'GET /api/graph/status': { body: freshStatus } });
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: freshStatus },
+      'GET /api/memory/files': { body: memoryFilesAvailable },
+    });
     const { findByText, getByText, container } = renderScreen();
 
     await findByText('Memory: Fresh');
@@ -62,13 +71,19 @@ describe('P24.3 · status detail card — available (fresh)', () => {
   });
 
   it('describes what memory indexes honestly, without inventing counts the API did not return', async () => {
-    stubFetchRoutes({ 'GET /api/graph/status': { body: freshStatus } });
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: freshStatus },
+      'GET /api/memory/files': { body: memoryFilesAvailable },
+    });
     const { findByText } = renderScreen();
     await findByText(/source code, docs, schema, and test fixtures/i);
   });
 
   it('does not show the stale advisory caption when fresh', async () => {
-    stubFetchRoutes({ 'GET /api/graph/status': { body: freshStatus } });
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: freshStatus },
+      'GET /api/memory/files': { body: memoryFilesAvailable },
+    });
     const { findByText, queryByText } = renderScreen();
     await findByText('Memory: Fresh');
     expect(queryByText(/may be out of date/i)).toBeNull();
@@ -90,7 +105,10 @@ describe('P24.3 · status detail card — stale', () => {
   };
 
   it('shows the Stale chip, an advisory re-verify caption, and still renders real figures', async () => {
-    stubFetchRoutes({ 'GET /api/graph/status': { body: staleStatus } });
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: staleStatus },
+      'GET /api/memory/files': { body: memoryFilesAvailable },
+    });
     const { findByText, getByText } = renderScreen();
 
     await findByText('Memory: Stale');
@@ -103,7 +121,10 @@ describe('P24.3 · status detail card — stale', () => {
 
 describe('P24.3 · status detail card — unavailable (missing)', () => {
   it('renders an honest unavailable panel with hosted + future-wiring copy, no counts, no error styling', async () => {
-    stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusMissing } });
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/memory/files': { body: memoryFilesUnavailable },
+    });
     const { findByText, container } = renderScreen();
 
     await findByText('Memory: Missing');
@@ -132,7 +153,10 @@ describe('P24.3 · status detail card — backend down', () => {
 
 describe('P24.3 · no fake search input on Project Memory', () => {
   it('has no search input or searchbox role anywhere on the screen', async () => {
-    stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusMissing } });
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/memory/files': { body: memoryFilesUnavailable },
+    });
     const { container, queryByRole, findByText } = renderScreen();
     await findByText('Memory: Missing');
     expect(container.querySelector('input[type="search"]')).toBeNull();

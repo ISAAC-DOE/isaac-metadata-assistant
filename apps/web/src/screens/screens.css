@@ -197,6 +197,219 @@
   line-height: 1.55;
 }
 
+/* ---- Source Index card (P24.4) — metadata/provenance file explorer -- */
+/* A provenance navigator, not a file browser: no content, no search input. */
+.source-index-card {
+  margin-top: 18px;
+}
+.source-index-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.source-index-subtitle {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+/* Honest single note — no fake rows, no disabled skeletons (never error/red). */
+.source-index-unavailable {
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.source-index-groups {
+  margin-top: 14px;
+  max-height: 440px;
+  overflow-y: auto;
+}
+.source-index-group + .source-index-group {
+  margin-top: 16px;
+}
+.source-index-group-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.source-index-group-count {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-quaternary);
+}
+.source-index-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.source-index-row + .source-index-row {
+  border-top: 1px solid var(--border-hair);
+}
+.source-index-row-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-inner);
+  text-align: left;
+  color: inherit;
+}
+.source-index-row-btn:hover {
+  background: var(--surface-subtle);
+}
+.source-index-chevron {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-disabled);
+}
+.source-index-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.source-index-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding-top: 1px;
+}
+/* Neutral marker (an absence-of-file fact), never the pass/fail palette. */
+.source-index-badge {
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.source-index-panel {
+  margin: 0 0 10px 22px;
+  padding: 10px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+}
+.source-index-panel-figures {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px 16px;
+}
+.source-index-panel-figures dt {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.source-index-panel-figures dd {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-heading);
+}
+/* `local_reference` is inert text — no link, no download, no viewer. */
+.source-index-local-ref {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-faint);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.source-index-local-ref-label {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.source-index-local-ref-missing {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+.source-index-section {
+  margin-top: 12px;
+}
+.source-index-section-heading {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.source-index-rationale-list,
+.source-index-related-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.source-index-rationale-list li {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.source-index-related-list li {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.source-index-related-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--action);
+}
+.source-index-related-link:hover {
+  color: var(--action-hover);
+  text-decoration: underline;
+}
+.source-index-relation {
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+.source-index-empty-note {
+  margin: 0;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+.source-index-caption {
+  margin-top: 14px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.source-index-panel-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* Live pending blockers listed inside the needs-you banner (S3). */
 .needsyou-list {
   margin: 8px 0 0;

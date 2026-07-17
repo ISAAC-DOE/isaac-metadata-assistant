@@ -3,7 +3,7 @@ import { render, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { ProjectMemory } from '../screens/ProjectMemory';
-import { graphStatusFresh, stubFetchRoutes } from '../test/apiFixtures';
+import { graphStatusFresh, memoryFilesAvailable, stubFetchRoutes } from '../test/apiFixtures';
 
 function renderTopBar() {
   return render(
@@ -106,7 +106,10 @@ describe('P22D · Help is a real, working popover', () => {
 
 describe('P22D · Project Memory never fabricates a freshness claim', () => {
   it('renders the real graph status from the endpoint, not a hardcoded "fresh" string', async () => {
-    stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusFresh } });
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: graphStatusFresh },
+      'GET /api/memory/files': { body: memoryFilesAvailable },
+    });
     const { findByText, container } = render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ProjectMemory />

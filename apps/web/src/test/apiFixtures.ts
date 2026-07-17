@@ -258,6 +258,100 @@ export const graphStatusStale = {
   note: 'Graphify is a memory/query layer — never a validator.',
 };
 
+// --- P24.4 Source Index fixtures (memory plane; synthetic, shape-faithful
+// to apps/api/isaac_api/routes.py "16. memory" / memory.py) --------------
+
+const MEMORY_NOTE = 'Project memory returns leads to verify — never a validation verdict.';
+
+/** GET /api/memory/files — available, 4 served rows across code/document/null groups. */
+export const memoryFilesAvailable = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: true,
+  files: [
+    {
+      path: 'src/fake_mod.py',
+      file_type: 'code',
+      community_id: '131',
+      community_name: 'Export Pipeline',
+      node_count: 42,
+      on_disk: true,
+    },
+    {
+      path: 'src/other_mod.py',
+      file_type: 'code',
+      community_id: '55',
+      community_name: null,
+      node_count: 3,
+      on_disk: true,
+    },
+    {
+      path: 'docs/fake-note.md',
+      file_type: 'document',
+      community_id: null,
+      community_name: null,
+      node_count: 1,
+      on_disk: false,
+    },
+    {
+      path: '.github/workflows/fake-ci.yml',
+      file_type: null,
+      community_id: null,
+      community_name: null,
+      node_count: 0,
+      on_disk: true,
+    },
+  ],
+};
+
+/** GET /api/memory/files — degraded (graph absent). */
+export const memoryFilesUnavailable = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: false,
+  reason: 'graph_absent' as const,
+  files: [],
+};
+
+/** GET /api/memory/file?path=src/fake_mod.py — real leads (rationale + related files/concepts). */
+export const memoryFileDetailWithLeads = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: true,
+  file: {
+    path: 'src/fake_mod.py',
+    file_type: 'code',
+    community_id: '131',
+    community_name: 'Export Pipeline',
+    node_count: 42,
+    on_disk: true,
+    local_reference: 'src/fake_mod.py',
+  },
+  related: {
+    files: [{ path: 'src/other_mod.py', relation: 'imports', file_type: 'code' }],
+    concepts: [{ id: 'concept-provenance', label: 'Provenance', relation: 'relates_to' }],
+  },
+  rationales: ['Deterministic, doubly-gated export transform.'],
+};
+
+/** GET /api/memory/file?path=docs/fake-note.md — on_disk:false, no leads. */
+export const memoryFileDetailEmptyLeads = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: true,
+  file: {
+    path: 'docs/fake-note.md',
+    file_type: 'document',
+    community_id: null,
+    community_name: null,
+    node_count: 1,
+    on_disk: false,
+    local_reference: 'docs/fake-note.md',
+  },
+  related: { files: [], concepts: [] },
+  rationales: [],
+};
+
 /** Artifacts before export: all null (200, not an error). */
 export const artifactsNull = {
   record: null,

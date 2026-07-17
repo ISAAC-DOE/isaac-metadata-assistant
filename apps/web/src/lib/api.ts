@@ -22,6 +22,8 @@ import type {
   ApiExportResponse,
   ApiGraphStatus,
   ApiHealth,
+  ApiMemoryFileResponse,
+  ApiMemoryFilesResponse,
   ApiPendingResponse,
   ApiSourcePreview,
   ApiDemoRunResponse,
@@ -175,6 +177,16 @@ export const api = {
   // Memory plane (advisory only; never gates).
   getGraphStatus(): Promise<ApiGraphStatus> {
     return getJson<ApiGraphStatus>('/graph/status');
+  },
+
+  // P24.4 — Source Index: the served-allowlist file list + one file's
+  // provenance detail. Metadata/provenance only — never file content.
+  getMemoryFiles(): Promise<ApiMemoryFilesResponse> {
+    return getJson<ApiMemoryFilesResponse>('/memory/files');
+  },
+
+  getMemoryFile(path: string): Promise<ApiMemoryFileResponse> {
+    return getJson<ApiMemoryFileResponse>(`/memory/file?path=${enc(path)}`);
   },
 
   // S2 — run the synthetic pipeline; `draft_only` stops at the blockers.
