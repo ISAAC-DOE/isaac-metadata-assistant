@@ -26,7 +26,11 @@ Working prototype (`v0.1.0`), **synthetic data only**.
 - One-command reproducible synthetic XANES demo (regenerates the committed sample byte-for-byte).
 - `isaac` CLI (`validate` / `export` / `audit` / `new-id`) and five Claude authoring skills.
 - Non-gating portal-style advisory soft-warnings (local seam) and a Graphify memory/query reviewer demo.
-- 178 passing Python tests (plus 115 frontend tests), including a test that the truth plane never imports Graphify.
+- A read-only **Project Memory** browsing surface (Phase 24) over the `/api/memory/*` endpoints —
+  status card, source index, concept lookup. Metadata/provenance only, no file contents served, no
+  search box. It is a **memory plane**, never a truth plane: it never validates a record or
+  authorizes export. See [`docs/project-memory-map.md`](docs/project-memory-map.md).
+- 251 passing Python tests (plus 134 frontend tests), including a test that the truth plane never imports Graphify.
 
 **Not built yet**
 
@@ -38,6 +42,11 @@ Working prototype (`v0.1.0`), **synthetic data only**.
   prototype. A protection-gated demo deployment exists (Phase 20, see
   [`docs/deployment.md`](docs/deployment.md)); local dev per
   [`docs/ui-local-dev.md`](docs/ui-local-dev.md). No MCP server.
+- Project Memory has real content but thin connections today: all 19 curated concepts currently
+  have zero graph edges, so concept detail honestly shows "no recorded leads." The hosted demo
+  deployment ships without graph artifacts at all — Project Memory shows an honest
+  unavailable state there, not an empty one (future-wiring path in
+  [`docs/project-memory-map.md`](docs/project-memory-map.md)).
 
 ## Two layers
 
@@ -73,7 +82,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,api]'
-.venv/bin/pytest                                   # 178 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # 251 tests: golden records validate, transform is gated
 ```
 
 **Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →

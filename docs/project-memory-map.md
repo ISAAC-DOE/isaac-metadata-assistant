@@ -65,6 +65,40 @@ The pipeline runs correctly with Graphify entirely absent. Deep-dive:
 [`graphify-workflow.md`](graphify-workflow.md) and [`query-demo.md`](query-demo.md); routed
 question patterns: [`query-cookbook.md`](query-cookbook.md).
 
+### Project Memory (Phase 24 UI + API)
+
+A read-only browsing surface over this same Graphify layer: four `GET /api/memory/*` endpoints
+(`apps/api/isaac_api/memory.py`, routed in `apps/api/isaac_api/routes.py`) plus additive fields on
+`GET /api/graph/status`, and the `ProjectMemory` screen
+(`apps/web/src/screens/ProjectMemory.tsx`) — a status card, a Source Index, and Concept Lookup.
+Explicitly **metadata-only**: no file contents are ever served, and there is no search box.
+
+Guardrails:
+
+- **Served allowlist** — the graph manifest minus `examples/**`, `.superpowers/**`,
+  `apps/web/.vercel/**`, `.claude/settings.local.json`, and binaries (`.png`); only files on this
+  allowlist are ever named or shown as provenance.
+- **Path guard** — `GET /api/memory/file` classifies the requested path before anything else:
+  segment-based `..` rejection (`".." in path.split("/")`, so a benign filename such as
+  `my..note.md` isn't mistaken for traversal) returns `400 unsafe_source_path`; anything else must
+  match an **exact** allowlist key or it is `404 source_not_indexed` — there is no partial/fuzzy
+  serving path.
+- **Honest degraded states** — a missing or unreadable `graph.json` renders `available: false` with
+  a stated reason, never a fabricated empty success; a malformed manifest/labels file alone doesn't
+  take the plane down, it just degrades to empty served names. `/api/graph/status` and the
+  `/api/memory/*` endpoints resolve one reader per request, so status and counts always describe the
+  same graph.
+- **Hosted = honest-unavailable-for-now** — the hosted demo deployment ships without graph artifacts
+  at all, so Project Memory shows an explicit unavailable panel there instead of an empty or
+  misleading one. The documented future-wiring path is a sanitized snapshot, a db-backed index, or
+  an institution-hosted service behind login — none built yet.
+- **Never a validator** — every response carries `plane: "memory"` and a note that this plane
+  returns leads to verify, never a validation verdict; it cannot authorize export.
+
+Current real-data state: 19 curated concepts exist, and today all 19 have zero recorded edges in
+the graph — Concept Lookup's related-leads panel is honestly empty for every concept rather than
+implying connections that aren't there.
+
 ### Claude assistant / operator layer
 
 Five slash skills — `/isaac-draft`, `/isaac-complete`, `/isaac-validate`, `/isaac-query`,
@@ -126,6 +160,8 @@ The primary anchor. Every path below has been confirmed to exist in the repo.
 | Portal-style advisory warnings | `src/isaac_records/portal_warnings.py`, [`portal-warnings.md`](portal-warnings.md) |
 | Advisory AI review (placeholder) | `src/isaac_records/review.py` |
 | Graphify workflow | [`graphify-workflow.md`](graphify-workflow.md), [`query-demo.md`](query-demo.md) |
+| Project Memory API (read-only) | `apps/api/isaac_api/memory.py`, `apps/api/isaac_api/routes.py` (`/api/memory/*`, `/api/graph/status`) |
+| Project Memory UI | `apps/web/src/screens/ProjectMemory.tsx`, [`ui-local-dev.md`](ui-local-dev.md) "Project Memory (Phase 24)" |
 | Query routing / cookbook | [`query-cookbook.md`](query-cookbook.md), `.claude/skills/isaac-query/SKILL.md` |
 | Claude skills | `.claude/skills/isaac-draft/SKILL.md`, `isaac-complete/`, `isaac-validate/`, `isaac-query/`, `isaac-export/SKILL.md`; [`claude-workflow.md`](claude-workflow.md) |
 | Synthetic XANES demo | `scripts/run_synthetic_demo.py`, [`demo.md`](demo.md) |
@@ -304,6 +340,7 @@ Project-owner direction as of July 2026:
 |---|---|
 | Second domain — electrochemistry / performance | **Back burner** (recommended next domain when resumed; exercises conditional-required rules) |
 | Web UI | **Built** — `apps/api` (FastAPI) + `apps/web` (React/Vite), a synthetic-only prototype since Phase 19, with a protection-gated demo deployment since Phase 20 (see [`deployment.md`](deployment.md)); production hardening is not planned |
+| Project Memory browsing (Phase 24) | **Built** — read-only metadata/provenance surface (status card, Source Index, Concept Lookup) over `/api/memory/*`; never a validator; hosted deployment currently ships honest-unavailable (no graph artifacts shipped yet) |
 | CI / GitHub Actions | **Implemented** — `.github/workflows/ci.yml` runs two jobs on push/PR to `main`: a backend job (tests, the synthetic demo, official validation, advisory warnings, the evidence audit) and a frontend job (`apps/web`: vitest, build) |
 | License | **Pending** mentor/project decision — no license is asserted yet |
 | Real / sanitized-data pilot | Requires **explicit written data-governance approval** first |

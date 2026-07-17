@@ -110,8 +110,9 @@ curl -s http://127.0.0.1:8000/api/health
 
 The backend persists UI state (experiments, exported records/sidecars) under a
 workspace directory **outside the repo**: `ISAAC_UI_WORKSPACE` (default
-`/tmp/isaac-ui-workspace`). It is a thin wrapper — 17 endpoints under
-`/api/*` — that imports and calls the same `isaac_records` functions the CLI
+`/tmp/isaac-ui-workspace`). It is a thin wrapper — 21 endpoints under
+`/api/*` (17 experiment/pipeline endpoints plus 4 read-only `/api/memory/*`
+project-memory endpoints) — that imports and calls the same `isaac_records` functions the CLI
 uses (`draft_validator`, `official`, `export`, `audit`); it adds no validation
 logic of its own. See `apps/api/README.md` for the full endpoint list and
 governance notes.
@@ -178,10 +179,40 @@ shows real results, nothing is staged client-side.
    immutable — re-exporting the same id returns `409` and the UI shows an
    immutability message, never an overwrite.
 
-Three additional nav destinations exist (**Project Memory**, **Governance &
-Safety**, **Settings**) but are intentionally minimal placeholders in this
-first build — they are not wired to live data beyond static explanatory copy
-and the governance banner, and are out of the critical demo path above.
+Two additional nav destinations (**Governance & Safety**, **Settings**) are
+intentionally minimal placeholders in this first build — not wired to live
+data beyond static explanatory copy and the governance banner, and out of the
+critical demo path above. **Project Memory** is a third nav destination and,
+since Phase 24, is a real read-only surface — see the next section.
+
+## Project Memory (Phase 24)
+
+The **Project Memory** nav destination (`/memory`) is a real, read-only
+browsing surface over the `/api/memory/*` endpoints and the additive
+`GET /api/graph/status` fields — not a placeholder. It is a **memory plane**:
+metadata/provenance only, never a validator, and it never authorizes export.
+
+- **Status card** — live graph figures from `GET /api/graph/status` (node /
+  edge / community / indexed-file / concept counts, built-at commit, graph
+  age). Missing graph artifacts render an honest unavailable panel — not a
+  fabricated zero state — with a note on the future-wiring path; a stale
+  graph shows an advisory caption, never a pass/fail token.
+- **Source Index** — the served-file allowlist (`GET /api/memory/files` /
+  `GET /api/memory/file`), grouped by kind (Code / Documents / Other), with
+  per-file provenance (rationale, related leads). No file contents are
+  served, and there is no search box.
+- **Concept Lookup** — the curated concepts (`GET /api/memory/concepts` /
+  `GET /api/memory/concepts/{id}`), browsable as an accordion showing anchor
+  source, community, and related leads. Today all 19 curated concepts have
+  zero recorded edges in the graph, so every concept detail honestly reads
+  "no recorded leads for this concept in the current graph" rather than
+  implying findings that don't exist.
+
+Everything on this screen is a lead to verify, framed as memory/navigation —
+never a validation result. See
+[`docs/project-memory-map.md`](project-memory-map.md) for the full guardrails
+(served allowlist, path-traversal guard, honest degraded states, and the
+hosted-unavailable-for-now path).
 
 ## Tests and build
 

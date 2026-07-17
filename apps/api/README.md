@@ -21,3 +21,13 @@ allowed via CORS. Workspace root: `ISAAC_UI_WORKSPACE` (default `/tmp/isaac-ui-w
 
 Synthetic fixtures only. `POST /api/uploads` is always `403` (real/private uploads are
 approval-gated); source preview serves only the two committed synthetic fixtures.
+
+## Memory plane (read-only)
+
+Four `GET /api/memory/*` endpoints (`/memory/concepts`, `/memory/concepts/{id}`, `/memory/files`,
+`/memory/file`) wrap the read-only project-memory graph (`memory.py`) — metadata/provenance only,
+no file contents ever served, no search. `GET /api/graph/status` additionally carries seven
+additive fields (`built_at_commit`, `node_count`, `edge_count`, `community_count`, `file_count`,
+`concept_count`, `graph_mtime`) sourced from the same reader as the memory endpoints, so status and
+counts always describe the same graph. This is a **memory plane**: it never validates a record and
+never authorizes export. See [`../../docs/project-memory-map.md`](../../docs/project-memory-map.md).
