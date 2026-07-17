@@ -309,6 +309,45 @@ def test_missing_nodes_key_is_unreadable(tmp_path):
     assert reader.overview()["reason"] == "graph_unreadable"
 
 
+def test_type_corrupt_graph_is_unreadable(tmp_path):
+    """JSON-valid graph whose VALUES have wrong types (string ``community``)
+    degrades to graph_unreadable — never raises (a future db/hosted provider may
+    carry different type conventions)."""
+    graph = _synthetic_graph()
+    for node in graph["nodes"]:
+        node["community"] = str(node["community"])  # int expected -> str corrupt
+    art = _write_artifacts(tmp_path, graph=graph)
+    reader = LocalGraphArtifactSource(art)
+    ov = reader.overview()
+    assert ov["available"] is False
+    assert ov["reason"] == "graph_unreadable"
+    # list/detail calls degrade too; nothing raises.
+    assert reader.concepts() == []
+    assert reader.files() == []
+    assert reader.concept("concept_alpha") is None
+    assert reader.file("src/fake_mod.py") is None
+    assert reader.classify_path("src/fake_mod.py") == "not_indexed"
+
+
+@pytest.mark.parametrize("manifest", ["{broken manifest", None],
+                         ids=["corrupt", "missing"])
+def test_bad_manifest_alone_stays_available(tmp_path, manifest):
+    """Corrupt/missing manifest with a healthy graph: the plane stays available
+    (graph.json is the sole availability signal); the served allowlist degrades
+    to empty, so files()/file() surface nothing."""
+    art = _write_artifacts(tmp_path, manifest=manifest)
+    reader = LocalGraphArtifactSource(art)
+    ov = reader.overview()
+    assert ov["available"] is True
+    assert ov["served_file_count"] == 0
+    assert ov["manifest_file_count"] == 0
+    assert reader.files() == []
+    assert reader.file("src/fake_mod.py") is None
+    assert reader.classify_path("src/fake_mod.py") == "not_indexed"
+    # concepts come from the graph, not the manifest — unaffected.
+    assert {c["id"] for c in reader.concepts()} == {"concept_alpha", "concept_beta"}
+
+
 def test_corrupt_labels_alone_stays_available(tmp_path):
     art = _write_artifacts(tmp_path, labels="{broken labels")
     reader = LocalGraphArtifactSource(art)

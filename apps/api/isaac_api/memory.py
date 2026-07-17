@@ -23,9 +23,13 @@ Design contract (see docs/superpowers/specs/2026-07-16-phase-24-project-memory-d
   membership in this allowlist; the path guard is defense-in-depth only.
 * **Honest degradation.** No exception ever escapes for an artifact problem.
   Absent artifacts dir / missing ``graph.json`` -> ``available: False,
-  reason: "graph_absent"``. Invalid JSON or a structurally-wrong graph ->
+  reason: "graph_absent"``. Invalid JSON, a structurally-wrong graph, or a
+  JSON-valid graph with type-corrupt values (any error during derivation) ->
   ``available: False, reason: "graph_unreadable"``. A missing/corrupt labels file
   alone never makes the plane unavailable — it only nulls ``community_name``.
+  A missing/corrupt manifest alone never makes the plane unavailable either
+  (``graph.json`` is the sole availability signal) — the served allowlist
+  degrades to empty, so ``files()``/``file()`` surface nothing.
 
 Provider seam
 -------------
@@ -238,6 +242,19 @@ class LocalGraphArtifactSource:
         if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
             return _GraphState(key=key, available=False, reason="graph_unreadable")
 
+        # Never-raise guard over the whole derivation: a JSON-valid graph whose
+        # VALUES have unexpected types (e.g. string ``community``, non-string
+        # ``source_file``) must degrade to graph_unreadable, never propagate —
+        # a future db/hosted provider may carry different type conventions. A
+        # blanket wrapper is the deliberate choice here; no per-field coercion.
+        try:
+            return self._derive(key, graph)
+        except Exception:
+            return _GraphState(key=key, available=False, reason="graph_unreadable")
+
+    def _derive(self, key: tuple, graph: dict) -> _GraphState:
+        """Build the derived state from a shape-checked graph dict. May raise on
+        type-corrupt values; ``_build`` catches everything and degrades."""
         nodes = [n for n in graph["nodes"] if isinstance(n, dict)]
         links = graph.get("links")
         if not isinstance(links, list):
