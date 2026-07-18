@@ -45,13 +45,17 @@ Design contract (see docs/superpowers/specs/2026-07-16-phase-24-project-memory-d
 Provider seam
 -------------
 ``LocalGraphArtifactSource`` is one concrete reader over a local artifacts
-directory. Consumers should depend on its method surface (see the ``MemoryReader``
-Protocol), not on how it loads data, so a future database source, mounted
+directory; ``SanitizedSnapshotSource`` is a second concrete reader over a
+pre-generated sanitized ``memory-snapshot.json`` (the hosted-image seam).
+Consumers should depend on the shared method surface (see the ``MemoryReader``
+Protocol), not on how a reader loads data, so a future database source, mounted
 graph-snapshot volume, hosted memory service, or login-gated institutional backend
 can replace/supplement it without rewriting callers. ``get_default_reader()``
-resolves the artifacts directory from the optional ``ISAAC_MEMORY_DIR`` environment
-override (the future mounted-volume seam) and otherwise falls back to the repo's
-``graphify-out/`` directory.
+selects a provider by precedence: the ``ISAAC_MEMORY_SNAPSHOT`` file override, then
+the packaged canonical snapshot if present, then the ``ISAAC_MEMORY_DIR`` live-graph
+override (the mounted-volume seam), and finally the repo's ``graphify-out/``
+directory. Both readers expose a ``status(build_commit)`` method carrying the
+provider kind and a null-safe freshness verdict.
 
 Rationale join
 --------------
@@ -72,6 +76,7 @@ is needed.
 from __future__ import annotations
 
 import collections
+import copy
 import json
 import os
 from dataclasses import dataclass, field
@@ -85,6 +90,26 @@ MANIFEST_FILE = "manifest.json"
 LABELS_FILE = ".graphify_labels.json"
 
 ENV_MEMORY_DIR = "ISAAC_MEMORY_DIR"
+#: Absolute/relative path to a pre-generated sanitized ``memory-snapshot.json``
+#: (the hosted-image seam). When set & non-empty it selects
+#: :class:`SanitizedSnapshotSource` over the live-graph reader (see
+#: :func:`get_default_reader`).
+ENV_MEMORY_SNAPSHOT = "ISAAC_MEMORY_SNAPSHOT"
+
+#: The ``kind`` sentinel a valid snapshot must carry (mirrors the generator's
+#: ``scripts/build_memory_snapshot.py::SNAPSHOT_KIND``; kept independent so the
+#: memory plane never imports the generator).
+SNAPSHOT_KIND = "isaac-memory-snapshot"
+#: The single ``snapshot_schema_version`` this reader understands. A snapshot
+#: carrying any other version degrades to ``graph_unreadable`` (honest, never a
+#: silent mis-read of a shape this code does not know).
+SUPPORTED_SNAPSHOT_SCHEMA_VERSION = 1
+#: Top-level keys every snapshot must carry (a missing one -> ``graph_unreadable``).
+_SNAPSHOT_REQUIRED_KEYS = frozenset({
+    "snapshot_schema_version", "kind", "generator",
+    "built_at_commit", "source_graph_sha256",
+    "overview", "concepts", "concept_detail", "files", "file_detail", "served",
+})
 
 #: Governance-sensitive prefixes filtered out of the served allowlist (spec §4).
 EXCLUDED_PREFIXES = ("examples/", ".superpowers/", "apps/web/.vercel/")
@@ -120,6 +145,7 @@ class MemoryReader(Protocol):
     def files(self) -> list: ...
     def file(self, path: str) -> Optional[dict]: ...
     def classify_path(self, path: str) -> str: ...
+    def status(self, build_commit: Optional[str] = None) -> dict: ...
 
 
 # --- parsed state -------------------------------------------------------------
@@ -151,7 +177,42 @@ class _GraphState:
     rationales_by_file: dict = field(default_factory=dict)  # path -> list[str]
 
 
+@dataclass(frozen=True)
+class _SnapshotState:
+    """Immutable parsed view of one sanitized snapshot load; swapped atomically
+    into the cache (mirrors :class:`_GraphState`)."""
+
+    key: tuple
+    available: bool
+    reason: Optional[str] = None
+    built_at_commit: Optional[str] = None
+    source_graph_sha256: Optional[str] = None
+    snapshot_schema_version: Optional[int] = None
+    overview: dict = field(default_factory=dict)
+    concepts: list = field(default_factory=list)
+    concept_detail: dict = field(default_factory=dict)
+    files: list = field(default_factory=list)
+    file_detail: dict = field(default_factory=dict)
+    served: frozenset = frozenset()
+
+
 # --- helpers ------------------------------------------------------------------
+
+
+def _freshness(available: bool, build_commit, source_commit) -> str:
+    """The shared, null-safe freshness verdict used by both providers'
+    ``status()``.
+
+    ``"unavailable"`` when the reader has no data; otherwise ``"unknown"`` when
+    EITHER commit is null/unknown (never compares ``null == null`` into
+    ``"fresh"``, never reports a real SHA vs ``null`` as ``"stale"``); else
+    ``"fresh"`` iff the two known commits are equal, ``"stale"`` iff they differ.
+    """
+    if not available:
+        return "unavailable"
+    if build_commit is None or source_commit is None:
+        return "unknown"
+    return "fresh" if build_commit == source_commit else "stale"
 
 
 def _find_repo_root() -> Path:
@@ -617,30 +678,264 @@ class LocalGraphArtifactSource:
             return True
         return False
 
+    def status(self, build_commit: Optional[str] = None) -> dict:
+        """Provider/freshness descriptor for the seam (P24.9-impl-2).
+
+        Freshness compares the caller-supplied backend ``build_commit`` against
+        the graph's ``built_at_commit`` via the shared null-safe :func:`_freshness`
+        rule. A local reader has no snapshot schema/sha256, so those are ``None``."""
+        state = self._state_now()
+        return {
+            "provider_kind": "local-graph",
+            "available": state.available,
+            "reason": state.reason,
+            "snapshot_schema_version": None,
+            "source_graph_commit": state.built_at_commit,
+            "source_graph_sha256": None,
+            "freshness": _freshness(state.available, build_commit, state.built_at_commit),
+        }
+
+
+# --- sanitized snapshot reader ------------------------------------------------
+
+
+class SanitizedSnapshotSource:
+    """Concrete :class:`MemoryReader` over a pre-generated sanitized
+    ``memory-snapshot.json`` (see ``scripts/build_memory_snapshot.py``).
+
+    This is the hosted-image analogue of :class:`LocalGraphArtifactSource`: the
+    snapshot already contains the reader's *returned* metadata (overview, concept
+    and file summaries/details, the served allowlist) with no raw graph, no file
+    contents, and no governance-excluded paths. This reader therefore only parses
+    and serves that projection — it never re-derives graph logic — and returns
+    shapes byte-identical to the local reader so the ``/api/memory/*`` routes need
+    zero change. ``on_disk`` is whatever the snapshot baked (uniformly ``false``);
+    ``graph_mtime`` is the snapshot's baked ``null``.
+
+    Same mtime-cache pattern as the local reader: the snapshot is parsed lazily on
+    first use and cached, keyed by its file mtime, re-parsed only on change, and
+    swapped atomically into one attribute (GIL-safe; no lock). Any parse/derive
+    problem degrades honestly to the SAME reason strings the local reader uses
+    (``graph_absent`` / ``graph_unreadable``) — it never raises, never 500s.
+    """
+
+    def __init__(self, snapshot_path):
+        self.snapshot_path = Path(snapshot_path)
+        self.reload_count = 0
+        self._state: Optional[_SnapshotState] = None
+
+    # -- cache --
+
+    def _mtime(self, path: Path) -> Optional[float]:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return None
+
+    def _current_key(self) -> tuple:
+        return (self._mtime(self.snapshot_path),)
+
+    def _state_now(self) -> _SnapshotState:
+        key = self._current_key()
+        state = self._state
+        if state is not None and state.key == key:
+            return state
+        new_state = self._build(key)
+        self._state = new_state  # atomic swap; readers see one consistent object
+        return new_state
+
+    # -- build --
+
+    def _build(self, key: tuple) -> _SnapshotState:
+        self.reload_count += 1
+
+        if not self.snapshot_path.is_file():
+            return _SnapshotState(key=key, available=False, reason="graph_absent")
+        try:
+            data = _load_json(self.snapshot_path)
+        except (ValueError, OSError):
+            return _SnapshotState(key=key, available=False, reason="graph_unreadable")
+        if not isinstance(data, dict):
+            return _SnapshotState(key=key, available=False, reason="graph_unreadable")
+
+        # Blanket never-raise guard over the whole derivation, exactly like
+        # ``LocalGraphArtifactSource._build``: a missing key, wrong ``kind``,
+        # unsupported schema version, wrong value type, or a structurally
+        # incomplete projection all degrade to ``graph_unreadable`` — never
+        # propagate.
+        try:
+            return self._derive(key, data)
+        except Exception:
+            return _SnapshotState(key=key, available=False, reason="graph_unreadable")
+
+    def _derive(self, key: tuple, data: dict) -> _SnapshotState:
+        """Validate and load a snapshot dict into immutable state. Raises on any
+        shape/version/completeness problem; ``_build`` catches and degrades."""
+        missing = _SNAPSHOT_REQUIRED_KEYS - set(data)
+        if missing:
+            raise ValueError(f"snapshot missing required keys: {sorted(missing)}")
+        if data.get("kind") != SNAPSHOT_KIND:
+            raise ValueError(f"snapshot kind mismatch: {data.get('kind')!r}")
+        version = data.get("snapshot_schema_version")
+        if version != SUPPORTED_SNAPSHOT_SCHEMA_VERSION:
+            raise ValueError(f"unsupported snapshot_schema_version: {version!r}")
+
+        overview = data["overview"]
+        concepts = data["concepts"]
+        concept_detail = data["concept_detail"]
+        files = data["files"]
+        file_detail = data["file_detail"]
+        served = data["served"]
+        if not isinstance(overview, dict):
+            raise ValueError("overview must be an object")
+        if not (isinstance(concepts, list) and isinstance(files, list)
+                and isinstance(served, list)):
+            raise ValueError("concepts/files/served must be lists")
+        if not (isinstance(concept_detail, dict) and isinstance(file_detail, dict)):
+            raise ValueError("concept_detail/file_detail must be objects")
+
+        # Structural completeness: every summary must have a matching detail entry
+        # (a projection with a dangling summary is corrupt, not partially valid).
+        for c in concepts:
+            if not isinstance(c, dict) or c.get("id") not in concept_detail:
+                raise ValueError("concept in concepts[] missing from concept_detail")
+        for f in files:
+            if not isinstance(f, dict) or f.get("path") not in file_detail:
+                raise ValueError("path in files[] missing from file_detail")
+
+        return _SnapshotState(
+            key=key,
+            available=True,
+            built_at_commit=data.get("built_at_commit"),
+            source_graph_sha256=data.get("source_graph_sha256"),
+            snapshot_schema_version=version,
+            overview=overview,
+            concepts=concepts,
+            concept_detail=concept_detail,
+            files=files,
+            file_detail=file_detail,
+            served=frozenset(served),
+        )
+
+    # -- public read surface (shapes identical to LocalGraphArtifactSource) --
+
+    def overview(self) -> dict:
+        state = self._state_now()
+        if not state.available:
+            return {"available": False, "reason": state.reason}
+        # The snapshot's overview already carries built_at_commit + counts +
+        # graph_mtime:null, matching the local reader's key set exactly.
+        return {"available": True, **state.overview}
+
+    def concepts(self) -> list:
+        state = self._state_now()
+        if not state.available:
+            return []
+        return [copy.deepcopy(c) for c in state.concepts]
+
+    def concept(self, concept_id: str) -> Optional[dict]:
+        state = self._state_now()
+        if not state.available:
+            return None
+        detail = state.concept_detail.get(concept_id)
+        if detail is None:
+            return None
+        return copy.deepcopy(detail)  # fresh copy; never leak cached state
+
+    def files(self) -> list:
+        state = self._state_now()
+        if not state.available:
+            return []
+        return [copy.deepcopy(f) for f in state.files]
+
+    def file(self, path: str) -> Optional[dict]:
+        state = self._state_now()
+        if not state.available:
+            return None
+        detail = state.file_detail.get(path)
+        if detail is None:
+            return None
+        return copy.deepcopy(detail)  # fresh copy; never leak cached state
+
+    def classify_path(self, path: str) -> str:
+        """``"unsafe"`` / ``"served"`` / ``"not_indexed"`` — the SAME contract as
+        the local reader, using the identical traversal guard
+        (``LocalGraphArtifactSource._is_unsafe``) so a path unsafe locally is
+        unsafe here regardless of snapshot availability."""
+        if LocalGraphArtifactSource._is_unsafe(path):
+            return "unsafe"
+        state = self._state_now()
+        if state.available and path in state.served:
+            return "served"
+        return "not_indexed"
+
+    def status(self, build_commit: Optional[str] = None) -> dict:
+        """Provider/freshness descriptor for the seam (P24.9-impl-2).
+
+        Carries the snapshot's own provenance (schema version, source graph commit
+        + sha256) and the null-safe freshness verdict comparing ``build_commit``
+        against the snapshot's ``built_at_commit``."""
+        state = self._state_now()
+        return {
+            "provider_kind": "sanitized-snapshot",
+            "available": state.available,
+            "reason": state.reason,
+            "snapshot_schema_version": state.snapshot_schema_version,
+            "source_graph_commit": state.built_at_commit,
+            "source_graph_sha256": state.source_graph_sha256,
+            "freshness": _freshness(state.available, build_commit, state.built_at_commit),
+        }
+
 
 # --- module-level default accessor -------------------------------------------
 
 _REPO_ROOT = _find_repo_root()
-_default_reader: Optional[LocalGraphArtifactSource] = None
-_default_dir: Optional[Path] = None
+#: The canonical snapshot shipped inside the hosted image, resolved
+#: ``__file__``-relative so it is working-directory-independent (``isaac_api`` runs
+#: via ``--app-dir apps/api``, not pip-installed). Present only once impl-4 commits
+#: the real snapshot; absent in local dev, where the live-graph reader is used.
+_PACKAGED_SNAPSHOT = Path(__file__).resolve().parent / "data" / "memory-snapshot.json"
+
+_default_reader: Optional[MemoryReader] = None
+#: The ``(kind, path)`` choice the memoized reader was built for; rebuilt on change.
+_default_choice: Optional[tuple] = None
 
 
-def _resolve_artifacts_dir() -> Path:
+def _resolve_reader_choice() -> tuple:
+    """Resolve which memory provider to use, as a ``(kind, path)`` pair.
+
+    Precedence (P24.9-impl-2 decision #2):
+      1. ``ISAAC_MEMORY_SNAPSHOT`` set & non-empty -> the snapshot at that path.
+      2. else the packaged canonical snapshot, if it exists.
+      3. else ``ISAAC_MEMORY_DIR`` set & non-empty -> the live graph at that dir.
+      4. else the repo's ``graphify-out/`` live graph.
+    Honest-unavailable falls out naturally: if step 4's directory has no graph, the
+    local reader reports ``graph_absent``."""
+    snapshot = os.environ.get(ENV_MEMORY_SNAPSHOT, "").strip()
+    if snapshot:
+        return ("snapshot", Path(snapshot))
+    if _PACKAGED_SNAPSHOT.is_file():
+        return ("snapshot", _PACKAGED_SNAPSHOT)
     override = os.environ.get(ENV_MEMORY_DIR, "").strip()
     if override:
-        return Path(override)
-    return _REPO_ROOT / "graphify-out"
+        return ("local", Path(override))
+    return ("local", _REPO_ROOT / "graphify-out")
 
 
-def get_default_reader() -> LocalGraphArtifactSource:
+def get_default_reader() -> MemoryReader:
     """The process-wide default reader.
 
-    Resolves the artifacts directory from ``ISAAC_MEMORY_DIR`` (the mounted-volume
-    seam) or the repo's ``graphify-out/``. The reader instance is reused so its
-    mtime cache persists; it is rebuilt only if the resolved directory changes."""
-    global _default_reader, _default_dir
-    resolved = _resolve_artifacts_dir()
-    if _default_reader is None or _default_dir != resolved:
-        _default_reader = LocalGraphArtifactSource(resolved, repo_root=_REPO_ROOT)
-        _default_dir = resolved
+    Selects between :class:`SanitizedSnapshotSource` (hosted image / snapshot seam)
+    and :class:`LocalGraphArtifactSource` (live ``graphify-out/``) via
+    :func:`_resolve_reader_choice`. The reader instance is reused so its mtime cache
+    persists; it is rebuilt only when the resolved ``(kind, path)`` choice changes."""
+    global _default_reader, _default_choice
+    choice = _resolve_reader_choice()
+    if _default_reader is None or _default_choice != choice:
+        kind, path = choice
+        if kind == "snapshot":
+            _default_reader = SanitizedSnapshotSource(path)
+        else:
+            _default_reader = LocalGraphArtifactSource(path, repo_root=_REPO_ROOT)
+        _default_choice = choice
     return _default_reader

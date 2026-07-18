@@ -806,7 +806,7 @@ def _repo_root() -> Path:
 
 _STDLIB_ROOTS = {
     "json", "os", "sys", "time", "pathlib", "dataclasses", "typing",
-    "functools", "collections", "__future__",
+    "functools", "collections", "copy", "__future__",
 }
 
 
@@ -827,6 +827,18 @@ def test_memory_module_imports_only_stdlib():
     # The forbidden modules must not appear among *actual* imports (docstring
     # mentions of them describing the isolation contract are fine).
     assert roots.isdisjoint({"isaac_records", "graphify", "fastapi", "isaac_api"})
+
+
+def test_reader_exposes_seven_method_surface(reader):
+    """The ``MemoryReader`` seam grew to seven methods with the additive
+    ``status`` freshness method (P24.9-impl-2); the local reader must implement
+    all seven so a future snapshot/db/hosted provider mirrors one surface."""
+    for name in ("overview", "concepts", "concept", "files", "file",
+                 "classify_path", "status"):
+        assert callable(getattr(reader, name))
+    st = reader.status(build_commit="fakecommit0000")
+    assert st["provider_kind"] == "local-graph"
+    assert st["freshness"] == "fresh"  # synthetic graph built_at_commit matches
 
 
 # --- 10. real-graph smoke (conditional) ---------------------------------------
