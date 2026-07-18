@@ -1,0 +1,194 @@
+{
+  "built_at_commit": "fakecommitp24900",
+  "concept_detail": {
+    "concept_fake_absolute": {
+      "community_id": "1",
+      "community_name": "Fake alpha community",
+      "id": "concept_fake_absolute",
+      "label": "Fake absolute-anchored concept",
+      "on_disk": false,
+      "related": {
+        "concepts": [],
+        "files": []
+      },
+      "source_file": null
+    },
+    "concept_fake_alpha": {
+      "community_id": "1",
+      "community_name": "Fake alpha community",
+      "id": "concept_fake_alpha",
+      "label": "Fake alpha concept",
+      "on_disk": false,
+      "related": {
+        "concepts": [],
+        "files": [
+          {
+            "file_type": "document",
+            "path": "docs/fake_notes.md",
+            "relation": "references"
+          },
+          {
+            "file_type": "code",
+            "path": "src/fake_widget.py",
+            "relation": "references"
+          }
+        ]
+      },
+      "source_file": "docs/fake_notes.md"
+    },
+    "concept_fake_excluded": {
+      "community_id": "1",
+      "community_name": "Fake alpha community",
+      "id": "concept_fake_excluded",
+      "label": "Fake excluded concept (examples-anchored)",
+      "on_disk": false,
+      "related": {
+        "concepts": [],
+        "files": []
+      },
+      "source_file": null
+    }
+  },
+  "concepts": [
+    {
+      "community_id": "1",
+      "community_name": "Fake alpha community",
+      "id": "concept_fake_absolute",
+      "label": "Fake absolute-anchored concept",
+      "on_disk": false,
+      "source_file": null
+    },
+    {
+      "community_id": "1",
+      "community_name": "Fake alpha community",
+      "id": "concept_fake_alpha",
+      "label": "Fake alpha concept",
+      "on_disk": false,
+      "source_file": "docs/fake_notes.md"
+    },
+    {
+      "community_id": "1",
+      "community_name": "Fake alpha community",
+      "id": "concept_fake_excluded",
+      "label": "Fake excluded concept (examples-anchored)",
+      "on_disk": false,
+      "source_file": null
+    }
+  ],
+  "file_detail": {
+    "docs/fake_notes.md": {
+      "community_id": "1",
+      "community_name": "Fake alpha community",
+      "file_type": "document",
+      "local_reference": "docs/fake_notes.md",
+      "node_count": 2,
+      "on_disk": false,
+      "path": "docs/fake_notes.md",
+      "rationales": [],
+      "related": {
+        "concepts": [],
+        "files": [
+          {
+            "file_type": "code",
+            "path": "src/fake_widget.py",
+            "relation": "references"
+          }
+        ]
+      }
+    },
+    "src/fake_helper.py": {
+      "community_id": "2",
+      "community_name": "Fake widget community",
+      "file_type": "code",
+      "local_reference": "src/fake_helper.py",
+      "node_count": 2,
+      "on_disk": false,
+      "path": "src/fake_helper.py",
+      "rationales": [],
+      "related": {
+        "concepts": [],
+        "files": [
+          {
+            "file_type": "code",
+            "path": "src/fake_widget.py",
+            "relation": "calls"
+          }
+        ]
+      }
+    },
+    "src/fake_widget.py": {
+      "community_id": "2",
+      "community_name": "Fake widget community",
+      "file_type": "code",
+      "local_reference": "src/fake_widget.py",
+      "node_count": 3,
+      "on_disk": false,
+      "path": "src/fake_widget.py",
+      "rationales": [
+        "Short fake rationale about the widget module.",
+        "This is a synthetic fake rationale string, deliberately made long on purpose, used only to exercise the MAX_RATIONALE_CHARS truncation logic in the snapshot generator test suite. It describes nothing real about any actual codebase, module, experiment, or dataset. Padding filler …"
+      ],
+      "related": {
+        "concepts": [
+          {
+            "id": "concept_fake_alpha",
+            "label": "Fake alpha concept",
+            "relation": "references"
+          }
+        ],
+        "files": [
+          {
+            "file_type": "code",
+            "path": "src/fake_helper.py",
+            "relation": "calls"
+          }
+        ]
+      }
+    }
+  },
+  "files": [
+    {
+      "community_id": "1",
+      "community_name": "Fake alpha community",
+      "file_type": "document",
+      "node_count": 2,
+      "on_disk": false,
+      "path": "docs/fake_notes.md"
+    },
+    {
+      "community_id": "2",
+      "community_name": "Fake widget community",
+      "file_type": "code",
+      "node_count": 2,
+      "on_disk": false,
+      "path": "src/fake_helper.py"
+    },
+    {
+      "community_id": "2",
+      "community_name": "Fake widget community",
+      "file_type": "code",
+      "node_count": 3,
+      "on_disk": false,
+      "path": "src/fake_widget.py"
+    }
+  ],
+  "generator": "scripts/build_memory_snapshot.py",
+  "kind": "isaac-memory-snapshot",
+  "overview": {
+    "built_at_commit": "fakecommitp24900",
+    "community_count": 3,
+    "concept_count": 3,
+    "edge_count": 5,
+    "graph_mtime": null,
+    "manifest_file_count": 4,
+    "node_count": 10,
+    "served_file_count": 3
+  },
+  "served": [
+    "docs/fake_notes.md",
+    "src/fake_helper.py",
+    "src/fake_widget.py"
+  ],
+  "snapshot_schema_version": 1,
+  "source_graph_sha256": "86c25c586b3f9c104b087ba1be3db5486347cb81486b6c57a5085fc9a5dbc0d6"
+}

@@ -729,6 +729,36 @@ def test_no_content_or_lines_keys_anywhere(reader):
         assert keys.isdisjoint(FORBIDDEN_VERDICT_KEYS)
 
 
+def test_related_equal_weight_tie_relation_is_canonical(tmp_path):
+    """Two EQUAL-WEIGHT edges from one file to the same related file, carrying
+    different relations, must retain the canonical (lexicographically smallest)
+    relation — never first-seen — so ``_related`` is order/hash-seed independent.
+    Distinct-weight behavior (higher weight wins) is untouched."""
+    nodes = [
+        {"id": "hub", "label": "hub.py", "file_type": "code", "community": 1,
+         "source_file": "src/hub.py", "source_location": "L1"},
+        {"id": "neigh_a", "label": "neigh.py", "file_type": "code", "community": 2,
+         "source_file": "src/neigh.py", "source_location": "L1"},
+        {"id": "neigh_b", "label": "do()", "file_type": "code", "community": 2,
+         "source_file": "src/neigh.py", "source_location": "L10"},
+    ]
+    # Same target file (src/neigh.py) at equal weight 6.0 via two relations;
+    # "imports" is listed first so a first-seen accumulator would keep it.
+    links = [
+        {"source": "hub", "target": "neigh_a", "relation": "imports",
+         "weight": 6.0, "source_file": "src/hub.py"},
+        {"source": "hub", "target": "neigh_b", "relation": "calls",
+         "weight": 6.0, "source_file": "src/hub.py"},
+    ]
+    graph = {"nodes": nodes, "links": links, "built_at_commit": "fakecommit0000"}
+    manifest = {k: {"mtime": 1.0, "ast_hash": "x", "semantic_hash": ""}
+                for k in ("src/hub.py", "src/neigh.py")}
+    art = _write_artifacts(tmp_path, graph=graph, manifest=manifest, labels={})
+    reader = LocalGraphArtifactSource(art)
+    files = reader.file("src/hub.py")["related"]["files"]
+    assert files == [{"path": "src/neigh.py", "relation": "calls", "file_type": "code"}]
+
+
 def test_related_lists_capped_at_25(tmp_path):
     """A file linked to 30 others surfaces only the 25 highest-weight related files."""
     nodes = [{"id": "hub", "label": "hub.py", "file_type": "code", "community": 1,

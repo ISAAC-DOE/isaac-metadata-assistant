@@ -1,0 +1,121 @@
+{
+  "built_at_commit": "fakecommitp24900",
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "hyperedges": [],
+  "nodes": [
+    {
+      "id": "concept_fake_alpha",
+      "label": "Fake alpha concept",
+      "file_type": "concept",
+      "community": 1,
+      "source_file": "docs/fake_notes.md"
+    },
+    {
+      "id": "concept_fake_excluded",
+      "label": "Fake excluded concept (examples-anchored)",
+      "file_type": "concept",
+      "community": 1,
+      "source_file": "examples/README.md"
+    },
+    {
+      "id": "concept_fake_absolute",
+      "label": "Fake absolute-anchored concept",
+      "file_type": "concept",
+      "community": 1,
+      "source_file": "/etc/fake-passwd"
+    },
+    {
+      "id": "doc_fake_notes",
+      "label": "fake_notes.md",
+      "file_type": "document",
+      "community": 1,
+      "source_file": "docs/fake_notes.md",
+      "source_location": "L1"
+    },
+    {
+      "id": "src_fake_widget",
+      "label": "fake_widget.py",
+      "file_type": "code",
+      "community": 2,
+      "source_file": "src/fake_widget.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "src_fake_widget_rationale_short",
+      "label": "Short fake rationale about the widget module.",
+      "file_type": "rationale",
+      "community": 2,
+      "source_file": "src/fake_widget.py"
+    },
+    {
+      "id": "src_fake_widget_rationale_long",
+      "label": "This is a synthetic fake rationale string, deliberately made long on purpose, used only to exercise the MAX_RATIONALE_CHARS truncation logic in the snapshot generator test suite. It describes nothing real about any actual codebase, module, experiment, or dataset. Padding filler text follows to push the length well past the two hundred eighty character cap so truncation is unambiguous: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end-of-fake-rationale-marker.",
+      "file_type": "rationale",
+      "community": 2,
+      "source_file": "src/fake_widget.py"
+    },
+    {
+      "id": "examples_fake_readme",
+      "label": "README.md",
+      "file_type": "document",
+      "community": 3,
+      "source_file": "examples/README.md",
+      "source_location": "L1"
+    },
+    {
+      "id": "src_fake_helper",
+      "label": "fake_helper.py",
+      "file_type": "code",
+      "community": 2,
+      "source_file": "src/fake_helper.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "src_fake_helper_func",
+      "label": "do_helper_thing()",
+      "file_type": "code",
+      "community": 2,
+      "source_file": "src/fake_helper.py",
+      "source_location": "L10"
+    }
+  ],
+  "links": [
+    {
+      "source": "concept_fake_alpha",
+      "target": "doc_fake_notes",
+      "relation": "references",
+      "weight": 5.0,
+      "source_file": "docs/fake_notes.md"
+    },
+    {
+      "source": "src_fake_widget",
+      "target": "concept_fake_alpha",
+      "relation": "references",
+      "weight": 2.0,
+      "source_file": "src/fake_widget.py"
+    },
+    {
+      "source": "src_fake_widget",
+      "target": "examples_fake_readme",
+      "relation": "references",
+      "weight": 9.0,
+      "source_file": "src/fake_widget.py"
+    },
+    {
+      "source": "src_fake_widget",
+      "target": "src_fake_helper",
+      "relation": "imports",
+      "weight": 6.0,
+      "source_file": "src/fake_widget.py"
+    },
+    {
+      "source": "src_fake_widget",
+      "target": "src_fake_helper_func",
+      "relation": "calls",
+      "weight": 6.0,
+      "source_file": "src/fake_widget.py"
+    }
+  ]
+}

@@ -234,6 +234,22 @@ def _community_for(nodes: list):
     return max(counts.items(), key=lambda kv: (kv[1], -kv[0]))[0]
 
 
+def _prefer_related(cand: tuple, prev: tuple) -> bool:
+    """Whether ``cand`` should replace the accumulated related entry ``prev``.
+
+    Both are ``(weight, relation, extra)`` where ``extra`` is the file's
+    ``file_type`` (related files) or the concept's ``label`` (related concepts).
+    Higher weight always wins; on a weight tie the lexicographically smallest
+    ``(relation or "", extra or "")`` wins. This makes the retained payload a
+    CANONICAL choice rather than first-seen, so ``_related`` is independent of
+    the order in which equal-weight multi-edges to the same target are visited
+    (and thus independent of set-iteration / hash-seed order).
+    """
+    if cand[0] != prev[0]:
+        return cand[0] > prev[0]
+    return (cand[1] or "", cand[2] or "") < (prev[1] or "", prev[2] or "")
+
+
 # --- reader -------------------------------------------------------------------
 
 
@@ -457,10 +473,17 @@ class LocalGraphArtifactSource:
 
         Each related file/concept is kept at its highest edge weight, ordered by
         weight desc (ties by path/id), and capped at :data:`MAX_RELATED`. Edges to
-        nodes in the same file (``self_path``) are skipped."""
+        nodes in the same file (``self_path``) are skipped.
+
+        Order-independent / deterministic across processes and hash seeds: the
+        node set is iterated in SORTED order, and for equal-weight multi-edges to
+        the same target the retained ``(relation, file_type/label)`` payload is
+        the canonical (lexicographically smallest) choice via
+        :func:`_prefer_related`, never first-seen — so the result never depends
+        on set-iteration order."""
         files_acc: dict = {}
         concepts_acc: dict = {}
-        for nid in node_ids:
+        for nid in sorted(node_ids):
             for other_id, relation, weight in state.adjacency.get(nid, []):
                 other = state.nodes_by_id.get(other_id)
                 if other is None:
@@ -468,9 +491,10 @@ class LocalGraphArtifactSource:
                 if other.get("file_type") == CONCEPT:
                     if other_id in node_ids:
                         continue
+                    cand = (weight, relation, other.get("label"))
                     prev = concepts_acc.get(other_id)
-                    if prev is None or weight > prev[0]:
-                        concepts_acc[other_id] = (weight, relation, other.get("label"))
+                    if prev is None or _prefer_related(cand, prev):
+                        concepts_acc[other_id] = cand
                 else:
                     opath = other.get("source_file")
                     # Related file paths come from graph nodes, not the served
@@ -482,9 +506,10 @@ class LocalGraphArtifactSource:
                     if (not opath or opath == self_path
                             or self._is_unsafe(opath) or not _is_served(opath)):
                         continue
+                    cand = (weight, relation, other.get("file_type"))
                     prev = files_acc.get(opath)
-                    if prev is None or weight > prev[0]:
-                        files_acc[opath] = (weight, relation, other.get("file_type"))
+                    if prev is None or _prefer_related(cand, prev):
+                        files_acc[opath] = cand
         files = sorted(files_acc.items(), key=lambda kv: (-kv[1][0], kv[0]))[:MAX_RELATED]
         concepts = sorted(
             concepts_acc.items(), key=lambda kv: (-kv[1][0], kv[0])

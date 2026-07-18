@@ -1,0 +1,6 @@
+{
+  "docs/fake_notes.md": {"mtime": 1.0, "ast_hash": "fake", "semantic_hash": ""},
+  "src/fake_widget.py": {"mtime": 1.0, "ast_hash": "fake", "semantic_hash": ""},
+  "src/fake_helper.py": {"mtime": 1.0, "ast_hash": "fake", "semantic_hash": ""},
+  "examples/README.md": {"mtime": 1.0, "ast_hash": "fake", "semantic_hash": ""}
+}
