@@ -2,7 +2,9 @@
 #
 # Data governance: COPY is an explicit allowlist. examples/, drafts/, records/,
 # and graphify-out/ must NEVER be added — the image contains only the vendored
-# public schema, committed synthetic fixtures, and code.
+# public schema, committed synthetic fixtures, code, and one committed sanitized
+# Project Memory snapshot (apps/api/isaac_api/data/memory-snapshot.json, P24.9 —
+# metadata/provenance only, no file contents; ships inside `COPY apps/api/`).
 
 FROM python:3.11-slim
 

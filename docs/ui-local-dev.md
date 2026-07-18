@@ -194,9 +194,11 @@ metadata/provenance only, never a validator, and it never authorizes export.
 
 - **Status card** — live graph figures from `GET /api/graph/status` (node /
   edge / community / indexed-file / concept counts, built-at commit, graph
-  age). Missing graph artifacts render an honest unavailable panel — not a
-  fabricated zero state — with a note on the future-wiring path; a stale
-  graph shows an advisory caption, never a pass/fail token.
+  age). Locally these come from a live `graphify-out/` graph; on the hosted
+  demo they come from the committed sanitized snapshot (P24.9). Missing/
+  unreadable artifacts render an honest unavailable panel — not a fabricated
+  zero state — and a snapshot older than the running build honestly reads
+  `stale` (advisory caption), never a pass/fail token.
 - **Source Index** — the served-file allowlist (`GET /api/memory/files` /
   `GET /api/memory/file`), grouped by kind (Code / Documents / Other), with
   per-file provenance (rationale, related leads). No file contents are
@@ -212,7 +214,7 @@ Everything on this screen is a lead to verify, framed as memory/navigation —
 never a validation result. See
 [`docs/project-memory-map.md`](project-memory-map.md) for the full guardrails
 (served allowlist, path-traversal guard, honest degraded states, and the
-hosted-unavailable-for-now path).
+committed sanitized-snapshot delivery for the hosted demo).
 
 ## Tests and build
 

@@ -88,10 +88,14 @@ Guardrails:
   take the plane down, it just degrades to empty served names. `/api/graph/status` and the
   `/api/memory/*` endpoints resolve one reader per request, so status and counts always describe the
   same graph.
-- **Hosted = honest-unavailable-for-now** — the hosted demo deployment ships without graph artifacts
-  at all, so Project Memory shows an explicit unavailable panel there instead of an empty or
-  misleading one. The documented future-wiring path is a sanitized snapshot, a db-backed index, or
-  an institution-hosted service behind login — none built yet.
+- **Hosted = committed sanitized snapshot (P24.9)** — the hosted demo ships a deterministic,
+  sanitized `apps/api/isaac_api/data/memory-snapshot.json` (metadata/provenance only, no file
+  contents, all `on_disk` false, secret-scanned), served by `SanitizedSnapshotSource`. Project
+  Memory shows real counts there, not an unavailable panel. Freshness is reported honestly:
+  `/api/graph/status` reads `stale` whenever the deployed build commit is ahead of the snapshot's
+  `built_at_commit` (regenerate and recommit to refresh — spec §16). If the snapshot is ever
+  absent or unreadable the plane still degrades to the honest unavailable panel. Further
+  future-wiring (a db-backed index or an institution-hosted service behind login) remains unbuilt.
 - **Never a validator** — every response carries `plane: "memory"` and a note that this plane
   returns leads to verify, never a validation verdict; it cannot authorize export.
 
@@ -340,7 +344,7 @@ Project-owner direction as of July 2026:
 |---|---|
 | Second domain — electrochemistry / performance | **Back burner** (recommended next domain when resumed; exercises conditional-required rules) |
 | Web UI | **Built** — `apps/api` (FastAPI) + `apps/web` (React/Vite), a synthetic-only prototype since Phase 19, with a protection-gated demo deployment since Phase 20 (see [`deployment.md`](deployment.md)); production hardening is not planned |
-| Project Memory browsing (Phase 24) | **Built** — read-only metadata/provenance surface (status card, Source Index, Concept Lookup) over `/api/memory/*`; never a validator; hosted deployment currently ships honest-unavailable (no graph artifacts shipped yet) |
+| Project Memory browsing (Phase 24) | **Built** — read-only metadata/provenance surface (status card, Source Index, Concept Lookup) over `/api/memory/*`; never a validator; hosted deployment serves a committed sanitized snapshot (P24.9 — real counts, honest `stale`/unavailable freshness) |
 | CI / GitHub Actions | **Implemented** — `.github/workflows/ci.yml` runs two jobs on push/PR to `main`: a backend job (tests, the synthetic demo, official validation, advisory warnings, the evidence audit) and a frontend job (`apps/web`: vitest, build) |
 | License | **Pending** mentor/project decision — no license is asserted yet |
 | Real / sanitized-data pilot | Requires **explicit written data-governance approval** first |

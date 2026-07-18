@@ -30,7 +30,7 @@ Working prototype (`v0.1.0`), **synthetic data only**.
   status card, source index, concept lookup. Metadata/provenance only, no file contents served, no
   search box. It is a **memory plane**, never a truth plane: it never validates a record or
   authorizes export. See [`docs/project-memory-map.md`](docs/project-memory-map.md).
-- 251 passing Python tests (plus 134 frontend tests), including a test that the truth plane never imports Graphify.
+- 411 passing Python tests (plus 138 frontend tests), including a test that the truth plane never imports Graphify.
 
 **Not built yet**
 
@@ -82,7 +82,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,api]'
-.venv/bin/pytest                                   # 251 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # 411 tests: golden records validate, transform is gated
 ```
 
 **Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →

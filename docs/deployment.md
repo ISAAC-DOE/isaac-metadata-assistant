@@ -11,13 +11,39 @@ core in a container.
   while iterating.
 - **Backend** — FastAPI on Railway, built from the repo-root `Dockerfile`
   (explicit COPY allowlist; never contains `examples/`, `drafts/`,
-  `records/`, or `graphify-out/`). Health check: `GET /api/health`.
+  `records/`, or `graphify-out/`). The image does ship one committed,
+  sanitized `apps/api/isaac_api/data/memory-snapshot.json` (P24.9,
+  metadata/provenance only, no file contents), which powers hosted Project
+  Memory. Health check: `GET /api/health`.
 - **State** — a Railway Volume mounted at `/data/isaac-workspace`, pointed at
   by `ISAAC_UI_WORKSPACE`. Contents are synthetic-only: experiment state,
   exported demo records, evidence sidecars.
 - **Auto-deploys** — both platforms track GitHub
   `Krish-Verma/isaac-metadata-assistant`, branch `main`. Pushing to `main`
   deploys backend (Railway) and frontend (Vercel).
+
+## Project Memory snapshot (P24.9)
+
+Hosted Project Memory is served from a committed, sanitized snapshot rather than
+a live graph (`graphify-out/` is gitignored and never shipped).
+
+- **Delivery** — `apps/api/isaac_api/data/memory-snapshot.json` ships inside the
+  existing `COPY apps/api/` layer; no extra Dockerfile COPY is needed. The reader
+  auto-selects it by on-disk presence (`SanitizedSnapshotSource`), so no env var
+  is required for the packaged path. `ISAAC_MEMORY_SNAPSHOT` can point at an
+  alternate file (e.g. a Railway volume) if delivery changes later.
+- **Content** — metadata/provenance only: counts, served-file allowlist, curated
+  concepts, and length-capped rationales. Never file contents; every `on_disk` is
+  forced `false`; secret/path-excluded strings are scanned out at generation.
+- **Freshness** — `GET /api/graph/status` compares the deploy's build commit
+  (`RAILWAY_GIT_COMMIT_SHA` / `ISAAC_BUILD_COMMIT`) against the snapshot's
+  `built_at_commit`. It honestly reads `stale` whenever the deploy is ahead of the
+  snapshot; a missing/unreadable snapshot degrades to the honest unavailable panel.
+- **Refresh / rollback** — regenerate with
+  `python scripts/build_memory_snapshot.py` from a fresh local graph, review the
+  diff (including every `rationales[]` string), and recommit; `test_committed_snapshot.py`
+  gates shape, provenance, and leaks in CI. Rollback is atomic with code via
+  `git revert`. See the P24.9 spec §16 (update) and §15 (rollback).
 
 ## Environment variables
 
