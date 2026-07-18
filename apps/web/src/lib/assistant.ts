@@ -35,8 +35,11 @@ export function hasVerdictLanguage(text: string): boolean {
 export const ROUTE_TO_CLI_NOTE =
   'Truth questions route to the CLI — the assistant never renders a verdict.';
 
-export const MEMORY_CAVEAT: Record<'stale' | 'missing' | 'unavailable', string> = {
+export const MEMORY_CAVEAT: Record<'stale' | 'unknown' | 'missing' | 'unavailable', string> = {
   stale: 'a source changed after the graph was built — verify against the cited file.',
+  // P24.9: the graph IS available; only the backend's own build commit is
+  // unknown, so currency can't be confirmed either way.
+  unknown: "the backend build commit is unavailable — the graph's currency could not be confirmed.",
   missing: 'no project-memory graph is built — answered from source files directly.',
   unavailable: 'project memory unavailable — answered from source files.',
 };

@@ -6,6 +6,7 @@ import {
   stubFetchRoutes,
   stubFetchDown,
   graphStatusMissing,
+  graphStatusUnknown,
   memoryFilesAvailable,
   memoryFilesUnavailable,
   memoryConceptsUnavailable,
@@ -121,6 +122,48 @@ describe('P24.3 · status detail card — stale', () => {
     expect(getByText(/re-verify against the cited files/i)).toBeInTheDocument();
     expect(getByText('100')).toBeInTheDocument();
     expect(getByText('50')).toBeInTheDocument();
+  });
+});
+
+describe('P24.9 · status detail card — unknown freshness (available, build commit unresolved)', () => {
+  it('renders as available (real counts shown), an honest unknown note, no stale warning, and no age row when graph_mtime is null', async () => {
+    stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
+      'GET /api/graph/status': { body: graphStatusUnknown },
+      'GET /api/memory/files': { body: memoryFilesAvailable },
+    });
+    const { findByText, getByText, queryByText, container } = renderScreen();
+
+    await findByText('Memory: Unknown');
+    // Real counts render — "unknown" is available, not degraded.
+    expect(getByText('42')).toBeInTheDocument();
+    expect(getByText('17')).toBeInTheDocument();
+    expect(getByText('5')).toBeInTheDocument();
+    expect(getByText('9')).toBeInTheDocument();
+    expect(getByText('3')).toBeInTheDocument();
+
+    // The honest unknown-freshness note is shown, and the stale amber warning is not.
+    expect(getByText(/freshness could not be confirmed/i)).toBeInTheDocument();
+    expect(queryByText(/may be out of date/i)).toBeNull();
+
+    // graph_mtime is null -> no invented age; specifically never a 1970 epoch artifact.
+    expect(container.querySelector('.memory-figures')).not.toBeNull();
+    expect(container.textContent).not.toMatch(/1970/);
+    expect(container.textContent).not.toMatch(/\bAge\b/);
+
+    // Never verdict language, in this state either.
+    expect(container.textContent).not.toMatch(/\b(PASS|FAIL|valid|invalid)\b/i);
+  });
+
+  it('does not render the degraded/unavailable panel for unknown', async () => {
+    stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
+      'GET /api/graph/status': { body: graphStatusUnknown },
+      'GET /api/memory/files': { body: memoryFilesAvailable },
+    });
+    const { findByText, queryByText } = renderScreen();
+    await findByText('Memory: Unknown');
+    expect(queryByText(/memory graph artifacts are not present/i)).toBeNull();
   });
 });
 

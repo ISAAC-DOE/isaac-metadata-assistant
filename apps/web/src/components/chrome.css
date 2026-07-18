@@ -306,6 +306,16 @@
   color: var(--advisory-text);
 }
 .graph-chip.graph-stale svg { color: var(--advisory-icon); }
+/* Unknown: the graph IS available but the backend build commit can't confirm
+   its currency — quiet/neutral, NOT an error and NOT the stale amber. Reuses
+   the existing "info tint" pairing (see --action-tint's comment in tokens.css)
+   rather than inventing a new color family. */
+.graph-chip.graph-unknown {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+  color: var(--text-secondary);
+}
+.graph-chip.graph-unknown svg { color: var(--action); }
 .graph-chip.graph-missing {
   background: var(--surface-subtle);
   border-color: var(--border);

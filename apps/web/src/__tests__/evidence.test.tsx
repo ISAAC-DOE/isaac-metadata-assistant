@@ -130,11 +130,12 @@ describe('S5 · Evidence & File Preview (live)', () => {
   });
 });
 
-describe('GraphStatusChip renders all three states, never implies validation', () => {
-  it('renders Fresh / Stale / Missing with the memory-plane note', () => {
+describe('GraphStatusChip renders all four states, never implies validation', () => {
+  it('renders Fresh / Stale / Unknown / Missing with the memory-plane note', () => {
     for (const [status, label] of [
       ['fresh', 'Fresh'],
       ['stale', 'Stale'],
+      ['unknown', 'Unknown'],
       ['missing', 'Missing'],
     ] as const) {
       const { getByText, container, unmount } = render(

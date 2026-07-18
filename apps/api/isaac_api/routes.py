@@ -517,53 +517,59 @@ def get_artifacts(experiment_id: str):
 # --- 14. graph status (memory plane) ------------------------------------------
 
 
-# Resolved once at import so the freshness helper stays loadable even when
-# tests patch this module's REPO_ROOT attribute (which anchors source scans,
-# not the location of our own scripts).
-_FRESHNESS_SCRIPT = REPO_ROOT / "scripts" / "check_graphify_freshness.py"
-
-
-def _graph_freshness(artifacts_dir) -> str:
-    """Call scripts/check_graphify_freshness.check() by file path (scripts/ is not a
-    package). Any failure degrades to 'missing' — the memory plane is optional.
-
-    ``artifacts_dir`` anchors the graph FILE (the same directory the memory
-    reader resolved, honoring ISAAC_MEMORY_DIR); tracked SOURCE material stays
-    anchored at REPO_ROOT. The fresh/stale determination is unchanged."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "check_graphify_freshness", _FRESHNESS_SCRIPT
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.check(REPO_ROOT, graph=artifacts_dir / "graph.json")
-
-
 #: Additive /graph/status fields sourced from the memory reader's overview
 #: (spec §3.1). Single-source guarantee: `status` and these fields describe the
-#: SAME graph — the handler resolves the reader once and anchors the freshness
-#: check's graph file at that reader's artifacts dir (ISAAC_MEMORY_DIR-aware),
-#: so the body can never read status:"missing" alongside populated counts.
-#: Present with real values when the reader is available; explicit `null`
-#: (not omitted, for shape stability) otherwise.
+#: SAME graph — the handler resolves ONE reader and reads both its `status()`
+#: and its `overview()` off that one instance, so the body can never read
+#: status:"missing" alongside populated counts. Present with real values when
+#: the reader is available; explicit `null` (not omitted, for shape stability)
+#: otherwise.
 _STATUS_ADDITIVE_FIELDS = (
     "built_at_commit", "node_count", "edge_count",
     "community_count", "file_count", "concept_count", "graph_mtime",
 )
 
+#: Per-state notes (memory-plane framing; never PASS/FAIL/valid/verdict
+#: wording). fresh/stale/missing reuse the existing generic disclaimer;
+#: "unknown" is new (P24.9-impl-3) — it means the reader IS available but the
+#: backend's own build commit is unknown, so freshness can't be confirmed
+#: either way (never guessed into "fresh").
+_GRAPH_STATUS_NOTES = {
+    "fresh": "Graphify is a memory/query layer — never a validator.",
+    "stale": "Graphify is a memory/query layer — never a validator.",
+    "unknown": (
+        "Freshness unknown — the backend build commit is unavailable, so the "
+        "snapshot's currency can't be confirmed; re-verify against the cited files."
+    ),
+    "missing": "Graphify is a memory/query layer — never a validator.",
+}
+
 
 @router.get("/graph/status")
 def graph_status() -> dict:
-    note = "Graphify is a memory/query layer — never a validator."
-    reader = memory.get_default_reader()
-    try:
-        status = _graph_freshness(reader.artifacts_dir)
-    except Exception:
-        status = "missing"
+    """Provider-agnostic memory-plane status (P24.9-impl-3).
 
-    body = {"status": status, "plane": "memory", "note": note}
+    Resolves ONE reader and reads BOTH its ``status()`` (provider identity +
+    null-safe freshness) and its ``overview()`` (counts) off that same
+    instance — never ``isinstance``-branches on which provider it is. The wire
+    ``status`` is the reader's freshness verbatim (``fresh`` / ``stale`` /
+    ``unknown``) when available, else ``"missing"``; this is the only mapping
+    step, so status and counts can never disagree about which graph they
+    describe.
+    """
+    reader = memory.get_default_reader()
+    st = reader.status(_build_commit())
     overview = reader.overview()
+
+    status = st["freshness"] if overview["available"] else "missing"
+    body = {
+        "status": status,
+        "plane": "memory",
+        "note": _GRAPH_STATUS_NOTES.get(status, _GRAPH_STATUS_NOTES["unknown"]),
+        "provider_kind": st["provider_kind"],
+        "snapshot_schema_version": st["snapshot_schema_version"],
+        "source_graph_sha256": st["source_graph_sha256"],
+    }
     if overview["available"]:
         body.update(
             built_at_commit=overview["built_at_commit"],

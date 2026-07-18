@@ -77,7 +77,10 @@ export function ProjectMemory() {
 // --- status detail card --------------------------------------------------
 
 function MemoryStatusDetail({ data }: { data: ApiGraphStatus }) {
-  const available = data.status === 'fresh' || data.status === 'stale';
+  // "unknown" means the graph IS available — the backend's own build commit is
+  // just unavailable, so currency can't be confirmed either way. It renders
+  // real counts, same as fresh/stale, never the degraded/unavailable panel.
+  const available = data.status === 'fresh' || data.status === 'stale' || data.status === 'unknown';
 
   return (
     <>
@@ -91,6 +94,11 @@ function MemoryStatusDetail({ data }: { data: ApiGraphStatus }) {
           {data.status === 'stale' && (
             <p className="memory-stale-note">
               Memory may be out of date — re-verify against the cited files.
+            </p>
+          )}
+          {data.status === 'unknown' && (
+            <p className="memory-unknown-note">
+              Freshness could not be confirmed for this build — re-verify against the cited files.
             </p>
           )}
           <MemoryFigures data={data} />

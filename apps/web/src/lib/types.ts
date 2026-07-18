@@ -152,7 +152,7 @@ export interface SourcePreview {
 
 // --- memory / assistant -----------------------------------------------
 
-export type GraphFreshness = 'fresh' | 'stale' | 'missing' | 'unavailable';
+export type GraphFreshness = 'fresh' | 'stale' | 'unknown' | 'missing' | 'unavailable';
 
 export interface GraphStatus {
   status: GraphFreshness;
@@ -400,6 +400,11 @@ export interface ApiUploadsBlocked {
 // P24.2 additive fields on GET /api/graph/status: present with real values when
 // the graph is available; explicit `null` (not omitted) when missing/unreadable
 // — single-source, so these always describe the same graph as `status`.
+// P24.9 adds `provider_kind`/`snapshot_schema_version`/`source_graph_sha256`
+// (from the provider-agnostic `reader.status()` seam) and the `"unknown"`
+// freshness value (available, but the backend's own build commit is unknown
+// so currency can't be confirmed either way — still real counts, never a
+// fake age).
 export interface ApiGraphStatus {
   status: GraphFreshness;
   plane: 'memory';
@@ -411,6 +416,9 @@ export interface ApiGraphStatus {
   file_count?: number | null;
   concept_count?: number | null;
   graph_mtime?: number | null;
+  provider_kind?: string | null;
+  snapshot_schema_version?: number | null;
+  source_graph_sha256?: string | null;
 }
 
 // P24.4 — Source Index (memory plane; metadata/provenance only, never file

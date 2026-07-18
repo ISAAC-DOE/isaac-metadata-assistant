@@ -20,6 +20,15 @@ FORBIDDEN_KEYS = {"ok", "valid", "passed", "verdict", "schema", "errors"}
 MEMORY_NOTE_FRAGMENT = "leads to verify"
 
 
+def _repo_root() -> Path:
+    """Walk up until the vendored official schema is found (mirrors memory.py)."""
+    here = Path(__file__).resolve()
+    for candidate in (here, *here.parents):
+        if (candidate / "schema" / "isaac_record_v1.json").exists():
+            return candidate
+    return here.parents[3]
+
+
 # --- synthetic-fixture builders (unmistakably fake; local to this test file) --
 
 
@@ -180,10 +189,15 @@ def test_memory_file_detail_available(tmp_path, monkeypatch):
 
 
 def test_graph_status_additive_fields_present_when_available(tmp_path, monkeypatch):
+    # No ISAAC_BUILD_COMMIT/RAILWAY_GIT_COMMIT_SHA set -> the reader's freshness
+    # is deterministically "unknown" (the backend's own build commit is
+    # unknown), while the graph itself IS available -> real counts present.
+    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     art = _write_artifacts(tmp_path)
     client = _client(tmp_path, monkeypatch, art)
     body = client.get("/api/graph/status").json()
-    assert body["status"] in {"fresh", "stale", "missing"}
+    assert body["status"] == "unknown"
     assert body["plane"] == "memory"
     assert body["built_at_commit"] == "fakecommit0000"
     assert body["node_count"] == 5
@@ -192,6 +206,29 @@ def test_graph_status_additive_fields_present_when_available(tmp_path, monkeypat
     assert body["concept_count"] == 2
     assert body["file_count"] == 3  # served allowlist count (examples/ excluded)
     assert isinstance(body["graph_mtime"], float)
+    assert body["provider_kind"] == "local-graph"
+    assert body["snapshot_schema_version"] is None
+    assert body["source_graph_sha256"] is None
+
+
+def test_graph_status_local_provider_fresh_when_build_commit_matches(tmp_path, monkeypatch):
+    art = _write_artifacts(tmp_path)
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "fakecommit0000")  # matches the synthetic graph
+    client = _client(tmp_path, monkeypatch, art)
+    body = client.get("/api/graph/status").json()
+    assert body["status"] == "fresh"
+    assert body["provider_kind"] == "local-graph"
+    assert body["node_count"] == 5  # counts present alongside fresh
+
+
+def test_graph_status_local_provider_stale_when_build_commit_differs(tmp_path, monkeypatch):
+    art = _write_artifacts(tmp_path)
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "some-other-commit")
+    client = _client(tmp_path, monkeypatch, art)
+    body = client.get("/api/graph/status").json()
+    assert body["status"] == "stale"
+    assert body["provider_kind"] == "local-graph"
+    assert body["node_count"] == 5  # counts present alongside stale
 
 
 # --- 1b. P24.9: no emitted path may fail the served allowlist ------------------
@@ -358,30 +395,29 @@ def test_memory_endpoints_available_false_when_graph_absent(tmp_path, monkeypatc
 
 def test_graph_status_additive_fields_absent_when_missing(tmp_path, monkeypatch):
     memory_dir = tmp_path / "graphify-out"  # never created
-    # Also point REPO_ROOT (the freshness check's source anchor) at the same
-    # empty tmp tree so `status` itself is deterministically "missing" in this
-    # test, matching the additive-fields-absent case exactly. Scoped to this
-    # single test function; no other handler is exercised here.
-    monkeypatch.setattr("isaac_api.routes.REPO_ROOT", tmp_path)
     client = _client(tmp_path, monkeypatch, memory_dir)
     body = client.get("/api/graph/status").json()
     assert body["status"] == "missing"
     for key in ("built_at_commit", "node_count", "edge_count",
                 "community_count", "file_count", "concept_count", "graph_mtime"):
         assert body[key] is None
+    # provider_kind is provider IDENTITY, not a graph-content count — it stays
+    # populated even when the graph itself is absent (mirrors reader.status()
+    # returning provider_kind regardless of availability).
+    assert body["provider_kind"] == "local-graph"
+    assert body["snapshot_schema_version"] is None
+    assert body["source_graph_sha256"] is None
 
 
 def test_graph_status_single_source_when_env_overrides(tmp_path, monkeypatch):
-    """ISAAC_MEMORY_DIR points at a populated graph while the repo-local
-    graphify-out is guaranteed absent (REPO_ROOT patched to an empty tmp tree,
-    as in the missing-test above): `status` and the additive counts must
-    describe the SAME graph — never a self-contradictory body reading
-    status:"missing" alongside populated counts (the documented future
-    mounted-volume case)."""
+    """ISAAC_MEMORY_DIR points at a populated graph: `status` and the additive
+    counts must describe the SAME graph — never a self-contradictory body
+    reading status:"missing" alongside populated counts (the documented future
+    mounted-volume case). ISAAC_BUILD_COMMIT is set to the synthetic graph's own
+    commit so freshness is deterministically "fresh", pinning the honest value
+    rather than merely asserting "not missing"."""
     art = _write_artifacts(tmp_path / "volume")
-    empty_root = tmp_path / "empty-repo"
-    empty_root.mkdir()
-    monkeypatch.setattr("isaac_api.routes.REPO_ROOT", empty_root)
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "fakecommit0000")
     client = _client(tmp_path, monkeypatch, art)
     body = client.get("/api/graph/status").json()
     # Counts describe the env-pointed graph...
@@ -389,9 +425,113 @@ def test_graph_status_single_source_when_env_overrides(tmp_path, monkeypatch):
     assert body["node_count"] == 5
     # ...and status must describe that same graph, so it cannot be "missing".
     assert body["status"] != "missing"
-    # Pin the honest value: the env-pointed graph file exists, and no tracked
-    # source under the (empty) root is newer than it -> "fresh".
     assert body["status"] == "fresh"
+
+
+# --- 2b. snapshot provider (packaged/explicit via ISAAC_MEMORY_SNAPSHOT) -------
+#
+# Reuses the golden fixture snapshot from test_snapshot_source.py (same repo
+# path, same known commit/sha256) so these route-level tests pin the SAME
+# provider-agnostic wiring against the second concrete MemoryReader, with no
+# isinstance branch in routes.py.
+
+_SNAPSHOT_FIXTURE = _repo_root() / "tests" / "fixtures" / "memory_snapshot" / "memory-snapshot.json"
+_SNAPSHOT_COMMIT = "fakecommitp24900"
+_SNAPSHOT_SHA256 = "86c25c586b3f9c104b087ba1be3db5486347cb81486b6c57a5085fc9a5dbc0d6"
+
+
+def test_graph_status_snapshot_provider_fresh(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_SNAPSHOT_FIXTURE))
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", _SNAPSHOT_COMMIT)
+    client = _client(tmp_path, monkeypatch)
+    body = client.get("/api/graph/status").json()
+    assert body["status"] == "fresh"
+    assert body["provider_kind"] == "sanitized-snapshot"
+    assert body["snapshot_schema_version"] == 1
+    assert body["source_graph_sha256"] == _SNAPSHOT_SHA256
+    assert body["built_at_commit"] == _SNAPSHOT_COMMIT
+    assert body["node_count"] is not None
+
+
+def test_graph_status_snapshot_provider_stale(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_SNAPSHOT_FIXTURE))
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "deadbeefdeadbeef")  # differs from the snapshot
+    client = _client(tmp_path, monkeypatch)
+    body = client.get("/api/graph/status").json()
+    assert body["status"] == "stale"
+    assert body["provider_kind"] == "sanitized-snapshot"
+    assert body["node_count"] is not None  # counts present alongside stale
+
+
+def test_graph_status_snapshot_provider_unknown_when_no_build_commit(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_SNAPSHOT_FIXTURE))
+    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    client = _client(tmp_path, monkeypatch)
+    body = client.get("/api/graph/status").json()
+    assert body["status"] == "unknown"
+    assert body["provider_kind"] == "sanitized-snapshot"
+    assert body["node_count"] is not None  # available -> real counts, just unknown freshness
+
+
+def test_graph_status_snapshot_missing_file_is_missing_with_null_counts(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(tmp_path / "nope.json"))  # never created
+    client = _client(tmp_path, monkeypatch)
+    body = client.get("/api/graph/status").json()
+    assert body["status"] == "missing"
+    for key in ("built_at_commit", "node_count", "edge_count",
+                "community_count", "file_count", "concept_count", "graph_mtime"):
+        assert body[key] is None
+    assert body["provider_kind"] == "sanitized-snapshot"
+    assert body["snapshot_schema_version"] is None
+    assert body["source_graph_sha256"] is None
+
+
+def test_graph_status_snapshot_unsupported_version_is_missing_with_null_counts(tmp_path, monkeypatch):
+    data = json.loads(_SNAPSHOT_FIXTURE.read_text(encoding="utf-8"))
+    data["snapshot_schema_version"] = 999  # unsupported -> graph_unreadable
+    bad_snapshot = tmp_path / "bad-snapshot.json"
+    bad_snapshot.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(bad_snapshot))
+    client = _client(tmp_path, monkeypatch)
+    body = client.get("/api/graph/status").json()
+    assert body["status"] == "missing"
+    for key in ("built_at_commit", "node_count", "edge_count",
+                "community_count", "file_count", "concept_count", "graph_mtime"):
+        assert body[key] is None
+
+
+def test_graph_status_note_never_carries_verdict_wording_across_states(tmp_path, monkeypatch):
+    """Sweep fresh/stale/unknown/missing (both providers) and assert the `note`
+    is always non-empty and free of PASS/FAIL/verdict wording — the memory
+    plane never speaks in validator language, in any state."""
+    notes = []
+
+    # local: unknown (no build commit), fresh, stale.
+    art = _write_artifacts(tmp_path / "local-graph")
+    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    notes.append(_client(tmp_path, monkeypatch, art).get("/api/graph/status").json()["note"])
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "fakecommit0000")
+    notes.append(_client(tmp_path, monkeypatch, art).get("/api/graph/status").json()["note"])
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "some-other-commit")
+    notes.append(_client(tmp_path, monkeypatch, art).get("/api/graph/status").json()["note"])
+
+    # local: missing (never-created dir).
+    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
+    notes.append(
+        _client(tmp_path, monkeypatch, tmp_path / "never-created").get("/api/graph/status").json()["note"]
+    )
+
+    # snapshot: fresh.
+    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_SNAPSHOT_FIXTURE))
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", _SNAPSHOT_COMMIT)
+    notes.append(_client(tmp_path, monkeypatch).get("/api/graph/status").json()["note"])
+
+    for note in notes:
+        assert note
+        assert "PASS" not in note and "FAIL" not in note
+        assert "verdict" not in note
 
 
 # --- 3. malformed graph ---------------------------------------------------------
@@ -420,31 +560,26 @@ def test_memory_endpoints_available_false_when_graph_unreadable(tmp_path, monkey
 
 
 def test_graph_status_coherent_when_graph_exists_but_malformed(tmp_path, monkeypatch):
-    """P24.6 Item 2 (coverage): pin ``/api/graph/status`` when ``graph.json``
-    EXISTS but is malformed. The shape must be internally coherent and
-    non-crashing: status is decided by mtime (the file is present) so it is
-    ``fresh``/``stale`` — never ``missing`` and never a 500 — while every
-    additive count is ``null`` (a malformed graph yields no honest counts, so
-    there is no populated-count + parse-failure contradiction). The memory
-    envelope stays intact.
-
-    REPO_ROOT (the freshness check's tracked-source anchor) is patched to the
-    empty tmp tree so ``status`` is deterministic and independent of the
-    developer's working tree; the graph FILE stays anchored at the malformed
-    ISAAC_MEMORY_DIR artifact.
+    """P24.9-impl-3: pin ``/api/graph/status`` when ``graph.json`` EXISTS but is
+    malformed. The reader itself reports ``available: False`` (reason
+    ``graph_unreadable``) for a type-corrupt/unparseable graph, so the wire
+    ``status`` is ``"missing"`` — never a 500, and never a populated-count +
+    parse-failure contradiction (every additive count is ``null``). This is the
+    single-source invariant: status and counts always describe the SAME
+    (in this case, unreadable) graph state.
     """
     art = _write_artifacts(tmp_path, graph="{not valid json")
-    monkeypatch.setattr("isaac_api.routes.REPO_ROOT", tmp_path)
     client = _client(tmp_path, monkeypatch, art)
     resp = client.get("/api/graph/status")
     assert resp.status_code == 200  # never 500
     body = resp.json()
-    assert body["status"] in {"fresh", "stale"}  # file exists -> mtime-based
+    assert body["status"] == "missing"
     for key in ("node_count", "edge_count", "community_count", "file_count",
                 "concept_count", "built_at_commit", "graph_mtime"):
         assert body[key] is None
     assert body["plane"] == "memory"
     assert "note" in body and body["note"]
+    assert body["provider_kind"] == "local-graph"
 
 
 # --- 4. auth ---------------------------------------------------------------------
@@ -558,9 +693,15 @@ def test_no_forbidden_verdict_keys_in_any_memory_response(tmp_path, monkeypatch)
 
 
 def test_graph_status_backward_compatible_shape_untouched(tmp_path, monkeypatch):
-    """Mirrors the existing (untouched) test_graph_status assertions exactly."""
+    """P24.9-impl-3: the pre-existing shape (status/plane/note) is preserved;
+    `status` additionally accepts "unknown" now. build_commit is forced to
+    None so this is deterministic regardless of the developer's local
+    graphify-out/ state (see test_graph_status in test_api.py for the same
+    pattern)."""
+    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     client = _client(tmp_path, monkeypatch)
     body = client.get("/api/graph/status").json()
-    assert body["status"] in {"fresh", "stale", "missing"}
+    assert body["status"] in {"unknown", "missing"}
     assert body["plane"] == "memory"
-    assert "never a validator" in body["note"]
+    assert body["note"]

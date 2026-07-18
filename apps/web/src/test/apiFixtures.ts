@@ -258,6 +258,26 @@ export const graphStatusStale = {
   note: 'Graphify is a memory/query layer — never a validator.',
 };
 
+/** P24.9: available graph, backend build commit unknown — real counts, no age
+ * row (graph_mtime null), honest "unknown" note (never the stale warning). */
+export const graphStatusUnknown = {
+  status: 'unknown',
+  plane: 'memory',
+  note:
+    "Freshness unknown — the backend build commit is unavailable, so the snapshot's currency " +
+    'can\'t be confirmed; re-verify against the cited files.',
+  built_at_commit: 'fakecommitp24900',
+  node_count: 42,
+  edge_count: 17,
+  community_count: 5,
+  file_count: 9,
+  concept_count: 3,
+  graph_mtime: null,
+  provider_kind: 'sanitized-snapshot',
+  snapshot_schema_version: 1,
+  source_graph_sha256: '86c25c586b3f9c104b087ba1be3db5486347cb81486b6c57a5085fc9a5dbc0d6',
+};
+
 // --- P24.4 Source Index fixtures (memory plane; synthetic, shape-faithful
 // to apps/api/isaac_api/routes.py "16. memory" / memory.py) --------------
 
