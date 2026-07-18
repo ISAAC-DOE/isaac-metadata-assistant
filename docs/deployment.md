@@ -44,6 +44,18 @@ a live graph (`graphify-out/` is gitignored and never shipped).
   diff (including every `rationales[]` string), and recommit; `test_committed_snapshot.py`
   gates shape, provenance, and leaks in CI. Rollback is atomic with code via
   `git revert`. See the P24.9 spec §16 (update) and §15 (rollback).
+- **Verification scope (two independent guarantees).** The committed snapshot's
+  **shape + leak scan** (`test_committed_snapshot.py`) runs unconditionally in every
+  backend test run — it reads only the committed artifact and needs no graph, so a
+  malformed or leaking snapshot is always caught, including in CI. **Byte-drift
+  detection** (`python scripts/build_memory_snapshot.py --check`, which regenerates
+  from the source graph and compares) is different: it requires the local Graphify
+  artifacts (`graphify-out/`). Where those artifacts are present the check is
+  deterministic and catches any drift between the committed snapshot and the graph;
+  where they are absent — e.g. CI, which does not ship `graphify-out/` — drift cannot
+  be recomputed, and CI does **not** and **cannot** regenerate the graph, because the
+  Graphify inputs are not available there. Keeping the committed snapshot current is
+  therefore a local, human-run step (§16), not something CI can do on its own.
 
 ## Environment variables
 
