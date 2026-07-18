@@ -10,6 +10,7 @@ import {
   memoryConceptsUnavailable,
   memoryConceptDetailWithLeads,
   memoryConceptDetailEmptyLeads,
+  memoryConceptDetailWithheldAnchor,
 } from '../test/apiFixtures';
 
 /*
@@ -129,6 +130,34 @@ describe('P24.5 · Concept Lookup — empty-leads honesty', () => {
     // never invented: no related-file/related-concept content in this panel
     expect(scoped.queryByText('Files')).toBeNull();
     expect(scoped.queryByText('Concepts')).toBeNull();
+  });
+});
+
+describe('P24.9 · Concept Lookup — withheld anchor honesty', () => {
+  it('renders an honest "anchor withheld" note (not an empty mono span) when the backend nulls a governance-excluded anchor', async () => {
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/memory/files': { body: memoryFilesUnavailable },
+      'GET /api/memory/concepts': { body: memoryConceptsAvailable },
+      [conceptPath('concept-governance')]: { body: memoryConceptDetailWithheldAnchor },
+    });
+    const { findByText, getByRole } = renderScreen();
+    await findByText('Concept Lookup');
+
+    const row = getByRole('button', { name: /Governance allowlist/ });
+    fireEvent.click(row);
+
+    await findByText('anchor withheld (excluded source)');
+    const panel = panelFor(row);
+    const scoped = within(panel);
+
+    // The honest withheld note is present...
+    expect(scoped.getByText('anchor withheld (excluded source)')).toBeInTheDocument();
+    // ...and no empty mono span was rendered for the withheld anchor.
+    const monoSpans = panel.querySelectorAll('.concept-lookup-anchor .mono');
+    expect(monoSpans).toHaveLength(0);
+    // The "not present locally" note is suppressed when there is no anchor path.
+    expect(scoped.queryByText('not present locally on this backend')).toBeNull();
   });
 });
 

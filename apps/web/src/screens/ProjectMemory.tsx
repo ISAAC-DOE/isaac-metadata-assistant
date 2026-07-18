@@ -600,9 +600,16 @@ function ConceptLookupDetail({
     <div className="concept-lookup-detail">
       <p className="concept-lookup-anchor">
         <span className="concept-lookup-anchor-label">anchor source</span>
-        <span className="mono">{concept.source_file}</span>
+        {concept.source_file ? (
+          <span className="mono">{concept.source_file}</span>
+        ) : (
+          // P24.9: the graph anchor points at a governance-excluded source, so
+          // the backend withheld the path — render an honest note, never an
+          // empty mono span.
+          <span className="concept-lookup-anchor-missing">anchor withheld (excluded source)</span>
+        )}
       </p>
-      {!concept.on_disk && (
+      {concept.source_file && !concept.on_disk && (
         <p className="concept-lookup-anchor-missing">not present locally on this backend</p>
       )}
 

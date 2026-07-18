@@ -192,6 +192,24 @@ def _is_served(path: str) -> bool:
     return True
 
 
+def _served_source_file(sf) -> Optional[str]:
+    """A concept's anchor path, but only when it is governance-served.
+
+    Concept ``source_file`` values come from GRAPH NODES, not the manifest served
+    allowlist, so an anchor can point at a governance-excluded / secret path (e.g.
+    ``examples/README.md``) OR — for a future snapshot/db/hosted provider — an
+    absolute / traversal path a served-only check would miss. Return ``sf``
+    unchanged only when it is truthy, path-safe (mirrors ``classify_path``'s
+    ``_is_unsafe`` contract), AND governance-served; otherwise ``None`` so the
+    path is withheld while the concept itself is still surfaced. Single-sources
+    the anchor policy for both the concept summary (``_derive``) and the concept
+    detail (``concept``).
+    """
+    if sf and not LocalGraphArtifactSource._is_unsafe(sf) and _is_served(sf):
+        return sf
+    return None
+
+
 def _community_id(value) -> Optional[str]:
     return None if value is None else str(value)
 
@@ -338,13 +356,14 @@ class LocalGraphArtifactSource:
         for node in nodes:
             if node.get("file_type") != CONCEPT:
                 continue
+            sf = _served_source_file(node.get("source_file"))
             summary = {
                 "id": node.get("id"),
                 "label": node.get("label"),
                 "community_id": _community_id(node.get("community")),
                 "community_name": self._community_name(node.get("community"), labels),
-                "source_file": node.get("source_file"),
-                "on_disk": self._on_disk(node.get("source_file")),
+                "source_file": sf,
+                "on_disk": self._on_disk(sf),
             }
             concept_summaries.append(summary)
             concept_by_id[node.get("id")] = node
@@ -454,7 +473,14 @@ class LocalGraphArtifactSource:
                         concepts_acc[other_id] = (weight, relation, other.get("label"))
                 else:
                     opath = other.get("source_file")
-                    if not opath or opath == self_path:
+                    # Related file paths come from graph nodes, not the served
+                    # allowlist, so drop any path-unsafe (absolute/traversal, for
+                    # a future snapshot/db/hosted provider) or governance-excluded
+                    # / secret path (e.g. examples/**) BEFORE the sort/cap — a
+                    # related lead must never surface a path the file endpoints
+                    # would 400/404.
+                    if (not opath or opath == self_path
+                            or self._is_unsafe(opath) or not _is_served(opath)):
                         continue
                     prev = files_acc.get(opath)
                     if prev is None or weight > prev[0]:
@@ -505,13 +531,14 @@ class LocalGraphArtifactSource:
         node = state.concept_by_id.get(concept_id)
         if node is None:
             return None
+        sf = _served_source_file(node.get("source_file"))
         detail = {
             "id": node.get("id"),
             "label": node.get("label"),
             "community_id": _community_id(node.get("community")),
             "community_name": self._community_name(node.get("community"), state.labels),
-            "source_file": node.get("source_file"),
-            "on_disk": self._on_disk(node.get("source_file")),
+            "source_file": sf,
+            "on_disk": self._on_disk(sf),
         }
         detail["related"] = self._related(state, {concept_id}, self_path=None)
         return detail

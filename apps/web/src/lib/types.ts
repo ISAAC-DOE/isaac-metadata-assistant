@@ -480,7 +480,9 @@ export interface ApiMemoryConceptSummary {
   label: string;
   community_id: string | null;
   community_name: string | null;
-  source_file: string;
+  // `null` when the graph anchor points at a governance-excluded / secret path
+  // (P24.9): the concept is still surfaced but its excluded anchor is withheld.
+  source_file: string | null;
   on_disk: boolean;
 }
 

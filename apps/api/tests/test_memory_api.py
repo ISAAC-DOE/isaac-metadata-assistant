@@ -194,6 +194,137 @@ def test_graph_status_additive_fields_present_when_available(tmp_path, monkeypat
     assert isinstance(body["graph_mtime"], float)
 
 
+# --- 1b. P24.9: no emitted path may fail the served allowlist ------------------
+#
+# Concept anchors and related-file paths come from GRAPH NODES, not the manifest
+# served allowlist, so an anchor/related path can point at a governance-excluded
+# path (the live ``examples/README.md`` leak). Drive the real API and assert NO
+# path-bearing field in any available response fails ``_is_served``; the
+# examples-anchored concept specifically returns ``source_file: null`` while
+# still being listed. RED before the reader hardening.
+
+_PATH_KEYS = {"path", "source_file", "local_reference"}
+
+
+def _walk_path_values(obj):
+    """Yield ``(key, value)`` for every non-empty string under a path-bearing key."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in _PATH_KEYS and isinstance(v, str) and v:
+                yield k, v
+            yield from _walk_path_values(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            yield from _walk_path_values(item)
+
+
+def _anchor_graph() -> dict:
+    """Graph with concepts anchored at examples-excluded / absolute / traversal
+    paths, and a file whose related neighbors include a served path plus
+    governance-excluded, absolute, and traversal paths — all of which must be
+    withheld / dropped."""
+    nodes = [
+        {"id": "c_examples", "label": "Examples-anchored concept", "file_type": "concept",
+         "community": 1, "source_file": "examples/README.md"},
+        {"id": "c_absolute", "label": "Absolute-anchored concept", "file_type": "concept",
+         "community": 1, "source_file": "/etc/passwd"},
+        {"id": "c_traversal", "label": "Traversal-anchored concept", "file_type": "concept",
+         "community": 1, "source_file": "../../secret"},
+        {"id": "c_ok", "label": "Approved-anchor concept", "file_type": "concept",
+         "community": 1, "source_file": "docs/fake-note.md"},
+        {"id": "hub", "label": "hub.py", "file_type": "code", "community": 2,
+         "source_file": "src/fake_mod.py", "source_location": "L1"},
+        {"id": "served_neighbor", "label": "other_mod.py", "file_type": "code",
+         "community": 2, "source_file": "src/other_mod.py", "source_location": "L1"},
+        {"id": "excluded_neighbor", "label": "README.md", "file_type": "document",
+         "community": 2, "source_file": "examples/README.md", "source_location": "L1"},
+        {"id": "abs_neighbor", "label": "passwd", "file_type": "document",
+         "community": 2, "source_file": "/etc/passwd", "source_location": "L1"},
+        {"id": "traversal_neighbor", "label": "secret", "file_type": "document",
+         "community": 2, "source_file": "../../secret", "source_location": "L1"},
+    ]
+    links = [
+        {"source": "hub", "target": "served_neighbor", "relation": "imports",
+         "weight": 5.0, "source_file": "src/fake_mod.py"},
+        {"source": "hub", "target": "excluded_neighbor", "relation": "references",
+         "weight": 9.0, "source_file": "src/fake_mod.py"},
+        {"source": "hub", "target": "abs_neighbor", "relation": "references",
+         "weight": 8.0, "source_file": "src/fake_mod.py"},
+        {"source": "hub", "target": "traversal_neighbor", "relation": "references",
+         "weight": 7.0, "source_file": "src/fake_mod.py"},
+    ]
+    return {"nodes": nodes, "links": links, "built_at_commit": "fakecommit0000"}
+
+
+def _anchor_manifest() -> dict:
+    keys = ["docs/fake-note.md", "src/fake_mod.py", "src/other_mod.py", "examples/README.md"]
+    return {k: {"mtime": 1.0, "ast_hash": "fake", "semantic_hash": ""} for k in keys}
+
+
+def _assert_no_unserved_path(body: dict) -> None:
+    from isaac_api.memory import LocalGraphArtifactSource, _is_served
+
+    for key, value in _walk_path_values(body):
+        # Every emitted path must be BOTH governance-served AND path-safe — an
+        # absolute/traversal path would now fail this sweep, not just an
+        # examples/** path.
+        assert _is_served(value), f"unserved path leaked via {key!r}: {value!r}"
+        assert not LocalGraphArtifactSource._is_unsafe(value), \
+            f"path-unsafe value leaked via {key!r}: {value!r}"
+
+
+@pytest.mark.parametrize("cid", ["c_examples", "c_absolute", "c_traversal"])
+def test_memory_concepts_withheld_anchor_nulled_but_listed(tmp_path, monkeypatch, cid):
+    art = _write_artifacts(tmp_path, graph=_anchor_graph(), manifest=_anchor_manifest())
+    client = _client(tmp_path, monkeypatch, art)
+    body = client.get("/api/memory/concepts").json()
+    assert body["available"] is True
+    concept = next(c for c in body["concepts"] if c["id"] == cid)
+    assert concept["source_file"] is None  # excluded/absolute/traversal anchor withheld
+    assert concept["on_disk"] is False
+    _assert_no_unserved_path(body)
+
+
+@pytest.mark.parametrize("cid", ["c_examples", "c_absolute", "c_traversal"])
+def test_memory_concept_detail_withheld_anchor_nulled(tmp_path, monkeypatch, cid):
+    art = _write_artifacts(tmp_path, graph=_anchor_graph(), manifest=_anchor_manifest())
+    client = _client(tmp_path, monkeypatch, art)
+    body = client.get(f"/api/memory/concepts/{cid}").json()
+    assert body["available"] is True
+    assert body["concept"]["source_file"] is None
+    assert body["concept"]["on_disk"] is False
+    _assert_no_unserved_path(body)
+
+
+def test_memory_file_related_drops_excluded_and_unsafe_neighbors(tmp_path, monkeypatch):
+    art = _write_artifacts(tmp_path, graph=_anchor_graph(), manifest=_anchor_manifest())
+    client = _client(tmp_path, monkeypatch, art)
+    body = client.get("/api/memory/file", params={"path": "src/fake_mod.py"}).json()
+    assert body["available"] is True
+    related_paths = [f["path"] for f in body["related"]["files"]]
+    assert "src/other_mod.py" in related_paths  # served neighbor retained
+    assert "examples/README.md" not in related_paths  # governance-excluded dropped
+    assert "/etc/passwd" not in related_paths  # absolute dropped
+    assert "../../secret" not in related_paths  # traversal dropped
+    _assert_no_unserved_path(body)
+
+
+def test_no_unserved_path_across_all_memory_endpoints(tmp_path, monkeypatch):
+    art = _write_artifacts(tmp_path, graph=_anchor_graph(), manifest=_anchor_manifest())
+    client = _client(tmp_path, monkeypatch, art)
+    bodies = [
+        client.get("/api/memory/concepts").json(),
+        client.get("/api/memory/concepts/c_examples").json(),
+        client.get("/api/memory/concepts/c_absolute").json(),
+        client.get("/api/memory/concepts/c_traversal").json(),
+        client.get("/api/memory/concepts/c_ok").json(),
+        client.get("/api/memory/files").json(),
+        client.get("/api/memory/file", params={"path": "src/fake_mod.py"}).json(),
+    ]
+    for body in bodies:
+        _assert_no_unserved_path(body)
+
+
 # --- 2. missing graph (env -> empty tmp dir) -----------------------------------
 
 

@@ -322,6 +322,162 @@ def test_approved_source_still_served(governed_reader):
     assert governed_reader.classify_path("src/isaac_records/official.py") == "served"
 
 
+# --- 2b. P24.9: concept-anchor + related path filtering -----------------------
+#
+# A concept's ``source_file`` and a related file's ``source_file`` come from
+# GRAPH NODES, not the manifest served allowlist, so an anchor can point at a
+# governance-excluded / secret path (e.g. the live ``examples/README.md`` leak).
+# Every path-bearing value a reader method emits must pass ``_is_served``: an
+# excluded concept anchor is nulled (concept STILL listed), and an excluded
+# related file is dropped. RED before the reader hardening in ``_derive`` /
+# ``concept`` / ``_related``.
+
+
+def _anchor_graph() -> dict:
+    """Fake graph exercising path filtering: concepts anchored to excluded /
+    secret / approved / benign-dotted paths, and a file whose related neighbors
+    include one served and one governance-excluded path."""
+    nodes = [
+        {"id": "c_excluded", "label": "Excluded anchor concept", "file_type": "concept",
+         "community": 1, "source_file": "examples/README.md"},
+        {"id": "c_secret", "label": "Secret anchor concept", "file_type": "concept",
+         "community": 1, "source_file": "secrets/app.key"},
+        {"id": "c_approved", "label": "Approved anchor concept", "file_type": "concept",
+         "community": 1, "source_file": "README.md"},
+        {"id": "c_benign", "label": "Benign dotted anchor concept", "file_type": "concept",
+         "community": 1, "source_file": "docs/my..note.md"},
+        # Path-unsafe anchors (defense-in-depth for a future snapshot/db/hosted
+        # provider whose node source_file is absolute / traversal):
+        {"id": "c_absolute", "label": "Absolute anchor concept", "file_type": "concept",
+         "community": 1, "source_file": "/etc/passwd"},
+        {"id": "c_traversal", "label": "Traversal anchor concept", "file_type": "concept",
+         "community": 1, "source_file": "../../secret"},
+        {"id": "hub", "label": "hub.py", "file_type": "code", "community": 2,
+         "source_file": "src/hub.py", "source_location": "L1"},
+        {"id": "served_neighbor", "label": "served.py", "file_type": "code",
+         "community": 2, "source_file": "src/served.py", "source_location": "L1"},
+        {"id": "excluded_neighbor", "label": "README.md", "file_type": "document",
+         "community": 2, "source_file": "examples/README.md", "source_location": "L1"},
+        {"id": "abs_neighbor", "label": "passwd", "file_type": "document",
+         "community": 2, "source_file": "/etc/passwd", "source_location": "L1"},
+        {"id": "traversal_neighbor", "label": "secret", "file_type": "document",
+         "community": 2, "source_file": "../../secret", "source_location": "L1"},
+    ]
+    links = [
+        {"source": "hub", "target": "served_neighbor", "relation": "imports",
+         "weight": 5.0, "source_file": "src/hub.py"},
+        # Higher weight than the served neighbor, so if it were NOT dropped it
+        # would sort first — proving the drop happens before the cap/sort.
+        {"source": "hub", "target": "excluded_neighbor", "relation": "references",
+         "weight": 9.0, "source_file": "src/hub.py"},
+        {"source": "hub", "target": "abs_neighbor", "relation": "references",
+         "weight": 8.0, "source_file": "src/hub.py"},
+        {"source": "hub", "target": "traversal_neighbor", "relation": "references",
+         "weight": 7.0, "source_file": "src/hub.py"},
+    ]
+    return {"nodes": nodes, "links": links, "built_at_commit": "fakecommit0000"}
+
+
+@pytest.fixture()
+def anchor_reader(tmp_path):
+    """Reader over ``_anchor_graph``. ``README.md`` exists on disk (drives the
+    real ``on_disk`` check for a kept anchor); ``src/hub.py`` is served so its
+    detail (and thus ``_related``) is reachable."""
+    manifest = {k: {"mtime": 1.0, "ast_hash": "x", "semantic_hash": ""}
+                for k in ("src/hub.py", "src/served.py", "README.md", "docs/my..note.md")}
+    art = _write_artifacts(tmp_path, graph=_anchor_graph(), manifest=manifest, labels={})
+    (tmp_path / "README.md").write_text("# fake readme\n", encoding="utf-8")
+    return LocalGraphArtifactSource(art)
+
+
+def test_concept_excluded_anchor_is_nulled_but_still_listed(anchor_reader):
+    summaries = {c["id"]: c for c in anchor_reader.concepts()}
+    assert "c_excluded" in summaries  # concept STILL surfaced
+    assert summaries["c_excluded"]["source_file"] is None
+    assert summaries["c_excluded"]["on_disk"] is False
+    detail = anchor_reader.concept("c_excluded")
+    assert detail is not None
+    assert detail["source_file"] is None
+    assert detail["on_disk"] is False
+
+
+def test_concept_secret_anchor_is_nulled(anchor_reader):
+    summary = next(c for c in anchor_reader.concepts() if c["id"] == "c_secret")
+    assert summary["source_file"] is None
+    assert summary["on_disk"] is False
+    detail = anchor_reader.concept("c_secret")
+    assert detail["source_file"] is None
+    assert detail["on_disk"] is False
+
+
+def test_concept_approved_anchor_kept_with_real_on_disk(anchor_reader):
+    summary = next(c for c in anchor_reader.concepts() if c["id"] == "c_approved")
+    assert summary["source_file"] == "README.md"
+    assert summary["on_disk"] is True  # created on disk -> real existence check
+    detail = anchor_reader.concept("c_approved")
+    assert detail["source_file"] == "README.md"
+    assert detail["on_disk"] is True
+
+
+def test_concept_benign_dotted_anchor_kept(anchor_reader):
+    # Dots, not traversal — served, so the anchor is retained (NOT nulled).
+    summary = next(c for c in anchor_reader.concepts() if c["id"] == "c_benign")
+    assert summary["source_file"] == "docs/my..note.md"
+    detail = anchor_reader.concept("c_benign")
+    assert detail["source_file"] == "docs/my..note.md"
+
+
+@pytest.mark.parametrize("cid,src", [
+    ("c_absolute", "/etc/passwd"),
+    ("c_traversal", "../../secret"),
+])
+def test_concept_path_unsafe_anchor_is_nulled(anchor_reader, cid, src):
+    # Defense-in-depth: an absolute/traversal anchor is path-unsafe, so it is
+    # withheld even though _is_served alone would not have rejected it.
+    summary = next(c for c in anchor_reader.concepts() if c["id"] == cid)
+    assert summary["source_file"] is None
+    assert summary["on_disk"] is False
+    detail = anchor_reader.concept(cid)
+    assert detail["source_file"] is None
+    assert detail["on_disk"] is False
+
+
+def test_related_files_drops_excluded_and_unsafe_keeps_served(anchor_reader):
+    detail = anchor_reader.file("src/hub.py")
+    related_paths = [f["path"] for f in detail["related"]["files"]]
+    assert "src/served.py" in related_paths  # served neighbor retained
+    assert "examples/README.md" not in related_paths  # governance-excluded dropped
+    assert "/etc/passwd" not in related_paths  # absolute dropped
+    assert "../../secret" not in related_paths  # traversal dropped
+    # Every retained related path is BOTH served AND path-safe.
+    assert all(_is_served_probe(p) and not _is_unsafe_probe(p) for p in related_paths)
+
+
+def _is_served_probe(path: str) -> bool:
+    """Mirror the reader's served predicate for the related-drop assertion."""
+    from isaac_api.memory import _is_served
+
+    return _is_served(path)
+
+
+def _is_unsafe_probe(path: str) -> bool:
+    """Mirror the reader's path-safety predicate for the related-drop assertion."""
+    return LocalGraphArtifactSource._is_unsafe(path)
+
+
+def test_anchor_reader_traversal_still_blocked(anchor_reader):
+    assert anchor_reader.classify_path("../etc/passwd") == "unsafe"
+
+
+def test_anchor_graph_malformed_degrades_not_raises(tmp_path):
+    art = _write_artifacts(tmp_path, graph="{not valid json")
+    reader = LocalGraphArtifactSource(art)
+    ov = reader.overview()
+    assert ov["available"] is False
+    assert ov["reason"] == "graph_unreadable"
+    assert reader.concepts() == []  # nothing raises
+
+
 # --- 3. path guard ------------------------------------------------------------
 
 

@@ -434,6 +434,25 @@ export const memoryConceptDetailEmptyLeads = {
   related: { files: [], concepts: [] },
 };
 
+/** GET /api/memory/concepts/concept-governance — P24.9: the graph anchor points
+ * at a governance-excluded source, so `source_file` is null (withheld). The
+ * concept is still surfaced; the UI must render an honest note, not an empty
+ * mono span. */
+export const memoryConceptDetailWithheldAnchor = {
+  plane: 'memory' as const,
+  note: MEMORY_NOTE,
+  available: true,
+  concept: {
+    id: 'concept-governance',
+    label: 'Governance allowlist',
+    community_id: '55',
+    community_name: null,
+    source_file: null,
+    on_disk: false,
+  },
+  related: { files: [], concepts: [] },
+};
+
 /** Artifacts before export: all null (200, not an error). */
 export const artifactsNull = {
   record: null,
