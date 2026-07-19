@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import collections
 import copy
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -128,6 +129,21 @@ SECRET_BASENAMES = frozenset({
 
 MAX_RELATED = 25
 MAX_RATIONALES = 10
+
+# --- P24.10 memory-input fingerprint version stamps (spec: phase 24 project
+# memory freshness). These pin the exclusion policy, the reader projection shape,
+# and the fingerprint algorithm independently, so a change to any one of them
+# yields a different policy fingerprint (drift-detectable). Slice 1 defines the
+# pure primitives only; generator/reader/route/frontend wiring is later slices.
+MEMORY_INPUTS_POLICY_VERSION: int = 1
+PROJECTION_VERSION: int = 1
+FINGERPRINT_ALGO_VERSION: int = 1
+#: Canonical home for the per-rationale character cap. The generator
+#: (``scripts/build_memory_snapshot.py``) currently defines its own
+#: ``MAX_RATIONALE_CHARS = 280``; a later slice makes it import this. Distinct
+#: from ``MAX_RATIONALES`` (a per-file *count* cap). Participates in the policy
+#: fingerprint so a changed cap is drift-detectable.
+MAX_RATIONALE_CHARS: int = 280
 
 CONCEPT = "concept"
 RATIONALE = "rationale"
@@ -885,6 +901,106 @@ class SanitizedSnapshotSource:
             "source_graph_sha256": state.source_graph_sha256,
             "freshness": _freshness(state.available, build_commit, state.built_at_commit),
         }
+
+
+# --- P24.10 memory-input fingerprint primitives -------------------------------
+#
+# Two provable freshness concepts, computed here as pure stdlib primitives (no
+# wiring into generator/reader/route/frontend yet):
+#   * a *policy fingerprint* over the exclusion/projection/algo policy, so a
+#     changed governance policy is detectable; and
+#   * a *served-content manifest* (repo-relative path + raw-bytes sha256) plus an
+#     aggregate fingerprint over it, so a change to the actual served file bytes
+#     is detectable.
+# Both are deterministic and content-only; neither reads the graph or any
+# governance-excluded path.
+
+
+def _policy_fingerprint_payload() -> dict:
+    """The canonical, sorted policy payload the policy fingerprint hashes.
+
+    Every field materially participates in the fingerprint: the version stamps,
+    plus the full exclusion policy (prefixes / exact paths / binary+secret
+    extensions / secret basenames) and the rationale char cap. Sets are emitted
+    as ``sorted`` lists so the payload is order-stable regardless of set-iteration
+    / hash-seed order."""
+    return {
+        "schema_version": SUPPORTED_SNAPSHOT_SCHEMA_VERSION,
+        "policy_version": MEMORY_INPUTS_POLICY_VERSION,
+        "projection_version": PROJECTION_VERSION,
+        "algo_version": FINGERPRINT_ALGO_VERSION,
+        "excluded_prefixes": sorted(EXCLUDED_PREFIXES),
+        "excluded_exact": sorted(EXCLUDED_EXACT),
+        "binary_exts": sorted(BINARY_EXTS),
+        "secret_exts": sorted(SECRET_EXTS),
+        "secret_basenames": sorted(SECRET_BASENAMES),
+        "max_rationale_chars": MAX_RATIONALE_CHARS,
+    }
+
+
+def compute_memory_policy_fingerprint() -> str:
+    """A stable sha256 hex digest of the memory-input exclusion/version policy.
+
+    Canonical serialization is ``json.dumps(payload, sort_keys=True,
+    ensure_ascii=False, separators=(",", ":"))`` UTF-8 encoded, so the digest is
+    deterministic and independent of dict-insertion / set-iteration order."""
+    canonical = json.dumps(
+        _policy_fingerprint_payload(),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def compute_served_content_manifest(served_paths, repo_root) -> list[dict]:
+    """A deterministic ``[{"path", "sha256"}]`` manifest of served file bytes.
+
+    ``repo_root`` is a :class:`~pathlib.Path`; ``served_paths`` is an iterable of
+    repo-relative posix path strings. Every path must (a) be path-safe — not
+    absolute, no ``..`` segment, no backslash / ``~`` (via
+    :meth:`LocalGraphArtifactSource._is_unsafe`), (b) resolve strictly inside
+    ``repo_root``, and (c) pass the served allowlist (:func:`_is_served`); any
+    violation raises :class:`ValueError`. For each accepted path the raw bytes of
+    ``repo_root / path`` are read and sha256-hexed; a missing/unreadable file
+    raises :class:`ValueError`. Returns the entries sorted by ``path`` with posix
+    separators — callers decide how to handle raised errors."""
+    root = Path(repo_root).resolve()
+    entries: list[dict] = []
+    for path in served_paths:
+        if not isinstance(path, str) or not path:
+            raise ValueError(f"invalid served path: {path!r}")
+        # Path-safety guard (absolute / ``..`` / backslash / ``~``), then the
+        # governance served allowlist — both mirror the reader's contract so a
+        # path unsafe or unserved for the reader is rejected here too.
+        if LocalGraphArtifactSource._is_unsafe(path):
+            raise ValueError(f"unsafe served path: {path!r}")
+        if not _is_served(path):
+            raise ValueError(f"path not in served allowlist: {path!r}")
+        target = (root / path).resolve()
+        try:
+            target.relative_to(root)  # resolves outside repo_root -> reject
+        except ValueError as exc:
+            raise ValueError(f"served path escapes repo root: {path!r}") from exc
+        try:
+            raw = target.read_bytes()
+        except OSError as exc:
+            raise ValueError(f"served path missing/unreadable: {path!r}") from exc
+        entries.append({"path": path.replace("\\", "/"), "sha256": hashlib.sha256(raw).hexdigest()})
+    entries.sort(key=lambda e: e["path"])
+    return entries
+
+
+def compute_served_manifest_fingerprint(manifest) -> str:
+    """An aggregate sha256 hex digest over a served-content manifest.
+
+    ``manifest`` is any iterable of ``{"path", "sha256"}`` dicts (need not be
+    pre-sorted — this function sorts by ``path`` itself). The digest is sha256 of
+    ``"\\n".join(f"{path}\\0{sha256}")`` over the path-sorted pairs, so it is
+    order-independent and changes iff any path or any sha256 changes."""
+    pairs = sorted((e["path"], e["sha256"]) for e in manifest)
+    joined = "\n".join(f"{path}\0{sha256}" for path, sha256 in pairs)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
 # --- module-level default accessor -------------------------------------------

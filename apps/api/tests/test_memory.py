@@ -806,7 +806,7 @@ def _repo_root() -> Path:
 
 _STDLIB_ROOTS = {
     "json", "os", "sys", "time", "pathlib", "dataclasses", "typing",
-    "functools", "collections", "copy", "__future__",
+    "functools", "collections", "copy", "hashlib", "__future__",
 }
 
 
