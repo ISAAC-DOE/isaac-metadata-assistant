@@ -19,19 +19,29 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from isaac_api import memory as isaac_memory
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "build_memory_snapshot.py"
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "memory_snapshot"
 FIXTURE_GRAPH_DIR = FIXTURE_DIR / "graph"
 GOLDEN_SNAPSHOT = FIXTURE_DIR / "memory-snapshot.json"
+#: Committed directory holding REAL bytes for the graph fixture's three served
+#: paths (docs/fake_notes.md, src/fake_widget.py, src/fake_helper.py) — the
+#: synthetic fixture graph references paths that do not exist under the real
+#: repo root, so the served-content manifest (P24.10 Slice 2) needs its own
+#: fixed, committed "repo root" to read bytes from.
+FIXTURE_SERVED_ROOT = FIXTURE_DIR / "served_root"
 
 FORBIDDEN_VERDICT_KEYS = {"ok", "valid", "passed", "verdict", "schema", "errors"}
 
@@ -80,8 +90,10 @@ def _walk_on_disk(obj):
 
 @pytest.fixture()
 def snapshot() -> dict:
-    """The snapshot built directly from the committed fixture graph."""
-    return gen.build_snapshot(FIXTURE_GRAPH_DIR, REPO_ROOT)
+    """The snapshot built directly from the committed fixture graph, reading
+    served-content bytes from the committed ``served_root`` fixture (the
+    synthetic graph's served paths do not exist under the real repo root)."""
+    return gen.build_snapshot(FIXTURE_GRAPH_DIR, FIXTURE_SERVED_ROOT)
 
 
 # --- 1. shape / schema validity -------------------------------------------
@@ -93,6 +105,7 @@ def test_top_level_keys_exact(snapshot):
         "built_at_commit", "source_graph_sha256",
         "overview", "concepts", "concept_detail",
         "files", "file_detail", "served",
+        "memory_inputs",
     }
 
 
@@ -161,6 +174,9 @@ def test_on_disk_false_everywhere_even_when_real_file_exists(tmp_path):
     naturally report on_disk=True; the generator must still force False."""
     (tmp_path / "docs").mkdir(parents=True)
     (tmp_path / "docs" / "fake_notes.md").write_text("# fake\n", encoding="utf-8")
+    # The other two served paths (src/fake_widget.py, src/fake_helper.py) need
+    # SOME real bytes too, so the served-content manifest can be built.
+    shutil.copytree(FIXTURE_SERVED_ROOT / "src", tmp_path / "src")
     snap = gen.build_snapshot(FIXTURE_GRAPH_DIR, tmp_path)
     on_disk_values = list(_walk_on_disk(snap))
     assert on_disk_values, "expected at least one on_disk field"
@@ -223,7 +239,7 @@ def test_cross_process_determinism_differing_hash_seeds(tmp_path):
             [sys.executable, str(SCRIPT),
              "--graph-dir", str(FIXTURE_GRAPH_DIR),
              "--out", str(out),
-             "--repo-root", str(REPO_ROOT)],
+             "--repo-root", str(FIXTURE_SERVED_ROOT)],
             capture_output=True, text=True, timeout=60, env=env,
         )
         assert result.returncode == 0, result.stderr
@@ -343,6 +359,9 @@ def test_cli_aborts_on_secret_straddling_truncation(tmp_path):
         (poisoned_dir / name).write_text(
             (FIXTURE_GRAPH_DIR / name).read_text(encoding="utf-8"), encoding="utf-8"
         )
+    # repo_root=tmp_path must carry real bytes for the manifest's served paths
+    # so the CLI aborts on the SECRET SCAN, not on a missing-file error.
+    shutil.copytree(FIXTURE_SERVED_ROOT, tmp_path, dirs_exist_ok=True)
     out_path = tmp_path / "memory-snapshot.json"
     rc = gen.main([
         "--graph-dir", str(poisoned_dir),
@@ -393,6 +412,9 @@ def test_cli_aborts_nonzero_and_writes_nothing_on_planted_secret(tmp_path):
         (FIXTURE_GRAPH_DIR / ".graphify_labels.json").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
+    # repo_root=tmp_path must carry real bytes for the manifest's served paths
+    # so the CLI aborts on the SECRET SCAN, not on a missing-file error.
+    shutil.copytree(FIXTURE_SERVED_ROOT, tmp_path, dirs_exist_ok=True)
     out_path = tmp_path / "memory-snapshot.json"
     rc = gen.main([
         "--graph-dir", str(poisoned_dir),
@@ -424,8 +446,8 @@ def test_rationale_truncation_deterministic(snapshot):
 
 
 def test_rationale_truncation_stable_across_runs():
-    a = gen.build_snapshot(FIXTURE_GRAPH_DIR, REPO_ROOT)
-    b = gen.build_snapshot(FIXTURE_GRAPH_DIR, REPO_ROOT)
+    a = gen.build_snapshot(FIXTURE_GRAPH_DIR, FIXTURE_SERVED_ROOT)
+    b = gen.build_snapshot(FIXTURE_GRAPH_DIR, FIXTURE_SERVED_ROOT)
     ra = a["file_detail"]["src/fake_widget.py"]["rationales"]
     rb = b["file_detail"]["src/fake_widget.py"]["rationales"]
     assert ra == rb
@@ -486,8 +508,8 @@ def test_no_content_lines_or_verdict_keys(snapshot):
 
 
 def test_determinism_byte_identical_twice():
-    a = gen.build_snapshot(FIXTURE_GRAPH_DIR, REPO_ROOT)
-    b = gen.build_snapshot(FIXTURE_GRAPH_DIR, REPO_ROOT)
+    a = gen.build_snapshot(FIXTURE_GRAPH_DIR, FIXTURE_SERVED_ROOT)
+    b = gen.build_snapshot(FIXTURE_GRAPH_DIR, FIXTURE_SERVED_ROOT)
     assert gen._serialize(a) == gen._serialize(b)
 
 
@@ -507,7 +529,7 @@ def test_check_passes_on_matching_golden_fixture():
     rc = gen.main([
         "--graph-dir", str(FIXTURE_GRAPH_DIR),
         "--out", str(GOLDEN_SNAPSHOT),
-        "--repo-root", str(REPO_ROOT),
+        "--repo-root", str(FIXTURE_SERVED_ROOT),
         "--check",
     ])
     assert rc == 0
@@ -522,7 +544,7 @@ def test_check_fails_on_drifted_snapshot(tmp_path):
     rc = gen.main([
         "--graph-dir", str(FIXTURE_GRAPH_DIR),
         "--out", str(drifted),
-        "--repo-root", str(REPO_ROOT),
+        "--repo-root", str(FIXTURE_SERVED_ROOT),
         "--check",
     ])
     assert rc != 0
@@ -534,7 +556,7 @@ def test_check_fails_on_malformed_target(tmp_path):
     rc = gen.main([
         "--graph-dir", str(FIXTURE_GRAPH_DIR),
         "--out", str(malformed),
-        "--repo-root", str(REPO_ROOT),
+        "--repo-root", str(FIXTURE_SERVED_ROOT),
         "--check",
     ])
     assert rc != 0
@@ -545,7 +567,7 @@ def test_check_never_writes(tmp_path):
     gen.main([
         "--graph-dir", str(FIXTURE_GRAPH_DIR),
         "--out", str(target),
-        "--repo-root", str(REPO_ROOT),
+        "--repo-root", str(FIXTURE_SERVED_ROOT),
         "--check",
     ])
     assert not target.exists()
@@ -556,7 +578,7 @@ def test_write_is_atomic_no_tmp_left_behind(tmp_path):
     rc = gen.main([
         "--graph-dir", str(FIXTURE_GRAPH_DIR),
         "--out", str(out_path),
-        "--repo-root", str(REPO_ROOT),
+        "--repo-root", str(FIXTURE_SERVED_ROOT),
     ])
     assert rc == 0
     assert out_path.exists()
@@ -569,14 +591,14 @@ def test_generate_then_check_round_trip(tmp_path):
     rc1 = gen.main([
         "--graph-dir", str(FIXTURE_GRAPH_DIR),
         "--out", str(out_path),
-        "--repo-root", str(REPO_ROOT),
+        "--repo-root", str(FIXTURE_SERVED_ROOT),
     ])
     assert rc1 == 0
     assert out_path.exists()
     rc2 = gen.main([
         "--graph-dir", str(FIXTURE_GRAPH_DIR),
         "--out", str(out_path),
-        "--repo-root", str(REPO_ROOT),
+        "--repo-root", str(FIXTURE_SERVED_ROOT),
         "--check",
     ])
     assert rc2 == 0
@@ -591,7 +613,7 @@ def test_cli_subprocess_smoke(tmp_path):
         [sys.executable, str(SCRIPT),
          "--graph-dir", str(FIXTURE_GRAPH_DIR),
          "--out", str(out_path),
-         "--repo-root", str(REPO_ROOT)],
+         "--repo-root", str(FIXTURE_SERVED_ROOT)],
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stderr
@@ -623,3 +645,175 @@ def test_generator_does_not_import_truth_core_or_graphify():
 def test_generator_imports_memory_module():
     source = SCRIPT.read_text(encoding="utf-8")
     assert "from isaac_api import memory" in source or "isaac_api.memory" in source
+
+
+# --- 14. memory_inputs fingerprint block (P24.10 Slice 2) ---------------------
+
+
+_MEMORY_INPUTS_KEYS = {
+    "policy_fingerprint", "policy_version", "projection_version",
+    "fingerprint_algo_version", "served_manifest_fingerprint",
+    "served_content_manifest", "served_file_count",
+    "freshness_scope", "freshness_basis",
+}
+
+
+def test_max_rationale_chars_is_the_memory_module_constant():
+    """Single source of truth (P24.10 Slice 2): the generator must not
+    re-define its own ``280`` literal — it must reference
+    ``isaac_api.memory.MAX_RATIONALE_CHARS`` so the runtime reader and the
+    build-time generator can never drift apart."""
+    assert gen.MAX_RATIONALE_CHARS == isaac_memory.MAX_RATIONALE_CHARS
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "280" not in source, "MAX_RATIONALE_CHARS must not be a re-declared literal"
+
+
+def test_memory_inputs_present_with_exact_keys(snapshot):
+    mi = snapshot["memory_inputs"]
+    assert set(mi.keys()) == _MEMORY_INPUTS_KEYS
+
+
+def test_memory_inputs_policy_fingerprint_matches_memory_module(snapshot):
+    mi = snapshot["memory_inputs"]
+    assert mi["policy_fingerprint"] == isaac_memory.compute_memory_policy_fingerprint()
+    assert mi["policy_version"] == isaac_memory.MEMORY_INPUTS_POLICY_VERSION
+    assert mi["projection_version"] == isaac_memory.PROJECTION_VERSION
+    assert mi["fingerprint_algo_version"] == isaac_memory.FINGERPRINT_ALGO_VERSION
+
+
+def test_memory_inputs_served_manifest_fingerprint_matches_memory_module(snapshot):
+    mi = snapshot["memory_inputs"]
+    expected = isaac_memory.compute_served_manifest_fingerprint(mi["served_content_manifest"])
+    assert mi["served_manifest_fingerprint"] == expected
+
+
+def test_memory_inputs_served_file_count_matches_manifest_length(snapshot):
+    mi = snapshot["memory_inputs"]
+    assert mi["served_file_count"] == len(mi["served_content_manifest"])
+
+
+def test_memory_inputs_freshness_scope_and_basis(snapshot):
+    mi = snapshot["memory_inputs"]
+    assert mi["freshness_scope"] == "served_files_only"
+    assert mi["freshness_basis"] == "ci_content_manifest"
+
+
+def test_memory_inputs_manifest_covers_exactly_the_served_fixture_files(snapshot):
+    """The manifest built from the fixture graph must cover exactly the three
+    served fixture paths (examples/README.md is governance-excluded and never
+    reaches ``served``), and each sha256 must match the real fixture bytes
+    under FIXTURE_SERVED_ROOT."""
+    manifest = snapshot["memory_inputs"]["served_content_manifest"]
+    paths = [e["path"] for e in manifest]
+    assert paths == sorted(snapshot["served"])
+    assert paths == ["docs/fake_notes.md", "src/fake_helper.py", "src/fake_widget.py"]
+    for entry in manifest:
+        raw = (FIXTURE_SERVED_ROOT / entry["path"]).read_bytes()
+        assert entry["sha256"] == hashlib.sha256(raw).hexdigest()
+
+
+def test_memory_inputs_manifest_is_a_list_of_path_sha256_dicts(snapshot):
+    manifest = snapshot["memory_inputs"]["served_content_manifest"]
+    assert isinstance(manifest, list)
+    for entry in manifest:
+        assert set(entry.keys()) == {"path", "sha256"}
+        assert isinstance(entry["path"], str)
+        assert isinstance(entry["sha256"], str)
+        assert len(entry["sha256"]) == 64
+
+
+def test_memory_inputs_deterministic_across_two_builds():
+    a = gen.build_snapshot(FIXTURE_GRAPH_DIR, FIXTURE_SERVED_ROOT)
+    b = gen.build_snapshot(FIXTURE_GRAPH_DIR, FIXTURE_SERVED_ROOT)
+    assert a["memory_inputs"] == b["memory_inputs"]
+    assert gen._serialize(a) == gen._serialize(b)
+
+
+# -- self-exclusion: the snapshot must never embed its own digest ------------
+
+
+def test_manifest_paths_excludes_any_memory_snapshot_json_artifact():
+    """Any served path that IS a ``*memory-snapshot.json`` artifact is dropped
+    regardless of ``out_path`` — embedding the snapshot's own digest is
+    circular by construction, not just when the names happen to collide."""
+    served = ["docs/a.md", "data/memory-snapshot.json", "src/b.py"]
+    kept = gen._manifest_paths(served, repo_root=FIXTURE_SERVED_ROOT, out_path=None)
+    assert kept == ["docs/a.md", "src/b.py"]
+
+
+def test_manifest_paths_excludes_out_path_relative_to_repo_root(tmp_path):
+    """The CLI's own ``--out`` target, when it happens to fall inside
+    ``repo_root`` at a served-looking relative path, must be excluded too —
+    not just names ending in the literal ``memory-snapshot.json`` string."""
+    served = ["docs/a.md", "reports/weekly.json", "src/b.py"]
+    out_path = tmp_path / "reports" / "weekly.json"
+    kept = gen._manifest_paths(served, repo_root=tmp_path, out_path=out_path)
+    assert kept == ["docs/a.md", "src/b.py"]
+
+
+def test_manifest_paths_out_path_outside_repo_root_excludes_nothing_extra(tmp_path):
+    """When ``--out`` resolves OUTSIDE ``repo_root`` (the common case in these
+    tests), there is nothing to exclude via the relative-path rule, and the
+    function must not raise."""
+    served = ["docs/a.md", "src/b.py"]
+    out_path = tmp_path / "elsewhere" / "memory-snapshot-copy.txt"
+    kept = gen._manifest_paths(served, repo_root=FIXTURE_SERVED_ROOT, out_path=out_path)
+    assert kept == served
+
+
+def test_build_snapshot_excludes_out_path_from_served_content_manifest():
+    """End-to-end: passing ``out_path`` equal to one of the fixture's OWN
+    served files must exclude that file from the served_content_manifest
+    (self-exclusion), while leaving the top-level ``served``/``files`` lists
+    (unrelated to memory_inputs) untouched."""
+    coinciding_out = FIXTURE_SERVED_ROOT / "src" / "fake_widget.py"
+    snap = gen.build_snapshot(FIXTURE_GRAPH_DIR, FIXTURE_SERVED_ROOT, out_path=coinciding_out)
+    manifest_paths = [e["path"] for e in snap["memory_inputs"]["served_content_manifest"]]
+    assert "src/fake_widget.py" not in manifest_paths
+    assert manifest_paths == ["docs/fake_notes.md", "src/fake_helper.py"]
+    # unaffected: the reader-derived served/files lists still list all three
+    assert "src/fake_widget.py" in snap["served"]
+
+
+# -- shape validation: memory_inputs is additive (backward compatible) -------
+
+
+def test_shape_validation_passes_without_memory_inputs_key(snapshot):
+    """A pre-P24.10 snapshot lacking ``memory_inputs`` entirely (e.g. the
+    already-committed hosted snapshot, regenerated by a later release slice)
+    must still validate cleanly — no schema version bump, purely additive."""
+    legacy = dict(snapshot)
+    del legacy["memory_inputs"]
+    assert gen._validate_shape(legacy) == []
+
+
+def test_shape_invalid_when_memory_inputs_is_not_an_object(snapshot):
+    broken = copy.deepcopy(snapshot)
+    broken["memory_inputs"] = "not-an-object"
+    issues = gen._validate_shape(broken)
+    assert issues
+    assert any("memory_inputs" in i for i in issues)
+
+
+def test_shape_invalid_when_memory_inputs_keys_mismatch(snapshot):
+    broken = copy.deepcopy(snapshot)
+    del broken["memory_inputs"]["served_file_count"]
+    issues = gen._validate_shape(broken)
+    assert issues
+    assert any("memory_inputs" in i for i in issues)
+
+
+# -- leak scan: manifest paths are covered by the path-shape rule ------------
+
+
+def test_scan_catches_unsafe_path_injected_into_served_content_manifest(snapshot):
+    bad = copy.deepcopy(snapshot)
+    bad["memory_inputs"]["served_content_manifest"].append(
+        {"path": "/etc/passwd", "sha256": "0" * 64}
+    )
+    issues = gen._scan_for_leaks(bad, repo_root=REPO_ROOT)
+    assert issues
+
+
+def test_scan_clean_on_good_snapshot_with_memory_inputs(snapshot):
+    assert gen._scan_for_leaks(snapshot, repo_root=REPO_ROOT) == []

@@ -89,18 +89,37 @@ GENERATOR_PATH = "scripts/build_memory_snapshot.py"
 #: ellipsis character, so the result is always exactly ``MAX_RATIONALE_CHARS``
 #: long when truncated, and is a pure, deterministic function of the input
 #: string (never split differently between runs).
-MAX_RATIONALE_CHARS = 280
+#:
+#: Single source of truth (P24.10 Slice 2): NOT re-declared as a literal here.
+#: ``isaac_api.memory.MAX_RATIONALE_CHARS`` is also hashed into
+#: ``compute_memory_policy_fingerprint()``'s payload, so a build-time-only
+#: constant would let the runtime reader's policy fingerprint and this
+#: generator's truncation silently drift apart.
+MAX_RATIONALE_CHARS = memory.MAX_RATIONALE_CHARS
 
-_TOP_LEVEL_KEYS = frozenset({
+_REQUIRED_TOP_LEVEL_KEYS = frozenset({
     "snapshot_schema_version", "kind", "generator",
     "built_at_commit", "source_graph_sha256",
     "overview", "concepts", "concept_detail",
     "files", "file_detail", "served",
 })
+#: Present in every snapshot THIS generator emits, but optional for shape
+#: validation (P24.10 Slice 2): additive, no ``SNAPSHOT_SCHEMA_VERSION`` bump,
+#: so an already-committed pre-P24.10 snapshot (missing ``memory_inputs``
+#: entirely) still validates cleanly via ``test_committed_snapshot.py`` until
+#: a later release slice regenerates it.
+_OPTIONAL_TOP_LEVEL_KEYS = frozenset({"memory_inputs"})
+_TOP_LEVEL_KEYS = _REQUIRED_TOP_LEVEL_KEYS | _OPTIONAL_TOP_LEVEL_KEYS
 _OVERVIEW_KEYS = frozenset({
     "built_at_commit", "graph_mtime", "node_count", "edge_count",
     "community_count", "concept_count", "served_file_count",
     "manifest_file_count",
+})
+_MEMORY_INPUTS_KEYS = frozenset({
+    "policy_fingerprint", "policy_version", "projection_version",
+    "fingerprint_algo_version", "served_manifest_fingerprint",
+    "served_content_manifest", "served_file_count",
+    "freshness_scope", "freshness_basis",
 })
 
 _FORBIDDEN_KEYS = frozenset(
@@ -238,10 +257,43 @@ def _check_projection_consistency(
             raise SnapshotError(f"file projection mismatch for path={path!r}")
 
 
+# --- served-content manifest (P24.10 Slice 2: memory_inputs) ----------------
+
+
+def _manifest_paths(served: list, *, repo_root, out_path) -> list:
+    """The served paths eligible for the ``memory_inputs`` served-content
+    manifest: ``served`` minus two circular self-references.
+
+    (a) The snapshot's OWN ``--out`` target, resolved relative to
+    ``repo_root``, when the resolution succeeds (``out_path`` may legitimately
+    live outside ``repo_root``, e.g. a tmp directory in tests — that is not an
+    error, it just means nothing is excluded via this rule). Embedding the
+    snapshot's own digest in itself is circular by construction.
+    (b) Any served path that IS a ``*memory-snapshot.json`` artifact
+    regardless of ``out_path`` — e.g. a stray prior snapshot the graph indexed
+    from an earlier build — for the same reason.
+
+    Order is preserved (callers pass an already-sorted ``served`` list)."""
+    excluded_rel: Optional[str] = None
+    if out_path is not None:
+        try:
+            out_rel = Path(out_path).resolve().relative_to(Path(repo_root).resolve())
+        except ValueError:
+            excluded_rel = None
+        else:
+            excluded_rel = out_rel.as_posix()
+    return [
+        p for p in served
+        if p != excluded_rel and not p.endswith("memory-snapshot.json")
+    ]
+
+
 # --- generation -------------------------------------------------------------
 
 
-def build_snapshot(graph_dir, repo_root, *, _rationale_originals=None) -> dict:
+def build_snapshot(
+    graph_dir, repo_root, *, _rationale_originals=None, out_path=None
+) -> dict:
     """Build the sanitized snapshot dict from a live/fixture Graphify artifacts
     directory. Drives ``LocalGraphArtifactSource``'s six public methods over
     the FULL concept-id set and FULL served-path set; never re-derives graph
@@ -252,7 +304,12 @@ def build_snapshot(graph_dir, repo_root, *, _rationale_originals=None) -> dict:
     If ``_rationale_originals`` is a list, it is extended with every ORIGINAL
     (un-truncated) rationale string so the caller can secret-scan the full text,
     not just the emitted truncated value (a secret straddling the
-    :data:`MAX_RATIONALE_CHARS` cut must still be caught)."""
+    :data:`MAX_RATIONALE_CHARS` cut must still be caught).
+
+    ``out_path``, when given, is the snapshot's own eventual ``--out`` target;
+    it is used only to self-exclude the snapshot's own path (see
+    :func:`_manifest_paths`) from the embedded ``memory_inputs`` served-content
+    manifest (P24.10 Slice 2) — never read, never written here."""
     graph_dir = Path(graph_dir)
     repo_root = Path(repo_root)
 
@@ -312,6 +369,33 @@ def build_snapshot(graph_dir, repo_root, *, _rationale_originals=None) -> dict:
         "manifest_file_count": overview.get("manifest_file_count"),
     }
 
+    # --- P24.10 Slice 2: memory_inputs fingerprint block ---------------------
+    # Reuses the pure primitives from isaac_api.memory unchanged (Slice 1);
+    # this generator only WIRES them in. Self-excludes the snapshot's own
+    # output path (and any stray *memory-snapshot.json) before reading bytes —
+    # embedding the snapshot's own digest in itself would be circular.
+    manifest_source_paths = _manifest_paths(served_list, repo_root=repo_root, out_path=out_path)
+    try:
+        served_content_manifest = memory.compute_served_content_manifest(
+            manifest_source_paths, repo_root
+        )
+    except ValueError as exc:
+        raise SnapshotError(f"failed to build served-content manifest: {exc}") from exc
+
+    memory_inputs = {
+        "policy_fingerprint": memory.compute_memory_policy_fingerprint(),
+        "policy_version": memory.MEMORY_INPUTS_POLICY_VERSION,
+        "projection_version": memory.PROJECTION_VERSION,
+        "fingerprint_algo_version": memory.FINGERPRINT_ALGO_VERSION,
+        "served_manifest_fingerprint": memory.compute_served_manifest_fingerprint(
+            served_content_manifest
+        ),
+        "served_content_manifest": served_content_manifest,
+        "served_file_count": len(served_content_manifest),
+        "freshness_scope": "served_files_only",
+        "freshness_basis": "ci_content_manifest",
+    }
+
     return {
         "snapshot_schema_version": SNAPSHOT_SCHEMA_VERSION,
         "kind": SNAPSHOT_KIND,
@@ -324,6 +408,7 @@ def build_snapshot(graph_dir, repo_root, *, _rationale_originals=None) -> dict:
         "files": files_list,
         "file_detail": file_detail_map,
         "served": served_list,
+        "memory_inputs": memory_inputs,
     }
 
 
@@ -337,7 +422,7 @@ def _validate_shape(snapshot: dict) -> list:
         return ["snapshot is not a JSON object"]
 
     keys = set(snapshot.keys())
-    missing = _TOP_LEVEL_KEYS - keys
+    missing = _REQUIRED_TOP_LEVEL_KEYS - keys
     extra = keys - _TOP_LEVEL_KEYS
     if missing:
         issues.append(f"missing top-level keys: {sorted(missing)}")
@@ -377,6 +462,34 @@ def _validate_shape(snapshot: dict) -> list:
                        ("concept_detail", dict), ("file_detail", dict)):
         if not isinstance(snapshot.get(key), kind):
             issues.append(f"{key} must be a {kind.__name__}")
+
+    # memory_inputs is OPTIONAL for shape validity (P24.10 Slice 2, additive —
+    # see _OPTIONAL_TOP_LEVEL_KEYS), but when present must carry exactly the
+    # expected sub-keys and value types.
+    if "memory_inputs" in snapshot:
+        mi = snapshot.get("memory_inputs")
+        if not isinstance(mi, dict):
+            issues.append("memory_inputs must be an object when present")
+        else:
+            mi_keys = set(mi.keys())
+            if mi_keys != _MEMORY_INPUTS_KEYS:
+                issues.append(f"memory_inputs keys mismatch: {sorted(mi_keys)}")
+            for str_key in ("policy_fingerprint", "served_manifest_fingerprint",
+                             "freshness_scope", "freshness_basis"):
+                if str_key in mi and not isinstance(mi.get(str_key), str):
+                    issues.append(f"memory_inputs.{str_key} must be a string")
+            for int_key in ("policy_version", "projection_version",
+                             "fingerprint_algo_version", "served_file_count"):
+                if int_key in mi and not isinstance(mi.get(int_key), int):
+                    issues.append(f"memory_inputs.{int_key} must be an int")
+            manifest = mi.get("served_content_manifest")
+            if not isinstance(manifest, list):
+                issues.append("memory_inputs.served_content_manifest must be a list")
+            elif "served_file_count" in mi and mi.get("served_file_count") != len(manifest):
+                issues.append(
+                    "memory_inputs.served_file_count must equal "
+                    "len(served_content_manifest)"
+                )
 
     return issues
 
@@ -437,6 +550,14 @@ def _iter_path_fields(snapshot: dict):
         yield (f"concept_detail[{cid!r}].source_file", detail.get("source_file"))
         for rf in (detail.get("related") or {}).get("files", []):
             yield (f"concept_detail[{cid!r}].related.files[].path", rf.get("path"))
+    # P24.10 Slice 2: belt-and-suspenders over compute_served_content_manifest's
+    # OWN _is_unsafe/_is_served enforcement at construction time — every
+    # manifest entry's path goes through the same path-shape rule as every
+    # other path-bearing field here.
+    manifest = (snapshot.get("memory_inputs") or {}).get("served_content_manifest") or []
+    for entry in manifest:
+        if isinstance(entry, dict):
+            yield ("memory_inputs.served_content_manifest[].path", entry.get("path"))
 
 
 def _machine_secret_issues(s: str, repo_root_str: str) -> list:
@@ -565,7 +686,8 @@ def main(argv=None) -> int:
     rationale_originals: list = []
     try:
         snapshot = build_snapshot(
-            args.graph_dir, repo_root, _rationale_originals=rationale_originals
+            args.graph_dir, repo_root,
+            _rationale_originals=rationale_originals, out_path=args.out,
         )
     except SnapshotError as exc:
         print(f"error: source graph unavailable: {exc}", file=sys.stderr)

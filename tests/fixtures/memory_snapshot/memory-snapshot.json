@@ -174,6 +174,30 @@
   ],
   "generator": "scripts/build_memory_snapshot.py",
   "kind": "isaac-memory-snapshot",
+  "memory_inputs": {
+    "fingerprint_algo_version": 1,
+    "freshness_basis": "ci_content_manifest",
+    "freshness_scope": "served_files_only",
+    "policy_fingerprint": "a23387ff6abf85d1d5df62c2e849b7c255420ed270f370b1bf9dde4cbf7f59a9",
+    "policy_version": 1,
+    "projection_version": 1,
+    "served_content_manifest": [
+      {
+        "path": "docs/fake_notes.md",
+        "sha256": "494bb18069bfa1e2df7bfc2a9584eae1682297892eecb165b5c7330eb9db29fd"
+      },
+      {
+        "path": "src/fake_helper.py",
+        "sha256": "438a490e517997513b7486e6ffd75428974e63415cf427afa403b6846f97c566"
+      },
+      {
+        "path": "src/fake_widget.py",
+        "sha256": "f5586a8c87ddd42f6559b2ee79c7ed50b48da335548fd59038de7cb489aa0787"
+      }
+    ],
+    "served_file_count": 3,
+    "served_manifest_fingerprint": "9b44d17323fed978caea412d00d9b68c1cb3ffac9cef995e8a4362003f4ac818"
+  },
   "overview": {
     "built_at_commit": "fakecommitp24900",
     "community_count": 3,
