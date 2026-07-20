@@ -296,12 +296,14 @@ Available project-local skills:
 - `/isaac-validate`
 - `/isaac-query`
 - `/isaac-export`
+- `/isaac-checkpoint`
+- `/isaac-resume`
 
 Do not add new slash commands unless explicitly approved.
 
 `/checkpoint`, `/resume`, `/phase`, and `/verify-ui` were previously prose workflow names in these
 instructions, **not installed ISAAC commands** — do not assume they are invocable. The checkpoint and
-resume discipline is provided as repo-local skills (see §17); `/phase` and `/verify-ui` remain prose +
+resume discipline is now provided as repo-local skills `/isaac-checkpoint` and `/isaac-resume`; `/phase` and `/verify-ui` remain prose +
 plan-doc conventions with a manual procedure documented in the toolchain reconnection runbook.
 
 Current command boundaries:
@@ -311,6 +313,8 @@ Current command boundaries:
 - `/isaac-validate`: explain draft/official validation results
 - `/isaac-query`: route query to schema/docs/audit/git/Graphify depending on question type
 - `/isaac-export`: deterministic export to official ISAAC record + evidence sidecar
+- `/isaac-checkpoint`: report verified session/repo state (branch, tree, changed-file classes, verification), run the snapshot preflight when served files changed, and commit/push only explicitly-safe scoped docs; refuses destructive git and deployment
+- `/isaac-resume`: reconstruct verified repo + remote state, read the decision-lock/roadmap/active phase plan/checkpoint, and state the next authorized action; implements nothing
 
 ---
 
