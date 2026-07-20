@@ -44,6 +44,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -164,6 +165,49 @@ def test_committed_snapshot_readable_by_sanitized_snapshot_source():
     # they are not duplicated here, and so they run only while degradation is the
     # reality (Branch A). Once the snapshot is regenerated with ``memory_inputs``,
     # dispatch flips to the strict Branch-B content-drift gate automatically.
+
+
+# --- 4b. every served/manifest/files path must be GIT-TRACKED ------------------
+#
+# Regression guard (P24.10 content-drift fix): the committed snapshot must
+# reference ONLY git-tracked files. An untracked/gitignored file (e.g. a
+# locally-present ``ux-review/`` report that Graphify happened to index)
+# neither ships in the Docker image built from the git checkout nor exists in
+# a fresh CI checkout, so the Branch-B content-drift gate cannot read its bytes
+# there (``ValueError: served path missing/unreadable``). This asserts the
+# invariant on ANY machine regardless of local disk state — unlike the Branch-B
+# gate, which caught it only in CI because the dev disk happened to carry the
+# untracked files.
+
+
+def _git_tracked_paths() -> set:
+    """Repo-root-relative POSIX paths tracked by git (``git ls-files -z``).
+    Deterministic and Graphify-free: reads only the git index, never
+    ``graphify-out/``. ``-z`` yields NUL-terminated, unquoted literal paths."""
+    proc = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+        capture_output=True, check=True,
+    )
+    return {p for p in proc.stdout.decode("utf-8", "surrogateescape").split("\0") if p}
+
+
+def test_committed_snapshot_paths_are_all_git_tracked():
+    snapshot = _snapshot()
+    tracked = _git_tracked_paths()
+
+    served_paths = set(snapshot["served"])
+    file_paths = {f["path"] for f in snapshot["files"]}
+    manifest_paths = {
+        entry["path"]
+        for entry in snapshot.get("memory_inputs", {}).get("served_content_manifest", [])
+    }
+    referenced = served_paths | file_paths | manifest_paths
+
+    untracked = sorted(referenced - tracked)
+    assert untracked == [], (
+        "committed snapshot references non-git-tracked paths (they cannot ship in "
+        f"the Docker image nor be verified in a fresh CI checkout): {untracked}"
+    )
 
 
 # --- 5. indexed-source content-drift gate (P24.10 Slice 6, CI-ONLY) ------------
@@ -381,7 +425,8 @@ def test_indexed_source_gate_does_not_detect_newly_added_files(tmp_path):
 
 
 _ALLOWED_IMPORT_ROOTS = {
-    "__future__", "ast", "importlib", "json", "pathlib", "pytest", "isaac_api",
+    "__future__", "ast", "importlib", "json", "subprocess", "pathlib", "pytest",
+    "isaac_api",
 }
 
 

@@ -59,6 +59,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -288,6 +289,48 @@ def _manifest_paths(served: list, *, repo_root, out_path) -> list:
     ]
 
 
+# --- git-tracked filter (the served set ships only tracked files) -----------
+
+
+def _git_tracked_paths(repo_root) -> Optional[frozenset]:
+    """Repo-root-relative POSIX paths tracked by git under ``repo_root``, or
+    ``None`` when ``repo_root`` is not a git work tree.
+
+    WHY this filter exists: the committed snapshot ships INSIDE a Docker image
+    built from the git checkout, and its served-content drift is CI-verified
+    against that same checkout (``test_committed_snapshot.py`` Branch B, which
+    re-reads each served file's bytes). A file that is NOT git-tracked
+    (untracked/gitignored) can neither ship in that image nor be read in a fresh
+    CI checkout, so it must never enter ``served``/``files`` or the
+    ``memory_inputs.served_content_manifest``, and its metadata must not leak
+    into the served snapshot. A file that is present on the dev disk (and thus
+    in the local Graphify index) but untracked — e.g. a gitignored
+    ``ux-review/`` report — is exactly this hazard. The rule is the general
+    invariant "git-tracked only", never a one-off path exclusion.
+
+    Fail closed: if the ``git`` executable cannot be run at all (missing/broken
+    binary), raise :class:`SnapshotError` rather than silently shipping
+    untracked metadata. When ``repo_root`` is simply not a git work tree
+    (``git`` returns non-zero — e.g. a throwaway tmp directory in a test), no
+    Docker image is built from it and tracking is undefined, so return ``None``
+    and let the caller skip the intersection. ``ls-files -z`` yields
+    NUL-terminated, unquoted literal paths (repo-root-relative POSIX), matching
+    how ``memory._is_served`` and the reader key served paths."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-files", "-z"],
+            capture_output=True,
+        )
+    except OSError as exc:  # git binary missing / not executable
+        raise SnapshotError(
+            f"cannot determine git-tracked files (git unavailable): {exc}"
+        ) from exc
+    if proc.returncode != 0:
+        return None  # repo_root is not a git work tree; tracking is undefined here
+    data = proc.stdout.decode("utf-8", "surrogateescape")
+    return frozenset(p for p in data.split("\0") if p)
+
+
 # --- generation -------------------------------------------------------------
 
 
@@ -334,9 +377,19 @@ def build_snapshot(
             raise SnapshotError(f"concept vanished during generation: {cid!r}")
         concept_detail_map[cid] = _sanitize_concept_detail(detail)
 
+    # Restrict the served set to GIT-TRACKED files. Any untracked/gitignored
+    # file the reader surfaced (present on the dev disk + Graphify index but not
+    # in the checkout) is dropped here, so it never enters files/served or the
+    # memory_inputs served-content manifest. See _git_tracked_paths for the full
+    # rationale (ships in / verified against the git checkout only). ``None``
+    # means repo_root is not a git work tree, so no intersection is applied.
+    tracked_paths = _git_tracked_paths(repo_root)
+
     file_detail_map: dict = {}
     for f in source.files():
         path = f["path"]
+        if tracked_paths is not None and path not in tracked_paths:
+            continue
         detail = source.file(path)
         if detail is None:
             raise SnapshotError(f"file vanished during generation: {path!r}")
@@ -365,7 +418,12 @@ def build_snapshot(
         "edge_count": overview.get("edge_count"),
         "community_count": overview.get("community_count"),
         "concept_count": overview.get("concept_count"),
-        "served_file_count": overview.get("served_file_count"),
+        # The reader's overview counts EVERY served file it indexed; this snapshot
+        # serves only the git-tracked subset (see _git_tracked_paths), so report the
+        # filtered served count to stay honest and internally consistent with
+        # files/served. manifest_file_count is the raw Graphify-manifest key count
+        # (a distinct concept, not the served subset) and is left as-is.
+        "served_file_count": len(served_list),
         "manifest_file_count": overview.get("manifest_file_count"),
     }
 

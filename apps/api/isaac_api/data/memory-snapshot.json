@@ -8603,48 +8603,6 @@
         ]
       }
     },
-    "ux-review/inventory-report.md": {
-      "community_id": "91",
-      "community_name": "Contributing",
-      "file_type": "document",
-      "local_reference": "ux-review/inventory-report.md",
-      "node_count": 21,
-      "on_disk": false,
-      "path": "ux-review/inventory-report.md",
-      "rationales": [],
-      "related": {
-        "concepts": [],
-        "files": []
-      }
-    },
-    "ux-review/planning-archaeology-report.md": {
-      "community_id": "168",
-      "community_name": "properties",
-      "file_type": "document",
-      "local_reference": "ux-review/planning-archaeology-report.md",
-      "node_count": 12,
-      "on_disk": false,
-      "path": "ux-review/planning-archaeology-report.md",
-      "rationales": [],
-      "related": {
-        "concepts": [],
-        "files": []
-      }
-    },
-    "ux-review/ux-review-report.md": {
-      "community_id": "171",
-      "community_name": "properties",
-      "file_type": "document",
-      "local_reference": "ux-review/ux-review-report.md",
-      "node_count": 12,
-      "on_disk": false,
-      "path": "ux-review/ux-review-report.md",
-      "rationales": [],
-      "related": {
-        "concepts": [],
-        "files": []
-      }
-    },
     "vocabulary/descriptor_class.json": {
       "community_id": null,
       "community_name": null,
@@ -10278,30 +10236,6 @@
       "path": "tests/test_review.py"
     },
     {
-      "community_id": "91",
-      "community_name": "Contributing",
-      "file_type": "document",
-      "node_count": 21,
-      "on_disk": false,
-      "path": "ux-review/inventory-report.md"
-    },
-    {
-      "community_id": "168",
-      "community_name": "properties",
-      "file_type": "document",
-      "node_count": 12,
-      "on_disk": false,
-      "path": "ux-review/planning-archaeology-report.md"
-    },
-    {
-      "community_id": "171",
-      "community_name": "properties",
-      "file_type": "document",
-      "node_count": 12,
-      "on_disk": false,
-      "path": "ux-review/ux-review-report.md"
-    },
-    {
       "community_id": null,
       "community_name": null,
       "file_type": null,
@@ -10910,7 +10844,7 @@
       },
       {
         "path": "scripts/build_memory_snapshot.py",
-        "sha256": "cf52bf49f50f4043a23a95eb1298a6a6f59c709e173a909e3745cc54011cc6ff"
+        "sha256": "868f3ebaf4727eef85e796e2fede664719ced9dae9a1faf7753a16488b6c258a"
       },
       {
         "path": "scripts/check_graphify_freshness.py",
@@ -11125,24 +11059,12 @@
         "sha256": "6cdf05f703986420675f3f87d3cdd8b5c94a213cb6dfb83e41ff61e80aad941f"
       },
       {
-        "path": "ux-review/inventory-report.md",
-        "sha256": "02deb30b5491f30421568817f15ed5127facb379c01c4891c0f47412754cf6dd"
-      },
-      {
-        "path": "ux-review/planning-archaeology-report.md",
-        "sha256": "69f47f9cea27c44437aab2916dd564aa81809247c0de94c810bf1a4197009470"
-      },
-      {
-        "path": "ux-review/ux-review-report.md",
-        "sha256": "809a38e6ea998969e1083c2d92a026224c6b7a2acb8c88c9c2ea9893808ac71a"
-      },
-      {
         "path": "vocabulary/descriptor_class.json",
         "sha256": "0cf2bc6bfd0b19acb5a09eea5b1ba7e2b6c638fcf88641d67ca1454a23ad325a"
       }
     ],
-    "served_file_count": 205,
-    "served_manifest_fingerprint": "d72a773a125efd82dc25f353b8ab1e8ef1efd90fbb771446514a8e2133a47707"
+    "served_file_count": 202,
+    "served_manifest_fingerprint": "ab75420a0a6330be80dc61dd7491c5088dabc2f8cee5ace3d19a3cf9fccc91da"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
@@ -11152,7 +11074,7 @@
     "graph_mtime": null,
     "manifest_file_count": 262,
     "node_count": 2988,
-    "served_file_count": 206
+    "served_file_count": 203
   },
   "served": [
     ".claude/skills/isaac-complete/SKILL.md",
@@ -11357,9 +11279,6 @@
     "tests/test_portal_warnings.py",
     "tests/test_query_safety_docs.py",
     "tests/test_review.py",
-    "ux-review/inventory-report.md",
-    "ux-review/planning-archaeology-report.md",
-    "ux-review/ux-review-report.md",
     "vocabulary/descriptor_class.json"
   ],
   "snapshot_schema_version": 1,
