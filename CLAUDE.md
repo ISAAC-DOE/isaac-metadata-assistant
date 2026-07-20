@@ -299,6 +299,11 @@ Available project-local skills:
 
 Do not add new slash commands unless explicitly approved.
 
+`/checkpoint`, `/resume`, `/phase`, and `/verify-ui` were previously prose workflow names in these
+instructions, **not installed ISAAC commands** — do not assume they are invocable. The checkpoint and
+resume discipline is provided as repo-local skills (see §17); `/phase` and `/verify-ui` remain prose +
+plan-doc conventions with a manual procedure documented in the toolchain reconnection runbook.
+
 Current command boundaries:
 
 - `/isaac-draft`: extract into draft format with evidence
@@ -344,7 +349,12 @@ Each phase should follow this loop:
 
 For this project:
 
-- Fable 5 is the orchestrator, planner, reviewer, and verifier.
+- Fable 5 is the orchestrator, planner, reviewer, and verifier **when it is actually available in the
+  current account**. Until its availability is confirmed, **Opus 4.8 is the ratified standing
+  orchestrator fallback**.
+- The orchestrator does not implement production code. Delegate instruction-architecture and
+  security-sensitive work to Opus 4.8, mechanical documentation/inventory changes to Sonnet 5; browser
+  QA may run on Opus 4.8 or Sonnet 5; final independent review goes to a separate Opus 4.8 subagent.
 - Opus subagents are preferred for implementation slices unless explicitly told otherwise.
 - Keep slices small, reviewable, testable, and committable.
 - Do not begin the next phase without explicit user approval.
@@ -487,3 +497,41 @@ After interruption or context reset:
 8. Continue only from verified facts.
 
 Never guess what was completed.
+
+## 17. Account, Continuity & Snapshot Preflight
+
+### Default-account policy
+
+Preserve the currently connected, developer-owned service identities for ISAAC (GitHub, Railway, Vercel)
+unless the user explicitly authorizes a different account. Claude Code runs under the SLAC organization
+account; **that does not migrate the other services.** Do not log out a working account, switch identity,
+link/relink a project, create duplicate cloud projects, change teams/orgs, alter billing, rotate
+credentials, or change git remotes without explicit per-action approval. Treat current infrastructure as
+**temporary developer-owned infrastructure pending an explicit SLAC ownership and handoff decision.** The
+specific service identities, the account-switch/reconnection/recovery procedure, and the ownership-handoff
+gate live in `docs/toolchain-reconnection-runbook.md` — link, do not duplicate.
+
+### Orchestrator selection
+
+Fable 5 orchestrates when available in the account; otherwise Opus 4.8 (ratified fallback). The
+orchestrator plans/reviews/verifies and does not implement production code (see §10).
+
+### Snapshot preflight (before any push that touches served files)
+
+The committed snapshot `apps/api/isaac_api/data/memory-snapshot.json` embeds a served-content manifest
+(currently 202 files) re-checked in CI by `apps/api/tests/test_committed_snapshot.py`. It includes
+`CLAUDE.md`, `AGENTS.md`, every `docs/*.md`, and each `.claude/skills/*/SKILL.md`. Editing any
+manifest-listed file is predictable drift — regenerate in the same commit; do not wait for CI. Pre-push
+sequence: implementation → focused tests → full relevant tests → typecheck / Vite build → snapshot drift
+check → deterministic regeneration if required → path/secret/leak checks → independent review → commit →
+push → exact-HEAD CI → deployment/browser QA. Commands:
+
+```bash
+# drift check (exit 0 = no drift)
+.venv/bin/python scripts/build_memory_snapshot.py --graph-dir graphify-out \
+  --out apps/api/isaac_api/data/memory-snapshot.json --check
+# deterministic regeneration (drop --check), then re-run the check + the gate test
+.venv/bin/python scripts/build_memory_snapshot.py --graph-dir graphify-out \
+  --out apps/api/isaac_api/data/memory-snapshot.json
+.venv/bin/pytest apps/api/tests/test_committed_snapshot.py -q
+```

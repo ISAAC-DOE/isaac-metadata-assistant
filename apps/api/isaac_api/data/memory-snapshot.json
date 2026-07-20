@@ -10280,11 +10280,11 @@
       },
       {
         "path": "AGENTS.md",
-        "sha256": "9ef6003265bb8b00f2e4d59e6f4cb952b6950ae662d36cb088b0acd35b5f3bab"
+        "sha256": "fcf72d80f928825236687f074145c8b8b2776eeab649718e77a8cafc39a838c5"
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "13058568d2cb79d30b1998b0c613604f20216dbf304f91d57a6ce07b5dbd733a"
+        "sha256": "e948c5a5949a327be79072207b8b4fee9cb0d61f4641ea2c5d397856b1a22394"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "6d09078a1d3ade70d08caa378a13b9294ea575c8fa79883787aa0de17c30a64a"
+    "served_manifest_fingerprint": "a8e9ee2b9516fc1614cc424c3f38e89792f946857ae2812492161495fda02240"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

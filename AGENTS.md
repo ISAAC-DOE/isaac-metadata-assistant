@@ -34,6 +34,9 @@ Upstream:
 https://github.com/ISAAC-DOE/isaac-ai-ready-record
 ```
 
+Preserve existing project ownership and service identities unless an authorized migration plan explicitly
+changes them.
+
 ---
 
 ## 2. Agent Roles
