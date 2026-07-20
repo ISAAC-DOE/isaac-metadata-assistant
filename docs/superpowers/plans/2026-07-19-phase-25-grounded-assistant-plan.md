@@ -1,6 +1,6 @@
 # Phase 25 — Grounded Assistant — Implementation Plan
 
-Status: PROPOSED — awaiting approval. Direction **DECISION-LOCKED 2026-07-20**; P25.0 (design/spec) is the only authorized next step, and no production code (P25.1+) is authorized.
+Status (updated 2026-07-20): **P25.0 approved · P25.1 RELEASED · P25.2 RELEASED** — all on `origin/main`, CI-green and browser-verified. **P25.3 remains an intentional tombstone** (folded into P25.1). The next approved candidate is **P25.4 (Ground the Export context)**, which is **NOT YET AUTHORIZED** — no further P25 slice may begin without explicit user approval. Direction **DECISION-LOCKED 2026-07-20**.
 Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md; `2026-07-20-remaining-work-decision-lock.md` (authoritative); P24 specs (24 / 24.9 / 24.10); this doc EXTENDS the approved arc.
 
@@ -433,7 +433,7 @@ Each slice: objective · files touched · files forbidden · model · acceptance
     the spec. Tests: none (doc). Report: spec path + the finalized taxonomy/chips/templates. Commit:
     docs-only, on approval. **STOP for user review — no implementation until approved.**
 
-- **P25.1 — Deterministic composer skeleton + source-label rendering on RecordWorkbench.**
+- **P25.1 — Deterministic composer skeleton + source-label rendering on RecordWorkbench. ✅ RELEASED 2026-07-20** — commits `ee60367` (skeleton) · `83aa5b8` (hardening: composer never renders `undefined`/`null`; pending count/list agree) · `7e5a86c` (memory-snapshot CI fix); CI-green on `origin/main`; browser-verified (Record Workbench).
   - Objective: add `lib/assistantComposer.ts` (pure `compose()` + resolvers) + composer types + the
     source-label enum extensions (`advisory` + artifact/workflow label), TDD'd as a pure module, **then
     wire it into RecordWorkbench** (replacing `ASSISTANT_SAMPLES.review`) so the assistant renders
@@ -446,7 +446,7 @@ Each slice: objective · files touched · files forbidden · model · acceptance
     extend `live-screens.test.tsx`. Report: module surface + coverage + RecordWorkbench behavior.
     Commit: after tests green. Stop: review before wiring further screens.
 
-- **P25.2 — Free-text removal + "Guided prompts only" framing (arc item 8).**
+- **P25.2 — Free-text removal + "Guided prompts only" framing (arc item 8). ✅ RELEASED 2026-07-20** — commits `8eab6ba` (removal + guided-only note + `aria-live`) · `5a0c049` (memory-snapshot CI fix); CI-green on `origin/main`; browser-verified (Record Workbench + Ready to Export).
   - Objective: remove the disabled input/send block from `AssistantPanel.tsx` + `assistant.css`; add
     the guided-only line; add `aria-live` on the reply region. Update `assistant.test.tsx`
     (free-form-not-wired → guided-only) with rationale comments.
@@ -459,7 +459,7 @@ Each slice: objective · files touched · files forbidden · model · acceptance
   composer skeleton in P25.1 per the decision-lock's first-code-slice definition. This ID is retained
   as a tombstone so P25.4–P25.8 keep their numbers; there is no separate P25.3 work.
 
-- **P25.4 — Ground the Export context (ExportReadiness).**
+- **P25.4 — Ground the Export context (ExportReadiness). ⏭ NEXT CANDIDATE — NOT YET AUTHORIZED (awaiting explicit user approval before any work begins).**
   - Objective: replace `ASSISTANT_SAMPLES.export` with `compose('export', bundle)`; keep
     `ROUTE_TO_CLI_NOTE`. Coverage/warnings echoed live; verdict routed. Files:
     `screens/ExportReadiness.tsx`; test. Model: Opus. Tests: extend `completion-export.test.tsx`. CP-B.
