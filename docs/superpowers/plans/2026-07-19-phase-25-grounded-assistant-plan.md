@@ -4,6 +4,14 @@ Status (updated 2026-07-20): **P25.0 approved · P25.1 RELEASED · P25.2 RELEASE
 Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md; `2026-07-20-remaining-work-decision-lock.md` (authoritative); P24 specs (24 / 24.9 / 24.10); this doc EXTENDS the approved arc.
 
+### Session checkpoint — 2026-07-20
+- **P25.1 and P25.2 are RELEASED**; **no later P25 slice has begun.**
+- `main` is **clean and synchronized** with `origin/main`; **HEAD = `5013d7c`**; CI green on that HEAD.
+- **P25.3 remains an intentional tombstone** (folded into P25.1).
+- **P25.4 (Ground the Export context) is the next proposed slice but is NOT yet authorized** — no work until explicit user approval.
+- **Documented deployment concern (needs separate review):** the hosted frontend is built with `VITE_API_BASE=http://127.0.0.1:8000`, so an HTTPS Vercel page cannot reach the HTTP-localhost API (mixed content). The deployed *shell* loads (past Vercel SSO), but the hosted frontend cannot fetch data on its own; there is effectively no live Railway backend wired to it. This is a config/deployment concern, not a P25.1/P25.2 defect.
+- **Browser data QA method:** performed against a **byte-identical local preview** (`vite preview` of the same production build) + a **local backend**, NOT a live Railway-connected hosted frontend — because of the concern above. Composer/UI behavior is genuinely browser-verified on the shipped build; the hosted URL was verified only to the shell level.
+
 Approval decisions — **RESOLVED by the 2026-07-20 decision-lock:**
 - Q1 → **YES.** Add `'advisory'` to `AssistantSource`, **and** add a distinct **artifact/workflow-state** label so the five source categories (truth · evidence · advisory · artifact/workflow · Project Memory) are each honestly labeled. Keep `'git'` for history. (Exact enum spelling of the artifact/workflow label = a P25.0 finalization item.) (see §12)
 - Q2 → **RESOLVED (mount set).** Prioritize the 4 record surfaces (Review Record, Complete Missing Fields, Evidence & File Preview, Ready to Export) **plus Project Memory where appropriate**. Do **NOT** mount on My Experiments, Load Materials, Settings, or Governance merely for visual consistency; such a screen gets the assistant only if P25.0 identifies specific useful inputs, deterministic outputs, and user value. (see §6, §13, §20)
