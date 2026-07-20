@@ -321,3 +321,62 @@ assistant samples → **P25.10** full Phase 25 verification & release → **Phas
 Memory Search → UI Refinement & Visual QA → Final Stabilization → Documentation & Deliverables →
 optional post-core Convex evaluation → deferred back-burner. **P25.4 stays BLOCKED until this
 reconciliation gate is complete and the report reviewed.**
+
+---
+
+## R4.1 follow-up (2026-07-20) — toolset-profile separation + `isaac-profile`
+
+> **Separately authorized after R1–R6.** R1–R6 remain **COMPLETE** and unchanged (see the execution
+> checkpoint at the top of this plan). This section is **append-only**; it revises nothing above.
+
+**Selected architecture: A1 — supported toolset-only separation.** Claude Code `2.1.211` isolates
+*tooling* per config root via `CLAUDE_CONFIG_DIR` (plugins, MCP, hooks, skills, settings, caches).
+Authentication is **NOT** isolated: it is a **shared macOS Keychain item** (`"Claude Code-credentials"`)
+that lives outside any config root. A2 and every unsupported mechanism —
+`CLAUDE_CODE_HOST_CREDS_FILE`, plaintext OAuth files, credential copying, Keychain manipulation,
+automated account switching — are **rejected and out of scope**.
+
+**Consequence (stated honestly):** the two launchers select different Claude **tool environments**, not
+guaranteed Claude **accounts**. The launcher marker is a *claimed toolset mode*, never proof of the
+signed-in account; the normal Claude login (shared Keychain) still determines the account.
+
+**Delivered:**
+- `~/.claude-slac/` — minimal SLAC toolset root; context-mode absent (fresh root) and explicitly
+  disabled; no copied credentials, no personal MCP/plugins.
+- `~/.local/bin/claude-personal` — default root `~/.claude` (personal tooling incl. context-mode),
+  marker `personal`; does not set `CLAUDE_CONFIG_DIR`.
+- `~/.local/bin/claude-slac` — `CLAUDE_CONFIG_DIR=$HOME/.claude-slac`, marker `slac`.
+- `.claude/skills/isaac-profile/SKILL.md` — the **runtime guardrail**: read-only; reports launcher
+  marker, effective config root, best-effort (non-secret) account context, model, orchestrator,
+  context-mode state, tools/MCP/services, and refreshed durable context; emits
+  `PROFILE CONFIGURATION MISMATCH` when marker/root/account disagree and
+  `UNKNOWN — Claude account context could not be established safely.` when the account cannot be
+  established safely; mutates nothing (no login/logout/switch, no credential read, no settings edit, no
+  plugin install, no commit/push/deploy).
+
+**Not done (by design):** no shell startup file edited; no plugin installed into either root; no
+credential/Keychain/login action; external service identities (GitHub/Railway/Vercel) untouched.
+
+**Empirical finding:** the R2 project-scope context-mode disable does **not** suppress context-mode's
+user-scope `SessionStart`/`PreToolUse` hooks inside an ISAAC session — which validates *root separation*
+(a root that simply never installs context-mode) as the sound control, rather than relying on a
+project-scope disable.
+
+**Snapshot:** the new `isaac-profile` SKILL.md is not in the committed 2026-07-18 served manifest, so it
+does **not** drift the gate (`build_memory_snapshot.py --check` = no drift; `test_committed_snapshot.py`
+green). It enters the manifest only at the single authorized **final** Graphify/snapshot refresh,
+together with `isaac-checkpoint`/`isaac-resume`.
+
+**One manual verification (safe, ~30s, human-run in a real terminal):** a live "fresh process" check was
+not run from inside a Claude session, because launching a new `CLAUDE_CONFIG_DIR` risks a first-run trust
+prompt and nested auth against the shared Keychain. To confirm the SLAC toolset live, a human runs
+`claude-slac` in a terminal and confirms context-mode's tools / SessionStart injection are absent. Static
+config-root inspection already confirms context-mode is not installed in `~/.claude-slac`.
+
+**Authorization update (supersedes the "P25.4 stays BLOCKED" line above by dated note, not rewrite):**
+the 2026-07-20 master authorization lifts the P25.4 block and authorizes **continuous execution** of the
+locked core roadmap (R4.1 → P25.4–P25.10 → Phase 26 → UI Refinement → Stabilization → Documentation &
+Deliverables → one final Graphify/snapshot refresh). Per-slice report → independent review → commit →
+push → exact-HEAD CI → checkpoint is **retained**; the hard-stop gates remain in force; P25.8 stays
+excluded; Convex/institutional infrastructure stay off the core path. This changes execution **cadence
+only** — it introduces no new architectural decision and stays within the decision lock.
