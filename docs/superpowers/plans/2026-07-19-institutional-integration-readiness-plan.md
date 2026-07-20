@@ -1,12 +1,22 @@
-Status: PROPOSED — awaiting approval. No implementation authorized.
-Date: 2026-07-19  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
-Related: 2026-07-16-phases-23-26-arc-decisions.md; P24 specs (P24.9/P24.10 memory-plane); this doc EXTENDS the approved arc as a cross-cutting readiness assessment (it does not reorder or replace the 23→24→25→26 sequence).
-Approval decisions required:
-- Q1 Do we authorize an ISAAC-side "seam-introduction" phase at all (Protocols + default impls, zero behavior change), or keep this doc as pure assessment until an institution engages?
-- Q2 Is durable multi-user persistence (identity + owner + real store) IN SCOPE for ISAAC, or does ISAAC only expose the seams and the institution supplies every backing store?
-- Q3 Confirm the governance walls (uploads-403, 2-fixture source allowlist, synthetic-only) stay CLOSED by default even after seams exist — i.e. seams are dormant until an institution explicitly enables them.
-- Q4 Confirm the ordering constraint: none of these seams may precede or entangle P25 (Grounded Assistant) / P26 (Real Search) unless the user re-prioritises.
-- Q5 Sign off that the truth core (`src/isaac_records/`, `schema/`) is OFF-LIMITS to every slice here.
+Status: PROPOSED — **ASSESSMENT / DOCUMENTATION ONLY.** Direction **DECISION-LOCKED 2026-07-20**:
+**no** speculative seam-introduction phase is authorized. This plan **documents** provider seams,
+ownership, migration requirements, and tests; it introduces **no** seam and modifies no code. None of
+the seam slices S1–S9 is authorized.
+Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+Related: 2026-07-16-phases-23-26-arc-decisions.md; `2026-07-20-remaining-work-decision-lock.md` (authoritative); P24 specs (P24.9/P24.10 memory-plane); this doc EXTENDS the approved arc as a cross-cutting readiness assessment (it does not reorder or replace the 23→24→25→26 sequence).
+
+Approval decisions — **RESOLVED by the 2026-07-20 decision-lock:**
+- Q1 → **NO speculative seam-introduction phase.** Keep this as pure assessment/documentation. A seam
+  is introduced **only** when **(1)** a current approved feature genuinely requires it, or **(2)** SLAC
+  provides concrete requirements, an owner, and authorization. **Verified: no current P25/P26 feature
+  (including the richer synthetic seed and workspace search, which use the existing filesystem
+  workspace functions) requires any seam** — so S1–S9 stay a documented catalog, not a scheduled phase.
+- Q2 → ISAAC **only exposes seams + synthetic/demo defaults**; the institution supplies every backing
+  store. Durable multi-user persistence stays deferred (back-burner).
+- Q3 → **Confirmed.** Governance walls (uploads-403, 2-fixture source allowlist, synthetic-only) stay
+  CLOSED by default; any seam is dormant until an institution explicitly enables it.
+- Q4 → **Confirmed.** No seam precedes or entangles P25/P26.
+- Q5 → **Confirmed.** The truth core (`src/isaac_records/`, `schema/`) is OFF-LIMITS to every slice.
 
 # Institutional Integration Readiness Plan
 
@@ -297,7 +307,7 @@ Part A is the substantive per-area detail; the numbered points below frame the p
 
 **19 Documentation impact.** Add an "Institutional deployment" doc (env matrix + which Protocol to implement per backend) and update `docs/project-memory-map.md` back-burner registry. Do NOT fix the separately-owned stale docs (mentor-brief, final-deliverable-outline, paper-notes) here.
 
-**20 Bite-sized slices.** Each slice: introduce ONE seam as a Protocol + default impl with zero behavior change; independently reviewable/committable; ends at a stop gate. All are gated on Q1 approval and none may modify the truth core.
+**20 Bite-sized slices.** Each slice: introduce ONE seam as a Protocol + default impl with zero behavior change; independently reviewable/committable; ends at a stop gate. **NONE of S1–S9 is authorized (decision-lock 2026-07-20, Q1 = NO speculative phase).** They are a documented *if/when* catalog, activated only when a current approved feature requires the specific seam **or** SLAC provides concrete requirements, an owner, and authorization — and each would then be re-proposed and justified within that feature. All are gated on that trigger and none may modify the truth core.
 
 - **S1 — ExperimentStore seam (foundational).** *Objective:* extract a `ExperimentStore` Protocol + `FilesystemExperimentStore` default + `get_default_store()`; make `Experiment` a pure model. *Files touched:* `workspace.py`, `routes.py` (callsites), new `store.py`, `apps/api/tests/*`. *Files forbidden:* `src/isaac_records/*`, `schema/*`. *Model:* Opus (data-model/architecture-critical). *Acceptance:* all workspace access goes through the store; filesystem behavior byte-identical (paths, seeding, status, 409 immutability). *Tests:* store contract-suite (filesystem + in-memory fake); baseline green. *Report:* diff vs invariants, equivalence evidence, truth-path-untouched confirmation. *Commit:* one commit, `P-inst-S1`. *Stop point:* review before S2.
 - **S2 — Identity principal seam.** *Objective:* `AuthProvider` Protocol + `RequestPrincipal`; default shared-secret provider yields a fixed `local` principal on `request.state`. *Files touched:* `auth.py`, `app.py`, `routes.py`, new `identity.py`, tests. *Forbidden:* truth core, schema. *Model:* Opus (security-sensitive). *Acceptance:* principal available to routes; default = today's shared-secret behavior; `test_deploy_config.py`/`test_memory_api.py:606-614` green. *Tests:* fake provider principal-propagation. *Stop point:* review before S3.
@@ -309,12 +319,12 @@ Part A is the substantive per-area detail; the numbered points below frame the p
 - **S8 — JobRunner (deferred/optional).** *Objective:* `JobRunner` Protocol + `InlineJobRunner` default. *Model:* Sonnet. *Acceptance:* synchronous equivalence. *Stop point:* review. (Build only alongside real A7/A9 async need.)
 - **S9 — Config validation + institutional env docs.** *Objective:* fail-fast config validator (only when non-default provider selected) + env matrix doc + memory institutional-impl contract doc. *Files touched:* new `config.py`, `app.py`, `docs/`, `test_deploy_config.py`. *Forbidden:* truth core, schema. *Model:* Sonnet (docs/mechanical). *Acceptance:* zero-config local dev still boots. *Stop point:* review.
 
-**21 Model/subagent assignment.** Fable orchestrates/reviews/verifies. S1–S6 → Opus 4.8 (architecture/data-model/security/governance). S7–S9 → Sonnet 5 (mechanical/docs). Memory (A8) and search (A9) need no slice here.
+**21 Model/subagent assignment.** Orchestrator = **Fable 5 when available, else Opus 4.8** (reviews/verifies; authors planning markdown; never implements production code). *If and only if* a seam is later authorized: S1–S6 → Opus 4.8 (architecture/data-model/security/governance); S7–S9 → Sonnet 5 (mechanical/docs). Memory (A8) and search (A9) need no slice here.
 
 **22 Acceptance criteria.** Every approved slice: (a) Protocol + default impl with proven byte-identical default behavior; (b) truth core + schema untouched; (c) both isolation tests + full 461/137 baseline green; (d) governance walls still closed by default; (e) independently reviewable and committed alone.
 
-**23 Stop / approval gates.** Gate 0: approve Q1–Q5 before ANY slice. Then a stop gate after each slice (S1→…→S9) — no slice starts before the previous is reviewed and merged. S1 is a hard gate (foundational). S6 is a governance gate (Q3). This plan authorizes NOTHING until Gate 0 passes.
+**23 Stop / approval gates.** **Gate 0 is resolved by the 2026-07-20 decision-lock: assessment/documentation only — NO slice is authorized.** A seam slice may be proposed later only under a §Q1 trigger (a feature requires it, or SLAC authorizes with an owner); if so, each slice then keeps a stop gate (no slice starts before the previous is reviewed and merged; S1 foundational; S6 a governance gate per Q3). Until such a trigger, **this plan authorizes NOTHING.**
 
 **24 Deferred items.** Search provider (A9) → P26. Real backing implementations (DB, IdP, S3, queue, notifier) → institution. Async job runner (S8) until real ingest/index exists. Notifier (S7) until events are consumed. IaC/staging definition. Register these in `docs/project-memory-map.md` back-burner table rather than duplicating.
 
-**25 Explicit questions for the user.** See header Q1–Q5. In short: (Q1) authorize a seam-introduction phase at all? (Q2) does ISAAC own durable persistence or only the seam? (Q3) confirm governance walls stay closed by default? (Q4) confirm no entanglement with P25/P26 ordering? (Q5) confirm truth core is off-limits?
+**25 Explicit questions for the user — RESOLVED (2026-07-20 decision-lock; see header).** (Q1) → **no** speculative seam-introduction phase; assessment/documentation only, seam introduced only when a feature requires it or SLAC authorizes with an owner. (Q2) → ISAAC exposes seams + synthetic defaults only. (Q3) → governance walls stay closed by default. (Q4) → no entanglement with P25/P26. (Q5) → truth core off-limits. **Nothing here is authorized;** re-open only under the two §Q1 triggers.

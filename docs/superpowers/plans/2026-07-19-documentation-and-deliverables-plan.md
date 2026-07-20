@@ -1,7 +1,9 @@
-Status: PROPOSED — awaiting approval. No implementation authorized.
-Date: 2026-07-19  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
-Related: `2026-07-16-phases-23-26-arc-decisions.md` (approved arc, phases 23→24→25→26); `2026-07-16-phase-24-project-memory-design.md`, `2026-07-17-phase-24-9-hosted-project-memory-enablement.md`, `2026-07-19-phase-24-10-memory-freshness-semantics.md` (P24 specs). This doc **EXTENDS** the approved arc with a parallel documentation/deliverables track — it does not renumber or replace phases 25/26.
-Approval decisions required: poster/slide/paper timing vs. Phase 25/26 completion (ties to open D7); paper/poster emphasis (D8, still open); standalone new docs vs. embedded sections for institutional-integration/limitations/security-governance/reproducibility content; figure source tooling (Mermaid+SVG vs. design tool); poster/slide production tool; single- vs. double-pass demo screenshots; explicit go-ahead on the mentor-decisions.md single-line fix. Full list in §25.
+Status: PROPOSED — awaiting approval. Direction **DECISION-LOCKED 2026-07-20** (Docs Tier 0 truth-fixes
+run in parallel now; capstone is the terminal core-path item #5). No implementation authorized; the
+content-bearing deliverables (D7/D8-dependent) still need your input.
+Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+Related: `2026-07-16-phases-23-26-arc-decisions.md` (approved arc, phases 23→24→25→26); `2026-07-20-remaining-work-decision-lock.md` (authoritative); `2026-07-16-phase-24-project-memory-design.md`, `2026-07-17-phase-24-9-hosted-project-memory-enablement.md`, `2026-07-19-phase-24-10-memory-freshness-semantics.md` (P24 specs). This doc **EXTENDS** the approved arc with a parallel documentation/deliverables track — it does not renumber or replace phases 25/26.
+Approval decisions: **the decision-lock places Documentation/Deliverables as the terminal core-path item (#5) with Docs Tier 0 + regression tracks permitted in parallel now.** Still genuinely OPEN (the lock did NOT decide these): poster/slide/paper timing (ties to **D7**); paper/poster emphasis (**D8**); standalone vs. embedded docs for institutional-integration/limitations/security-governance/reproducibility; figure source tooling (Mermaid+SVG vs. design tool); poster/slide production tool; single- vs. double-pass demo screenshots; the `mentor-decisions.md` single-line `26/26`→`33/33` fix. Full list in §25.
 
 # Documentation, Handoff & Deliverables Plan
 
@@ -18,6 +20,14 @@ A scientist or reviewer picking up any doc in `docs/` gets an accurate picture o
 None of this phase touches the truth or memory plane. Its only "architectural" output is *documentation of* the existing two-plane architecture (figures, an institutional-integration guide) — it must describe, never redesign, `src/isaac_records/` or `apps/api/isaac_api/memory.py`.
 
 ## 5. Dependencies
+> **Source-provenance note:** references to `PLANNING-BASELINE.md` throughout this plan point to a
+> session **scratchpad** audit baseline that is **not a committed repo file**. The authoritative,
+> committed baseline is `docs/superpowers/plans/2026-07-20-remaining-work-decision-lock.md` §1 plus
+> `README.md` and `docs/architecture.md`. Verify every count against those (backend **461** / frontend
+> **137** at `f534a4c`; 21 routes → 22 after P26; 9 screens; 19 concepts / 203 served files) rather
+> than the scratchpad; treat the `PLANNING-BASELINE.md` citations below as "the planning baseline as
+> summarized in the decision-lock."
+
 - Tier 0 (fix/verify/produce-now) depends only on the current baseline (`f534a4c`, clean, in sync with `origin/main` — confirmed via `git log --oneline -3` and `git status -sb` at planning time). No implementation dependency.
 - Tier 1 depends on Phase 25 ("Grounded Assistant") shipping — not started per `audit-docs.md` §2.
 - Tier 2 depends on Phase 26 ("Real Search") shipping — not started.
@@ -269,9 +279,9 @@ Acceptance criteria: zero unverified numeric claims; every figure/table referenc
 Stop point: **heavy, likely multi-pass user content/taste review** before this is treated as final.
 
 ## 21. Model/subagent assignment
-Fable: orchestrator, planner, reviewer, verifier for the whole phase — no exceptions.
+Orchestrator (**Fable 5 when available, else Opus 4.8**): planner, reviewer, verifier for the whole phase; authors planning markdown; **does not implement** the deliverable content — that is delegated.
 Sonnet 5: Slices 1, 2, 3, 4 (T1/T2), 9 (draft), 10 (draft), 12, 15 (script text), 16 (draft), 17 (draft), 18 (mechanical insertion).
-Opus: Slices 5, 6, 7, 8, 11, 13, 14, 18 (assembly/consistency pass) — all architecture-sensitive figure/guide work, per the repo's MODEL RULE.
+Opus 4.8: Slices 5, 6, 7, 8, 11, 13, 14, 18 (assembly/consistency pass) — all architecture-sensitive figure/guide work, per the MODEL RULE.
 Visual production tooling (actual poster/slide layout): unassigned pending §25.5 — likely the user directly, or a design-tool integration named later.
 
 ## 22. Acceptance criteria

@@ -1,9 +1,11 @@
 # Phase — Final Product Stabilization & Release (Plan)
 
-Status: PROPOSED — awaiting approval. No implementation authorized.
-Date: 2026-07-19 · Baseline commit: `f534a4c` · Author: Claude (planning)
-Related: `2026-07-16-phases-23-26-arc-decisions.md`; P24 specs; this EXTENDS the approved arc. Runs **after** Phase 25 (Grounded Assistant) and Phase 26 (Workspace + Memory Search) so it stabilizes the *finished* feature set — but the truth-path / deploy / governance regression tracks can start independently at any time.
-Approval decisions required: see §25.
+Status: PROPOSED — awaiting approval. Direction **DECISION-LOCKED 2026-07-20** (required-now vs
+institutional split confirmed; persistence stays ephemeral — richer synthetic seed instead of a
+durable store). No implementation authorized.
+Date: 2026-07-19 (decisions locked 2026-07-20) · Baseline commit: `f534a4c` · Author: Claude (planning)
+Related: `2026-07-16-phases-23-26-arc-decisions.md`; `2026-07-20-remaining-work-decision-lock.md` (authoritative); P24 specs; this EXTENDS the approved arc. Runs **after** Phase 25 (Grounded Assistant) and Phase 26 (Workspace + Memory Search) so it stabilizes the *finished* feature set — but the truth-path / deploy / governance regression tracks can start independently at any time.
+Approval decisions required: see §25 (most now RESOLVED by the decision-lock).
 
 > Authoring note: this plan was written directly by the planning orchestrator after the delegated authoring agent failed to execute twice (returned no work). Content is grounded in the verified `f534a4c` baseline and the repo audits (`scratchpad/audit-*.md`).
 
@@ -56,7 +58,7 @@ No visual change. Verify each screen renders correctly in loading / data / empty
 
 ## 14. Security/governance constraints
 Secret/path/private-data sweep (no secrets committed; snapshot ships metadata-only; `git check-ignore` on generated artifacts); synthetic-only confirmation; truth core stays Graphify-free and authoritative.
-**Judgment call — required-now vs institutional (explicit):**
+**Judgment call — required-now vs institutional (explicit) — LOCKED (decision-lock 2026-07-20):**
 - **Required now (in-core):** honest error/degraded states; deterministic health endpoint; documented rollback; CI gate; secret-hygiene; CORS correctness; the always-403 upload wall.
 - **Deferred to Institutional plan / back-burner (do NOT add to required core):** rate limiting, WAF, third-party monitoring/APM vendors, log aggregation, uptime alerting, autoscaling. Rationale: this is a synthetic, protection-gated demo with a single shared key and ephemeral state; production-ops infra is the institution's responsibility and adding vendor dependencies now would violate the "functional with synthetic/demo providers" target and the dependency-discipline rule. If any single item is wanted for the demo (e.g., a minimal request log), it gets its own justified slice.
 
@@ -66,7 +68,7 @@ Secret/path/private-data sweep (no secrets committed; snapshot ships metadata-on
 - A stabilization bug fix could touch product source — each such fix is a separate reviewed slice, not folded in silently.
 
 ## 16. Tests
-Consolidated E2E workflow test (draft→complete→validate→export→audit); navigation/reload/deep-link tests; keyboard-only walkthrough test; state-matrix tests (loading/error/empty/backend-down × key screens); memory-state matrix (missing/malformed/stale/current); auth-failure/expired-key test; contract-alignment test; snapshot `--check` + committed-snapshot gate (already exists — include in the release run); truth-path regression (existing suite).
+Consolidated E2E workflow test (draft→complete→validate→export→audit); navigation/reload/deep-link tests; keyboard-only walkthrough test; state-matrix tests (loading/error/empty/backend-down × key screens); memory-state matrix (missing/malformed/stale/current); auth-failure/expired-key test; contract-alignment test; snapshot `--check` + committed-snapshot gate (already exists — include in the release run); truth-path regression (existing suite). **Richer synthetic seed verification (decision-lock §5):** confirm the deterministic seed (owned by **Phase 26 / P26.0a**, not re-implemented here) reseeds honestly after restart, is stable across runs, covers the target workflow states, and is clearly synthetic/demo-labeled — the demo's richness comes from this seed, **not** from durable persistence.
 
 ## 17. Verification
 `pytest -q` (backend, repo root), `npx vitest run` + `npm run build` (frontend), `isaac validate --official`, `isaac audit`, `scripts/build_memory_snapshot.py --check`, `scripts/check_graphify_freshness.py`, a manual keyboard-only + reload pass, and a hosted smoke (health commit match + Project Memory axes + a record workflow).
@@ -92,7 +94,7 @@ Each: objective · files touched · files forbidden · model · acceptance · te
 - **S-STAB.11 — Deployment + rollback verification** (deploy a no-op, verify health-commit match, exercise rollback per playbook). Model: Opus. Stop.
 
 ## 21. Model/subagent assignment
-Opus for a11y, performance, security/governance, deployment/rollback judgment; Sonnet for mechanical test authoring, inventories, matrices, checklist formatting. Orchestrator reviews + verifies each slice.
+Orchestrator = **Fable 5 when available, else Opus 4.8** (planner/reviewer/verifier; authors planning markdown; never implements production code). Opus 4.8 (implementation) for a11y, performance, security/governance, deployment/rollback judgment; Sonnet 5 (implementation) for mechanical test authoring, inventories, matrices, checklist formatting. Orchestrator reviews + verifies each slice.
 
 ## 22. Acceptance criteria
 All new + existing tests green in CI; contract alignment proven by test; E2E + state matrices covered; keyboard-only + reload + deep-link verified with evidence; truth-path/schema/export/audit/snapshot regressions green; security/governance checklist signed; `docs/release-checklist.md` exists and was followed once end-to-end; no stale claims remain unflagged.
@@ -104,7 +106,7 @@ Stop after each slice with a report. Hard gate before any hosted deploy in S-STA
 Rate limiting, monitoring/APM vendors, log aggregation, uptime alerting, autoscaling, multi-user load testing → Institutional plan / back-burner. Visual polish → UI-refinement plan. Stale-doc *content rewrites* → Documentation plan (this plan only flags them).
 
 ## 25. Explicit questions for the user
-1. Confirm the required-now vs institutional split in §14 (i.e., NO rate-limiting/monitoring vendors added to the core now)?
-2. Should hosted E2E assume the ephemeral shared workspace (verify honest re-seed) or do you want durable persistence prioritized first (that is the Institutional plan / P-persistence)?
-3. Do you want a CI job added for the frontend/backend contract-alignment test, or keep it local-only?
-4. Is a minimal request/access log wanted for the demo, or explicitly deferred?
+1. ✅ **RESOLVED** — required-now vs institutional split in §14 confirmed (**NO** rate-limiting/monitoring vendors added to the core now).
+2. ✅ **RESOLVED** — hosted E2E assumes the **ephemeral shared workspace** and verifies honest re-seed; durable persistence is **not** prioritized. Demo richness comes from the deterministic richer synthetic seed (Phase 26 / P26.0a), not a durable store.
+3. **OPEN** — add a CI job for the frontend/backend contract-alignment test, or keep it local-only?
+4. **OPEN** — is a minimal request/access log wanted for the demo, or explicitly deferred?

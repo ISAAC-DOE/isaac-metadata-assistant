@@ -1,20 +1,27 @@
 # Phase 26 — Real Workspace + Project Memory Search
 
 ```
-Status: PROPOSED — awaiting approval. No implementation authorized.
-Date: 2026-07-19  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
-Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); P24 specs
-         (2026-07-16-phase-24-project-memory-design.md,
+Status: PROPOSED — awaiting approval. Direction **DECISION-LOCKED 2026-07-20**; no implementation
+authorized (P26.0 is the gate before any P26 code, reached only after Phase 25 completes).
+Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
+         (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
-Approval decisions required:
-  D1. Single grouped GET /api/search route (recommended) vs. two routes.
-  D2. Affordance: ⌘K command palette + a visible TopBar search trigger (recommended) vs. ⌘K only.
-  D3. Sequencing of the dedicated "no-fake-search" test-invariant rewrite (see §20 P26.6 —
-      co-reviewed pair vs. green-per-commit retire-then-replace).
-  D4. Confirm vector/semantic embeddings stay BACK-BURNER (not built this phase). See §7, §24.
-  D5. Confirm search is scoped to the single shared workspace + single memory provider
-      (no per-user scoping; multi-user scoping deferred — depends on greenfield identity). See §14.
-  D6. Confirm NO new env vars and NO new dependencies. See §18.
+
+Approval decisions — **RESOLVED by the 2026-07-20 decision-lock:**
+  D1 → **Single grouped `GET /api/search`** with **internal separate providers/helper layers** for
+       workspace/truth-plane and Project Memory data.
+  D2 → **⌘K + a visible TopBar search trigger** (NOT keyboard-only).
+  D3 → The dedicated "no-fake-search" invariant rewrite (P26.6) is its **own reviewed slice**, run
+       **only after** backend search behavior + visible trigger + working dialog + correct navigation
+       + tests-prove-real-behavior exist. **OPEN sub-item:** the CI-green mechanic (co-reviewed pair
+       with a documented transient red vs. strict green-per-commit).
+  D4 → Vector/semantic embeddings **stay BACK-BURNER** (not built this phase). See §7, §24.
+  D5 → Search is scoped to the **single shared workspace + single memory provider** (no per-user
+       scoping; multi-user deferred — depends on greenfield identity). See §14.
+  D6 → **No new env vars, no new dependencies.** See §18.
+  (Also: a **deterministic richer synthetic seed** is added to this phase — see §6 item 0 and P26.0a —
+   because workspace search is not demonstrable over the single seeded experiment.)
 ```
 
 This plan is the proposed content of the **P26.0 design mini-spec** that the arc requires to
@@ -79,6 +86,14 @@ governing principle (arc §Governing principle) — real API, real keyboard beha
 ## 6. Scope
 
 IN scope:
+0. **Deterministic richer synthetic seed** (decision-lock §5): expand the workspace seed from the
+   single demo experiment to a small deterministic set of synthetic experiments spanning varied
+   workflow states (needs_attention / in_review / ready_to_export / done), exportable **and** blocked
+   records, missing **and** completed fields, and different evidence conditions — so workspace search
+   has real matches and assistant/queue views are meaningful. Uses the **existing filesystem seeding
+   path** (`workspace.py` seed helpers); introduces **no** `ExperimentStore` seam and **no** durable
+   store. Every fixture stays synthetic, deterministic, version-controlled, governed by existing data
+   restrictions, and clearly labeled demo data — never fake product data.
 1. Backend workspace-search core module + typed contract.
 2. Backend memory-search via a new `MemoryReader.search()` Protocol method + both provider impls.
 3. One HTTP route (`GET /api/search`) returning a grouped, plane-labeled envelope.
@@ -205,6 +220,7 @@ Response (200 always when the query is well-formed; degradation is in-body, neve
   "scope": "all",
   "workspace": {
     "plane": "truth",
+    "provider": "workspace-store",              // which provider produced this group (decision-lock: source/provider)
     "available": true,
     "total": 12, "returned": 10, "limit": 10, "offset": 0,
     "results": [
@@ -221,12 +237,14 @@ Response (200 always when the query is well-formed; degradation is in-body, neve
           "reason": "matched draft field value" // human "why this matched"
         },
         "navigate_to": "/record/<id>/evidence", // client deep-link
-        "plane": "truth"
+        "plane": "truth",
+        "source": "workspace-store"             // provider that produced this result (typed source/provider)
       }
     ]
   },
   "memory": {
     "plane": "memory",
+    "provider": "memory:<resolved-reader-id>",  // which MemoryReader produced this group (source/provider)
     "note": "<MEMORY_NOTE — leads to verify, never a verdict>",
     "available": false,
     "reason": "graph_absent",                   // or graph_unreadable / unsupported / null
@@ -236,14 +254,22 @@ Response (200 always when the query is well-formed; degradation is in-body, neve
       // { "kind":"concept"|"file"|"rationale", "id":…|null, "path":…|null, "label":…,
       //   "community_name":…|null,
       //   "match": {"field":"concept.label","snippet":"…","reason":"matched concept label"},
-      //   "navigate_to":"/memory?concept=<id>"  |  "/memory?file=<path>", "plane":"memory" }
+      //   "navigate_to":"/memory?concept=<id>"  |  "/memory?file=<path>",
+      //   "plane":"memory", "source":"memory:<resolved-reader-id>" }
     ]
   }
 }
 ```
 Contract invariants:
+- **Typed result metadata (decision-lock):** every result carries enough typed metadata to identify
+  **result kind · plane · source/provider · stable identifier · title/label · snippet · why it
+  matched (`match.reason`) · navigation target (`navigate_to`)**, and each group carries its own
+  **availability/caveat** (`available`/`reason`, plus `note` for memory). The two groups stay clearly
+  separated (never merged/interleaved) and one group may be `available:false` while the other returns
+  results — partial results are reported honestly.
 - **No verdict keys anywhere** — never emit `ok/valid/passed/verdict/schema/errors`; never emit
-  PASS/FAIL text (mirrors the memory plane's contract, audit-architecture §1).
+  PASS/FAIL text; search results are **never** presented as validation findings (mirrors the memory
+  plane's contract, audit-architecture §1).
 - `scope=workspace` omits the memory group's results (group present, `available` still reported);
   `scope=memory` omits workspace results. Default `all`.
 - **Query guards**: `q` normalized (Unicode NFC, lowercased, whitespace-collapsed). Min length 2
@@ -322,8 +348,11 @@ the route runs).
 4. **The dedicated test-invariant rewrite sequencing** (transient red between UI + test slices).
    *Mitigate*: §20 P26.6 + open question D3.
 5. **Performance** if the workspace grows large (O(N) scan + per-experiment loads).
-   *Mitigate*: demo scale is tiny (auto-seeds ONE experiment); hard result caps; lazy per-experiment
+   *Mitigate*: demo scale stays tiny — the richer synthetic seed (§6 item 0 / P26.0a) adds only a
+   small, deterministic handful of experiments (not hundreds); hard result caps; lazy per-experiment
    loads short-circuit on the summary; document a future index as back-burner (§24). No index built.
+   *(Baseline note: today the workspace auto-seeds exactly ONE experiment; searching over one hit is
+   why the richer seed is required for a meaningful demo.)*
 6. **⌘K conflicts** with browser/OS shortcuts. *Mitigate*: standard command-palette pattern
    (`preventDefault` only when our dialog handles it), visible trigger fallback, ESC to close.
 7. **Ephemeral shared hosted workspace** means search reflects only the shared demo state
@@ -395,6 +424,25 @@ is isolated per arc decision #10.
 - **Model**: Fable (orchestrator). **Acceptance**: user approval recorded. **Tests**: none.
 - **Report**: decisions resolved. **Commit**: docs commit if edited. **Stop**: HARD gate — no
   implementation until approved.
+
+### P26.0a — Deterministic richer synthetic seed (data-only; decision-lock §5)
+- **Objective**: expand `workspace.py` seeding from one demo experiment to a small **deterministic**
+  set of synthetic experiments covering varied states (needs_attention / in_review / ready_to_export
+  / done), exportable **and** blocked records, missing **and** completed fields, and different
+  evidence conditions — enough for meaningful workspace-search matches, queue views, and assistant
+  answers. Add any new synthetic fixtures needed (unmistakably fake, deterministic). Uses the existing
+  filesystem seeding path; introduces **no** `ExperimentStore` seam and **no** durable persistence.
+- **Files touched**: `apps/api/isaac_api/workspace.py` (seed helpers), new committed synthetic
+  fixtures under `tests/fixtures/` or `apps/api/isaac_api/data/`, `apps/api/tests/*` (seed
+  determinism + state-coverage tests). **Forbidden**: `src/isaac_records/*`, `schema/*`, `memory.py`,
+  `auth.py`, any durable store or new env var.
+- **Model**: Opus 4.8 (data-model/governance-sensitive — must stay synthetic, deterministic, and not
+  become fake product data). **Acceptance**: seeding is deterministic (stable ids/order across
+  restarts); every seeded experiment is clearly synthetic/demo-labeled; each target workflow state is
+  represented; `examples/` untouched; backend suite green. **Governance**: report which fixtures were
+  added and that all are synthetic. **Report**: the seed catalog + determinism evidence. **Commit**:
+  single. **Stop**: review before P26.1. *(Placement in Phase 26 is decided by the decision-lock;
+  Stabilization only verifies it — it is not re-implemented there.)*
 
 ### P26.1 — Workspace search core (no route)
 - **Objective**: `apps/api/isaac_api/search.py` — pure `workspace_search(query, experiments, loaders,
@@ -474,11 +522,12 @@ is isolated per arc decision #10.
 
 ## 21. Model / subagent assignment
 
-- Fable 5: orchestrator/planner/reviewer/verifier; the P26.0 gate; reviews every slice diff.
-- Opus 4.8: P26.1, P26.2, P26.3 (search architecture, governance, honest degradation), P26.5, P26.6
-  (UX/a11y/honesty-sensitive).
-- Sonnet 5: P26.4 (mechanical client wiring), P26.7 (docs).
-- Every slice independently assignable/reviewable/verifiable/committable with a stop gate (arc MODEL RULE).
+- Orchestrator (**Fable 5 when available, else Opus 4.8**): planner/reviewer/verifier; the P26.0
+  gate; reviews every slice diff. Authors planning markdown; **never implements production code**.
+- Opus 4.8 (implementation): P26.0a (synthetic seed — governance-sensitive), P26.1, P26.2, P26.3
+  (search architecture, governance, honest degradation), P26.5, P26.6 (UX/a11y/honesty-sensitive).
+- Sonnet 5 (implementation): P26.4 (mechanical client wiring), P26.7 (docs).
+- Every slice independently assignable/reviewable/verifiable/committable with a stop gate (MODEL RULE).
 
 ## 22. Acceptance criteria (phase)
 
@@ -513,22 +562,21 @@ is isolated per arc decision #10.
 - Full graph explorer / raw network visualization (arc decision #6, back-burner).
 - Update `docs/project-memory-map.md` back-burner table accordingly (do not silently drop items).
 
-## 25. Explicit questions for the user
+## 25. Explicit questions for the user — RESOLVED (2026-07-20 decision-lock)
 
-1. **D1** — Single grouped `GET /api/search` route (recommended, matches "group workspace vs memory"
-   + "honest when one provider is down"), or two separate routes?
-2. **D2** — Affordance: ⌘K **plus** a visible TopBar "Search ⌘K" trigger (recommended for
-   discoverability), or ⌘K only? Any objection to leaving `/` unbound?
-3. **D3** — Sequencing for the dedicated invariant rewrite (P26.5 feature → P26.6 rewrite): prefer
-   (a) co-reviewed pair merged together with a documented transient red between commits, or
-   (b) strict green-per-commit "retire absence assertions first, then add UI + functional
-   assertions" (splits removal and replacement across two commits)? Arc decision #10 wants remove +
-   replace in one dedicated slice, which favors (a).
-4. **D4** — Confirm vector/semantic search stays BACK-BURNER (not built this phase)?
-5. **D5** — Confirm search is scoped to the single shared workspace + single memory provider (no
-   per-user scoping; UI must not imply otherwise) until identity/persistence exist?
-6. **D6** — Confirm NO new env vars and NO new dependencies for this phase?
-7. Result caps/pagination defaults: per-group hard cap and default page size (proposed: cap 50,
-   page 10) — acceptable, or different?
-8. Minimum query length (proposed: 2 chars) — acceptable?
+1. **D1** ✅ **Single grouped `GET /api/search`** with internal separate providers.
+2. **D2** ✅ **⌘K + a visible TopBar "Search ⌘K" trigger** (not keyboard-only); `/` left unbound.
+3. **D3** ✅ Rewrite is a **dedicated reviewed slice (P26.6), after** real behavior/trigger/dialog/
+   navigation/tests exist. **OPEN sub-item:** the CI-green mechanic — (a) co-reviewed pair with a
+   documented transient red, or (b) strict green-per-commit. Arc decision #10 favors (a); confirm at
+   P26.0.
+4. **D4** ✅ Vector/semantic search stays **BACK-BURNER** (not built).
+5. **D5** ✅ Scoped to the **single shared workspace + single memory provider**; UI must not imply
+   per-user results.
+6. **D6** ✅ **No new env vars, no new dependencies.**
+7. **OPEN** — Result caps/pagination defaults (proposed cap 50, page 10) — confirm at P26.0.
+8. **OPEN** — Minimum query length (proposed 2 chars) — confirm at P26.0.
+9. **NEW (decision-lock)** — a **deterministic richer synthetic seed** is added (§6 item 0 / P26.0a),
+   **placed in Phase 26** (Stabilization verifies, does not re-implement). **OPEN:** only the exact
+   target state-coverage / number of synthetic experiments — confirm at P26.0.
 ```

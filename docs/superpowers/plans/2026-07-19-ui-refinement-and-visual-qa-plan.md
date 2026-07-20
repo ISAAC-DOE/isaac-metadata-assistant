@@ -1,14 +1,17 @@
 # UI Refinement & Visual-QA Audit / Backlog Plan
 
-Status: PROPOSED — awaiting approval. No implementation authorized.
-Date: 2026-07-19  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
-Related: 2026-07-16-phases-23-26-arc-decisions.md; P24 specs; this doc EXTENDS the approved arc (it is a cross-cutting quality pass, not a new product plane).
-Approval decisions required:
-1. Approve the audit rubric + breakpoint matrix + state matrix (Slice 0 gate) before any screenshot capture.
-2. Confirm this is **audit-only first**: no CSS/source change until the consolidated CRITICAL/MEDIUM/OPTIONAL backlog is reviewed and you select items.
-3. Confirm screenshots run against the **synthetic demo seed only** (no real/private SLAC data, no fabricated rows for polish).
-4. Decide sequencing vs P25/P26: the Assistant-presentation and future-search-dialog audits partly depend on those phases landing. See §5, §24, §25.
-5. All aesthetic/taste calls (density, accent restraint, dark-mode scope, type scale) are deferred to you at the consolidation gate — this plan sets up the review, it does not pre-decide look.
+Status: PROPOSED — awaiting approval. Direction **DECISION-LOCKED 2026-07-20** (audit-first
+confirmed; dark mode deferred; no dedicated projector breakpoint unless a finding requires it). No
+implementation authorized.
+Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+Related: 2026-07-16-phases-23-26-arc-decisions.md; `2026-07-20-remaining-work-decision-lock.md` (authoritative); P24 specs; this doc EXTENDS the approved arc (it is a cross-cutting quality pass, not a new product plane).
+
+Approval decisions — **RESOLVED by the 2026-07-20 decision-lock** (process/scope), with aesthetic/taste calls still yours at the Slice-K gate:
+1. Rubric + breakpoint matrix + state matrix still gate at Slice 0 (you approve them before capture). **Note:** "projector-wide" is a QA *capture* width, **not** a pre-committed new breakpoint — a dedicated projector breakpoint is proposed only if the audit finds a concrete readability/layout problem existing responsive behavior cannot solve.
+2. ✅ **Audit-only first** — no CSS/source change until the consolidated CRITICAL / MEDIUM / OPTIONAL backlog is reviewed and you select items (workflow: capture → screenshot-backed findings → classify → propose backlog → **stop for your visual/taste review** → implement only approved).
+3. ✅ Screenshots run against the **synthetic demo seed only** (no real/private SLAC data, no fabricated rows for polish).
+4. ✅ Sequencing: this pass runs **after P25 + P26** (per the master order) so the audit reviews the complete functional product; a lightweight baseline capture MAY run in parallel earlier, but the binding backlog is post-A+B.
+5. ✅ **Dark mode stays deferred.** All other aesthetic/taste calls (density, accent restraint, type scale, breakpoint widths) are deferred to you at the consolidation gate — this plan sets up the review, it does not pre-decide look. Preserve the light-first scientific-workbench design, subtle/minimal/premium presentation, truth-vs-advisory semantics, accessibility, and existing functionality; no broad redesign without separate approval.
 
 ---
 
@@ -254,7 +257,7 @@ Each slice is one subagent, independently reviewable/committable, with a visual-
 
 ## 21. Model / subagent assignment
 
-Fable = orchestrator/planner/reviewer/verifier. Opus 4.8 = accessibility/contrast, signal-separation, dense-surface, and synthesis slices (A–F, H, I, J, K + sensitive refinements). Sonnet 5 = harness setup and light/minimal surfaces (Slice 0, G, mechanical refinement clusters). Every slice independently assignable/reviewable/verifiable/committable with an explicit stop gate (baseline §MODEL RULE).
+Orchestrator (**Fable 5 when available, else Opus 4.8**) = planner/reviewer/verifier; authors planning markdown; never implements. Opus 4.8 = accessibility/contrast, signal-separation, dense-surface, and synthesis slices (A–F, H, I, J, K + sensitive refinements). Sonnet 5 = harness setup and light/minimal surfaces (Slice 0, G, mechanical refinement clusters). **Any Claude-in-Chrome / browser screenshot work uses Opus 4.8 or Sonnet 5** (decision-lock). Every slice independently assignable/reviewable/verifiable/committable with an explicit stop gate (MODEL RULE).
 
 ## 22. Acceptance criteria
 
@@ -283,14 +286,15 @@ No slice proceeds past its gate without explicit user approval (baseline §Phase
 ## 25. Explicit questions for the user
 
 Taste / aesthetic (these will not be decided without you):
-1. **Breakpoints** — approve target widths, and is a "projector-wide" (demo) breakpoint in scope? What is the demo display resolution?
-2. **Density preference** — do you want tighter/denser tables and field lists (more on screen) or more breathing room? This drives most spacing findings and is a pure taste call.
-3. **Dark mode** — in or out of scope for this pass? Tokens are light-only today; adding dark mode is a larger effort and would need its own approval.
-4. **Type scale / font** — keep the current type ramp and font stack, or is refining the typographic hierarchy (heading sizes, weights) on the table?
-5. **Accent restraint** — how minimal? Any brand/institutional palette to align the accent and advisory/needs-you ambers toward, or hold the current tokens?
+Still OPEN (taste — for you at the Slice-0 / Slice-K gates):
+1. **Breakpoints** — approve target widths and the demo display resolution. (Locked: large-screen/projector QA is IN as a *capture* width; a dedicated projector *breakpoint* is proposed only if a concrete finding needs it — not pre-committed.)
+2. **Density preference** — tighter/denser tables and field lists, or more breathing room? Pure taste call.
+4. **Type scale / font** — keep the current ramp and font stack, or refine the typographic hierarchy?
+5. **Accent restraint** — how minimal? Any brand/institutional palette to align accent + advisory/needs-you ambers toward, or hold the current tokens?
+8. Screenshot evidence set — **committed** to the repo or kept in the scratchpad and referenced only? (Synthetic-only either way.)
+9. Any screens you already feel are weakest and want prioritized into CRITICAL regardless of the rubric?
 
-Process / scope:
-6. Confirm **audit-only first** (no CSS change until the Slice K backlog is reviewed).
-7. Sequencing: run this pass **before**, **after**, or **parallel to** P25/P26? (Affects whether Assistant/search audits are re-run.)
-8. Should the screenshot evidence set be **committed** to the repo, or kept in the scratchpad and referenced only? (It is synthetic-only either way.)
-9. Are there specific screens you already feel are weakest and want prioritized into CRITICAL regardless of the rubric?
+RESOLVED (2026-07-20 decision-lock):
+3. **Dark mode** — ✅ **deferred** (out of scope this pass; tokens light-only; separate approval if ever).
+6. **Audit-only first** — ✅ **confirmed** (no CSS change until the Slice-K backlog is reviewed).
+7. **Sequencing** — ✅ run **after P25 + P26** (baseline capture may run earlier in parallel; binding backlog is post-A+B).

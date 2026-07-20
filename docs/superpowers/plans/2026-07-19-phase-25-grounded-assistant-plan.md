@@ -1,14 +1,15 @@
 # Phase 25 — Grounded Assistant — Implementation Plan
 
-Status: PROPOSED — awaiting approval. No implementation authorized.
-Date: 2026-07-19  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
-Related: 2026-07-16-phases-23-26-arc-decisions.md; P24 specs (24 / 24.9 / 24.10); this doc EXTENDS the approved arc.
-Approval decisions required:
-- Q1 — Extend the `AssistantSource` enum with an advisory (and history) label, or keep 5 and map advisory onto an existing label? (see §12, §25)
-- Q2 — Mount the assistant on the 3 non-record top-level screens (My Experiments, Load Materials, Project Memory), which needs AppShell layout work, or defer those to a follow-on and ship P25-core on the 4 record surfaces only? (see §13, §25)
-- Q3 — Confirm the composer is pure-frontend (zero new backend endpoint / zero truth-path change). Recommended. (see §11, §25)
-- Q4 — Confirm hard-removal of the disabled free-text input per arc item 8, replaced with "Guided prompts only" framing. (see §13, §25)
-- Q5 — Approve the P25.0 design/spec deliverable as the single gate before any P25 implementation. (see §23)
+Status: PROPOSED — awaiting approval. Direction **DECISION-LOCKED 2026-07-20**; P25.0 (design/spec) is the only authorized next step, and no production code (P25.1+) is authorized.
+Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+Related: 2026-07-16-phases-23-26-arc-decisions.md; `2026-07-20-remaining-work-decision-lock.md` (authoritative); P24 specs (24 / 24.9 / 24.10); this doc EXTENDS the approved arc.
+
+Approval decisions — **RESOLVED by the 2026-07-20 decision-lock:**
+- Q1 → **YES.** Add `'advisory'` to `AssistantSource`, **and** add a distinct **artifact/workflow-state** label so the five source categories (truth · evidence · advisory · artifact/workflow · Project Memory) are each honestly labeled. Keep `'git'` for history. (Exact enum spelling of the artifact/workflow label = a P25.0 finalization item.) (see §12)
+- Q2 → **RESOLVED (mount set).** Prioritize the 4 record surfaces (Review Record, Complete Missing Fields, Evidence & File Preview, Ready to Export) **plus Project Memory where appropriate**. Do **NOT** mount on My Experiments, Load Materials, Settings, or Governance merely for visual consistency; such a screen gets the assistant only if P25.0 identifies specific useful inputs, deterministic outputs, and user value. (see §6, §13, §20)
+- Q3 → **CONFIRMED.** Pure-frontend composer; zero new backend endpoint; zero truth-path change. (see §11)
+- Q4 → **CONFIRMED.** Hard-remove the disabled free-text input; use honest `Guided Prompts Only` framing. (see §13)
+- Q5 → **APPROVED.** P25.0 is the single design/spec gate before any P25 implementation. (see §23)
 
 ---
 
@@ -84,10 +85,13 @@ In scope:
    that maps `(screenContext, alreadyFetchedBundle)` → `{ reply, prompts }` via fixed templates.
 2. **Per-screen guided-chip catalogs** grounded in that screen's live data.
 3. **Free-text input removal** + "Guided prompts only" framing (arc item 8).
-4. Wiring the composer into the record surfaces that host the panel today (Review, Export) and the
-   record surfaces that should host it (Evidence, Complete Missing Fields).
-5. Optionally (Q2) mounting a grounded assistant context on the top-level screens (My Experiments,
-   Load Materials, Project Memory).
+4. Wiring the composer into the **prioritized surfaces**: the record surfaces that host the panel
+   today (Review, Export), the record surfaces that should host it (Evidence, Complete Missing
+   Fields), **and Project Memory where appropriate** (memory-caveated).
+5. **Excluded by default (decision-lock):** the assistant is **not** mounted on My Experiments, Load
+   Materials, Settings, or Governance for visual consistency. Any such non-record screen is mounted
+   **only** if P25.0 identifies specific useful inputs, deterministic outputs, and user value — an
+   explicit, separately-approved addition, not part of P25-core.
 6. Retiring the static `ASSISTANT_SAMPLES` table and migrating the dev-sanity guard.
 7. Unit + screen-integration + regression tests; full verification; docs update; deploy gate.
 
@@ -211,22 +215,26 @@ and disables chips whose data is not present — reusing the existing `disabled=
 - **Composer output type:** reuses `AssistantMessage` / `SuggestedPrompt` (`types.ts:164-176`) so
   `AssistantPanel` props are unchanged (`{ reply, prompts, availability, note? }`). This keeps the
   component contract stable and the change localized to *how* `reply`/`prompts` are produced.
-- **Source-label taxonomy** (rendered as `answered from: <source>`), distinguishing the four required
-  planes plus history:
+- **Source-label taxonomy** (rendered as `answered from: <source>`). The 2026-07-20 lock requires the
+  taxonomy to clearly distinguish **five source categories** — truth state · evidence · advisory ·
+  artifact/workflow state · Project Memory — plus an auxiliary history label:
 
-  | Plane | Meaning | `answeredFrom` label | Backing endpoint(s) |
+  | Source category | Meaning | `answeredFrom` label | Backing endpoint(s) |
   |---|---|---|---|
-  | **Truth** | schema validity gate, deterministic checks | `schema` | `/validate`, official schema |
-  | **Truth (reporting)** | evidence coverage counts (info, not a verdict) | `audit` | `/audit` |
+  | **Truth state** | schema validity gate, deterministic checks | `schema` | `/validate`, official schema |
+  | **Truth state (reporting)** | evidence coverage counts (info, not a verdict) | `audit` | `/audit` |
   | **Evidence** | per-field provenance, cited source lines, draft field origin | `files` | `/evidence`, `/source-preview`, `/draft` |
-  | **Advisory** | soft non-gating warnings | `advisory` *(new — Q1)* or mapped | `/warnings` |
-  | **Memory** | concepts, availability, provenance, drift | `graph` | `/graph/status`, `/memory/*` |
-  | **History** | "what changed" | `git` *(existing, low-use)* | git-derived docs |
+  | **Advisory** | soft non-gating warnings | `advisory` *(new)* | `/warnings` |
+  | **Artifact / workflow state** | record/experiment status, exported artifacts, export-readiness | `workflow` *(new — exact spelling set at P25.0)* | `/experiments/{id}`, `/artifacts`, `/export` readiness |
+  | **Project Memory** | concepts, availability, provenance, drift | `graph` | `/graph/status`, `/memory/*` |
+  | **History** *(auxiliary)* | "what changed" | `git` *(existing, low-use)* | git-derived docs |
 
-  **Q1 decision:** the current enum (`schema|audit|git|graph|files`) has no dedicated **advisory**
-  label; warnings would otherwise be mislabeled `schema`. Recommend adding `'advisory'` (and keeping
-  `git` for history). Alternative: keep 5 and label advisory as `files`/`schema` (rejected — muddies
-  the plane distinction the guard/UX depends on).
+  **Q1 decision (LOCKED):** the pre-P25 enum (`schema|audit|git|graph|files`) had no dedicated
+  **advisory** label (warnings would be mislabeled `schema`) and no **artifact/workflow-state** label
+  (status/artifacts/export-readiness would be conflated with truth). The lock adds **`'advisory'`**
+  and a distinct **artifact/workflow-state** label (proposed `'workflow'`; final spelling is a P25.0
+  item), keeping `git` for history. Mapping advisory/workflow onto `files`/`schema` is rejected — it
+  muddies the plane/category distinction the guard and UX depend on.
 
 - **Value-echo restrictions (hard rules):**
   - MAY echo values **verbatim** that already exist in fetched state: pending-field paths, validate
@@ -245,12 +253,9 @@ and disables chips whose data is not present — reusing the existing `disabled=
 ### Screen contexts + guided chips (per context)
 
 Each context ships a small fixed chip catalog. Chips are authored, not generated; their *answers* are
-composed live. Representative catalogs (final wording set at P25.0):
+composed live. Representative catalogs (final wording set at P25.0).
 
-- **My Experiments** (Q2): "What needs me next?" (→ statuses/pending counts across the queue),
-  "How do I start a new record?" (→ Load Materials). *Memory chips only if graph available.*
-- **Load Materials**: "Why is upload blocked here?" (→ echoes the 403 governance reason verbatim),
-  "What does the synthetic demo contain?" (→ echoes demo dataset label).
+**Prioritized surfaces (decision-lock):**
 - **Review Record** (RecordWorkbench): "Explain the fields that need me" (→ live pending paths),
   "Trace a field to its source" (→ evidence for selected field), "What's left before export?"
   (→ blocker count from validate). "Is this record valid yet?" stays a **routed** truth chip.
@@ -263,9 +268,15 @@ composed live. Representative catalogs (final wording set at P25.0):
 - **Ready to Export** (ExportReadiness): "What does the verdict mean here?" (routed), "Is coverage the
   same as valid?" (→ explains, echoes live coverage), "Explain the advisory warning" (→ echoes live
   warning codes). Keeps `ROUTE_TO_CLI_NOTE`.
-- **Project Memory** (Q2): "Where do these leads come from?" (→ provenance/anchor), "Is memory current?"
-  (→ echoes `memory_policy`/`indexed_sources`/drift, non-alarming), "Why is memory unavailable?"
-  (→ honest availability). All carry the memory caveat (below).
+- **Project Memory** (where appropriate): "Where do these leads come from?" (→ provenance/anchor),
+  "Is memory current?" (→ echoes `memory_policy`/`indexed_sources`/drift, non-alarming), "Why is
+  memory unavailable?" (→ honest availability). All carry the memory caveat (below).
+
+**Excluded by default (decision-lock — NOT mounted for visual consistency):** My Experiments, Load
+Materials, Settings, Governance. Each is mounted **only** if P25.0 identifies specific useful inputs,
+deterministic outputs, and user value for that screen. Illustrative catalogs to weigh **at P25.0**
+(not authorized here): My Experiments — "What needs me next?" (→ statuses/pending counts across the
+queue); Load Materials — "Why is upload blocked here?" (→ echoes the 403 governance reason verbatim).
 
 ### Allowed vs forbidden input types
 
@@ -400,24 +411,40 @@ composed live. Representative catalogs (final wording set at P25.0):
 
 Each slice: objective · files touched · files forbidden · model · acceptance · tests · report · commit · stop.
 
-- **P25.0 — Design/spec approval gate (DESIGN ONLY — the single gate before implementation).**
-  - Objective: produce the P25 design mini-spec in `docs/superpowers/specs/2026-07-19-phase-25-grounded-assistant-design.md`:
-    finalized composer contract + `GroundedQuery`/`GroundingState` shapes, per-context chip catalog +
-    exact template wording (CP-A), source-label taxonomy decision (Q1), free-text removal decision
-    (Q4), top-level-screen decision (Q2), pure-frontend decision (Q3). No production code.
-  - Files touched: the spec doc only. Forbidden: everything under `apps/`, `src/`, `schema/`.
-  - Model: Opus (design/UX/governance-sensitive). Acceptance: user approves the spec. Tests: none
-    (doc). Report: spec path + the resolved Q1–Q4. Commit: docs-only, on approval. **STOP for user
-    review — no implementation until approved.**
+> **First-code-slice reconciliation (decision-lock 2026-07-20):** the authoritative first *code*
+> slice is **P25.1 = deterministic composer skeleton + source-label rendering on RecordWorkbench**
+> (one screen, behind the existing verdict guard, fully unit-tested, no new backend contract) — this
+> matches the master roadmap §14 and the decision-lock. The earlier "pure unwired scaffold then wire"
+> split has been folded into P25.1 (the pure `compose()` module is still TDD'd first, then wired to
+> RecordWorkbench within the same slice). Nothing here is authorized until P25.0 is approved.
 
-- **P25.1 — Composer scaffold + types (pure module, unwired).**
-  - Objective: add `lib/assistantComposer.ts` (pure `compose()` + resolvers) and composer types; add
-    the source-label enum extension if Q1=yes. Keep `ASSISTANT_SAMPLES` in place, still used by
-    screens (no behavior change yet).
-  - Files: `lib/assistantComposer.ts` (new), `lib/types.ts`, `lib/assistant.ts` (enum only if needed).
-    Forbidden: screens, backend, truth path. Model: Opus. Acceptance: composer compiles, fully
-    unit-tested against fixtures, imported nowhere yet. Tests: `assistantComposer.test.ts`. Report:
-    module surface + coverage. Commit: after tests green. Stop: review before wiring.
+- **P25.0 — Design/spec approval gate (DESIGN ONLY — the single gate before implementation).**
+  - Objective: produce the P25 design mini-spec in `docs/superpowers/specs/2026-07-20-phase-25-grounded-assistant-design.md`.
+    It must define (per the decision-lock): the finalized deterministic composer contract +
+    `GroundedQuery`/`GroundingState` shapes; the **5-category source-label taxonomy** (truth · evidence
+    · advisory · artifact/workflow · Project Memory) incl. the exact new enum spellings (`advisory`,
+    artifact/workflow label); exact **per-screen contexts**; **guided-prompt chip catalogs**; **answer
+    templates**; **allowed input fields**; **value-echo / no-verdict rules**; **caveat rules** incl.
+    memory-policy & indexed-source caveats; **unavailable & unknown behavior**; **copy-density limits**;
+    **accessibility behavior**; **tests**; the **bite-sized P25.1+ slices**; **approval questions**; and
+    **visual/copy examples** for review. No production code.
+  - Files touched: the spec doc only. Forbidden: everything under `apps/`, `src/`, `schema/`.
+  - Model: Opus (design/UX/governance-sensitive) + Opus product-copy review. Acceptance: user approves
+    the spec. Tests: none (doc). Report: spec path + the finalized taxonomy/chips/templates. Commit:
+    docs-only, on approval. **STOP for user review — no implementation until approved.**
+
+- **P25.1 — Deterministic composer skeleton + source-label rendering on RecordWorkbench.**
+  - Objective: add `lib/assistantComposer.ts` (pure `compose()` + resolvers) + composer types + the
+    source-label enum extensions (`advisory` + artifact/workflow label), TDD'd as a pure module, **then
+    wire it into RecordWorkbench** (replacing `ASSISTANT_SAMPLES.review`) so the assistant renders
+    live, source-labeled answers on that one screen behind the existing verdict guard. No new backend
+    contract. Other screens keep `ASSISTANT_SAMPLES` for now.
+  - Files: `lib/assistantComposer.ts` (new), `lib/types.ts`, `lib/assistant.ts` (enum), `lib/labels`
+    if needed, `screens/RecordWorkbench.tsx`; tests. Forbidden: other screens, backend, truth path.
+    Model: Opus. Acceptance: composer fully unit-tested against fixtures; RecordWorkbench chips answer
+    from live pending/evidence/blocker state; guard-clean; CP-B. Tests: `assistantComposer.test.ts` +
+    extend `live-screens.test.tsx`. Report: module surface + coverage + RecordWorkbench behavior.
+    Commit: after tests green. Stop: review before wiring further screens.
 
 - **P25.2 — Free-text removal + "Guided prompts only" framing (arc item 8).**
   - Objective: remove the disabled input/send block from `AssistantPanel.tsx` + `assistant.css`; add
@@ -428,11 +455,9 @@ Each slice: objective · files touched · files forbidden · model · acceptance
     backend. Model: Sonnet (mechanical + copy). Acceptance: no input in DOM; guided-only text present;
     a11y intact. Tests: updated regression. Report: diff + test delta. Commit: yes. Stop: review.
 
-- **P25.3 — Ground the Review context (RecordWorkbench).**
-  - Objective: replace `ASSISTANT_SAMPLES.review` with `compose('review', bundle)` from the
-    already-fetched `getRecordBundle`. Files: `screens/RecordWorkbench.tsx`; screen test. Forbidden:
-    other screens, backend. Model: Opus. Acceptance: chips answer from live pending/evidence/blocker
-    state; guard-clean; CP-B. Tests: extend `live-screens.test.tsx`. Report + commit + stop.
+- **P25.3 — (FOLDED INTO P25.1.)** RecordWorkbench grounding is now delivered together with the
+  composer skeleton in P25.1 per the decision-lock's first-code-slice definition. This ID is retained
+  as a tombstone so P25.4–P25.8 keep their numbers; there is no separate P25.3 work.
 
 - **P25.4 — Ground the Export context (ExportReadiness).**
   - Objective: replace `ASSISTANT_SAMPLES.export` with `compose('export', bundle)`; keep
@@ -452,16 +477,22 @@ Each slice: objective · files touched · files forbidden · model · acceptance
     describe blockers; confirm/skip flow in `GuidedPrompt.tsx` untouched. Tests: extend
     `completion-export.test.tsx`. CP-B. Report + commit + stop.
 
-- **P25.7 — (Q2, optional) Top-level contexts: My Experiments + Load Materials.**
-  - Objective: mount grounded assistant on the queue + load screens; requires an AppShell layout slice
-    for the `full` variant. Files: `screens/ExperimentsHome.tsx`, `screens/LoadMaterials.tsx`,
-    `components/AppShell.tsx`, tests. Model: Opus. Acceptance: layout intact, answers grounded in
-    queue/demo state. **Deferrable per Q2.** Report + commit + stop.
+- **P25.7 — Project Memory context (PRIORITIZED — where appropriate).**
+  - Objective: mount a grounded, memory-caveated assistant on `ProjectMemory`, wiring
+    `compose('memory', graphStatus/concepts/files)`. Files: `screens/ProjectMemory.tsx`, test. Model:
+    Opus. Acceptance: availability/drift/provenance echoed, non-alarming, carries the leads-to-verify
+    caveat; mounted only where it adds real grounded value (per the decision-lock "where appropriate").
+    Tests: extend `memory-concepts.test.tsx`/screen test. CP-B. Report + commit + stop.
 
-- **P25.8 — (Q2, optional) Project Memory context.**
-  - Objective: mount grounded, memory-caveated assistant on `ProjectMemory`. Files:
-    `screens/ProjectMemory.tsx`, test. Model: Opus. Acceptance: availability/drift/provenance echoed,
-    non-alarming, carries the leads-to-verify caveat. **Deferrable per Q2.** Report + commit + stop.
+- **P25.8 — (NOT AUTHORIZED by default) Non-record screens: My Experiments / Load Materials.**
+  - Status: **excluded by the 2026-07-20 decision-lock** — the assistant is not mounted on My
+    Experiments, Load Materials, Settings, or Governance merely for visual consistency. This slice runs
+    **only** if P25.0 explicitly identifies specific useful inputs, deterministic outputs, and user
+    value for one of these screens, and the user approves that addition separately.
+  - If approved: mount grounded assistant on the named screen(s); may require an AppShell layout slice
+    for the `full` variant. Files: `screens/ExperimentsHome.tsx` / `screens/LoadMaterials.tsx`,
+    `components/AppShell.tsx`, tests. Model: Opus. Acceptance: layout intact, answers grounded in real
+    queue/demo state. Report + commit + stop.
 
 - **P25.9 — Retire `ASSISTANT_SAMPLES` + migrate the DEV sanity guard.**
   - Objective: delete the static table and its DEV loop from `lib/assistant.ts`; migrate the sanity
@@ -476,13 +507,14 @@ Each slice: objective · files touched · files forbidden · model · acceptance
 
 ## 21. Model / subagent assignment
 
-- **Fable 5:** orchestration, planning, review of every slice diff against invariants, verification,
-  gate enforcement. Never implements.
-- **Opus 4.8:** P25.0 design; the composer (P25.1); all grounding/UX-sensitive wiring slices
-  (P25.3–P25.8) — grounding correctness, verdict-guard integrity, and provenance labeling are
-  design-critical.
-- **Sonnet 5:** mechanical slices — free-text removal/CSS (P25.2), static-table retirement (P25.9),
-  doc + test formatting (P25.10).
+- **Orchestrator (Fable 5 when available, else Opus 4.8):** orchestration, planning, authoring this
+  planning markdown, review of every slice diff against invariants, verification, gate enforcement.
+  **Never implements production code.**
+- **Opus 4.8 (implementation):** P25.0 design + product-copy review; the composer + RecordWorkbench
+  grounding (P25.1); all grounding/UX-sensitive wiring slices (P25.4–P25.7) — grounding correctness,
+  verdict-guard integrity, and provenance labeling are design-critical.
+- **Sonnet 5 (implementation):** mechanical slices — free-text removal/CSS (P25.2), static-table
+  retirement (P25.9), doc + test formatting (P25.10).
 
 ## 22. Acceptance criteria (phase-level)
 
@@ -500,10 +532,11 @@ Each slice: objective · files touched · files forbidden · model · acceptance
 ## 23. Stop / approval gates
 
 - **P25.0 is the single design/spec approval gate.** No implementation slice begins until the user
-  approves the P25.0 spec (resolving Q1–Q5).
-- Every slice ends at a review stop point; Fable reviews the diff before the next slice.
-- Q2 (top-level screens) is re-confirmed before P25.7/P25.8; those slices are deferrable without
-  blocking the phase.
+  approves the P25.0 spec. (Q1–Q5 are already resolved by the 2026-07-20 decision-lock; P25.0
+  finalizes the remaining details — chip wording, templates, exact enum spellings.)
+- Every slice ends at a review stop point; the orchestrator reviews the diff before the next slice.
+- The non-record-screen mount (P25.8: My Experiments / Load Materials) is **excluded by default** and
+  runs only if P25.0 justifies it and the user approves separately — it never blocks the phase.
 - Final phase stop at P25.10 before any Phase 26 work.
 
 ## 24. Deferred items
@@ -513,22 +546,22 @@ Each slice: objective · files touched · files forbidden · model · acceptance
 - A backend `/assistant/context` aggregation endpoint — only if a future need appears; P25 is
   pure-frontend.
 - Related-records / record-similarity answers — back-burnered.
-- Top-level-screen assistant contexts (P25.7/P25.8) if Q2 defers them.
+- Non-record-screen assistant contexts (P25.8: My Experiments / Load Materials) — excluded by default
+  unless P25.0 justifies specific value; Settings / Governance not in scope.
 - History (`git`)-plane chips beyond what already exists — optional, low priority.
 
-## 25. Explicit questions for the user
+## 25. Explicit questions for the user — RESOLVED (2026-07-20 decision-lock)
 
-1. **Q1 — Source-label enum.** Add `'advisory'` (and keep `'git'` for history) to `AssistantSource`
-   so warnings are labeled honestly, or keep the current 5 and map advisory onto an existing label?
-   (Recommend: add `'advisory'`.)
-2. **Q2 — Screen coverage.** Mount the grounded assistant on the 3 non-record top-level screens
-   (My Experiments, Load Materials, Project Memory) — which needs an AppShell `full`-variant layout
-   slice — or ship P25-core on the 4 record surfaces (Review, Export, Evidence, Complete) and defer
-   the top-level contexts? (Recommend: ship record surfaces first; treat top-level as deferrable.)
-3. **Q3 — Pure-frontend composer.** Confirm the composer is a pure frontend function over
-   already-fetched bundles with **zero** new backend endpoint and **zero** truth-path change.
-   (Recommend: yes.)
-4. **Q4 — Free-text removal.** Confirm hard-removal of the disabled free-text input per arc item 8,
-   replaced by "Guided prompts only" framing (vs keeping the visibly-disabled box). (Arc item 8 says
-   remove.)
-5. **Q5 — Gate.** Approve P25.0 (design mini-spec) as the single gate before any P25 implementation.
+1. **Q1 — Source-label enum.** ✅ **Add `'advisory'`** and a distinct **artifact/workflow-state**
+   label; keep `'git'` for history (5-category taxonomy). Exact artifact/workflow spelling = P25.0.
+2. **Q2 — Screen coverage.** ✅ Prioritize the **4 record surfaces + Project Memory where
+   appropriate**; **exclude** My Experiments / Load Materials / Settings / Governance unless P25.0
+   identifies specific useful inputs, deterministic outputs, and user value.
+3. **Q3 — Pure-frontend composer.** ✅ **Confirmed** — zero new backend endpoint, zero truth-path
+   change.
+4. **Q4 — Free-text removal.** ✅ **Confirmed** — hard-remove the disabled input; `Guided Prompts
+   Only` framing.
+5. **Q5 — Gate.** ✅ **Approved** — P25.0 is the single gate before any P25 implementation.
+
+**Remaining for P25.0 (not yet decided):** final chip wording, answer templates, the exact
+artifact/workflow enum spelling, and copy-density exact limits.

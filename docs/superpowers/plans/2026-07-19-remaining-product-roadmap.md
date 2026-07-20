@@ -1,8 +1,8 @@
 # ISAAC — Master Remaining-Work Roadmap
 
-Status: PROPOSED — awaiting approval. No implementation authorized.
-Date: 2026-07-19 · Baseline commit: `f534a4c` (P24.10 released) · Author: Claude (planning)
-Related / superseded: EXTENDS `2026-07-16-phases-23-26-arc-decisions.md`; consolidates the back-burner registry currently in `docs/project-memory-map.md`. Companion detailed plans (all dated 2026-07-19, all PROPOSED): phase-25-grounded-assistant, phase-26-workspace-memory-search, ui-refinement-and-visual-qa, final-product-stabilization, institutional-integration-readiness, documentation-and-deliverables, convex-feasibility-spike.
+Status: PROPOSED — awaiting approval. Direction **DECISION-LOCKED 2026-07-20**; no production implementation authorized (only P25.0 design/spec after these plans are pushed).
+Date: 2026-07-19 (decisions locked 2026-07-20) · Baseline commit: `f534a4c` (P24.10 released) · Author: Claude (planning)
+Related / superseded: EXTENDS `2026-07-16-phases-23-26-arc-decisions.md`; the accepted decisions are recorded in `2026-07-20-remaining-work-decision-lock.md` (authoritative where it and any companion plan conflict); consolidates the back-burner registry currently in `docs/project-memory-map.md`. Companion detailed plans (all dated 2026-07-19, all PROPOSED): phase-25-grounded-assistant, phase-26-workspace-memory-search, ui-refinement-and-visual-qa, final-product-stabilization, institutional-integration-readiness, documentation-and-deliverables, convex-feasibility-spike.
 
 > This roadmap is repo-grounded against a four-part audit of HEAD `f534a4c` (see `scratchpad/audit-*.md`). It supersedes the scope framing in the arc-decisions doc where the two differ, and it renumbers nothing in the approved 23→24→25→26 sequence — it refines *what runs in parallel* and *what is genuinely on the critical path*.
 
@@ -58,6 +58,8 @@ Related / superseded: EXTENDS `2026-07-16-phases-23-26-arc-decisions.md`; consol
 
 **I largely endorse the approved arc (25→26).** My one refinement is explicit: treat A's composer as the shared substrate for B, and run Docs Track B + Stabilization Track C in parallel rather than strictly after.
 
+**Accepted master order (decision-lock 2026-07-20):** 1) Phase 25 → 2) Phase 26 → 3) UI Refinement → 4) Final Stabilization → 5) **Documentation, Handoff & Deliverables (terminal core-path item)** — with Docs Tier 0 truth-fixes and the regression/security tracks permitted to run in parallel when they change no product behavior and bypass no gate. Institutional infrastructure and Convex remain off the core path.
+
 ## 5. Approval gates
 - **P25.0** — design/spec approval before any Phase 25 implementation (single gate).
 - **P26.0** — design/spec approval before any Phase 26 implementation; **P26.6** (the "no fake search" test-rewrite) is a dedicated reviewed slice with its own gate.
@@ -74,7 +76,7 @@ Related / superseded: EXTENDS `2026-07-16-phases-23-26-arc-decisions.md`; consol
 - **Off critical path:** F (gated), G (optional).
 
 ## 7. Major risks (cross-cutting)
-1. **Ephemeral + shared hosted workspace** (biggest architectural reality): one auto-seeded demo experiment on `/tmp`, wiped on restart, one global key. Search (B) and the demo look thin over a single experiment, and no user work persists. *Not a blocker for "current project complete" (synthetic demo), but it caps demo richness.* Decision needed (Q-CROSS-2): seed a richer synthetic workspace and/or a Railway persistent volume, vs. accept ephemeral + honest re-seed.
+1. **Ephemeral + shared hosted workspace** (biggest architectural reality): one auto-seeded demo experiment on `/tmp`, wiped on restart, one global key. Search (B) and the demo look thin over a single experiment, and no user work persists. *Not a blocker for "current project complete" (synthetic demo), but it caps demo richness.* **Decision (LOCKED, Q-CROSS-2):** keep ephemeral + shared + honest re-seed (no DB / no volume); add a **deterministic richer synthetic seed** (multiple synthetic experiments in varied states) via the existing filesystem seeding path — placed in **Phase 26**, verified in Stabilization, clearly labeled demo data, never fake product data.
 2. **Test-invariant change (P26.6):** flipping the actively-tested "no search" invariant must be a reviewed, honest slice; CI-green-per-commit ordering needs a decision (Q-P26-3).
 3. **Deliverables depend on you:** poster/deck/paper need your scientific content, figure taste, and closure of open mentor decisions D1–D8 (esp. D7/D8).
 4. **Subagent environment flakiness** observed this session (some spawns fast-fail with injected text — see §12). Mitigation: verify every artifact on disk; author keystone docs directly.
@@ -120,7 +122,7 @@ Class: **P**roduct · **I**nfrastructure · **R**esearch · **C**osmetic.
 | Real file ingestion / upload | I | Uploads wall = always 403 (governance) | Approved object storage + sanitization | Keeps the governance wall until storage is safe |
 | Broad monitoring / ops infra (rate-limit, APM, alerting, autoscale) | I | Institutional responsibility; not core | Institutional hosting | Institution supplies; ISAAC stays vendor-neutral |
 
-No back-burner item is promoted into the core roadmap without an explicit, called-out approval.
+No back-burner item is promoted into the core roadmap without an explicit, called-out approval. The **2026-07-20 decision-lock re-affirmed every row above as deferred** (see `2026-07-20-remaining-work-decision-lock.md` §11); none was promoted.
 
 ---
 
@@ -129,25 +131,28 @@ During plan authoring, three subagent spawns fast-failed (~2–5s, zero tool cal
 
 ---
 
-## 13. Decisions required from you (consolidated; full lists live in each plan's §25)
+## 13. Decisions — LOCKED 2026-07-20 (see `2026-07-20-remaining-work-decision-lock.md`)
+The questions below are **resolved** by the 2026-07-20 decision-lock. Genuinely-open items (this
+lock did not decide them) are called out as **OPEN**.
+
 **Cross-cutting**
-- Q-CROSS-1: Confirm the execution order **A(P25) → B(P26) → C(UI) → D(Stabilization)**, with Docs Tier 0 + regression tracks in parallel.
-- Q-CROSS-2: Hosted workspace — accept **ephemeral + shared** (honest re-seed) for the demo, or prioritize a richer synthetic workspace / durable volume first?
-- Q-CROSS-3: Confirm institutional infra (SSO, durable multi-user persistence, monitoring/rate-limiting) stays **institution-ready-but-not-wired**, off the core path.
+- Q-CROSS-1 → **LOCKED.** Order = **P25 → P26 → UI → Stabilization → Documentation/Deliverables (terminal)**, with Docs Tier 0 + regression/security tracks in parallel.
+- Q-CROSS-2 → **LOCKED.** Hosted workspace stays **ephemeral + shared + synthetic + honest re-seed**; **no** production DB / Railway volume for demo polish. A **deterministic richer synthetic seed** is **required** (placed in Phase 26; §7 risk 1). *(Baseline correction: the workspace seeds **one** experiment, not eight.)*
+- Q-CROSS-3 → **LOCKED.** Institutional infra (SSO, durable multi-user persistence, monitoring/rate-limiting) stays **institution-ready-but-not-wired**, off the core path.
 
-**Phase 25** — (1) add `'advisory'` to the source-label enum? (2) mount on the 3 non-record screens now or ship the 4 record surfaces first? (3) confirm pure-frontend composer, no new backend/truth contract? (4) hard-remove the disabled free-text box (arc item 8)? (5) approve P25.0 as the single gate?
+**Phase 25** — all LOCKED: (1) add `'advisory'` **yes**, plus a distinct **artifact/workflow-state** source label (5-category taxonomy); (2) mount on the **4 record surfaces + Project Memory where appropriate**; do **not** mount My Experiments / Load Materials / Settings / Governance for consistency; (3) pure-frontend composer, no new backend/truth contract **confirmed**; (4) **remove** the disabled free-text box, use `Guided Prompts Only` framing; (5) P25.0 approved as the **single** gate. First code slice = **P25.1 (composer skeleton + source-label rendering on RecordWorkbench)** — not authorized until P25.0 approved. **OPEN:** final chip wording / templates / the exact artifact-workflow enum value (P25.0 deliverables).
 
-**Phase 26** — D1 single `/api/search` route vs two; D2 ⌘K + visible trigger vs ⌘K-only; **D3 the P26.6 test-rewrite CI sequencing**; D4 confirm vector/semantic deferred; D5 confirm single-workspace scoping; D6 no new env vars/deps; caps/pagination defaults (proposed 50/10); min query length (proposed 2).
+**Phase 26** — LOCKED: D1 **single** `GET /api/search` (internal separate providers); D2 **⌘K + visible trigger** (not keyboard-only); D3 P26.6 rewrite is a **dedicated reviewed slice, after** real behavior/trigger/dialog/navigation/tests exist; D4 vector/semantic **deferred**; D5 **single shared workspace + single memory provider**; D6 **no new env vars/deps**. Results carry typed metadata incl. **source/provider**. **OPEN:** the P26.6 CI-green mechanic (co-reviewed pair vs green-per-commit); caps/page defaults (proposed 50/10); min query length (proposed 2).
 
-**UI** — breakpoints incl. projector width; density preference; dark-mode scope (deferred?); type scale/font; accent/palette restraint; confirm audit-only-first; commit screenshots or keep in scratchpad.
+**UI** — LOCKED: **audit-only first**; dark-mode **deferred**; include large-screen/projector **QA** but **no dedicated projector breakpoint** unless a concrete finding requires it; preserve light-first workbench, truth-vs-advisory semantics, accessibility. **OPEN (taste, for you at the Slice-K gate):** breakpoint widths & demo resolution; density; type scale/font; accent restraint; whether to commit the screenshot set.
 
-**Stabilization** — confirm required-now vs institutional split (no rate-limiting/monitoring in core now); ephemeral vs durable persistence priority; add a CI contract-alignment job?; minimal request log for the demo?
+**Stabilization** — LOCKED: required-now vs institutional split confirmed (**no** rate-limiting/monitoring vendors in core now); persistence stays **ephemeral** (richer synthetic seed instead of durable). **OPEN:** add a CI contract-alignment job?; a minimal request/access log for the demo?
 
-**Institutional** — Q-INST-1 authorize a seam-introduction phase at all (Gate-0) or keep pure assessment; Q-INST-2 does ISAAC own durable persistence or only expose seams; Q-INST-3 confirm governance walls stay closed-by-default; Q-INST-4 no P25/P26 entanglement; Q-INST-5 truth core off-limits to every slice.
+**Institutional** — LOCKED: **Gate-0 = assessment/documentation only.** Q-INST-1 → **no** speculative seam-introduction phase (seam only when a feature requires it, or SLAC authorizes with an owner); Q-INST-2 → ISAAC **exposes seams + synthetic defaults**, institution supplies backends; Q-INST-3/-4/-5 → governance walls closed-by-default, no P25/P26 entanglement, truth core off-limits — **all confirmed**. No current feature triggers any seam, so **none of S1–S9 is authorized**.
 
-**Deliverables** — timing vs P25/26; emphasis of mentor decisions D7/D8; doc placement; figure/poster tooling; number of screenshot passes; approve the one-line `mentor-decisions.md` fix; architecture-figure revision policy.
+**Deliverables** — LOCKED: parallel Docs Tier 0 now; capstone terminal. **OPEN:** mentor decisions **D7** (deliverable scope/timing) & **D8** (paper/poster emphasis); figure/poster tooling; doc placement; number of screenshot passes; the one-line `mentor-decisions.md` `26/26`→`33/33` fix; architecture-figure revision policy.
 
-**Convex** — Q-CVX-1 schedule the spike at all (post-core) or shelve; self-hosted Convex required for governance vs synthetic Convex Cloud acceptable; quarantine-outside-repo acceptable; also build a Postgres baseline for comparison?; live two-session demo or written recommendation; who supplies SLAC infra facts for the comparison.
+**Convex** — LOCKED: **optional, post-core**; not scheduled; reconsider only after P25 + P26 + UI + Stabilization **and** demo/deliverables are substantially complete. Candidate application/data plane — not a Graphify or Python-truth-core replacement. **OPEN:** the go/no-go on scheduling the spike; self-host vs synthetic Cloud; Postgres comparison baseline; live demo vs written memo; who supplies SLAC infra facts.
 
 ---
 

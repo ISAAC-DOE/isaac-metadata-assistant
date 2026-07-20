@@ -1,8 +1,10 @@
 # Convex Feasibility Spike — OPTIONAL, Post-Core, Off-Roadmap
 
-Status: PROPOSED — awaiting approval. No implementation authorized.
-Date: 2026-07-19  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
-Related: 2026-07-16-phases-23-26-arc-decisions.md; P24 specs. This doc does NOT extend or reorder the approved 23→26 arc — it is a **standalone, optional, reversible spike** to be considered only AFTER the core arc lands, and only if the institutional-multi-user question is actually pursued.
+Status: PROPOSED — **OPTIONAL, post-core.** Direction **DECISION-LOCKED 2026-07-20**: **not scheduled
+and not authorized**; reconsider only after P25, P26, UI refinement, and final stabilization are
+complete **and** the main demo and deliverables are substantially complete. No implementation authorized.
+Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+Related: 2026-07-16-phases-23-26-arc-decisions.md; `2026-07-20-remaining-work-decision-lock.md` (authoritative); P24 specs. This doc does NOT extend or reorder the approved 23→26 arc — it is a **standalone, optional, reversible spike**. Per the decision-lock, Convex remains a candidate **application/data plane** — **not** a Graphify replacement and **not** a replacement for the Python truth core.
 Approval decisions required:
 1. Approve running an isolated, synthetic-only Convex feasibility spike at all (yes/no). This plan is PROPOSED; nothing here authorizes installing Convex, adopting it, or touching production code.
 2. Approve the quarantine location (a sandbox OUTSIDE the ISAAC repo working tree) and the rule that only the findings markdown returns to the repo.
@@ -34,7 +36,7 @@ Forces an explicit answer to the open institutional question the audits flag rep
 
 ## 5. Dependencies
 
-- **Sequencing:** OPTIONAL and POST-CORE. Do not start until the approved 23→26 arc is complete (P24 done; P25 Grounded Assistant and P26 Real Search not started per `PLANNING-BASELINE.md`). This spike must NOT preempt, reorder, or consume the arc's implementation attention.
+- **Sequencing:** OPTIONAL and POST-CORE. Per the 2026-07-20 decision-lock, do not start until **P25 (Grounded Assistant), P26 (Real Search), UI refinement, and final stabilization are complete AND the main demo and deliverables are substantially complete** (P24 done; P25/P26 not started). This spike must NOT preempt, reorder, or consume the core arc's implementation attention; scheduling it at all remains a separate, explicit go/no-go.
 - **Inputs available today:** the deterministic FastAPI validation endpoint (`POST /api/experiments/{id}/validate` → `{ok, errors, schema, dry_run}`, routes.py:347-381) as the truth-core call target; the sanitized `memory-snapshot.json` projection shape (`memory.py`) as the memory-import fixture; the official schema version string (`EXPECTED_VERSION="1.05"`, official.py:23) and record/sidecar shapes for hashing.
 - **External:** Convex CLI/runtime installed **only inside the sandbox**; a Node toolchain. Nothing added to the ISAAC repo's dependency manifests.
 
@@ -178,7 +180,7 @@ Each slice: one subagent, independently reviewable, sandbox-only, with a hard ST
 - **Stop point:** STOP. A failure here (e.g., pressure to move logic into Convex) is a candidate rejection trigger — report immediately.
 
 ### Slice E — Workspace search
-- **Objective:** Convex full-text search over synthetic experiments/drafts/evidence metadata; compare to the P26 deterministic/plane-labeled/permission-aware/honest-degradation requirement (`PLANNING-BASELINE.md` P26 line).
+- **Objective:** Convex full-text search over synthetic experiments/drafts/evidence metadata; compare to the P26 deterministic/plane-labeled/permission-aware/honest-degradation requirement (see the `2026-07-19-phase-26-workspace-memory-search-plan.md` contract + `2026-07-20-remaining-work-decision-lock.md` §8).
 - **Model:** Opus.
 - **Acceptance:** typed, provenance-bearing hits; assessment of whether Convex search meets P26's honesty + permission constraints.
 - **Tests:** search-hit + provenance test.
@@ -222,7 +224,7 @@ Each slice: one subagent, independently reviewable, sandbox-only, with a hard ST
 
 ## 21. Model / subagent assignment
 
-Fable = orchestrator/planner/reviewer/verifier only (never implements). Opus 4.8 = every architecture/truth-boundary/security/governance/permissions slice (A rubric, B, C, D, E, F, G). Sonnet 5 = mechanical fixture assembly only. Every slice is independently assignable, reviewable in the sandbox, and gated. Fable reviews each slice's evidence before the next slice's install/build proceeds.
+Orchestrator (**Fable 5 when available, else Opus 4.8**) = planner/reviewer/verifier only (authors planning markdown; never implements). Opus 4.8 (implementation) = every architecture/truth-boundary/security/governance/permissions slice (A rubric, B, C, D, E, F, G). Sonnet 5 = mechanical fixture assembly only. Every slice is independently assignable, reviewable in the sandbox, and gated. The orchestrator reviews each slice's evidence before the next slice's install/build proceeds.
 
 ## 22. Acceptance criteria
 
