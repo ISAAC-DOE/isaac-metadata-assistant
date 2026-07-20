@@ -44,9 +44,11 @@ Working prototype (`v0.1.0`), **synthetic data only**.
   [`docs/ui-local-dev.md`](docs/ui-local-dev.md). No MCP server.
 - Project Memory has real content but thin connections today: all 19 curated concepts currently
   have zero graph edges, so concept detail honestly shows "no recorded leads." The hosted demo
-  deployment ships without graph artifacts at all — Project Memory shows an honest
-  unavailable state there, not an empty one (future-wiring path in
-  [`docs/project-memory-map.md`](docs/project-memory-map.md)).
+  deployment ships a committed, sanitized memory snapshot (metadata/provenance only, no file
+  contents; P24.9) — Project Memory shows real counts there, reported through honest separated
+  status axes (availability, snapshot integrity, memory policy, indexed sources; P24.10), and
+  degrades to an honest unavailable panel only if the snapshot is absent or unreadable
+  (future-wiring path in [`docs/project-memory-map.md`](docs/project-memory-map.md)).
 
 ## Two layers
 

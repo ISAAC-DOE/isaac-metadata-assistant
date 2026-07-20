@@ -91,11 +91,13 @@ Guardrails:
 - **Hosted = committed sanitized snapshot (P24.9)** — the hosted demo ships a deterministic,
   sanitized `apps/api/isaac_api/data/memory-snapshot.json` (metadata/provenance only, no file
   contents, all `on_disk` false, secret-scanned), served by `SanitizedSnapshotSource`. Project
-  Memory shows real counts there, not an unavailable panel. Freshness is reported honestly:
-  `/api/graph/status` reads `stale` whenever the deployed build commit is ahead of the snapshot's
-  `built_at_commit` (regenerate and recommit to refresh — spec §16). If the snapshot is ever
-  absent or unreadable the plane still degrades to the honest unavailable panel. Further
-  future-wiring (a db-backed index or an institution-hosted service behind login) remains unbuilt.
+  Memory shows real counts there, not an unavailable panel. Freshness (redesigned P24.10) is two
+  separated, provable axes — `memory_policy` and `indexed_sources` — computed only from the
+  snapshot's own embedded fingerprints, never from the deployed app commit; `indexed_sources`
+  drift is proven only in CI, over the files already in the snapshot (regenerate and recommit to
+  refresh). If the snapshot is ever absent or unreadable the plane still degrades to the honest
+  unavailable panel. Further future-wiring (a db-backed index or an institution-hosted service
+  behind login) remains unbuilt.
 - **Never a validator** — every response carries `plane: "memory"` and a note that this plane
   returns leads to verify, never a validation verdict; it cannot authorize export.
 

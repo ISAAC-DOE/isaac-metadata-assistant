@@ -30,7 +30,7 @@ Read this before demoing it to anyone:
   `records/` folder (`<record_id>.json` + `<record_id>.evidence.json` —
   never the repo's own `records/`), nothing is submitted anywhere.
 - **Graphify is a memory/query layer, never a validator.** The UI's "Memory:
-  Fresh / Stale / Missing" chip (`GraphStatusChip`) is status-only context about
+  Available / Unavailable" chip (`GraphStatusChip`) is status-only context about
   the optional project-memory graph. It never renders a verdict and never gates
   anything.
 - **The assistant is advisory and subordinate.** It never renders `PASS`/`FAIL`
@@ -73,7 +73,7 @@ Read this before demoing it to anyone:
 - **Help is a real, static popover** (`HelpPanel`) — a small honest explainer of the five pipeline
   steps, opened from the Help button, closable via Escape or click-outside. It is not chat and not
   search.
-- **The "Memory: Fresh / Stale / Missing" chip is live** — it reflects `GET /api/graph/status`, not
+- **The "Memory: Available / Unavailable" chip is live** — it reflects `GET /api/graph/status`, not
   a hardcoded placeholder; still status-only and never a verdict.
 - **There is no search box and no user/account chip.** An earlier iteration of the chrome had
   placeholder versions of both; they were removed (Phase 22D) because this prototype has no search
@@ -193,12 +193,15 @@ browsing surface over the `/api/memory/*` endpoints and the additive
 metadata/provenance only, never a validator, and it never authorizes export.
 
 - **Status card** — live graph figures from `GET /api/graph/status` (node /
-  edge / community / indexed-file / concept counts, built-at commit, graph
-  age). Locally these come from a live `graphify-out/` graph; on the hosted
-  demo they come from the committed sanitized snapshot (P24.9). Missing/
-  unreadable artifacts render an honest unavailable panel — not a fabricated
-  zero state — and a snapshot older than the running build honestly reads
-  `stale` (advisory caption), never a pass/fail token.
+  edge / community / indexed-file / concept counts, built-at commit) plus three
+  separately-honest freshness axes (P24.10): Snapshot Integrity
+  (Verified/Malformed/Unsupported/Unknown), Memory Policy (Current/Out of
+  date/Unknown), and Indexed Sources (Current/Out of date/Unknown, scoped to
+  "proven in CI over only the files already in the snapshot"). Locally these
+  come from a live `graphify-out/` graph; on the hosted demo they come from the
+  committed sanitized snapshot (P24.9). Missing/unreadable artifacts render an
+  honest unavailable panel — not a fabricated zero state — and none of these
+  axes is ever a pass/fail token.
 - **Source Index** — the served-file allowlist (`GET /api/memory/files` /
   `GET /api/memory/file`), grouped by kind (Code / Documents / Other), with
   per-file provenance (rationale, related leads). No file contents are

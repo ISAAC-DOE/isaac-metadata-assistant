@@ -35,10 +35,17 @@ a live graph (`graphify-out/` is gitignored and never shipped).
 - **Content** — metadata/provenance only: counts, served-file allowlist, curated
   concepts, and length-capped rationales. Never file contents; every `on_disk` is
   forced `false`; secret/path-excluded strings are scanned out at generation.
-- **Freshness** — `GET /api/graph/status` compares the deploy's build commit
-  (`RAILWAY_GIT_COMMIT_SHA` / `ISAAC_BUILD_COMMIT`) against the snapshot's
-  `built_at_commit`. It honestly reads `stale` whenever the deploy is ahead of the
-  snapshot; a missing/unreadable snapshot degrades to the honest unavailable panel.
+- **Freshness (redesigned P24.10)** — `GET /api/graph/status` no longer compares
+  the deploy's build commit to the snapshot; `deployed_app_commit` is surfaced as
+  version metadata only, never a freshness input. Freshness is two separated,
+  provable axes instead: `memory_policy` (current/stale/unknown — the shipped
+  sanitization/exclusion policy recomputed at runtime against the snapshot's
+  embedded fingerprint) and `indexed_sources` (current/stale/unknown — a
+  CI-only content-drift gate over the files already embedded in the snapshot;
+  the hosted runtime never recomputes it, since the served files aren't
+  shipped). A missing/unreadable snapshot still degrades to the honest
+  unavailable panel regardless. See
+  [`2026-07-19-phase-24-10-memory-freshness-semantics.md`](superpowers/specs/2026-07-19-phase-24-10-memory-freshness-semantics.md).
 - **Refresh / rollback** — regenerate with
   `python scripts/build_memory_snapshot.py` from a fresh local graph, review the
   diff (including every `rationales[]` string), and recommit; `test_committed_snapshot.py`
