@@ -14,10 +14,12 @@
  */
 
 import type {
+  ApiValidateResult,
   AssistantMessage,
   ComposerOutput,
   GroundedChip,
   GroundingState,
+  ScreenContext,
   SuggestedPrompt,
 } from './types';
 
@@ -47,6 +49,30 @@ function isUsableStr(x: unknown): x is string {
 }
 
 const ROUTE_TO_VALIDATE = 'Open Validate to run the deterministic schema check.';
+
+/**
+ * The blocking-paths answer, shared verbatim by the Record Workbench (§5.1) and
+ * Ready to Export (§5.2 — "Same template as §5.1") so the two can never drift.
+ * It states a COUNT of blocking paths + the first ≤3 paths + a route to the
+ * deterministic check. It NEVER echoes `validate.ok` or concludes validity.
+ * `null` when the validation payload is absent → the chip is disabled.
+ */
+function blockingPathsMessage(validate: ApiValidateResult | undefined | null): AssistantMessage | null {
+  if (!validate) return null; // data absent → chip disabled
+  const errors = validate.errors;
+  if (errors.length === 0) {
+    return {
+      text: `No blocking paths are listed in the current validation response. ${ROUTE_TO_VALIDATE}`,
+      answeredFrom: 'schema',
+    };
+  }
+  const verb = errors.length === 1 ? 'is' : 'are';
+  const paths = joinCapped(errors.map((e) => e.path));
+  return {
+    text: `${count(errors.length, 'path')} ${verb} listed as blocking export: ${paths}. ${ROUTE_TO_VALIDATE}`,
+    answeredFrom: 'schema',
+  };
+}
 
 // --- Record Workbench (context: 'review'; state = getRecordBundle) ----------
 
@@ -86,21 +112,7 @@ export const REVIEW_CATALOG: GroundedChip[] = [
     routed: true,
     resolve(state): AssistantMessage | null {
       if (state.context !== 'review') return null;
-      const { validate } = state.bundle;
-      if (!validate) return null; // data absent → chip disabled
-      const errors = validate.errors;
-      if (errors.length === 0) {
-        return {
-          text: `No blocking paths are listed in the current validation response. ${ROUTE_TO_VALIDATE}`,
-          answeredFrom: 'schema',
-        };
-      }
-      const verb = errors.length === 1 ? 'is' : 'are';
-      const paths = joinCapped(errors.map((e) => e.path));
-      return {
-        text: `${count(errors.length, 'path')} ${verb} listed as blocking export: ${paths}. ${ROUTE_TO_VALIDATE}`,
-        answeredFrom: 'schema',
-      };
+      return blockingPathsMessage(state.bundle.validate);
     },
   },
   {
@@ -160,25 +172,112 @@ const REVIEW_FALLBACK: AssistantMessage = {
   answeredFrom: 'workflow',
 };
 
+// --- Ready to Export (context: 'export'; state = getExportReadiness) --------
+// Three chips explain the DISTINCT audit / schema / advisory planes (§5.2).
+// The panel-level `note` stays `ROUTE_TO_CLI_NOTE` (set by the screen); the
+// blocker chip additionally routes truth in its own copy. No chip ever echoes
+// `validate.ok` or concludes validity.
+
+export const EXPORT_CATALOG: GroundedChip[] = [
+  {
+    id: 'coverage_vs_validity',
+    label: 'Is coverage the same as valid?',
+    source: 'audit',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'export') return null;
+      const { audit } = state.bundle;
+      if (!audit) return null; // audit payload absent → chip disabled
+      const record = audit.records[0];
+      if (!record) {
+        // Pre-export: `records:[]` — nothing has been exported/audited yet.
+        // An honest, present-but-empty answer (mirrors the review empty-state
+        // precedent); coverage is a count, NEVER a validity determination.
+        return {
+          text: 'No coverage figures yet — coverage appears after export.',
+          answeredFrom: 'audit',
+        };
+      }
+      return {
+        text: `Coverage is ${record.evidence_present}/${record.evidence_expected} evidenced fields. It describes how many expected fields carry evidence; the schema check is separate.`,
+        answeredFrom: 'audit',
+      };
+    },
+  },
+  {
+    id: 'blocking_paths',
+    label: "What's left before export?",
+    source: 'schema',
+    routed: true,
+    // Same template as §5.1 (shared helper); the panel `note = ROUTE_TO_CLI_NOTE`
+    // routes to the CLI. Never echoes `validate.ok`.
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'export') return null;
+      return blockingPathsMessage(state.bundle.validate);
+    },
+  },
+  {
+    id: 'advisory_detail',
+    label: 'Explain the advisory warning',
+    source: 'advisory',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'export') return null;
+      const { warnings } = state.bundle;
+      if (!warnings) return null; // advisory payload absent → chip disabled
+      const list = warnings.warnings ?? [];
+      if (list.length === 0) {
+        return { text: 'No advisory warnings on this record.', answeredFrom: 'advisory' };
+      }
+      const w = list[0];
+      const more = list.length - 1;
+      const moreClause = more > 0 ? `. …and ${more} more` : '';
+      return {
+        text: `${w.code} — ${w.message} (advisory, non-gating; where: ${w.where})${moreClause}.`,
+        answeredFrom: 'advisory',
+      };
+    },
+  },
+];
+
+// Neutral fallback when every export chip resolves to null (defensive — the
+// real bundle always carries audit/validate/warnings).
+const EXPORT_FALLBACK: AssistantMessage = {
+  text: 'Pick a suggested question above.',
+  answeredFrom: 'audit',
+};
+
+// Per-context chip catalog + neutral fallback. Contexts not yet wired throw.
+function pickCatalog(context: ScreenContext): {
+  catalog: GroundedChip[];
+  fallback: AssistantMessage;
+} {
+  switch (context) {
+    case 'review':
+      return { catalog: REVIEW_CATALOG, fallback: REVIEW_FALLBACK };
+    case 'export':
+      return { catalog: EXPORT_CATALOG, fallback: EXPORT_FALLBACK };
+    default:
+      throw new Error('compose: context not implemented yet');
+  }
+}
+
 /**
  * Compose the reply + guided prompts for a screen from its already-fetched
- * state. P25.1 implements only the `review` context; any other context throws.
+ * state. `review` (P25.1) and `export` (P25.4) are wired; evidence / complete /
+ * memory throw until their slices land.
  */
 export function compose(state: GroundingState): ComposerOutput {
-  if (state.context !== 'review') {
-    throw new Error('compose: context not implemented in P25.1');
-  }
+  const { catalog, fallback } = pickCatalog(state.context);
 
-  const prompts: SuggestedPrompt[] = REVIEW_CATALOG.map((chip) => ({
+  const prompts: SuggestedPrompt[] = catalog.map((chip) => ({
     text: chip.label,
     answeredFrom: chip.source,
     // null answer → undefined → chip disabled by the panel's `disabled={!p.answer}`.
     answer: chip.resolve(state) ?? undefined,
   }));
 
-  // reply = first chip with a non-null answer, in catalog priority order
-  // (pending → blocking → provenance); else the neutral grounded fallback.
-  const reply = prompts.find((p) => p.answer)?.answer ?? REVIEW_FALLBACK;
+  // reply = first chip with a non-null answer, in catalog priority order; else
+  // the neutral grounded fallback.
+  const reply = prompts.find((p) => p.answer)?.answer ?? fallback;
 
   return { reply, prompts };
 }

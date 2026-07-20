@@ -1,19 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import { compose, count, REVIEW_CATALOG } from './assistantComposer';
+import { compose, count, EXPORT_CATALOG, REVIEW_CATALOG } from './assistantComposer';
 import { SOURCE_LABELS } from './assistant';
 import {
   experimentDetail,
   draftResponse,
   pendingResponse,
   validateDryRun,
+  validateReadyDryRun,
+  validateExported,
   auditNotExported,
+  auditExported,
   warningsDryRun,
+  artifactsNull,
   evidenceResponse,
   graphStatusUnavailable,
 } from '../test/apiFixtures';
 import type {
   ApiEvidenceEntry,
   ApiPendingItem,
+  ExportReadinessBundle,
   GroundingState,
   RecordBundle,
 } from './types';
@@ -224,10 +229,12 @@ describe('compose — no-verdict guarantee across every composed string', () => 
   });
 });
 
-describe('compose — only the review context is implemented in P25.1', () => {
-  it('throws for any non-review context', () => {
-    const notReview = { context: 'export' } as unknown as GroundingState;
-    expect(() => compose(notReview)).toThrow('compose: context not implemented in P25.1');
+describe('compose — review + export wired; other contexts still throw', () => {
+  it('throws for contexts not yet implemented (evidence / complete / memory)', () => {
+    for (const context of ['evidence', 'complete', 'memory'] as const) {
+      const notWired = { context } as unknown as GroundingState;
+      expect(() => compose(notWired)).toThrow('compose: context not implemented yet');
+    }
   });
 });
 
@@ -446,5 +453,234 @@ describe('pending_summary — count and displayed list agree (6b)', () => {
     }));
     const answer = summary(pending);
     expect(answer.text).toBe('7 fields still need you: A0, A1, A2, …and 4 more.');
+  });
+});
+
+// --- P25.4: Ready to Export context ------------------------------------------
+
+// A full, shape-faithful export bundle (verbatim from the API fixtures). Only
+// audit / validate / warnings are read by the export composer; the rest are
+// present so the state is a real ExportReadinessBundle. Defaults describe the
+// POST-export state (audit has a record, dry-run has passed).
+function exportState(overrides: Partial<ExportReadinessBundle> = {}): GroundingState {
+  const base = {
+    detail: experimentDetail,
+    pending: pendingResponse.pending,
+    validate: validateExported,
+    audit: auditExported,
+    warnings: warningsDryRun,
+    graph: graphStatusUnavailable,
+    artifacts: artifactsNull,
+  } as unknown as ExportReadinessBundle;
+  return { context: 'export', bundle: { ...base, ...overrides } };
+}
+
+const twoWarnings = {
+  advisory: true as const,
+  gating: false as const,
+  warnings: [
+    { code: 'NO_LINKS', where: 'record.links', message: 'no relationships declared' },
+    { code: 'THIN_DESCRIPTORS', where: 'record.descriptors', message: 'few descriptors present' },
+  ],
+};
+
+describe('EXPORT_CATALOG — the three export chips (order + source labels)', () => {
+  it('is exactly [coverage_vs_validity, blocking_paths, advisory_detail] in order', () => {
+    expect(EXPORT_CATALOG.map((c) => c.id)).toEqual([
+      'coverage_vs_validity',
+      'blocking_paths',
+      'advisory_detail',
+    ]);
+  });
+
+  it('maps each chip to its approved source and label', () => {
+    expect(EXPORT_CATALOG.map((c) => c.source)).toEqual(['audit', 'schema', 'advisory']);
+    expect(EXPORT_CATALOG.map((c) => c.label)).toEqual([
+      'Is coverage the same as valid?',
+      "What's left before export?",
+      'Explain the advisory warning',
+    ]);
+    // the blocker is the routed truth-question chip
+    expect(EXPORT_CATALOG.find((c) => c.id === 'blocking_paths')!.routed).toBe(true);
+  });
+});
+
+describe('compose({context:"export"}) — post-export fixture bundle', () => {
+  const out = compose(exportState());
+
+  it('emits three prompts whose text == chip label and answeredFrom == chip source', () => {
+    expect(out.prompts.map((p) => p.text)).toEqual([
+      'Is coverage the same as valid?',
+      "What's left before export?",
+      'Explain the advisory warning',
+    ]);
+    expect(out.prompts.map((p) => p.answeredFrom)).toEqual(['audit', 'schema', 'advisory']);
+  });
+
+  it('coverage_vs_validity echoes evidence_present/evidence_expected live (33/33), never a verdict', () => {
+    expect(out.prompts[0].answer).toEqual({
+      text:
+        'Coverage is 33/33 evidenced fields. It describes how many expected fields carry evidence; ' +
+        'the schema check is separate.',
+      answeredFrom: 'audit',
+    });
+  });
+
+  it('blocking_paths (post-export, 0 errors) → no-blocking message, still routes to Validate', () => {
+    expect(out.prompts[1].answer).toEqual({
+      text:
+        'No blocking paths are listed in the current validation response. ' +
+        'Open Validate to run the deterministic schema check.',
+      answeredFrom: 'schema',
+    });
+  });
+
+  it('advisory_detail echoes the first warning verbatim, flagged advisory/non-gating', () => {
+    expect(out.prompts[2].answer).toEqual({
+      text: 'NO_LINKS — no relationships declared (advisory, non-gating; where: record.links).',
+      answeredFrom: 'advisory',
+    });
+  });
+
+  it('reply is the first non-null answer in priority order (coverage → blocking → advisory)', () => {
+    expect(out.reply).toEqual(out.prompts[0].answer);
+    expect(out.reply.answeredFrom).toBe('audit');
+  });
+});
+
+describe('compose export — coverage echo variants + pre-export fallback + disabled chip', () => {
+  it('interpolates any live present/expected pair (11/14), not just the fixture', () => {
+    const out = compose(
+      exportState({
+        audit: {
+          records: [
+            {
+              name: 'r.json',
+              ok: true,
+              schema_errors: [],
+              evidence_present: 11,
+              evidence_expected: 14,
+              uncovered: [],
+              dangling: [],
+            },
+          ],
+          text: '',
+        },
+      }),
+    );
+    expect(out.prompts[0].answer!.text).toBe(
+      'Coverage is 11/14 evidenced fields. It describes how many expected fields carry evidence; ' +
+        'the schema check is separate.',
+    );
+  });
+
+  it('pre-export (records:[]) → honest empty-coverage fallback (chip still enabled)', () => {
+    const out = compose(exportState({ audit: auditNotExported }));
+    expect(out.prompts[0].answer).toEqual({
+      text: 'No coverage figures yet — coverage appears after export.',
+      answeredFrom: 'audit',
+    });
+    // pre-export the fallback is the panel reply (coverage is the lead chip)
+    expect(out.reply).toEqual(out.prompts[0].answer);
+  });
+
+  it('audit payload absent → coverage chip DISABLED (answer undefined); reply falls to blocking', () => {
+    const out = compose(exportState({ audit: undefined }));
+    expect(out.prompts[0].answer).toBeUndefined();
+    expect(out.reply.answeredFrom).toBe('schema');
+  });
+});
+
+describe('compose export — blocking_paths routing (shares §5.1 template; never echoes validity)', () => {
+  it('2 errors → path count + first paths + route (from validateDryRun)', () => {
+    const out = compose(exportState({ validate: validateDryRun }));
+    expect(out.prompts[1].answer).toEqual({
+      text:
+        '2 paths are listed as blocking export: $.assets, $.measurement.series. ' +
+        'Open Validate to run the deterministic schema check.',
+      answeredFrom: 'schema',
+    });
+  });
+
+  it('1 error → grammatical "1 path is listed"', () => {
+    const out = compose(
+      exportState({
+        validate: { ...validateDryRun, errors: [{ path: '$.assets', message: 'required' }] },
+      }),
+    );
+    expect(out.prompts[1].answer!.text).toBe(
+      '1 path is listed as blocking export: $.assets. ' +
+        'Open Validate to run the deterministic schema check.',
+    );
+  });
+
+  it('0 errors (validateReadyDryRun) → no-blocking message', () => {
+    const out = compose(exportState({ validate: validateReadyDryRun }));
+    expect(out.prompts[1].answer!.text).toBe(
+      'No blocking paths are listed in the current validation response. ' +
+        'Open Validate to run the deterministic schema check.',
+    );
+  });
+
+  it('validate absent → blocking chip disabled (answer undefined)', () => {
+    const out = compose(exportState({ validate: undefined }));
+    expect(out.prompts[1].answer).toBeUndefined();
+  });
+});
+
+describe('compose export — advisory_detail (echo, pluralized "…and K more", empty, disabled)', () => {
+  it('multiple warnings → first echoed + ". …and K more" (K = length - 1)', () => {
+    const out = compose(exportState({ warnings: twoWarnings }));
+    expect(out.prompts[2].answer!.text).toBe(
+      'NO_LINKS — no relationships declared (advisory, non-gating; where: record.links). …and 1 more.',
+    );
+  });
+
+  it('no warnings → honest "No advisory warnings on this record."', () => {
+    const out = compose(
+      exportState({ warnings: { advisory: true, gating: false, warnings: [] } }),
+    );
+    expect(out.prompts[2].answer).toEqual({
+      text: 'No advisory warnings on this record.',
+      answeredFrom: 'advisory',
+    });
+  });
+
+  it('warnings payload absent → advisory chip disabled (answer undefined)', () => {
+    const out = compose(exportState({ warnings: undefined }));
+    expect(out.prompts[2].answer).toBeUndefined();
+  });
+});
+
+describe('compose export — no-verdict guarantee across every composed string', () => {
+  const states: GroundingState[] = [
+    exportState(),
+    exportState({ audit: auditNotExported }),
+    exportState({ audit: undefined }),
+    exportState({ validate: validateDryRun }),
+    exportState({ validate: validateReadyDryRun }),
+    exportState({ validate: undefined }),
+    exportState({ warnings: twoWarnings }),
+    exportState({ warnings: { advisory: true, gating: false, warnings: [] } }),
+  ];
+
+  it('no reply/prompt/answer string states PASS/FAIL or "(in)valid against"', () => {
+    for (const state of states) {
+      const out = compose(state);
+      const strings = [
+        out.reply.text,
+        ...out.prompts.flatMap((p) => [p.text, p.answer?.text ?? '']),
+      ];
+      for (const s of strings) {
+        expect(s).not.toMatch(VERDICT);
+        expect(s).not.toMatch(INVALID_AGAINST);
+      }
+    }
+  });
+
+  it('never echoes validate.ok as a valid/invalid claim (even when validate.ok is true)', () => {
+    const out = compose(exportState({ validate: validateExported }));
+    const all = [out.reply.text, ...out.prompts.map((p) => p.answer?.text ?? '')].join(' ');
+    expect(all).not.toMatch(/\b(valid|invalid)\b/i);
   });
 });

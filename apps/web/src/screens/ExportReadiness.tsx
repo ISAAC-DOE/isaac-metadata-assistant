@@ -15,7 +15,8 @@ import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
 import { ROUTES } from '../lib/routes';
 import { LABELS } from '../lib/labels';
-import { ASSISTANT_SAMPLES, ROUTE_TO_CLI_NOTE } from '../lib/assistant';
+import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
+import { compose } from '../lib/assistantComposer';
 import { api, ApiError } from '../lib/api';
 import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
 import type {
@@ -299,8 +300,7 @@ function LoadedExport({
   const rightPanel = (
     <aside className="record-right narrow" aria-label="Assistant">
       <AssistantPanel
-        reply={ASSISTANT_SAMPLES.export.reply}
-        prompts={ASSISTANT_SAMPLES.export.prompts}
+        {...compose({ context: 'export', bundle: data })}
         availability={graph.availability}
         note={ROUTE_TO_CLI_NOTE}
       />

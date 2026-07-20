@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
-import { render, fireEvent, waitFor } from '@testing-library/react';
+import { render, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
+import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import {
   answersAfterNotebook,
   auditExported,
@@ -312,5 +313,86 @@ describe('S6 · Ready to Export (live)', () => {
     ).toBeInTheDocument();
     // nothing was written in this session: no in-session artifact cards
     expect(container.querySelectorAll('.artifact')).toHaveLength(0);
+  });
+});
+
+describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
+  const VERDICT = /\b(PASS|FAIL)\b/;
+  const INVALID_AGAINST = /\b(in)?valid against\b/i;
+
+  it('pre-export: assistant is grounded live — empty-coverage fallback, blocking routing, ROUTE_TO_CLI_NOTE', async () => {
+    stubFetchRoutes(exportReadyRoutes('demo')); // audit records:[], dry-run would pass, 1 advisory
+    const { container, findByText } = renderAt('/record/demo/export');
+
+    // reply defaults to the coverage chip (lead), grounded in the LIVE audit
+    // bundle: pre-export there are no coverage figures yet.
+    await findByText('No coverage figures yet — coverage appears after export.');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+    expect(panel.getByText('answered from: Evidence Audit')).toBeInTheDocument();
+
+    // the three approved export chips are the guided prompts
+    expect(panel.getByText('Is coverage the same as valid?')).toBeInTheDocument();
+    expect(panel.getByText("What's left before export?")).toBeInTheDocument();
+    expect(panel.getByText('Explain the advisory warning')).toBeInTheDocument();
+
+    // ROUTE_TO_CLI_NOTE is preserved on the panel
+    expect(panel.getByText(ROUTE_TO_CLI_NOTE)).toBeInTheDocument();
+
+    // clicking the blocker chip routes to the deterministic check — it never
+    // states a verdict and never echoes validate.ok
+    fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
+    expect(
+      panel.getByText(
+        'No blocking paths are listed in the current validation response. ' +
+          'Open Validate to run the deterministic schema check.',
+      ),
+    ).toBeInTheDocument();
+    expect(panel.getByText('answered from: Schema Rules')).toBeInTheDocument();
+
+    // no verdict language anywhere in the assistant panel (the approved chip
+    // label "…same as valid?" is a question, not a verdict, so the guard is the
+    // reserved PASS/FAIL + "(in)valid against" language only)
+    expect(assistant.textContent).not.toMatch(VERDICT);
+    expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
+  });
+
+  it('pre-export: the advisory chip echoes the LIVE warning, flagged advisory / non-gating', async () => {
+    stubFetchRoutes(exportReadyRoutes('demo'));
+    const { container, findByText } = renderAt('/record/demo/export');
+    await findByText('No coverage figures yet — coverage appears after export.');
+    const panel = within(container.querySelector('.assistant') as HTMLElement);
+
+    fireEvent.click(panel.getByText('Explain the advisory warning').closest('button')!);
+    expect(
+      panel.getByText(
+        'NO_LINKS — no relationships declared (advisory, non-gating; where: record.links).',
+      ),
+    ).toBeInTheDocument();
+    expect(panel.getByText('answered from: Advisory Checks')).toBeInTheDocument();
+  });
+
+  it('post-export: coverage chip echoes evidence_present/expected live (33/33), never a verdict', async () => {
+    stubFetchRoutes(exportedReadyRoutes('demo')); // audit 33/33, real (post-export) validation
+    const { container, findByText } = renderAt('/record/demo/export');
+
+    // wait for the loaded (post-export) screen
+    await findByText('Valid against official ISAAC schema v1.05.');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+
+    // the assistant reply is the LIVE coverage figure — a count, not a verdict
+    expect(
+      panel.getByText(
+        'Coverage is 33/33 evidenced fields. It describes how many expected fields carry ' +
+          'evidence; the schema check is separate.',
+      ),
+    ).toBeInTheDocument();
+    expect(panel.getByText('answered from: Evidence Audit')).toBeInTheDocument();
+
+    // even though the SCREEN shows a real PASS verdict card, the assistant panel
+    // itself never states PASS/FAIL or an "(in)valid against" conclusion
+    expect(assistant.textContent).not.toMatch(VERDICT);
+    expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
   });
 });
