@@ -10380,7 +10380,7 @@
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
-        "sha256": "80edc7be23cce095517cf6d8b553f33ccf9343857a3965d04e68c341c4cd2dfa"
+        "sha256": "2d2f4502da68bce663cbd90b24cdd04d0c12bcb04561f70121d4fdb3a11c8523"
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "92e316f574d04db8e147d9e2a570bf443498176536023eb6a37d3b1c59177e45"
+        "sha256": "ef22edef258637606781b0409b63c5d7ed0259e731fc7149388fed7e5d9a9684"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
-        "sha256": "c271756809a8883bc39e55775ab639091798f79a48602395b2da5883733461c2"
+        "sha256": "da86c01a4e8d4b26d58a5a898eab22faab96b0035a019b44a2ab638067e228ce"
       },
       {
         "path": "apps/web/src/lib/labels.ts",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "2d25d524616d29cfa62458137cc9e92d89ca64c57f1bfb12df6a761f8dc9725d"
+        "sha256": "849aec7a91cfb1dde4f0c7f9dd1d4001375aeac0fb7b57c7a0c5a2368b1be83d"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10608,7 +10608,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "22e263e9a5922bdda16d28dcf90a9228642f504f7b212fe41000fefa0b9acd52"
+        "sha256": "dae816a3813a18c5a2db959fade408edbe797278886efe77d80db2877bbb33e9"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "ab75420a0a6330be80dc61dd7491c5088dabc2f8cee5ace3d19a3cf9fccc91da"
+    "served_manifest_fingerprint": "37597159400d78f49771b7e603d9830d38671e1356731dcc2f528386515b37d5"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
