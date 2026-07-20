@@ -10672,7 +10672,7 @@
       },
       {
         "path": "docs/deployment.md",
-        "sha256": "9fe39a2a5390ad764dcba7593e1c7df239835cf78e9072c4ee4967a9a05a85cb"
+        "sha256": "392dd298e74719ee955561b0d75edcbafd7927d9a41b73fd2a65820f0fff0c24"
       },
       {
         "path": "docs/extraction.md",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "bd54bc14b888bb221611cbf5d5022cfe9e764cf09dd0c9cfdbdffcf1d4d09f97"
+    "served_manifest_fingerprint": "2787ac41f0c86089f57dec459809ac3133ce3cc1e2f49c0b875e7c289af7e1ca"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

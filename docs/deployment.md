@@ -75,7 +75,7 @@ a live graph (`graphify-out/` is gitignored and never shipped).
 | `ISAAC_BUILD_COMMIT` | Railway (optional) | Explicit build/commit identity for `GET /api/health` |
 | `RAILWAY_GIT_COMMIT_SHA` | Railway (injected) | Fallback build/commit identity for `GET /api/health` |
 | `VITE_API_BASE` | Vercel (build-time) | Backend origin + `/api` |
-| `VITE_API_KEY` | Vercel (build-time) | Same value as `ISAAC_UI_API_KEY` |
+| `VITE_API_KEY` | Vercel (build-time) | Same value as `ISAAC_UI_API_KEY`; **compiled into client JS — browser-visible, not a private secret** (see Auth model) |
 
 ### Build/commit identity on `/api/health`
 
@@ -112,6 +112,12 @@ cryptographic access control. Rotate by changing the env var on both
 platforms and redeploying. Rate limiting is not implemented — it is a
 back-burner item with no phase currently scheduled to add it (not a
 Phase 21 commitment).
+
+Because any `VITE_`-prefixed variable is compiled into client-side JavaScript, `VITE_API_KEY`
+is a **browser-visible shared demo credential**, acceptable only within the current
+synthetic-demo boundary (reach is limited by Vercel access protection). It is **not**
+institutional user authentication; institutional SSO and per-user authorization remain
+deferred and institution-owned.
 
 ## Resetting the synthetic workspace
 
