@@ -5,6 +5,7 @@ import { LABELS } from '../lib/labels';
 import {
   FREEFORM_NOT_WIRED,
   MEMORY_UNAVAILABLE_CAVEAT,
+  SOURCE_LABELS,
   SUBORDINATE_CAPTION,
   hasVerdictLanguage,
 } from '../lib/assistant';
@@ -58,7 +59,7 @@ export function AssistantPanel({ reply, prompts, availability, note }: Assistant
 
       <p className="assistant-reply">{safeText}</p>
       <div className="assistant-sources">
-        <span className="answered-from">answered from: {active.answeredFrom}</span>
+        <span className="answered-from">answered from: {SOURCE_LABELS[active.answeredFrom]}</span>
         {sourceDoc && <span className="assistant-sourcedoc mono">From {sourceDoc}</span>}
       </div>
 

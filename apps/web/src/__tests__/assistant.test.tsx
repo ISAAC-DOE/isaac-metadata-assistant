@@ -5,15 +5,18 @@ import { ASSISTANT_SAMPLES, hasVerdictLanguage } from '../lib/assistant';
 
 describe('AssistantPanel is subordinate and never renders a verdict', () => {
   it('renders subordinate copy with a source label and a memory freshness dot', () => {
-    const { container, getByText } = render(
+    const { container, getByText, queryByText } = render(
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.review.reply}
         prompts={ASSISTANT_SAMPLES.review.prompts}
         availability="available"
       />,
     );
-    // every reply names its source
+    // every reply names its source — rendered as the friendly Title-Case label,
+    // never the raw machine enum (P25.1). The review reply is answeredFrom 'files'.
     expect(getByText(/answered from:/)).toBeInTheDocument();
+    expect(getByText('answered from: Evidence & Sources')).toBeInTheDocument();
+    expect(queryByText('answered from: files')).toBeNull();
     expect(getByText(/memory:/)).toBeInTheDocument();
     // indigo assistant surface, never a verdict class
     expect(container.querySelector('.assistant')).not.toBeNull();

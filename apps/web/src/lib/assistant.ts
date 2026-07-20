@@ -17,11 +17,28 @@ export const ASSISTANT_SOURCES: readonly AssistantSource[] = [
   'git',
   'graph',
   'files',
+  'advisory',
+  'workflow',
 ];
 
 export function isValidSource(source: string): source is AssistantSource {
   return (ASSISTANT_SOURCES as readonly string[]).includes(source);
 }
+
+/**
+ * Approved Title-Case display map (P25.0 §2, Q-A/Q-B). The internal enum stays
+ * machine-stable; the panel renders `answered from: <label>`. No label implies
+ * the assistant itself validates, approves, certifies, or produces a verdict.
+ */
+export const SOURCE_LABELS: Record<AssistantSource, string> = {
+  schema: 'Schema Rules',
+  audit: 'Evidence Audit',
+  files: 'Evidence & Sources',
+  advisory: 'Advisory Checks',
+  workflow: 'Workflow & Artifacts',
+  graph: 'Project Memory',
+  git: 'Project History',
+};
 
 /**
  * Guard: reserved verdict language the assistant must never render. The panel

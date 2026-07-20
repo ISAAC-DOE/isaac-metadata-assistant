@@ -21,7 +21,7 @@ import {
   toAuditResult,
   toValidationResult,
 } from '../lib/adapt';
-import { ASSISTANT_SAMPLES } from '../lib/assistant';
+import { compose } from '../lib/assistantComposer';
 import type { ApiEvidenceEntry, DraftField, RecordBundle } from '../lib/types';
 
 /**
@@ -171,8 +171,7 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
       <div className="right-divider" aria-hidden="true" />
 
       <AssistantPanel
-        reply={ASSISTANT_SAMPLES.review.reply}
-        prompts={ASSISTANT_SAMPLES.review.prompts}
+        {...compose({ context: 'review', bundle })}
         availability={graph.availability}
       />
     </aside>

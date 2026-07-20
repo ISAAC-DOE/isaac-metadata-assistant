@@ -159,7 +159,17 @@ export type MemoryAvailability = 'available' | 'unavailable';
 export type SnapshotIntegrity = 'verified' | 'malformed' | 'unsupported' | 'unknown';
 export type MemoryConsistency = 'current' | 'stale' | 'unknown';
 
-export type AssistantSource = 'schema' | 'audit' | 'git' | 'graph' | 'files';
+// Additive (P25.1): `advisory` (soft, non-gating warnings) and `workflow`
+// (record/experiment status, pending items, artifacts) join the machine-stable
+// enum. No source label ever implies the assistant itself validates.
+export type AssistantSource =
+  | 'schema'
+  | 'audit'
+  | 'git'
+  | 'graph'
+  | 'files'
+  | 'advisory'
+  | 'workflow';
 
 export interface AssistantMessage {
   text: string; // sentence case; never renders PASS/FAIL
@@ -173,6 +183,38 @@ export interface SuggestedPrompt {
   // The STATIC, source-labeled sample answer shown when this prompt is clicked.
   // A guided prompt with no answer stays display-only (never fabricates one).
   answer?: AssistantMessage;
+}
+
+// --- grounded assistant composer (P25.1) ------------------------------
+// The composer is a pure, synchronous function over the bundle a screen has
+// ALREADY fetched — zero new fetches, zero backend endpoint, zero truth-path
+// change. The full union is TYPE-declared here; only `review` is wired at P25.1.
+
+export type ScreenContext = 'review' | 'export' | 'evidence' | 'complete' | 'memory';
+
+export type GroundingState =
+  | { context: 'review'; bundle: RecordBundle }
+  | { context: 'export'; bundle: ExportReadinessBundle }
+  | { context: 'evidence'; bundle: EvidenceBundle; selectedPath?: string }
+  | {
+      context: 'complete';
+      detail: ApiExperimentDetail;
+      pending: ApiPendingItem[];
+      selectedPendingId?: string;
+    }
+  | { context: 'memory'; graph: ApiGraphStatus };
+
+export interface GroundedChip {
+  id: string; // stable key
+  label: string; // chip text (verb-first, one question)
+  source: AssistantSource; // the plane/category this answers from
+  routed?: boolean; // truth-question chips that ALWAYS route, never echo a verdict
+  resolve(state: GroundingState): AssistantMessage | null; // null → data absent → chip disabled
+}
+
+export interface ComposerOutput {
+  reply: AssistantMessage;
+  prompts: SuggestedPrompt[];
 }
 
 // --- export artifacts (S6) --------------------------------------------
