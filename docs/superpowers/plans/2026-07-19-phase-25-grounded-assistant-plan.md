@@ -1,6 +1,6 @@
 # Phase 25 — Grounded Assistant — Implementation Plan
 
-Status (updated 2026-07-20): **P25.0 approved · P25.1 RELEASED · P25.2 RELEASED** — all on `origin/main`, CI-green and browser-verified. **P25.3 remains an intentional tombstone** (folded into P25.1). The next candidate **P25.4 (Ground the Export context)** is now **AUTHORIZED and active** under the 2026-07-20 master authorization (continuous execution of the locked core roadmap; reconciliation gate incl. R4.1 complete — R4.1 released `47aa9c7`, CI green). Per-slice report→review→commit→push→CI→checkpoint and the hard-stop gates remain in force. Direction **DECISION-LOCKED 2026-07-20**.
+Status (updated 2026-07-20): **P25.0 approved · P25.1 RELEASED · P25.2 RELEASED** — all on `origin/main`, CI-green and browser-verified. **P25.3 remains an intentional tombstone** (folded into P25.1). **P25.4 (Ground the Export context) is RELEASED** (`e0e3d1a`, CI green, hosted QA green); **P25.5 (Evidence context) is now the active authorized slice** under the 2026-07-20 master authorization (continuous execution of the locked core roadmap; reconciliation gate incl. R4.1 complete — R4.1 released `47aa9c7`). Per-slice report→review→commit→push→CI→checkpoint and the hard-stop gates remain in force. Direction **DECISION-LOCKED 2026-07-20**.
 Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md; `2026-07-20-remaining-work-decision-lock.md` (authoritative); P24 specs (24 / 24.9 / 24.10); this doc EXTENDS the approved arc.
 
@@ -8,7 +8,8 @@ Related: 2026-07-16-phases-23-26-arc-decisions.md; `2026-07-20-remaining-work-de
 - **Reconciliation gate COMPLETE.** R1–R6 done; **R4.1** (toolset-profile separation + `isaac-profile`) released — commit `47aa9c7` on `origin/main`, exact-HEAD CI green (run `29782165668`).
 - **HEAD = `47aa9c7`**; `main` clean and synchronized with `origin/main`.
 - The **2026-07-20 master authorization** lifts the P25.4 block and authorizes **continuous execution** of the locked core roadmap (P25.4→P25.10 → Phase 26 → UI Refinement → Stabilization → Documentation & Deliverables → one final Graphify/snapshot refresh). Per-slice report→independent review→commit→push→exact-HEAD CI→checkpoint retained; hard-stop gates in force; P25.8 excluded; Convex/institutional infra off-path.
-- **Active authorized slice: P25.4 — Ground the Export context (ExportReadiness)**, delegated to Opus 4.8.
+- **P25.4 RELEASED** — commit `e0e3d1a` on `origin/main`; 194 frontend tests, `tsc -b` clean, Vite build, snapshot regen (served-file drift), exact-HEAD CI green (run `29783857915`), independent Opus review APPROVED. **Hosted browser QA GREEN** on `isaac-demo-web.vercel.app` Ready-to-Export: coverage `29/33` from *Evidence Audit*; "What's left before export?" routes to the deterministic check with **no verdict** (record is PASS, assistant does not echo it); 3 §5.2 chips; `ROUTE_TO_CLI_NOTE` preserved.
+- **Active authorized slice: P25.5 — ground + mount the Evidence context (EvidenceExplorer)**, delegated to Opus 4.8.
 - The prior checkpoint block (below) is retained as history; its "P25.4 not yet authorized" and "HEAD = `5013d7c`" lines are superseded by this block.
 
 ### Session checkpoint — 2026-07-20
@@ -475,7 +476,7 @@ Each slice: objective · files touched · files forbidden · model · acceptance
   composer skeleton in P25.1 per the decision-lock's first-code-slice definition. This ID is retained
   as a tombstone so P25.4–P25.8 keep their numbers; there is no separate P25.3 work.
 
-- **P25.4 — Ground the Export context (ExportReadiness). ⏭ ACTIVE — AUTHORIZED 2026-07-20 (master authorization; continuous locked-roadmap execution; delegated to Opus 4.8).**
+- **P25.4 — Ground the Export context (ExportReadiness). ✅ RELEASED 2026-07-20 — commit `e0e3d1a`; 194 frontend tests, CI green, hosted QA green.**
   - Objective: replace `ASSISTANT_SAMPLES.export` with `compose('export', bundle)`; keep
     `ROUTE_TO_CLI_NOTE`. Coverage/warnings echoed live; verdict routed. Files:
     `screens/ExportReadiness.tsx`; test. Model: Opus. Tests: extend `completion-export.test.tsx`. CP-B.
