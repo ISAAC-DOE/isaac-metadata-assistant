@@ -114,7 +114,16 @@ def test_committed_snapshot_readable_by_sanitized_snapshot_source():
     assert len(reader.concepts()) == len(snapshot["concepts"])
     assert len(reader.files()) == len(snapshot["files"])
 
-    status = reader.status(build_commit=snapshot["built_at_commit"])
+    # P24.10: the REAL committed snapshot predates memory_inputs (it is
+    # regenerated to embed them only in the release slice), so it degrades
+    # honestly: available + integrity=verified, but both provable freshness
+    # concepts are "unknown" (no embedded fingerprint reference to prove against).
+    # The full content-drift gate is a later slice; this only pins the status shape.
+    status = reader.status()
     assert status["provider_kind"] == "sanitized-snapshot"
     assert status["available"] is True
-    assert status["freshness"] == "fresh"
+    assert status["integrity"] == "verified"
+    assert status["policy_consistency"] == "unknown"
+    assert status["indexed_sources"] == "unknown"
+    assert status["policy_fingerprint"] is None
+    assert status["served_manifest_fingerprint"] is None

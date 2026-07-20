@@ -54,8 +54,10 @@ can replace/supplement it without rewriting callers. ``get_default_reader()``
 selects a provider by precedence: the ``ISAAC_MEMORY_SNAPSHOT`` file override, then
 the packaged canonical snapshot if present, then the ``ISAAC_MEMORY_DIR`` live-graph
 override (the mounted-volume seam), and finally the repo's ``graphify-out/``
-directory. Both readers expose a ``status(build_commit)`` method carrying the
-provider kind and a null-safe freshness verdict.
+directory. Both readers expose a ``status()`` method (P24.10) carrying the
+provider kind, separated availability / integrity, and two provable, separated
+freshness concepts (policy_consistency, indexed_sources) — the deployed/app-HEAD
+commit is never an input to any freshness value.
 
 Rationale join
 --------------
@@ -161,7 +163,7 @@ class MemoryReader(Protocol):
     def files(self) -> list: ...
     def file(self, path: str) -> Optional[dict]: ...
     def classify_path(self, path: str) -> str: ...
-    def status(self, build_commit: Optional[str] = None) -> dict: ...
+    def status(self) -> dict: ...
 
 
 # --- parsed state -------------------------------------------------------------
@@ -174,6 +176,11 @@ class _GraphState:
     key: tuple
     available: bool
     reason: Optional[str] = None
+    #: Snapshot-integrity axis, SEPARATE from availability (P24.10). A live graph
+    #: is ``"verified"`` when available, ``"malformed"`` when present-but-unreadable,
+    #: ``"unknown"`` when absent. (Local graphs have no schema version, so never
+    #: ``"unsupported"``.)
+    integrity: str = "unknown"
     built_at_commit: Optional[str] = None
     graph_mtime: float = 0.0
     node_count: int = 0
@@ -201,9 +208,20 @@ class _SnapshotState:
     key: tuple
     available: bool
     reason: Optional[str] = None
+    #: Snapshot-integrity axis, SEPARATE from availability (P24.10):
+    #: ``"verified"`` (present + supported schema + valid shape), ``"unsupported"``
+    #: (present but unsupported schema version), ``"malformed"`` (present but bad
+    #: keys/types/unreadable), ``"unknown"`` (no artifact). A malformed snapshot is
+    #: BOTH available=False AND integrity="malformed".
+    integrity: str = "unknown"
     built_at_commit: Optional[str] = None
     source_graph_sha256: Optional[str] = None
     snapshot_schema_version: Optional[int] = None
+    #: The snapshot's embedded top-level ``memory_inputs`` object (P24.10), or
+    #: ``None`` when absent/malformed. Its presence + internal consistency drive
+    #: the policy_consistency / indexed_sources freshness concepts; its absence
+    #: degrades both to ``"unknown"`` without affecting availability/integrity.
+    memory_inputs: Optional[dict] = None
     overview: dict = field(default_factory=dict)
     concepts: list = field(default_factory=list)
     concept_detail: dict = field(default_factory=dict)
@@ -215,20 +233,71 @@ class _SnapshotState:
 # --- helpers ------------------------------------------------------------------
 
 
-def _freshness(available: bool, build_commit, source_commit) -> str:
-    """The shared, null-safe freshness verdict used by both providers'
-    ``status()``.
+def _memory_input_freshness(available: bool, memory_inputs) -> dict:
+    """The shared, null-safe P24.10 freshness derivation for both providers'
+    ``status()``, computed ONLY from a snapshot's embedded ``memory_inputs`` — the
+    deployed/app-HEAD commit is NEVER an input to any value here.
 
-    ``"unavailable"`` when the reader has no data; otherwise ``"unknown"`` when
-    EITHER commit is null/unknown (never compares ``null == null`` into
-    ``"fresh"``, never reports a real SHA vs ``null`` as ``"stale"``); else
-    ``"fresh"`` iff the two known commits are equal, ``"stale"`` iff they differ.
+    Returns the five ``memory_inputs``-derived status fields::
+
+        policy_fingerprint, policy_consistency, served_manifest_fingerprint,
+        served_file_count, indexed_sources
+
+    * **policy_consistency** — ``"current"`` iff the runtime-recomputed
+      :func:`compute_memory_policy_fingerprint` equals the embedded fingerprint;
+      ``"stale"`` iff both present & differ; ``"unknown"`` when unavailable or the
+      embedded fingerprint is absent/None. Policy is recomputable at runtime from
+      shipped constants, so a real mismatch is a provable ``"stale"``.
+    * **indexed_sources** — ``"current"`` iff ``memory_inputs`` is present AND
+      internally consistent (the recomputed aggregate over its embedded
+      ``served_content_manifest`` equals the embedded
+      ``served_manifest_fingerprint``); otherwise ``"unknown"``. It is NEVER
+      ``"stale"`` here: the hosted runtime does not ship the served files, so it
+      cannot recompute their on-disk digests — actual content drift is CI's
+      authority. Internal inconsistency degrades to ``"unknown"``, never a
+      manufactured ``"stale"``.
+
+    A live graph (no embedded ``memory_inputs``) passes ``memory_inputs=None`` and
+    gets all-unknown / all-None: it carries no fingerprint reference to prove
+    against.
     """
-    if not available:
-        return "unavailable"
-    if build_commit is None or source_commit is None:
-        return "unknown"
-    return "fresh" if build_commit == source_commit else "stale"
+    mi = memory_inputs if isinstance(memory_inputs, dict) else None
+
+    policy_fp = mi.get("policy_fingerprint") if mi else None
+    policy_fp = policy_fp if isinstance(policy_fp, str) else None
+    served_fp = mi.get("served_manifest_fingerprint") if mi else None
+    served_fp = served_fp if isinstance(served_fp, str) else None
+    served_count = mi.get("served_file_count") if mi else None
+    if not (isinstance(served_count, int) and not isinstance(served_count, bool)):
+        served_count = None
+
+    if not available or policy_fp is None:
+        policy_consistency = "unknown"
+    else:
+        policy_consistency = (
+            "current" if compute_memory_policy_fingerprint() == policy_fp else "stale"
+        )
+
+    indexed_sources = "unknown"
+    if available and mi is not None and served_fp is not None:
+        manifest = mi.get("served_content_manifest")
+        if isinstance(manifest, list):
+            try:
+                recomputed = compute_served_manifest_fingerprint(manifest)
+            except Exception:
+                recomputed = None
+            if recomputed is not None and recomputed == served_fp:
+                indexed_sources = "current"
+            # else stays "unknown" — NEVER "stale" (runtime cannot recompute file
+            # digests; drift detection is CI's authority).
+
+    return {
+        "policy_fingerprint": policy_fp,
+        "policy_consistency": policy_consistency,
+        "served_manifest_fingerprint": served_fp,
+        "served_file_count": served_count,
+        "indexed_sources": indexed_sources,
+    }
 
 
 def _find_repo_root() -> Path:
@@ -378,13 +447,16 @@ class LocalGraphArtifactSource:
         self.reload_count += 1
 
         if not self.graph_path.is_file():
-            return _GraphState(key=key, available=False, reason="graph_absent")
+            return _GraphState(key=key, available=False, reason="graph_absent",
+                               integrity="unknown")
         try:
             graph = _load_json(self.graph_path)
         except (ValueError, OSError):
-            return _GraphState(key=key, available=False, reason="graph_unreadable")
+            return _GraphState(key=key, available=False, reason="graph_unreadable",
+                               integrity="malformed")
         if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
-            return _GraphState(key=key, available=False, reason="graph_unreadable")
+            return _GraphState(key=key, available=False, reason="graph_unreadable",
+                               integrity="malformed")
 
         # Never-raise guard over the whole derivation: a JSON-valid graph whose
         # VALUES have unexpected types (e.g. string ``community``, non-string
@@ -394,7 +466,8 @@ class LocalGraphArtifactSource:
         try:
             return self._derive(key, graph)
         except Exception:
-            return _GraphState(key=key, available=False, reason="graph_unreadable")
+            return _GraphState(key=key, available=False, reason="graph_unreadable",
+                               integrity="malformed")
 
     def _derive(self, key: tuple, graph: dict) -> _GraphState:
         """Build the derived state from a shape-checked graph dict. May raise on
@@ -480,6 +553,7 @@ class LocalGraphArtifactSource:
         return _GraphState(
             key=key,
             available=True,
+            integrity="verified",
             built_at_commit=graph.get("built_at_commit"),
             graph_mtime=self._mtime(self.graph_path) or 0.0,
             node_count=len(nodes),
@@ -694,21 +768,36 @@ class LocalGraphArtifactSource:
             return True
         return False
 
-    def status(self, build_commit: Optional[str] = None) -> dict:
-        """Provider/freshness descriptor for the seam (P24.9-impl-2).
+    def status(self) -> dict:
+        """Separated status/freshness descriptor for the seam (P24.10).
 
-        Freshness compares the caller-supplied backend ``build_commit`` against
-        the graph's ``built_at_commit`` via the shared null-safe :func:`_freshness`
-        rule. A local reader has no snapshot schema/sha256, so those are ``None``."""
+        A live graph carries NO embedded ``memory_inputs`` (only generated
+        snapshots do), so it has no fingerprint reference to prove against:
+        ``policy_consistency`` and ``indexed_sources`` are honestly ``"unknown"``
+        and both fingerprints ``None``. (Live-graph-vs-repo drift is
+        ``check_graphify_freshness.py``'s separate concern, out of scope here.)
+        ``source_graph_commit`` is the graph's ``built_at_commit`` (version
+        metadata, never a freshness input); a local reader has no snapshot
+        schema/sha256, so those are ``None``. The key set matches
+        :class:`SanitizedSnapshotSource.status` exactly (provider parity)."""
         state = self._state_now()
+        fresh = _memory_input_freshness(state.available, None)
         return {
             "provider_kind": "local-graph",
             "available": state.available,
-            "reason": state.reason,
-            "snapshot_schema_version": None,
+            "integrity": state.integrity,
+            "policy_fingerprint": fresh["policy_fingerprint"],
+            "policy_consistency": fresh["policy_consistency"],
+            "served_manifest_fingerprint": fresh["served_manifest_fingerprint"],
+            # Live served count is honest here (no manifest fingerprint to tie it
+            # to); null when the graph is unavailable.
+            "served_file_count": state.served_file_count if state.available else None,
+            "indexed_sources": fresh["indexed_sources"],
+            "freshness_scope": "served_files_only",
+            "freshness_basis": "ci_content_manifest",
             "source_graph_commit": state.built_at_commit,
             "source_graph_sha256": None,
-            "freshness": _freshness(state.available, build_commit, state.built_at_commit),
+            "snapshot_schema_version": None,
         }
 
 
@@ -766,23 +855,37 @@ class SanitizedSnapshotSource:
         self.reload_count += 1
 
         if not self.snapshot_path.is_file():
-            return _SnapshotState(key=key, available=False, reason="graph_absent")
+            return _SnapshotState(key=key, available=False, reason="graph_absent",
+                                  integrity="unknown")
         try:
             data = _load_json(self.snapshot_path)
         except (ValueError, OSError):
-            return _SnapshotState(key=key, available=False, reason="graph_unreadable")
+            return _SnapshotState(key=key, available=False, reason="graph_unreadable",
+                                  integrity="malformed")
         if not isinstance(data, dict):
-            return _SnapshotState(key=key, available=False, reason="graph_unreadable")
+            return _SnapshotState(key=key, available=False, reason="graph_unreadable",
+                                  integrity="malformed")
+
+        # Integrity axis (P24.10), assessed BEFORE the blanket-degrade wrapper so a
+        # present-but-unsupported schema version reports integrity="unsupported"
+        # (distinct from the malformed shapes). A present int version that is not
+        # the supported one is "unsupported"; a missing/non-int version falls
+        # through to _derive, which raises -> "malformed".
+        version = data.get("snapshot_schema_version")
+        if isinstance(version, int) and not isinstance(version, bool) \
+                and version != SUPPORTED_SNAPSHOT_SCHEMA_VERSION:
+            return _SnapshotState(key=key, available=False, reason="graph_unreadable",
+                                  integrity="unsupported", snapshot_schema_version=version)
 
         # Blanket never-raise guard over the whole derivation, exactly like
         # ``LocalGraphArtifactSource._build``: a missing key, wrong ``kind``,
-        # unsupported schema version, wrong value type, or a structurally
-        # incomplete projection all degrade to ``graph_unreadable`` — never
-        # propagate.
+        # wrong value type, or a structurally incomplete projection all degrade to
+        # ``graph_unreadable`` / integrity="malformed" — never propagate.
         try:
             return self._derive(key, data)
         except Exception:
-            return _SnapshotState(key=key, available=False, reason="graph_unreadable")
+            return _SnapshotState(key=key, available=False, reason="graph_unreadable",
+                                  integrity="malformed")
 
     def _derive(self, key: tuple, data: dict) -> _SnapshotState:
         """Validate and load a snapshot dict into immutable state. Raises on any
@@ -819,12 +922,21 @@ class SanitizedSnapshotSource:
             if not isinstance(f, dict) or f.get("path") not in file_detail:
                 raise ValueError("path in files[] missing from file_detail")
 
+        # ``memory_inputs`` is an ADDITIVE, optional top-level object (P24.10): a
+        # pre-P24.10 snapshot lacks it and stays fully verified. A present-but-not
+        # a dict value degrades to None (freshness -> unknown), never unavailable.
+        memory_inputs = data.get("memory_inputs")
+        if not isinstance(memory_inputs, dict):
+            memory_inputs = None
+
         return _SnapshotState(
             key=key,
             available=True,
+            integrity="verified",
             built_at_commit=data.get("built_at_commit"),
             source_graph_sha256=data.get("source_graph_sha256"),
             snapshot_schema_version=version,
+            memory_inputs=memory_inputs,
             overview=overview,
             concepts=concepts,
             concept_detail=concept_detail,
@@ -885,21 +997,34 @@ class SanitizedSnapshotSource:
             return "served"
         return "not_indexed"
 
-    def status(self, build_commit: Optional[str] = None) -> dict:
-        """Provider/freshness descriptor for the seam (P24.9-impl-2).
+    def status(self) -> dict:
+        """Separated status/freshness descriptor for the seam (P24.10).
 
         Carries the snapshot's own provenance (schema version, source graph commit
-        + sha256) and the null-safe freshness verdict comparing ``build_commit``
-        against the snapshot's ``built_at_commit``."""
+        + sha256, integrity) plus the two separated, provable freshness concepts
+        derived ONLY from the embedded ``memory_inputs`` (never the deployed/app
+        commit): ``policy_consistency`` (recomputed policy fingerprint vs embedded)
+        and ``indexed_sources`` (embedded manifest internal consistency; never
+        ``"stale"`` — the hosted runtime cannot recompute file digests). A snapshot
+        without ``memory_inputs`` degrades both to ``"unknown"`` while staying
+        available + integrity="verified". The key set matches
+        :class:`LocalGraphArtifactSource.status` exactly (provider parity)."""
         state = self._state_now()
+        fresh = _memory_input_freshness(state.available, state.memory_inputs)
         return {
             "provider_kind": "sanitized-snapshot",
             "available": state.available,
-            "reason": state.reason,
-            "snapshot_schema_version": state.snapshot_schema_version,
+            "integrity": state.integrity,
+            "policy_fingerprint": fresh["policy_fingerprint"],
+            "policy_consistency": fresh["policy_consistency"],
+            "served_manifest_fingerprint": fresh["served_manifest_fingerprint"],
+            "served_file_count": fresh["served_file_count"],
+            "indexed_sources": fresh["indexed_sources"],
+            "freshness_scope": "served_files_only",
+            "freshness_basis": "ci_content_manifest",
             "source_graph_commit": state.built_at_commit,
             "source_graph_sha256": state.source_graph_sha256,
-            "freshness": _freshness(state.available, build_commit, state.built_at_commit),
+            "snapshot_schema_version": state.snapshot_schema_version,
         }
 
 

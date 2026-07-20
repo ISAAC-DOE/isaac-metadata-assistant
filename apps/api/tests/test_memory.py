@@ -830,15 +830,18 @@ def test_memory_module_imports_only_stdlib():
 
 
 def test_reader_exposes_seven_method_surface(reader):
-    """The ``MemoryReader`` seam grew to seven methods with the additive
-    ``status`` freshness method (P24.9-impl-2); the local reader must implement
-    all seven so a future snapshot/db/hosted provider mirrors one surface."""
+    """The ``MemoryReader`` seam has seven methods including the separated
+    ``status()`` (P24.10 takes no build_commit — app-HEAD is not a freshness
+    input); the local reader must implement all seven so a future
+    snapshot/db/hosted provider mirrors one surface."""
     for name in ("overview", "concepts", "concept", "files", "file",
                  "classify_path", "status"):
         assert callable(getattr(reader, name))
-    st = reader.status(build_commit="fakecommit0000")
+    st = reader.status()
     assert st["provider_kind"] == "local-graph"
-    assert st["freshness"] == "fresh"  # synthetic graph built_at_commit matches
+    # A live graph carries no embedded memory_inputs -> honest "unknown".
+    assert st["policy_consistency"] == "unknown"
+    assert st["indexed_sources"] == "unknown"
 
 
 # --- 10. real-graph smoke (conditional) ---------------------------------------

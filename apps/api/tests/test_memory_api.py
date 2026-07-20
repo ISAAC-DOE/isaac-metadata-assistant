@@ -188,47 +188,49 @@ def test_memory_file_detail_available(tmp_path, monkeypatch):
     assert len(body["rationales"]) <= 10
 
 
-def test_graph_status_additive_fields_present_when_available(tmp_path, monkeypatch):
-    # No ISAAC_BUILD_COMMIT/RAILWAY_GIT_COMMIT_SHA set -> the reader's freshness
-    # is deterministically "unknown" (the backend's own build commit is
-    # unknown), while the graph itself IS available -> real counts present.
+def test_graph_status_local_provider_separated_fields_when_available(tmp_path, monkeypatch):
+    # The local (live-graph) provider is available, verified, but carries NO
+    # embedded memory_inputs -> both freshness concepts are honestly "unknown"
+    # and both fingerprints null. Counts + source_graph_commit are populated.
     monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     art = _write_artifacts(tmp_path)
     client = _client(tmp_path, monkeypatch, art)
     body = client.get("/api/graph/status").json()
-    assert body["status"] == "unknown"
     assert body["plane"] == "memory"
-    assert body["built_at_commit"] == "fakecommit0000"
+    assert body["availability"] == "available"
+    assert body["integrity"] == "verified"
+    assert body["provider"] == "local-graph"
+    assert body["memory_policy"] == "unknown"      # no embedded memory_inputs
+    assert body["indexed_sources"] == "unknown"    # no embedded memory_inputs
+    assert body["policy_fingerprint"] is None
+    assert body["served_manifest_fingerprint"] is None
+    assert body["freshness_scope"] == "served_files_only"
+    assert body["freshness_basis"] == "ci_content_manifest"
+    assert body["source_graph_commit"] == "fakecommit0000"
+    assert body["snapshot_schema_version"] is None
+    assert body["deployed_app_commit"] is None     # no build commit set -> null metadata
     assert body["node_count"] == 5
     assert body["edge_count"] == 3
     assert body["community_count"] == 4  # distinct communities {7,9,3,5}
     assert body["concept_count"] == 2
     assert body["file_count"] == 3  # served allowlist count (examples/ excluded)
+    assert body["served_file_count"] == 3  # live served count for local provider
     assert isinstance(body["graph_mtime"], float)
-    assert body["provider_kind"] == "local-graph"
-    assert body["snapshot_schema_version"] is None
-    assert body["source_graph_sha256"] is None
 
 
-def test_graph_status_local_provider_fresh_when_build_commit_matches(tmp_path, monkeypatch):
+def test_graph_status_local_deployed_commit_is_metadata_only(tmp_path, monkeypatch):
+    # Whatever the deployed app commit is (match OR differ vs source_graph_commit),
+    # it NEVER drives memory_policy / indexed_sources — it is pure metadata. The
+    # local provider stays memory_policy/indexed_sources="unknown" in both cases.
     art = _write_artifacts(tmp_path)
-    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "fakecommit0000")  # matches the synthetic graph
-    client = _client(tmp_path, monkeypatch, art)
-    body = client.get("/api/graph/status").json()
-    assert body["status"] == "fresh"
-    assert body["provider_kind"] == "local-graph"
-    assert body["node_count"] == 5  # counts present alongside fresh
-
-
-def test_graph_status_local_provider_stale_when_build_commit_differs(tmp_path, monkeypatch):
-    art = _write_artifacts(tmp_path)
-    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "some-other-commit")
-    client = _client(tmp_path, monkeypatch, art)
-    body = client.get("/api/graph/status").json()
-    assert body["status"] == "stale"
-    assert body["provider_kind"] == "local-graph"
-    assert body["node_count"] == 5  # counts present alongside stale
+    for deployed in ("fakecommit0000", "some-other-commit"):
+        monkeypatch.setenv("ISAAC_BUILD_COMMIT", deployed)
+        body = _client(tmp_path, monkeypatch, art).get("/api/graph/status").json()
+        assert body["deployed_app_commit"] == deployed  # reflected as metadata
+        assert body["memory_policy"] == "unknown"
+        assert body["indexed_sources"] == "unknown"
+        assert body["node_count"] == 5  # counts present regardless
 
 
 # --- 1b. P24.9: no emitted path may fail the served allowlist ------------------
@@ -397,35 +399,35 @@ def test_graph_status_additive_fields_absent_when_missing(tmp_path, monkeypatch)
     memory_dir = tmp_path / "graphify-out"  # never created
     client = _client(tmp_path, monkeypatch, memory_dir)
     body = client.get("/api/graph/status").json()
-    assert body["status"] == "missing"
-    for key in ("built_at_commit", "node_count", "edge_count",
-                "community_count", "file_count", "concept_count", "graph_mtime"):
+    assert body["availability"] == "unavailable"
+    assert body["integrity"] == "unknown"  # no artifact to assess
+    # provider collapses to "unavailable" when the plane has no data.
+    assert body["provider"] == "unavailable"
+    assert body["memory_policy"] == "unknown"
+    assert body["indexed_sources"] == "unknown"
+    for key in ("node_count", "edge_count", "community_count",
+                "file_count", "concept_count", "graph_mtime",
+                "source_graph_commit", "policy_fingerprint",
+                "served_manifest_fingerprint", "served_file_count"):
         assert body[key] is None
-    # provider_kind is provider IDENTITY, not a graph-content count — it stays
-    # populated even when the graph itself is absent (mirrors reader.status()
-    # returning provider_kind regardless of availability).
-    assert body["provider_kind"] == "local-graph"
     assert body["snapshot_schema_version"] is None
-    assert body["source_graph_sha256"] is None
 
 
 def test_graph_status_single_source_when_env_overrides(tmp_path, monkeypatch):
-    """ISAAC_MEMORY_DIR points at a populated graph: `status` and the additive
-    counts must describe the SAME graph — never a self-contradictory body
-    reading status:"missing" alongside populated counts (the documented future
-    mounted-volume case). ISAAC_BUILD_COMMIT is set to the synthetic graph's own
-    commit so freshness is deterministically "fresh", pinning the honest value
-    rather than merely asserting "not missing"."""
+    """ISAAC_MEMORY_DIR points at a populated graph: the separated status fields
+    and the additive counts must describe the SAME graph — never a
+    self-contradictory body reading availability:"unavailable" alongside
+    populated counts (the documented future mounted-volume case)."""
     art = _write_artifacts(tmp_path / "volume")
     monkeypatch.setenv("ISAAC_BUILD_COMMIT", "fakecommit0000")
     client = _client(tmp_path, monkeypatch, art)
     body = client.get("/api/graph/status").json()
     # Counts describe the env-pointed graph...
-    assert body["built_at_commit"] == "fakecommit0000"
+    assert body["source_graph_commit"] == "fakecommit0000"
     assert body["node_count"] == 5
-    # ...and status must describe that same graph, so it cannot be "missing".
-    assert body["status"] != "missing"
-    assert body["status"] == "fresh"
+    # ...and availability must describe that same graph, so it is "available".
+    assert body["availability"] == "available"
+    assert body["provider"] == "local-graph"
 
 
 # --- 2b. snapshot provider (packaged/explicit via ISAAC_MEMORY_SNAPSHOT) -------
@@ -438,100 +440,109 @@ def test_graph_status_single_source_when_env_overrides(tmp_path, monkeypatch):
 _SNAPSHOT_FIXTURE = _repo_root() / "tests" / "fixtures" / "memory_snapshot" / "memory-snapshot.json"
 _SNAPSHOT_COMMIT = "fakecommitp24900"
 _SNAPSHOT_SHA256 = "86c25c586b3f9c104b087ba1be3db5486347cb81486b6c57a5085fc9a5dbc0d6"
+#: The fixture snapshot's embedded served_manifest_fingerprint (P24.10 Slice 2).
+_SNAPSHOT_MANIFEST_FP = "9b44d17323fed978caea412d00d9b68c1cb3ffac9cef995e8a4362003f4ac818"
 
 
-def test_graph_status_snapshot_provider_fresh(tmp_path, monkeypatch):
+def test_graph_status_snapshot_provider_current(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_SNAPSHOT_FIXTURE))
     monkeypatch.setenv("ISAAC_BUILD_COMMIT", _SNAPSHOT_COMMIT)
     client = _client(tmp_path, monkeypatch)
     body = client.get("/api/graph/status").json()
-    assert body["status"] == "fresh"
-    assert body["provider_kind"] == "sanitized-snapshot"
+    assert body["availability"] == "available"
+    assert body["integrity"] == "verified"
+    assert body["provider"] == "sanitized-snapshot"
+    assert body["memory_policy"] == "current"      # embedded fp matches recompute
+    assert body["indexed_sources"] == "current"    # manifest internally consistent
+    assert body["policy_fingerprint"] is not None
+    assert body["served_manifest_fingerprint"] == _SNAPSHOT_MANIFEST_FP
+    assert body["served_file_count"] == 3
     assert body["snapshot_schema_version"] == 1
-    assert body["source_graph_sha256"] == _SNAPSHOT_SHA256
-    assert body["built_at_commit"] == _SNAPSHOT_COMMIT
+    assert body["source_graph_commit"] == _SNAPSHOT_COMMIT
     assert body["node_count"] is not None
 
 
-def test_graph_status_snapshot_provider_stale(tmp_path, monkeypatch):
+def test_graph_status_snapshot_deployed_commit_does_not_drive_freshness(tmp_path, monkeypatch):
+    # Snapshot WITH memory_inputs; set the deployed app commit to something
+    # DIFFERENT from source_graph_commit. memory_policy STAYS current AND
+    # indexed_sources STAYS current -> proof app-HEAD no longer drives freshness.
+    # deployed_app_commit reflects the env var purely as version metadata.
     monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_SNAPSHOT_FIXTURE))
-    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "deadbeefdeadbeef")  # differs from the snapshot
+    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "totallydifferentappcommit")
     client = _client(tmp_path, monkeypatch)
     body = client.get("/api/graph/status").json()
-    assert body["status"] == "stale"
-    assert body["provider_kind"] == "sanitized-snapshot"
-    assert body["node_count"] is not None  # counts present alongside stale
+    assert body["source_graph_commit"] == _SNAPSHOT_COMMIT
+    assert body["deployed_app_commit"] == "totallydifferentappcommit"
+    assert body["source_graph_commit"] != body["deployed_app_commit"]
+    assert body["memory_policy"] == "current"      # unaffected by app-HEAD
+    assert body["indexed_sources"] == "current"    # unaffected by app-HEAD
+    assert body["availability"] == "available"
+    assert body["integrity"] == "verified"
+    assert body["provider"] == "sanitized-snapshot"
 
 
-def test_graph_status_snapshot_provider_unknown_when_no_build_commit(tmp_path, monkeypatch):
-    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_SNAPSHOT_FIXTURE))
-    monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
-    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
-    client = _client(tmp_path, monkeypatch)
-    body = client.get("/api/graph/status").json()
-    assert body["status"] == "unknown"
-    assert body["provider_kind"] == "sanitized-snapshot"
-    assert body["node_count"] is not None  # available -> real counts, just unknown freshness
-
-
-def test_graph_status_snapshot_missing_file_is_missing_with_null_counts(tmp_path, monkeypatch):
+def test_graph_status_snapshot_missing_file_is_unavailable_with_null_counts(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(tmp_path / "nope.json"))  # never created
     client = _client(tmp_path, monkeypatch)
     body = client.get("/api/graph/status").json()
-    assert body["status"] == "missing"
-    for key in ("built_at_commit", "node_count", "edge_count",
-                "community_count", "file_count", "concept_count", "graph_mtime"):
+    assert body["availability"] == "unavailable"
+    assert body["integrity"] == "unknown"  # no artifact
+    assert body["provider"] == "unavailable"
+    assert body["memory_policy"] == "unknown"
+    assert body["indexed_sources"] == "unknown"
+    for key in ("node_count", "edge_count", "community_count", "file_count",
+                "concept_count", "graph_mtime", "source_graph_commit",
+                "policy_fingerprint", "served_manifest_fingerprint", "served_file_count"):
         assert body[key] is None
-    assert body["provider_kind"] == "sanitized-snapshot"
     assert body["snapshot_schema_version"] is None
-    assert body["source_graph_sha256"] is None
 
 
-def test_graph_status_snapshot_unsupported_version_is_missing_with_null_counts(tmp_path, monkeypatch):
+def test_graph_status_snapshot_unsupported_version_is_unavailable_unsupported(tmp_path, monkeypatch):
     data = json.loads(_SNAPSHOT_FIXTURE.read_text(encoding="utf-8"))
-    data["snapshot_schema_version"] = 999  # unsupported -> graph_unreadable
+    data["snapshot_schema_version"] = 999  # present but unsupported
     bad_snapshot = tmp_path / "bad-snapshot.json"
     bad_snapshot.write_text(json.dumps(data), encoding="utf-8")
     monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(bad_snapshot))
     client = _client(tmp_path, monkeypatch)
     body = client.get("/api/graph/status").json()
-    assert body["status"] == "missing"
-    for key in ("built_at_commit", "node_count", "edge_count",
-                "community_count", "file_count", "concept_count", "graph_mtime"):
+    assert body["availability"] == "unavailable"
+    assert body["integrity"] == "unsupported"
+    assert body["memory_policy"] == "unknown"
+    assert body["indexed_sources"] == "unknown"
+    for key in ("node_count", "edge_count", "community_count", "file_count",
+                "concept_count", "graph_mtime", "source_graph_commit"):
         assert body[key] is None
 
 
 def test_graph_status_note_never_carries_verdict_wording_across_states(tmp_path, monkeypatch):
-    """Sweep fresh/stale/unknown/missing (both providers) and assert the `note`
-    is always non-empty and free of PASS/FAIL/verdict wording — the memory
-    plane never speaks in validator language, in any state."""
+    """Sweep available/unavailable across both providers and assert the `note`
+    is always non-empty and free of valid/invalid/PASS/FAIL/verdict wording — the
+    memory plane never speaks in validator language, in any state."""
     notes = []
 
-    # local: unknown (no build commit), fresh, stale.
+    # local: available (with + without a deployed commit).
     art = _write_artifacts(tmp_path / "local-graph")
     monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     notes.append(_client(tmp_path, monkeypatch, art).get("/api/graph/status").json()["note"])
-    monkeypatch.setenv("ISAAC_BUILD_COMMIT", "fakecommit0000")
-    notes.append(_client(tmp_path, monkeypatch, art).get("/api/graph/status").json()["note"])
     monkeypatch.setenv("ISAAC_BUILD_COMMIT", "some-other-commit")
     notes.append(_client(tmp_path, monkeypatch, art).get("/api/graph/status").json()["note"])
 
-    # local: missing (never-created dir).
+    # local: unavailable (never-created dir).
     monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
     notes.append(
         _client(tmp_path, monkeypatch, tmp_path / "never-created").get("/api/graph/status").json()["note"]
     )
 
-    # snapshot: fresh.
+    # snapshot: available/current.
     monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_SNAPSHOT_FIXTURE))
     monkeypatch.setenv("ISAAC_BUILD_COMMIT", _SNAPSHOT_COMMIT)
     notes.append(_client(tmp_path, monkeypatch).get("/api/graph/status").json()["note"])
 
     for note in notes:
         assert note
-        assert "PASS" not in note and "FAIL" not in note
-        assert "verdict" not in note
+        for banned in ("valid", "invalid", "PASS", "FAIL", "verdict"):
+            assert banned not in note, f"verdict/validation wording in note: {note!r}"
 
 
 # --- 3. malformed graph ---------------------------------------------------------
@@ -573,13 +584,14 @@ def test_graph_status_coherent_when_graph_exists_but_malformed(tmp_path, monkeyp
     resp = client.get("/api/graph/status")
     assert resp.status_code == 200  # never 500
     body = resp.json()
-    assert body["status"] == "missing"
+    assert body["availability"] == "unavailable"
+    assert body["integrity"] == "malformed"  # present on disk but unreadable
     for key in ("node_count", "edge_count", "community_count", "file_count",
-                "concept_count", "built_at_commit", "graph_mtime"):
+                "concept_count", "graph_mtime", "source_graph_commit"):
         assert body[key] is None
     assert body["plane"] == "memory"
     assert "note" in body and body["note"]
-    assert body["provider_kind"] == "local-graph"
+    assert body["provider"] == "unavailable"
 
 
 # --- 4. auth ---------------------------------------------------------------------
@@ -692,16 +704,22 @@ def test_no_forbidden_verdict_keys_in_any_memory_response(tmp_path, monkeypatch)
 # --- 8. status back-compat -------------------------------------------------------
 
 
-def test_graph_status_backward_compatible_shape_untouched(tmp_path, monkeypatch):
-    """P24.9-impl-3: the pre-existing shape (status/plane/note) is preserved;
-    `status` additionally accepts "unknown" now. build_commit is forced to
-    None so this is deterministic regardless of the developer's local
-    graphify-out/ state (see test_graph_status in test_api.py for the same
-    pattern)."""
+def test_graph_status_separated_shape(tmp_path, monkeypatch):
+    """P24.10: the separated body carries availability/integrity/provider +
+    the two provable freshness concepts + version metadata — never a single
+    conflated `status`. build_commit is forced to None so this is deterministic
+    regardless of the developer's local graphify-out/ state."""
     monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     client = _client(tmp_path, monkeypatch)
     body = client.get("/api/graph/status").json()
-    assert body["status"] in {"unknown", "missing"}
+    assert "status" not in body  # the conflated single status is gone
     assert body["plane"] == "memory"
+    assert body["availability"] in {"available", "unavailable"}
+    assert body["integrity"] in {"verified", "malformed", "unsupported", "unknown"}
+    assert body["memory_policy"] in {"current", "stale", "unknown"}
+    assert body["indexed_sources"] in {"current", "stale", "unknown"}
+    assert body["freshness_scope"] == "served_files_only"
+    assert body["freshness_basis"] == "ci_content_manifest"
+    assert "deployed_app_commit" in body  # version metadata present (may be null)
     assert body["note"]

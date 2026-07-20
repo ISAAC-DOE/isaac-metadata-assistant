@@ -270,69 +270,167 @@ def test_unavailable_data_methods_never_raise(tmp_path):
     assert reader.classify_path("../x") == "unsafe"
 
 
-# --- 3. status() freshness seam -----------------------------------------------
+# --- 3. status() separated contract (P24.10) ----------------------------------
+#
+# App-HEAD equality freshness is GONE. status() carries two separated, provable
+# freshness concepts (policy_consistency, indexed_sources) plus separated
+# availability / integrity / provider / version metadata. status() takes no
+# build_commit — the deployed/app commit is NEVER an input to any freshness value.
+
+#: The exact key set BOTH providers' status() return (parity contract).
+STATUS_KEYS = {
+    "provider_kind", "available", "integrity",
+    "policy_fingerprint", "policy_consistency",
+    "served_manifest_fingerprint", "served_file_count",
+    "indexed_sources", "freshness_scope", "freshness_basis",
+    "source_graph_commit", "source_graph_sha256", "snapshot_schema_version",
+}
 
 
-def test_snapshot_status_fresh(snap):
-    st = snap.status(build_commit=_SNAPSHOT_COMMIT)
+def test_snapshot_status_key_set(snap):
+    assert set(snap.status().keys()) == STATUS_KEYS
+
+
+def test_local_status_key_set(local):
+    assert set(local.status().keys()) == STATUS_KEYS
+
+
+def test_provider_status_key_parity(snap, local):
+    # Identical key set across both providers, available or not.
+    assert set(snap.status().keys()) == set(local.status().keys())
+    with_missing = SanitizedSnapshotSource(_FIXTURE_ROOT / "does-not-exist.json")
+    assert set(with_missing.status().keys()) == STATUS_KEYS
+
+
+def test_snapshot_status_takes_no_build_commit(snap):
+    with pytest.raises(TypeError):
+        snap.status(build_commit=_SNAPSHOT_COMMIT)  # app-HEAD removed from status()
+
+
+def test_snapshot_with_memory_inputs_is_current(snap):
+    st = snap.status()
     assert st["provider_kind"] == "sanitized-snapshot"
     assert st["available"] is True
-    assert st["reason"] is None
-    assert st["freshness"] == "fresh"
-    assert st["snapshot_schema_version"] == 1
+    assert st["integrity"] == "verified"
+    assert st["policy_consistency"] == "current"
+    assert st["indexed_sources"] == "current"
+    assert st["policy_fingerprint"] == memory.compute_memory_policy_fingerprint()
+    embedded = _golden_dict()["memory_inputs"]
+    assert st["served_manifest_fingerprint"] == embedded["served_manifest_fingerprint"]
+    assert st["served_file_count"] == embedded["served_file_count"] == 3
+    assert st["freshness_scope"] == "served_files_only"
+    assert st["freshness_basis"] == "ci_content_manifest"
     assert st["source_graph_commit"] == _SNAPSHOT_COMMIT
     assert st["source_graph_sha256"] == _SNAPSHOT_SHA256
+    assert st["snapshot_schema_version"] == 1
 
 
-def test_snapshot_status_stale(snap):
-    st = snap.status(build_commit="deadbeefdeadbeef")
-    assert st["freshness"] == "stale"
-
-
-def test_snapshot_status_unknown_when_build_commit_none(snap):
-    assert snap.status()["freshness"] == "unknown"
-    assert snap.status(build_commit=None)["freshness"] == "unknown"
-
-
-def test_snapshot_status_unknown_when_snapshot_commit_none(tmp_path):
+def test_snapshot_without_memory_inputs_degrades_to_unknown(tmp_path):
+    # A pre-P24.10 snapshot (like the current committed one) has no memory_inputs:
+    # still available + integrity=verified, but the two freshness concepts and the
+    # fingerprints degrade honestly to unknown/None.
     data = _golden_dict()
-    data["built_at_commit"] = None  # snapshot has no source commit
+    del data["memory_inputs"]
     reader = SanitizedSnapshotSource(_write_snapshot(tmp_path / "s.json", data))
-    st = reader.status(build_commit="somerealcommit")
+    st = reader.status()
     assert st["available"] is True
-    assert st["source_graph_commit"] is None
-    assert st["freshness"] == "unknown"  # never null==null -> fresh
+    assert st["integrity"] == "verified"
+    assert st["policy_consistency"] == "unknown"
+    assert st["indexed_sources"] == "unknown"
+    assert st["policy_fingerprint"] is None
+    assert st["served_manifest_fingerprint"] is None
+    assert st["served_file_count"] is None
+
+
+def test_snapshot_malformed_manifest_indexed_unknown_never_stale(tmp_path):
+    # Tamper the embedded aggregate so it no longer matches the recomputed
+    # aggregate of served_content_manifest -> internal inconsistency -> unknown.
+    # NEVER stale: the hosted runtime cannot recompute file digests (files not
+    # shipped), so drift detection is CI's authority, not the reader's.
+    data = _golden_dict()
+    data["memory_inputs"]["served_manifest_fingerprint"] = "0" * 64
+    reader = SanitizedSnapshotSource(_write_snapshot(tmp_path / "s.json", data))
+    st = reader.status()
+    assert st["available"] is True
+    assert st["integrity"] == "verified"
+    assert st["indexed_sources"] == "unknown"
+    assert st["indexed_sources"] != "stale"
+
+
+def test_snapshot_policy_fingerprint_mismatch_is_stale(tmp_path):
+    # A recomputable policy fingerprint that differs from the embedded one is a
+    # real, provable policy drift -> stale (policy is recomputable at runtime).
+    data = _golden_dict()
+    data["memory_inputs"]["policy_fingerprint"] = "f" * 64
+    reader = SanitizedSnapshotSource(_write_snapshot(tmp_path / "s.json", data))
+    st = reader.status()
+    assert st["available"] is True
+    assert st["integrity"] == "verified"
+    assert st["policy_consistency"] == "stale"
+    assert st["policy_fingerprint"] == "f" * 64
+
+
+def test_snapshot_unsupported_version_integrity(tmp_path):
+    data = _golden_dict()
+    data["snapshot_schema_version"] = 999  # present but unsupported
+    reader = SanitizedSnapshotSource(_write_snapshot(tmp_path / "s.json", data))
+    st = reader.status()
+    assert st["available"] is False
+    assert st["integrity"] == "unsupported"
+    assert st["policy_consistency"] == "unknown"
+    assert st["indexed_sources"] == "unknown"
+
+
+def test_snapshot_malformed_json_integrity_is_malformed(tmp_path):
+    reader = SanitizedSnapshotSource(_write_snapshot(tmp_path / "s.json", "{not json"))
+    st = reader.status()
+    assert st["available"] is False
+    assert st["integrity"] == "malformed"
+    assert st["policy_consistency"] == "unknown"
+    assert st["indexed_sources"] == "unknown"
 
 
 def test_snapshot_status_unavailable(tmp_path):
     reader = SanitizedSnapshotSource(tmp_path / "missing.json")
-    st = reader.status(build_commit=_SNAPSHOT_COMMIT)
+    st = reader.status()
     assert st["provider_kind"] == "sanitized-snapshot"
     assert st["available"] is False
-    assert st["reason"] == "graph_absent"
-    assert st["freshness"] == "unavailable"
-    assert "snapshot_schema_version" in st
-    assert "source_graph_sha256" in st
+    assert st["integrity"] == "unknown"
+    assert st["policy_consistency"] == "unknown"
+    assert st["indexed_sources"] == "unknown"
+    assert st["policy_fingerprint"] is None
+    assert st["served_manifest_fingerprint"] is None
+    assert st["served_file_count"] is None
+    assert st["source_graph_commit"] is None
+    assert st["source_graph_sha256"] is None
+    assert st["snapshot_schema_version"] is None
 
 
-def test_local_status_fresh_stale_unknown(local):
-    fresh = local.status(build_commit=_SNAPSHOT_COMMIT)
-    assert fresh["provider_kind"] == "local-graph"
-    assert fresh["available"] is True
-    assert fresh["snapshot_schema_version"] is None
-    assert fresh["source_graph_sha256"] is None
-    assert fresh["source_graph_commit"] == _SNAPSHOT_COMMIT
-    assert fresh["freshness"] == "fresh"
-    assert local.status(build_commit="othersha")["freshness"] == "stale"
-    assert local.status()["freshness"] == "unknown"
+def test_local_status_unknown_freshness(local):
+    # A live graph carries NO embedded memory_inputs, so it has no fingerprint
+    # reference to prove against -> both freshness concepts are honestly unknown,
+    # both fingerprints None. source_graph_commit is the graph's built_at_commit.
+    st = local.status()
+    assert st["provider_kind"] == "local-graph"
+    assert st["available"] is True
+    assert st["integrity"] == "verified"
+    assert st["policy_consistency"] == "unknown"
+    assert st["indexed_sources"] == "unknown"
+    assert st["policy_fingerprint"] is None
+    assert st["served_manifest_fingerprint"] is None
+    assert st["source_graph_commit"] == _SNAPSHOT_COMMIT  # graph built_at_commit
+    assert st["source_graph_sha256"] is None
+    assert st["snapshot_schema_version"] is None
 
 
 def test_local_status_unavailable(tmp_path):
     reader = LocalGraphArtifactSource(tmp_path / "graphify-out")  # never created
-    st = reader.status(build_commit=_SNAPSHOT_COMMIT)
+    st = reader.status()
     assert st["provider_kind"] == "local-graph"
     assert st["available"] is False
-    assert st["freshness"] == "unavailable"
+    assert st["integrity"] == "unknown"
+    assert st["policy_consistency"] == "unknown"
+    assert st["indexed_sources"] == "unknown"
 
 
 # --- 4. classify_path safety regardless of availability -----------------------
@@ -449,7 +547,7 @@ def test_no_verdict_or_content_or_plane_keys_anywhere(snap):
         snap.concept("concept_fake_alpha"),
         snap.files(),
         snap.file("src/fake_widget.py"),
-        snap.status(build_commit=_SNAPSHOT_COMMIT),
+        snap.status(),
     ]
     for payload in payloads:
         keys = set(_walk_keys(payload))

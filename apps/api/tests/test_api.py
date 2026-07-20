@@ -415,19 +415,20 @@ def test_artifacts_unknown_id_404(client):
 
 
 def test_graph_status(client, monkeypatch):
-    # Force build_commit -> None so freshness is deterministic regardless of
-    # whether this dev machine happens to have a real graphify-out/ (with an
-    # env deliberately unset, freshness can only be "unknown" when available,
-    # "missing" when not — never "fresh"/"stale", which would require a
-    # coincidental match/mismatch this test does not control).
+    # P24.10: the deployed commit is forced to None so the body is deterministic
+    # regardless of whether this dev machine happens to have a real graphify-out/.
+    # It is metadata only and never drives any freshness value.
     monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     body = client.get("/api/graph/status").json()
-    assert body["status"] in {"unknown", "missing"}
+    assert "status" not in body  # conflated single status removed
+    assert body["availability"] in {"available", "unavailable"}
+    assert body["memory_policy"] in {"current", "stale", "unknown"}
+    assert body["indexed_sources"] in {"current", "stale", "unknown"}
     assert body["plane"] == "memory"
     assert body["note"]
-    assert "PASS" not in body["note"] and "FAIL" not in body["note"]
-    assert "verdict" not in body["note"]
+    for banned in ("valid", "invalid", "PASS", "FAIL", "verdict"):
+        assert banned not in body["note"]
 
 
 # --- 15. uploads --------------------------------------------------------------

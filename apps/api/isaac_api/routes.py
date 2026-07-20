@@ -517,62 +517,77 @@ def get_artifacts(experiment_id: str):
 # --- 14. graph status (memory plane) ------------------------------------------
 
 
-#: Additive /graph/status fields sourced from the memory reader's overview
-#: (spec §3.1). Single-source guarantee: `status` and these fields describe the
-#: SAME graph — the handler resolves ONE reader and reads both its `status()`
-#: and its `overview()` off that one instance, so the body can never read
-#: status:"missing" alongside populated counts. Present with real values when
-#: the reader is available; explicit `null` (not omitted, for shape stability)
-#: otherwise.
+#: Additive /graph/status count fields sourced from the memory reader's overview.
+#: Single-source guarantee: the separated status fields and these counts describe
+#: the SAME graph — the handler resolves ONE reader and reads both its
+#: ``status()`` and its ``overview()`` off that one instance. Present with real
+#: values when the reader is available; explicit ``null`` (not omitted, for shape
+#: stability) otherwise. (``source_graph_commit`` carries the built_at_commit as a
+#: top-level version-metadata field, so it is not repeated here.)
 _STATUS_ADDITIVE_FIELDS = (
-    "built_at_commit", "node_count", "edge_count",
-    "community_count", "file_count", "concept_count", "graph_mtime",
+    "node_count", "edge_count", "community_count",
+    "file_count", "concept_count", "graph_mtime",
 )
 
-#: Per-state notes (memory-plane framing; never PASS/FAIL/valid/verdict
-#: wording). fresh/stale/missing reuse the existing generic disclaimer;
-#: "unknown" is new (P24.9-impl-3) — it means the reader IS available but the
-#: backend's own build commit is unknown, so freshness can't be confirmed
-#: either way (never guessed into "fresh").
+#: Memory-plane notes (P24.10). Leads/provenance framing only — never
+#: PASS/FAIL/valid/invalid/verdict wording, and never phrased around a single
+#: conflated freshness status (there isn't one anymore). Keyed by availability.
 _GRAPH_STATUS_NOTES = {
-    "fresh": "Graphify is a memory/query layer — never a validator.",
-    "stale": "Graphify is a memory/query layer — never a validator.",
-    "unknown": (
-        "Freshness unknown — the backend build commit is unavailable, so the "
-        "snapshot's currency can't be confirmed; re-verify against the cited files."
+    "available": (
+        "Project Memory provides leads and provenance, never a correctness "
+        "ruling — confirm every lead against the cited files."
     ),
-    "missing": "Graphify is a memory/query layer — never a validator.",
+    "unavailable": (
+        "Project Memory is unavailable, so no leads can be served. It provides "
+        "leads and provenance, never a correctness ruling — confirm against the "
+        "cited files."
+    ),
 }
 
 
 @router.get("/graph/status")
 def graph_status() -> dict:
-    """Provider-agnostic memory-plane status (P24.9-impl-3).
+    """Provider-agnostic, separated memory-plane status (P24.10).
 
     Resolves ONE reader and reads BOTH its ``status()`` (provider identity +
-    null-safe freshness) and its ``overview()`` (counts) off that same
-    instance — never ``isinstance``-branches on which provider it is. The wire
-    ``status`` is the reader's freshness verbatim (``fresh`` / ``stale`` /
-    ``unknown``) when available, else ``"missing"``; this is the only mapping
-    step, so status and counts can never disagree about which graph they
-    describe.
+    separated availability / integrity / provable freshness) and its
+    ``overview()`` (counts) off that same instance — never
+    ``isinstance``-branches on which provider it is.
+
+    App-HEAD equality is REMOVED from all freshness: the deployed commit is
+    surfaced ONLY as ``deployed_app_commit`` version metadata, never an input to
+    ``memory_policy`` or ``indexed_sources``. The two freshness concepts are kept
+    separate and provable; the reader returns ``"unknown"`` rather than
+    manufacturing ``"current"`` when it cannot prove a status.
     """
     reader = memory.get_default_reader()
-    st = reader.status(_build_commit())
+    st = reader.status()
     overview = reader.overview()
 
-    status = st["freshness"] if overview["available"] else "missing"
+    available = st["available"]
+    availability = "available" if available else "unavailable"
+    note = _GRAPH_STATUS_NOTES["available" if available else "unavailable"]
+
     body = {
-        "status": status,
         "plane": "memory",
-        "note": _GRAPH_STATUS_NOTES.get(status, _GRAPH_STATUS_NOTES["unknown"]),
-        "provider_kind": st["provider_kind"],
+        "availability": availability,
+        "integrity": st["integrity"],
+        "provider": st["provider_kind"] if available else "unavailable",
+        "memory_policy": st["policy_consistency"],
+        "indexed_sources": st["indexed_sources"],
+        "policy_fingerprint": st["policy_fingerprint"],
+        "served_manifest_fingerprint": st["served_manifest_fingerprint"],
+        "served_file_count": st["served_file_count"],
+        "freshness_scope": st["freshness_scope"],
+        "freshness_basis": st["freshness_basis"],
+        "source_graph_commit": st["source_graph_commit"],
         "snapshot_schema_version": st["snapshot_schema_version"],
-        "source_graph_sha256": st["source_graph_sha256"],
+        # VERSION METADATA ONLY — never a freshness input.
+        "deployed_app_commit": _build_commit(),
+        "note": note,
     }
     if overview["available"]:
         body.update(
-            built_at_commit=overview["built_at_commit"],
             node_count=overview["node_count"],
             edge_count=overview["edge_count"],
             community_count=overview["community_count"],
