@@ -3,6 +3,16 @@
 **Status: ACCEPTED 2026-07-20 — decisions ratified by the user; R1–R6 authorized for execution.
 P25.4 remains BLOCKED until this reconciliation gate is complete and reviewed.**
 
+> **Execution checkpoint 2026-07-20 — R1–R6 COMPLETE.** All six slices are on `origin/main`
+> (R1 `3ac9b31` · R2 `a6709d7` · R3 `936c654` · R4 `6a06df3` · R6 `230ada4`; R5 was verification-only,
+> no commit). Every exact-HEAD CI run is green. Hosted production E2E QA verified GREEN (R5). Two
+> independent Opus reviews passed (plan + final R1–R6, both APPROVED-WITH-MINORS). **P25.4 remains
+> BLOCKED pending the user's review of the reconciliation report.** Non-blocking follow-ups (all gated):
+> optional removal of the residual global `context-mode-cache-heal.mjs` hook (a `~/.claude` edit); any
+> account migration/relink (handoff gate); an optional `graphify update` + snapshot regen so the new
+> governance docs/skills (`infrastructure-ownership.md`, `toolchain-reconnection-runbook.md`,
+> `isaac-checkpoint`, `isaac-resume`) enter the served manifest.
+
 Date: 2026-07-20
 Orchestrator: **Opus 4.8** (ratified standing fallback; Fable 5 availability under the SLAC org is a
 model-picker UI fact not verifiable from the CLI — use Fable 5 as orchestrator only when it is
