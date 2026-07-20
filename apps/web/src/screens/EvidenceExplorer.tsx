@@ -130,7 +130,7 @@ function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
           phase={LABELS.evidenceTrail}
           phaseDot="idle"
           note={`sidecar · assistant convention, not an official ISAAC standard · ${directTotal} direct paths counted in coverage`}
-          graph={<GraphStatusChip status={graph.status} note={graph.note} />}
+          graph={<GraphStatusChip availability={graph.availability} note={graph.note} />}
         />
       }
       mainPad="none"

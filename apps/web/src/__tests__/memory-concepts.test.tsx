@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import {
   stubFetchRoutes,
-  graphStatusMissing,
+  graphStatusUnavailable,
   memoryFilesUnavailable,
   memoryConceptsAvailable,
   memoryConceptsUnavailable,
@@ -46,7 +46,7 @@ afterEach(() => {
 describe('P24.5 · Concept Lookup — list', () => {
   it('renders exactly the stubbed concepts, with labels and community context (name or honest fallback)', async () => {
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
       'GET /api/memory/concepts': { body: memoryConceptsAvailable },
     });
@@ -76,7 +76,7 @@ describe('P24.5 · Concept Lookup — list', () => {
 describe('P24.5 · Concept Lookup — detail (real leads)', () => {
   it('activating a concept fetches its provenance and renders the anchor, community, related files, and related concepts', async () => {
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
       'GET /api/memory/concepts': { body: memoryConceptsAvailable },
       [conceptPath('concept-provenance')]: { body: memoryConceptDetailWithLeads },
@@ -107,7 +107,7 @@ describe('P24.5 · Concept Lookup — detail (real leads)', () => {
 describe('P24.5 · Concept Lookup — empty-leads honesty', () => {
   it('shows the honest empty note when related is empty, still rendering the anchor provenance — never invented leads', async () => {
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
       'GET /api/memory/concepts': { body: memoryConceptsAvailable },
       [conceptPath('concept-governance')]: { body: memoryConceptDetailEmptyLeads },
@@ -136,7 +136,7 @@ describe('P24.5 · Concept Lookup — empty-leads honesty', () => {
 describe('P24.9 · Concept Lookup — withheld anchor honesty', () => {
   it('renders an honest "anchor withheld" note (not an empty mono span) when the backend nulls a governance-excluded anchor', async () => {
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
       'GET /api/memory/concepts': { body: memoryConceptsAvailable },
       [conceptPath('concept-governance')]: { body: memoryConceptDetailWithheldAnchor },
@@ -164,7 +164,7 @@ describe('P24.9 · Concept Lookup — withheld anchor honesty', () => {
 describe('P24.5 · Concept Lookup — unavailable', () => {
   it('renders a compact honest unavailable note, zero concept rows, no error/red styling', async () => {
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
       'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
     });
@@ -181,7 +181,7 @@ describe('P24.5 · Concept Lookup — unavailable', () => {
 describe('P24.5 · Concept Lookup — keyboard accessibility', () => {
   it('is activatable via focus + synthesized click, a raw keydown alone does not toggle, aria-expanded tracks state, and there is still no search input', async () => {
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
       'GET /api/memory/concepts': { body: memoryConceptsAvailable },
       [conceptPath('concept-provenance')]: { body: memoryConceptDetailWithLeads },
@@ -220,7 +220,7 @@ describe('P24.5 · Concept Lookup — keyboard accessibility', () => {
 describe('P24.5 · Concept Lookup — no verdict language', () => {
   it('never renders PASS/FAIL/valid/invalid, across available and unavailable states', async () => {
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
       'GET /api/memory/concepts': { body: memoryConceptsAvailable },
       [conceptPath('concept-provenance')]: { body: memoryConceptDetailWithLeads },
@@ -234,7 +234,7 @@ describe('P24.5 · Concept Lookup — no verdict language', () => {
     vi.unstubAllGlobals();
 
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
       'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
     });

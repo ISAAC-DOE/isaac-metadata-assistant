@@ -173,7 +173,7 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.review.reply}
         prompts={ASSISTANT_SAMPLES.review.prompts}
-        freshness={graph.status}
+        availability={graph.availability}
       />
     </aside>
   );

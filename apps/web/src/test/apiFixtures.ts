@@ -240,42 +240,120 @@ export const evidenceResponse = {
   ],
 };
 
-export const graphStatusMissing = {
-  status: 'missing',
+// --- GET /api/graph/status fixtures (P24.10 separated-freshness contract) ---
+// The old single conflated `status` verdict is gone. The body now carries
+// individually-honest axes: availability (primary), integrity, memory_policy,
+// indexed_sources — plus provenance and additive counts. Shapes mirror
+// apps/api/isaac_api/routes.py `graph_status()` 1:1.
+
+const AVAILABLE_NOTE =
+  'Project Memory provides leads and provenance, never a correctness ruling — ' +
+  'confirm every lead against the cited files.';
+const UNAVAILABLE_NOTE =
+  'Project Memory is unavailable, so no leads can be served. It provides leads and ' +
+  'provenance, never a correctness ruling — confirm against the cited files.';
+
+/** Fully current: available, integrity verified, policy + indexed sources current. */
+export const graphStatusAvailable = {
   plane: 'memory',
-  note: 'Graphify is a memory/query layer — never a validator.',
+  availability: 'available',
+  integrity: 'verified',
+  provider: 'sanitized-snapshot',
+  memory_policy: 'current',
+  indexed_sources: 'current',
+  policy_fingerprint: 'sha256:fakepolicyfingerprintp2410aaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  served_manifest_fingerprint: 'sha256:fakemanifestfingerprintp2410bbbbbbbbbbbbbbbbbbbbbbbb',
+  served_file_count: 190,
+  freshness_scope: 'served_files_only',
+  freshness_basis: 'ci_content_manifest',
+  source_graph_commit: 'ab12cd34ef567890',
+  snapshot_schema_version: 1,
+  deployed_app_commit: 'deadbee0cafe0001',
+  note: AVAILABLE_NOTE,
+  node_count: 2296,
+  edge_count: 3447,
+  community_count: 214,
+  file_count: 190,
+  concept_count: 19,
+  graph_mtime: null,
 };
 
-export const graphStatusFresh = {
-  status: 'fresh',
+/** The REAL pre-regen snapshot state: available, integrity verified, but policy
+ * and indexed-sources currency cannot yet be proven (unknown), and the served
+ * file count is not yet embedded (null). Real counts still render. */
+export const graphStatusPreRegen = {
   plane: 'memory',
-  note: 'Graphify is a memory/query layer — never a validator.',
-};
-
-export const graphStatusStale = {
-  status: 'stale',
-  plane: 'memory',
-  note: 'Graphify is a memory/query layer — never a validator.',
-};
-
-/** P24.9: available graph, backend build commit unknown — real counts, no age
- * row (graph_mtime null), honest "unknown" note (never the stale warning). */
-export const graphStatusUnknown = {
-  status: 'unknown',
-  plane: 'memory',
-  note:
-    "Freshness unknown — the backend build commit is unavailable, so the snapshot's currency " +
-    'can\'t be confirmed; re-verify against the cited files.',
-  built_at_commit: 'fakecommitp24900',
+  availability: 'available',
+  integrity: 'verified',
+  provider: 'sanitized-snapshot',
+  memory_policy: 'unknown',
+  indexed_sources: 'unknown',
+  policy_fingerprint: null,
+  served_manifest_fingerprint: null,
+  served_file_count: null,
+  freshness_scope: 'served_files_only',
+  freshness_basis: 'ci_content_manifest',
+  source_graph_commit: '86c25c586b3f9c104b087ba1be3db5486347cb81',
+  snapshot_schema_version: 1,
+  deployed_app_commit: null,
+  note: AVAILABLE_NOTE,
   node_count: 42,
   edge_count: 17,
   community_count: 5,
   file_count: 9,
   concept_count: 3,
   graph_mtime: null,
-  provider_kind: 'sanitized-snapshot',
-  snapshot_schema_version: 1,
-  source_graph_sha256: '86c25c586b3f9c104b087ba1be3db5486347cb81486b6c57a5085fc9a5dbc0d6',
+};
+
+/** A shipped-but-malformed artifact: unavailable + integrity malformed. Quiet
+ * degrade, never an error state; no counts. */
+export const graphStatusMalformed = {
+  plane: 'memory',
+  availability: 'unavailable',
+  integrity: 'malformed',
+  provider: 'unavailable',
+  memory_policy: 'unknown',
+  indexed_sources: 'unknown',
+  policy_fingerprint: null,
+  served_manifest_fingerprint: null,
+  served_file_count: null,
+  freshness_scope: 'served_files_only',
+  freshness_basis: 'ci_content_manifest',
+  source_graph_commit: null,
+  snapshot_schema_version: null,
+  deployed_app_commit: 'deadbee0cafe0001',
+  note: UNAVAILABLE_NOTE,
+  node_count: null,
+  edge_count: null,
+  community_count: null,
+  file_count: null,
+  concept_count: null,
+  graph_mtime: null,
+};
+
+/** No artifact present at all: unavailable + integrity unknown. */
+export const graphStatusUnavailable = {
+  plane: 'memory',
+  availability: 'unavailable',
+  integrity: 'unknown',
+  provider: 'unavailable',
+  memory_policy: 'unknown',
+  indexed_sources: 'unknown',
+  policy_fingerprint: null,
+  served_manifest_fingerprint: null,
+  served_file_count: null,
+  freshness_scope: 'served_files_only',
+  freshness_basis: 'ci_content_manifest',
+  source_graph_commit: null,
+  snapshot_schema_version: null,
+  deployed_app_commit: 'deadbee0cafe0001',
+  note: UNAVAILABLE_NOTE,
+  node_count: null,
+  edge_count: null,
+  community_count: null,
+  file_count: null,
+  concept_count: null,
+  graph_mtime: null,
 };
 
 // --- P24.4 Source Index fixtures (memory plane; synthetic, shape-faithful
@@ -513,7 +591,7 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     [`GET ${base}/warnings`]: { body: warningsDryRun },
     [`GET ${base}/evidence`]: { body: evidenceResponse },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
-    'GET /api/graph/status': { body: graphStatusMissing },
+    'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
 
@@ -598,7 +676,7 @@ export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRo
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
-    'GET /api/graph/status': { body: graphStatusMissing },
+    'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
 
@@ -718,7 +796,7 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
     [`GET ${base}/artifacts`]: { body: { ...artifactsExported, record: { ...artifactsExported.record, record_id: id }, sidecar: { ...artifactsExported.sidecar, record_id: id } } },
     [`GET ${base}/source-preview?source=mock_campaign.csv`]: { body: sourcePreviewCsv },
     [`GET ${base}/source-preview?source=raw_scan_listing.txt`]: { body: sourcePreviewListing },
-    'GET /api/graph/status': { body: graphStatusMissing },
+    'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
 
@@ -745,6 +823,6 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
     [`POST ${base}/audit`]: { body: auditExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
     [`GET ${base}/artifacts`]: { body: artifactsExported },
-    'GET /api/graph/status': { body: graphStatusMissing },
+    'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }

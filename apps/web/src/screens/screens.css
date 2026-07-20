@@ -177,19 +177,62 @@
   color: var(--text-tertiary);
   line-height: 1.55;
 }
-/* Advisory tokens only — never the pass/fail verdict palette (status-system.md). */
-.memory-stale-note {
-  margin-top: 8px;
+/* ---- Separated memory-plane axes (P24.10) -------------------------- */
+/* Snapshot Integrity / Memory Policy / Indexed Sources, each individually
+   honest. Advisory tokens only — never the pass/fail verdict palette
+   (status-system.md). "Unknown" is quiet/neutral, never an error tone. */
+.memory-axes {
+  margin: 14px 0 0;
+  display: flex;
+  flex-direction: column;
+}
+.memory-axis {
+  padding: 10px 0;
+  border-top: 1px solid var(--border-faint);
+}
+.memory-axis:first-child {
+  border-top: none;
+}
+.memory-axis-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.memory-axis-label {
   font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-heading);
+}
+.memory-axis-state {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.memory-axis-state.axis-ok {
+  background: var(--verified-bg);
+  border-color: var(--verified-border);
+  color: var(--verified-text);
+}
+.memory-axis-state.axis-warn {
+  background: var(--advisory-bg);
+  border-color: var(--advisory-border);
   color: var(--advisory-text);
 }
-/* Unknown freshness — neutral/informational, distinct from the stale amber
-   warning above (the graph IS available; only the backend build commit is
-   unknown, so this is never an error tone). */
-.memory-unknown-note {
-  margin-top: 8px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
+.memory-axis-state.axis-quiet {
+  background: var(--surface-subtle);
+  border-color: var(--border);
+  color: var(--text-tertiary);
+}
+.memory-axis-caption {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
 }
 /* The honest "unavailable" panel — neutral surface, not an error state. */
 .memory-unavailable-title {

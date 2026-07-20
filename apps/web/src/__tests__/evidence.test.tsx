@@ -124,34 +124,35 @@ describe('S5 · Evidence & File Preview (live)', () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
     const { findByText, getByText } = renderAt('/record/demo/evidence');
     await findByText('Direct Fields');
-    // the /graph/status chip (missing in this fixture) degrades quietly
-    expect(getByText('Memory: Missing')).toBeInTheDocument();
+    // the /graph/status chip (unavailable in this fixture) degrades quietly
+    expect(getByText('Memory: Unavailable')).toBeInTheDocument();
     expect(getByText('memory plane')).toBeInTheDocument();
   });
 });
 
-describe('GraphStatusChip renders all four states, never implies validation', () => {
-  it('renders Fresh / Stale / Unknown / Missing with the memory-plane note', () => {
-    for (const [status, label] of [
-      ['fresh', 'Fresh'],
-      ['stale', 'Stale'],
-      ['unknown', 'Unknown'],
-      ['missing', 'Missing'],
+describe('GraphStatusChip shows the availability axis, never implies validation', () => {
+  it('renders Available / Unavailable with the memory-plane note', () => {
+    for (const [availability, label] of [
+      ['available', 'Available'],
+      ['unavailable', 'Unavailable'],
     ] as const) {
       const { getByText, container, unmount } = render(
-        <GraphStatusChip status={status} note="Graphify is a memory/query layer — never a validator." />,
+        <GraphStatusChip
+          availability={availability}
+          note="Project Memory provides leads and provenance, never a correctness ruling."
+        />,
       );
       expect(getByText(`Memory: ${label}`)).toBeInTheDocument();
       expect(getByText('memory plane')).toBeInTheDocument();
-      // never a verdict / validity claim
-      expect(container.textContent).not.toMatch(/\b(PASS|FAIL|valid)\b/i);
+      // never a verdict / validity claim on the memory plane
+      expect(container.textContent).not.toMatch(/\b(PASS|FAIL|valid|invalid)\b/i);
       unmount();
     }
   });
 
-  it('unavailable degrades quietly to Missing (not an error state)', () => {
-    const { getByText, container } = render(<GraphStatusChip status="unavailable" />);
-    expect(getByText('Memory: Missing')).toBeInTheDocument();
-    expect(container.querySelector('.graph-missing')).not.toBeNull();
+  it('unavailable degrades quietly (not an error state)', () => {
+    const { getByText, container } = render(<GraphStatusChip availability="unavailable" />);
+    expect(getByText('Memory: Unavailable')).toBeInTheDocument();
+    expect(container.querySelector('.graph-unavailable')).not.toBeNull();
   });
 });

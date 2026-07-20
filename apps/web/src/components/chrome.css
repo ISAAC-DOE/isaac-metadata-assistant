@@ -300,28 +300,22 @@
   font-size: 9.5px;
   color: var(--text-quaternary);
 }
-.graph-chip.graph-stale {
-  background: var(--advisory-bg);
-  border-color: var(--advisory-border);
-  color: var(--advisory-text);
+/* Available: the graph is present and serving leads — a calm, affirmative
+   memory-plane tone (the field-status teal), deliberately NOT the export
+   pass/fail verdict palette (memory is advisory, never a verdict). */
+.graph-chip.graph-available {
+  background: var(--verified-bg);
+  border-color: var(--verified-border);
+  color: var(--verified-text);
 }
-.graph-chip.graph-stale svg { color: var(--advisory-icon); }
-/* Unknown: the graph IS available but the backend build commit can't confirm
-   its currency — quiet/neutral, NOT an error and NOT the stale amber. Reuses
-   the existing "info tint" pairing (see --action-tint's comment in tokens.css)
-   rather than inventing a new color family. */
-.graph-chip.graph-unknown {
-  background: var(--action-tint);
-  border-color: var(--action-selected-border);
-  color: var(--text-secondary);
-}
-.graph-chip.graph-unknown svg { color: var(--action); }
-.graph-chip.graph-missing {
+.graph-chip.graph-available svg { color: var(--verified-text); }
+/* Unavailable: quiet/neutral, NOT an error — the memory plane is optional. */
+.graph-chip.graph-unavailable {
   background: var(--surface-subtle);
   border-color: var(--border);
   color: var(--text-tertiary);
 }
-.graph-chip.graph-missing svg { color: var(--text-quaternary); }
+.graph-chip.graph-unavailable svg { color: var(--text-quaternary); }
 
 /* ---- GovernanceBanner ---------------------------------------------- */
 .gov-banner {

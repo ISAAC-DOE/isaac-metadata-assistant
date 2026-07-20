@@ -9,7 +9,7 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.review.reply}
         prompts={ASSISTANT_SAMPLES.review.prompts}
-        freshness="fresh"
+        availability="available"
       />,
     );
     // every reply names its source
@@ -26,7 +26,7 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.export.reply}
         prompts={ASSISTANT_SAMPLES.export.prompts}
-        freshness="fresh"
+        availability="available"
         note="Truth questions route to the CLI — the assistant never renders a verdict."
       />,
     );
@@ -39,7 +39,7 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
       <AssistantPanel
         reply={{ text: 'This record is PASS against the schema.', answeredFrom: 'schema' }}
         prompts={[]}
-        freshness="fresh"
+        availability="available"
       />,
     );
     expect(container.textContent).not.toMatch(/\bPASS\b/);
@@ -109,7 +109,7 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.evidence.reply}
         prompts={ASSISTANT_SAMPLES.evidence.prompts}
-        freshness="fresh"
+        availability="available"
       />,
     );
     // guided prompts are primary; clicking one swaps in its answer
@@ -125,7 +125,7 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.evidence.reply}
         prompts={ASSISTANT_SAMPLES.evidence.prompts}
-        freshness="fresh"
+        availability="available"
       />,
     );
     expect(getByText(/not wired in this prototype/i)).toBeInTheDocument();

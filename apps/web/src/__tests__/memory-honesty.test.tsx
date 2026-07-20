@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import {
   stubFetchRoutes,
-  graphStatusMissing,
+  graphStatusUnavailable,
   memoryFilesUnavailable,
   memoryConceptsUnavailable,
 } from '../test/apiFixtures';
@@ -35,12 +35,12 @@ describe('P24.8 · Project Memory intro copy — no "related records" claim', ()
   it('never claims to surface "related records", and does claim related files and concepts', async () => {
     stubFetchRoutes({
       'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
-      'GET /api/graph/status': { body: graphStatusMissing },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
     });
     const { findByText, container } = renderScreen();
 
-    await findByText('Memory: Missing');
+    await findByText('Memory: Unavailable');
 
     expect(container.textContent).not.toMatch(/related records/i);
     expect(container.textContent).toMatch(/related files/i);

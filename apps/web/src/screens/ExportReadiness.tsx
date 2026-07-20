@@ -301,7 +301,7 @@ function LoadedExport({
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.export.reply}
         prompts={ASSISTANT_SAMPLES.export.prompts}
-        freshness={graph.status}
+        availability={graph.availability}
         note={ROUTE_TO_CLI_NOTE}
       />
     </aside>

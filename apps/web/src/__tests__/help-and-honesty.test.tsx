@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import {
-  graphStatusFresh,
+  graphStatusAvailable,
   memoryConceptsAvailable,
   memoryFilesAvailable,
   stubFetchRoutes,
@@ -112,7 +112,7 @@ describe('P22D · Help is a real, working popover', () => {
 describe('P22D · Project Memory never fabricates a freshness claim', () => {
   it('renders the real graph status from the endpoint, not a hardcoded "fresh" string', async () => {
     stubFetchRoutes({
-      'GET /api/graph/status': { body: graphStatusFresh },
+      'GET /api/graph/status': { body: graphStatusAvailable },
       'GET /api/memory/files': { body: memoryFilesAvailable },
       'GET /api/memory/concepts': { body: memoryConceptsAvailable },
     });
@@ -121,7 +121,7 @@ describe('P22D · Project Memory never fabricates a freshness claim', () => {
         <ProjectMemory />
       </MemoryRouter>,
     );
-    await findByText('Memory: Fresh');
+    await findByText('Memory: Available');
     expect(container.textContent).not.toMatch(/project memory: fresh/i);
   });
 

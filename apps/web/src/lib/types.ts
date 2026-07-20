@@ -152,13 +152,12 @@ export interface SourcePreview {
 
 // --- memory / assistant -----------------------------------------------
 
-export type GraphFreshness = 'fresh' | 'stale' | 'unknown' | 'missing' | 'unavailable';
-
-export interface GraphStatus {
-  status: GraphFreshness;
-  plane: 'memory';
-  note?: string;
-}
+// P24.10 separated memory-plane axes. `availability` is the PRIMARY axis; the
+// old single conflated freshness `status` is gone. Each axis is individually
+// honest and advisory — none is ever a validation verdict.
+export type MemoryAvailability = 'available' | 'unavailable';
+export type SnapshotIntegrity = 'verified' | 'malformed' | 'unsupported' | 'unknown';
+export type MemoryConsistency = 'current' | 'stale' | 'unknown';
 
 export type AssistantSource = 'schema' | 'audit' | 'git' | 'graph' | 'files';
 
@@ -397,28 +396,37 @@ export interface ApiUploadsBlocked {
   reason: string;
 }
 
-// P24.2 additive fields on GET /api/graph/status: present with real values when
-// the graph is available; explicit `null` (not omitted) when missing/unreadable
-// — single-source, so these always describe the same graph as `status`.
-// P24.9 adds `provider_kind`/`snapshot_schema_version`/`source_graph_sha256`
-// (from the provider-agnostic `reader.status()` seam) and the `"unknown"`
-// freshness value (available, but the backend's own build commit is unknown
-// so currency can't be confirmed either way — still real counts, never a
-// fake age).
+// GET /api/graph/status — the P24.10 separated-freshness contract
+// (apps/api/isaac_api/routes.py `graph_status()`). The old single conflated
+// `status` field and `source_graph_sha256` are removed. Each axis is
+// individually honest: `availability` is primary, `integrity` describes only
+// whether the snapshot artifact is well-formed + schema-supported (NOT its
+// contents), and `memory_policy` / `indexed_sources` are separately-provable
+// freshness axes. `deployed_app_commit` is version metadata ONLY — never a
+// freshness input. Additive counts carry real values when the reader is
+// available, else explicit `null` (never omitted, for shape stability).
 export interface ApiGraphStatus {
-  status: GraphFreshness;
   plane: 'memory';
-  note?: string;
-  built_at_commit?: string | null;
-  node_count?: number | null;
-  edge_count?: number | null;
-  community_count?: number | null;
-  file_count?: number | null;
-  concept_count?: number | null;
-  graph_mtime?: number | null;
-  provider_kind?: string | null;
-  snapshot_schema_version?: number | null;
-  source_graph_sha256?: string | null;
+  availability: MemoryAvailability;
+  integrity: SnapshotIntegrity;
+  provider: string; // provider_kind when available, else 'unavailable'
+  memory_policy: MemoryConsistency;
+  indexed_sources: MemoryConsistency;
+  policy_fingerprint: string | null;
+  served_manifest_fingerprint: string | null;
+  served_file_count: number | null;
+  freshness_scope: string;
+  freshness_basis: string;
+  source_graph_commit: string | null;
+  snapshot_schema_version: number | null;
+  deployed_app_commit: string | null;
+  note: string;
+  node_count: number | null;
+  edge_count: number | null;
+  community_count: number | null;
+  file_count: number | null;
+  concept_count: number | null;
+  graph_mtime: number | null;
 }
 
 // P24.4 — Source Index (memory plane; metadata/provenance only, never file

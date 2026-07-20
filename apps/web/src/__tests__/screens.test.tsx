@@ -6,7 +6,7 @@ import {
   bundleRoutes,
   evidenceBundleRoutes,
   experimentSummary,
-  graphStatusFresh,
+  graphStatusAvailable,
   stubFetchRoutes,
 } from '../test/apiFixtures';
 
@@ -64,11 +64,11 @@ describe('router-level smoke: each surface renders without error', () => {
   });
 
   it('Project Memory (/memory) is a separate destination', async () => {
-    stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusFresh } });
+    stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusAvailable } });
     const { getByText, findByText } = renderAt('/memory');
     expect(getByText('Memory / Query Plane')).toBeInTheDocument();
     // Freshness is live from the endpoint, not a hardcoded claim.
-    await findByText('Memory: Fresh');
+    await findByText('Memory: Available');
   });
 
   it('the index route redirects into the queue', async () => {

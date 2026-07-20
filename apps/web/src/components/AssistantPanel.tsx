@@ -4,16 +4,17 @@ import { MessageSquare, ChevronRight, SendHorizontal } from './icons';
 import { LABELS } from '../lib/labels';
 import {
   FREEFORM_NOT_WIRED,
-  MEMORY_CAVEAT,
+  MEMORY_UNAVAILABLE_CAVEAT,
   SUBORDINATE_CAPTION,
   hasVerdictLanguage,
 } from '../lib/assistant';
-import type { AssistantMessage, GraphFreshness, SuggestedPrompt } from '../lib/types';
+import type { AssistantMessage, MemoryAvailability, SuggestedPrompt } from '../lib/types';
 
 interface AssistantPanelProps {
   reply: AssistantMessage;
   prompts: SuggestedPrompt[];
-  freshness: GraphFreshness;
+  /** The primary memory-plane axis (P24.10): available vs unavailable. */
+  availability: MemoryAvailability;
   /** Optional subordinate note, e.g. "truth questions route to the CLI…". */
   note?: string;
 }
@@ -27,7 +28,7 @@ interface AssistantPanelProps {
  * verdict-language guard strips any reply that would state a verdict. The panel
  * explains and points to sources; it never decides.
  */
-export function AssistantPanel({ reply, prompts, freshness, note }: AssistantPanelProps) {
+export function AssistantPanel({ reply, prompts, availability, note }: AssistantPanelProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   const active =
@@ -40,7 +41,7 @@ export function AssistantPanel({ reply, prompts, freshness, note }: AssistantPan
     : active.text;
   const sourceDoc = guarded ? undefined : active.sourceDoc;
 
-  const caveat = freshness !== 'fresh' ? MEMORY_CAVEAT[freshness] : undefined;
+  const caveat = availability === 'unavailable' ? MEMORY_UNAVAILABLE_CAVEAT : undefined;
 
   return (
     <section className="assistant" aria-label="Assistant (advisory)">
@@ -51,7 +52,7 @@ export function AssistantPanel({ reply, prompts, freshness, note }: AssistantPan
         <span className="assistant-label">{LABELS.assistant}</span>
         <span className="assistant-memory">
           <span className="dot dot-memory" aria-hidden="true" />
-          memory: {freshness}
+          memory: {availability}
         </span>
       </div>
 

@@ -15,6 +15,8 @@ import type {
   ApiMemoryConceptSummary,
   ApiMemoryFileResponse,
   ApiMemoryFileSummary,
+  MemoryConsistency,
+  SnapshotIntegrity,
 } from '../lib/types';
 
 /**
@@ -77,30 +79,21 @@ export function ProjectMemory() {
 // --- status detail card --------------------------------------------------
 
 function MemoryStatusDetail({ data }: { data: ApiGraphStatus }) {
-  // "unknown" means the graph IS available — the backend's own build commit is
-  // just unavailable, so currency can't be confirmed either way. It renders
-  // real counts, same as fresh/stale, never the degraded/unavailable panel.
-  const available = data.status === 'fresh' || data.status === 'stale' || data.status === 'unknown';
+  // P24.10: the primary axis is availability. The finer axes (integrity /
+  // memory policy / indexed sources) are each individually honest and are shown
+  // as separate rows — never collapsed back into a single freshness verdict.
+  const available = data.availability === 'available';
 
   return (
     <>
-      <GraphStatusChip status={data.status} note={data.note} />
+      <GraphStatusChip availability={data.availability} note={data.note} />
       {available ? (
         <>
           <p>
             Graphify is a memory plane, not a truth plane — every lead points back to a cited file
             to confirm.
           </p>
-          {data.status === 'stale' && (
-            <p className="memory-stale-note">
-              Memory may be out of date — re-verify against the cited files.
-            </p>
-          )}
-          {data.status === 'unknown' && (
-            <p className="memory-unknown-note">
-              Freshness could not be confirmed for this build — re-verify against the cited files.
-            </p>
-          )}
+          <MemoryAxes data={data} />
           <MemoryFigures data={data} />
           <p className="memory-indexed-note">
             Project memory indexes this project's source code, docs, schema, and test fixtures via
@@ -108,9 +101,106 @@ function MemoryStatusDetail({ data }: { data: ApiGraphStatus }) {
           </p>
         </>
       ) : (
-        <MemoryUnavailablePanel />
+        <>
+          {/* When a shipped artifact is malformed/unsupported, surface WHY via the
+              integrity axis; a wholly-absent artifact stays quiet (integrity unknown). */}
+          {data.integrity !== 'unknown' && (
+            <div className="memory-axes">
+              <MemoryAxisRow
+                label="Snapshot Integrity"
+                caption={AXIS_CAPTION.integrity}
+                presentation={INTEGRITY_AXIS[data.integrity]}
+              />
+            </div>
+          )}
+          <MemoryUnavailablePanel integrity={data.integrity} />
+        </>
       )}
     </>
+  );
+}
+
+// --- separated memory-plane axes (P24.10) --------------------------------
+// Each axis is individually honest and advisory — NEVER a validation verdict.
+// "Unknown" is quiet/neutral, never an error.
+
+interface AxisPresentation {
+  label: string;
+  tone: 'ok' | 'warn' | 'quiet';
+}
+
+const INTEGRITY_AXIS: Record<SnapshotIntegrity, AxisPresentation> = {
+  verified: { label: 'Verified', tone: 'ok' },
+  malformed: { label: 'Malformed', tone: 'warn' },
+  unsupported: { label: 'Unsupported', tone: 'warn' },
+  unknown: { label: 'Unknown', tone: 'quiet' },
+};
+
+const CONSISTENCY_AXIS: Record<MemoryConsistency, AxisPresentation> = {
+  current: { label: 'Current', tone: 'ok' },
+  stale: { label: 'Out of date', tone: 'warn' },
+  unknown: { label: 'Unknown', tone: 'quiet' },
+};
+
+const AXIS_TONE_CLASS: Record<AxisPresentation['tone'], string> = {
+  ok: 'axis-ok',
+  warn: 'axis-warn',
+  quiet: 'axis-quiet',
+};
+
+const AXIS_CAPTION = {
+  integrity:
+    'Whether the snapshot artifact is well-formed and schema-supported — not a check of its contents.',
+  memoryPolicy:
+    'The shipped sanitization and exclusion policy and versions match what the snapshot was built under.',
+  // Scope-honest: CI proves this only over files already in the snapshot; a
+  // newly added indexable file is not detected until Graphify re-indexes.
+  indexedSources:
+    'Proven in CI over only the files already in the snapshot — newly added indexable files are not detected until Graphify re-indexes.',
+} as const;
+
+function MemoryAxisRow({
+  label,
+  caption,
+  presentation,
+}: {
+  label: string;
+  caption: string;
+  presentation: AxisPresentation;
+}) {
+  return (
+    <div className="memory-axis">
+      <div className="memory-axis-head">
+        <span className="memory-axis-label">{label}</span>
+        <span className={`memory-axis-state ${AXIS_TONE_CLASS[presentation.tone]}`}>
+          {presentation.label}
+        </span>
+      </div>
+      <p className="memory-axis-caption">{caption}</p>
+    </div>
+  );
+}
+
+/** The three separated freshness axes, shown only when memory is available. */
+function MemoryAxes({ data }: { data: ApiGraphStatus }) {
+  return (
+    <div className="memory-axes">
+      <MemoryAxisRow
+        label="Snapshot Integrity"
+        caption={AXIS_CAPTION.integrity}
+        presentation={INTEGRITY_AXIS[data.integrity]}
+      />
+      <MemoryAxisRow
+        label="Memory Policy"
+        caption={AXIS_CAPTION.memoryPolicy}
+        presentation={CONSISTENCY_AXIS[data.memory_policy]}
+      />
+      <MemoryAxisRow
+        label="Indexed Sources"
+        caption={AXIS_CAPTION.indexedSources}
+        presentation={CONSISTENCY_AXIS[data.indexed_sources]}
+      />
+    </div>
   );
 }
 
@@ -128,14 +218,23 @@ function MemoryFigures({ data }: { data: ApiGraphStatus }) {
   if (data.community_count != null) {
     rows.push({ label: 'Communities', value: String(data.community_count), mono: true });
   }
+  // "Indexed files" is the served file count from the overview (file_count).
+  // The status-plane `served_file_count` can be null pre-regen; we never render
+  // a broken/empty "served" figure from it — the count shown here is file_count.
   if (data.file_count != null) {
     rows.push({ label: 'Indexed files', value: String(data.file_count), mono: true });
   }
   if (data.concept_count != null) {
     rows.push({ label: 'Concepts', value: String(data.concept_count), mono: true });
   }
-  if (data.built_at_commit != null) {
-    rows.push({ label: 'Built at commit', value: shortSha(data.built_at_commit), mono: true });
+  if (data.provider !== 'unavailable') {
+    rows.push({ label: 'Provider', value: data.provider, mono: true });
+  }
+  if (data.source_graph_commit != null) {
+    rows.push({ label: 'Source graph commit', value: shortSha(data.source_graph_commit), mono: true });
+  }
+  if (data.snapshot_schema_version != null) {
+    rows.push({ label: 'Snapshot schema', value: `v${data.snapshot_schema_version}`, mono: true });
   }
   // No invented timestamps: the age line is derived from the shipped age
   // signal (`graph_mtime`) only, and is omitted entirely when it is absent.
@@ -158,11 +257,29 @@ function MemoryFigures({ data }: { data: ApiGraphStatus }) {
 }
 
 /**
- * The honest degraded panel for `status:"missing"` — covers hosted (no graph
- * shipped), local-no-graph, and unreadable-graph alike. Not an error state:
- * no red, no counts, no fake placeholders.
+ * The honest degraded panel for `availability:"unavailable"`. Not an error
+ * state: no red, no counts, no fake placeholders. A shipped-but-malformed or
+ * unsupported artifact is explained by its integrity; a wholly-absent artifact
+ * (integrity unknown) shows the hosted + future-wiring context.
  */
-function MemoryUnavailablePanel() {
+function MemoryUnavailablePanel({ integrity }: { integrity: SnapshotIntegrity }) {
+  if (integrity === 'malformed' || integrity === 'unsupported') {
+    const reason =
+      integrity === 'malformed'
+        ? 'the snapshot artifact is present but malformed'
+        : 'the snapshot artifact uses an unsupported schema version';
+    return (
+      <div className="memory-unavailable">
+        <p className="memory-unavailable-title">
+          Project memory is unavailable — {reason}, so no leads can be served.
+        </p>
+        <p className="memory-unavailable-text">
+          This is a quiet, advisory state, not an error — the memory plane is optional. Rebuild the
+          snapshot to restore leads and provenance.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="memory-unavailable">
       <p className="memory-unavailable-title">
