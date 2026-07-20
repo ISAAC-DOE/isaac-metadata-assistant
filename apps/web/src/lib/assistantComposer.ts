@@ -39,6 +39,13 @@ function joinCapped(items: string[]): string {
   return rest > 0 ? `${base}, …and ${rest} more` : base;
 }
 
+// A string is "usable" only when it is present and non-empty after trim. This
+// guards every interpolated field so `undefined` / `null` / an empty value can
+// never reach rendered output (Fix 6a/6b).
+function isUsableStr(x: unknown): x is string {
+  return typeof x === 'string' && x.trim() !== '';
+}
+
 const ROUTE_TO_VALIDATE = 'Open Validate to run the deterministic schema check.';
 
 // --- Record Workbench (context: 'review'; state = getRecordBundle) ----------
@@ -55,12 +62,19 @@ export const REVIEW_CATALOG: GroundedChip[] = [
       if (pending.length === 0) {
         return { text: 'No pending fields are listed for this record.', answeredFrom: 'workflow' };
       }
-      const abouts = pending
-        .map((p) => p.about)
-        .filter((a): a is string => Boolean(a));
+      // One label per pending item (full-length; never drops an item for
+      // lacking `about`). First usable value wins: about → question → id →
+      // literal. joinCapped's "…and K more" is then computed over the FULL
+      // list, so the shown count and the listed labels always agree (Fix 6b).
+      const labels = pending.map((p) => {
+        if (isUsableStr(p.about)) return p.about;
+        if (isUsableStr(p.question)) return p.question;
+        if (isUsableStr(p.id)) return p.id;
+        return 'unnamed pending field';
+      });
       const verb = pending.length === 1 ? 'needs' : 'need';
       return {
-        text: `${count(pending.length, 'field')} still ${verb} you: ${joinCapped(abouts)}.`,
+        text: `${count(pending.length, 'field')} still ${verb} you: ${joinCapped(labels)}.`,
         answeredFrom: 'workflow',
       };
     },
@@ -96,14 +110,44 @@ export const REVIEW_CATALOG: GroundedChip[] = [
     resolve(state): AssistantMessage | null {
       if (state.context !== 'review') return null;
       const { evidence } = state.bundle;
-      const entry = (evidence ?? []).find((e) => (e.evidence?.length ?? 0) > 0);
+      const entries = evidence ?? [];
+
+      // Prefer the first field that carries a sub-entry with a usable
+      // source_file; the honest file-level trace only comes from there.
+      const fileField = entries.find((e) =>
+        (e.evidence ?? []).some((fe) => isUsableStr(fe.source_file)),
+      );
+      if (fileField) {
+        const fileEntry = fileField.evidence.find((fe) => isUsableStr(fe.source_file))!;
+        const locator = isUsableStr(fileEntry.locator) ? ` (locator: ${fileEntry.locator})` : '';
+        // Guard source_type like every other interpolated value: an unusable
+        // one (only reachable via a type-illegal bundle) drops the whole clause
+        // rather than rendering "source type: .". `fileField.path` is
+        // contract-guaranteed non-optional (the sentence subject) — not guarded.
+        const sourceType = isUsableStr(fileEntry.source_type)
+          ? ` — source type: ${fileEntry.source_type}`
+          : '';
+        return {
+          text: `${fileField.path} traces to ${fileEntry.source_file}${locator}${sourceType}.`,
+          answeredFrom: 'files',
+        };
+      }
+
+      // No field cites a usable file. Fall back to the first entry that has any
+      // evidence at all and answer honestly — never claim a file-level trace.
+      const entry = entries.find((e) => (e.evidence?.length ?? 0) > 0);
       if (!entry) {
         return { text: 'No cited source is recorded for a field yet.', answeredFrom: 'files' };
       }
-      const fe = entry.evidence[0];
-      const locator = fe.locator ? ` (locator: ${fe.locator})` : '';
+      const sourceTypes = [
+        ...new Set((entry.evidence ?? []).map((fe) => fe.source_type).filter(isUsableStr)),
+      ];
+      if (sourceTypes.length === 0) {
+        return { text: 'No cited source file is recorded for this field.', answeredFrom: 'files' };
+      }
+      const typeWord = sourceTypes.length === 1 ? 'source type' : 'source types';
       return {
-        text: `${entry.path} traces to ${fe.source_file}${locator} — source type: ${fe.source_type}.`,
+        text: `${entry.path} has ${count(entry.evidence.length, 'evidence entry', 'evidence entries')} but no cited source file — ${typeWord}: ${joinCapped(sourceTypes)}.`,
         answeredFrom: 'files',
       };
     },

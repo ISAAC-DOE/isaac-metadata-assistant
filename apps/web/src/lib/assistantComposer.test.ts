@@ -11,7 +11,12 @@ import {
   evidenceResponse,
   graphStatusUnavailable,
 } from '../test/apiFixtures';
-import type { GroundingState, RecordBundle } from './types';
+import type {
+  ApiEvidenceEntry,
+  ApiPendingItem,
+  GroundingState,
+  RecordBundle,
+} from './types';
 
 // A full, shape-faithful review bundle (verbatim from the API fixtures). Only
 // pending / validate / evidence are read by the review composer; the rest are
@@ -223,5 +228,223 @@ describe('compose — only the review context is implemented in P25.1', () => {
   it('throws for any non-review context', () => {
     const notReview = { context: 'export' } as unknown as GroundingState;
     expect(() => compose(notReview)).toThrow('compose: context not implemented in P25.1');
+  });
+});
+
+// --- Fix 6a: field_provenance must never render undefined/null/empty ---------
+describe('field_provenance — deterministic, never renders undefined/null/empty (6a)', () => {
+  const provenance = (evidence: unknown) =>
+    compose(reviewState({ evidence: evidence as unknown as ApiEvidenceEntry[] })).prompts[2]
+      .answer!;
+
+  it('first sub-entry lacks source_file → traces to the LATER usable file', () => {
+    const answer = provenance([
+      {
+        path: 'sample.material.formula',
+        value: 'CuO2',
+        status: 'verified',
+        evidence: [
+          { source_type: 'user_confirmation', question: 'confirm?', answer: 'yes' },
+          { source_type: 'spreadsheet', source_file: 'campaign.csv', locator: 'row 3' },
+        ],
+      },
+    ]);
+    expect(answer).toEqual({
+      text:
+        'sample.material.formula traces to campaign.csv (locator: row 3) — source type: spreadsheet.',
+      answeredFrom: 'files',
+    });
+    expect(answer.text).not.toContain('undefined');
+    expect(answer.text).not.toContain('null');
+  });
+
+  it('file-trace with a usable source_file but empty source_type → omits the "source type" clause', () => {
+    const answer = provenance([
+      {
+        path: 'system.technique',
+        value: 'X',
+        status: 'verified',
+        evidence: [{ source_type: '', source_file: 'campaign.csv', locator: "Sheet 'A'" }],
+      },
+    ]);
+    expect(answer).toEqual({
+      text: "system.technique traces to campaign.csv (locator: Sheet 'A').",
+      answeredFrom: 'files',
+    });
+    expect(answer.text).not.toContain('source type');
+    expect(answer.text).not.toMatch(/\s\.$/);
+    expect(answer.text).not.toContain('undefined');
+    expect(answer.text).not.toContain('null');
+  });
+
+  it('no entry has a usable source_file but source types exist → honest fallback (no file trace)', () => {
+    const answer = provenance([
+      {
+        path: 'system.domain',
+        value: 'experimental',
+        status: 'inferred',
+        evidence: [
+          { source_type: 'derivation', rule: 'r1' },
+          { source_type: 'user_confirmation', question: 'q', answer: 'a' },
+        ],
+      },
+    ]);
+    expect(answer).toEqual({
+      text:
+        'system.domain has 2 evidence entries but no cited source file — ' +
+        'source types: derivation, user_confirmation.',
+      answeredFrom: 'files',
+    });
+    expect(answer.text).not.toContain('traces to');
+    expect(answer.text).not.toContain('undefined');
+    expect(answer.text).not.toContain('null');
+  });
+
+  it('evidenced entry with neither a usable source_file nor usable source types → stable string', () => {
+    const answer = provenance([
+      {
+        path: 'implicit:absorbing_element',
+        value: 'Cu',
+        status: 'inferred',
+        evidence: [{ source_type: '', rule: 'derived' }],
+      },
+    ]);
+    expect(answer).toEqual({
+      text: 'No cited source file is recorded for this field.',
+      answeredFrom: 'files',
+    });
+    expect(answer.text).not.toContain('undefined');
+    expect(answer.text).not.toContain('null');
+  });
+
+  it('empty/whitespace source_file on the only sub-entry → treated as absent (no "traces to")', () => {
+    const answer = provenance([
+      {
+        path: 'system.technique',
+        value: 'X',
+        status: 'verified',
+        evidence: [{ source_type: 'spreadsheet', source_file: '   ', locator: 'loc' }],
+      },
+    ]);
+    expect(answer).toEqual({
+      text:
+        'system.technique has 1 evidence entry but no cited source file — source type: spreadsheet.',
+      answeredFrom: 'files',
+    });
+    expect(answer.text).not.toContain('traces to');
+    expect(answer.text).not.toContain('undefined');
+    expect(answer.text).not.toContain('null');
+  });
+
+  it('sweep: none of these provenance states ever emit "undefined" or "null"', () => {
+    const states: unknown[] = [
+      [
+        {
+          path: 'a.b',
+          value: null,
+          status: 'inferred',
+          evidence: [{ source_type: 'derivation', rule: 'r' }],
+        },
+      ],
+      [
+        {
+          path: 'c.d',
+          value: null,
+          status: 'verified',
+          evidence: [
+            { source_type: 'user_confirmation', question: 'q', answer: 'a' },
+            { source_type: 'spreadsheet', source_file: 'f.csv' },
+          ],
+        },
+      ],
+      [
+        {
+          path: 'e.f',
+          value: null,
+          status: 'inferred',
+          evidence: [{ source_type: '', source_file: '' }],
+        },
+      ],
+      [],
+    ];
+    for (const evidence of states) {
+      const answer = provenance(evidence);
+      expect(answer.text).not.toContain('undefined');
+      expect(answer.text).not.toContain('null');
+      expect(answer.text).not.toContain('traces to  ');
+    }
+  });
+});
+
+// --- Fix 6b: pending count and displayed list must agree ---------------------
+describe('pending_summary — count and displayed list agree (6b)', () => {
+  const summary = (pending: unknown) =>
+    compose(reviewState({ pending: pending as unknown as ApiPendingItem[] })).prompts[0].answer!;
+
+  it('every item has about → labels are the abouts (existing-fixture path, derived from the fixture)', () => {
+    const out = compose(reviewState());
+    const first3 = pendingResponse.pending.slice(0, 3).map((p) => p.about);
+    expect(out.prompts[0].answer!.text).toBe(
+      `5 fields still need you: ${first3.join(', ')}, …and 2 more.`,
+    );
+  });
+
+  it('exactly one item lacks about → it still appears (question fallback); count still equals total', () => {
+    const answer = summary([
+      { id: 'a1', kind: 'asset', question: 'q1?', about: 'about-one' },
+      { id: 'a2', kind: 'asset', question: 'q2-question?', about: null },
+    ]);
+    expect(answer.text).toBe('2 fields still need you: about-one, q2-question?.');
+    expect(answer.text).toContain('q2-question?');
+  });
+
+  it('all items lack about → labels come from question/id; no empty segment after the colon', () => {
+    const answer = summary([
+      { id: 'id-1', kind: 'asset', question: 'question-1?', about: null },
+      { id: 'id-2', kind: 'series', question: '', about: undefined },
+    ]);
+    expect(answer.text).toBe('2 fields still need you: question-1?, id-2.');
+    expect(answer.text).not.toContain(', ,');
+    expect(answer.text).not.toMatch(/:\s*[,.]/);
+    expect(answer.text).not.toContain('unnamed pending field');
+  });
+
+  it('more than three mixed-shape items → first 3 labels + "…and K more" (K = length - 3)', () => {
+    const pending = [
+      { id: 'x1', kind: 'asset', question: 'q1', about: 'A1' },
+      { id: 'x2', kind: 'asset', question: 'q2', about: null },
+      { id: 'x3', kind: 'series', question: '', about: null },
+      { id: 'x4', kind: 'descriptor', question: 'q4', about: 'A4' },
+      { id: 'x5', kind: 'edge', question: 'q5', about: 'A5' },
+    ];
+    const K = pending.length - 3;
+    const answer = summary(pending);
+    expect(K).toBe(2);
+    expect(answer.text).toBe(`5 fields still need you: A1, q2, x3, …and ${K} more.`);
+    expect(answer.text).toContain(`…and ${K} more`);
+  });
+
+  it('singular grammar: 1 pending → "1 field still needs you"', () => {
+    const answer = summary([{ id: 'z', kind: 'asset', question: 'q', about: 'only-one' }]);
+    expect(answer.text).toBe('1 field still needs you: only-one.');
+  });
+
+  it('plural grammar: 2 pending → "2 fields still need you"', () => {
+    const answer = summary([
+      { id: 'z1', kind: 'asset', question: 'q1', about: 'one' },
+      { id: 'z2', kind: 'asset', question: 'q2', about: 'two' },
+    ]);
+    expect(answer.text).toBe('2 fields still need you: one, two.');
+  });
+
+  it('exact "…and K more" for a known count of 7 → K = 4', () => {
+    const pending = Array.from({ length: 7 }, (_, i) => ({
+      id: `p${i}`,
+      kind: 'asset',
+      question: `q${i}`,
+      about: `A${i}`,
+    }));
+    const answer = summary(pending);
+    expect(answer.text).toBe('7 fields still need you: A0, A1, A2, …and 4 more.');
   });
 });
