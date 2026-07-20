@@ -44,7 +44,6 @@
 
   /* assistant — indigo (advisory only) */
   --assist:          #4a54d6;  /* icon/stroke */
-  --assist-hover:    #3f48c4;  /* P22C: assistant-send hover background */
   --assist-text:     #3b41a8;
   --assist-tint:     #ecebfb;  /* icon square */
   --assist-panel-bg: #f8f8fd;  /* also #f7f7fd */

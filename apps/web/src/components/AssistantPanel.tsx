@@ -1,9 +1,9 @@
 import './assistant.css';
 import { useState } from 'react';
-import { MessageSquare, ChevronRight, SendHorizontal } from './icons';
+import { MessageSquare, ChevronRight } from './icons';
 import { LABELS } from '../lib/labels';
 import {
-  FREEFORM_NOT_WIRED,
+  GUIDED_ONLY_NOTE,
   MEMORY_UNAVAILABLE_CAVEAT,
   SOURCE_LABELS,
   SUBORDINATE_CAPTION,
@@ -21,10 +21,11 @@ interface AssistantPanelProps {
 }
 
 /**
- * Subordinate indigo helper — final placeholder form. Guided prompts are PRIMARY:
- * clicking one swaps in its STATIC, source-labeled sample answer (each names the
- * doc it is grounded in). Free-form input is rendered SECONDARY and clearly marked
- * not wired in this prototype. Every reply carries `answered from:` + a memory
+ * Subordinate indigo helper — final placeholder form. Guided prompts are the
+ * PRIMARY and ONLY input: clicking one swaps in its STATIC, source-labeled
+ * sample answer (each names the doc it is grounded in). There is no free-text
+ * affordance — the panel is honestly guided-prompts-only (P25.2), stated via
+ * `GUIDED_ONLY_NOTE`. Every reply carries `answered from:` + a memory
  * freshness dot, and NEVER renders PASS/FAIL or a validity claim — the
  * verdict-language guard strips any reply that would state a verdict. The panel
  * explains and points to sources; it never decides.
@@ -57,7 +58,7 @@ export function AssistantPanel({ reply, prompts, availability, note }: Assistant
         </span>
       </div>
 
-      <p className="assistant-reply">{safeText}</p>
+      <p className="assistant-reply" aria-live="polite">{safeText}</p>
       <div className="assistant-sources">
         <span className="answered-from">answered from: {SOURCE_LABELS[active.answeredFrom]}</span>
         {sourceDoc && <span className="assistant-sourcedoc mono">From {sourceDoc}</span>}
@@ -83,20 +84,7 @@ export function AssistantPanel({ reply, prompts, availability, note }: Assistant
         ))}
       </div>
 
-      <div className="assistant-freeform">
-        <div className="assistant-input" aria-hidden="true">
-          <input
-            type="text"
-            placeholder="or ask your own question…"
-            aria-label="Ask the assistant (not wired in this prototype)"
-            disabled
-          />
-          <button type="button" className="assistant-send" aria-label="Send" disabled>
-            <SendHorizontal size={15} strokeWidth={2} aria-hidden="true" />
-          </button>
-        </div>
-        <p className="assistant-freeform-note">{FREEFORM_NOT_WIRED}</p>
-      </div>
+      <p className="assistant-guided-note">{GUIDED_ONLY_NOTE}</p>
 
       <p className="assistant-caption">{SUBORDINATE_CAPTION}</p>
     </section>

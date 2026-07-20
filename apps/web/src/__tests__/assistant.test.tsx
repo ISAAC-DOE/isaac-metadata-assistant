@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
-import { ASSISTANT_SAMPLES, hasVerdictLanguage } from '../lib/assistant';
+import { ASSISTANT_SAMPLES, GUIDED_ONLY_NOTE, hasVerdictLanguage } from '../lib/assistant';
 
 describe('AssistantPanel is subordinate and never renders a verdict', () => {
   it('renders subordinate copy with a source label and a memory freshness dot', () => {
@@ -22,6 +22,27 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     expect(container.querySelector('.assistant')).not.toBeNull();
     expect(container.querySelector('.verdict-pass')).toBeNull();
     expect(container.querySelector('.verdict-fail')).toBeNull();
+  });
+
+  it('unavailable memory renders the quiet caveat; available memory renders none (unchanged by P25.2)', () => {
+    const unavailable = render(
+      <AssistantPanel
+        reply={ASSISTANT_SAMPLES.review.reply}
+        prompts={ASSISTANT_SAMPLES.review.prompts}
+        availability="unavailable"
+      />,
+    );
+    expect(unavailable.getByText(/answered from source files directly/i)).toBeInTheDocument();
+    unavailable.unmount();
+
+    const available = render(
+      <AssistantPanel
+        reply={ASSISTANT_SAMPLES.review.reply}
+        prompts={ASSISTANT_SAMPLES.review.prompts}
+        availability="available"
+      />,
+    );
+    expect(available.queryByText(/answered from source files directly/i)).toBeNull();
   });
 
   it('contains no PASS/FAIL strings', () => {
@@ -123,19 +144,45 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
     expect(getByText(sourceDoc, { exact: false })).toBeInTheDocument();
   });
 
-  it('free-form input is secondary and marked not wired; a subordinate caption is visible', () => {
-    const { getByText, getByLabelText } = render(
+  it('is honestly guided-prompts-only: no free-text input, no fake chat affordance; a subordinate caption is visible', () => {
+    const { getByText, queryByRole, queryByLabelText } = render(
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.evidence.reply}
         prompts={ASSISTANT_SAMPLES.evidence.prompts}
         availability="available"
       />,
     );
-    expect(getByText(/not wired in this prototype/i)).toBeInTheDocument();
-    const input = getByLabelText(/Ask the assistant/i) as HTMLInputElement;
-    expect(input.disabled).toBe(true);
+    // P25.2: the disabled free-text input + send button are removed entirely —
+    // there is no textbox and no "Send" affordance to mislead a user into
+    // thinking free-text chat is available.
+    expect(queryByRole('textbox')).toBeNull();
+    expect(queryByRole('button', { name: /^send$/i })).toBeNull();
+    expect(queryByLabelText(/ask the assistant/i)).toBeNull();
+    // the honest guided-only note replaces it
+    expect(getByText(GUIDED_ONLY_NOTE)).toBeInTheDocument();
     // subordinate-to-deterministic-validation caption
     expect(getByText(/advisory — it explains/i)).toBeInTheDocument();
     expect(getByText(/never validates/i)).toBeInTheDocument();
+  });
+
+  it('prompt chips remain keyboard-accessible real buttons', () => {
+    const { getAllByRole } = render(
+      <AssistantPanel
+        reply={ASSISTANT_SAMPLES.evidence.reply}
+        prompts={ASSISTANT_SAMPLES.evidence.prompts}
+        availability="available"
+      />,
+    );
+    const buttons = getAllByRole('button');
+    // every clickable prompt chip is a real <button>, focusable/clickable —
+    // the only input surface the assistant offers.
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const chip of buttons) {
+      expect(chip.tagName).toBe('BUTTON');
+      if (!chip.hasAttribute('disabled')) {
+        chip.focus();
+        expect(chip).toHaveFocus();
+      }
+    }
   });
 });

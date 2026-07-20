@@ -115,11 +115,9 @@
 }
 .assistant-prompt:disabled { opacity: 0.6; cursor: default; }
 .assistant-prompt .chev { margin-left: auto; color: var(--text-disabled); flex: none; }
-.assistant-freeform {
+/* P25.2: honest guided-only line, replacing the removed disabled free-text input. */
+.assistant-guided-note {
   margin-top: 14px;
-}
-.assistant-freeform-note {
-  margin-top: 7px;
   font-size: 10.5px;
   color: var(--text-quaternary);
   line-height: 1.5;
@@ -132,39 +130,6 @@
   color: var(--text-tertiary);
   line-height: 1.5;
 }
-.assistant-input {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 6px 0 12px;
-  height: 40px;
-  background: var(--screen-base);
-  border: 1px solid var(--border-input);
-  border-radius: var(--radius-control);
-  opacity: 0.65;
-}
-.assistant-input input {
-  flex: 1;
-  border: 0;
-  background: none;
-  outline: none;
-  font-size: 12.5px;
-  color: var(--text-primary);
-}
-.assistant-send {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
-  border: 0;
-  background: var(--assist);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.12s ease;
-}
-.assistant-send:hover:not(:disabled) { background: var(--assist-hover); }
-.assistant-send:active:not(:disabled) { background: var(--assist-text); }
 
 /* ---- GuidedPrompt (S4) --------------------------------------------- */
 .guided {

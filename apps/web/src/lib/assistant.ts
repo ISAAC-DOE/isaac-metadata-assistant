@@ -63,14 +63,17 @@ interface AssistantContext {
   prompts: SuggestedPrompt[];
 }
 
-// The always-visible subordinate caption + the free-form-not-wired marker. This
-// is the final placeholder form: guided prompts are primary; free-form is clearly
-// secondary and not wired in the prototype.
+// The always-visible subordinate caption. This is the final placeholder form:
+// guided prompts are the only input — there is no free-text affordance to mark
+// as secondary or not-wired (removed at P25.2; see GUIDED_ONLY_NOTE below).
 export const SUBORDINATE_CAPTION =
   'The assistant is advisory — it explains artifacts and points to sources. It never validates; deterministic validation is the authority.';
 
-export const FREEFORM_NOT_WIRED =
-  'Free-form questions are not wired in this prototype — pick a suggested question above.';
+// P25.2: there is no disabled free-text input to caveat anymore — this line
+// states plainly that guided prompts are the only way to ask the assistant
+// something.
+export const GUIDED_ONLY_NOTE =
+  'Guided prompts only — the assistant answers the suggested questions above.';
 
 // Static, grounded sample messages per record surface. Every reply — and every
 // clickable prompt answer — names the deterministic doc it is grounded in; none
