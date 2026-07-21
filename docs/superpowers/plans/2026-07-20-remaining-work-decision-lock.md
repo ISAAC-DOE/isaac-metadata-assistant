@@ -4,6 +4,17 @@ Status: **DECISIONS ACCEPTED** — these decisions lock the direction of the eig
 remaining-work plans. Implementation of **P25.1 and every later production slice remains NOT
 authorized**; only P25.0 (design/spec) is authorized after these plans are pushed.
 Date: 2026-07-20 · Baseline commit: `f534a4c` (P24.10 released) · Author: orchestrator (planning).
+
+> **AUTHORIZATION UPDATE (later 2026-07-20 master authorization).** The "only P25.0 authorized"
+> statement above is the *initial* post-planning gate and is retained as history — it is **not**
+> reopened. Since then the **2026-07-20 master authorization** (recorded in the Phase 25 plan's
+> session checkpoints and `2026-07-20-slac-account-toolchain-reconciliation.md`) authorized
+> **continuous execution of the locked core roadmap** (Phase 25 slices → Phase 26 → UI Refinement →
+> Final Stabilization → Documentation & Deliverables), subject to the existing hard gates
+> (per-slice report → independent review → commit → push → exact-HEAD CI → checkpoint; P25.8 excluded;
+> institutional infrastructure and Convex off-path). The **direction decisions** in this lock remain
+> authoritative and unchanged; only the *execution-scope* line above is superseded, per the newer
+> checkpoint. This reconciles the header with the master authorization for fresh sessions.
 Supersedes the *open-question* framing in the companion plans where they conflict; the companion
 plans (all dated 2026-07-19) are updated to reference this lock.
 
