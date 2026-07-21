@@ -563,3 +563,167 @@ def test_no_verdict_or_content_or_plane_keys_anywhere(snap):
 def test_both_providers_expose_status(snap, local):
     assert callable(getattr(snap, "status"))
     assert callable(getattr(local, "status"))
+
+
+# --- 9. P26.2 — search() on the snapshot provider -----------------------------
+#
+# The frozen local-provider search contract lives in test_memory.py. Here we pin
+# the SANITIZED SNAPSHOT provider (grounded in the golden fixture's real concept
+# labels / file paths / rationale text), its honest degradation, and — most
+# importantly — local-vs-snapshot PARITY, which proves both providers delegate to
+# the one shared algorithm.
+
+_MEM_FORBIDDEN_KEYS = {"ok", "valid", "passed", "verdict", "schema",
+                       "schema_valid", "errors"}
+
+
+def _key(res):
+    """The provider-agnostic identity of a result set: the set of
+    ``(kind, id, path, match.field)`` tuples (order/snippet-independent)."""
+    return {(r["kind"], r.get("id"), r.get("path"), r["match"]["field"])
+            for r in res["results"]}
+
+
+def test_snapshot_search_hits_concept_file_and_rationale(snap):
+    # "fake" is grounded in the golden fixture: every concept label ("Fake alpha
+    # concept" ...), every served file path ("src/fake_widget.py" ...) and the
+    # widget rationale text all contain it.
+    res = snap.search("fake", limit=50)
+    assert res["available"] is True
+    assert res["reason"] is None
+    kinds = {r["kind"] for r in res["results"]}
+    assert kinds == {"concept", "file", "rationale"}
+    ids = {r.get("id") for r in res["results"] if r["kind"] == "concept"}
+    assert {"concept_fake_alpha", "concept_fake_absolute",
+            "concept_fake_excluded"} <= ids
+    paths = {r.get("path") for r in res["results"] if r["kind"] == "file"}
+    assert {"docs/fake_notes.md", "src/fake_helper.py",
+            "src/fake_widget.py"} <= paths
+
+
+def test_snapshot_search_concept_exact_tier(snap):
+    # A concept-label exact match (the golden fixture's real label) ranks first.
+    res = snap.search("Fake alpha concept", limit=50)
+    assert res["results"]
+    top = res["results"][0]
+    assert top["kind"] == "concept"
+    assert top["id"] == "concept_fake_alpha"
+    assert top["match"]["tier"] == "exact"
+    assert top["navigate_to"] == "/memory?concept=concept_fake_alpha"
+
+
+def test_snapshot_search_file_path_hit(snap):
+    res = snap.search("helper", limit=50)
+    assert _has(res, kind="file", path="src/fake_helper.py")
+
+
+def test_snapshot_search_rationale_hit(snap):
+    # "widget" appears only in the short widget rationale (well under the 280-char
+    # truncation cap), so snapshot & live agree on this rationale.
+    res = snap.search("widget", limit=50)
+    rat = [r for r in res["results"] if r["kind"] == "rationale"]
+    assert rat
+    assert rat[0]["path"] == "src/fake_widget.py"
+    assert "widget" in rat[0]["match"]["snippet"].lower()
+
+
+def test_snapshot_search_result_shape_and_no_verdict_keys(snap):
+    res = snap.search("fake", limit=50)
+    assert res["results"]
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                assert k not in _MEM_FORBIDDEN_KEYS, f"verdict key: {k}"
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(res["results"])
+    for r in res["results"]:
+        assert r["plane"] == "memory"
+        assert r["source"] == "memory:sanitized-snapshot"
+        assert r["match"]["offsets"]
+        assert r["match"]["tier"] in ("exact", "prefix", "token", "substring")
+
+
+def test_snapshot_search_min_query_length_guard(snap):
+    for q in ("", "   ", "a"):
+        res = snap.search(q)
+        assert res["available"] is True
+        assert res["reason"] == "query_too_short"
+        assert res["total"] == 0
+        assert res["results"] == []
+
+
+def test_snapshot_search_degrades_when_absent(tmp_path):
+    reader = SanitizedSnapshotSource(tmp_path / "nope.json")  # never created
+    res = reader.search("fake")
+    assert res["available"] is False
+    assert res["reason"] == "graph_absent"
+    assert res["total"] == 0
+    assert res["results"] == []
+
+
+def test_snapshot_search_degrades_when_unreadable(tmp_path):
+    reader = SanitizedSnapshotSource(_write_snapshot(tmp_path / "s.json", "{not valid json"))
+    res = reader.search("fake")
+    assert res["available"] is False
+    assert res["reason"] == "graph_unreadable"
+    assert res["results"] == []
+
+
+def test_snapshot_search_never_raises_on_degrade(tmp_path):
+    for reader in (SanitizedSnapshotSource(tmp_path / "missing.json"),
+                   SanitizedSnapshotSource(_write_snapshot(tmp_path / "s.json", "[bad"))):
+        assert isinstance(reader.search("anything"), dict)
+
+
+# --- 10. P26.2 — local-vs-snapshot search PARITY ------------------------------
+#
+# The objective proof both providers share ONE algorithm: for the same query,
+# LocalGraphArtifactSource(_FIXTURE_GRAPH_DIR) and
+# SanitizedSnapshotSource(_GOLDEN_SNAPSHOT) return the SAME set of
+# (kind, id, path, match.field) tuples. The one documented difference — the
+# snapshot truncates rationales at MAX_RATIONALE_CHARS — cannot affect these
+# tuples: the queries below only match on concept labels / file paths /
+# communities / the SHORT widget rationale, all identical across providers, and
+# the long rationale differs only past 280 chars (never in a matched token here).
+
+_PARITY_QUERIES = ["fake", "alpha", "widget", "helper", "notes", "rationale",
+                   "code", "Fake alpha concept", "absolute"]
+
+
+@pytest.mark.parametrize("q", _PARITY_QUERIES)
+def test_local_vs_snapshot_search_parity(snap, local, q):
+    lres = local.search(q, limit=50)
+    sres = snap.search(q, limit=50)
+    assert lres["available"] is True
+    assert sres["available"] is True
+    # Guard against a future fixture edit silently reducing parity to comparing two
+    # empty sets: every parity query is chosen to match real fixture content.
+    assert lres["results"], f"parity query {q!r} unexpectedly matched nothing"
+    assert _key(lres) == _key(sres), f"parity mismatch for {q!r}"
+
+
+def test_parity_search_min_query_and_degradation(snap, local):
+    # Both providers agree on the too-short guard and on absent-plane degradation.
+    assert local.search("a")["reason"] == snap.search("a")["reason"] == "query_too_short"
+    lmiss = LocalGraphArtifactSource(_FIXTURE_ROOT / "does-not-exist")
+    smiss = SanitizedSnapshotSource(_FIXTURE_ROOT / "does-not-exist.json")
+    lr, sr = lmiss.search("fake"), smiss.search("fake")
+    assert lr["available"] is sr["available"] is False
+    assert lr["reason"] == sr["reason"] == "graph_absent"
+
+
+def _has(res, *, kind=None, id=None, path=None):
+    for r in res["results"]:
+        if kind is not None and r["kind"] != kind:
+            continue
+        if id is not None and r.get("id") != id:
+            continue
+        if path is not None and r.get("path") != path:
+            continue
+        return True
+    return False

@@ -807,6 +807,10 @@ def _repo_root() -> Path:
 _STDLIB_ROOTS = {
     "json", "os", "sys", "time", "pathlib", "dataclasses", "typing",
     "functools", "collections", "copy", "hashlib", "__future__",
+    # P26.2: memory search normalizes queries with Unicode NFC folding. This is a
+    # genuine stdlib module — allowing it preserves the isolation test's real intent
+    # (no non-stdlib deps; no isaac_records/graphify/fastapi/isaac_api coupling).
+    "unicodedata",
 }
 
 
@@ -829,13 +833,12 @@ def test_memory_module_imports_only_stdlib():
     assert roots.isdisjoint({"isaac_records", "graphify", "fastapi", "isaac_api"})
 
 
-def test_reader_exposes_seven_method_surface(reader):
-    """The ``MemoryReader`` seam has seven methods including the separated
-    ``status()`` (P24.10 takes no build_commit — app-HEAD is not a freshness
-    input); the local reader must implement all seven so a future
+def test_reader_exposes_full_method_surface(reader):
+    """The ``MemoryReader`` seam now has EIGHT methods: the original seven plus the
+    P26.2 ``search()``. The local reader must implement all of them so a future
     snapshot/db/hosted provider mirrors one surface."""
     for name in ("overview", "concepts", "concept", "files", "file",
-                 "classify_path", "status"):
+                 "classify_path", "status", "search"):
         assert callable(getattr(reader, name))
     st = reader.status()
     assert st["provider_kind"] == "local-graph"
@@ -861,3 +864,200 @@ def test_real_graph_smoke():
     assert not any(p.startswith("examples/") for p in paths)
     assert not any(p.startswith(".superpowers/") for p in paths)
     assert not any(p.endswith(".png") for p in paths)
+
+
+# --- 11. P26.2 — MemoryReader.search() (local-graph provider) -----------------
+#
+# Deterministic memory-plane search over already-parsed, governance-filtered
+# projections (concept label/id/community, file path/type/community, file
+# rationale text). No LLM, no embeddings. Honest degradation (never raises), a
+# min-length guard, caps/pagination, and a strict governance boundary: an
+# excluded/secret/unsafe path can never surface even if the query "matches" it.
+#
+# The snapshot provider's search() + local-vs-snapshot parity are pinned in
+# test_snapshot_source.py (both readers delegate to one shared algorithm).
+
+_MEM_FORBIDDEN_KEYS = {"ok", "valid", "passed", "verdict", "schema", "schema_valid", "errors"}
+
+
+def _absent_reader(tmp_path):
+    return LocalGraphArtifactSource(_write_artifacts(tmp_path, graph=None))
+
+
+def _unreadable_reader(tmp_path):
+    return LocalGraphArtifactSource(_write_artifacts(tmp_path, graph="{not valid json"))
+
+
+def _mem_kinds(res):
+    return {r["kind"] for r in res["results"]}
+
+
+def _has(res, *, kind=None, id=None, path=None):
+    for r in res["results"]:
+        if kind is not None and r["kind"] != kind:
+            continue
+        if id is not None and r.get("id") != id:
+            continue
+        if path is not None and r.get("path") != path:
+            continue
+        return True
+    return False
+
+
+def test_search_matches_concept_label(reader):
+    res = reader.search("alpha")
+    assert res["available"] is True
+    assert res["reason"] is None
+    assert _has(res, kind="concept", id="concept_alpha")
+
+
+def test_search_matches_concept_id(reader):
+    res = reader.search("concept_beta")
+    assert _has(res, kind="concept", id="concept_beta")
+
+
+def test_search_matches_file_path(reader):
+    res = reader.search("other_mod")
+    assert _has(res, kind="file", path="src/other_mod.py")
+
+
+def test_search_matches_rationale_text(reader):
+    res = reader.search("rationale")
+    rat = [r for r in res["results"] if r["kind"] == "rationale"]
+    assert rat
+    assert rat[0]["path"] == "src/fake_mod.py"
+    assert "rationale" in rat[0]["match"]["snippet"].lower()
+
+
+def test_search_matches_community_name(reader):
+    res = reader.search("beta community")
+    assert _has(res, kind="concept", id="concept_beta")
+
+
+def test_search_no_match_is_available_and_empty(reader):
+    res = reader.search("zzznotanythinghere")
+    assert res["available"] is True
+    assert res["reason"] is None
+    assert res["total"] == 0
+    assert res["results"] == []
+
+
+def test_search_min_query_length_guard(reader):
+    res = reader.search("a")
+    assert res["available"] is True
+    assert res["reason"] == "query_too_short"
+    assert res["total"] == 0
+    assert res["results"] == []
+
+
+def test_search_empty_query_guard(reader):
+    assert reader.search("")["reason"] == "query_too_short"
+    assert reader.search("   ")["reason"] == "query_too_short"
+
+
+def test_search_degrades_when_graph_absent(tmp_path):
+    res = _absent_reader(tmp_path).search("alpha")
+    assert res["available"] is False
+    assert res["reason"] == "graph_absent"
+    assert res["results"] == []
+    assert res["total"] == 0
+
+
+def test_search_degrades_when_graph_unreadable(tmp_path):
+    res = _unreadable_reader(tmp_path).search("alpha")
+    assert res["available"] is False
+    assert res["reason"] == "graph_unreadable"
+    assert res["results"] == []
+
+
+def test_search_never_raises_on_degrade(tmp_path):
+    # Exercises the same never-raise contract the other read methods honor.
+    for r in (_absent_reader(tmp_path), _unreadable_reader(tmp_path)):
+        assert isinstance(r.search("anything"), dict)
+
+
+def test_search_case_insensitive(reader):
+    lower = [r["id"] for r in reader.search("alpha concept")["results"] if r["kind"] == "concept"]
+    upper = [r["id"] for r in reader.search("ALPHA CONCEPT")["results"] if r["kind"] == "concept"]
+    assert lower == upper
+    assert "concept_alpha" in lower
+
+
+def test_search_governance_excluded_paths_never_surface(reader):
+    # examples/README.md, .superpowers/**, apps/web/.vercel/**, .claude/settings.local.json
+    # and the .png are in the raw manifest but governance-excluded — a query that
+    # would "match" their names must never surface them.
+    for q in ("readme", "settings", "vercel", "superpowers", "shot", "examples"):
+        res = reader.search(q)
+        for r in res["results"]:
+            blob = repr(r)
+            for danger in ("examples/", ".superpowers/", ".vercel", "settings.local", ".png"):
+                assert danger not in blob, f"query {q!r} leaked {danger!r}"
+
+
+def test_search_result_shape_and_labels(reader):
+    res = reader.search("alpha", limit=50)
+    assert res["results"]
+    for r in res["results"]:
+        assert r["kind"] in ("concept", "file", "rationale")
+        assert r["plane"] == "memory"
+        assert r["source"].startswith("memory:")
+        assert "label" in r
+        m = r["match"]
+        assert m["reason"] and m["reason"].strip()
+        assert m["tier"] in ("exact", "prefix", "token", "substring")
+        assert m["offsets"]
+        if r["kind"] == "concept":
+            assert r["navigate_to"] == f"/memory?concept={r['id']}"
+        else:
+            assert r["navigate_to"] == f"/memory?file={r['path']}"
+
+
+def test_search_no_verdict_keys(reader):
+    res = reader.search("alpha", limit=50)
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                assert k not in _MEM_FORBIDDEN_KEYS, f"verdict key: {k}"
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(res["results"])
+
+
+def test_search_deterministic(reader):
+    key = lambda res: [(r["kind"], r.get("id"), r.get("path"), r["match"]["field"]) for r in res["results"]]
+    assert key(reader.search("mod", limit=50)) == key(reader.search("mod", limit=50))
+
+
+def test_search_pagination_and_caps(reader):
+    full = reader.search("mod", limit=50)
+    assert full["total"] == len(full["results"]) <= 50
+    p1 = reader.search("mod", limit=1, offset=0)
+    assert p1["returned"] == min(full["total"], 1)
+    assert p1["limit"] == 1
+    if full["total"] >= 2:
+        p2 = reader.search("mod", limit=1, offset=1)
+        k = lambda res: [(r["kind"], r.get("id"), r.get("path"), r["match"]["field"]) for r in res["results"]]
+        assert set(k(p1)).isdisjoint(set(k(p2)))
+
+
+def test_search_default_limit_is_ten(reader):
+    res = reader.search("mod")
+    assert res["limit"] == 10
+
+
+def test_search_negative_offset_and_zero_limit(reader):
+    assert reader.search("mod", offset=-3)["results"] == reader.search("mod", offset=0)["results"]
+    z = reader.search("mod", limit=0)
+    assert z["returned"] == 0 and z["results"] == []
+
+
+def test_search_exact_tier_ranks_first(reader):
+    # An exact concept-label match outranks looser matches.
+    res = reader.search("Alpha concept", limit=50)
+    assert res["results"]
+    assert res["results"][0]["match"]["tier"] == "exact"
