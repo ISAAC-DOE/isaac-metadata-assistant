@@ -19,8 +19,17 @@ token-AND, four-tier ranking (exact>prefix>token>substring), cap 50 / page 10 / 
 offsets + reason, six truth-plane result kinds; NO route, NO verdict, NO truth-core import, NO filesystem
 traversal, defensive path-leak sanitizer; 53 behavior tests, backend suite 589 green, snapshot no drift,
 R4.3 preflight PASS; two independent Opus reviews (APPROVE-WITH-MINORS → the Important path-leak-
-enforcement gap + minors fixed). NEXT: P26.2 (MemoryReader.search()). See §20 for per-slice status.
-Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a + P26.0b + P26.1 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+enforcement gap + minors fixed).
+P26.2 RELEASED 2026-07-21 (commit `51e8b24`, CI green run `29877645942`, Railway+Vercel healthy at HEAD):
+`MemoryReader.search(query, limit, offset)` on the Protocol + BOTH providers via one shared pure helper —
+NFC/casefold/whitespace normalization, token-AND four-tier ranking, cap 50 / page 10 / min-len 2, three
+result kinds (concept / file / rationale), each `plane:"memory"`, `source:"memory:<provider_kind>"`,
+`navigate_to /memory?concept=|?file=`; governance inherited by delegating ONLY to the public read surface
+(no excluded/secret/unsafe path can surface), honest degradation never raises, stdlib-only (isolation
+holds). 21 frozen local tests + snapshot search + non-vacuous local↔snapshot parity; backend suite 628
+green; snapshot regenerated in-slice (§17 predictable drift, generator unchanged); independent Opus review
+APPROVE. NEXT: P26.3 (GET /api/search route). See §20 for per-slice status.
+Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a + P26.0b + P26.1 + P26.2 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
          (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
@@ -551,7 +560,32 @@ is isolated per arc decision #10.
   pagination/governance/no-verdict tests green; no truth-core import. **Tests**: as §16 workspace.
 - **Report**: contract + ranking rules + what fields are searched. **Commit**: single. **Stop**: review before P26.2.
 
-### P26.2 — MemoryReader.search() (no route)
+### P26.2 — MemoryReader.search() (no route) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `51e8b24`, CI green run `29877645942`, Railway+Vercel healthy at HEAD.
+> Added `search(self, query, limit=10, offset=0) -> dict` to the `MemoryReader` Protocol and implemented it
+> in BOTH `LocalGraphArtifactSource` and `SanitizedSnapshotSource` via ONE shared pure module-level
+> `_run_memory_search(reader, query, limit, offset)` (+ `_mem_normalize`/`_mem_tier`/`_mem_snippet_and_offsets`/
+> `_mem_best_aspect`, `_MEM_*` constants). Deterministic: NFC + casefold + whitespace-collapse (256 cap,
+> min length 2 → `query_too_short`), token-AND four-tier match (exact>prefix>token>substring), stable
+> total-order rank `(tier, facet, natural_key, match.field)`, cap 50 / page 10, per-hit snippet + offsets +
+> reason + tier. Three kinds — `concept` (label/id/community), `file` (path/type/community), `rationale`
+> (file-detail text) — each `plane:"memory"`, `source:"memory:<provider_kind>"`, `navigate_to
+> /memory?concept=<id> | ?file=<path>`. **Governance inherited**: the helper reads ONLY the reader's public
+> methods (`overview/concepts/files/file/status`), never raw `_GraphState`/`_SnapshotState`, so every
+> path/secret/anchor filter is inherited — adversarially probed, no excluded/secret/unsafe file can surface.
+> **Honest degradation** (`graph_absent`/`graph_unreadable` → safe empties, never raises); `query_too_short`
+> keeps `available:true`. **Stdlib-only** (adds `unicodedata`; no `re`, no truth-core/graphify/fastapi/
+> `search.py` import) — `test_memory_module_imports_only_stdlib` still green (`_STDLIB_ROOTS` += `unicodedata`).
+> **Snapshot generator UNTOUCHED** (plan §18 assumption held): `search()` scans the already-served
+> projection at request time; `scripts/build_memory_snapshot.py` git-clean. **Files**: `memory.py`,
+> `tests/test_memory.py` (21 frozen local behavior tests + isolation/protocol update), `tests/test_snapshot_
+> source.py` (snapshot search + non-vacuous local↔snapshot parity), regenerated `memory-snapshot.json`
+> (§17 predictable drift — memory.py + the two test files are manifest-listed served content; diff confined
+> to their sha256 + `served_manifest_fingerprint`). **Verified**: backend suite 628 green, snapshot no drift,
+> committed-snapshot gate 17, R4.3 full preflight PASS. **Review**: independent Opus adversarial review →
+> APPROVE (only Minors: post-cap `total` intentional/consistent, per-file `file()` for rationales fine at
+> demo scale, parity non-emptiness guard added). Backend-library-only → no hosted browser QA needed;
+> Railway/Vercel healthy at `51e8b24`.
 - **Objective**: add `search(query, limit, offset)` to the `MemoryReader` Protocol and implement in
   `LocalGraphArtifactSource` + `SanitizedSnapshotSource`; reuse existing governance/path-safety
   filters; honest degradation; stdlib-only. Confirm the snapshot generator needs no change (§18). TDD.
