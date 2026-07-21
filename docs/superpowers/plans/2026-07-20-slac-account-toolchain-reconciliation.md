@@ -392,3 +392,49 @@ Deliverables → one final Graphify/snapshot refresh). Per-slice report → inde
 push → exact-HEAD CI → checkpoint is **retained**; the hard-stop gates remain in force; P25.8 stays
 excluded; Convex/institutional infrastructure stay off the core path. This changes execution **cadence
 only** — it introduces no new architectural decision and stays within the decision lock.
+
+---
+
+## R4.2 follow-up (2026-07-20) — Shared Repository Synchronization Contract
+
+> **Separately authorized continuity follow-up after R4.1.** R1–R6 and R4.1 remain COMPLETE and
+> unchanged. This section is **append-only**; it revises nothing above and creates no new product
+> phase or replacement roadmap.
+
+**Goal.** Keep personal `claude`, `claude-slac`, the local ISAAC repo, GitHub, CI, Railway, and
+Vercel consistent through one clear, safe operating contract — while the two Claude configuration
+roots stay intentionally isolated.
+
+**Delivered:**
+- **Authoritative contract** — `docs/toolchain-reconnection-runbook.md` →
+  "Shared Repository Synchronization Contract": one shared repo / two intentionally different tool
+  roots; four repository states (`CLEAN_AND_SYNCHRONIZED`, `ACTIVE_SCOPED_WIP`,
+  `INTERRUPTED_SCOPED_WIP`/`INTERRUPTED_UNKNOWN_WIP`, and the unsafe set incl. `WRONG_REPOSITORY`/
+  `WRONG_REMOTE`/`WRONG_BRANCH`/`DIRTY_UNKNOWN_WIP`/`DIVERGED`/`REMOTE_ADVANCED_DURING_WIP`/
+  `REMOTE_UNAVAILABLE`/`SERVICE_IDENTITY_MISMATCH`/`REQUIRES_HUMAN_REVIEW`); the single
+  fast-forward-only auto-reconcile and its clean-tree precondition; dirty/ahead/diverged/
+  remote-advanced handling; usage-limit recovery; single-editor rule; profile-switch workflow;
+  four synchronization axes; a 40-row decision table.
+- **Concise cross-references** — `CLAUDE.md` §17 and this plan point to the contract; the three
+  continuity skills reference it rather than restating it (one authoritative home).
+- **Skill strengthening** — `isaac-profile` (four-axis summary + single-editor/interrupted-work
+  warning + one safe next action), `isaac-resume` (safe fetch; ff-only ONLY for clean-behind;
+  never pull into dirty; never push; active/interrupted-WIP recovery), `isaac-checkpoint`
+  (re-fetch before commit; remote-advanced detection; post-push re-fetch + 0/0 verification;
+  four-axis reporting; interruption-safe output).
+
+**Verification (no product code touched):** disposable-repo git simulations (git 2.50.1)
+confirmed ff-only reaches 0/0 from clean-behind; diverged aborts (`Not possible to
+fast-forward`); non-ff push is rejected; and — the key finding — **ff-only into a *dirty* tree
+with unrelated changes succeeds and moves HEAD**, so the skills gate on a clean tree themselves
+rather than relying on git to refuse. Non-git scenarios (CI/Vercel/Railway axes, identity
+mismatch, second-session) verified as declarative dry-runs against the decision table.
+
+**Deferred (approved fallback, not built):** a machine-local `.git/isaac-session-state.json` —
+`DEFERRED — approved fallback, not currently necessary`. Existing Git state + checkpoint docs
+suffice; it may be added later only via a separately reviewed slice.
+
+**Scope:** continuity/workflow only. No truth core, schema, validation, frontend/backend product
+behavior, API, env/deploy config, auth, billing, ownership, or Phase 25 product implementation
+was modified. Product position unchanged: **P25.6 (Complete Missing Fields context) remains the
+active authorized slice**; P25.8 excluded.

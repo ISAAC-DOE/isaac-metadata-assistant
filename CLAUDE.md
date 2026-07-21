@@ -539,3 +539,21 @@ push → exact-HEAD CI → deployment/browser QA. Commands:
   --out apps/api/isaac_api/data/memory-snapshot.json
 .venv/bin/pytest apps/api/tests/test_committed_snapshot.py -q
 ```
+
+### Shared Repository Synchronization Contract
+
+Both Claude toolsets (`claude-personal` on `~/.claude`, `claude-slac` on `~/.claude-slac`) share
+the **one** repository `~/Documents/ISAAC` — one working tree, `.git`, `origin`, `main`, history,
+tracked plans/specs, repo-local skills, and one each GitHub/Railway/Vercel project — while their
+Claude **config roots stay intentionally different** and are **never** copied between (no
+credentials, OAuth/Keychain, plugins, hooks, MCP, caches, context-mode state). Only **one**
+session edits the repo at a time. A **stable checkpoint** requires clean local/Git sync (branch
+`main`, 0 ahead / 0 behind, HEAD == `origin/main`); active and interrupted work may exist only
+locally and must never be lost. The **only** automatic reconciliation is `git pull --ff-only`
+from a **clean** tree that is strictly behind and not diverged; dirty, ahead, diverged, and
+remote-advanced states stop for human decision — no automatic merge/rebase/reset/stash/force.
+Git, CI, Vercel, and Railway are **four separate synchronization axes**; never report global
+"synchronized" when only Git is. Service identities stay the existing Krish-owned accounts. The
+authoritative rules, the four-state model, and the decision table live in
+`docs/toolchain-reconnection-runbook.md` → "Shared Repository Synchronization Contract" — link,
+do not duplicate.

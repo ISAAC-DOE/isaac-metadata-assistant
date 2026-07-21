@@ -1,13 +1,21 @@
 ---
 name: isaac-profile
-description: Report the active Claude toolset/account posture for ISAAC — launcher marker, effective config root, account context, model, orchestrator, context-mode state, tools/MCP/services, and refreshed durable project context — then name the one safe next action. Read-only and advisory; mutates nothing. Use when the user runs /isaac-profile or asks which profile/account/toolset is active.
+description: Report the active Claude toolset/account posture for ISAAC — launcher marker, effective config root, account context, model, orchestrator, context-mode state, tools/MCP/services, and refreshed durable project context — then name the one safe next action. Read-only aside from a remote-ref fetch; mutates no working tree, commits, config, or credentials. Use when the user runs /isaac-profile or asks which profile/account/toolset is active.
 ---
 
 # /isaac-profile
 
 Read-only and advisory. It reports the current Claude toolset/account posture and refreshes durable
-project context. It mutates NOTHING — no login/logout, no account switch, no settings edit, no plugin
-install, no relink, no deploy, no commit/push, no record mutation, no private-data indexing.
+project context. It mutates no working tree, no commits, no config, no credentials, no records — no
+login/logout, no account switch, no settings edit, no plugin install, no relink, no deploy, no
+commit/push, no record mutation, no private-data indexing. The single permitted operation that touches
+`.git` is a read-only `git fetch --prune origin` to update remote-tracking refs for synchronization
+reporting; it never fetches into the working tree, merges, or moves branches.
+
+The authoritative synchronization rules (repository states, the single ff-only auto-reconcile, the four
+synchronization axes, the decision table) live in `docs/toolchain-reconnection-runbook.md` →
+"Shared Repository Synchronization Contract". This skill reports posture against them; it does not
+restate the decision table.
 
 CRITICAL HONESTY RULE: the launcher marker (`$ISAAC_CLAUDE_PROFILE`) and effective config root prove the
 claimed TOOLSET only — they do NOT prove the Claude ACCOUNT. Auth lives in a shared macOS Keychain item.
@@ -40,6 +48,20 @@ parser.
    `$NODE_OPTIONS` effect; relevant plugin inventory; relevant MCP inventory; browser connection;
    external CLI identities (GitHub `gh auth status`, Railway `railway whoami`, Vercel `vercel whoami` —
    report identity/scope BY NAME, never print secrets); repository state; the current authorization gate.
+
+   For repository state, run the permitted read-only `git fetch --prune origin` (updates
+   remote-tracking refs only), then compute — best-effort, read-only — local HEAD, `origin/main` HEAD,
+   ahead/behind via `git rev-list --left-right --count HEAD...origin/main`, divergence, and a
+   working-tree classification (clean · dirty · untracked-needing-review). Summarize the repo-state
+   class (one of `CLEAN_AND_SYNCHRONIZED` / `ACTIVE_SCOPED_WIP` / `INTERRUPTED_*` / an unsafe class per
+   the runbook contract) and the four synchronization axes (Local↔GitHub, GitHub↔CI, GitHub↔Vercel,
+   GitHub↔Railway) at a best-effort read-only level. Deep authorized-state reconstruction still defers
+   to `/isaac-resume`.
+
+   **Single-editor / interrupted-work WARNING:** when the shared tree is dirty or shows interrupted
+   work, warn that it may belong to another Claude session and that only one session may edit the repo
+   at a time. Report this as advisory shared-tree evidence — NOT process detection; this skill cannot
+   detect another OS process.
 
 3. **Refresh durable context — read the ACTUAL committed docs, not chat memory.** Read in this order
    (where a same-purpose newer doc exists, the newest wins). This is the SAME doc set `/isaac-resume`
@@ -99,6 +121,11 @@ parser.
 - HEAD:
 - Working tree:
 - Remote synchronization:
+- Repo state class:
+- Ahead/behind:
+- Divergence:
+- Sync axes (Local↔GitHub · CI · Vercel · Railway):
+- Active/interrupted-work warning:
 - CI:
 
 ## SERVICES
