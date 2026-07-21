@@ -26,10 +26,16 @@ def client(tmp_path, monkeypatch):
 
 
 def _seed_id(client) -> str:
-    """The single seeded demo experiment id (seeding happens on first list)."""
+    """The canonical New Draft scenario id (raw, 5-pending) among the five seeds.
+
+    P26.0a seeds FIVE canonical scenarios; these API tests drive the raw draft one
+    through completion/export exactly as the old single seed did.
+    """
     experiments = client.get("/api/experiments").json()["experiments"]
-    assert len(experiments) == 1
-    return experiments[0]["id"]
+    assert len(experiments) == 5
+    raw = [e for e in experiments if e["pending_count"] == 5]
+    assert len(raw) == 1
+    return raw[0]["id"]
 
 
 def _complete_seed(client, exp_id: str) -> dict:
@@ -102,11 +108,12 @@ def test_demo_run_rejects_invalid_mode(client):
 # --- 3-4. list / detail / 404 -------------------------------------------------
 
 
-def test_list_seeds_one_experiment(client):
+def test_list_seeds_five_canonical_experiments(client):
     experiments = client.get("/api/experiments").json()["experiments"]
-    assert len(experiments) == 1
-    seed = experiments[0]
-    assert "Synthetic" in seed["title"] and "Demo" in seed["title"]
+    assert len(experiments) == 5
+    # The raw New Draft scenario keeps the old single-seed properties.
+    seed = next(e for e in experiments if e["pending_count"] == 5)
+    assert "Synthetic" in seed["title"] and "New Draft" in seed["title"]
     assert seed["status"] == "needs_attention"
     assert seed["pending_count"] == 5
     assert seed["evidenced_field_count"] == 26

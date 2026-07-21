@@ -127,6 +127,14 @@ def demo_run(body: dict = Body(default=None)) -> dict:
 
     steps: list[dict] = []
 
+    # Idempotent: ensure the canonical five-scenario seed exists first, then run
+    # the requested pipeline against a FIXED canonical id, overwriting it in place
+    # (upsert) rather than appending a new random experiment. Re-running never
+    # increases the record count and preserves canonical identities.
+    ws.ensure_seeded()
+    target_id = ws.SEED_DONE_ID if mode == "full" else ws.SEED_NEW_DRAFT_ID
+    created_utc, title = ws.SEED_META[target_id]
+
     # [1] build_draft — deterministic extraction from the synthetic fixtures.
     draft = build_draft(ws.CSV_PATH, ws.LISTING_PATH)
     steps.append(
@@ -151,12 +159,14 @@ def demo_run(body: dict = Body(default=None)) -> dict:
     )
 
     exp = ws.create_experiment(
-        title="Synthetic XANES — CuO (Cu K-edge) Demo (demo/run)",
+        title=title,
         source={
             "description": "Synthetic XANES campaign (CuO, Cu K-edge) — committed demo fixtures",
             "files": list(ws.SOURCE_FILES),
         },
         draft=draft,
+        id=target_id,
+        created_utc=created_utc,
     )
 
     if mode == "full":

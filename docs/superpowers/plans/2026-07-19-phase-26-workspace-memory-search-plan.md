@@ -1,9 +1,15 @@
 # Phase 26 — Real Workspace + Project Memory Search
 
 ```
-Status: PROPOSED — awaiting approval. Direction **DECISION-LOCKED 2026-07-20**; no implementation
-authorized (P26.0 is the gate before any P26 code, reached only after Phase 25 completes).
-Date: 2026-07-19 (decisions locked 2026-07-20)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+Status: ACTIVE — Phase 25 COMPLETE (fresh-session Chrome resilience PASSED, gate closed at 19a2300);
+Phase 26 activated under the 2026-07-20 master authorization. P26.0 gate resolved 2026-07-21: D1–D6
+unchanged; the four decision-lock §12 open items closed — result cap 50 / page 10, min query length 2,
+D2 = 5-scenario seed (all 4 states), D3 = strict green-per-commit (no transient-red push). Baselines
+reconciled to post-P25 HEAD (routes 21→22 w/ /api/search; MemoryReader = 7 methods, no search() yet;
+backend/web tests 500/299 not 461/137; backend files byte-identical to f534a4c so §8–§11 citations hold).
+P26.0a RELEASED (deterministic 5-scenario seed + idempotent demo; 18 behavior tests + full suite green,
+independent Opus adversarial review APPROVE). NEXT: P26.1 (workspace search core). See §20 for per-slice status.
+Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
          (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
@@ -425,7 +431,17 @@ is isolated per arc decision #10.
 - **Report**: decisions resolved. **Commit**: docs commit if edited. **Stop**: HARD gate — no
   implementation until approved.
 
-### P26.0a — Deterministic richer synthetic seed (data-only; decision-lock §5)
+### P26.0a — Deterministic richer synthetic seed (data-only; decision-lock §5) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21.** Five canonical scenarios (fixed Crockford ids `01SYNTHXANESSEED000000000{1..5}`,
+> fixed `created_utc`): New Draft (5 pending → needs_attention), Partially Completed (2 pending →
+> needs_attention), Ready to Export (0 pending, export dry-run ok, not exported), Export Review Required
+> (0 pending, real `export_draft` failure `'uncertainty' is a required property` → in_review — truthfully
+> reached, not faked), Exported Record (real export + record/sidecar on disk → done). `demo/run` made
+> idempotent (ensure_seeded + upsert by fixed id; response shape `{experiment_id,steps,status}` preserved
+> so the frontend is untouched). Files: `workspace.py`, `routes.py`, `tests/test_api.py`,
+> new `tests/test_seed.py` (18 behavior-level tests), regenerated `memory-snapshot.json` (202 unchanged).
+> Verified: full suite 518 green, snapshot no drift, independent Opus adversarial review APPROVE
+> (byte-identical cross-workspace determinism; no truth-core/frontend/forbidden file touched).
 - **Objective**: expand `workspace.py` seeding from one demo experiment to a small **deterministic**
   set of synthetic experiments covering varied states (needs_attention / in_review / ready_to_export
   / done), exportable **and** blocked records, missing **and** completed fields, and different

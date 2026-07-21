@@ -18,16 +18,18 @@ in-memory dry-run of ``export_draft`` — nothing is written to derive status.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from isaac_records.complete import apply_answers
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
-from isaac_records.ids import new_record_id
+from isaac_records.ids import is_record_id, new_record_id
 
 # --- repo + fixture locations -------------------------------------------------
 
@@ -187,20 +189,29 @@ class Experiment:
 # --- store operations ---------------------------------------------------------
 
 
-def create_experiment(title: str, source: dict, draft: dict) -> Experiment:
+def create_experiment(
+    title: str,
+    source: dict,
+    draft: dict,
+    *,
+    id: str | None = None,
+    created_utc: str | None = None,
+) -> Experiment:
+    """Create (or upsert, given an explicit ``id``) and persist an experiment.
+
+    ``id`` / ``created_utc`` default to a random ULID + wall-clock timestamp for
+    ad hoc use; the canonical seed and the idempotent demo pass EXPLICIT fixed
+    values so identities/order are stable across restarts and fresh workspaces.
+    """
     exp = Experiment(
-        id=new_record_id(),
+        id=id or new_record_id(),
         title=title,
-        created_utc=_now_iso(),
+        created_utc=created_utc or _now_iso(),
         source=source,
         draft=draft,
     )
     exp.save()
     return exp
-
-
-def _seed_draft() -> dict:
-    return build_draft(CSV_PATH, LISTING_PATH)
 
 
 def _seed_source() -> dict:
@@ -210,13 +221,118 @@ def _seed_source() -> dict:
     }
 
 
-def seed_experiment() -> Experiment:
-    """Create the single seeded demo experiment (5 pending -> needs_attention)."""
-    return create_experiment(
-        title="Synthetic XANES — CuO (Cu K-edge) Demo",
-        source=_seed_source(),
-        draft=_seed_draft(),
+# --- canonical deterministic seed (P26.0a) ------------------------------------
+#
+# Exactly FIVE canonical synthetic scenarios spanning all four derived workflow
+# states. FIXED ids + FIXED created_utc keep ids and list order stable across
+# restarts and across fresh workspaces WITHOUT touching src/isaac_records/*. Each
+# draft is derived ONLY from the two committed synthetic fixtures + the committed
+# demo answers, through the unchanged truth core — no invented values.
+
+_SEED_ID_PREFIX = "01SYNTHXANESSEED000000000"  # + n (1..5) => 26-char id matching RECORD_ID_RE
+SEED_NEW_DRAFT_ID = _SEED_ID_PREFIX + "1"
+SEED_PARTIAL_ID = _SEED_ID_PREFIX + "2"
+SEED_READY_ID = _SEED_ID_PREFIX + "3"
+SEED_REVIEW_ID = _SEED_ID_PREFIX + "4"
+SEED_DONE_ID = _SEED_ID_PREFIX + "5"
+
+_SEED_TITLE_BASE = "Synthetic XANES — CuO (Cu K-edge)"
+
+
+def _raw_draft() -> dict:
+    """Scenario 1 — raw extraction (5 pending -> needs_attention)."""
+    return build_draft(CSV_PATH, LISTING_PATH)
+
+
+def _partial_draft() -> dict:
+    """Scenario 2 — only the sha256 answers applied (2 pending -> needs_attention)."""
+    answers = load_demo_answers()
+    partial = {k: v for k, v in answers.items() if k not in ("series", "descriptor")}
+    return apply_answers(build_draft(CSV_PATH, LISTING_PATH), partial)
+
+
+def _full_draft() -> dict:
+    """Scenarios 3 & 5 — all committed answers applied (0 pending)."""
+    return apply_answers(build_draft(CSV_PATH, LISTING_PATH), copy.deepcopy(load_demo_answers()))
+
+
+def _review_draft() -> dict:
+    """Scenario 4 — full answers EXCEPT the descriptor's uncertainty sub-key.
+
+    A human supplied a descriptor value but no uncertainty; the official schema
+    legitimately blocks export ('uncertainty' is a required property), so the
+    REAL export_draft dry-run fails and status derives to in_review. Truthful,
+    never faked.
+    """
+    answers = copy.deepcopy(load_demo_answers())
+    answers["descriptor"].pop("uncertainty", None)
+    return apply_answers(build_draft(CSV_PATH, LISTING_PATH), answers)
+
+
+@dataclass(frozen=True)
+class _SeedSpec:
+    id: str
+    created_utc: str
+    title: str
+    draft_fn: "callable"
+    exported: bool
+
+
+def _seed_specs() -> list["_SeedSpec"]:
+    return [
+        _SeedSpec(SEED_NEW_DRAFT_ID, "2026-07-12T00:00:01Z",
+                  f"{_SEED_TITLE_BASE} · New Draft", _raw_draft, False),
+        _SeedSpec(SEED_PARTIAL_ID, "2026-07-12T00:00:02Z",
+                  f"{_SEED_TITLE_BASE} · Partially Completed", _partial_draft, False),
+        _SeedSpec(SEED_READY_ID, "2026-07-12T00:00:03Z",
+                  f"{_SEED_TITLE_BASE} · Ready to Export", _full_draft, False),
+        _SeedSpec(SEED_REVIEW_ID, "2026-07-12T00:00:04Z",
+                  f"{_SEED_TITLE_BASE} · Export Review Required", _review_draft, False),
+        _SeedSpec(SEED_DONE_ID, "2026-07-12T00:00:05Z",
+                  f"{_SEED_TITLE_BASE} · Exported Record", _full_draft, True),
+    ]
+
+
+#: (created_utc, title) for the canonical ids the idempotent demo overwrites in
+#: place, so demo-run reuses the scenario's stable identity instead of appending.
+SEED_META = {s.id: (s.created_utc, s.title) for s in _seed_specs()}
+
+
+def _write_seed_record(exp: Experiment, result) -> None:
+    """Write the REAL export_draft output (record + sidecar) into the records dir.
+
+    Mirrors ``routes._write_record``; never hand-writes schema content.
+    """
+    exp.records_dir.mkdir(parents=True, exist_ok=True)
+    exp.record_id = result.record["record_id"]
+    (exp.records_dir / f"{exp.record_id}.json").write_text(
+        json.dumps(result.record, indent=2) + "\n", encoding="utf-8"
     )
+    (exp.records_dir / f"{exp.record_id}.evidence.json").write_text(
+        json.dumps(result.sidecar, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _materialise_seed(spec: "_SeedSpec") -> Experiment:
+    if not is_record_id(spec.id):  # guard: fixed ids must match RECORD_ID_RE
+        raise ValueError(f"canonical seed id {spec.id!r} is not a valid record id")
+    exp = Experiment(
+        id=spec.id,
+        title=spec.title,
+        created_utc=spec.created_utc,
+        source=_seed_source(),
+        draft=spec.draft_fn(),
+    )
+    if spec.exported:
+        # Reuse the REAL export output; let the truth core produce the record.
+        result = export_draft(exp.draft, REPO_ROOT, record_id=spec.id)
+        if not result.ok:  # pragma: no cover - would signal a truth-path regression
+            raise RuntimeError(
+                "canonical 'done' seed failed real export; refusing to fake a record"
+            )
+        _write_seed_record(exp, result)
+    exp.save()
+    return exp
 
 
 def _experiment_dirs() -> list[Path]:
@@ -227,9 +343,15 @@ def _experiment_dirs() -> list[Path]:
 
 
 def ensure_seeded() -> None:
-    """Seed exactly ONE demo experiment on first access to an empty workspace."""
-    if not _experiment_dirs():
-        seed_experiment()
+    """Materialise the five canonical scenarios (by fixed id) when missing.
+
+    Idempotent: only canonical ids not already present are (re)built, so repeated
+    calls — and the idempotent demo pass — never grow the record count.
+    """
+    existing = {p.name for p in _experiment_dirs()}
+    for spec in _seed_specs():
+        if spec.id not in existing:
+            _materialise_seed(spec)
 
 
 def list_experiments() -> list[Experiment]:
