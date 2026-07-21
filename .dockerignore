@@ -7,4 +7,5 @@ examples
 drafts
 records
 graphify-out
-apps/web
+apps/web/dist
+apps/web/node_modules
