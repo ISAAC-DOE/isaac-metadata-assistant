@@ -18,3 +18,4 @@ __pycache__/
 
 # local design reference, not committed
 design-handoff/
+venv/

@@ -1,6 +1,29 @@
 # Infrastructure Ownership & Account Policy
 
-This document records the accepted infrastructure-ownership decision from the 2026-07-20 SLAC account/toolchain reconciliation. **Status: ACCEPTED.**
+This document records the accepted infrastructure-ownership decision from the 2026-07-20 SLAC account/toolchain reconciliation. **Status: SUPERSEDED (2026-07-21) — see "SLAC handoff executed" below.**
+
+---
+
+## SLAC handoff executed (2026-07-21)
+
+The handoff this document gated on was explicitly authorized and executed by
+the SLAC project owner (kskoien@slac.stanford.edu):
+
+- **Code** — canonical repo is now `ISAAC-DOE/isaac-metadata-assistant`
+  (private, full history pushed). The personal repo
+  `Krish-Verma/isaac-metadata-assistant` should be archived by its owner with
+  a pointer to the org repo.
+- **Hosting** — SLAC Kubernetes (ISAAC vCluster) at
+  `https://isaac.slac.stanford.edu/krish/`, deployed via GitHub Actions ->
+  ghcr.io -> Flux GitOps (see `docs/deployment.md`). Vercel and Railway are
+  retired; their projects run on the personal account and must be deleted by
+  that account holder (teardown checklist in `docs/deployment.md`).
+- **Ownership** — infrastructure, secrets, and deployment are owned by the
+  ISAAC/SLAC team through the `isaac-k8` GitOps repo and cluster; no personal
+  cloud accounts remain in the serving path once teardown completes.
+
+The sections below are retained as the historical record of the pre-handoff
+state and the policy that governed it.
 
 Cross-links:
 - Reconciliation plan (decision record): `docs/superpowers/plans/2026-07-20-slac-account-toolchain-reconciliation.md`

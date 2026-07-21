@@ -1,26 +1,37 @@
-# Deployment — Synthetic Demo Hosting (Phase 20)
+# Deployment — SLAC Kubernetes (isaac.slac.stanford.edu/krish)
 
-The synthetic UI prototype is hosted for sharing. Nothing about validation,
-audit, or export changed — the deployed backend runs the same deterministic
-core in a container.
+The synthetic UI prototype is hosted on SLAC-owned infrastructure. Nothing
+about validation, audit, or export changed — the deployed backend runs the
+same deterministic core in a container.
 
 ## Architecture
 
-- **Frontend** — Vite/React SPA on Vercel (root `apps/web`, static `dist/`,
-  SPA rewrite via `apps/web/vercel.json`). Deployment Protection is enabled
-  while iterating.
-- **Backend** — FastAPI on Railway, built from the repo-root `Dockerfile`
-  (explicit COPY allowlist; never contains `examples/`, `drafts/`,
-  `records/`, or `graphify-out/`). The image does ship one committed,
-  sanitized `apps/api/isaac_api/data/memory-snapshot.json` (P24.9,
-  metadata/provenance only, no file contents), which powers hosted Project
-  Memory. Health check: `GET /api/health`.
-- **State** — a Railway Volume mounted at `/data/isaac-workspace`, pointed at
-  by `ISAAC_UI_WORKSPACE`. Contents are synthetic-only: experiment state,
-  exported demo records, evidence sidecars.
-- **Auto-deploys** — both platforms track GitHub
-  `Krish-Verma/isaac-metadata-assistant`, branch `main`. Pushing to `main`
-  deploys backend (Railway) and frontend (Vercel).
+- **One image, one container** — the repo-root `Dockerfile` is multi-stage: a
+  Node stage builds the Vite/React SPA with the deploy prefix baked in
+  (`BASE_PATH` build arg, default `/krish`), and the Python stage serves both
+  the API (`{base}/api/*`) and the static SPA (`ISAAC_STATIC_DIR`, with an
+  `index.html` fallback for client-side routes). The COPY allowlist is
+  unchanged: never `examples/`, `drafts/`, `records/`, or `graphify-out/`.
+  The image ships one committed, sanitized
+  `apps/api/isaac_api/data/memory-snapshot.json` (P24.9, metadata/provenance
+  only, no file contents), which powers hosted Project Memory.
+- **CI/CD** — pushing to `main` on `ISAAC-DOE/isaac-metadata-assistant` runs
+  `.github/workflows/build-push.yaml`: it builds the image, pushes
+  `ghcr.io/isaac-doe/isaac-metadata-assistant:<semver>` (auto-incremented
+  patch, e.g. v0.0.1 -> v0.0.2) plus `:latest`, and tags the repo. Flux image
+  automation in the `isaac-k8` repo detects the new semver tag and bumps the
+  deployment manifest; k8s manifests never reference `:latest`.
+- **Hosting** — a Deployment/Service/Ingress in the `metadata-assistant`
+  namespace of the ISAAC vCluster (manifests live in `isaac-k8/metadata-assistant/`).
+  The ingress serves `path: /krish` (Prefix, no rewrite — the app owns its
+  subpath) on `isaac.slac.stanford.edu`, behind Authentik forward auth
+  (admin or researcher group, same policy as `/portal`).
+- **State** — an `emptyDir` volume at `ISAAC_UI_WORKSPACE`. Contents are
+  synthetic-only and self-seed deterministically on first read, so pod
+  restarts reset state harmlessly.
+- **Health** — `GET /krish/api/health`; pod probes hit the container port
+  directly (bypassing ingress/auth), and this path stays open even when
+  API-key auth is enabled.
 
 ## Project Memory snapshot (P24.9)
 
@@ -31,17 +42,17 @@ a live graph (`graphify-out/` is gitignored and never shipped).
   existing `COPY apps/api/` layer; no extra Dockerfile COPY is needed. The reader
   auto-selects it by on-disk presence (`SanitizedSnapshotSource`), so no env var
   is required for the packaged path. `ISAAC_MEMORY_SNAPSHOT` can point at an
-  alternate file (e.g. a Railway volume) if delivery changes later.
+  alternate file if delivery changes later.
 - **Content** — metadata/provenance only: counts, served-file allowlist, curated
   concepts, and length-capped rationales. Never file contents; every `on_disk` is
   forced `false`; secret/path-excluded strings are scanned out at generation.
-- **Freshness (redesigned P24.10)** — `GET /api/graph/status` no longer compares
-  the deploy's build commit to the snapshot; `deployed_app_commit` is surfaced as
-  version metadata only, never a freshness input. Freshness is two separated,
-  provable axes instead: `memory_policy` (current/stale/unknown — the shipped
-  sanitization/exclusion policy recomputed at runtime against the snapshot's
-  embedded fingerprint) and `indexed_sources` (current/stale/unknown — a
-  CI-only content-drift gate over the files already embedded in the snapshot;
+- **Freshness (redesigned P24.10)** — `GET {base}/api/graph/status` no longer
+  compares the deploy's build commit to the snapshot; `deployed_app_commit` is
+  surfaced as version metadata only, never a freshness input. Freshness is two
+  separated, provable axes instead: `memory_policy` (current/stale/unknown — the
+  shipped sanitization/exclusion policy recomputed at runtime against the
+  snapshot's embedded fingerprint) and `indexed_sources` (current/stale/unknown —
+  a CI-only content-drift gate over the files already embedded in the snapshot;
   the hosted runtime never recomputes it, since the served files aren't
   shipped). A missing/unreadable snapshot still degrades to the honest
   unavailable panel regardless. See
@@ -66,118 +77,78 @@ a live graph (`graphify-out/` is gitignored and never shipped).
 
 ## Environment variables
 
-| Variable | Platform | Purpose |
+| Variable | Where | Purpose |
 |---|---|---|
-| `ISAAC_UI_WORKSPACE` | Railway | Workspace dir; set to the volume mount path |
-| `ISAAC_UI_CORS_ORIGINS` | Railway | Comma-separated browser origins (the Vercel domain) |
-| `ISAAC_UI_API_KEY` | Railway | Shared-secret bearer key; unset → auth disabled (local dev) |
-| `PORT` | Railway (injected) | Container listen port |
-| `ISAAC_BUILD_COMMIT` | Railway (optional) | Explicit build/commit identity for `GET /api/health` |
-| `RAILWAY_GIT_COMMIT_SHA` | Railway (injected) | Fallback build/commit identity for `GET /api/health` |
-| `VITE_API_BASE` | Vercel (build-time) | Backend origin + `/api` |
-| `VITE_API_KEY` | Vercel (build-time) | Same value as `ISAAC_UI_API_KEY`; **compiled into client JS — browser-visible, not a private secret** (see Auth model) |
-
-### Build/commit identity on `/api/health`
-
-`GET /api/health` includes an additive `commit` field so a deployed backend's
-running commit can be confirmed without a shell into the container:
-`ISAAC_BUILD_COMMIT` wins if set and non-empty; else `RAILWAY_GIT_COMMIT_SHA`
-if set and non-empty; else `null`. All other health fields are unchanged.
-Both env vars are read per-request, not cached at import time.
-
-Railway provides `RAILWAY_GIT_COMMIT_SHA` automatically for GitHub-connected
-deploys. If it turns out not to be exposed at runtime, `commit` is `null` and
-that is the honest state — do not change Railway config to force it; set
-`ISAAC_BUILD_COMMIT` explicitly instead if a guaranteed value is needed.
+| `ISAAC_BASE_PATH` | image ENV (from `BASE_PATH` build arg) | Deploy prefix for API routes and SPA serving; must match the prefix the frontend was built with |
+| `ISAAC_STATIC_DIR` | image ENV | Built SPA `dist/` dir; unset locally (API-only, exactly the pre-k8s behavior) |
+| `ISAAC_UI_WORKSPACE` | k8s manifest | Workspace dir; set to the emptyDir mount path |
+| `ISAAC_UI_CORS_ORIGINS` | k8s manifest | Comma-separated browser origins; mostly moot now that the SPA is same-origin |
+| `ISAAC_UI_API_KEY` | (unset in k8s) | Shared-secret bearer key; unset -> auth disabled. Authentik forward auth gates access at the edge instead |
+| `PORT` | container | Listen port (default 8000) |
+| `ISAAC_BUILD_COMMIT` | Docker build arg (CI passes `github.sha`) | Build/commit identity on `GET {base}/api/health` |
+| `VITE_BASE_PATH` / `VITE_API_BASE` | Docker build (frontend stage) | Baked base path and same-origin API base (`/krish/`, `/krish/api`) |
 
 `ISAAC_UI_CORS_ORIGINS` values must be exact origins — scheme://host with no
-trailing slash and no path (e.g. `https://app.vercel.app`, NOT
-`https://app.vercel.app/`) — because browsers match origins exactly and a
+trailing slash and no path — because browsers match origins exactly and a
 trailing slash silently breaks CORS.
 
-Local dev needs none of these — defaults reproduce the pre-Phase-20 behavior
-exactly (localhost CORS, `/tmp/isaac-ui-workspace`, auth off, no header).
+Local dev needs none of these — defaults reproduce the pre-hosting behavior
+exactly (localhost CORS, `/tmp/isaac-ui-workspace`, auth off, API at `/api`,
+no SPA serving; run the Vite dev server separately as always).
 
 ## Auth model (honest scope)
 
-When `ISAAC_UI_API_KEY` is set, every route requires
-`Authorization: Bearer <ISAAC_UI_API_KEY>` except `GET /api/health` (kept open
-for Railway health checks) and `OPTIONS` requests (CORS preflight carries no
-credentials). That includes FastAPI's auto-generated `/docs` and
-`/openapi.json` — intentional, so the deployed demo has no public schema
-browsing. The key is baked into the frontend bundle at build time, so it is
-exactly as secret as frontend access — which is gated by Vercel Deployment
-Protection. This is nuisance-abuse prevention for a synthetic demo, not
-cryptographic access control. Rotate by changing the env var on both
-platforms and redeploying. Rate limiting is not implemented — it is a
-back-burner item with no phase currently scheduled to add it (not a
-Phase 21 commitment).
+Access control is enforced at the edge: the nginx ingress forward-auths every
+`/krish` request against the cluster's Authentik outpost, and the existing
+`isaac-portal` application policy admits the `admin` and `researcher` groups
+(same policy as `/portal`). Unauthenticated users are redirected to login;
+authenticated users outside those groups are denied.
 
-Because any `VITE_`-prefixed variable is compiled into client-side JavaScript, `VITE_API_KEY`
-is a **browser-visible shared demo credential**, acceptable only within the current
-synthetic-demo boundary (reach is limited by Vercel access protection). It is **not**
-institutional user authentication; institutional SSO and per-user authorization remain
-deferred and institution-owned.
+The app's own `ISAAC_UI_API_KEY` bearer-auth seam still exists but is left
+unset in k8s — it was nuisance-abuse prevention for the public demo hosting
+and is redundant behind Authentik. `GET {base}/api/health` stays open
+regardless so pod probes never need credentials.
 
 ## Resetting the synthetic workspace
 
 ```bash
-railway ssh -- rm -rf /data/isaac-workspace
+kubectl -n metadata-assistant exec deploy/metadata-assistant -- rm -rf /data/workspace
+# or simply restart the pod; emptyDir state is disposable
+kubectl -n metadata-assistant rollout restart deploy/metadata-assistant
 ```
 
-The backend auto-seeds a fresh synthetic demo experiment on the next request.
-Nuclear option: delete and re-create the volume in the Railway dashboard.
+The backend auto-seeds fresh synthetic demo experiments on the next request.
 
 ## Rollback and failure recovery
 
-Both platforms deploy from the same `main` commit, so the primary recovery
-path is deterministic: **`git revert` the offending commit and push** — both
-auto-deploys converge on the same known-good code. Platform rollbacks are the
-fast stopgap while a revert is prepared:
+Frontend and backend ship in one image, so there is no split-brain: every
+deployed tag is a single tested commit. Recovery paths:
 
-- **Vercel**: Instant Rollback (dashboard) or `vercel rollback` repoints
-  production at the previous immutable deployment. The frontend is stateless;
-  rollback is always safe.
-- **Railway**: redeploy a previous deployment from the dashboard's deploy
-  history. A failed deploy (build or `GET /api/health` health-check failure)
-  never replaces the running healthy one — a broken push degrades to "old
-  backend keeps serving", not downtime.
+- **Bad release** — `git revert` the offending commit and push; CI builds the
+  next patch tag and Flux rolls it out. For an immediate stopgap, edit the
+  image tag in `isaac-k8/metadata-assistant/deployment.yaml` back to the last
+  good semver and push that repo (Flux applies it; if image automation
+  re-bumps to a broken newer tag, revert in this repo first so a fixed tag
+  supersedes it).
+- **Failed rollout** — a pod that never passes `GET /krish/api/health`
+  readiness never receives traffic; the old ReplicaSet keeps serving.
+- **Workspace state** — untouched by rollbacks and disposable (see reset
+  above).
 
-**If one platform deploys a push and the other fails** (split-brain), the old
-side keeps serving against the new side — an API-contract version mismatch.
-The UI's explicit error states make this degraded, not corrupting. Recover by
-revert-and-push so both converge; do not fix-forward one platform by hand.
+## Former hosting (Vercel + Railway) — teardown
 
-**Outside git rollbacks:** the volume is untouched by any rollback — if a
-newer backend wrote workspace state an older one cannot parse, reset the
-workspace (above) and it re-seeds. Env vars (key, CORS origins) do not roll
-back with code; after any rollback confirm both platforms' env vars still
-match the running code.
+Until 2026-07 the frontend deployed to Vercel (`isaac-demo-web`) and the
+backend to Railway (`isaac-metadata-assistant`), both auto-deploying from the
+personal repo `Krish-Verma/isaac-metadata-assistant`. Those platforms run on
+personal accounts, so teardown is owned by that account holder:
 
-### Verifying backend/frontend version compatibility
+1. Delete (or pause) the Railway service/project `isaac-metadata-assistant`
+   (region sfo, volume `isaac-metadata-assistant-volume`).
+2. Delete the Vercel project `isaac-demo-web`
+   (https://isaac-demo-web.vercel.app).
+3. Archive `Krish-Verma/isaac-metadata-assistant` with a pointer to
+   `ISAAC-DOE/isaac-metadata-assistant` — otherwise pushes there keep
+   deploying to both platforms.
 
-Both platforms build from the same `main` commit, so compatibility is a
-property of the commit, not of runtime coordination: the API client and the
-backend are tested together on every push (`.venv/bin/pytest` backend suite +
-`npm test` frontend suite in CI). After any deploy or rollback, confirm the
-running pair:
-
-1. Both dashboards show the same deployed commit SHA (Railway service →
-   latest deployment; Vercel project → production deployment).
-2. `GET /api/health` on the Railway domain returns 200 with the
-   `synthetic-only` banner.
-3. Load the frontend and run one synthetic demo cycle — this exercises the
-   live API contract end to end (list, demo run, pending, evidence).
-
-If the two SHAs differ (split-brain), recover by revert-and-push as above —
-do not fix forward one platform by hand.
-
-## Deployed URLs and project names
-
-Recorded after deployment (kept here, not hardcoded in code):
-
-- Railway project: `isaac-metadata-assistant` (service `isaac-metadata-assistant`,
-  region sfo; volume `isaac-metadata-assistant-volume` at `/data/isaac-workspace`)
-- Backend URL: https://isaac-metadata-assistant-production.up.railway.app
-- Vercel project: `isaac-demo-web` (root directory `apps/web`)
-- Frontend URL: https://isaac-demo-web.vercel.app
+The `RAILWAY_GIT_COMMIT_SHA` fallback in the health endpoint remains in code
+as harmless legacy.

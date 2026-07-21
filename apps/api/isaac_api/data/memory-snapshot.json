@@ -4618,20 +4618,6 @@
         "files": []
       }
     },
-    "apps/web/vercel.json": {
-      "community_id": "209",
-      "community_name": "vercel.json",
-      "file_type": "code",
-      "local_reference": "apps/web/vercel.json",
-      "node_count": 3,
-      "on_disk": false,
-      "path": "apps/web/vercel.json",
-      "rationales": [],
-      "related": {
-        "concepts": [],
-        "files": []
-      }
-    },
     "apps/web/vite.config.ts": {
       "community_id": "207",
       "community_name": "vite.config.ts",
@@ -7009,20 +6995,6 @@
         "files": []
       }
     },
-    "railway.json": {
-      "community_id": "182",
-      "community_name": "thermodynamics",
-      "file_type": "code",
-      "local_reference": "railway.json",
-      "node_count": 9,
-      "on_disk": false,
-      "path": "railway.json",
-      "rationales": [],
-      "related": {
-        "concepts": [],
-        "files": []
-      }
-    },
     "schema/PROVENANCE.md": {
       "community_id": "218",
       "community_name": "user-workflows.md",
@@ -9388,14 +9360,6 @@
       "path": "apps/web/tsconfig.node.json"
     },
     {
-      "community_id": "209",
-      "community_name": "vercel.json",
-      "file_type": "code",
-      "node_count": 3,
-      "on_disk": false,
-      "path": "apps/web/vercel.json"
-    },
-    {
       "community_id": "207",
       "community_name": "vite.config.ts",
       "file_type": "code",
@@ -9762,14 +9726,6 @@
       "node_count": 1,
       "on_disk": false,
       "path": "pyproject.toml"
-    },
-    {
-      "community_id": "182",
-      "community_name": "thermodynamics",
-      "file_type": "code",
-      "node_count": 9,
-      "on_disk": false,
-      "path": "railway.json"
     },
     {
       "community_id": "218",
@@ -10368,11 +10324,11 @@
       },
       {
         "path": "apps/web/package.json",
-        "sha256": "37b6af9e1bdd30a74c3c2d19b2b29b92d40fa205269069a5a35435042aa14964"
+        "sha256": "738b9bf4566fb672e03ededba81a28788e077e165b3c5fcb538b8a66cb4fee70"
       },
       {
         "path": "apps/web/src/App.tsx",
-        "sha256": "5e5a4b38f7adbb1ef1a90c83d44ca5df0b037d92ad70a39a2f94e0fed0e00c61"
+        "sha256": "662befd7782beb3200c3e78777715abf6f10d0dcfb79bdbb4b09520cab77e005"
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
@@ -10639,12 +10595,8 @@
         "sha256": "a082945cdf5b527ce6891fd25bb83316af54edcc459a7d9f7853fe92cdbb06ac"
       },
       {
-        "path": "apps/web/vercel.json",
-        "sha256": "6d084311cb9a09642602875313e30e04e3b567b14bed7d55eb28d963c170acc1"
-      },
-      {
         "path": "apps/web/vite.config.ts",
-        "sha256": "2d658c39bed187603f63ad3212bc8109fb825954c92c9a6b5235779c4039e7b7"
+        "sha256": "c679cdd834ca2e2e13d0d14b2770424e9196520317d7be656ec5bd9af9874439"
       },
       {
         "path": "docs/architecture.md",
@@ -10672,7 +10624,7 @@
       },
       {
         "path": "docs/deployment.md",
-        "sha256": "392dd298e74719ee955561b0d75edcbafd7927d9a41b73fd2a65820f0fff0c24"
+        "sha256": "675daf6fef7ac6069817384b860380df067e71e2d47f00292290b77a11434e55"
       },
       {
         "path": "docs/extraction.md",
@@ -10825,10 +10777,6 @@
       {
         "path": "pyproject.toml",
         "sha256": "1285f8950623828387c098a3d7aff349e7572072ac95599b4d6e919dfb4eccc2"
-      },
-      {
-        "path": "railway.json",
-        "sha256": "d226ec2baf08abce959a1cdff56aac14f6103b2bf788168fb70679b3f97a4bb6"
       },
       {
         "path": "schema/PROVENANCE.md",
@@ -11063,8 +11011,8 @@
         "sha256": "0cf2bc6bfd0b19acb5a09eea5b1ba7e2b6c638fcf88641d67ca1454a23ad325a"
       }
     ],
-    "served_file_count": 202,
-    "served_manifest_fingerprint": "55b134d45e9e17de3196d76c1eefc1ba503e471e6ae6ab842aac8b08e3758166"
+    "served_file_count": 200,
+    "served_manifest_fingerprint": "baa83e21bdbad834499d1b77f9eba8f3e85b946cf1ebd1b4d0e2726fc455cf18"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
@@ -11074,7 +11022,7 @@
     "graph_mtime": null,
     "manifest_file_count": 262,
     "node_count": 2988,
-    "served_file_count": 203
+    "served_file_count": 201
   },
   "served": [
     ".claude/skills/isaac-complete/SKILL.md",
@@ -11173,7 +11121,6 @@
     "apps/web/tsconfig.app.json",
     "apps/web/tsconfig.json",
     "apps/web/tsconfig.node.json",
-    "apps/web/vercel.json",
     "apps/web/vite.config.ts",
     "docs/architecture.md",
     "docs/claude-workflow.md",
@@ -11220,7 +11167,6 @@
     "docs/ui-handoff/validation-audit-warning-model.md",
     "docs/ui-local-dev.md",
     "pyproject.toml",
-    "railway.json",
     "schema/PROVENANCE.md",
     "schema/isaac_draft.schema.json",
     "schema/isaac_record_v1.json",
