@@ -30,9 +30,16 @@ export function AppRoutes() {
   );
 }
 
+/** Router basename from Vite's base ('/' locally and under vitest; '/krish/'
+ * in the deployed build). Trailing slash stripped: '' means no basename. */
+const BASENAME = import.meta.env.BASE_URL.replace(/\/+$/, '');
+
 export default function App() {
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter
+      basename={BASENAME}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
       <AppRoutes />
     </BrowserRouter>
   );
