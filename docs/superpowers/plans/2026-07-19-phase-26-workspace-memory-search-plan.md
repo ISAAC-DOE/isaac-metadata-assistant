@@ -28,8 +28,17 @@ result kinds (concept / file / rationale), each `plane:"memory"`, `source:"memor
 (no excluded/secret/unsafe path can surface), honest degradation never raises, stdlib-only (isolation
 holds). 21 frozen local tests + snapshot search + non-vacuous local↔snapshot parity; backend suite 628
 green; snapshot regenerated in-slice (§17 predictable drift, generator unchanged); independent Opus review
-APPROVE. NEXT: P26.3 (GET /api/search route). See §20 for per-slice status.
-Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a + P26.0b + P26.1 + P26.2 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+APPROVE.
+P26.3 RELEASED 2026-07-21 (commit `f9d6b0a`, CI green run `29878778089`, Railway+Vercel healthy at HEAD,
+`/api/search` live+auth-gated): `GET /api/search?q=&scope=all|workspace|memory&limit=10&offset=0` composes
+both cores into ONE grouped, plane-labeled, no-verdict envelope (workspace/truth + memory groups, each with
+own available/reason; memory carries MEMORY_NOTE). Out-of-scope plane present-but-blank; too-short query →
+both groups query_too_short (plan §12); every core call wrapped → degraded provider yields a shaped 200,
+never 5xx; auth inherited from middleware. +18 route tests (deterministic memory-absent client fixture);
+backend suite 646 green; snapshot regenerated (routes.py served → sha256+fingerprint only). Independent Opus
+review APPROVE-WITH-MINORS (M2 provider-label fixed, M3 pass-through coverage added, M1 kept as plan-mandated).
+NEXT: P26.4 (frontend API client + types). See §20 for per-slice status.
+Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a/0b + P26.1/2/3 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
          (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
@@ -596,7 +605,27 @@ is isolated per arc decision #10.
   test `test_memory.py:813` still green. **Tests**: §16 memory. **Report**: whether the generator
   was touched and why. **Commit**: single. **Stop**: review before P26.3.
 
-### P26.3 — GET /api/search route
+### P26.3 — GET /api/search route — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `f9d6b0a`, CI green run `29878778089`, Railway+Vercel healthy at HEAD;
+> `/api/search` live and auth-gated on Railway (401 without bearer). Added `GET /api/search` (routes.py §17,
+> `search_records`) composing `search.workspace_search` + `memory.get_default_reader().search` into one
+> grouped envelope: `{query, normalized_query, scope, workspace{plane:truth,provider,available,reason,
+> total,returned,limit,offset,results}, memory{plane:memory,provider:"memory:<kind>",note:MEMORY_NOTE,
+> available,reason,total,returned,limit,offset,results}}`. `scope` all|workspace|memory (unknown→all); an
+> out-of-scope plane stays present with true availability but blank rows; a too-short query sets both
+> groups' reason=query_too_short (§12) with each plane's own available honest; every core call wrapped so a
+> degraded provider yields a shaped 200 — NEVER 5xx. WorkspaceResults serialized via `dataclasses.asdict`;
+> memory results already JSON-ready. Auth inherited from `ApiKeyAuthMiddleware` (no per-route code). **Files**:
+> `routes.py`, `tests/test_search.py` (+18 route tests: envelope shape, scope filtering, per-group
+> independence with memory degraded, query_too_short, memory-available via golden snapshot, pagination
+> pass-through, adversarial-params-never-5xx, no-verdict, auth-gating; deterministic memory-absent `client`
+> fixture), regenerated `memory-snapshot.json` (routes.py served → sha256+fingerprint only; generator
+> git-clean). `serialize.py` NOT needed (asdict); `test_deploy_config.py` unchanged (no route-enumeration
+> test). **Verified**: backend suite 646 green, snapshot no drift, committed-snapshot gate 17, R4.3 preflight
+> PASS. **Review**: independent Opus adversarial review (17 TestClient probes) → APPROVE-WITH-MINORS: M2
+> (`memory:None` label edge) fixed, M3 (route pass-through coverage) added, M1 (query_too_short precedence)
+> kept as the plan-mandated symmetric-envelope behavior. Not yet UI-consumed (P26.4/P26.5) → no hosted
+> browser QA; regression check = Railway/Vercel healthy at `f9d6b0a`, `/api/search` reachable+gated.
 - **Objective**: wire both cores into one grouped, plane-labeled, no-verdict envelope; `scope`,
   caps, pagination; auth inherited; per-group independence; never 5xx on a degraded provider.
 - **Files touched**: `routes.py`, optionally `serialize.py`, extend `test_search.py` /
