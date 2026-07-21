@@ -36,10 +36,20 @@ Synchronization Contract". This skill applies them; it does not restate the deci
    phase plan under `docs/superpowers/plans/` (or the reconciliation plan while R1–R6 are active). Only
    status wording that reflects verified facts; never invent progress.
 5. Commit/push ONLY if the user authorized it AND the change is scoped, safe documentation (or a
-   deterministically-regenerated snapshot). Otherwise leave the tree untouched and report. Never deploy,
-   relink, log in, change secrets, or change env vars (all approval-gated). **After a push, re-fetch and
-   verify** HEAD == `origin/main`, 0 ahead, 0 behind, clean tree — a checkpoint must NEVER claim
-   synchronization without a post-push re-fetch + verification.
+   deterministically-regenerated snapshot). Otherwise leave the tree untouched and report. **Before any
+   push, run the deterministic first-push preflight and REFUSE to push on a non-zero exit:**
+   ```bash
+   .venv/bin/python scripts/isaac_preflight.py full
+   ```
+   It confirms repo/branch/remote state, detects remote-advancement/divergence, rejects secret-like and
+   junk files, scans files changed in the working tree AND in commits ahead of `origin/main` for leaked
+   credentials (so a secret in an already-committed ahead-commit with a clean tree is still caught), and
+   runs the committed-snapshot `--check` and its CI gate test UNCONDITIONALLY (never inferring snapshot
+   relevance from filenames — the a0446fe failure class). A non-zero exit means DO NOT PUSH: fix the reported gate (e.g. regenerate the snapshot
+   deliberately per step 3) and re-run. The preflight never pushes and never regenerates the snapshot.
+   Never deploy, relink, log in, change secrets, or change env vars (all approval-gated). **After a push,
+   re-fetch and verify** HEAD == `origin/main`, 0 ahead, 0 behind, clean tree — a checkpoint must NEVER
+   claim synchronization without a post-push re-fetch + verification.
    **Interruption-safe:** never create a commit merely to make the tree clean. Leave incomplete or
    insufficiently-verified work dirty and classify it (`INTERRUPTED_SCOPED_WIP` /
    `INTERRUPTED_UNKNOWN_WIP`); preserve it for the next session.
