@@ -373,6 +373,18 @@ prompt and nested auth against the shared Keychain. To confirm the SLAC toolset 
 `claude-slac` in a terminal and confirms context-mode's tools / SessionStart injection are absent. Static
 config-root inspection already confirms context-mode is not installed in `~/.claude-slac`.
 
+**Fresh-process verification COMPLETED (2026-07-21):** this session was launched via `claude-slac` and
+re-verified the SLAC toolset live from inside the process: `$ISAAC_CLAUDE_PROFILE=slac`; effective config
+root `~/.claude-slac`; context-mode **absent** (not installed — `plugins:{}` in the SLAC root — and
+disabled in settings) with **no** context-mode `SessionStart`/`PreToolUse` injection and no context-mode
+MCP tools/skills loaded; `$NODE_OPTIONS` unset (no shim); `node --version`/`npm --version` succeed;
+repo-local skills (`isaac-profile`, `isaac-resume`, `isaac-checkpoint`, …) load. The Claude **account**
+is reported `UNKNOWN` — expected and acceptable, because auth is a shared macOS Keychain item outside
+`CLAUDE_CONFIG_DIR`; GitHub/Railway/Vercel remain the existing Krish-owned identities. **R4.1 is NOT
+reopened.** Architecture statement (unchanged, honest): *R4.1 isolates Claude tooling through separate
+configuration roots; Claude authentication remains shared through the macOS Keychain and is verified
+separately when detectable.*
+
 **Authorization update (supersedes the "P25.4 stays BLOCKED" line above by dated note, not rewrite):**
 the 2026-07-20 master authorization lifts the P25.4 block and authorizes **continuous execution** of the
 locked core roadmap (R4.1 → P25.4–P25.10 → Phase 26 → UI Refinement → Stabilization → Documentation &
