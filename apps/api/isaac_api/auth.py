@@ -20,15 +20,18 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-_OPEN_PATHS = frozenset({"/api/health"})
+from .config import base_path
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
     """Require ``Authorization: Bearer <ISAAC_UI_API_KEY>`` on every route except
-    ``GET /api/health`` and ``OPTIONS``."""
+    ``GET {base}/api/health`` and ``OPTIONS``."""
 
     def __init__(self, app) -> None:
         super().__init__(app)
+        # Health stays open at the deployed base path so platform/pod probes
+        # never need credentials ({"/api/health"} when ISAAC_BASE_PATH is unset).
+        self._open_paths = frozenset({f"{base_path()}/api/health"})
         self._expected = ""
         key = os.environ.get("ISAAC_UI_API_KEY", "").strip()
         if key:
@@ -37,7 +40,7 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         if not self._expected:
             return await call_next(request)
-        if request.method == "OPTIONS" or request.url.path in _OPEN_PATHS:
+        if request.method == "OPTIONS" or request.url.path in self._open_paths:
             return await call_next(request)
         supplied = request.headers.get("authorization", "")
         # Compare as bytes: compare_digest raises TypeError on non-ASCII str,

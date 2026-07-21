@@ -21,7 +21,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .auth import ApiKeyAuthMiddleware
+from .config import base_path
 from .routes import router
+from .spa import mount_spa
 
 # Default: the Vite dev server origins. Deployed environments override via
 # ISAAC_UI_CORS_ORIGINS (comma-separated full origins, e.g. the Vercel domain).
@@ -38,6 +40,7 @@ def _cors_origins() -> list[str]:
 
 
 def create_app() -> FastAPI:
+    base = base_path()
     app = FastAPI(
         title="ISAAC Metadata Assistant — local UI backend",
         version=__version__,
@@ -54,7 +57,12 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
-    app.include_router(router)
+    # ISAAC_BASE_PATH prefixes every route (the router keeps its own /api
+    # prefix, so routes land at {base}/api/*). Unset, prefix="" is byte-identical
+    # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR
+    # points at a built frontend; registered last so API routes win.
+    app.include_router(router, prefix=base)
+    mount_spa(app, base)
     return app
 
 
