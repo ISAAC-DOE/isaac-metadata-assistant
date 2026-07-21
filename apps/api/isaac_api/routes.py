@@ -7,6 +7,7 @@ boundary. It adds no validation logic and never mutates the truth path.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
 from . import memory
+from . import search
 from . import serialize
 from . import sources
 from . import workspace as ws
@@ -810,4 +812,135 @@ def get_memory_file(path: str = ""):
         "file": detail,
         "related": related,
         "rationales": rationales,
+    }
+
+
+# --- 17. search (composed truth + memory planes, grouped, no verdict) ----------
+#
+# Composes the two existing search cores into ONE grouped, plane-labeled envelope.
+# It computes NO verdict and carries NO verdict keys. Each plane is a separate,
+# self-labeled group so a client always knows which plane a lead came from and can
+# never confuse a memory lead for a truth-plane ruling.
+#
+# Degradation is ALWAYS in-body (available:false + reason), never a 5xx: both cores
+# are designed never to raise, and the composition is additionally wrapped so any
+# unexpected failure still yields a shaped 200 with the affected group degraded.
+#
+# ``scope`` selects which planes are actually searched:
+#   * ``all``       -> both planes searched and populated.
+#   * ``workspace`` -> workspace searched; memory group PRESENT with its real
+#                      availability reported but no rows (memory not searched).
+#   * ``memory``    -> symmetric: memory searched; workspace group present, no rows.
+# ``normalized_query`` is always computed (workspace_search is cheap over the tens of
+# in-memory snapshots) even when the workspace group's rows are blanked out.
+
+_SEARCH_SCOPES = ("all", "workspace", "memory")
+
+
+def _blank_group_rows(group: dict) -> dict:
+    """Report a group's availability/reason but with no rows (out-of-scope plane)."""
+    group["results"] = []
+    group["total"] = 0
+    group["returned"] = 0
+    return group
+
+
+@router.get("/search")
+def search_records(
+    q: str = "", scope: str = "all", limit: int = 10, offset: int = 0
+) -> dict:
+    if scope not in _SEARCH_SCOPES:
+        scope = "all"
+
+    # --- workspace group (truth plane) ---
+    # Always run the workspace core: it is cheap over the in-memory snapshot and it
+    # is the source of the envelope's ``normalized_query``. Only its rows are blanked
+    # when the workspace plane is out of scope.
+    normalized_query = search.normalize((q or "")[:256])
+    query_too_short = False
+    try:
+        exps = ws.list_experiments()  # hardened, read-race-safe snapshot
+        wres = search.workspace_search(q, exps, limit=limit, offset=offset)
+        normalized_query = wres.normalized_query
+        query_too_short = wres.reason == search.QUERY_TOO_SHORT
+        workspace_group = {
+            "plane": search.PLANE,
+            "provider": search.PROVIDER,
+            "available": True,
+            "reason": wres.reason,
+            "total": wres.total,
+            "returned": wres.returned,
+            "limit": wres.limit,
+            "offset": wres.offset,
+            "results": [dataclasses.asdict(r) for r in wres.results],
+        }
+    except Exception:  # pragma: no cover - defensive; degrade in-body, never 500
+        workspace_group = {
+            "plane": search.PLANE,
+            "provider": search.PROVIDER,
+            "available": False,
+            "reason": None,
+            "total": 0,
+            "returned": 0,
+            "limit": max(0, limit),
+            "offset": max(0, offset),
+            "results": [],
+        }
+    if scope == "memory":
+        _blank_group_rows(workspace_group)
+
+    # --- memory group (memory plane) ---
+    try:
+        reader = memory.get_default_reader()
+        mres = reader.search(q, limit=limit, offset=offset)
+        try:
+            provider_kind = reader.status().get("provider_kind")
+        except Exception:  # pragma: no cover - defensive; identity only
+            provider_kind = None
+        memory_group = {
+            "plane": "memory",
+            # Coalesce a missing kind to "unavailable" so the label is never the
+            # literal "memory:None" (only reachable if status() unexpectedly raises).
+            "provider": f"memory:{provider_kind or 'unavailable'}",
+            "note": MEMORY_NOTE,
+            "available": mres["available"],
+            "reason": mres["reason"],
+            "total": mres["total"],
+            "returned": mres["returned"],
+            "limit": mres["limit"],
+            "offset": mres["offset"],
+            "results": mres["results"],
+        }
+    except Exception:  # pragma: no cover - defensive; degrade in-body, never 500
+        memory_group = {
+            "plane": "memory",
+            "provider": "memory:unavailable",
+            "note": MEMORY_NOTE,
+            "available": False,
+            "reason": "graph_unreadable",
+            "total": 0,
+            "returned": 0,
+            "limit": max(0, limit),
+            "offset": max(0, offset),
+            "results": [],
+        }
+    # A too-short query is a QUERY-level condition, orthogonal to plane
+    # availability: the workspace core reports it directly, but the memory core
+    # checks availability first and so would surface ``graph_absent`` for a short
+    # query against an absent graph. Normalize both planes to the same query-level
+    # ``query_too_short`` reason (with no rows) so the envelope is symmetric — the
+    # plane's own ``available`` flag still reports its true state.
+    if query_too_short:
+        memory_group["reason"] = search.QUERY_TOO_SHORT
+        _blank_group_rows(memory_group)
+
+    if scope == "workspace":
+        _blank_group_rows(memory_group)
+
+    return {
+        "query": q,
+        "normalized_query": normalized_query,
+        "scope": scope,
+        "workspace": workspace_group,
+        "memory": memory_group,
     }

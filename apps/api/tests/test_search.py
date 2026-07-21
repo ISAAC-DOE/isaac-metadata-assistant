@@ -467,6 +467,190 @@ def test_core_imports_no_truth_core_validator():
 
 
 # =============================================================================
+# P26.3 — GET /api/search route (grouped, plane-labeled, no-verdict envelope)
+# =============================================================================
+
+from pathlib import Path as _Path
+
+from fastapi.testclient import TestClient
+
+
+def _repo_root() -> _Path:
+    here = _Path(__file__).resolve()
+    for cand in (here, *here.parents):
+        if (cand / "schema" / "isaac_record_v1.json").exists():
+            return cand
+    return here.parents[3]
+
+
+_GOLDEN_SNAPSHOT = _repo_root() / "tests" / "fixtures" / "memory_snapshot" / "memory-snapshot.json"
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    """Seeded workspace; memory plane DETERMINISTICALLY degraded (graph_absent).
+
+    Point ISAAC_MEMORY_SNAPSHOT at a guaranteed-nonexistent path so the reader
+    resolves to a degraded snapshot source regardless of whether a real
+    ``graphify-out/`` exists in the dev checkout — the memory-plane availability of
+    these route tests must not depend on the developer's local graph (CI has none).
+    A test that wants an available memory plane builds its own client (see
+    ``test_route_memory_available_via_snapshot``)."""
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(tmp_path / "no-such-snapshot.json"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    from isaac_api.app import create_app
+
+    return TestClient(create_app())
+
+
+def _walk_dict_keys(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k
+            yield from _walk_dict_keys(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_dict_keys(v)
+
+
+def test_route_envelope_shape(client):
+    r = client.get("/api/search", params={"q": "xanes"})
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) >= {"query", "normalized_query", "scope", "workspace", "memory"}
+    assert body["scope"] == "all"
+    ws_group = body["workspace"]
+    assert ws_group["plane"] == "truth"
+    assert ws_group["provider"] == "workspace-store"
+    assert ws_group["available"] is True
+    assert ws_group["total"] > 0
+    assert {"total", "returned", "limit", "offset", "results"} <= set(ws_group)
+    mem = body["memory"]
+    assert mem["plane"] == "memory"
+    assert mem["provider"].startswith("memory:")
+    assert "note" in mem and mem["note"]
+    assert isinstance(mem["available"], bool)
+
+
+def test_route_workspace_returns_seeded_hits(client):
+    body = client.get("/api/search", params={"q": "xanes"}).json()
+    results = body["workspace"]["results"]
+    assert results
+    for row in results:
+        assert row["kind"] in (
+            "experiment", "record_id", "draft_field", "evidence", "artifact", "source_ref"
+        )
+        assert row["plane"] == "truth"
+        assert row["navigate_to"].startswith("/record/")
+
+
+def test_route_scope_workspace_omits_memory_results(client):
+    body = client.get("/api/search", params={"q": "xanes", "scope": "workspace"}).json()
+    assert body["scope"] == "workspace"
+    assert body["workspace"]["results"]
+    # memory group still present + availability reported, but no rows
+    assert body["memory"]["results"] == []
+
+
+def test_route_scope_memory_omits_workspace_results(client):
+    body = client.get("/api/search", params={"q": "xanes", "scope": "memory"}).json()
+    assert body["scope"] == "memory"
+    assert body["workspace"]["results"] == []
+
+
+def test_route_query_too_short(client):
+    body = client.get("/api/search", params={"q": "a"}).json()
+    assert body["workspace"]["reason"] == "query_too_short"
+    assert body["workspace"]["total"] == 0
+    assert body["memory"]["reason"] == "query_too_short"
+
+
+def test_route_memory_unavailable_but_workspace_ok_is_200(client):
+    # No memory graph configured -> memory plane degrades honestly, workspace still works,
+    # and the response is a clean 200 (never a 5xx from a degraded provider).
+    r = client.get("/api/search", params={"q": "xanes"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["memory"]["available"] is False
+    assert body["memory"]["reason"] in ("graph_absent", "graph_unreadable")
+    assert body["workspace"]["available"] is True
+    assert body["workspace"]["results"]
+
+
+def test_route_memory_available_via_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_GOLDEN_SNAPSHOT))
+    from isaac_api.app import create_app
+
+    c = TestClient(create_app())
+    body = c.get("/api/search", params={"q": "fake"}).json()
+    assert body["memory"]["available"] is True
+    assert body["memory"]["results"]
+    for row in body["memory"]["results"]:
+        assert row["plane"] == "memory"
+        assert row["kind"] in ("concept", "file", "rationale")
+
+
+def test_route_default_limit_and_pagination(client):
+    body = client.get("/api/search", params={"q": "cu"}).json()
+    assert body["workspace"]["limit"] == 10
+    p1 = client.get("/api/search", params={"q": "cu", "limit": 2, "offset": 0}).json()
+    assert len(p1["workspace"]["results"]) <= 2
+    assert p1["workspace"]["limit"] == 2
+
+
+def test_route_no_verdict_keys(client):
+    body = client.get("/api/search", params={"q": "xanes"}).json()
+    forbidden = {"ok", "valid", "passed", "verdict", "schema", "schema_valid", "audit_passed", "errors"}
+    for k in _walk_dict_keys(body):
+        assert k not in forbidden, f"verdict key in envelope: {k}"
+
+
+def test_route_is_auth_gated(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    from isaac_api.app import create_app
+
+    c = TestClient(create_app())
+    assert c.get("/api/search", params={"q": "xanes"}).status_code == 401
+    ok = c.get("/api/search", params={"q": "xanes"}, headers={"Authorization": "Bearer demo-secret"})
+    assert ok.status_code == 200
+
+
+def test_route_group_returned_matches_len(client):
+    body = client.get("/api/search", params={"q": "xanes"}).json()
+    for grp in (body["workspace"], body["memory"]):
+        assert grp["returned"] == len(grp["results"])
+
+
+def test_route_limit_offset_forwarded(client):
+    body = client.get("/api/search", params={"q": "cu", "limit": 2, "offset": 1}).json()
+    assert body["workspace"]["limit"] == 2
+    assert body["workspace"]["offset"] == 1
+    assert len(body["workspace"]["results"]) <= 2
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"q": "cu", "limit": -5},
+        {"q": "cu", "limit": 0},
+        {"q": "cu", "offset": -9},
+        {"q": "cu", "limit": 100000},
+        {"q": "cu", "scope": "../bad"},
+        {"q": "café🔬"},
+    ],
+)
+def test_route_adversarial_params_never_5xx(client, params):
+    r = client.get("/api/search", params=params)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["workspace"]["returned"] == len(body["workspace"]["results"])
+
+
+# =============================================================================
 # Adversarial governance — dirty draft/evidence content must never leak
 # (plan §15 risk 2: "a path never appears in results even if it 'matches'")
 # =============================================================================
