@@ -567,6 +567,25 @@ export interface ApiHealth {
   version: string;
 }
 
+// POST /api/demo/reset — the guarded synthetic-demo reset (DemoResetResponse in
+// apps/api/isaac_api/routes.py). The SAME shape carries both success (status
+// "ok") and a safe refusal (status "refused"), returned at HTTP 200/403/409.
+// Every field is a server-derived count/id; the client renders them, it never
+// computes a reset decision.
+export interface ApiDemoResetResult {
+  status: 'ok' | 'refused';
+  mode: 'preview' | 'execute';
+  previous_count: number;
+  canonical_count: number;
+  legacy_count: number;
+  ambiguous_count: number;
+  removed_count: number;
+  final_count: number;
+  canonical_ids: string[];
+  removable: { id: string; title: string }[];
+  state_counts: Record<string, number>;
+}
+
 // Everything S3 needs, fetched concurrently but kept as separate values so the
 // three signals are never merged (each still renders in its own component).
 export interface RecordBundle {

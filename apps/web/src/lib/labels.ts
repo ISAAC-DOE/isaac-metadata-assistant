@@ -152,6 +152,17 @@ export const LABELS = {
   actionRunDemo: 'Run Synthetic Demo',
   actionRunDemoShort: 'Run Demo',
   actionNewRecord: 'New Record',
+  actionResetDemo: 'Reset Demo',
+  actionCancel: 'Cancel',
+
+  // Guarded synthetic-demo reset (P26.0b)
+  resetDialogTitle: 'Reset Shared Synthetic Demo',
+  resetConfirmAction: 'Reset Shared Demo',
+  resetCountCurrent: 'Current Experiments',
+  resetCountCanonical: 'Canonical Scenarios Preserved',
+  resetCountLegacy: 'Legacy Demo Records Removed',
+  resetCountAmbiguous: 'Ambiguous Records',
+  resetCountFinal: 'Final Experiments',
   actionReviewAnswer: 'Review & Answer',
   actionConfirm: 'Confirm',
   actionRevalidate: 'Re-Validate',

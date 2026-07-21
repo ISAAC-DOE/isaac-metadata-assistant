@@ -5,6 +5,7 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
+import { ResetDemoDialog } from '../components/ResetDemoDialog';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Play, Plus } from '../components/icons';
 import { LABELS } from '../lib/labels';
@@ -56,6 +57,7 @@ export function ExperimentsHome() {
           {subcount && <p className="page-subcount">{subcount}</p>}
         </div>
         <div className="page-actions">
+          <ResetDemoDialog onResetComplete={result.reload} />
           <button type="button" className="btn btn-secondary" onClick={() => navigate(ROUTES.load)}>
             <Play size={14} strokeWidth={2} aria-hidden="true" />
             {LABELS.actionRunDemo}

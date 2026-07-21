@@ -30,10 +30,14 @@ export function stubFetchRoutes(routes: Record<string, StubbedRoute>): string[] 
     const hit = routes[key];
     if (!hit) throw new TypeError(`fetch stub: no route for ${key}`);
     const status = hit.status ?? 200;
+    // A `body` may be a thunk, re-evaluated on every hit, so a test can model an
+    // endpoint whose response changes over time (e.g. the experiment list before
+    // vs. after a reset). Plain-object bodies (the common case) are unaffected.
+    const body = typeof hit.body === 'function' ? (hit.body as () => unknown)() : hit.body;
     return {
       ok: status < 400,
       status,
-      json: async () => hit.body,
+      json: async () => body,
     } as Response;
   };
   vi.stubGlobal('fetch', vi.fn(impl));
@@ -577,6 +581,143 @@ export const uploadsBlocked = {
   reason:
     'Real or private data upload is approval-gated and not enabled in this synthetic prototype.',
 };
+
+// --- P26.0b guarded synthetic-demo reset fixtures ------------------------
+// Shapes verbatim from DemoResetResponse (apps/api/isaac_api/routes.py); the
+// five canonical scenarios use the fixed ids from workspace.py (SEED_*).
+
+/** GET /api/health — authoritative synthetic-mode signal the Reset control gates on. */
+export const healthSynthetic = {
+  status: 'ok',
+  mode: 'synthetic-only',
+  core: 'isaac_records',
+  version: '0.1.0',
+};
+
+/** A non-synthetic health body — the Reset control must NOT render for this. */
+export const healthNonSynthetic = { ...healthSynthetic, mode: 'production' };
+
+export const CANONICAL_RESET_IDS = [
+  '01SYNTHXANESSEED0000000001',
+  '01SYNTHXANESSEED0000000002',
+  '01SYNTHXANESSEED0000000003',
+  '01SYNTHXANESSEED0000000004',
+  '01SYNTHXANESSEED0000000005',
+];
+
+const RESET_TITLE_BASE = 'Synthetic XANES — CuO (Cu K-edge)';
+
+/** The five canonical scenarios as a summary list (post-reset dashboard).
+ * Distribution: needs_attention:2, ready_to_export:1, in_review:1, done:1. */
+export const canonicalFiveSummaries = [
+  { id: CANONICAL_RESET_IDS[0], title: `${RESET_TITLE_BASE} · New Draft`, status: 'needs_attention', created_utc: '2026-07-12T00:00:01Z', pending_count: 5, evidenced_field_count: 26, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[1], title: `${RESET_TITLE_BASE} · Partially Completed`, status: 'needs_attention', created_utc: '2026-07-12T00:00:02Z', pending_count: 2, evidenced_field_count: 30, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[2], title: `${RESET_TITLE_BASE} · Ready to Export`, status: 'ready_to_export', created_utc: '2026-07-12T00:00:03Z', pending_count: 0, evidenced_field_count: 33, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[3], title: `${RESET_TITLE_BASE} · Export Review Required`, status: 'in_review', created_utc: '2026-07-12T00:00:04Z', pending_count: 0, evidenced_field_count: 33, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[4], title: `${RESET_TITLE_BASE} · Exported Record`, status: 'done', created_utc: '2026-07-12T00:00:05Z', pending_count: 0, evidenced_field_count: 33, exported: true, record_id: CANONICAL_RESET_IDS[4] },
+];
+
+/** Two managed-legacy demo records (random ids + the committed demo marker). */
+const LEGACY_REMOVABLE = [
+  { id: '01SYNTHLEGACYDEMORUN0000001', title: `${RESET_TITLE_BASE} Demo (demo/run)` },
+  { id: '01SYNTHLEGACYDEMORUN0000002', title: `${RESET_TITLE_BASE} Demo (demo/run)` },
+];
+
+const RESET_STATE_COUNTS = { needs_attention: 2, ready_to_export: 1, in_review: 1, done: 1 };
+
+/** POST /api/demo/reset {mode:'preview'} — 5 canonical + 2 legacy present, 0 ambiguous. */
+export const demoResetPreviewClean = {
+  status: 'ok' as const,
+  mode: 'preview' as const,
+  previous_count: 7,
+  canonical_count: 5,
+  legacy_count: 2,
+  ambiguous_count: 0,
+  removed_count: 0,
+  final_count: 5,
+  canonical_ids: CANONICAL_RESET_IDS,
+  removable: LEGACY_REMOVABLE,
+  state_counts: RESET_STATE_COUNTS,
+};
+
+/** POST /api/demo/reset {mode:'execute', confirmation:'RESET SYNTHETIC DEMO'} — success. */
+export const demoResetExecuteOk = {
+  ...demoResetPreviewClean,
+  mode: 'execute' as const,
+  previous_count: 7,
+  removed_count: 2,
+  final_count: 5,
+};
+
+/** Preview when an ambiguous (unmanaged) record is present — refused (HTTP 200). */
+export const demoResetPreviewAmbiguous = {
+  status: 'refused' as const,
+  mode: 'preview' as const,
+  previous_count: 8,
+  canonical_count: 5,
+  legacy_count: 2,
+  ambiguous_count: 1,
+  removed_count: 0,
+  final_count: 8,
+  canonical_ids: CANONICAL_RESET_IDS,
+  removable: LEGACY_REMOVABLE,
+  state_counts: RESET_STATE_COUNTS,
+};
+
+/**
+ * Route map for the My Experiments page with the Reset Demo control wired.
+ * `experiments` defaults to a thunk that returns 7 rows (5 canonical + 2 legacy)
+ * until `flipToFive()` is called, then the canonical five — so a test can prove
+ * the list is re-fetched from the backend after a successful reset.
+ */
+export function resetDemoRoutes(
+  opts: {
+    mode?: string;
+    preview?: unknown;
+    execute?: unknown;
+    executeStatus?: number;
+  } = {},
+): { routes: Record<string, StubbedRoute>; flipToFive: () => void } {
+  const legacySummaries = LEGACY_REMOVABLE.map((r, i) => ({
+    id: r.id,
+    title: r.title,
+    status: 'needs_attention',
+    created_utc: `2025-01-0${i + 1}T00:00:00Z`,
+    pending_count: 5,
+    evidenced_field_count: 26,
+    exported: false,
+    record_id: null,
+  }));
+  let five = false;
+  const flipToFive = () => {
+    five = true;
+  };
+  // The dialog issues the preview POST on open, then the execute POST on submit —
+  // same METHOD+path, so the body is served by call order: 1st = preview, 2nd+ =
+  // execute (which also flips the list to the canonical five, mirroring the real
+  // backend so a subsequent GET /experiments reflects the reset).
+  const previewBody = opts.preview ?? demoResetPreviewClean;
+  const executeBody = opts.execute ?? demoResetExecuteOk;
+  let postCalls = 0;
+  const routes: Record<string, StubbedRoute> = {
+    'GET /api/health': { body: { ...healthSynthetic, mode: opts.mode ?? 'synthetic-only' } },
+    'GET /api/experiments': {
+      body: () => ({
+        experiments: five ? canonicalFiveSummaries : [...canonicalFiveSummaries, ...legacySummaries],
+      }),
+    },
+    'POST /api/demo/reset': {
+      status: opts.executeStatus,
+      body: () => {
+        postCalls += 1;
+        if (postCalls === 1) return previewBody;
+        five = true;
+        return executeBody;
+      },
+    },
+  };
+  return { routes, flipToFive };
+}
 
 /** The full route map for one S3 record bundle (plus S1's list) for `id`. */
 export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {

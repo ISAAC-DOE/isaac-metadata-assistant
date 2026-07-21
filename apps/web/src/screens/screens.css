@@ -865,3 +865,79 @@
   color: var(--text-secondary);
   background: var(--surface-subtle);
 }
+
+/* Guarded synthetic-demo reset dialog (P26.0b) — reuses .artifact-modal shell. */
+.reset-dialog { width: min(560px, 100%); }
+.reset-loading {
+  padding: 18px 22px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.reset-dialog-body {
+  padding: 18px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.reset-disclosure {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.reset-counts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.reset-count-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 13px;
+  font-size: 12px;
+  background: var(--surface);
+}
+.reset-count-row dt { color: var(--text-secondary); margin: 0; }
+.reset-count-row dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.reset-count-final {
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--border);
+}
+.reset-refused {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--fail-border);
+  background: var(--fail-bg);
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fail-text);
+}
+.reset-confirm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.reset-confirm-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.reset-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}

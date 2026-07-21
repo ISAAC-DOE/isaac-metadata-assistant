@@ -10320,7 +10320,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "1f6c4829692e5bf13c0cf7440355d435bb6909b7afa35223d9fca74ae17807ca"
+        "sha256": "f971dc61aeb1a76b97c4c72ecc7934c63e31d4ae1609ce6bc6d8b4872dd6b554"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10332,7 +10332,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "dc7c5188c9450ecc7876fc480de63c8cca8e502e51bc8039c1ea0177d7e42fe9"
+        "sha256": "aa8c280709de7c9df752304dad5ad1f734691a8a352a5a69bd21da88a4c719e0"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10548,7 +10548,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "e28b40b08c41677c5d4776c5444ca06b440af161f050bdc2f1b7354235ef2278"
+        "sha256": "ef1263ad077116bb206ce0ce1f99a9e9b62af958c6b8a78f07c7822c8032628e"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10556,7 +10556,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "07d0748b0e33154a8cd18ec21d2b95cb3f8d188e37ec885b9562bbd49798fd51"
+        "sha256": "c1ca709ce09155736576ca5a107efab896192d4453fbf0ff8c84240dfa30a128"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "d309e7544a36ad1c910de7dd728aa0af4a090ffd68367dd1a65c4b9b98525e71"
+        "sha256": "d3ddbaca3f9e440f055443ffbf14bf379be0c3b813ff4b5c61b748783d85b8a4"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10584,7 +10584,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "2f3243bc13367f18fec625013fd6c0dd5f662cda5db83ca6bf433d4e8013d0f5"
+        "sha256": "6485da0073f2d26b9d9c0e82967d8de54fb9c275ac57a527d12633ea3f7651f4"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10616,7 +10616,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "c8d0cd9c07e3bbc1977a4ea35c61e96e95dffa952a499e670c28396f0ba1610e"
+        "sha256": "0501d42e2614be1bcb1424e0cdb4e28431c0fa1c03547476d8f517edc582a23d"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "d1e510e5a194b93623a46962ba212a68f6f783778a01179d97ee7699a423237b"
+    "served_manifest_fingerprint": "7c12ee8a41018392c964bc7d2d8ff86beb618207fd4bf0beab017f6bbb062bc3"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

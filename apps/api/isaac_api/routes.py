@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from isaac_records.audit import audit_records, render_audit
 from isaac_records.complete import apply_answers
@@ -208,6 +210,78 @@ def demo_run(body: dict = Body(default=None)) -> dict:
         exp.save()
 
     return {"experiment_id": exp.id, "steps": steps, "status": exp.status()}
+
+
+# --- 2b. guarded synthetic-demo reset (P26.0b) --------------------------------
+#
+# Restores the workspace to EXACTLY the five canonical P26.0a scenarios. It never
+# accepts caller-supplied ids or paths (unknown fields are rejected by the typed
+# request model), removes ONLY managed synthetic-demo records, and refuses on any
+# ambiguous record. There is deliberately NO general per-experiment delete route.
+
+_RESET_CONFIRMATION = "RESET SYNTHETIC DEMO"
+
+
+class DemoResetRequest(BaseModel):
+    """Typed reset request. ``extra="forbid"`` rejects any caller-supplied ids or
+    paths (e.g. ``ids``/``experiment_id``/``path``) with a 422 — they can never
+    influence what is removed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["preview", "execute"]
+    confirmation: str | None = None
+
+
+class DemoResetResponse(BaseModel):
+    """Typed, path-free reset result (no filesystem paths ever leak out)."""
+
+    status: Literal["ok", "refused"]
+    mode: Literal["preview", "execute"]
+    previous_count: int
+    canonical_count: int
+    legacy_count: int
+    ambiguous_count: int
+    removed_count: int
+    final_count: int
+    canonical_ids: list[str]
+    removable: list[dict]
+    state_counts: dict
+
+
+def _reset_response(data: dict, *, mode: str, status: str, http: int) -> JSONResponse:
+    payload = {k: v for k, v in data.items() if k != "refused"}
+    resp = DemoResetResponse(status=status, mode=mode, **payload)
+    return JSONResponse(status_code=http, content=resp.model_dump())
+
+
+@router.post("/demo/reset")
+def demo_reset(req: DemoResetRequest):
+    mode = req.mode
+
+    # Governance gate: refuse outside synthetic-only mode (classification is
+    # read-only, so it is safe to report counts alongside the refusal).
+    if not ws.is_synthetic_only():
+        data = ws.reset_to_canonical_seed(dry_run=True)
+        return _reset_response(data, mode=mode, status="refused", http=403)
+
+    # Preview NEVER mutates: classify only.
+    if mode == "preview":
+        data = ws.reset_to_canonical_seed(dry_run=True)
+        status = "refused" if data["refused"] else "ok"
+        return _reset_response(data, mode=mode, status=status, http=200)
+
+    # Execute requires the exact confirmation phrase; otherwise no mutation.
+    if req.confirmation != _RESET_CONFIRMATION:
+        data = ws.reset_to_canonical_seed(dry_run=True)
+        return _reset_response(data, mode=mode, status="refused", http=409)
+
+    # Confirmed execute: the reset itself refuses (no mutation) if any ambiguous
+    # record is present; otherwise it removes managed legacy + reseeds.
+    data = ws.reset_to_canonical_seed(dry_run=False)
+    if data["refused"]:
+        return _reset_response(data, mode=mode, status="refused", http=409)
+    return _reset_response(data, mode=mode, status="ok", http=200)
 
 
 # --- 3. list ------------------------------------------------------------------

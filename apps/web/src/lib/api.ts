@@ -29,6 +29,7 @@ import type {
   ApiPendingResponse,
   ApiSourcePreview,
   ApiDemoRunResponse,
+  ApiDemoResetResult,
   ApiUploadsBlocked,
   ApiValidateResult,
   ApiWarningsResponse,
@@ -51,6 +52,13 @@ function apiKey(): string | undefined {
   const key = (import.meta.env.VITE_API_KEY as string | undefined)?.trim();
   return key ? key : undefined;
 }
+
+/**
+ * The exact phrase the backend requires to EXECUTE a synthetic-demo reset. Sent
+ * verbatim on execute only; the operator types the shorter "RESET" gate in the UI
+ * and never sees or re-types this phrase (no auto-fill of the typed gate).
+ */
+export const RESET_CONFIRMATION = 'RESET SYNTHETIC DEMO';
 
 /** The exact command that starts the local backend (shown in the down state). */
 export const RUN_COMMAND =
@@ -204,6 +212,28 @@ export const api = {
   // S2 — run the synthetic pipeline; `draft_only` stops at the blockers.
   runDemo(mode: 'draft_only' | 'full' = 'draft_only'): Promise<ApiDemoRunResponse> {
     return postJson<ApiDemoRunResponse>('/demo/run', { mode });
+  },
+
+  // P26.0b — the guarded synthetic-demo reset. Preview (200) and both safe
+  // refusals (403 not-synthetic / 409 wrong-confirmation or ambiguous) all carry
+  // the SAME typed body, so — like blockUpload — we read the JSON on those
+  // statuses instead of throwing. Only a status OUTSIDE {200,403,409} (or a
+  // network failure, which request() already turns into an unreachable ApiError)
+  // is a genuine error. Preview sends only { mode }; execute adds the phrase.
+  async resetDemo(
+    mode: 'preview' | 'execute',
+    confirmation?: string,
+  ): Promise<ApiDemoResetResult> {
+    const payload =
+      mode === 'execute' ? { mode, confirmation } : { mode };
+    const res = await request('/demo/reset', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (res.status === 200 || res.status === 403 || res.status === 409) {
+      return (await res.json()) as ApiDemoResetResult;
+    }
+    throw new ApiError(`Request failed (${res.status}).`, { status: res.status });
   },
 
   // S2 — governance seam. Always 403; we read the verbatim reason from the body.

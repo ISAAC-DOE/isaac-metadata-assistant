@@ -21,6 +21,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,6 +54,14 @@ ANSWERS_PATH = SYN_DIR / "xanes_completion_answers.json"
 # Source files an experiment is built from (also the source-preview allowlist).
 SOURCE_FILES = (CSV_PATH.name, LISTING_PATH.name)
 
+# The committed synthetic-demo provenance marker. A non-canonical experiment is
+# recognised as belonging to the managed synthetic-demo dataset when its
+# ``source.description`` equals this string and/or its ``source.files`` is a
+# non-empty subset of SOURCE_FILES. See ``classify_experiment``.
+MANAGED_SOURCE_DESCRIPTION = (
+    "Synthetic XANES campaign (CuO, Cu K-edge) — committed demo fixtures"
+)
+
 DEFAULT_WORKSPACE = "/tmp/isaac-ui-workspace"
 
 # Derived status values (product vocabulary for the UI).
@@ -65,6 +74,26 @@ DONE = "done"
 def workspace_root() -> Path:
     """The workspace dir (env-overridable, resolved fresh so tests can monkeypatch)."""
     return Path(os.environ.get("ISAAC_UI_WORKSPACE", DEFAULT_WORKSPACE))
+
+
+def is_synthetic_only() -> bool:
+    """Whether this deployment is the synthetic-only demo.
+
+    Hard-coded True to mirror the ``/health`` ``mode: "synthetic-only"`` banner:
+    the prototype only ever serves synthetic fixtures. The guarded reset gates on
+    this single function so tests can monkeypatch it to False to prove the reset
+    refuses outside synthetic-only mode.
+
+    NOTE (deferred to the post-Phase-26 architecture decision packet): this gate,
+    like the ``/health`` mode literal, is a CONSTANT today, so the 403 governance
+    refusal is only reachable under test. That is acceptable ONLY because the
+    prototype is synthetic-only by construction. The reset's real defence-in-depth
+    is provenance classification: a non-managed (e.g. real) record lacks
+    ``MANAGED_SOURCE_DESCRIPTION`` -> classifies AMBIGUOUS -> the whole reset
+    refuses with zero mutation. Before any real-data deployment, wire this to an
+    authoritative runtime signal instead of a literal.
+    """
+    return True
 
 
 def _now_iso() -> str:
@@ -216,7 +245,7 @@ def create_experiment(
 
 def _seed_source() -> dict:
     return {
-        "description": "Synthetic XANES campaign (CuO, Cu K-edge) — committed demo fixtures",
+        "description": MANAGED_SOURCE_DESCRIPTION,
         "files": list(SOURCE_FILES),
     }
 
@@ -235,6 +264,12 @@ SEED_PARTIAL_ID = _SEED_ID_PREFIX + "2"
 SEED_READY_ID = _SEED_ID_PREFIX + "3"
 SEED_REVIEW_ID = _SEED_ID_PREFIX + "4"
 SEED_DONE_ID = _SEED_ID_PREFIX + "5"
+
+#: The five fixed canonical seed ids. An experiment whose id is in this set is
+#: canonical and is NEVER a removal candidate.
+CANONICAL_IDS = frozenset(
+    {SEED_NEW_DRAFT_ID, SEED_PARTIAL_ID, SEED_READY_ID, SEED_REVIEW_ID, SEED_DONE_ID}
+)
 
 _SEED_TITLE_BASE = "Synthetic XANES — CuO (Cu K-edge)"
 
@@ -358,7 +393,10 @@ def list_experiments() -> list[Experiment]:
     ensure_seeded()
     out: list[Experiment] = []
     for d in _experiment_dirs():
-        state = json.loads((d / "experiment.json").read_text(encoding="utf-8"))
+        try:
+            state = json.loads((d / "experiment.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue  # dir removed by a concurrent reset between listing and read — benign
         out.append(Experiment.from_state(state))
     out.sort(key=lambda e: e.created_utc)
     return out
@@ -370,3 +408,155 @@ def load_experiment(experiment_id: str) -> Experiment | None:
     if not state_path.exists():
         return None
     return Experiment.from_state(json.loads(state_path.read_text(encoding="utf-8")))
+
+
+# --- guarded synthetic-demo reset (P26.0b) ------------------------------------
+#
+# Restores the workspace to EXACTLY the five canonical P26.0a scenarios. It never
+# accepts caller ids/paths, removes ONLY records proven to belong to the managed
+# synthetic-demo dataset, refuses on ANY ambiguous record, and reuses the existing
+# deterministic seed (never fabricates a record). The truth core is never bypassed.
+
+CANONICAL = "canonical"
+MANAGED_LEGACY = "managed_legacy"
+AMBIGUOUS = "ambiguous"
+
+#: Ordered workflow-state keys reported in the reset result's ``state_counts``.
+_STATE_KEYS = (NEEDS_ATTENTION, READY_TO_EXPORT, IN_REVIEW, DONE)
+
+
+def classify_experiment(exp: Experiment) -> str:
+    """Classify an experiment for the guarded reset.
+
+    * ``canonical``      — id is one of the five fixed seed ids.
+    * ``managed_legacy`` — NOT canonical, but carries the committed synthetic-demo
+      provenance marker: ``source.description == MANAGED_SOURCE_DESCRIPTION``
+      (the exact string stamped by both the canonical seed and the demo-run path).
+    * ``ambiguous``      — NOT canonical and no managed-demo marker; never removed.
+
+    Provenance is proven ONLY by the exact description marker. Matching filenames
+    in ``source.files`` are deliberately NOT sufficient: an unrelated record that
+    merely references the two fixture names must classify ``ambiguous`` (and thus
+    force a refusal) rather than be auto-deleted. Do not weaken this to a filename
+    heuristic — filename overlap is not proof of managed-demo ownership.
+    """
+    if exp.id in CANONICAL_IDS:
+        return CANONICAL
+    source = exp.source or {}
+    has_marker = source.get("description") == MANAGED_SOURCE_DESCRIPTION
+    return MANAGED_LEGACY if has_marker else AMBIGUOUS
+
+
+def _load_all_experiments() -> list[Experiment]:
+    """Load every persisted experiment WITHOUT reseeding (unlike list_experiments).
+
+    The reset must classify the workspace exactly as it is, so this deliberately
+    avoids ``ensure_seeded`` to keep classification honest about missing canonical.
+    """
+    out: list[Experiment] = []
+    for d in _experiment_dirs():
+        try:
+            state = json.loads((d / "experiment.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue  # dir removed by a concurrent reset between listing and read — benign
+        out.append(Experiment.from_state(state))
+    return out
+
+
+def _remove_experiment_dir(exp_dir: Path) -> None:
+    """Delete a single experiment directory after proving it is safe.
+
+    Path-safety guard: the target must resolve to a DIRECT child of
+    ``workspace_root()`` (never the root itself, never a nested or ``..`` escape).
+    Anything else raises rather than deleting.
+    """
+    root = workspace_root().resolve()
+    target = exp_dir.resolve()
+    if target == root or target.parent != root:
+        raise ValueError(
+            f"refusing to remove {target} — not a direct child of the workspace root"
+        )
+    # Tolerate an already-removed dir: two concurrent resets (e.g. two browser
+    # tabs) can each snapshot the same managed-legacy dir, and losing the race to
+    # delete it is benign — the dir being gone IS the desired end state. Only this
+    # specific benign case is swallowed; the path-safety guard above still runs
+    # first, and any other error still propagates.
+    try:
+        shutil.rmtree(target)
+    except FileNotFoundError:
+        pass
+
+
+def remove_experiment(exp: Experiment) -> None:
+    """Remove ONE experiment — only if it classifies as managed_legacy.
+
+    Double guard: it refuses to delete anything that is not managed_legacy
+    (canonical/ambiguous raise) and defers the filesystem delete to
+    ``_remove_experiment_dir``, which enforces the direct-child path check.
+    """
+    if classify_experiment(exp) != MANAGED_LEGACY:
+        raise ValueError(
+            f"refusing to remove non-managed-legacy experiment {exp.id!r}"
+        )
+    _remove_experiment_dir(exp.dir)
+
+
+def _canonical_state_counts() -> dict:
+    """Workflow-state distribution over the currently-present canonical experiments.
+
+    Reports the projected/actual post-reset distribution (canonical set only);
+    legacy/ambiguous records are excluded on purpose.
+    """
+    counts = {key: 0 for key in _STATE_KEYS}
+    for exp in _load_all_experiments():
+        if exp.id in CANONICAL_IDS:
+            counts[exp.status()] = counts.get(exp.status(), 0) + 1
+    return counts
+
+
+def reset_to_canonical_seed(*, dry_run: bool) -> dict:
+    """Classify the workspace and (unless ``dry_run``) restore the canonical seed.
+
+    Refuses (makes NO changes) if ANY ambiguous record exists. Otherwise, on
+    execute, removes ONLY the managed_legacy directories via ``remove_experiment``
+    (path-safe) and calls ``ensure_seeded`` to (re)create any missing canonical.
+    Idempotent. Returns typed, path-free data (no filesystem paths).
+    """
+    experiments = _load_all_experiments()
+    buckets: dict[str, list[Experiment]] = {
+        CANONICAL: [],
+        MANAGED_LEGACY: [],
+        AMBIGUOUS: [],
+    }
+    for exp in experiments:
+        buckets[classify_experiment(exp)].append(exp)
+
+    previous_count = len(experiments)
+    canonical = buckets[CANONICAL]
+    legacy = buckets[MANAGED_LEGACY]
+    ambiguous = buckets[AMBIGUOUS]
+    refused = bool(ambiguous)
+
+    removed = 0
+    if not dry_run and not refused:
+        for exp in legacy:
+            remove_experiment(exp)
+            removed += 1
+        ensure_seeded()
+
+    # final_count: nothing changes when refused; otherwise the reset guarantees
+    # exactly the five canonical records (legacy removed, missing canonical rebuilt).
+    final_count = previous_count if refused else len(CANONICAL_IDS)
+
+    return {
+        "refused": refused,
+        "previous_count": previous_count,
+        "canonical_count": len(canonical),
+        "legacy_count": len(legacy),
+        "ambiguous_count": len(ambiguous),
+        "removed_count": removed,
+        "final_count": final_count,
+        "canonical_ids": sorted(CANONICAL_IDS),
+        "removable": [{"id": e.id, "title": e.title} for e in legacy],
+        "state_counts": _canonical_state_counts(),
+    }
