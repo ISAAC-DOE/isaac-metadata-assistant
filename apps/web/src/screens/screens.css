@@ -142,6 +142,11 @@
   margin-top: 18px;
   padding: 18px 20px;
 }
+/* P25.7: the grounded assistant carries its own inner padding (.assistant),
+   so its card wrapper keeps only the border/background/radius chrome. */
+.placeholder-card.memory-assistant-card {
+  padding: 0;
+}
 
 /* ---- Project Memory status detail card (P24.3) ---------------------- */
 /* Real figures from GET /api/graph/status, as a labeled definition list —

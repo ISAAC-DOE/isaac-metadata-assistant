@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
+import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import {
@@ -11,6 +11,7 @@ import {
   graphStatusUnavailable,
   memoryFilesAvailable,
   memoryFilesUnavailable,
+  memoryConceptsAvailable,
   memoryConceptsUnavailable,
 } from '../test/apiFixtures';
 
@@ -205,5 +206,169 @@ describe('P24.10 · no fake search input on Project Memory', () => {
     await findByText('Memory: Unavailable');
     expect(container.querySelector('input[type="search"]')).toBeNull();
     expect(queryByRole('searchbox')).toBeNull();
+  });
+});
+
+/*
+ * P25.7 — the grounded assistant mounts on Project Memory, subordinate to the
+ * memory-status content and driven entirely by the ALREADY-fetched
+ * GET /api/graph/status response. It adds NO fetch, never validates, and carries
+ * the leads-to-verify framing. Available → the three approved chips; unavailable
+ * → the single replacement chip (never red). Guided-prompts-only (no textbox).
+ */
+describe('P25.7 · Project Memory grounded assistant — available', () => {
+  const availableRoutes = {
+    'GET /api/memory/concepts': { body: memoryConceptsAvailable },
+    'GET /api/graph/status': { body: graphStatusAvailable },
+    'GET /api/memory/files': { body: memoryFilesAvailable },
+  };
+
+  it('renders exactly the three approved chips in order, subordinate to the status card', async () => {
+    stubFetchRoutes(availableRoutes);
+    const { findByText, container } = renderScreen();
+    await findByText('Memory: Available');
+
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    expect(assistant).not.toBeNull();
+    const panel = within(assistant);
+
+    const chips = Array.from(assistant.querySelectorAll('.assistant-prompt')).map(
+      (b) => b.textContent?.trim() ?? '',
+    );
+    expect(chips).toEqual([
+      'Where do these leads come from?',
+      'Is project memory current?',
+      'What sources are included?',
+    ]);
+
+    // default reply is the provenance chip, answered from Project Memory
+    expect(panel.getByText(/Leads come from indexed project files and concepts/)).toBeInTheDocument();
+    expect(panel.getByText('answered from: Project Memory')).toBeInTheDocument();
+    // leads-to-verify framing, never a verdict
+    expect(assistant.textContent).toMatch(/leads to verify — never a validation verdict/);
+    expect(assistant.textContent).not.toMatch(/\b(PASS|FAIL)\b/);
+    expect(assistant.textContent).not.toMatch(/\b(in)?valid\b/i);
+
+    // the status card (truth) renders ABOVE the assistant (advisory) in the DOM
+    const statusChip = container.querySelector('.graph-chip') as HTMLElement;
+    expect(statusChip).not.toBeNull();
+    expect(statusChip.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('is guided-prompts-only — no textbox, no send button', async () => {
+    stubFetchRoutes(availableRoutes);
+    const { findByText, container, queryByRole } = renderScreen();
+    await findByText('Memory: Available');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    expect(within(assistant).queryByRole('textbox')).toBeNull();
+    expect(queryByRole('button', { name: /^send$/i })).toBeNull();
+    expect(assistant.textContent).toMatch(/Guided prompts only/i);
+  });
+
+  it('renders the memory: available head line but NO unavailable caveat (unchanged behavior)', async () => {
+    stubFetchRoutes(availableRoutes);
+    const { findByText, container } = renderScreen();
+    await findByText('Memory: Available');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    // available → the caveat slot is never rendered (dedupe guard only ever
+    // applies in the unavailable state); the head-line dot still shows.
+    expect(assistant.querySelector('.assistant-caveat')).toBeNull();
+    expect(assistant.textContent).not.toMatch(
+      /Project Memory is unavailable, so no memory-based answer is available here\./,
+    );
+    expect(assistant.querySelector('.assistant-memory')?.textContent).toMatch(/available/);
+  });
+
+  it('clicking a chip swaps in its live answer and issues NO further network request', async () => {
+    stubFetchRoutes(availableRoutes);
+    const { findByText, container } = renderScreen();
+    await findByText('Memory: Available');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+
+    const before = (globalThis.fetch as Mock).mock.calls.length;
+    fireEvent.click(panel.getByText('What sources are included?').closest('button')!);
+    // the scope chip echoes file_count (190), grounded, deterministic
+    expect(panel.getByText(/This snapshot indexes 190 project files/)).toBeInTheDocument();
+    const after = (globalThis.fetch as Mock).mock.calls.length;
+    expect(after).toBe(before); // clicking a guided chip is pure — never fetches
+  });
+
+  it('chips are keyboard-activatable native buttons', async () => {
+    stubFetchRoutes(availableRoutes);
+    const { findByText, container } = renderScreen();
+    await findByText('Memory: Available');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const chips = Array.from(assistant.querySelectorAll('.assistant-prompt'));
+    expect(chips.length).toBe(3);
+    for (const chip of chips) {
+      expect(chip.tagName).toBe('BUTTON');
+      (chip as HTMLButtonElement).focus();
+      expect(chip).toHaveFocus();
+    }
+  });
+
+  it('the existing Source Index and Concept Lookup cards still render alongside the assistant', async () => {
+    stubFetchRoutes(availableRoutes);
+    const { findByText, getByText } = renderScreen();
+    await findByText('Memory: Available');
+    expect(getByText('Source Index')).toBeInTheDocument();
+    expect(getByText('Concept Lookup')).toBeInTheDocument();
+  });
+});
+
+describe('P25.7 · Project Memory grounded assistant — unavailable & fetch states', () => {
+  it('unavailable → the single replacement chip only, no red/error semantics', async () => {
+    stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'GET /api/memory/files': { body: memoryFilesUnavailable },
+    });
+    const { findByText, container } = renderScreen();
+    await findByText('Memory: Unavailable');
+
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    expect(assistant).not.toBeNull();
+    const chips = Array.from(assistant.querySelectorAll('.assistant-prompt')).map(
+      (b) => b.textContent?.trim() ?? '',
+    );
+    expect(chips).toEqual(['Why is memory unavailable?']); // never four chips
+    // Dedupe regression (P25.7): the composed reply text is byte-identical to
+    // MEMORY_UNAVAILABLE_CAVEAT here, so the unavailable sentence must render
+    // EXACTLY ONCE (in `.assistant-reply`) — never stacked a second time in
+    // `.assistant-caveat`. Count occurrences, not merely ≥1 presence.
+    const occurrences = (
+      assistant.textContent?.match(
+        /Project Memory is unavailable, so no memory-based answer is available here\./g,
+      ) ?? []
+    ).length;
+    expect(occurrences).toBe(1);
+    expect(assistant.querySelector('.assistant-reply')?.textContent).toBe(
+      'Project Memory is unavailable, so no memory-based answer is available here.',
+    );
+    // …and the caveat slot is suppressed precisely because it would duplicate
+    // the reply (the `memory: unavailable` head line still shows below).
+    expect(assistant.querySelector('.assistant-caveat')).toBeNull();
+    expect(assistant.querySelector('.assistant-memory')?.textContent).toMatch(/unavailable/);
+    // approved wording — NOT the retired "source files directly" string
+    expect(assistant.textContent).not.toMatch(/answered from source files directly/i);
+    // no verdict / error styling classes
+    expect(assistant.querySelector('.verdict-pass')).toBeNull();
+    expect(assistant.querySelector('.verdict-fail')).toBeNull();
+  });
+
+  it('loading → the assistant panel is NOT shown', () => {
+    // fetch never resolves → the screen stays on the loading state
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    const { container, getByText } = renderScreen();
+    expect(getByText(/Checking memory status/i)).toBeInTheDocument();
+    expect(container.querySelector('.assistant')).toBeNull();
+  });
+
+  it('backend down → BackendDown, and the assistant panel is NOT shown', async () => {
+    stubFetchDown();
+    const { findByText, container } = renderScreen();
+    await findByText('Backend Not Running');
+    expect(container.querySelector('.assistant')).toBeNull();
   });
 });

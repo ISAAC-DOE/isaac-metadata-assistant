@@ -178,16 +178,12 @@ function LoadedCompletion({
           pending,
           selectedPendingId: currentItem?.id,
         })}
-        // This screen loads only {detail, pending} — it never consults the
-        // memory/graph plane. We pass `available` (not `unavailable`) so the
-        // panel renders NO caveat: `unavailable` would surface
-        // MEMORY_UNAVAILABLE_CAVEAT ("…answered from source files directly"),
-        // which spec §6 explicitly declares FALSE for the composer (it performs
-        // no source lookup) and defers to P25.7. `available` keeps the accurate
-        // `answered from:` provenance line as the only source claim and stays
-        // consistent with the other mounted contexts. Reworking the memory-line
-        // framing for memory-less contexts is P25.7's job, not this slice.
-        availability="available"
+        // P25.7: this screen loads only {detail, pending} — it never consults the
+        // memory/graph plane, so it makes NO memory-availability claim. We pass
+        // no `availability`, and the panel then renders neither the `memory:`
+        // head line nor any memory caveat. (Previously it passed
+        // availability="available" to dodge the spec-§6-flagged-false caveat;
+        // omitting it is the honest fix — the screen never fetched graph status.)
       />
     </aside>
   );

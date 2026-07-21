@@ -10,9 +10,8 @@
  * `hasVerdictLanguage()` over the composed output as a structural backstop.
  *
  * `review` (Record Workbench, P25.1), `export` (Ready to Export, P25.4),
- * `evidence` (Evidence Explorer, P25.5) and `complete` (Guided Completion,
- * P25.6) are wired. The remaining context (`memory`) is TYPE-declared in the
- * GroundingState union but throws here until its slice lands.
+ * `evidence` (Evidence Explorer, P25.5), `complete` (Guided Completion, P25.6)
+ * and `memory` (Project Memory, P25.7) are all wired.
  */
 
 import type {
@@ -21,7 +20,6 @@ import type {
   ComposerOutput,
   GroundedChip,
   GroundingState,
-  ScreenContext,
   SuggestedPrompt,
 } from './types';
 
@@ -461,12 +459,141 @@ const COMPLETE_FALLBACK: AssistantMessage = {
   answeredFrom: 'workflow',
 };
 
-// Per-context chip catalog + neutral fallback. Contexts not yet wired throw.
-function pickCatalog(context: ScreenContext): {
+// --- Project Memory (context: 'memory'; state = graph status only) -----------
+// P25.7. Grounds ENTIRELY in the already-fetched GET /api/graph/status response
+// the screen holds (Q: NO new fetch, no graph/graphify import). The memory plane
+// reports FOUR independent axes — availability (primary), integrity,
+// memory_policy, indexed_sources — and the assistant NEVER collapses them into
+// one universal freshness/valid/invalid word (§6). Every reply carries the
+// leads-to-verify framing and answers from `graph` (→ "Project Memory"); none
+// states a validation verdict, claims related records, similarity, audit,
+// export-readiness, scientific truth, or that a file was directly inspected.
+//
+// The catalog is chosen by `availability`: available → three chips
+// (provenance / freshness / scope); unavailable → a SINGLE replacement chip —
+// never four chips at once (§5.5).
+
+// The leads-to-verify tail shared by the provenance chip.
+const MEMORY_LEADS_TAIL =
+  'Project memory returns leads to verify — never a validation verdict.';
+
+export const MEMORY_CATALOG: GroundedChip[] = [
+  {
+    id: 'memory_provenance',
+    label: 'Where do these leads come from?',
+    source: 'graph',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'memory') return null;
+      const { provider } = state.graph;
+      // Drop the parenthetical when the provider is absent, empty, or the
+      // 'unavailable' sentinel — never render "(provider: unavailable)" or a
+      // dangling "(provider: )".
+      const providerClause =
+        isUsableStr(provider) && provider !== 'unavailable' ? ` (provider: ${provider})` : '';
+      return {
+        text: `Leads come from indexed project files and concepts${providerClause}. ${MEMORY_LEADS_TAIL}`,
+        answeredFrom: 'graph',
+      };
+    },
+  },
+  {
+    id: 'memory_freshness',
+    label: 'Is project memory current?',
+    source: 'graph',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'memory') return null;
+      const { integrity, memory_policy, indexed_sources } = state.graph;
+      // Base line echoes each axis value verbatim; the per-axis caveats (§6) are
+      // then appended as SEPARATE sentences (the single documented exception to
+      // the ≤1-caveat density rule). Faithful separation wins over collapsing:
+      // in the realistic available state at most policy + indexed contribute
+      // caveats (integrity is verified when available), so the reply stays ≤3
+      // sentences; a type-constructed all-degraded available state may add the
+      // integrity caveat too — still each axis stated precisely, never merged.
+      let text =
+        `Snapshot integrity: ${integrity}; policy consistency: ${memory_policy}; ` +
+        `indexed sources: ${indexed_sources}.`;
+
+      if (integrity === 'malformed' || integrity === 'unsupported' || integrity === 'unknown') {
+        text += ` Snapshot integrity is ${integrity} — the snapshot artifact itself could not be fully verified.`;
+      }
+
+      if (memory_policy === 'stale') {
+        text +=
+          ' The shipped sanitization/exclusion policy or its versions differ from what this snapshot was built under.';
+      } else if (memory_policy === 'unknown') {
+        text += ' Policy consistency: comparison could not be established.';
+      }
+
+      // `indexed_sources` is never `stale` at runtime — real content drift is
+      // CI-only (§6). We deliberately emit NOTHING for a `stale` value from live
+      // status; only `unknown` yields a caveat. (Documented-but-unreachable: a
+      // future runtime surfacing `stale` would use its own wording — never here.)
+      if (indexed_sources === 'unknown') {
+        text += ' Indexed-source status: comparison could not be established.';
+      }
+
+      return { text, answeredFrom: 'graph' };
+    },
+  },
+  {
+    id: 'included_scope',
+    label: 'What sources are included?',
+    source: 'graph',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'memory') return null;
+      // Grounds on `file_count` (the "Indexed files" figure the screen renders),
+      // NOT served_file_count (withheld by the screen) and NOT any invented
+      // count. Null → the honest unavailable-count string, never a fabrication.
+      const { file_count } = state.graph;
+      if (file_count == null) {
+        return {
+          text: 'The indexed-file count is unavailable for this snapshot.',
+          answeredFrom: 'graph',
+        };
+      }
+      return {
+        text:
+          `This snapshot indexes ${count(file_count, 'project file')}. That scope covers files ` +
+          'already in the snapshot; newly added indexable files require a Graphify refresh.',
+        answeredFrom: 'graph',
+      };
+    },
+  },
+];
+
+// The single replacement chip shown when `availability === 'unavailable'`. Uses
+// the approved frontend string (NOT raw `graph.note`, NOT the retired "answered
+// from source files directly"): the assistant performs no source lookup.
+export const MEMORY_UNAVAILABLE_CATALOG: GroundedChip[] = [
+  {
+    id: 'memory_unavailable',
+    label: 'Why is memory unavailable?',
+    source: 'graph',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'memory') return null;
+      return {
+        text: 'Project Memory is unavailable, so no memory-based answer is available here.',
+        answeredFrom: 'graph',
+      };
+    },
+  },
+];
+
+// Neutral fallback when every memory chip resolves to null (defensive — memory
+// chips always answer within the memory context).
+const MEMORY_FALLBACK: AssistantMessage = {
+  text: 'Pick a suggested question above.',
+  answeredFrom: 'graph',
+};
+
+// Per-context chip catalog + neutral fallback. The memory catalog additionally
+// depends on `availability`, so the picker reads the full state.
+function pickCatalog(state: GroundingState): {
   catalog: GroundedChip[];
   fallback: AssistantMessage;
 } {
-  switch (context) {
+  switch (state.context) {
     case 'review':
       return { catalog: REVIEW_CATALOG, fallback: REVIEW_FALLBACK };
     case 'export':
@@ -475,18 +602,27 @@ function pickCatalog(context: ScreenContext): {
       return { catalog: EVIDENCE_CATALOG, fallback: EVIDENCE_FALLBACK };
     case 'complete':
       return { catalog: COMPLETE_CATALOG, fallback: COMPLETE_FALLBACK };
-    default:
-      throw new Error('compose: context not implemented yet');
+    case 'memory':
+      // available → 3 chips; unavailable → the single replacement chip. Never
+      // both at once.
+      return state.graph.availability === 'available'
+        ? { catalog: MEMORY_CATALOG, fallback: MEMORY_FALLBACK }
+        : { catalog: MEMORY_UNAVAILABLE_CATALOG, fallback: MEMORY_FALLBACK };
+    default: {
+      // Exhaustiveness guard: every ScreenContext is handled above.
+      const _exhaustive: never = state;
+      throw new Error(`compose: unhandled context ${(_exhaustive as { context: string }).context}`);
+    }
   }
 }
 
 /**
  * Compose the reply + guided prompts for a screen from its already-fetched
- * state. `review` (P25.1), `export` (P25.4), `evidence` (P25.5) and `complete`
- * (P25.6) are wired; memory throws until its slice lands.
+ * state. `review` (P25.1), `export` (P25.4), `evidence` (P25.5), `complete`
+ * (P25.6) and `memory` (P25.7) are wired.
  */
 export function compose(state: GroundingState): ComposerOutput {
-  const { catalog, fallback } = pickCatalog(state.context);
+  const { catalog, fallback } = pickCatalog(state);
 
   const prompts: SuggestedPrompt[] = catalog.map((chip) => ({
     text: chip.label,

@@ -239,7 +239,7 @@ describe('compose — no-verdict guarantee across every composed string', () => 
   });
 });
 
-describe('compose — review + export + evidence + complete wired; memory still throws', () => {
+describe('compose — review + export + evidence + complete + memory all wired', () => {
   it('evidence is WIRED — compose does NOT throw for it (P25.5)', () => {
     const wired = {
       context: 'evidence',
@@ -263,9 +263,14 @@ describe('compose — review + export + evidence + complete wired; memory still 
     expect(() => compose(wired)).not.toThrow();
   });
 
-  it('throws for the context not yet implemented (memory)', () => {
-    const notWired = { context: 'memory' } as unknown as GroundingState;
-    expect(() => compose(notWired)).toThrow('compose: context not implemented yet');
+  it('memory is now WIRED — compose does NOT throw for it (P25.7)', () => {
+    // P25.7 wired the last context; memory no longer throws. It requires a graph
+    // status (chosen by availability), so pass the shape-faithful fixture.
+    const wired = {
+      context: 'memory',
+      graph: graphStatusUnavailable,
+    } as unknown as GroundingState;
+    expect(() => compose(wired)).not.toThrow();
   });
 });
 

@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
-import { ASSISTANT_SAMPLES, GUIDED_ONLY_NOTE, hasVerdictLanguage } from '../lib/assistant';
+import {
+  ASSISTANT_SAMPLES,
+  GUIDED_ONLY_NOTE,
+  MEMORY_UNAVAILABLE_CAVEAT,
+  hasVerdictLanguage,
+} from '../lib/assistant';
 
 describe('AssistantPanel is subordinate and never renders a verdict', () => {
   it('renders subordinate copy with a source label and a memory freshness dot', () => {
@@ -24,7 +29,7 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     expect(container.querySelector('.verdict-fail')).toBeNull();
   });
 
-  it('unavailable memory renders the quiet caveat; available memory renders none (unchanged by P25.2)', () => {
+  it('unavailable memory renders the approved quiet caveat; available memory renders none', () => {
     const unavailable = render(
       <AssistantPanel
         reply={ASSISTANT_SAMPLES.review.reply}
@@ -32,7 +37,11 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
         availability="unavailable"
       />,
     );
-    expect(unavailable.getByText(/answered from source files directly/i)).toBeInTheDocument();
+    // P25.7 replaced the FALSE "…answered from source files directly" wording:
+    // the assistant performs no source lookup. The approved caveat is the
+    // MEMORY_UNAVAILABLE_CAVEAT string, and the retired wording must be gone.
+    expect(unavailable.getByText(MEMORY_UNAVAILABLE_CAVEAT)).toBeInTheDocument();
+    expect(unavailable.queryByText(/answered from source files directly/i)).toBeNull();
     unavailable.unmount();
 
     const available = render(
@@ -42,7 +51,25 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
         availability="available"
       />,
     );
-    expect(available.queryByText(/answered from source files directly/i)).toBeNull();
+    expect(available.queryByText(MEMORY_UNAVAILABLE_CAVEAT)).toBeNull();
+  });
+
+  it('omitting `availability` renders NO memory head line and NO caveat (P25.7)', () => {
+    // A memory-less screen (e.g. Guided Completion) passes no availability, so
+    // the panel must make no memory claim at all — neither the `memory:` head
+    // line nor any caveat.
+    const { container, queryByText } = render(
+      <AssistantPanel
+        reply={ASSISTANT_SAMPLES.review.reply}
+        prompts={ASSISTANT_SAMPLES.review.prompts}
+      />,
+    );
+    expect(queryByText(/^memory:/i)).toBeNull();
+    expect(container.querySelector('.assistant-memory')).toBeNull();
+    expect(container.querySelector('.assistant-caveat')).toBeNull();
+    expect(queryByText(MEMORY_UNAVAILABLE_CAVEAT)).toBeNull();
+    // the accurate `answered from:` provenance line is still the source claim
+    expect(queryByText(/answered from:/)).toBeInTheDocument();
   });
 
   it('contains no PASS/FAIL strings', () => {

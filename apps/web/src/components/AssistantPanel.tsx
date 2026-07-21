@@ -14,8 +14,14 @@ import type { AssistantMessage, MemoryAvailability, SuggestedPrompt } from '../l
 interface AssistantPanelProps {
   reply: AssistantMessage;
   prompts: SuggestedPrompt[];
-  /** The primary memory-plane axis (P24.10): available vs unavailable. */
-  availability: MemoryAvailability;
+  /**
+   * The primary memory-plane axis (P24.10): available vs unavailable — passed
+   * ONLY by screens that actually fetch GET /api/graph/status. When OMITTED
+   * (P25.7), the screen makes no memory-availability claim: the panel renders
+   * neither the `memory:` head line nor the memory caveat, keeping the framing
+   * honest for memory-less contexts (e.g. Guided Completion).
+   */
+  availability?: MemoryAvailability;
   /** Optional subordinate note, e.g. "truth questions route to the CLI…". */
   note?: string;
 }
@@ -43,7 +49,19 @@ export function AssistantPanel({ reply, prompts, availability, note }: Assistant
     : active.text;
   const sourceDoc = guarded ? undefined : active.sourceDoc;
 
-  const caveat = availability === 'unavailable' ? MEMORY_UNAVAILABLE_CAVEAT : undefined;
+  // Only a screen that actually fetched graph status may make a memory claim.
+  // With `availability` omitted, we render NO memory head line and NO caveat.
+  // Dedupe guard: on the Project Memory unavailable mount the composed reply
+  // text is byte-identical to MEMORY_UNAVAILABLE_CAVEAT, so rendering both would
+  // print the same sentence twice, stacked (reads as broken copy). Suppress the
+  // caveat when it equals the reply actually shown. On every other mount the
+  // reply is a substantive answer and the caveat is a genuinely distinct
+  // footnote, so both still render; the `memory: unavailable` head line is
+  // unaffected either way.
+  const caveat =
+    availability === 'unavailable' && MEMORY_UNAVAILABLE_CAVEAT !== safeText
+      ? MEMORY_UNAVAILABLE_CAVEAT
+      : undefined;
 
   return (
     <section className="assistant" aria-label="Assistant (advisory)">
@@ -52,10 +70,12 @@ export function AssistantPanel({ reply, prompts, availability, note }: Assistant
           <MessageSquare size={15} strokeWidth={2} />
         </span>
         <span className="assistant-label">{LABELS.assistant}</span>
-        <span className="assistant-memory">
-          <span className="dot dot-memory" aria-hidden="true" />
-          memory: {availability}
-        </span>
+        {availability && (
+          <span className="assistant-memory">
+            <span className="dot dot-memory" aria-hidden="true" />
+            memory: {availability}
+          </span>
+        )}
       </div>
 
       <p className="assistant-reply" aria-live="polite">{safeText}</p>

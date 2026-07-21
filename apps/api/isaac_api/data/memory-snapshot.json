@@ -10380,11 +10380,11 @@
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
-        "sha256": "b5e7ba33c4135f071e7301a4681adfa4d2fdb4d1ae98295f5ff969c01033250f"
+        "sha256": "8c78ce8bfe28400a7b3a323901f4caa5f78a8bb7f98e205c457171882639afa6"
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "10e18b0f5d9754ebc6e9ea58969ab3b17259ca22bbdf950f68efe5c65c9202c4"
+        "sha256": "3e69e0b0c7f519fdc2986437e485dc31cec61077178ffdfcec8cba6b92e0f969"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10420,7 +10420,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-status.test.tsx",
-        "sha256": "8a5a044b8720f5bfc3ae6d2373e95a338bdac22ef510cfe172d9e5f60eccb1ad"
+        "sha256": "151f2493f6865b0bd937277b94823634f4c5bac2ac5f9e0c3c273c1c88a43877"
       },
       {
         "path": "apps/web/src/__tests__/modal-a11y.test.tsx",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "d7e770db3fd81f2d63f0bfa1fa955467f18904a3d68c53266fcbec5bae7e1472"
+        "sha256": "42f18db398c168f8ea1f6b57d9e8a9eacd9dceec9462e8115b0128bc2563ab97"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
-        "sha256": "4620c5133c9695267199cc2bfbf4a15dd541169562efb02543099accfad8e086"
+        "sha256": "d20f2d6769eef4cbeface9afa179b4b9ed0c311a43007934217da09b5707cb18"
       },
       {
         "path": "apps/web/src/lib/labels.ts",
@@ -10596,7 +10596,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "87711a0ee5006975440f9c1e889190742906910d6a6b792093ac569e185abfa7"
+        "sha256": "c5a5eb0f1e0e38d4fefbc87095138a4be18a3a7fdefc489e5b75c1ebd0c88687"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10604,7 +10604,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "6ba3ba3a8c2de107b4a45d2798c92f62878ebe7b22b0344f40313d163a62ecb6"
+        "sha256": "8be6ad6b06ec43d493f7c0e3301ededcf0931674eb706247c7c8108ea50a0ed2"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "af7015a0f85f9dc0e548b17c129df57143c389e3c7aadceac50a14475f32d1d8"
+    "served_manifest_fingerprint": "40b08fc95c5f7fbdebae49513d24f77883717e4c9c0a5023fdee754fa0dee1a5"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

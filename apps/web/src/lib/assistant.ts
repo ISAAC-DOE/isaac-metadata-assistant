@@ -53,10 +53,13 @@ export const ROUTE_TO_CLI_NOTE =
   'Truth questions route to the CLI — the assistant never renders a verdict.';
 
 // P24.10: the assistant surfaces the PRIMARY memory axis (availability). When
-// memory is unavailable there is no graph to draw leads from, so the caveat
-// says the reply came from source files directly — quiet, never an error.
+// memory is unavailable there is no graph to draw leads from.
+// P25.7: the prior wording ("…answered from source files directly") was flagged
+// FALSE by spec §6 — the assistant performs no such source lookup. The approved
+// caveat states plainly that no memory-based answer is available; quiet, never an
+// error. The export name is kept so every mounting screen picks it up.
 export const MEMORY_UNAVAILABLE_CAVEAT =
-  'Project memory is unavailable — answered from source files directly.';
+  'Project Memory is unavailable, so no memory-based answer is available here.';
 
 interface AssistantContext {
   reply: AssistantMessage;

@@ -1,13 +1,16 @@
 import './screens.css';
+import '../components/assistant.css';
 import { useCallback, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { GraphStatusChip } from '../components/GraphStatusChip';
+import { AssistantPanel } from '../components/AssistantPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Network, ChevronDown, ChevronRight } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
+import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import type {
   ApiGraphStatus,
@@ -62,6 +65,20 @@ export function ProjectMemory() {
           {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
           {graph.status === 'data' && <MemoryStatusDetail data={graph.data} />}
         </div>
+        {/* P25.7: the grounded assistant, subordinate to the memory-status card
+            above (truth/status first, advisory assistant below). It grounds
+            ENTIRELY in the already-fetched graph status — no new fetch — and is
+            shown only once that status has loaded (loading → not shown; error →
+            the screen-level BackendDown above). It carries a REAL memory
+            availability claim because this screen genuinely fetched it. */}
+        {graph.status === 'data' && (
+          <div className="card placeholder-card memory-assistant-card">
+            <AssistantPanel
+              {...compose({ context: 'memory', graph: graph.data })}
+              availability={graph.data.availability}
+            />
+          </div>
+        )}
         {/* Skip the second/third fetch when the screen already knows the backend
             is unreachable — one screen-level BackendDown, not three, mirroring
             how P24.3 owns that state for the whole page. */}

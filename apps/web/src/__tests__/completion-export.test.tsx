@@ -432,16 +432,19 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(panel.getByText(PENDING_SUMMARY)).toBeInTheDocument();
     expect(panel.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
 
-    // honesty: this memory-less screen mounts with availability="available", so
-    // the panel renders NO caveat. The spec §6-flagged-FALSE caveat ("…answered
-    // from source files directly") must be absent — the composer performs no
-    // source lookup, and reworking the memory-line framing for memory-less
-    // contexts is deferred to P25.7.
+    // honesty (P25.7): this memory-less screen never fetches graph status, so it
+    // passes NO `availability` and the panel makes NO memory claim — neither the
+    // `memory:` head line nor any caveat. The spec §6-flagged-FALSE wording
+    // ("…answered from source files directly") stays absent, as does the memory
+    // caveat entirely. (Previously the screen passed availability="available" to
+    // dodge the false caveat; omitting it is the honest fix.)
     expect(assistant.textContent).not.toContain('answered from source files directly');
     expect(assistant.textContent).not.toContain(MEMORY_UNAVAILABLE_CAVEAT);
     expect(assistant.querySelector('.assistant-caveat')).toBeNull();
+    expect(assistant.querySelector('.assistant-memory')).toBeNull();
+    expect(assistant.textContent).not.toContain('memory:');
     // the only source claim is the accurate `answered from:` provenance line
-    expect(assistant.textContent).toContain('memory: available');
+    expect(assistant.textContent).toContain('answered from: Workflow & Artifacts');
   });
 
   it('the explain chip echoes the ACTIVE question live, answered from Workflow & Artifacts', async () => {
