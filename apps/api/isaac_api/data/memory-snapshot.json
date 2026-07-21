@@ -10384,7 +10384,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "51a7b1c6508c0f786e9537a01ee3f1bf45414f2ee33a7c88ee768e6fd2ad45e5"
+        "sha256": "10e18b0f5d9754ebc6e9ea58969ab3b17259ca22bbdf950f68efe5c65c9202c4"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10596,7 +10596,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "3acaad576b1a11f26e52e989022fc702013f8191c1edecd4e816736fab031c12"
+        "sha256": "87711a0ee5006975440f9c1e889190742906910d6a6b792093ac569e185abfa7"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "7799e8d39697708ee21d3631d2963afcb1ac123559272b35ae5218b9488c8659"
+    "served_manifest_fingerprint": "af7015a0f85f9dc0e548b17c129df57143c389e3c7aadceac50a14475f32d1d8"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
