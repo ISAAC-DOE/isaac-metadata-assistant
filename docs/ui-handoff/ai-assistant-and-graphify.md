@@ -7,6 +7,19 @@
 > [`../claude-workflow.md`](../claude-workflow.md), [`../graphify-workflow.md`](../graphify-workflow.md),
 > [`../query-cookbook.md`](../query-cookbook.md), [`../query-safety-checklist.md`](../query-safety-checklist.md).
 
+> **Shipped status (2026-07, Phase 25).** The Project Memory assistant shipped with three grounded
+> chips — provenance ("Where do these leads come from?"), freshness ("Is project memory current?"),
+> and included scope ("What sources are included?"). Per **CQ-2** (P25.10), the leads-to-verify
+> framing — *"Project memory returns leads to verify — never a validation verdict."* — is now the
+> final sentence of **every** grounded memory answer (all three available chips: provenance,
+> freshness, scope); previously only the provenance chip carried it, so the freshness and scope
+> answers stated the axis/scope facts without the advisory frame. The unavailable-state replacement
+> chip, which states that no memory answer exists, is the sole intentional exception. The
+> shipped assistant answers only from the already-fetched graph status and does **not** inspect or
+> read source files at runtime (P25.9); the "answer from files directly" phrasing in the design prose
+> below is original handoff intent, superseded by the shipped grounding. This note records shipped
+> behavior; the design prose below is preserved unchanged as the original handoff.
+
 ## Roles, stated plainly
 
 - **The assistant is an optional helper, not a truth source.** It explains what happened, narrates

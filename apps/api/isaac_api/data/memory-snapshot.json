@@ -10784,7 +10784,7 @@
       },
       {
         "path": "docs/ui-handoff/ai-assistant-and-graphify.md",
-        "sha256": "3153a86afbc4fc407919655b105937a17b5092d71f0386347f3d9389b57dfebf"
+        "sha256": "2ee72903e2814cbd65a4cf2be94247e6136db6d9ea354fef72182c3fbc2a8b21"
       },
       {
         "path": "docs/ui-handoff/claude-design-brief.md",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "0695b116b18dcfe097083520d8fee401d817e27580842abffa423e8222658e98"
+    "served_manifest_fingerprint": "dbfef943c0bf4c8d657a65dd7d94a8ce73100953b3d1d20a3fde68886c01802a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

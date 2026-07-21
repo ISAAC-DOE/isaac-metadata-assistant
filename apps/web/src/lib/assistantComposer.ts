@@ -473,7 +473,7 @@ const COMPLETE_FALLBACK: AssistantMessage = {
 // (provenance / freshness / scope); unavailable → a SINGLE replacement chip —
 // never four chips at once (§5.5).
 
-// The leads-to-verify tail shared by the provenance chip.
+// The leads-to-verify tail shared by the provenance, freshness, and scope chips.
 const MEMORY_LEADS_TAIL =
   'Project memory returns leads to verify — never a validation verdict.';
 
@@ -533,6 +533,10 @@ export const MEMORY_CATALOG: GroundedChip[] = [
         text += ' Indexed-source status: comparison could not be established.';
       }
 
+      // Leads-to-verify framing is the FINAL sentence of every memory reply,
+      // appended after all per-axis caveats (CQ-2).
+      text += ` ${MEMORY_LEADS_TAIL}`;
+
       return { text, answeredFrom: 'graph' };
     },
   },
@@ -548,14 +552,14 @@ export const MEMORY_CATALOG: GroundedChip[] = [
       const { file_count } = state.graph;
       if (file_count == null) {
         return {
-          text: 'The indexed-file count is unavailable for this snapshot.',
+          text: `The indexed-file count is unavailable for this snapshot. ${MEMORY_LEADS_TAIL}`,
           answeredFrom: 'graph',
         };
       }
       return {
         text:
           `This snapshot indexes ${count(file_count, 'project file')}. That scope covers files ` +
-          'already in the snapshot; newly added indexable files require a Graphify refresh.',
+          `already in the snapshot; newly added indexable files require a Graphify refresh. ${MEMORY_LEADS_TAIL}`,
         answeredFrom: 'graph',
       };
     },

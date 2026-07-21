@@ -100,7 +100,8 @@ describe('compose({context:"memory"}) — available, all four axes healthy', () 
   it('the freshness chip states all three axes on one clean line (no caveats when healthy)', () => {
     const freshness = out.prompts[1].answer!;
     expect(freshness.text).toBe(
-      'Snapshot integrity: verified; policy consistency: current; indexed sources: current.',
+      'Snapshot integrity: verified; policy consistency: current; indexed sources: current. ' +
+        'Project memory returns leads to verify — never a validation verdict.',
     );
   });
 
@@ -108,7 +109,8 @@ describe('compose({context:"memory"}) — available, all four axes healthy', () 
     const scope = out.prompts[2].answer!;
     expect(scope.text).toBe(
       'This snapshot indexes 190 project files. That scope covers files already in the snapshot; ' +
-        'newly added indexable files require a Graphify refresh.',
+        'newly added indexable files require a Graphify refresh. ' +
+        'Project memory returns leads to verify — never a validation verdict.',
     );
   });
 });
@@ -155,6 +157,7 @@ describe('memory_freshness — per-axis caveats appended SEPARATELY (§6)', () =
     'The shipped sanitization/exclusion policy or its versions differ from what this snapshot was built under.';
   const POLICY_UNKNOWN = 'Policy consistency: comparison could not be established.';
   const INDEXED_UNKNOWN = 'Indexed-source status: comparison could not be established.';
+  const TAIL = 'Project memory returns leads to verify — never a validation verdict.';
 
   it.each(['malformed', 'unsupported', 'unknown'] as const)(
     'integrity %s → integrity caveat only, policy/indexed clean',
@@ -162,7 +165,9 @@ describe('memory_freshness — per-axis caveats appended SEPARATELY (§6)', () =
       const text = freshness({ integrity, memory_policy: 'current', indexed_sources: 'current' });
       expect(text).toBe(
         `Snapshot integrity: ${integrity}; policy consistency: current; indexed sources: current. ` +
-          INTEGRITY_CAVEAT(integrity),
+          INTEGRITY_CAVEAT(integrity) +
+          ' ' +
+          TAIL,
       );
       expect(text).not.toContain(POLICY_STALE);
       expect(text).not.toContain(POLICY_UNKNOWN);
@@ -173,7 +178,7 @@ describe('memory_freshness — per-axis caveats appended SEPARATELY (§6)', () =
   it('integrity verified → NO integrity caveat', () => {
     const text = freshness({ integrity: 'verified', memory_policy: 'current', indexed_sources: 'current' });
     expect(text).toBe(
-      'Snapshot integrity: verified; policy consistency: current; indexed sources: current.',
+      'Snapshot integrity: verified; policy consistency: current; indexed sources: current. ' + TAIL,
     );
     expect(text).not.toContain('could not be fully verified');
   });
@@ -181,21 +186,30 @@ describe('memory_freshness — per-axis caveats appended SEPARATELY (§6)', () =
   it('memory_policy stale → the exact policy-drift caveat, stated separately', () => {
     const text = freshness({ integrity: 'verified', memory_policy: 'stale', indexed_sources: 'current' });
     expect(text).toBe(
-      'Snapshot integrity: verified; policy consistency: stale; indexed sources: current. ' + POLICY_STALE,
+      'Snapshot integrity: verified; policy consistency: stale; indexed sources: current. ' +
+        POLICY_STALE +
+        ' ' +
+        TAIL,
     );
   });
 
   it('memory_policy unknown → the policy comparison-could-not-be-established caveat', () => {
     const text = freshness({ integrity: 'verified', memory_policy: 'unknown', indexed_sources: 'current' });
     expect(text).toBe(
-      'Snapshot integrity: verified; policy consistency: unknown; indexed sources: current. ' + POLICY_UNKNOWN,
+      'Snapshot integrity: verified; policy consistency: unknown; indexed sources: current. ' +
+        POLICY_UNKNOWN +
+        ' ' +
+        TAIL,
     );
   });
 
   it('indexed_sources unknown → the indexed-source comparison caveat', () => {
     const text = freshness({ integrity: 'verified', memory_policy: 'current', indexed_sources: 'unknown' });
     expect(text).toBe(
-      'Snapshot integrity: verified; policy consistency: current; indexed sources: unknown. ' + INDEXED_UNKNOWN,
+      'Snapshot integrity: verified; policy consistency: current; indexed sources: unknown. ' +
+        INDEXED_UNKNOWN +
+        ' ' +
+        TAIL,
     );
   });
 
@@ -205,7 +219,7 @@ describe('memory_freshness — per-axis caveats appended SEPARATELY (§6)', () =
     // wording. The base line still echoes the axis value honestly.
     const text = freshness({ integrity: 'verified', memory_policy: 'current', indexed_sources: 'stale' });
     expect(text).toBe(
-      'Snapshot integrity: verified; policy consistency: current; indexed sources: stale.',
+      'Snapshot integrity: verified; policy consistency: current; indexed sources: stale. ' + TAIL,
     );
     expect(text).not.toContain('no longer match the versions verified');
     expect(text).not.toContain(INDEXED_UNKNOWN);
@@ -227,7 +241,9 @@ describe('memory_freshness — per-axis caveats appended SEPARATELY (§6)', () =
         ' ' +
         POLICY_UNKNOWN +
         ' ' +
-        INDEXED_UNKNOWN,
+        INDEXED_UNKNOWN +
+        ' ' +
+        TAIL,
     );
     // each axis caveat is present and distinct (four sentences total)
     expect(text).toContain(INTEGRITY_CAVEAT('unknown'));
@@ -245,7 +261,9 @@ describe('memory_freshness — per-axis caveats appended SEPARATELY (§6)', () =
       'Snapshot integrity: verified; policy consistency: stale; indexed sources: unknown. ' +
         POLICY_STALE +
         ' ' +
-        INDEXED_UNKNOWN,
+        INDEXED_UNKNOWN +
+        ' ' +
+        TAIL,
     );
     // never collapsed into a single universal freshness verdict word
     expect(text).not.toMatch(/\b(stale overall|unhealthy|out of date overall)\b/i);
@@ -258,17 +276,21 @@ describe('included_scope — grounds on file_count only (never served_file_count
   const scope = (graph: Partial<ApiGraphStatus>) =>
     compose(memoryState(graph)).prompts[2].answer!.text;
 
+  const TAIL = 'Project memory returns leads to verify — never a validation verdict.';
+
   it('pluralizes correctly at n=2', () => {
     expect(scope({ file_count: 2 })).toBe(
       'This snapshot indexes 2 project files. That scope covers files already in the snapshot; ' +
-        'newly added indexable files require a Graphify refresh.',
+        'newly added indexable files require a Graphify refresh. ' +
+        TAIL,
     );
   });
 
   it('uses the singular at n=1', () => {
     expect(scope({ file_count: 1 })).toBe(
       'This snapshot indexes 1 project file. That scope covers files already in the snapshot; ' +
-        'newly added indexable files require a Graphify refresh.',
+        'newly added indexable files require a Graphify refresh. ' +
+        TAIL,
     );
     // no raw pluralization placeholder survives
     expect(scope({ file_count: 1 })).not.toMatch(/file\(s\)/);
@@ -276,7 +298,7 @@ describe('included_scope — grounds on file_count only (never served_file_count
 
   it('file_count null → the honest unavailable-count string (never a fabricated number)', () => {
     const text = scope({ file_count: null });
-    expect(text).toBe('The indexed-file count is unavailable for this snapshot.');
+    expect(text).toBe('The indexed-file count is unavailable for this snapshot. ' + TAIL);
     expect(text).not.toMatch(/undefined|null|NaN/);
   });
 
@@ -310,6 +332,43 @@ describe('compose({context:"memory"}) — unavailable → single replacement chi
     expect(out.reply.text).not.toMatch(VERDICT);
     expect(out.reply.text).not.toMatch(VALID_WORD);
     expect(out.reply.text).not.toMatch(/\berror\b/i);
+  });
+});
+
+describe('CQ-2 — leads-to-verify framing on every rendered memory chip', () => {
+  // The invariant documented in this file's header (lines 17-19): EVERY memory
+  // reply carries the leads-to-verify framing. Asserted over RENDERED chip text
+  // (never a source-string search). The provenance chip already satisfies this;
+  // these assertions pin freshness (prompts[1]) and scope (prompts[2]) too.
+  const TAIL = 'Project memory returns leads to verify — never a validation verdict.';
+
+  it('healthy state: freshness (prompts[1]) ends with the leads-to-verify tail', () => {
+    const out = compose(memoryState());
+    expect(out.prompts[1].answer!.text.endsWith(TAIL)).toBe(true);
+  });
+
+  it('healthy state: scope (prompts[2]) ends with the leads-to-verify tail', () => {
+    const out = compose(memoryState());
+    expect(out.prompts[2].answer!.text.endsWith(TAIL)).toBe(true);
+  });
+
+  it('degraded freshness (memory_policy unknown): tail comes AFTER the per-axis caveat', () => {
+    const text = compose(memoryState({ memory_policy: 'unknown' })).prompts[1].answer!.text;
+    expect(text.endsWith(TAIL)).toBe(true);
+    // the caveat precedes the tail (tail is the FINAL sentence)
+    const caveat = 'Policy consistency: comparison could not be established.';
+    expect(text.indexOf(caveat)).toBeGreaterThan(-1);
+    expect(text.indexOf(caveat)).toBeLessThan(text.indexOf(TAIL));
+  });
+
+  it('unavailable-count scope (file_count null): scope text ends with the tail', () => {
+    const text = compose(memoryState({ file_count: null })).prompts[2].answer!.text;
+    expect(text.endsWith(TAIL)).toBe(true);
+  });
+
+  it('negative guard: the memory_unavailable chip does NOT carry the leads-to-verify phrase', () => {
+    const out = compose({ context: 'memory', graph: graphStatusUnavailable as ApiGraphStatus });
+    expect(out.prompts[0].answer!.text).not.toContain(TAIL);
   });
 });
 
