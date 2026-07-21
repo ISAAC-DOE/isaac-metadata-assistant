@@ -12,9 +12,15 @@ independent Opus adversarial review APPROVE). P26.0b RELEASED 2026-07-21 (guarde
 `POST /api/demo/reset` + Reset Demo control; commit `68fd910`, CI green run `29872521920`, deployed;
 hosted QA GREEN — preview 13→ canonical 5 / legacy 8 / ambiguous 0, execute → exactly the five
 (needs_attention 2 / in_review 1 / ready_to_export 1 / done 1), Run Demo ×3 held at 5). CQ-1 (demo/run
-unbounded accumulation) CLOSED by P26.0a (prevention) + P26.0b (cleanup), verified live. NEXT: P26.1
-(workspace search core). See §20 for per-slice status.
-Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a + P26.0b 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+unbounded accumulation) CLOSED by P26.0a (prevention) + P26.0b (cleanup), verified live.
+P26.1 RELEASED 2026-07-21 (commit `173780f`, CI green run `29876044687`, deployed): pure deterministic
+`search.workspace_search(query, experiments, *, limit, offset)` — NFC/casefold/whitespace normalization,
+token-AND, four-tier ranking (exact>prefix>token>substring), cap 50 / page 10 / min-len 2, snippet +
+offsets + reason, six truth-plane result kinds; NO route, NO verdict, NO truth-core import, NO filesystem
+traversal, defensive path-leak sanitizer; 53 behavior tests, backend suite 589 green, snapshot no drift,
+R4.3 preflight PASS; two independent Opus reviews (APPROVE-WITH-MINORS → the Important path-leak-
+enforcement gap + minors fixed). NEXT: P26.2 (MemoryReader.search()). See §20 for per-slice status.
+Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a + P26.0b + P26.1 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
          (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
@@ -509,7 +515,33 @@ is isolated per arc decision #10.
   constants today — acceptable only because the prototype is synthetic-only by construction; the real
   defense is provenance → ambiguous → refuse).
 
-### P26.1 — Workspace search core (no route)
+### P26.1 — Workspace search core (no route) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `173780f`, CI green run `29876044687`, Railway+Vercel healthy at HEAD.
+> Added `apps/api/isaac_api/search.py`: pure, deterministic `workspace_search(query, experiments, *,
+> limit, offset) -> WorkspaceSearchResults` (frozen dataclasses `MatchInfo`/`WorkspaceResult`/
+> `WorkspaceSearchResults`). Normalization = NFC + casefold + whitespace-collapse, 256-char input cap,
+> min length 2 (`query_too_short`). Token-AND matching over four tiers **exact > prefix > token >
+> substring**; stable TOTAL-order rank `(tier, facet_priority, created_utc, id, match.field)`; result cap
+> **50**, default page **10**, `limit`/`offset` clamped, `total = len(truncated)`; per-hit `snippet` +
+> structured `offsets` + human `reason` + `tier`. Six navigable truth-plane kinds — `experiment`,
+> `record_id`, `draft_field` (incl. pending blockers → `/complete`), `evidence`, `artifact`, `source_ref`
+> — each `plane:"truth"`, `source:"workspace-store"`, `navigate_to:/record/<id>[/complete|/evidence|
+> /export]`. **The signature intentionally OMITS the conceptual `loaders` param**: all searchable content
+> is in-memory on the `Experiment`/draft, so no loader is required (directive §9 "where required"); the
+> core is pure over the hardened `list_experiments()` snapshot and does ZERO filesystem access, so a
+> concurrent reset can never make search raise (P26.0b read-race contract). **Governance**: no verdict
+> keys/language, no truth-core import, stdlib-only (`re`/`unicodedata`); a defensive `_is_pathlike`
+> sanitizer drops path-like aspects AND labels so `examples/**`, absolute, `/tmp`, and workspace-internal
+> paths never surface even on dirty draft content. Lead dedup by `(experiment, kind, label, snippet,
+> reason, tier)` collapses byte-identical leads while keeping distinct-label same-value fields.
+> **Files**: `apps/api/isaac_api/search.py` (new), `apps/api/tests/test_search.py` (new, 53 behavior
+> tests). No route, no frontend, no `memory.py`, no truth-core edit. **Verified**: full backend suite 589
+> green, snapshot no drift, committed-snapshot gate 17, R4.3 full preflight PASS. **Review**: independent
+> Opus adversarial review → APPROVE-WITH-MINORS; the one Important (docstring/plan no-leak guarantee not
+> enforced + the plan-§15 dirty-data test missing) FIXED (sanitizer + 5 adversarial governance tests);
+> minors (dedup fidelity for same-value distinct fields; docstring plane-label + ranking-premise
+> precision) fixed. **Hosted QA**: backend-library-only slice not wired into any route → hosted browser QA
+> not independently meaningful; regression check = Railway/Vercel healthy at `173780f`, no visible change.
 - **Objective**: `apps/api/isaac_api/search.py` — pure `workspace_search(query, experiments, loaders,
   limit, offset)` returning typed workspace results; normalization, token-AND matching, ranking,
   caps, pagination, snippet + reason. TDD.
