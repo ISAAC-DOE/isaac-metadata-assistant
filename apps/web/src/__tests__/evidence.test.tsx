@@ -3,7 +3,7 @@ import { render, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import { GraphStatusChip } from '../components/GraphStatusChip';
-import { evidenceBundleRoutes, stubFetchRoutes } from '../test/apiFixtures';
+import { evidenceBundleRoutes, stubFetchDown, stubFetchRoutes } from '../test/apiFixtures';
 
 function renderAt(path: string) {
   return render(
@@ -46,9 +46,9 @@ describe('S5 · Evidence & File Preview (live)', () => {
       }),
     ).toBeInTheDocument();
 
-    // per the S5 screen spec there is NO dedicated assistant panel here —
-    // the provenance copy carries the explanation (design authority, D1 review)
-    expect(container.querySelector('.assistant')).toBeNull();
+    // P25.5: the Evidence context now mounts the grounded assistant (Phase 25
+    // plan §20). The panel is subordinate — truth (trail + preview) renders first.
+    expect(container.querySelector('.assistant')).not.toBeNull();
   });
 
   it('selecting an entry drives the preview and highlights the cited line', async () => {
@@ -127,6 +127,86 @@ describe('S5 · Evidence & File Preview (live)', () => {
     // the /graph/status chip (unavailable in this fixture) degrades quietly
     expect(getByText('Memory: Unavailable')).toBeInTheDocument();
     expect(getByText('memory plane')).toBeInTheDocument();
+  });
+});
+
+describe('S5 · grounded assistant (P25.5) — subordinate, guided-only, LLM-free', () => {
+  it('mounts the assistant with exactly the three approved evidence chips', async () => {
+    stubFetchRoutes(evidenceBundleRoutes('demo'));
+    const { container, findByText, getByText } = renderAt('/record/demo/evidence');
+
+    await findByText('Direct Fields');
+    const panel = container.querySelector('.assistant');
+    expect(panel).not.toBeNull();
+
+    // exactly the three approved chip labels render as prompt buttons
+    expect(getByText('Why multiple evidence entries?')).toBeInTheDocument();
+    expect(getByText('What is the evidence sidecar?')).toBeInTheDocument();
+    expect(getByText('Where are the exported artifacts?')).toBeInTheDocument();
+    expect(panel!.querySelectorAll('.assistant-prompt').length).toBe(3);
+  });
+
+  it('is guided-prompts-only — the note is present and there is NO textbox/send button', async () => {
+    stubFetchRoutes(evidenceBundleRoutes('demo'));
+    const { container, findByText, getByText, queryByRole } = renderAt('/record/demo/evidence');
+
+    await findByText('Direct Fields');
+    expect(
+      getByText('Guided prompts only — the assistant answers the suggested questions above.'),
+    ).toBeInTheDocument();
+    // no free-text affordance at all
+    expect(container.querySelector('.assistant textarea')).toBeNull();
+    expect(container.querySelector('.assistant input')).toBeNull();
+    expect(queryByRole('textbox')).toBeNull();
+    expect(queryByRole('button', { name: /send/i })).toBeNull();
+  });
+
+  it('selecting a different trail entry updates the multiplicity reply to that path', async () => {
+    stubFetchRoutes(evidenceBundleRoutes('demo'));
+    const { container, findByText, getByText } = renderAt('/record/demo/evidence');
+
+    await findByText('Direct Fields');
+    // default selection = first entry (system.technique, a single spreadsheet entry)
+    const reply = () => container.querySelector('.assistant-reply')!.textContent!;
+    expect(reply()).toContain('system.technique has 1 evidence entry: spreadsheet.');
+
+    // select the asset (2 entries: file_listing + user_confirmation)
+    fireEvent.click(getByText('assets:processing_notebook'));
+    expect(reply()).toContain('assets:processing_notebook has 2 evidence entries');
+    expect(reply()).toContain('Multiple entries can provide separate support');
+    // provenance must NOT leak into the assistant copy
+    expect(reply()).not.toContain('raw_scan_listing.txt');
+    expect(reply()).not.toContain('xanes_reduction_v2.ipynb');
+  });
+
+  it('clicking a chip issues NO new network request (pure, LLM-free)', async () => {
+    const calls = stubFetchRoutes(evidenceBundleRoutes('demo'));
+    const { container, findByText, getByText } = renderAt('/record/demo/evidence');
+
+    await findByText('Direct Fields');
+    const before = calls.length;
+
+    fireEvent.click(getByText('What is the evidence sidecar?'));
+    // the sidecar answer swaps in with no fetch
+    expect(container.querySelector('.assistant-reply')!.textContent).toContain(
+      'assistant convention, not part of the official ISAAC schema',
+    );
+    expect(calls.length).toBe(before);
+  });
+
+  it('does NOT render an assistant panel in the loading state', () => {
+    // never-resolving fetch keeps the screen in its loading state
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    const { container, getByRole } = renderAt('/record/demo/evidence');
+    expect(getByRole('status')).toBeInTheDocument(); // LoadingPanel
+    expect(container.querySelector('.assistant')).toBeNull();
+  });
+
+  it('does NOT render an assistant panel when the backend is down', async () => {
+    stubFetchDown();
+    const { container, findByText } = renderAt('/record/demo/evidence');
+    await findByText('Backend Not Running');
+    expect(container.querySelector('.assistant')).toBeNull();
   });
 });
 

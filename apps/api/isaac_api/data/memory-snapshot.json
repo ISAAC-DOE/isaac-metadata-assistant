@@ -10388,7 +10388,7 @@
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
-        "sha256": "374cabd3d3cc89024cd248a781d58d6e37043234d53e67569c67e7e23824a449"
+        "sha256": "24bef7a5968418a29157d841310d046c058dcb279f98e619c1d5d74e4ae82d16"
       },
       {
         "path": "apps/web/src/__tests__/help-and-honesty.test.tsx",
@@ -10580,7 +10580,7 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "c858f252743fdb744152a959e93d099c113d6f30086dc28682ae02e1b06f3711"
+        "sha256": "e35eacca8a5ec4646c7acd352b94e1d8edb34671d1b574ea1df678d8ec87c2cf"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "548344886d013dd64f736cf3450901f0b2890ad3429d6330c90ca12916bb4161"
+    "served_manifest_fingerprint": "b340ea727bb775039696dc2db53b8ee3356b49a6a2f56341aae1d53dfde108ea"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

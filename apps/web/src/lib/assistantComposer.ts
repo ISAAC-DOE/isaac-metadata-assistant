@@ -9,8 +9,10 @@
  * Truth questions route to the deterministic surfaces. The panel still runs
  * `hasVerdictLanguage()` over the composed output as a structural backstop.
  *
- * P25.1 wires only the `review` context (Record Workbench). Other contexts are
- * TYPE-declared in the GroundingState union but throw here until later slices.
+ * `review` (Record Workbench, P25.1), `export` (Ready to Export, P25.4) and
+ * `evidence` (Evidence Explorer, P25.5) are wired. The remaining contexts
+ * (`complete` / `memory`) are TYPE-declared in the GroundingState union but
+ * throw here until their slices land.
  */
 
 import type {
@@ -245,6 +247,121 @@ const EXPORT_FALLBACK: AssistantMessage = {
   answeredFrom: 'audit',
 };
 
+// --- Evidence Explorer (context: 'evidence'; state = getEvidenceBundle) ------
+// Three chips explain the evidence trail without asserting any provenance the
+// screen hasn't already shown: the multiplicity chip echoes ONLY the count +
+// source types of the selected field (never a source_file / locator / quote),
+// the sidecar chip is a static convention statement, and the artifacts chip
+// echoes only path strings that are actually present. No chip states a verdict.
+
+// Shared verbatim by the multiplicity chip so the "select a field" guidance is
+// identical whether nothing is selected or the selection isn't in the bundle.
+const SELECT_A_FIELD: AssistantMessage = {
+  text: 'Select a field in the Evidence Trail to see its supporting entries.',
+  answeredFrom: 'files',
+};
+
+export const EVIDENCE_CATALOG: GroundedChip[] = [
+  {
+    id: 'evidence_multiplicity',
+    label: 'Why multiple evidence entries?',
+    source: 'files',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'evidence') return null;
+      const { selectedPath } = state;
+      if (!isUsableStr(selectedPath)) return SELECT_A_FIELD;
+      const entry = state.bundle.evidence.find((e) => e.path === selectedPath);
+      if (!entry) return SELECT_A_FIELD;
+
+      const entries = entry.evidence ?? [];
+      if (entries.length === 0) {
+        return {
+          text: `${entry.path} has no separate evidence entries recorded.`,
+          answeredFrom: 'files',
+        };
+      }
+      // Display tokens are source_type ONLY — never source_file / locator /
+      // quote — so the chip can't claim any file-level provenance. source_type
+      // is guarded defensively (like every other interpolated value) so an
+      // unusable one becomes 'unspecified source' rather than leaking; the shown
+      // count and the listed items therefore always agree (the 6b invariant).
+      const tokens = entries.map((e) =>
+        isUsableStr(e.source_type) ? e.source_type : 'unspecified source',
+      );
+      if (entries.length === 1) {
+        return {
+          text: `${entry.path} has ${count(1, 'evidence entry', 'evidence entries')}: ${tokens[0]}.`,
+          answeredFrom: 'files',
+        };
+      }
+      return {
+        text: `${entry.path} has ${count(entries.length, 'evidence entry', 'evidence entries')}: ${joinCapped(tokens)}. Multiple entries can provide separate support for the same field.`,
+        answeredFrom: 'files',
+      };
+    },
+  },
+  {
+    id: 'sidecar_convention',
+    label: 'What is the evidence sidecar?',
+    source: 'files',
+    // Static convention statement — never null within the evidence context. It
+    // is deliberately NOT an official ISAAC standard, and says nothing about
+    // whether the record validates.
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'evidence') return null;
+      return {
+        text:
+          'The evidence sidecar is an ISAAC assistant convention, not part of the official ISAAC ' +
+          'schema. It preserves field-level evidence that the official record has no dedicated ' +
+          'place to store.',
+        answeredFrom: 'files',
+      };
+    },
+  },
+  {
+    id: 'artifact_paths',
+    label: 'Where are the exported artifacts?',
+    source: 'workflow',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'evidence') return null;
+      const { record_path, sidecar_path } = state.bundle.artifacts;
+      // isUsableStr uniformly handles null / undefined / empty-string, so a path
+      // is echoed ONLY when it is a present, non-empty string.
+      const hasRecord = isUsableStr(record_path);
+      const hasSidecar = isUsableStr(sidecar_path);
+      if (hasRecord && hasSidecar) {
+        return {
+          text: `Exported: record ${record_path} and its evidence sidecar ${sidecar_path}.`,
+          answeredFrom: 'workflow',
+        };
+      }
+      if (hasRecord) {
+        return {
+          text: `Exported: record ${record_path}. No evidence sidecar path is recorded.`,
+          answeredFrom: 'workflow',
+        };
+      }
+      if (hasSidecar) {
+        return {
+          text: `Exported: evidence sidecar ${sidecar_path}. No record path is recorded.`,
+          answeredFrom: 'workflow',
+        };
+      }
+      return {
+        text: 'Not exported yet — export writes the record plus its evidence sidecar.',
+        answeredFrom: 'workflow',
+      };
+    },
+  },
+];
+
+// Neutral fallback when every evidence chip resolves to null (defensive — the
+// sidecar chip always answers within the evidence context).
+const EVIDENCE_FALLBACK: AssistantMessage = {
+  text: 'Pick a suggested question above.',
+  answeredFrom: 'files',
+};
+
 // Per-context chip catalog + neutral fallback. Contexts not yet wired throw.
 function pickCatalog(context: ScreenContext): {
   catalog: GroundedChip[];
@@ -255,6 +372,8 @@ function pickCatalog(context: ScreenContext): {
       return { catalog: REVIEW_CATALOG, fallback: REVIEW_FALLBACK };
     case 'export':
       return { catalog: EXPORT_CATALOG, fallback: EXPORT_FALLBACK };
+    case 'evidence':
+      return { catalog: EVIDENCE_CATALOG, fallback: EVIDENCE_FALLBACK };
     default:
       throw new Error('compose: context not implemented yet');
   }
@@ -262,8 +381,8 @@ function pickCatalog(context: ScreenContext): {
 
 /**
  * Compose the reply + guided prompts for a screen from its already-fetched
- * state. `review` (P25.1) and `export` (P25.4) are wired; evidence / complete /
- * memory throw until their slices land.
+ * state. `review` (P25.1), `export` (P25.4) and `evidence` (P25.5) are wired;
+ * complete / memory throw until their slices land.
  */
 export function compose(state: GroundingState): ComposerOutput {
   const { catalog, fallback } = pickCatalog(state.context);

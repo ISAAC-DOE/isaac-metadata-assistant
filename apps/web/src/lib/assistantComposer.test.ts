@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { compose, count, EXPORT_CATALOG, REVIEW_CATALOG } from './assistantComposer';
+import {
+  compose,
+  count,
+  EVIDENCE_CATALOG,
+  EXPORT_CATALOG,
+  REVIEW_CATALOG,
+} from './assistantComposer';
 import { SOURCE_LABELS } from './assistant';
 import {
   experimentDetail,
@@ -12,12 +18,15 @@ import {
   auditExported,
   warningsDryRun,
   artifactsNull,
+  artifactsExported,
   evidenceResponse,
+  evidenceExported,
   graphStatusUnavailable,
 } from '../test/apiFixtures';
 import type {
   ApiEvidenceEntry,
   ApiPendingItem,
+  EvidenceBundle,
   ExportReadinessBundle,
   GroundingState,
   RecordBundle,
@@ -229,9 +238,23 @@ describe('compose — no-verdict guarantee across every composed string', () => 
   });
 });
 
-describe('compose — review + export wired; other contexts still throw', () => {
-  it('throws for contexts not yet implemented (evidence / complete / memory)', () => {
-    for (const context of ['evidence', 'complete', 'memory'] as const) {
+describe('compose — review + export + evidence wired; other contexts still throw', () => {
+  it('evidence is now WIRED — compose does NOT throw for it (P25.5)', () => {
+    const wired = {
+      context: 'evidence',
+      bundle: {
+        detail: experimentDetail,
+        evidence: evidenceExported.evidence,
+        artifacts: artifactsNull,
+        graph: graphStatusUnavailable,
+        sourcePreviews: {},
+      },
+    } as unknown as GroundingState;
+    expect(() => compose(wired)).not.toThrow();
+  });
+
+  it('throws for contexts not yet implemented (complete / memory)', () => {
+    for (const context of ['complete', 'memory'] as const) {
       const notWired = { context } as unknown as GroundingState;
       expect(() => compose(notWired)).toThrow('compose: context not implemented yet');
     }
@@ -682,5 +705,313 @@ describe('compose export — no-verdict guarantee across every composed string',
     const out = compose(exportState({ validate: validateExported }));
     const all = [out.reply.text, ...out.prompts.map((p) => p.answer?.text ?? '')].join(' ');
     expect(all).not.toMatch(/\b(valid|invalid)\b/i);
+  });
+});
+
+// --- P25.5: Evidence Explorer context ----------------------------------------
+
+// A full, shape-faithful evidence bundle (verbatim from the API fixtures). The
+// evidence composer reads only evidence + artifacts (+ the caller's
+// selectedPath); the rest are present so the state is a real EvidenceBundle.
+// `evidenceExported` carries system.technique (1 entry), assets:processing_notebook
+// (2 entries: file_listing + user_confirmation), implicit:absorbing_element (1).
+function evidenceState(
+  overrides: Partial<EvidenceBundle> = {},
+  selectedPath?: string,
+): GroundingState {
+  const base = {
+    detail: experimentDetail,
+    evidence: evidenceExported.evidence,
+    artifacts: artifactsNull,
+    graph: graphStatusUnavailable,
+    sourcePreviews: {},
+  } as unknown as EvidenceBundle;
+  return { context: 'evidence', bundle: { ...base, ...overrides }, selectedPath };
+}
+
+const NOTEBOOK_PATH = 'assets:processing_notebook';
+const RECORD_PATH = artifactsExported.record_path;
+const SIDECAR_PATH = artifactsExported.sidecar_path;
+
+describe('EVIDENCE_CATALOG — the three evidence chips (order + source labels)', () => {
+  it('is exactly [evidence_multiplicity, sidecar_convention, artifact_paths] in order', () => {
+    expect(EVIDENCE_CATALOG.map((c) => c.id)).toEqual([
+      'evidence_multiplicity',
+      'sidecar_convention',
+      'artifact_paths',
+    ]);
+  });
+
+  it('maps each chip to its approved source and label', () => {
+    expect(EVIDENCE_CATALOG.map((c) => c.source)).toEqual(['files', 'files', 'workflow']);
+    expect(EVIDENCE_CATALOG.map((c) => c.label)).toEqual([
+      'Why multiple evidence entries?',
+      'What is the evidence sidecar?',
+      'Where are the exported artifacts?',
+    ]);
+  });
+});
+
+describe('evidence_multiplicity — count + source types agree; no provenance leak', () => {
+  const multiplicity = (state: GroundingState) => compose(state).prompts[0].answer;
+
+  it('no selectedPath → "Select a field…" guidance (chip enabled)', () => {
+    expect(multiplicity(evidenceState())).toEqual({
+      text: 'Select a field in the Evidence Trail to see its supporting entries.',
+      answeredFrom: 'files',
+    });
+  });
+
+  it('selectedPath not found → same "Select a field…" guidance', () => {
+    expect(multiplicity(evidenceState({}, 'no.such.path'))).toEqual({
+      text: 'Select a field in the Evidence Trail to see its supporting entries.',
+      answeredFrom: 'files',
+    });
+  });
+
+  it('entry with 0 evidence entries → honest "no separate evidence entries recorded"', () => {
+    const state = evidenceState(
+      {
+        evidence: [
+          { path: 'sample.empty', value: 'x', status: 'verified', evidence: [] },
+        ] as unknown as ApiEvidenceEntry[],
+      },
+      'sample.empty',
+    );
+    expect(multiplicity(state)).toEqual({
+      text: 'sample.empty has no separate evidence entries recorded.',
+      answeredFrom: 'files',
+    });
+  });
+
+  it('1 entry → singular; NO "Multiple entries" sentence', () => {
+    const answer = multiplicity(evidenceState({}, 'system.technique'))!;
+    expect(answer).toEqual({
+      text: 'system.technique has 1 evidence entry: spreadsheet.',
+      answeredFrom: 'files',
+    });
+    expect(answer.text).not.toContain('Multiple entries');
+  });
+
+  it('2 entries → plural + the exact restrained "separate support" sentence', () => {
+    const answer = multiplicity(evidenceState({}, NOTEBOOK_PATH))!;
+    expect(answer).toEqual({
+      text:
+        'assets:processing_notebook has 2 evidence entries: file_listing, user_confirmation. ' +
+        'Multiple entries can provide separate support for the same field.',
+      answeredFrom: 'files',
+    });
+    // the appended sentence is the exact restrained wording — never a
+    // correctness/verdict word. (Word boundaries so the legitimate source-type
+    // token `user_confirmation` is not a false positive.)
+    expect(answer.text).not.toMatch(/\b(corroborate|prove|confirm|validate)\b/i);
+  });
+
+  it('>3 entries → capped list "…and K more" with exact K and total count matching', () => {
+    const state = evidenceState(
+      {
+        evidence: [
+          {
+            path: 'sample.many',
+            value: 'v',
+            status: 'verified',
+            evidence: [
+              { source_type: 'spreadsheet' },
+              { source_type: 'file_listing' },
+              { source_type: 'document' },
+              { source_type: 'derivation' },
+              { source_type: 'user_confirmation' },
+            ],
+          },
+        ] as unknown as ApiEvidenceEntry[],
+      },
+      'sample.many',
+    );
+    const answer = multiplicity(state)!;
+    expect(answer.text).toBe(
+      'sample.many has 5 evidence entries: spreadsheet, file_listing, document, …and 2 more. ' +
+        'Multiple entries can provide separate support for the same field.',
+    );
+    // shown count (5) and the remaining count (2, i.e. 5 − 3 shown) both agree
+    expect(answer.text).toContain('5 evidence entries');
+    expect(answer.text).toContain('…and 2 more');
+  });
+
+  it('duplicate source types are preserved honestly (both listed, count matches)', () => {
+    const state = evidenceState(
+      {
+        evidence: [
+          {
+            path: 'sample.dup',
+            value: 'v',
+            status: 'verified',
+            evidence: [{ source_type: 'spreadsheet' }, { source_type: 'spreadsheet' }],
+          },
+        ] as unknown as ApiEvidenceEntry[],
+      },
+      'sample.dup',
+    );
+    expect(multiplicity(state)!.text).toBe(
+      'sample.dup has 2 evidence entries: spreadsheet, spreadsheet. ' +
+        'Multiple entries can provide separate support for the same field.',
+    );
+  });
+
+  it('unusable source_type → token becomes "unspecified source"; count still matches', () => {
+    const state = evidenceState(
+      {
+        evidence: [
+          {
+            path: 'sample.bad',
+            value: 'v',
+            status: 'verified',
+            evidence: [{ source_type: '' }, { source_type: 'spreadsheet' }],
+          },
+        ] as unknown as ApiEvidenceEntry[],
+      },
+      'sample.bad',
+    );
+    expect(multiplicity(state)!.text).toBe(
+      'sample.bad has 2 evidence entries: unspecified source, spreadsheet. ' +
+        'Multiple entries can provide separate support for the same field.',
+    );
+  });
+
+  it('NEVER leaks source_file / locator / quote into the multiplicity text', () => {
+    const answer = multiplicity(evidenceState({}, NOTEBOOK_PATH))!;
+    // the notebook entry carries a source_file + locator + quote — none may appear
+    expect(answer.text).not.toContain('raw_scan_listing.txt');
+    expect(answer.text).not.toContain('line 16');
+    expect(answer.text).not.toContain('xanes_reduction_v2.ipynb');
+    expect(answer.text).not.toContain('ssrl-archive');
+  });
+});
+
+describe('sidecar_convention — exact wording, never an official standard or a verdict', () => {
+  const out = compose(evidenceState());
+  const answer = out.prompts[1].answer!;
+
+  it('emits the exact approved sidecar wording', () => {
+    expect(answer).toEqual({
+      text:
+        'The evidence sidecar is an ISAAC assistant convention, not part of the official ISAAC ' +
+        'schema. It preserves field-level evidence that the official record has no dedicated ' +
+        'place to store.',
+      answeredFrom: 'files',
+    });
+  });
+
+  it('the source label resolves to "Evidence & Sources"', () => {
+    expect(SOURCE_LABELS[answer.answeredFrom]).toBe('Evidence & Sources');
+  });
+
+  it('never calls it an official ISAAC standard, and carries no verdict/validity word', () => {
+    expect(answer.text).not.toContain('official ISAAC standard');
+    expect(answer.text).not.toMatch(/\b(PASS|FAIL|valid|invalid)\b/i);
+  });
+});
+
+describe('artifact_paths — safe, never renders undefined/null/empty', () => {
+  const artifacts = (state: GroundingState) => compose(state).prompts[2].answer!;
+
+  it('both paths present → names record + sidecar', () => {
+    const answer = artifacts(evidenceState({ artifacts: artifactsExported }));
+    expect(answer).toEqual({
+      text: `Exported: record ${RECORD_PATH} and its evidence sidecar ${SIDECAR_PATH}.`,
+      answeredFrom: 'workflow',
+    });
+  });
+
+  it('record only → names record, states no sidecar path', () => {
+    const answer = artifacts(
+      evidenceState({
+        artifacts: { record: null, sidecar: null, record_path: RECORD_PATH, sidecar_path: null },
+      }),
+    );
+    expect(answer.text).toBe(
+      `Exported: record ${RECORD_PATH}. No evidence sidecar path is recorded.`,
+    );
+  });
+
+  it('sidecar only → names sidecar, states no record path', () => {
+    const answer = artifacts(
+      evidenceState({
+        artifacts: { record: null, sidecar: null, record_path: null, sidecar_path: SIDECAR_PATH },
+      }),
+    );
+    expect(answer.text).toBe(
+      `Exported: evidence sidecar ${SIDECAR_PATH}. No record path is recorded.`,
+    );
+  });
+
+  it('neither (artifactsNull) → honest not-exported message', () => {
+    const answer = artifacts(evidenceState({ artifacts: artifactsNull }));
+    expect(answer).toEqual({
+      text: 'Not exported yet — export writes the record plus its evidence sidecar.',
+      answeredFrom: 'workflow',
+    });
+  });
+
+  it('empty-string / null / undefined path values each produce a safe message', () => {
+    const variants = [
+      { record_path: '', sidecar_path: '' },
+      { record_path: null, sidecar_path: null },
+      { record_path: undefined, sidecar_path: undefined },
+      { record_path: '   ', sidecar_path: '   ' },
+    ];
+    for (const v of variants) {
+      const answer = artifacts(
+        evidenceState({
+          artifacts: { record: null, sidecar: null, ...v } as unknown as EvidenceBundle['artifacts'],
+        }),
+      );
+      expect(answer.text).toBe(
+        'Not exported yet — export writes the record plus its evidence sidecar.',
+      );
+      expect(/undefined|null/.test(answer.text)).toBe(false);
+    }
+  });
+});
+
+describe('compose evidence — no-verdict / no-undefined sweep over every composed string', () => {
+  const states: GroundingState[] = [
+    evidenceState(),
+    evidenceState({}, 'system.technique'),
+    evidenceState({}, NOTEBOOK_PATH),
+    evidenceState({}, 'implicit:absorbing_element'),
+    evidenceState({}, 'no.such.path'),
+    evidenceState({ artifacts: artifactsExported }),
+    evidenceState({
+      artifacts: { record: null, sidecar: null, record_path: RECORD_PATH, sidecar_path: null },
+    }),
+    evidenceState({
+      artifacts: { record: null, sidecar: null, record_path: null, sidecar_path: SIDECAR_PATH },
+    }),
+    evidenceState({
+      evidence: [
+        { path: 'p.empty', value: 'x', status: 'verified', evidence: [] },
+      ] as unknown as ApiEvidenceEntry[],
+    }),
+  ];
+
+  it('no composed string states PASS/FAIL/valid/invalid or contains "undefined"/"null"', () => {
+    for (const state of states) {
+      const out = compose(state);
+      const strings = [
+        out.reply.text,
+        ...out.prompts.flatMap((p) => [p.text, p.answer?.text ?? '']),
+      ];
+      for (const s of strings) {
+        expect(s).not.toMatch(/\b(PASS|FAIL|valid|invalid)\b/i);
+        expect(s).not.toContain('undefined');
+        expect(s).not.toContain('null');
+      }
+    }
+  });
+
+  it('the panel reply is the first non-null answer (multiplicity guidance leads)', () => {
+    const out = compose(evidenceState());
+    expect(out.reply).toEqual(out.prompts[0].answer);
+    expect(out.reply.answeredFrom).toBe('files');
   });
 });

@@ -5,11 +5,13 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
 import { SourcePreview } from '../components/SourcePreview';
+import { AssistantPanel } from '../components/AssistantPanel';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { StatusBar } from '../components/StatusBar';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
+import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import {
   citedLinesForEntry,
@@ -95,9 +97,23 @@ function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
   const sourceFile = primarySourceFile(selected);
   const preview = sourceFile ? (sourcePreviews[sourceFile] ?? null) : null;
   const citedLines = citedLinesForEntry(selected, sourceFile);
-  // Per the S5 screen spec, there is NO dedicated assistant panel here — the
-  // provenance copy carries the explanation.
   const provenance = provenanceFor(selected);
+
+  // P25.5: the grounded assistant now mounts in the Evidence context (Phase 25
+  // plan §20). It is subordinate — the Evidence Trail + Source Preview (truth)
+  // render first/left; the assistant only echoes counts, the sidecar convention
+  // and artifact paths this screen already holds. `selectedPath = selected.key`
+  // so a different trail selection updates the multiplicity answer live. It
+  // mounts ONLY on this loaded path — never in loading / backend-down / the
+  // zero-evidence empty state, where there is no record data to be subordinate to.
+  const rightPanel = (
+    <aside className="record-right narrow" aria-label="Assistant">
+      <AssistantPanel
+        {...compose({ context: 'evidence', bundle: data, selectedPath: selected.key })}
+        availability={graph.availability}
+      />
+    </aside>
+  );
 
   return (
     <AppShell
@@ -125,6 +141,7 @@ function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
           meta={meta}
         />
       }
+      rightPanel={rightPanel}
       statusBar={
         <StatusBar
           phase={LABELS.evidenceTrail}
