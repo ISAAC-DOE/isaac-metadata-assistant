@@ -54,7 +54,11 @@ function describeTrailing(exp: ExperimentSummary): string {
   const t = exp.trailing;
   if (t.needsYouCount !== undefined) return `${t.needsYouCount} fields need you`;
   if (t.mentorReview) return 'Mentor Review';
-  if (t.verdict === 'pass') return `coverage ${t.coverage?.resolved}/${t.coverage?.total}, PASS`;
-  if (t.exported) return `coverage ${t.coverage?.resolved}/${t.coverage?.total}, Exported`;
+  if (t.verdict === 'pass') {
+    return t.coverage ? `coverage ${t.coverage.resolved}/${t.coverage.total}, PASS` : 'PASS';
+  }
+  if (t.exported) {
+    return t.coverage ? `coverage ${t.coverage.resolved}/${t.coverage.total}, Exported` : 'Exported';
+  }
   return 'open record';
 }
