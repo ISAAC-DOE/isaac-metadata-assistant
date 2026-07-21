@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
 import { render, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
+import { MEMORY_UNAVAILABLE_CAVEAT, ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import {
   answersAfterNotebook,
   auditExported,
@@ -14,6 +14,7 @@ import {
   exportedReadyRoutes,
   pendingResponse,
   seriesDemoValue,
+  stubFetchDown,
   stubFetchRoutes,
   validateDryRun,
 } from '../test/apiFixtures';
@@ -394,5 +395,158 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // itself never states PASS/FAIL or an "(in)valid against" conclusion
     expect(assistant.textContent).not.toMatch(VERDICT);
     expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
+  });
+});
+
+describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
+  const VERDICT = /\b(PASS|FAIL)\b/;
+  const INVALID_AGAINST = /\b(in)?valid against\b/i;
+  const P = pendingResponse.pending; // 5 pending; the notebook is item 0 (current)
+
+  // Grounded live from {detail, pending} — no validate/audit/graph fetch (Q-D).
+  const PENDING_SUMMARY =
+    `5 fields need you: ${P[0].about}, ${P[1].about}, ${P[2].about}, …and 2 more. ` +
+    'Confirm or skip each below.';
+  const EXPLAIN_CURRENT =
+    `${P[0].question} — about ${P[0].about}. Answer via propose → stage → confirm below.`;
+  const MISSING_BEHAVIOR =
+    'Leaving a field missing keeps it honest-missing — never guessed. Whether it blocks export ' +
+    'is a schema question — open Validate to run the deterministic schema check.';
+
+  it('mounts the three approved complete chips; the default reply is the LIVE pending summary', async () => {
+    stubFetchRoutes(bundleRoutes('demo')); // 5 pending, live from /pending
+    const { container, findByText } = renderAt('/record/demo/complete');
+
+    await findByText('Answer 5 Questions to Finish This Record');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    expect(assistant).not.toBeNull();
+    const panel = within(assistant);
+
+    // exactly the three approved chip labels render as prompt buttons
+    expect(panel.getByText('Which fields still need me?')).toBeInTheDocument();
+    expect(panel.getByText('What does this question want?')).toBeInTheDocument();
+    expect(panel.getByText('What if I leave one missing?')).toBeInTheDocument();
+    expect(assistant.querySelectorAll('.assistant-prompt').length).toBe(3);
+
+    // reply defaults to the pending-summary chip, grounded in the LIVE pending list
+    expect(panel.getByText(PENDING_SUMMARY)).toBeInTheDocument();
+    expect(panel.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
+
+    // honesty: this memory-less screen mounts with availability="available", so
+    // the panel renders NO caveat. The spec §6-flagged-FALSE caveat ("…answered
+    // from source files directly") must be absent — the composer performs no
+    // source lookup, and reworking the memory-line framing for memory-less
+    // contexts is deferred to P25.7.
+    expect(assistant.textContent).not.toContain('answered from source files directly');
+    expect(assistant.textContent).not.toContain(MEMORY_UNAVAILABLE_CAVEAT);
+    expect(assistant.querySelector('.assistant-caveat')).toBeNull();
+    // the only source claim is the accurate `answered from:` provenance line
+    expect(assistant.textContent).toContain('memory: available');
+  });
+
+  it('the explain chip echoes the ACTIVE question live, answered from Workflow & Artifacts', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { container, findByText } = renderAt('/record/demo/complete');
+
+    await findByText('Answer 5 Questions to Finish This Record');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+
+    fireEvent.click(panel.getByText('What does this question want?').closest('button')!);
+    expect(panel.getByText(EXPLAIN_CURRENT)).toBeInTheDocument();
+    expect(panel.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
+  });
+
+  it('the missing-field chip routes to the deterministic schema check, answered from Schema Rules', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { container, findByText } = renderAt('/record/demo/complete');
+
+    await findByText('Answer 5 Questions to Finish This Record');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+
+    fireEvent.click(panel.getByText('What if I leave one missing?').closest('button')!);
+    expect(panel.getByText(MISSING_BEHAVIOR)).toBeInTheDocument();
+    expect(panel.getByText('answered from: Schema Rules')).toBeInTheDocument();
+
+    // the routed truth chip never states a verdict / validity conclusion
+    expect(assistant.textContent).not.toMatch(VERDICT);
+    expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
+  });
+
+  it('is guided-prompts-only — the note is present and there is NO textbox/send button', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { container, findByText, getByText, queryByRole } = renderAt('/record/demo/complete');
+
+    await findByText('Answer 5 Questions to Finish This Record');
+    expect(
+      getByText('Guided prompts only — the assistant answers the suggested questions above.'),
+    ).toBeInTheDocument();
+    // no free-text affordance inside the assistant panel
+    expect(container.querySelector('.assistant textarea')).toBeNull();
+    expect(container.querySelector('.assistant input')).toBeNull();
+    expect(queryByRole('button', { name: /send/i })).toBeNull();
+  });
+
+  it('clicking a chip issues NO new network request (pure, LLM-free)', async () => {
+    const calls = stubFetchRoutes(bundleRoutes('demo'));
+    const { container, findByText } = renderAt('/record/demo/complete');
+
+    await findByText('Answer 5 Questions to Finish This Record');
+    const panel = within(container.querySelector('.assistant') as HTMLElement);
+    const before = calls.length;
+
+    fireEvent.click(panel.getByText('What if I leave one missing?').closest('button')!);
+    expect(panel.getByText(MISSING_BEHAVIOR)).toBeInTheDocument();
+    expect(calls.length).toBe(before);
+  });
+
+  it('no verdict language anywhere in the assistant panel across every chip', async () => {
+    stubFetchRoutes(bundleRoutes('demo'));
+    const { container, findByText } = renderAt('/record/demo/complete');
+
+    await findByText('Answer 5 Questions to Finish This Record');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+
+    for (const label of [
+      'Which fields still need me?',
+      'What does this question want?',
+      'What if I leave one missing?',
+    ]) {
+      fireEvent.click(panel.getByText(label).closest('button')!);
+      expect(assistant.textContent).not.toMatch(VERDICT);
+      expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
+      expect(assistant.textContent).not.toMatch(/\bthat is a truth question\b/i); // guard never triggered
+    }
+  });
+
+  it('the assistant also mounts on the all-resolved branch (0 pending), honestly', async () => {
+    stubFetchRoutes(exportReadyRoutes('demo')); // pending: [] from the first load
+    const { container, findByText } = renderAt('/record/demo/complete');
+
+    await findByText('All Fields Resolved');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    expect(assistant).not.toBeNull();
+    const panel = within(assistant);
+
+    // pending is empty → the honest empty-state summary, still guided-only
+    expect(panel.getByText('This draft currently has no pending fields listed.')).toBeInTheDocument();
+    expect(assistant.querySelectorAll('.assistant-prompt').length).toBe(3);
+  });
+
+  it('does NOT render an assistant panel in the loading state', () => {
+    // never-resolving fetch keeps the screen in its loading state
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    const { container, getByRole } = renderAt('/record/demo/complete');
+    expect(getByRole('status')).toBeInTheDocument(); // LoadingPanel
+    expect(container.querySelector('.assistant')).toBeNull();
+  });
+
+  it('does NOT render an assistant panel when the backend is down', async () => {
+    stubFetchDown();
+    const { container, findByText } = renderAt('/record/demo/complete');
+    await findByText('Backend Not Running');
+    expect(container.querySelector('.assistant')).toBeNull();
   });
 });

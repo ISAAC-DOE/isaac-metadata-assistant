@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   compose,
   count,
+  COMPLETE_CATALOG,
   EVIDENCE_CATALOG,
   EXPORT_CATALOG,
   REVIEW_CATALOG,
@@ -238,8 +239,8 @@ describe('compose — no-verdict guarantee across every composed string', () => 
   });
 });
 
-describe('compose — review + export + evidence wired; other contexts still throw', () => {
-  it('evidence is now WIRED — compose does NOT throw for it (P25.5)', () => {
+describe('compose — review + export + evidence + complete wired; memory still throws', () => {
+  it('evidence is WIRED — compose does NOT throw for it (P25.5)', () => {
     const wired = {
       context: 'evidence',
       bundle: {
@@ -253,11 +254,18 @@ describe('compose — review + export + evidence wired; other contexts still thr
     expect(() => compose(wired)).not.toThrow();
   });
 
-  it('throws for contexts not yet implemented (complete / memory)', () => {
-    for (const context of ['complete', 'memory'] as const) {
-      const notWired = { context } as unknown as GroundingState;
-      expect(() => compose(notWired)).toThrow('compose: context not implemented yet');
-    }
+  it('complete is now WIRED — compose does NOT throw for it (P25.6)', () => {
+    const wired = {
+      context: 'complete',
+      detail: experimentDetail,
+      pending: pendingResponse.pending,
+    } as unknown as GroundingState;
+    expect(() => compose(wired)).not.toThrow();
+  });
+
+  it('throws for the context not yet implemented (memory)', () => {
+    const notWired = { context: 'memory' } as unknown as GroundingState;
+    expect(() => compose(notWired)).toThrow('compose: context not implemented yet');
   });
 });
 
@@ -1013,5 +1021,194 @@ describe('compose evidence — no-verdict / no-undefined sweep over every compos
     const out = compose(evidenceState());
     expect(out.reply).toEqual(out.prompts[0].answer);
     expect(out.reply.answeredFrom).toBe('files');
+  });
+});
+
+// --- P25.6: Complete Missing Fields context ----------------------------------
+
+// A shape-faithful complete state (Q-D: {detail, pending} ONLY — no
+// validate/audit/graph). The composer reads pending + selectedPendingId; detail
+// is present so the state is a real `complete` GroundingState.
+function completeState(
+  pending: unknown = pendingResponse.pending,
+  selectedPendingId?: string,
+): GroundingState {
+  return {
+    context: 'complete',
+    detail: experimentDetail,
+    pending: pending as unknown as ApiPendingItem[],
+    selectedPendingId,
+  } as unknown as GroundingState;
+}
+
+const CP = pendingResponse.pending; // 5 fixture pending items; item 0 = notebook
+const CP_SUMMARY =
+  `5 fields need you: ${CP[0].about}, ${CP[1].about}, ${CP[2].about}, …and 2 more. ` +
+  'Confirm or skip each below.';
+const CP_EXPLAIN_0 =
+  `${CP[0].question} — about ${CP[0].about}. Answer via propose → stage → confirm below.`;
+const MISSING_BEHAVIOR =
+  'Leaving a field missing keeps it honest-missing — never guessed. Whether it blocks export ' +
+  'is a schema question — open Validate to run the deterministic schema check.';
+
+describe('COMPLETE_CATALOG — the three complete chips (order + source labels)', () => {
+  it('is exactly [pending_summary, explain_pending_item, missing_field_behavior] in order', () => {
+    expect(COMPLETE_CATALOG.map((c) => c.id)).toEqual([
+      'pending_summary',
+      'explain_pending_item',
+      'missing_field_behavior',
+    ]);
+  });
+
+  it('maps each chip to its approved source and label', () => {
+    expect(COMPLETE_CATALOG.map((c) => c.source)).toEqual(['workflow', 'workflow', 'schema']);
+    expect(COMPLETE_CATALOG.map((c) => c.label)).toEqual([
+      'Which fields still need me?',
+      'What does this question want?',
+      'What if I leave one missing?',
+    ]);
+    // the missing-field chip is the routed truth-question chip
+    expect(COMPLETE_CATALOG.find((c) => c.id === 'missing_field_behavior')!.routed).toBe(true);
+  });
+});
+
+describe('compose({context:"complete"}) — full fixture (current item = pending[0])', () => {
+  const out = compose(completeState(CP, CP[0].id));
+
+  it('emits three prompts whose text == chip label and answeredFrom == chip source', () => {
+    expect(out.prompts.map((p) => p.text)).toEqual([
+      'Which fields still need me?',
+      'What does this question want?',
+      'What if I leave one missing?',
+    ]);
+    expect(out.prompts.map((p) => p.answeredFrom)).toEqual(['workflow', 'workflow', 'schema']);
+  });
+
+  it('pending_summary echoes the count + first ≤3 abouts + "…and K more" + the CTA', () => {
+    expect(out.prompts[0].answer).toEqual({ text: CP_SUMMARY, answeredFrom: 'workflow' });
+  });
+
+  it('explain_pending_item echoes the SELECTED question + about + the propose→stage→confirm line', () => {
+    expect(out.prompts[1].answer).toEqual({ text: CP_EXPLAIN_0, answeredFrom: 'workflow' });
+  });
+
+  it('missing_field_behavior is the routed static schema answer', () => {
+    expect(out.prompts[2].answer).toEqual({ text: MISSING_BEHAVIOR, answeredFrom: 'schema' });
+  });
+
+  it('reply is the first non-null answer in priority order (pending summary leads)', () => {
+    expect(out.reply).toEqual(out.prompts[0].answer);
+    expect(out.reply.answeredFrom).toBe('workflow');
+  });
+});
+
+describe('compose complete — pending_summary echo variants + empty + disabled', () => {
+  const summary = (pending: unknown) => compose(completeState(pending)).prompts[0].answer;
+
+  it('empty pending → present-but-honest message (chip still enabled)', () => {
+    expect(summary([])).toEqual({
+      text: 'This draft currently has no pending fields listed.',
+      answeredFrom: 'workflow',
+    });
+  });
+
+  it('pending absent → chip disabled (answer undefined); reply falls to explain guidance', () => {
+    // pass pending explicitly absent (bypasses the builder's fixture default)
+    const out = compose({
+      context: 'complete',
+      detail: experimentDetail,
+      pending: undefined,
+    } as unknown as GroundingState);
+    expect(out.prompts[0].answer).toBeUndefined();
+    expect(out.reply.text).toBe('Select a field below to see what it asks.');
+    expect(out.reply.answeredFrom).toBe('workflow');
+  });
+
+  it('singular grammar: 1 pending → "1 field needs you"', () => {
+    expect(summary([{ id: 'z', kind: 'asset', question: 'q', about: 'only-one' }])!.text).toBe(
+      '1 field needs you: only-one. Confirm or skip each below.',
+    );
+  });
+
+  it('about → question → id fallback ladder; count and displayed list agree (>3 → "…and K more")', () => {
+    const answer = summary([
+      { id: 'x1', kind: 'asset', question: 'q1', about: 'A1' },
+      { id: 'x2', kind: 'asset', question: 'q2-question?', about: null },
+      { id: 'x3', kind: 'series', question: '', about: null },
+      { id: 'x4', kind: 'descriptor', question: 'q4', about: 'A4' },
+    ])!;
+    expect(answer.text).toBe('4 fields need you: A1, q2-question?, x3, …and 1 more. Confirm or skip each below.');
+    expect(answer.text).not.toContain('unnamed pending field');
+    expect(answer.text).not.toContain('undefined');
+    expect(answer.text).not.toContain('null');
+  });
+});
+
+describe('compose complete — explain_pending_item (selection, missing about, none selected)', () => {
+  const explain = (pending: unknown, selectedPendingId?: string) =>
+    compose(completeState(pending, selectedPendingId)).prompts[1].answer!;
+
+  it('no selectedPendingId → "Select a field below…" guidance (chip enabled)', () => {
+    expect(explain(CP)).toEqual({
+      text: 'Select a field below to see what it asks.',
+      answeredFrom: 'workflow',
+    });
+  });
+
+  it('selectedPendingId not found in pending → same guidance', () => {
+    expect(explain(CP, 'no.such.id').text).toBe('Select a field below to see what it asks.');
+  });
+
+  it('selected item lacks a usable about → drops the "— about" clause (never "about undefined")', () => {
+    const answer = explain(
+      [{ id: 'series', kind: 'series', question: 'Which reduced spectrum?', about: null }],
+      'series',
+    );
+    expect(answer.text).toBe('Which reduced spectrum? Answer via propose → stage → confirm below.');
+    expect(answer.text).not.toContain('about');
+    expect(answer.text).not.toContain('undefined');
+    expect(answer.text).not.toContain('null');
+  });
+
+  it('selects the item by id (not by position) — the descriptor item, not pending[0]', () => {
+    const answer = explain(CP, CP[4].id);
+    expect(answer.text).toBe(
+      `${CP[4].question} — about ${CP[4].about}. Answer via propose → stage → confirm below.`,
+    );
+  });
+});
+
+describe('compose complete — missing_field_behavior (static, routed, schema)', () => {
+  it('emits the exact approved copy and routes to the deterministic schema check', () => {
+    const out = compose(completeState(CP, CP[0].id));
+    expect(out.prompts[2].answer).toEqual({ text: MISSING_BEHAVIOR, answeredFrom: 'schema' });
+    expect(out.prompts[2].answer!.text).toContain('open Validate to run the deterministic schema check');
+    expect(out.prompts[2].answer!.text).not.toContain('valid against');
+  });
+});
+
+describe('compose complete — no-verdict guarantee across every composed string', () => {
+  const states: GroundingState[] = [
+    completeState(CP, CP[0].id),
+    completeState(CP),
+    completeState([]),
+    completeState(undefined),
+    completeState([{ id: 'z', kind: 'asset', question: 'q', about: 'only-one' }], 'z'),
+  ];
+
+  it('no reply/prompt/answer string states PASS/FAIL or "(in)valid against"; none render undefined/null', () => {
+    for (const state of states) {
+      const out = compose(state);
+      const strings = [
+        out.reply.text,
+        ...out.prompts.flatMap((p) => [p.text, p.answer?.text ?? '']),
+      ];
+      for (const s of strings) {
+        expect(s).not.toMatch(VERDICT);
+        expect(s).not.toMatch(INVALID_AGAINST);
+        expect(s).not.toContain('undefined');
+        expect(s).not.toContain('null');
+      }
+    }
   });
 });

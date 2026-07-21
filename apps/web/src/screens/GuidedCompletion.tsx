@@ -9,11 +9,13 @@ import { WorkflowSpine, buildSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { GuidedPrompt } from '../components/GuidedPrompt';
 import { StatusChip } from '../components/StatusChip';
+import { AssistantPanel } from '../components/AssistantPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Check, CircleHelp } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
+import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { answerValuePreview, pendingItemToBlocker } from '../lib/adapt';
 import type { ApiExperimentDetail, ApiPendingItem } from '../lib/types';
@@ -159,6 +161,37 @@ function LoadedCompletion({
       />
     );
 
+  // P25.6: the grounded assistant now mounts in the Complete context (Phase 25
+  // plan §20). It is subordinate — the guided completion form (truth) renders
+  // first; the assistant only echoes the pending queue this screen already holds
+  // and routes the "does missing block export?" truth question to Validate. It
+  // adds NO fetch (Q-D: {detail, pending} only) and never drives
+  // propose→stage→confirm. `selectedPendingId = currentItem?.id` keeps the
+  // "what does this question want?" answer aligned with the active question.
+  // Mounted on BOTH loaded branches via `shell`, never on loading / backend-down.
+  const rightPanel = (
+    <aside className="record-right narrow" aria-label="Assistant">
+      <AssistantPanel
+        {...compose({
+          context: 'complete',
+          detail,
+          pending,
+          selectedPendingId: currentItem?.id,
+        })}
+        // This screen loads only {detail, pending} — it never consults the
+        // memory/graph plane. We pass `available` (not `unavailable`) so the
+        // panel renders NO caveat: `unavailable` would surface
+        // MEMORY_UNAVAILABLE_CAVEAT ("…answered from source files directly"),
+        // which spec §6 explicitly declares FALSE for the composer (it performs
+        // no source lookup) and defers to P25.7. `available` keeps the accurate
+        // `answered from:` provenance line as the only source claim and stays
+        // consistent with the other mounted contexts. Reworking the memory-line
+        // framing for memory-less contexts is P25.7's job, not this slice.
+        availability="available"
+      />
+    </aside>
+  );
+
   const shell = (children: ReactNode) => (
     <AppShell
       variant="record"
@@ -172,6 +205,7 @@ function LoadedCompletion({
         />
       }
       sidebar={<WorkflowSpine steps={spine} recordId={id} />}
+      rightPanel={rightPanel}
       statusBar={statusBar}
       mainPad="centered"
     >

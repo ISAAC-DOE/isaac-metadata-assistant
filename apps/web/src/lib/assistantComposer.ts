@@ -9,10 +9,10 @@
  * Truth questions route to the deterministic surfaces. The panel still runs
  * `hasVerdictLanguage()` over the composed output as a structural backstop.
  *
- * `review` (Record Workbench, P25.1), `export` (Ready to Export, P25.4) and
- * `evidence` (Evidence Explorer, P25.5) are wired. The remaining contexts
- * (`complete` / `memory`) are TYPE-declared in the GroundingState union but
- * throw here until their slices land.
+ * `review` (Record Workbench, P25.1), `export` (Ready to Export, P25.4),
+ * `evidence` (Evidence Explorer, P25.5) and `complete` (Guided Completion,
+ * P25.6) are wired. The remaining context (`memory`) is TYPE-declared in the
+ * GroundingState union but throws here until its slice lands.
  */
 
 import type {
@@ -362,6 +362,105 @@ const EVIDENCE_FALLBACK: AssistantMessage = {
   answeredFrom: 'files',
 };
 
+// --- Complete Missing Fields (context: 'complete'; state = {detail, pending}) -
+// Advisory only — the assistant NEVER submits, validates, or mutates a field. It
+// grounds entirely in the pending list the screen already holds (Q-D: NO
+// validate / audit / graph fetch is added here). Two chips echo the pending
+// queue (workflow) and one routes the honest-missing / does-it-block question to
+// the deterministic schema check (schema). No chip drives propose→stage→confirm.
+
+// Shared verbatim by explain_pending_item whether nothing is selected or the
+// selected id isn't in the pending list.
+const SELECT_A_PENDING_FIELD: AssistantMessage = {
+  text: 'Select a field below to see what it asks.',
+  answeredFrom: 'workflow',
+};
+
+export const COMPLETE_CATALOG: GroundedChip[] = [
+  {
+    id: 'pending_summary',
+    label: 'Which fields still need me?',
+    source: 'workflow',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'complete') return null;
+      const { pending } = state;
+      if (!pending) return null; // data absent → chip disabled
+      if (pending.length === 0) {
+        return {
+          text: 'This draft currently has no pending fields listed.',
+          answeredFrom: 'workflow',
+        };
+      }
+      // Mirror REVIEW_CATALOG.pending_summary's about → question → id ladder so
+      // every item shows a usable label and the shown count always agrees with
+      // the listed labels (joinCapped computes "…and K more" over the FULL list).
+      const labels = pending.map((p) => {
+        if (isUsableStr(p.about)) return p.about;
+        if (isUsableStr(p.question)) return p.question;
+        if (isUsableStr(p.id)) return p.id;
+        return 'unnamed pending field';
+      });
+      const verb = pending.length === 1 ? 'needs' : 'need';
+      return {
+        text: `${count(pending.length, 'field')} ${verb} you: ${joinCapped(labels)}. Confirm or skip each below.`,
+        answeredFrom: 'workflow',
+      };
+    },
+  },
+  {
+    id: 'explain_pending_item',
+    label: 'What does this question want?',
+    source: 'workflow',
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'complete') return null;
+      const { pending, selectedPendingId } = state;
+      const item = isUsableStr(selectedPendingId)
+        ? (pending ?? []).find((p) => p.id === selectedPendingId)
+        : undefined;
+      if (!item) return SELECT_A_PENDING_FIELD;
+      // `question` is the contract-guaranteed subject (ApiPendingItem.question is
+      // non-optional) — not guarded; `about` is optional, so its clause drops
+      // rather than render "about undefined". Terminate the first sentence with a
+      // period only when it doesn't already end in terminal punctuation, so a
+      // dropped about-clause never yields a double "?." (the question already
+      // ends with "?").
+      const lead = `${item.question}${isUsableStr(item.about) ? ` — about ${item.about}` : ''}`;
+      const terminated = /[.!?]$/.test(lead) ? lead : `${lead}.`;
+      return {
+        text: `${terminated} Answer via propose → stage → confirm below.`,
+        answeredFrom: 'workflow',
+      };
+    },
+  },
+  {
+    id: 'missing_field_behavior',
+    label: 'What if I leave one missing?',
+    source: 'schema',
+    routed: true,
+    // Static/routed — never null within the complete context. States the
+    // honest-missing behavior and routes the "does it block export?" truth
+    // question to the deterministic schema check. Never echoes `validate.ok`.
+    // (Does not reuse ROUTE_TO_VALIDATE: the approved copy uses a mid-sentence
+    // lowercase "open Validate", not the const's sentence-leading "Open Validate".)
+    resolve(state): AssistantMessage | null {
+      if (state.context !== 'complete') return null;
+      return {
+        text:
+          'Leaving a field missing keeps it honest-missing — never guessed. Whether it blocks ' +
+          'export is a schema question — open Validate to run the deterministic schema check.',
+        answeredFrom: 'schema',
+      };
+    },
+  },
+];
+
+// Neutral fallback when every complete chip resolves to null (defensive — the
+// missing-field chip always answers within the complete context).
+const COMPLETE_FALLBACK: AssistantMessage = {
+  text: 'Pick a suggested question above.',
+  answeredFrom: 'workflow',
+};
+
 // Per-context chip catalog + neutral fallback. Contexts not yet wired throw.
 function pickCatalog(context: ScreenContext): {
   catalog: GroundedChip[];
@@ -374,6 +473,8 @@ function pickCatalog(context: ScreenContext): {
       return { catalog: EXPORT_CATALOG, fallback: EXPORT_FALLBACK };
     case 'evidence':
       return { catalog: EVIDENCE_CATALOG, fallback: EVIDENCE_FALLBACK };
+    case 'complete':
+      return { catalog: COMPLETE_CATALOG, fallback: COMPLETE_FALLBACK };
     default:
       throw new Error('compose: context not implemented yet');
   }
@@ -381,8 +482,8 @@ function pickCatalog(context: ScreenContext): {
 
 /**
  * Compose the reply + guided prompts for a screen from its already-fetched
- * state. `review` (P25.1), `export` (P25.4) and `evidence` (P25.5) are wired;
- * complete / memory throw until their slices land.
+ * state. `review` (P25.1), `export` (P25.4), `evidence` (P25.5) and `complete`
+ * (P25.6) are wired; memory throws until its slice lands.
  */
 export function compose(state: GroundingState): ComposerOutput {
   const { catalog, fallback } = pickCatalog(state.context);
