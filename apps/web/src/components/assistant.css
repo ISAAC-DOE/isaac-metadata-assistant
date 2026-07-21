@@ -67,10 +67,6 @@
   font-size: 10.5px;
   color: var(--assist-text);
 }
-.assistant-sourcedoc {
-  font-size: 10.5px;
-  color: var(--text-slate);
-}
 .assistant-caveat {
   margin-top: 10px;
   font-size: 11px;

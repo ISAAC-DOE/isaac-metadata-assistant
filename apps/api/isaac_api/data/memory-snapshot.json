@@ -10380,7 +10380,7 @@
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
-        "sha256": "8c78ce8bfe28400a7b3a323901f4caa5f78a8bb7f98e205c457171882639afa6"
+        "sha256": "1d087a34f3e4690824b0140920bed9dac5007e6b6bea4ac39d184cd2b623778d"
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "42f18db398c168f8ea1f6b57d9e8a9eacd9dceec9462e8115b0128bc2563ab97"
+        "sha256": "d6303ed0ae080e68563381943ffa8820413368c63ac77d28df046ba9b680f2cb"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
-        "sha256": "d20f2d6769eef4cbeface9afa179b4b9ed0c311a43007934217da09b5707cb18"
+        "sha256": "44f8157252688363b584df597e30c4d32d72c5effa81e48ceec270a92ece265b"
       },
       {
         "path": "apps/web/src/lib/labels.ts",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "849aec7a91cfb1dde4f0c7f9dd1d4001375aeac0fb7b57c7a0c5a2368b1be83d"
+        "sha256": "d309e7544a36ad1c910de7dd728aa0af4a090ffd68367dd1a65c4b9b98525e71"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "40b08fc95c5f7fbdebae49513d24f77883717e4c9c0a5023fdee754fa0dee1a5"
+    "served_manifest_fingerprint": "2ab4080338664cd996242497cdfd8b1b87d0cb009c39774e3be10eaf773515ca"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

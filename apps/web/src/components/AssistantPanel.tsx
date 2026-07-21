@@ -47,7 +47,6 @@ export function AssistantPanel({ reply, prompts, availability, note }: Assistant
   const safeText = guarded
     ? 'That is a truth question — open the Validate surface for the deterministic verdict.'
     : active.text;
-  const sourceDoc = guarded ? undefined : active.sourceDoc;
 
   // Only a screen that actually fetched graph status may make a memory claim.
   // With `availability` omitted, we render NO memory head line and NO caveat.
@@ -81,7 +80,6 @@ export function AssistantPanel({ reply, prompts, availability, note }: Assistant
       <p className="assistant-reply" aria-live="polite">{safeText}</p>
       <div className="assistant-sources">
         <span className="answered-from">answered from: {SOURCE_LABELS[active.answeredFrom]}</span>
-        {sourceDoc && <span className="assistant-sourcedoc mono">From {sourceDoc}</span>}
       </div>
 
       {caveat && <p className="assistant-caveat">{caveat}</p>}

@@ -1,24 +1,72 @@
 import { describe, it, expect } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { GUIDED_ONLY_NOTE, MEMORY_UNAVAILABLE_CAVEAT, hasVerdictLanguage } from '../lib/assistant';
+import { compose } from '../lib/assistantComposer';
 import {
-  ASSISTANT_SAMPLES,
-  GUIDED_ONLY_NOTE,
-  MEMORY_UNAVAILABLE_CAVEAT,
-  hasVerdictLanguage,
-} from '../lib/assistant';
+  experimentDetail,
+  pendingResponse,
+  validateDryRun,
+  auditNotExported,
+  warningsDryRun,
+  evidenceResponse,
+  evidenceExported,
+  artifactsNull,
+  graphStatusUnavailable,
+} from '../test/apiFixtures';
+import type { GroundingState, RecordBundle, EvidenceBundle } from '../lib/types';
+
+/*
+ * P25.9: ASSISTANT_SAMPLES (the static per-screen sample table) was retired as
+ * dead code — no screen imports it; every mounting screen grounds its reply +
+ * prompts via `compose()` (assistantComposer.ts) over already-fetched bundle
+ * data. These tests exercise `AssistantPanel` against real `compose()` output
+ * (built from the same shape-faithful API fixtures assistantComposer.test.ts /
+ * memory-composer.test.ts use), not a hand-authored static table.
+ */
+
+// A shape-faithful review bundle — same fixture shape as
+// assistantComposer.test.ts's reviewState(). Only pending/validate/evidence are
+// read by the review composer.
+function reviewState(overrides: Partial<RecordBundle> = {}): GroundingState {
+  const base = {
+    detail: experimentDetail,
+    pending: pendingResponse.pending,
+    validate: validateDryRun,
+    audit: auditNotExported,
+    warnings: warningsDryRun,
+    evidence: evidenceResponse.evidence,
+    graph: graphStatusUnavailable,
+  } as unknown as RecordBundle;
+  return { context: 'review', bundle: { ...base, ...overrides } };
+}
+
+// A shape-faithful evidence bundle — same fixture shape as
+// assistantComposer.test.ts's evidenceState(). With no `selectedPath`, the
+// leading (files-sourced) chip is "Select a field…" guidance.
+function evidenceState(overrides: Partial<EvidenceBundle> = {}): GroundingState {
+  const base = {
+    detail: experimentDetail,
+    evidence: evidenceExported.evidence,
+    artifacts: artifactsNull,
+    graph: graphStatusUnavailable,
+    sourcePreviews: {},
+  } as unknown as EvidenceBundle;
+  return { context: 'evidence', bundle: { ...base, ...overrides } };
+}
+
+const reviewOut = () => compose(reviewState());
+const evidenceOut = () => compose(evidenceState());
 
 describe('AssistantPanel is subordinate and never renders a verdict', () => {
   it('renders subordinate copy with a source label and a memory freshness dot', () => {
+    const out = evidenceOut();
     const { container, getByText, queryByText } = render(
-      <AssistantPanel
-        reply={ASSISTANT_SAMPLES.review.reply}
-        prompts={ASSISTANT_SAMPLES.review.prompts}
-        availability="available"
-      />,
+      <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
     // every reply names its source — rendered as the friendly Title-Case label,
-    // never the raw machine enum (P25.1). The review reply is answeredFrom 'files'.
+    // never the raw machine enum (P25.1). The evidence panel's leading chip
+    // (no field selected yet) is answeredFrom 'files'.
     expect(getByText(/answered from:/)).toBeInTheDocument();
     expect(getByText('answered from: Evidence & Sources')).toBeInTheDocument();
     expect(queryByText('answered from: files')).toBeNull();
@@ -30,12 +78,9 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
   });
 
   it('unavailable memory renders the approved quiet caveat; available memory renders none', () => {
+    const out = evidenceOut();
     const unavailable = render(
-      <AssistantPanel
-        reply={ASSISTANT_SAMPLES.review.reply}
-        prompts={ASSISTANT_SAMPLES.review.prompts}
-        availability="unavailable"
-      />,
+      <AssistantPanel reply={out.reply} prompts={out.prompts} availability="unavailable" />,
     );
     // P25.7 replaced the FALSE "…answered from source files directly" wording:
     // the assistant performs no source lookup. The approved caveat is the
@@ -45,11 +90,7 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     unavailable.unmount();
 
     const available = render(
-      <AssistantPanel
-        reply={ASSISTANT_SAMPLES.review.reply}
-        prompts={ASSISTANT_SAMPLES.review.prompts}
-        availability="available"
-      />,
+      <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
     expect(available.queryByText(MEMORY_UNAVAILABLE_CAVEAT)).toBeNull();
   });
@@ -58,11 +99,9 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     // A memory-less screen (e.g. Guided Completion) passes no availability, so
     // the panel must make no memory claim at all — neither the `memory:` head
     // line nor any caveat.
+    const out = evidenceOut();
     const { container, queryByText } = render(
-      <AssistantPanel
-        reply={ASSISTANT_SAMPLES.review.reply}
-        prompts={ASSISTANT_SAMPLES.review.prompts}
-      />,
+      <AssistantPanel reply={out.reply} prompts={out.prompts} />,
     );
     expect(queryByText(/^memory:/i)).toBeNull();
     expect(container.querySelector('.assistant-memory')).toBeNull();
@@ -73,10 +112,11 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
   });
 
   it('contains no PASS/FAIL strings', () => {
+    const out = reviewOut();
     const { container } = render(
       <AssistantPanel
-        reply={ASSISTANT_SAMPLES.export.reply}
-        prompts={ASSISTANT_SAMPLES.export.prompts}
+        reply={out.reply}
+        prompts={out.prompts}
         availability="available"
         note="Truth questions route to the CLI — the assistant never renders a verdict."
       />,
@@ -98,86 +138,48 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
   });
 });
 
-describe('assistant sample messages never contain verdict language', () => {
-  it('no static sample reply states PASS/FAIL', () => {
-    for (const ctx of Object.values(ASSISTANT_SAMPLES)) {
-      expect(hasVerdictLanguage(ctx.reply.text)).toBe(false);
-      for (const p of ctx.prompts) {
-        expect(hasVerdictLanguage(p.text)).toBe(false);
-      }
-    }
-  });
-
-  it('hasVerdictLanguage detects reserved verdict wording', () => {
+describe('hasVerdictLanguage — the structural guard the panel runs over every composed string', () => {
+  it('detects reserved verdict wording', () => {
     expect(hasVerdictLanguage('the record is PASS')).toBe(true);
     expect(hasVerdictLanguage('FAIL against schema')).toBe(true);
     expect(hasVerdictLanguage('the beamline came from the sheet')).toBe(false);
   });
-});
 
-describe('assistant copy cannot contradict live audit/pending truth (P21E)', () => {
-  const allSampleText = () =>
-    Object.values(ASSISTANT_SAMPLES)
-      .flatMap((ctx) => [
-        ctx.reply.text,
-        ...ctx.prompts.flatMap((p) => [p.text, p.answer?.text ?? '']),
-      ])
-      .join(' \n ');
-
-  it('no static sample states the old fixed 26-field coverage denominator', () => {
-    expect(allSampleText()).not.toMatch(/\b26\b/);
-  });
-
-  it('no static sample hardcodes a specific pending-field count that could contradict a live record', () => {
-    expect(allSampleText()).not.toMatch(/\b5 fields\b/i);
-    expect(allSampleText()).not.toMatch(/\bfive values\b/i);
-  });
-
-  it('the evidence-coverage prompt answers qualitatively and defers exact numbers to the live audit view', () => {
-    const prompt = ASSISTANT_SAMPLES.evidence.prompts.find((p) => /coverage/i.test(p.text));
-    expect(prompt).toBeDefined();
-    expect(prompt!.answer!.text).toMatch(
-      /fields, assets, descriptors, series, QC, links, and attribution/,
-    );
-    expect(prompt!.answer!.text).not.toMatch(/\b26\b/);
+  // The no-verdict guarantee over EVERY composed string (all five contexts,
+  // many bundle-state permutations) is enforced exhaustively in
+  // `lib/assistantComposer.test.ts` ("no-verdict guarantee across every
+  // composed string", per review/export/evidence/complete context) and
+  // `__tests__/memory-composer.test.ts` ("guard cleanliness sweep over EVERY
+  // composed string", memory context). This is a lightweight smoke check that
+  // the guard also holds for the review/evidence outputs this file renders.
+  it('no reply/prompt/answer text from the review or evidence compose() output states a verdict', () => {
+    for (const out of [reviewOut(), evidenceOut()]) {
+      const strings = [out.reply.text, ...out.prompts.flatMap((p) => [p.text, p.answer?.text ?? ''])];
+      for (const s of strings) {
+        expect(hasVerdictLanguage(s)).toBe(false);
+      }
+    }
   });
 });
 
 describe('assistant final placeholder form: guided prompts + source-labeled answers', () => {
-  it('every clickable prompt answer names a source doc and carries no verdict language', () => {
-    for (const ctx of Object.values(ASSISTANT_SAMPLES)) {
-      for (const p of ctx.prompts) {
-        expect(p.answer).toBeDefined();
-        expect(p.answer!.sourceDoc).toMatch(/\.md$/);
-        expect(hasVerdictLanguage(p.answer!.text)).toBe(false);
-      }
-    }
-  });
-
-  it('clicking a guided prompt shows its static, source-labeled sample answer', () => {
-    const prompt = ASSISTANT_SAMPLES.evidence.prompts[0];
+  it('clicking a guided prompt shows its composed answer', () => {
+    const out = evidenceOut();
+    const sidecarPrompt = out.prompts.find((p) => p.text === 'What is the evidence sidecar?')!;
     const { getByText } = render(
-      <AssistantPanel
-        reply={ASSISTANT_SAMPLES.evidence.reply}
-        prompts={ASSISTANT_SAMPLES.evidence.prompts}
-        availability="available"
-      />,
+      <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
-    // guided prompts are primary; clicking one swaps in its answer
-    fireEvent.click(getByText(prompt.text));
-    expect(getByText(/assistant convention, not an official ISAAC standard/)).toBeInTheDocument();
-    // the answer names its source doc
-    const sourceDoc = prompt.answer!.sourceDoc!;
-    expect(getByText(sourceDoc, { exact: false })).toBeInTheDocument();
+    // guided prompts are primary; clicking one swaps in its composed answer
+    fireEvent.click(getByText(sidecarPrompt.text));
+    expect(
+      getByText(/ISAAC assistant convention, not part of the official ISAAC schema/),
+    ).toBeInTheDocument();
   });
 
   it('is honestly guided-prompts-only: no free-text input, no fake chat affordance; a subordinate caption is visible', () => {
+    const out = evidenceOut();
     const { getByText, queryByRole, queryByLabelText } = render(
-      <AssistantPanel
-        reply={ASSISTANT_SAMPLES.evidence.reply}
-        prompts={ASSISTANT_SAMPLES.evidence.prompts}
-        availability="available"
-      />,
+      <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
     // P25.2: the disabled free-text input + send button are removed entirely —
     // there is no textbox and no "Send" affordance to mislead a user into
@@ -193,12 +195,9 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
   });
 
   it('prompt chips remain keyboard-accessible real buttons', () => {
+    const out = evidenceOut();
     const { getAllByRole } = render(
-      <AssistantPanel
-        reply={ASSISTANT_SAMPLES.evidence.reply}
-        prompts={ASSISTANT_SAMPLES.evidence.prompts}
-        availability="available"
-      />,
+      <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
     const buttons = getAllByRole('button');
     // every clickable prompt chip is a real <button>, focusable/clickable —

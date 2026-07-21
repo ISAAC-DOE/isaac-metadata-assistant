@@ -174,7 +174,6 @@ export type AssistantSource =
 export interface AssistantMessage {
   text: string; // sentence case; never renders PASS/FAIL
   answeredFrom: AssistantSource;
-  sourceDoc?: string; // the doc the sample answer is grounded in, e.g. "docs/…md"
 }
 
 export interface SuggestedPrompt {
