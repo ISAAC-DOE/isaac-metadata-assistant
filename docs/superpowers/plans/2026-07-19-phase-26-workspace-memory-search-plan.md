@@ -8,8 +8,13 @@ D2 = 5-scenario seed (all 4 states), D3 = strict green-per-commit (no transient-
 reconciled to post-P25 HEAD (routes 21→22 w/ /api/search; MemoryReader = 7 methods, no search() yet;
 backend/web tests 500/299 not 461/137; backend files byte-identical to f534a4c so §8–§11 citations hold).
 P26.0a RELEASED (deterministic 5-scenario seed + idempotent demo; 18 behavior tests + full suite green,
-independent Opus adversarial review APPROVE). NEXT: P26.1 (workspace search core). See §20 for per-slice status.
-Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+independent Opus adversarial review APPROVE). P26.0b RELEASED 2026-07-21 (guarded synthetic-demo reset —
+`POST /api/demo/reset` + Reset Demo control; commit `68fd910`, CI green run `29872521920`, deployed;
+hosted QA GREEN — preview 13→ canonical 5 / legacy 8 / ambiguous 0, execute → exactly the five
+(needs_attention 2 / in_review 1 / ready_to_export 1 / done 1), Run Demo ×3 held at 5). CQ-1 (demo/run
+unbounded accumulation) CLOSED by P26.0a (prevention) + P26.0b (cleanup), verified live. NEXT: P26.1
+(workspace search core). See §20 for per-slice status.
+Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a + P26.0b 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
          (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
@@ -459,6 +464,50 @@ is isolated per arc decision #10.
   added and that all are synthetic. **Report**: the seed catalog + determinism evidence. **Commit**:
   single. **Stop**: review before P26.1. *(Placement in Phase 26 is decided by the decision-lock;
   Stabilization only verifies it — it is not re-implemented there.)*
+
+### P26.0b — Guarded synthetic-demo reset (corrective; closes CQ-1) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `68fd910`, CI green run `29872521920`, deployed to Railway + Vercel.
+> An UNPLANNED corrective slice: P26.0a prevented FUTURE accumulation, but the hosted shared Railway
+> volume still held 8 stale pre-P26.0a random-id `demo/run` records (13 total). Adds
+> `POST /api/demo/reset` (preview/execute) + a guarded, subordinate-destructive **Reset Demo** control on
+> My Experiments, restoring the shared synthetic workspace to EXACTLY the five canonical scenarios.
+> **Safety model**: typed `DemoResetRequest` (`extra="forbid"` → caller ids/paths rejected 422); removes
+> ONLY records proven managed-legacy by the exact `source.description` marker; REFUSES with zero mutation
+> if ANY ambiguous record is present; deterministic reseed via the truth core; idempotent; path-free
+> typed response; NO general per-experiment DELETE route. **Frontend**: fail-closed synthetic-only gate
+> (`GET /api/health` mode), preview-before-execute, shared-workspace disclosure, type-"RESET" arming,
+> sync single-submit guard, refuse-with-no-bypass on ambiguous, focus-trap/return a11y, list refresh on
+> success. **Concurrency**: two simultaneous resets can never raise an uncaught 500 — the remove path AND
+> both read paths (`_load_all_experiments`, `list_experiments`) tolerate a dir removed mid-operation; a
+> deterministic read-race regression test proves the guard (verified to FAIL without the fix).
+> **Files**: `workspace.py`, `routes.py`, new `apps/api/tests/test_reset.py` (18); `apps/web` — new
+> `components/ResetDemoDialog.tsx`, `lib/{api,types,labels}.ts`, `screens/ExperimentsHome.tsx`,
+> `screens/screens.css`, `styles/base.css`, `test/apiFixtures.ts`, new `__tests__/reset-demo.test.tsx`
+> (26); regenerated `memory-snapshot.json` (202 unchanged). **Verified**: backend 536, frontend 325,
+> `tsc -b` + `vite build` clean, snapshot no drift, committed-snapshot gate 17, R4.3 full preflight PASS.
+> **Review**: two independent Opus reviews (backend, then full-slice); the full-slice review found the
+> read-path concurrency race (IMPORTANT) → fixed + deterministic test; two MINORs (constant synthetic
+> gate → documented + deferred; Escape preventDefault → accepted). All Critical/Important resolved.
+> **Hosted QA GREEN (production, browser-verified 2026-07-21)**: Reset Demo live and subordinate; preview
+> reported exactly Current 13 / Canonical Preserved 5 / Legacy Removed 8 / Ambiguous 0 / Final 5; execute
+> → ONE mutation request (`POST /demo/reset` 200) + one list refresh (`GET /experiments` 200); dashboard
+> refreshed to EXACTLY five with distribution needs_attention 2 / in_review 1 / ready_to_export 1 / done
+> 1; the Exported Record (`01SYNTHXANESSEED0000000005`) retained its Exported artifact; reload preserved
+> the five; **Run Synthetic Demo ×3 held the count at 5** (each upserts the canonical `…0001`, all 200);
+> Railway health 200 at `68fd910`; console clean; no failed request.
+> **CQ-1 disposition — CLOSED**: root cause = `demo/run` created a new experiment on every call
+> (unbounded accumulation, `routes.py`); PREVENTION = deterministic canonical ids + idempotent seeding
+> (P26.0a); CLEANUP = this guarded reset (P26.0b); hosted result = 13→5 and three repeated demo runs stay
+> at 5. Both prevention and cleanup are verified on production.
+- **Not in the original §20**: surfaced from the P26.0a hosted-QA finding (the persistent Railway volume
+  retained pre-P26.0a random-id demo records). Scoped, TDD, independently reviewed, one implementation
+  commit.
+- **Forbidden (honored)**: `src/isaac_records/*`, `schema/*`, `auth.py`, `memory.py`, `examples/`,
+  `graphify-out/` — none touched. No new dependency, no new env var, no DELETE route.
+- **Deferred to the post-Phase-26 architecture decision packet**: persistent-vs-ephemeral workspace
+  storage, and wiring `is_synthetic_only()` / `/health` mode to an authoritative runtime signal (both are
+  constants today — acceptable only because the prototype is synthetic-only by construction; the real
+  defense is provenance → ambiguous → refuse).
 
 ### P26.1 — Workspace search core (no route)
 - **Objective**: `apps/api/isaac_api/search.py` — pure `workspace_search(query, experiments, loaders,
