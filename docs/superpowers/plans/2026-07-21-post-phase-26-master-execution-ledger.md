@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **Phase 29 COMPLETE** (2026-07-22; documented non-blocking caveats — dormant write-path, passive-poll two-window, degraded not UI-induced) → Phase 30 — Live Runtime Record Retrieval |
-| **Active ticket** | P30.0 — proof + contract (next) |
+| **Current phase** | **Phase 29 REOPENED** (2026-07-22 — the `09cfaee` "COMPLETE" closure is RETRACTED as premature): the committed scope (plan §3 P29.5 "confirmation flow" hosted QA; the approved mandate's P29.5 "Confirm THROUGH THE VISIBLE UI") required a visible stage→confirm→mutate path; the write-path was left DORMANT by a unilateral orchestrator decision, NOT an approved deferral. Reopened for one bounded gap → **P29.6 Agent Actionability Closure**. Phase 30 BLOCKED until P29.6 + hosted confirmation QA pass. |
+| **Active ticket** | P29.6 — Agent Actionability Closure (visible, narrow, deterministic staging → confirm; then hosted QA) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
-| **Next step** | Phase 30 P30.0 proof+contract → P30.1 projection → P30.2 update/invalidation → P30.3 search+agent integration → P30.4 degradation+QA (P30.0 is a proof-GATE: index only if justified) |
+| **Next step** | **P29.6 Agent Actionability Closure** (visible narrow deterministic staging→confirm; test-first; hosted QA) → corrected Phase 29 closure → THEN Phase 30 P30.0 proof-GATE (index only if justified; bias to NO new persistent index if P26 Workspace search suffices) |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -562,7 +562,17 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   background tab answers from its stale in-memory snapshot until refresh (cross-tab freshness is refresh-driven,
   consistent with the passive-poll caveat).
 
-## Phase 29 Completion Gate (closed 2026-07-22 @ Phase-29 HEAD `c501425`)
+- **Phase 29 closure RETRACTION** (2026-07-22, after review challenge): the `09cfaee` "Phase 29 COMPLETE"
+  claim was **premature and is retracted**. CI/provenance were sound (all green; `c501425` ⊇ `cfd87ce` — no
+  deployment mismatch), but the **agent write-path dormancy was out of scope**: the committed Phase 29 plan §3
+  lists P29.5 hosted QA of the "confirmation flow", and the approved P29.5 mandate requires "Confirm THROUGH
+  THE VISIBLE UI. Observe one mutation request." No committed spec permits a read-only agent and no user
+  approved the deferral — the orchestrator chose dormancy unilaterally. Correct action = **P29.6 Agent
+  Actionability Closure** (Path A). Phase 29 gate below is **PROVISIONAL** pending P29.6 + hosted confirmation
+  QA. (Record is completable via the manual flow + P28.3 `/edit`; the missing piece is specifically the
+  agent's visible stage→confirm→mutate path required by P29.3/P29.5.)
+
+## Phase 29 Completion Gate (PROVISIONAL — reopened for P29.6; closed criteria pending visible staging + hosted confirm QA)
 
 | Criterion | Status | Evidence |
 |---|---|---|
