@@ -75,9 +75,11 @@ Read this before demoing it to anyone:
   search.
 - **The "Memory: Available / Unavailable" chip is live** — it reflects `GET /api/graph/status`, not
   a hardcoded placeholder; still status-only and never a verdict.
-- **There is no search box and no user/account chip.** An earlier iteration of the chrome had
-  placeholder versions of both; they were removed (Phase 22D) because this prototype has no search
-  and no user accounts, and a fake affordance would misrepresent that.
+- **Search is a real ⌘K command palette; there is still no user/account chip.** An earlier iteration
+  of the chrome had placeholder versions of both; they were removed (Phase 22D) because the prototype
+  then had neither real search nor user accounts, and a fake affordance would misrepresent that.
+  Phase 26 shipped a real, API-backed search (`SearchDialog`, opened with ⌘K); user accounts remain
+  absent, so no account chip is shown.
 
 ## Prerequisites
 
@@ -205,7 +207,8 @@ metadata/provenance only, never a validator, and it never authorizes export.
 - **Source Index** — the served-file allowlist (`GET /api/memory/files` /
   `GET /api/memory/file`), grouped by kind (Code / Documents / Other), with
   per-file provenance (rationale, related leads). No file contents are
-  served, and there is no search box.
+  served, and there is no inline search box on this screen itself — search
+  is the global ⌘K palette, not per-screen.
 - **Concept Lookup** — the curated concepts (`GET /api/memory/concepts` /
   `GET /api/memory/concepts/{id}`), browsable as an accordion showing anchor
   source, community, and related leads. Today all 19 curated concepts have
