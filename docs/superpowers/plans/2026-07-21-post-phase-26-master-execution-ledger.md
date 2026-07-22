@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 28 COMPLETE** (2026-07-22; two documented non-blocking QA caveats) → Phase 29 — Assistant Experience |
-| **Active ticket** | P29.0 — Live context builder (next) |
+| **Active ticket** | P29.1 — Ephemeral session context (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 29 P29.0 live context builder → P29.1 ephemeral session context → P29.2 conversation UI → P29.3 deterministic workflow agent → P29.4 one shared state → P29.5 hosted agent QA |
 | **Blockers** | none |
@@ -440,6 +440,22 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   for P32 UI audit. Demo left at canonical 2/1/1/1.
 
 ---
+
+## Phase 29 — Assistant Experience (in progress)
+
+- **P29.0** (read-only audit + contract, 2026-07-22): verified baseline `414b633` (CI green, Railway `414b633`
+  synthetic-only, Vercel 200, 0/0 clean). Audit (targeted `rg`+`Read`, NO agent swarm per the mandate's
+  prefer-rg/≤5-agents rule) → plan `docs/superpowers/plans/2026-07-22-phase-29-assistant-experience-plan.md`.
+  **Findings:** the assistant today = a PURE composer (`assistantComposer.ts`) over the screen's already-fetched
+  bundle + a static guided-prompt panel (`AssistantPanel.tsx`, verdict guard, source labels, memory caveat);
+  NO backend assistant endpoint, NO mutation, read-only, honest (no overclaim found). It does NOT yet consume
+  P28 `workflow`/`evidence-classification`. Per-screen `useFetch`, no shared store. **Contract selected:**
+  Option A (compose existing P28 typed endpoints) + a same-revision coherence guard, promoted into P29.4's
+  single record-session state owner. Rejected Option B (new assistant-context endpoint — duplication) and pure
+  Option C (bundle bloat/coupling). **Pushback recorded:** did not write all 16 contract tests as long-lived
+  RED at P29.0 (span 4 slices → CI-noise/maintainability risk); instead per-slice red-first (the Phase-28
+  pattern), with the 16 invariants distributed across P29.1/P29.3/P29.4 as the acceptance checklist. No new
+  hard gate; external-LLM prohibition honored by a deterministic-agent design. Docs-only; truth path untouched.
 
 ## Phase 28 Completion Gate (closed 2026-07-22 @ Phase-28 HEAD)
 
