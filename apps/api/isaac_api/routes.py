@@ -32,6 +32,7 @@ from . import runtime_mode
 from . import search
 from . import serialize
 from . import sources
+from . import version_contract as vc
 from . import workspace as ws
 from .workspace import REPO_ROOT, Experiment, atomic_write_text
 
@@ -397,9 +398,7 @@ def get_experiment(experiment_id: str, response: Response):
     if exp is None:
         return _not_found(experiment_id)
     detail = _detail(exp)
-    detail["rev"] = exp.rev
-    detail["updated_utc"] = exp.updated_utc
-    detail["version"] = exp.version_token()
+    detail.update(vc.version_fields(exp))
     response.headers["ETag"] = exp.etag()
     return detail
 
@@ -494,12 +493,12 @@ def post_answers(
             exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
         result = serialize.pending_to_list(exp.draft, ws.load_demo_answers())
         result["status"] = exp.status()
-        result["rev"] = exp.rev
-        result["updated_utc"] = exp.updated_utc
-        result["version"] = exp.version_token()
+        result.update(vc.version_fields(exp))
         response.headers["ETag"] = exp.etag()
         if used_grace:
-            response.headers["X-ISAAC-Deprecation"] = "if-match-required-next-release"
+            # When vc.precondition_required() becomes True, a missing If-Match
+            # returns 428 here instead of proceeding under the grace.
+            response.headers[vc.DEPRECATION_HEADER] = vc.DEPRECATION_VALUE
         return result
 
 
@@ -571,12 +570,12 @@ def post_export(
             "record_path": str(exp.record_path()),
             "sidecar_path": str(exp.sidecar_path()),
         }
-        payload["rev"] = exp.rev
-        payload["updated_utc"] = exp.updated_utc
-        payload["version"] = exp.version_token()
+        payload.update(vc.version_fields(exp))
         response.headers["ETag"] = exp.etag()
         if used_grace:
-            response.headers["X-ISAAC-Deprecation"] = "if-match-required-next-release"
+            # When vc.precondition_required() becomes True, a missing If-Match
+            # returns 428 here instead of proceeding under the grace.
+            response.headers[vc.DEPRECATION_HEADER] = vc.DEPRECATION_VALUE
         return payload
 
 
