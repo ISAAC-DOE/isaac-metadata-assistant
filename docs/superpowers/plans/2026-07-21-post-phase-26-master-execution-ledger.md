@@ -14,13 +14,13 @@
 | Field | Value |
 |---|---|
 | **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.5-strict — Strict enforcement slice: flip `precondition_required()`→True (missing If-Match → 428), invert compat-grace tests, update mutation tests to send If-Match (next) |
-| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 runtime mode (`26642eb`, Railway var live); P27.2 atomic writes + rev model (`14477bd`); P27.3 backend version contract (`ccac6d3`); P27.4 shared typed version contract (`41bd20b`); P27.5 FE version propagation (`0112f5f`, deployed + hosted-verified sending If-Match) |
-| **Next step** | P27.5-strict (code+tests only — NO new Railway var authorized): 428 for missing If-Match on answers/export, retain 412 stale; then P27.6 live sync; P27.7 two-tab concurrency QA |
-| **Blockers** | none (strict flip is code-level; deployed FE confirmed sending If-Match) |
-| **Latest impl commit** | `0112f5f` (P27.5) |
-| **Latest checkpoint commit** | `0112f5f` |
-| **Verification status** | full backend **720 passed**; frontend **361 passed** + Vite build clean; CI green on `0112f5f`; Railway synthetic-only; Vercel serving P27.5 bundle (If-Match verified live) |
+| **Active ticket** | P27.6-reset — Corrective Reset Demo semantics slice: reset must restore canonical CONTENT to baseline (2/1/1/1 + DONE artifact), invalidate pre-reset ETags, keep guards (next) |
+| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 FE propagation (`0112f5f`); P27.5-strict 428 enforcement (`d7a9fef`, deployed) |
+| **Next step** | Reset-semantics fix (mandate-ordered BEFORE P27.6 live-sync): re-materialise all 5 canonical to seed baseline on execute; then P27.6 live sync; P27.7 two-tab QA |
+| **Blockers** | none |
+| **Latest impl commit** | `d7a9fef` (P27.5-strict) |
+| **Latest checkpoint commit** | `d7a9fef` |
+| **Verification status** | full backend **728 passed**; frontend **361 passed**; CI green on `d7a9fef`; Railway serving `d7a9fef` synthetic-only; Vercel serving P27.5 bundle |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
 | **Next recommended action** | P27.4 — shared typed version contract + compat-rollout boundaries |
@@ -236,3 +236,24 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
     reset-semantics gap (matches the P27.3 ABA audit); deferred to a targeted Phase 28 workflow/reset fix.
     NOT force-fixed (would require credential-replay bypass — refused). Logged; hosted demo state is drifted
     but non-critical (synthetic).
+- **P27.5-strict** (`d7a9fef`, 2026-07-21): mandatory preconditions — the one-release grace is RETIRED.
+  `version_contract._PRECONDITION_REQUIRED = True`; `DEPRECATION_HEADER`/`DEPRECATION_VALUE` deleted.
+  routes.py: `_precondition_required(exp)` → **428** `{error:"precondition_required",experiment_id}`;
+  `_check_if_match` returns `JSONResponse|None` (missing → 428; `*`/strong-match → proceed; mismatch →
+  412; weak/malformed/empty → 400); deprecation-header emission removed from both handlers. Ordering
+  preserved (existence pre-check outside lock; 404 → precondition → export-409 → mutate; a missing
+  precondition on an already-exported record → 428 not 409). Only /answers + /export gated (grep-confirmed);
+  no hidden bypass (empty/whitespace/`,` → 400). Red-first (test_strict_precondition.py, 13); existing
+  mutation tests across test_api/test_versioning/test_version_contract(_shared) updated to send the REAL
+  ETag (not `*`); obsolete grace tests removed. Independent Opus adversarial review = **SHIP** (no
+  Crit/Imp; no bypass; FE always sends a truthy token → unaffected; declined M1 — the client truthiness
+  guard fails safe). Full backend **728 passed**; snapshot regen + gate 17; R4.3 full preflight PASS; CI
+  green on `d7a9fef`; Railway serving `d7a9fef` synthetic-only. 428 hosted-verified via deterministic
+  backend tests + runtime-commit match (no credential replay). Truth core + FE untouched.
+- **Credential-replay incident review (step 4, 2026-07-21):** read-only scan of git tree, working tree,
+  docs/plans, committed artifacts, and the repo leak scanner → **NO durable persistence of a token value**.
+  No secret file tracked; the only local `.env.local` is untracked + gitignored (holds an unrelated Vercel
+  OIDC token). Per policy: credentials **NOT rotated**. Standing QA rule added (memory + all hosted-QA
+  prompts): hosted QA must never capture/replay Authorization values or bypass UI safety controls —
+  header-name/request-shape observation only; exercise 428 via deterministic backend tests. Does not
+  authorize any auth/identity redesign; the shared synthetic-demo auth limitation remains a future item.
