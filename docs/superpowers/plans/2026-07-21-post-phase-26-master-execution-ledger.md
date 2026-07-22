@@ -14,21 +14,21 @@
 | Field | Value |
 |---|---|
 | **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.3 — Backend version contract (ETag/If-Match, 412/428) (next) |
-| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 runtime mode (`26642eb`, Railway var live); P27.2 atomic writes + rev model |
-| **Next step** | P27.3: expose `rev` (ETag + body), `If-Match` on answers/export, typed 412 (P27.4 adds 428 rollout) |
+| **Active ticket** | P27.4 — Safe compatibility rollout (compat→strict) + shared typed version contract (next) |
+| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 runtime mode (`26642eb`, Railway var live); P27.2 atomic writes + rev model (`14477bd`); P27.3 backend version contract (`ccac6d3`) |
+| **Next step** | P27.4: shared typed version contract for FE propagation; deprecation-signal boundaries time-bounded to one release (strict 428 comes after P27.5 FE ships) |
 | **Blockers** | none |
-| **Latest impl commit** | P27.2 (this commit) |
-| **Latest checkpoint commit** | `859d36c` |
-| **Verification status** | baseline verified; CI green on `859d36c`; Railway+Vercel healthy |
-| **Open decisions** | ledger→resume skill wiring (skill edit needs approval); `If-Match` strictness handled by P27.4 two-step |
+| **Latest impl commit** | `ccac6d3` (P27.3) |
+| **Latest checkpoint commit** | `ccac6d3` |
+| **Verification status** | full backend **714 passed**; CI green on `ccac6d3`; Railway serving `ccac6d3` synthetic-only; Vercel 200 |
+| **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | governance commit (this ledger + lock/roadmap/storage-doc reconcile), then P27.1 |
-| **Git sync** | `main` · local == `origin/main` == `859d36c` · 0/0 · clean |
-| **Exact-HEAD CI** | green on `859d36c` |
-| **Railway** | Online · commit `859d36c` · `mode: synthetic-only` · volume `/data/isaac-workspace` 34/500 MB |
-| **Vercel** | 200 · `isaac-demo.vercel.app` |
-| **Browser-QA** | P26 SearchDialog green (prior); Phase 27+ pending |
+| **Next recommended action** | P27.4 — shared typed version contract + compat-rollout boundaries |
+| **Git sync** | `main` · local == `origin/main` == `ccac6d3` · 0/0 · clean |
+| **Exact-HEAD CI** | green on `ccac6d3` (run 29890264575) |
+| **Railway** | Online · commit `ccac6d3` · `mode: synthetic-only` · volume `/data/isaac-workspace`; `expose_headers=[ETag]` live |
+| **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
+| **Browser-QA** | P26 SearchDialog green (prior); P27.3 hosted no-regression smoke (pre-P27.5 FE unchanged); full two-tab concurrency QA at P27.7 |
 
 ---
 
@@ -175,3 +175,29 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   synthetic demo byte-identical; snapshot regen + gate 17 green. NO HTTP conflict contract yet (P27.3).
   Truth-core/schema/export untouched. Known-accepted (deferred to P27.3): last-write-wins across
   concurrent instances (no If-Match yet).
+- **Checkpoint-record correction (2026-07-21):** the post-P27.2 checkpoint narrative said "5 commits this
+  session"; the actual count is **four** (`859d36c`, `33825ff`, `26642eb`, `14477bd` — verified by
+  `git rev-list --count 7926ab0..14477bd` = 4). The "5" was a typo in prose only; no commit was missing.
+  Corrected here rather than in a standalone commit.
+- **P27.3** (`ccac6d3`, 2026-07-21): backend version contract — ABA-safe ETag/If-Match/412 on the two
+  scientific-record mutations (`/answers`, `/export`). Four parallel read-only discovery audits (HTTP
+  surface, reset/reseed **ABA**, frontend/CORS, tests/standards) proved the integer `rev` alone is
+  ABA-unsafe (no durable field differs across a recreate; `created_utc` is a fixed constant; `demo_run`
+  reset `rev`→0). Fix: durable opaque `generation` nonce (`secrets.token_hex`, minted at genuine
+  (re)instantiation, preserved across saves/loads/no-op upserts, deterministic id-derived fallback for
+  legacy) + monotonic `rev`; public token `<generation>.<rev>`, HTTP ETag = that as a strong quoted
+  validator. Reads (detail/draft/pending) + successful mutations expose `rev`/`updated_utc`/`version` +
+  set ETag. If-Match: RFC 9110 strong comparison; `*` matches iff exists; mismatch → typed **412**
+  stale_write (+ current ETag echoed); weak/malformed → **400**; missing → accepted under a one-release
+  **compat grace** + non-noisy `X-ISAAC-Deprecation` header. Ordering: 404 → precondition(400/412) →
+  export 409 → mutate. Race: in-process per-record `record_lock` (single-process uvicorn threadpool is
+  the deployed model) serialises load→compare→mutate→save; existence check runs OUTSIDE the lock so
+  bogus ids cannot grow the lock map; `demo_run` target write is under the lock. CORS `expose_headers=
+  [ETag]`. Opus impl (red-first, 38 tests) + independent Opus adversarial review = **SHIP**; its two
+  Important findings (unbounded lock-map on attacker id → existence-precheck-before-lock; demo writer
+  bypass → lock demo_run + document demo_reset) + one RFC list-parsing minor were fixed and the tests
+  strengthened (T1 fresh-read-under-lock, T2 no-op-export, T3 deprecation-header coverage, trailing-comma
+  tolerance). Full backend **714 passed**; snapshot regen + gate 17 green; R4.3 full preflight PASS;
+  synthetic demo record byte-identical + official schema PASS (v1.05). Truth-core/schema/export untouched.
+  Live-verified: Railway serving `ccac6d3` synthetic-only, `expose_headers: ETag` deployed, auth enforced
+  (keyless probe → 401 as expected), Vercel 200. Deferred to P27.4/P27.5: strict 428, FE propagation.
