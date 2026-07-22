@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from isaac_records.audit import audit_records, render_audit
-from isaac_records.complete import apply_answers
+from isaac_records.complete import apply_answers, apply_corrections
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
@@ -506,7 +506,13 @@ def _answers_to_apply_shape(answers_by_id: dict, draft: dict, timestamp: str) ->
     key on their kind name.
     """
     pending = draft.get("pending") or []
+    # An asset key is recognized if it names a still-pending asset blocker (the
+    # /answers fill path) OR an asset already present in the draft (the /edit
+    # correction path, where 0 pending means no blocker carries the uri). The union
+    # leaves /answers behaviour unchanged — a pending asset is never yet in
+    # draft["assets"], so its uri is still recognized exactly as before.
     asset_uris = {e.get("uri") for e in pending if e.get("kind") == "asset"}
+    asset_uris |= {a.get("uri") for a in (draft.get("assets") or []) if isinstance(a, dict)}
     out: dict = {"timestamp": timestamp, "asset_sha256": {}}
     for key, value in (answers_by_id or {}).items():
         if value in (None, ""):
@@ -570,6 +576,93 @@ def post_answers(
             exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
         # Derived downstream invalidation (P28.2) at the post-mutation revision. A
         # byte-stable no-op reports changed=False with empty deltas and no rev bump.
+        changed_fields = submitted_fields if changed else []
+        invalidation = dependencies.build_invalidation(
+            changed=changed,
+            changed_fields=changed_fields,
+            pre_steps=pre_steps,
+            post_exp=exp,
+        )
+        result = serialize.pending_to_list(exp.draft, ws.load_demo_answers())
+        result["status"] = exp.status()
+        result.update(vc.version_fields(exp))
+        result["workflow"] = _workflow_for(exp)
+        result["invalidation"] = invalidation
+        response.headers["ETag"] = exp.etag()
+        return result
+
+
+# --- 7b. edit (correct an already-answered field) -----------------------------
+
+
+def _has_correction_target(apply_shape: dict) -> bool:
+    """True iff ``apply_shape`` names at least one recognized correction field.
+
+    An asset sha256 (keyed by a known uri), a series/descriptor/edge value. A bare
+    ``descriptor_label`` (or only ``timestamp``/``asset_sha256:{}``) is NOT an
+    actionable correction — an edit body that reduces to nothing recognized is
+    rejected (422) rather than silently no-op'd, so an unknown field is never
+    quietly swallowed.
+    """
+    return bool(apply_shape.get("asset_sha256")) or any(
+        k in apply_shape for k in ("series", "descriptor", "edge")
+    )
+
+
+@router.post("/experiments/{experiment_id}/edit")
+def post_edit(
+    experiment_id: str,
+    response: Response,
+    body: dict = Body(...),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    # Mirrors post_answers EXACTLY: existence pre-check OUTSIDE the lock so a bogus
+    # id never pins a permanent entry in the never-evicting per-record lock map.
+    if ws.load_experiment(experiment_id) is None:
+        return _not_found(experiment_id)
+    # The per-record lock serialises load->precondition->mutate->save; the record is
+    # loaded FRESH inside the lock so two writers holding the same token cannot both
+    # succeed (compare-and-swap).
+    with ws.record_lock(experiment_id):
+        exp = ws.load_experiment(experiment_id)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        if body.get("confirmed_by_user") is not True:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "confirmation_required",
+                    "message": "confirmed_by_user must be true to correct a field.",
+                },
+            )
+        err = _check_if_match(if_match, exp)
+        if err is not None:
+            return err
+        # Capture the PRE-mutation workflow so the invalidation reports the reopen
+        # DELTA (which completed steps, if any, regressed) after the correction.
+        pre_steps = _workflow_for(exp)["ordered_steps"]
+        submitted_fields = [
+            k for k, v in (body.get("answers") or {}).items() if v not in (None, "")
+        ]
+        timestamp = _now_iso()
+        apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
+        if not _has_correction_target(apply_shape):
+            # No recognized field to correct — never invent one.
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "unrecognized_field",
+                    "message": "No editable field was recognized in the request.",
+                },
+            )
+        # OVERWRITE the current value(s) for the recognized keys, recording a fresh
+        # user_confirmation. apply_corrections never touches pending and never
+        # invents a value (a malformed sha256 / off-enum qc leaves the value as-is).
+        exp.draft = apply_corrections(exp.draft, apply_shape)
+        exp.answer_log.append({"edited": apply_shape, "at": timestamp})
+        changed = exp.save_versioned()
+        if not changed:
+            exp.answer_log.pop()  # byte-stable no-op: discard the speculative log append
         changed_fields = submitted_fields if changed else []
         invalidation = dependencies.build_invalidation(
             changed=changed,

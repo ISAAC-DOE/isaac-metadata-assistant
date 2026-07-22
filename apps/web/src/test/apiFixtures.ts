@@ -853,6 +853,37 @@ export const answersAfterNotebook = {
   version: '1.1',
 };
 
+/** POST /edit response after correcting the processing-notebook sha256 (P28.3).
+ *  Same bundle shape as /answers (pending/status/version/workflow/invalidation);
+ *  the version advances (the client adopts it) and the invalidation reports a real
+ *  change with no downstream reopen. */
+export const editApplied = {
+  pending: [],
+  status: 'ready_to_export',
+  rev: 4,
+  updated_utc: '2099-04-02T09:18:00Z',
+  version: '1.1',
+  workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: false, rev: 4 }),
+  invalidation: {
+    changed: true,
+    rev: 4,
+    changed_fields: ['ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb'],
+    reopened_steps: [],
+    artifact: { state: 'none', reason: null },
+    reason: 'Updated 1 field(s); no downstream steps reopened.',
+  },
+};
+
+/** POST /edit 412 stale_write payload (verbatim backend contract shape). */
+export const editStaleWrite = {
+  error: 'stale_write',
+  experiment_id: EXP_ID,
+  expected_rev: 3,
+  current_rev: 7,
+  expected_version: '1.0',
+  current_version: '2.0',
+};
+
 /** POST /answers 412 stale_write payload (verbatim backend contract shape). */
 export const answersStaleWrite = {
   error: 'stale_write',

@@ -165,6 +165,8 @@ export const LABELS = {
   resetCountFinal: 'Final Experiments',
   actionReviewAnswer: 'Review & Answer',
   actionConfirm: 'Confirm',
+  actionEdit: 'Edit',
+  actionSave: 'Save',
   actionRevalidate: 'Re-Validate',
   actionDownload: 'Download',
   actionViewJson: 'View JSON',

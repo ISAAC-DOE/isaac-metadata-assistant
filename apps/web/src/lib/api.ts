@@ -209,6 +209,27 @@ export const api = {
     throw await mutationError(res);
   },
 
+  // P28.3 — correct/re-confirm an ALREADY-answered field. Same wire shape and
+  // optimistic-concurrency contract as submitAnswer (`{answers, confirmed_by_user}`
+  // + `If-Match: "<version>"`), but hits POST /edit, which OVERWRITES the current
+  // value (rather than filling a pending blocker) and returns the same
+  // pending/status/version/workflow/invalidation bundle. A 412 stale write (or 400
+  // malformed token) is thrown with the parsed body attached; an unchanged submit
+  // is a backend-guaranteed no-op (200, invalidation.changed:false).
+  async editField(
+    id: string,
+    answersById: Record<string, unknown>,
+    version?: string,
+  ): Promise<ApiAnswersResponse> {
+    const res = await request(`/experiments/${enc(id)}/edit`, {
+      method: 'POST',
+      body: JSON.stringify({ answers: answersById, confirmed_by_user: true }),
+      ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
+    });
+    if (res.ok) return (await res.json()) as ApiAnswersResponse;
+    throw await mutationError(res);
+  },
+
   // S6 — the schema-gated export. A 409 (record already exists) is thrown as an
   // ApiError(status:409); records are immutable and never overwritten. P27.5: a
   // threaded `version` is sent as `If-Match: "<version>"`; a 412 stale write (or

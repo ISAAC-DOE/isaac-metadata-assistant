@@ -10320,7 +10320,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "fd939f8a0e6b64bf92d20c61b8fc0c00bdb9297e2da6a3218c7787cc35a13f0a"
+        "sha256": "2d3c57a67e44b4f5ef0b533fbeb9b790a1019aae03c5d113da6b0eb014a69850"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "3d75dd4adde77afd91c9014648f9993d6874f22da9654c17d28272b92fa5a147"
+        "sha256": "8d5be0957467becee2a0b2d265e78e39b6a4a21b5f39a39a942f711b5e053c0d"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10548,7 +10548,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "dd6d2a34655f9ca2f4feb9ef7931aa17fd452fb750408af0f9d2e61701275b41"
+        "sha256": "fae0b8e4aa703c1bcb1fbc75b5fca1bfca31ee2c815cca09780b25bd68378b76"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10556,7 +10556,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "c1ca709ce09155736576ca5a107efab896192d4453fbf0ff8c84240dfa30a128"
+        "sha256": "ae5d4dbe4a83f92ddee1d19b83e8f3429ae5cd525bb7c78bdb7c18f1f62a927e"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10596,7 +10596,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "3d4d130b894dd61c215a38482b5fec9888502d069dcfd3e38f9caf3021df9a5f"
+        "sha256": "7c77d40c7d200052a630173525e27ff02a958482779bf22646db626a07bed008"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10616,7 +10616,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "64cfc34c6a2c76ff9d2df127ef951aff017be08ec5b5940076094c77e37c9de6"
+        "sha256": "b060b12627fe3a135797c74389e92bb9b2fdf2f3255dbf0f88bb830d508aa94a"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10872,7 +10872,7 @@
       },
       {
         "path": "src/isaac_records/complete.py",
-        "sha256": "b7f23d743a83ff61808d0313edafa7934c0bbf33850b37da1031fe94993077ae"
+        "sha256": "7f415924fb5e2673fd229d261c3f7ef05f1c3392d7f5cdc23caa324a9d4a237c"
       },
       {
         "path": "src/isaac_records/draft_validator.py",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "c231070b181acfad15e29985e41cc5c8465811e72a130f6a268e557e1956ae81"
+    "served_manifest_fingerprint": "cca1ad125ed306148c9fe90089b824ab3eacd3d1666d262b640e9ef0509ff2ec"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

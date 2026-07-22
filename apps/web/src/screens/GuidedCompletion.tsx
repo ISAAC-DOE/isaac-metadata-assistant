@@ -12,7 +12,7 @@ import { StatusChip } from '../components/StatusChip';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { Check, CircleHelp } from '../components/icons';
+import { Check, CircleHelp, Pencil } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
@@ -20,7 +20,12 @@ import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSync } from '../lib/useRecordSync';
 import { answerValuePreview, pendingItemToBlocker } from '../lib/adapt';
-import type { ApiExperimentDetail, ApiPendingItem } from '../lib/types';
+import type {
+  ApiExperimentDetail,
+  ApiInvalidation,
+  ApiPendingItem,
+  PendingBlocker,
+} from '../lib/types';
 
 /**
  * S4 · Complete Missing Fields — guided, one-question-at-a-time completion of the
@@ -73,6 +78,10 @@ interface Answered {
   id: string;
   label: string;
   storedValue: string;
+  /** The raw confirmed value, kept so an Edit can prefill the current value. */
+  rawValue: unknown;
+  /** The originating blocker, kept so an Edit can reconstruct the GuidedPrompt. */
+  blocker: PendingBlocker;
 }
 
 function LoadedCompletion({
@@ -92,6 +101,14 @@ function LoadedCompletion({
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
+  // P28.3 — summary-first edit of an already-confirmed field. `editingId` is the
+  // answered row currently in inline edit mode (null = all read-only summary).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<ApiError | null>(null);
+  // The last successful edit's downstream-invalidation (P28.2), surfaced honestly
+  // (reason + reopened/stale note). Never locally re-derived — server-reported.
+  const [editImpact, setEditImpact] = useState<ApiInvalidation | null>(null);
   // P27.5 — the optimistic-concurrency token. Initialized from the loaded detail
   // and re-adopted from every accepted answer response; sent as If-Match on the
   // next submit so a concurrent edit elsewhere is caught (412) instead of clobbered.
@@ -119,27 +136,72 @@ function LoadedCompletion({
     (p) => p.id !== currentItem?.id && !skipped.has(p.id),
   );
 
-  const confirmAnswer = (blockerId: string, kind: string, label: string, value: unknown) => {
+  const confirmAnswer = (blocker: PendingBlocker, value: unknown) => {
     setSubmitting(true);
     setSubmitError(null);
     api
-      .submitAnswer(id, { [blockerId]: value }, currentVersion)
+      .submitAnswer(id, { [blocker.id]: value }, currentVersion)
       .then((resp) => {
         setPending(resp.pending);
         setCurrentVersion(resp.version); // adopt the fresh token for the next submit
         setSkipped((prev) => {
-          if (!prev.has(blockerId)) return prev;
+          if (!prev.has(blocker.id)) return prev;
           const next = new Set(prev);
-          next.delete(blockerId);
+          next.delete(blocker.id);
           return next;
         });
         setAnswered((prev) => [
           ...prev,
-          { id: blockerId, label, storedValue: answerValuePreview(kind, value) },
+          {
+            id: blocker.id,
+            label: blocker.label,
+            storedValue: answerValuePreview(blocker.kind, value),
+            rawValue: value,
+            blocker,
+          },
         ]);
       })
       .catch((err: ApiError) => setSubmitError(err))
       .finally(() => setSubmitting(false));
+  };
+
+  // P28.3 — enter/leave inline edit for one answered row. Entering clears any prior
+  // edit error/impact; Cancel restores the summary with NO API call and NO mutation.
+  const startEdit = (rowId: string) => {
+    setEditingId(rowId);
+    setEditError(null);
+    setEditImpact(null);
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditError(null);
+  };
+
+  // Save a correction: POST /edit with the held If-Match token (P27.5), adopt the
+  // fresh version, update the summary row's value, and surface the server-reported
+  // downstream impact. A 412 keeps the editor mounted (input preserved) and shows
+  // the existing stale-write recovery banner. An unchanged submit is a backend
+  // no-op (200) — the row simply stays as it was.
+  const saveEdit = (blocker: PendingBlocker, value: unknown) => {
+    setEditSubmitting(true);
+    setEditError(null);
+    api
+      .editField(id, { [blocker.id]: value }, currentVersion)
+      .then((resp) => {
+        setCurrentVersion(resp.version);
+        setPending(resp.pending);
+        setAnswered((prev) =>
+          prev.map((a) =>
+            a.id === blocker.id
+              ? { ...a, storedValue: answerValuePreview(blocker.kind, value), rawValue: value }
+              : a,
+          ),
+        );
+        setEditImpact(resp.invalidation);
+        setEditingId(null);
+      })
+      .catch((err: ApiError) => setEditError(err))
+      .finally(() => setEditSubmitting(false));
   };
 
   const leaveMissing = (blockerId: string) => {
@@ -237,18 +299,98 @@ function LoadedCompletion({
     </>
   );
 
-  const answeredRows = answered.map((ans) => (
-    <div className="answered-row" key={ans.id}>
-      <span className="answered-check" aria-hidden="true">
-        <Check size={13} strokeWidth={2.6} />
-      </span>
-      <span className="answered-label">{ans.label}</span>
-      <span className="answered-stored">stored {ans.storedValue}</span>
-      <span className="answered-trailing">
-        <StatusChip kind="confirmed" />
-      </span>
+  // P28.3 stale-write recovery banner for an in-flight edit (reuses the SAME
+  // wording + Refresh path as the answer 412). The editor stays mounted so the
+  // input is preserved; Refresh reloads current state (no auto-merge).
+  const editErrorBanner = editError && (
+    <div style={{ marginTop: 10 }}>
+      {editError.unreachable ? (
+        <BackendDown error={editError} onRetry={() => setEditError(null)} />
+      ) : editError.status === 412 ? (
+        <div className="completion-submit-error" role="alert">
+          This record changed elsewhere. Nothing was applied — your input is kept. Refresh to load
+          the current state.
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ marginLeft: 10 }}
+            onClick={reload}
+          >
+            Refresh
+          </button>
+        </div>
+      ) : (
+        <div className="completion-submit-error" role="alert">
+          That correction could not be applied ({editError.status ?? 'error'}). Nothing was changed
+          — try again.
+        </div>
+      )}
     </div>
-  ));
+  );
+
+  // Each confirmed field renders READ-ONLY (value + Confirmed chip + an explicit
+  // Edit button). Editing one swaps that row for an inline GuidedPrompt prefilled
+  // with the current value; Cancel restores the summary with no mutation.
+  const answeredRows = answered.map((ans) =>
+    editingId === ans.id ? (
+      <div className="answered-editing" key={ans.id}>
+        <GuidedPrompt
+          key={`edit-${ans.id}`}
+          blocker={ans.blocker}
+          index={0}
+          total={1}
+          submitting={editSubmitting}
+          initialValue={typeof ans.rawValue === 'string' ? ans.rawValue : undefined}
+          initialStaged={ans.blocker.inputType === 'structured'}
+          confirmLabel={LABELS.actionSave}
+          dontKnowLabel={LABELS.actionCancel}
+          hideBlankHint
+          onConfirm={(value) => saveEdit(ans.blocker, value)}
+          onDontKnow={cancelEdit}
+        />
+        {editErrorBanner}
+      </div>
+    ) : (
+      <div className="answered-row" key={ans.id}>
+        <span className="answered-check" aria-hidden="true">
+          <Check size={13} strokeWidth={2.6} />
+        </span>
+        <span className="answered-label">{ans.label}</span>
+        <span className="answered-stored">stored {ans.storedValue}</span>
+        <span className="answered-trailing">
+          <StatusChip kind="confirmed" />
+          <button
+            type="button"
+            className="answered-edit"
+            onClick={() => startEdit(ans.id)}
+            aria-label={`Edit ${ans.label}`}
+            disabled={editingId !== null}
+          >
+            <Pencil size={13} strokeWidth={2.2} aria-hidden="true" />
+            {LABELS.actionEdit}
+          </button>
+        </span>
+      </div>
+    ),
+  );
+
+  // The honest downstream-impact of the last successful edit (P28.2): the server's
+  // reason, plus a stale-artifact / reopened-steps note where deterministically
+  // known. role="status" (announced, not color-only); never locally re-derived.
+  const editImpactNote = editImpact && editImpact.changed && (
+    <div className="edit-impact" role="status">
+      <Check size={14} strokeWidth={2.4} aria-hidden="true" />
+      <div>
+        <div className="edit-impact-reason">{editImpact.reason}</div>
+        {editImpact.artifact.state === 'stale' && (
+          <p className="edit-impact-note">
+            The exported record is now out of date — records are immutable, so regenerate (or reset
+            the demo) to refresh it.
+          </p>
+        )}
+      </div>
+    </div>
+  );
 
   // Finished: 0 remaining -> ready to export (route to S6). Also covers the
   // "0 blockers on arrival" case.
@@ -263,6 +405,7 @@ function LoadedCompletion({
           </span>
         </div>
         {answeredRows}
+        {editImpactNote}
         <div className="completion-done" role="status">
           <span className="dot dot-ready" aria-hidden="true" />
           <div>
@@ -317,6 +460,7 @@ function LoadedCompletion({
       </div>
 
       {answeredRows}
+      {editImpactNote}
 
       {blocker && (
         <div style={{ marginTop: 10 }}>
@@ -326,7 +470,7 @@ function LoadedCompletion({
             index={Math.min(answered.length + skippedItems.length, total - 1)}
             total={total}
             submitting={submitting}
-            onConfirm={(value) => confirmAnswer(blocker.id, blocker.kind, blocker.label, value)}
+            onConfirm={(value) => confirmAnswer(blocker, value)}
             onDontKnow={() => leaveMissing(blocker.id)}
           />
         </div>
