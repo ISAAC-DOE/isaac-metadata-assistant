@@ -14,9 +14,9 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 27 COMPLETE** (2026-07-22, with one documented passive-poll QA caveat) → Phase 28 — Workflow & Evidence Contracts |
-| **Active ticket** | P28.1 — Fixed canonical workflow order (backend-derived) (next) |
-| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit (4 parallel read-only tracks) → plan `2026-07-22-phase-28-workflow-evidence-plan.md` |
-| **Next step** | Phase 28 P28.1 fixed order → P28.2 dep invalidation → P28.3 revisit/view/edit → P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
+| **Active ticket** | P28.2 — Dependency-aware downstream invalidation (next) |
+| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`) |
+| **Next step** | Phase 28 P28.2 dep invalidation → P28.3 revisit/view/edit → P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -24,9 +24,9 @@
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | P28.1 — fixed canonical workflow order (backend-derived; replace the frontend-only `WorkflowSpine` state machine) |
-| **Git sync** | `main` · local == `origin/main` == `92ea16f` · 0/0 · clean (before P28.0 plan commit) |
-| **Exact-HEAD CI** | green on `92ea16f` (run 29901071582) |
+| **Next recommended action** | P28.2 — dependency-aware downstream invalidation (atomic recalc; field-level no-op; exported-artifact freshness) |
+| **Git sync** | `main` · local == `origin/main` == `e434de2` · 0/0 · clean |
+| **Exact-HEAD CI** | P28.0 `a0e2a09` green (run 29934124046); P28.1 `e434de2` green (run 29936948405) |
 | **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
 | **Browser-QA** | P26 SearchDialog green (prior); P27.3 hosted no-regression smoke (pre-P27.5 FE unchanged); full two-tab concurrency QA at P27.7 |
@@ -332,6 +332,22 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   spec-collision (P28.4 `inferred_candidate` vs committed `inferred`-exports) is resolved by scoping P28.4 as
   a display/classification layer that does not change truth-core gating (plan §2.1). Truth plane untouched;
   audit was read-only.
+- **P28.1** (`e434de2`, 2026-07-22): fixed canonical workflow order, backend-derived. NEW pure module
+  `workflow.py` `derive_workflow(pending_count, draft_ok, ready, exported, rev)` → ordered 5-step sequence
+  (`load_record → complete_metadata → review_evidence → review_export_readiness → export`) with per-step state
+  `{completed, current, reopened, blocked}` derived from current truth only — never persisted, never reordered,
+  never client-recomputed; surfaced in every detail bundle via `_detail`. Frontend `WorkflowSpine` rewritten to
+  render `detail.workflow.ordered_steps` verbatim; the hardcoded 5-step array + per-screen `active` re-derivation
+  (the forbidden frontend-only model) removed from all three record screens. `reopened` visually + textually
+  distinct from `blocked`; a11y preserved. **Test-first:** the orchestrator authored `test_workflow_order.py`
+  RED (9 failing) before delegating; Opus impl made it green. Independent Opus review = **SHIP-WITH-FIXES** →
+  finding **I1** fixed: `review_export_readiness` now uses NEW `Experiment.export_ready()` (current-draft dry-run,
+  independent of the frozen `exported` flag) so a regressed exported record honestly shows *reopened* readiness
+  instead of a misleading green step; added a route-reachable reopened integration test. Backend **762** (was 751),
+  frontend **390** (was 383), tsc clean, Vite build ok. Truth core (`src/isaac_records`, `schema`) untouched.
+  Snapshot deterministically regenerated (routes.py/workspace.py + 7 web files are manifest-listed). Deferred
+  non-blocking: M1 (surface reopened context on the current step — folds into P28.2/P28.3 reason enrichment),
+  M2 (memoize the double `status()`/`export_ready()` dry-run — micro-opt, negligible at 5-record scale → P32.2).
 
 ---
 
