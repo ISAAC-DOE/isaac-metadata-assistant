@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **Phase 28 COMPLETE** (2026-07-22; two documented non-blocking QA caveats) → Phase 29 — Assistant Experience |
-| **Active ticket** | P29.5 — Hosted assistant QA (live read-intent surface + evidence honesty + degraded + reset + two-tab) → close Phase 29. Staging-trigger decision recorded below (write-path dormant-by-safest-design). |
+| **Current phase** | **Phase 29 COMPLETE** (2026-07-22; documented non-blocking caveats — dormant write-path, passive-poll two-window, degraded not UI-induced) → Phase 30 — Live Runtime Record Retrieval |
+| **Active ticket** | P30.0 — proof + contract (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
-| **Next step** | Phase 29 P29.0 live context builder → P29.1 ephemeral session context → P29.2 conversation UI → P29.3 deterministic workflow agent → P29.4 one shared state → P29.5 hosted agent QA |
+| **Next step** | Phase 30 P30.0 proof+contract → P30.1 projection → P30.2 update/invalidation → P30.3 search+agent integration → P30.4 degradation+QA (P30.0 is a proof-GATE: index only if justified) |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -24,9 +24,9 @@
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | P29.0 — live context builder (assistant reads authoritative live record/workflow/evidence state; no external LLM; confirm-gated) |
-| **Git sync** | `main` · local == `origin/main` == `938c4e4` · 0/0 · clean (before Phase-28 closure commit) |
-| **Exact-HEAD CI** | P28.0–P28.5 green (`bea0a01`, `938c4e4` = success); closure commit pending push-time verify |
+| **Next recommended action** | P30.0 — live runtime record retrieval PROOF + contract (a proof-gate: prove the need + define the read-only, confirmed-facts-only projection before any index is built; retrieval subordinate to Workspace truth) |
+| **Git sync** | `main` · local == `origin/main` == `c501425` · 0/0 · clean (before Phase-29 closure commit) |
+| **Exact-HEAD CI** | Phase 29 P29.0–P29.4b green (`cfd87ce` = run success); closure commit pending push-time verify |
 | **Railway note** | 2026-07-22: rapid P28.1–P28.5 pushes queued serial Railway builds (each Docker build ~minutes on the metal builder). Builds SUCCEED (image push + healthcheck pass in logs); serving `37713d7`, draining the backlog toward HEAD. Not stalled/failed. Confirm Railway == Phase-28 HEAD (has `/edit` + `/evidence-classification`) before P28.6 hosted QA. |
 | **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
@@ -544,6 +544,49 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
     evidence honesty, degraded, reset, and two-tab READ consistency are hosted-QA-able; the full
     stage→confirm→mutate flow is unit/panel-verified only (not browser-reachable) and is carried as a caveat,
     revisited if/when a staging surface is introduced (Phase 32 UI audit, or a dedicated future slice).
+
+- **P29.5** (hosted assistant QA, 2026-07-22, UI-only, no credential capture/replay; against Railway `cfd87ce`
+  + Vercel): matrix **PASS** A–H (E NOT-OBSERVED), **no functional defects**, demo reset to canonical 2/1/1/1.
+  Live read-intent pills (8 exercised) append chronologically + reflect real record state + never a verdict +
+  no duplicate on double-click; evidence honesty confirmed (no strengthening / no conflict-winner / candidates-
+  not-fact / no unknown-guess / no secret/`/Users/` leak); READ-side version-binding STRONG (a stale transcript
+  message is badged "Based on an earlier version" after the record changes — never presented as current);
+  Reset clears the conversation + restores 2/1/1/1; two-tab read consistency (refresh-driven); zero console
+  errors, no request storm (read intents fire NO network — deterministic client-side over the loaded
+  evidence-classification/pending data). **NOT-OBSERVED (honest, non-blocking):** stage→confirm→mutate +
+  stale-proposal browser flows (dormant write-path by the recorded safest-design decision; unit/panel-verified);
+  passive-poll ~8s banner + continuous cross-tab live-sync (CDP hidden tab suppresses idle polling → human
+  two-window check); degraded assistant state (could not be safely induced via UI without risking truth paths —
+  unit-verified); live Conflicting/Insufficient/Unknown evidence classes (absent from canonical synthetic data —
+  verified via the assistant's honest "none present"). One design observation (not a defect): an idle
+  background tab answers from its stale in-memory snapshot until refresh (cross-tab freshness is refresh-driven,
+  consistent with the passive-poll caveat).
+
+## Phase 29 Completion Gate (closed 2026-07-22 @ Phase-29 HEAD `c501425`)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| Dataset-specific responses verify current state; context version-bound | ✅ | P29.4/agent; QA D stale-badge after change |
+| Backend-unavailable → honest language | ✅ | `DEGRADED_MESSAGE`; unit-tested (hosted degraded NOT-OBSERVED) |
+| Session ephemeral, non-authoritative, no cross-record leak | ✅ | P29.1 + QA (reset clears; per-experiment key) |
+| Conversation chronological; pills clear + accessible; auto-scroll respectful | ✅ | P29.2 + QA A/B |
+| Deterministic-result / advisory / inferred / confirmation visually distinct | ✅ | P29.2/P29.4b + QA C |
+| Deterministic agent handles approved intents; Unknown not guessed; conflicts not auto-resolved; candidates unconfirmed | ✅ | P29.3 + QA B/C (7 live intents) |
+| Every mutation requires human confirmation; stale proposals cannot mutate | ✅ | P29.3/P29.4b confirmProposal (unit/panel; write-path dormant in UI = safest) |
+| Assistant + manual share one authoritative record state | ✅ | P29.4 `useRecordSession` (one poller/ETag) |
+| Live synchronization intact; manual-first degradation | ✅ | P27.6 preserved; P29.4 manual-first (unit); QA G |
+| Backend + frontend suites pass; tsc + build | ✅ | backend 806, frontend 482 |
+| Truth validation + evidence audit pass | ✅ | unchanged from P28.6; truth path frozen all phase |
+| Snapshot + preflight pass; CI + deploys green; clean + synced | ✅ | preflight green each slice; CI green; Railway/Vercel `cfd87ce`; 0/0 |
+| Hosted QA passes | ✅ | P29.5 A–H PASS + documented NOT-OBSERVED |
+
+**Non-blocking caveats carried forward:** (1) **dormant write-path** — the assistant stage→confirm→mutate flow
+is built + unit/panel-verified but has NO staging trigger in the UI (safest state; no assistant-driven mutation
+reachable); revisit if/when a staging surface is introduced (Phase 32 UI audit or a dedicated slice). (2)
+**passive-poll two-window** check (idle live banner + ~8s cadence + offline indicator + continuous cross-tab
+sync) — unit-verified, not automation-observable (CDP hidden tab); close at a human two-visible-window session
+or Phase 32. (3) **degraded assistant** hosted-inducement + **live conflicting/insufficient/unknown** evidence
+states — unit-verified / architecturally sound but not exercised on canonical synthetic data.
 
 ## Phase 28 Completion Gate (closed 2026-07-22 @ Phase-28 HEAD)
 

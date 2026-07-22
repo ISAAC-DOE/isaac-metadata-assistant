@@ -1,6 +1,11 @@
 # Phase 29 — Assistant Experience (plan)
 
-Status: **P29.0 audit + contract complete (2026-07-22).** Active slice: **P29.1 (next).**
+Status: **Phase 29 COMPLETE (2026-07-22).** All slices shipped (P29.0 audit → P29.1 session → P29.2
+conversation UI → P29.3 deterministic agent → P29.4 shared record-session → P29.4b agent→UI wiring →
+P29.5 hosted QA), each independently reviewed (all SHIP; P29.1 caught+fixed a nested-secret leak, P29.4
+two Important fixes), CI-green, deployed (`cfd87ce`), hosted-QA PASS. Non-blocking caveats (dormant
+write-path; passive-poll two-window; degraded not UI-induced) recorded in the master ledger's Phase 29
+Completion Gate. Next: Phase 30 (P30.0 proof-gate).
 Baseline: `main @ 414b633` · CI green · Railway `414b633` synthetic-only · Vercel 200 · backend 806 · frontend 408.
 
 Derived from the P29.0 read-only audit (targeted `rg` + `Read` by the orchestrator — no agent swarm, per the mandate's "prefer rg / don't swarm / ≤5 agents per session"). Obeys the master ledger; does not create a competing master plan.
