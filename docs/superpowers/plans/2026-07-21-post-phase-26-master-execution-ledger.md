@@ -14,13 +14,13 @@
 | Field | Value |
 |---|---|
 | **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.4 — Safe compatibility rollout (compat→strict) + shared typed version contract (next) |
-| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 runtime mode (`26642eb`, Railway var live); P27.2 atomic writes + rev model (`14477bd`); P27.3 backend version contract (`ccac6d3`) |
-| **Next step** | P27.4: shared typed version contract for FE propagation; deprecation-signal boundaries time-bounded to one release (strict 428 comes after P27.5 FE ships) |
+| **Active ticket** | P27.5 — Frontend version propagation + stale-conflict recovery (next) |
+| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 runtime mode (`26642eb`, Railway var live); P27.2 atomic writes + rev model (`14477bd`); P27.3 backend version contract (`ccac6d3`); P27.4 shared typed version contract (`41bd20b`) |
+| **Next step** | P27.5: FE sends If-Match on every mutation, adopts returned token, 412 conflict banner + refresh preserving unsent input, consumes health.mode; THEN strict slice flips `precondition_required()`→428 |
 | **Blockers** | none |
-| **Latest impl commit** | `ccac6d3` (P27.3) |
-| **Latest checkpoint commit** | `ccac6d3` |
-| **Verification status** | full backend **714 passed**; CI green on `ccac6d3`; Railway serving `ccac6d3` synthetic-only; Vercel 200 |
+| **Latest impl commit** | `41bd20b` (P27.4) |
+| **Latest checkpoint commit** | `41bd20b` |
+| **Verification status** | full backend **720 passed**; CI green on `41bd20b`; Railway synthetic-only; Vercel 200 |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
 | **Next recommended action** | P27.4 — shared typed version contract + compat-rollout boundaries |
@@ -201,3 +201,13 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   synthetic demo record byte-identical + official schema PASS (v1.05). Truth-core/schema/export untouched.
   Live-verified: Railway serving `ccac6d3` synthetic-only, `expose_headers: ETag` deployed, auth enforced
   (keyless probe → 401 as expected), Vercel 200. Deferred to P27.4/P27.5: strict 428, FE propagation.
+- **P27.4** (`41bd20b`, 2026-07-21): shared typed version contract — behavior-preserving consolidation.
+  NEW `version_contract.py`: `VersionEnvelope` (typed rev/updated_utc/version — the shape P27.5's FE
+  consumes), `version_fields(exp)` (single producer, replaces 3× inline dict-merges in routes.py),
+  `DEPRECATION_HEADER`/`DEPRECATION_VALUE` (replaces 2× scattered magic strings), and
+  `precondition_required()` — the SINGLE grace toggle (False now; the strict slice flips it so a missing
+  If-Match → 428, post-P27.5). No observable HTTP change (same codes/ordering/ETag/headers/values, via the
+  shared helper). Red-first (6 tests) → Sonnet mechanical impl → orchestrator self-review of the 1:1
+  extraction (proportional: zero behavior change, already locked by the P27.3 adversarial review + suite).
+  Full backend **720 passed**; snapshot regen + gate 17; R4.3 full preflight PASS. Truth core untouched.
+  Backend-only (no FE deploy). Strict 428 remains gated on P27.5 shipping If-Match from the deployed FE.
