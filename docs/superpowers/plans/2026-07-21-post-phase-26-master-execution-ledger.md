@@ -13,14 +13,15 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.7 — Hosted two-tab concurrency QA (then Phase 27 close) (next) |
-| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 live sync (`ef31f5b`, deployed) |
-| **Next step** | P27.7 hosted two-tab QA (normal sync, stale-write→412, export conflict, reset, disconnect/reconnect, restart); then Phase 27 completion gate + checkpoint; then Phase 28 |
+| **Current phase** | **Phase 27 COMPLETE** (2026-07-22, with one documented passive-poll QA caveat) → Phase 28 — Workflow & Evidence Contracts |
+| **Active ticket** | P28.0 — Workflow & evidence audit (read-only baseline) (next) |
+| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS) |
+| **Next step** | Phase 28 P28.0 — read-only workflow/evidence audit; then P28.1 fixed order → P28.2 dep invalidation → P28.3 revisit/view/edit → P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
-| **Latest checkpoint commit** | `ef31f5b` |
-| **Verification status** | full backend **751 passed**; frontend **383 passed** + build clean; CI green on `ef31f5b`; Railway `ef31f5b` synthetic-only; Vercel P27.6 bundle live (polling active) |
+| **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
+| **Verification status** | full backend **751 passed**; frontend **383 passed** + build clean; CI green on `a50923d`; Railway `a50923d` synthetic-only; Vercel P27.6 bundle live |
+| **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
 | **Next recommended action** | P27.4 — shared typed version contract + compat-rollout boundaries |
@@ -294,3 +295,49 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   live-sync tests 11; full backend **751 passed**; frontend **383 passed**; tsc -b + vite build clean;
   snapshot regen + gate 17; R4.3 full preflight PASS; CI green on `ef31f5b`; Railway `ef31f5b`
   synthetic-only; Vercel P27.6 bundle live. Truth core untouched; no credential in URL/query/log/output.
+- **P27.7** (hosted two-tab QA, 2026-07-22, UI-only, no credential capture/replay): the revision-aware
+  conflict-safety core **PASSES conclusively on the live deployment** — (2) stale answer → **412** with the
+  exact "changed elsewhere / nothing applied / input kept / refresh" banner, input preserved, no auto-merge,
+  Tab A data intact, Refresh recovers; (3) stale export → **412**, no stale artifact written, no duplicate,
+  recovery to the immutable view; (4) Reset → exact canonical **2/1/1/1**, added answers cleared, ...003
+  reverted from Exported to Ready, only ...005 Done, no duplicates; (6) restart recovery (the P27.6 deploy)
+  → app/health/polling recover, no error loop. No RED console errors. Demo left at canonical 2/1/1/1.
+  - **QA CAVEAT (honest, tooling-bound — NOT a defect):** scenarios (1) idle passive-poll banner + ~8s
+    bounded cadence and (5) offline degraded indicator could NOT be exercised, because Claude-in-Chrome
+    drives tabs via CDP with `document.visibilityState === "hidden"` and the app's polling is CORRECTLY
+    visibility-gated (a hidden tab does not poll — a P27.6 requirement). Both behaviors are deterministically
+    unit-verified (record-sync.test.ts: visibility pause/resume + immediate check on regain, bounded backoff,
+    degraded threshold; live-sync-screens.test.tsx: LiveSyncNote honesty), and the change-detection path is
+    hosted-verified via the 412 conflict tests. Per the mandate's P27.7 fallback, this limitation is stated
+    honestly rather than fabricated. **Recommended human follow-up: a two-WINDOW session (two genuinely
+    visible OS windows) to visually confirm the idle banner, the ~8s cadence, and the offline indicator.**
+  - 428-on-missing-If-Match not produced via UI (the FE always sends If-Match); covered by deterministic
+    backend tests (test_strict_precondition.py). No credential value captured/copied/replayed; DevTools not
+    used for token access.
+
+---
+
+## Phase 27 Completion Gate (closed 2026-07-22 @ `a50923d`)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| Runtime mode authoritative | ✅ | P27.1 fail-closed `runtime_mode.py`; Railway `synthetic-only` |
+| Persistent storage confirmed + documented | ✅ | P27.0 Railway volume `/data/isaac-workspace`; docs reconciled |
+| Writes atomic | ✅ | P27.2 `atomic_write_text` (mkstemp→fsync→os.replace) |
+| ABA-safe record versions | ✅ | P27.3 `generation` nonce + `rev`; recreation mints fresh gen |
+| Matching mutations succeed | ✅ | hosted + unit |
+| Stale → 412 | ✅ | **hosted-verified** (P27.7 answers + export) |
+| Missing precondition → 428 | ✅ | P27.5-strict; deterministic tests (UI always sends If-Match) |
+| FE sends authoritative If-Match | ✅ | hosted-verified (P27.5 QA) |
+| Reset restores exact canonical content | ✅ | **hosted-verified** (P27.7 → 2/1/1/1) |
+| Live synchronization works | ✅ (mechanism) | conditional-GET 304/200 (11 backend tests); poller unit-tested incl. liveness regression; passive hosted observation → see QA caveat |
+| Two-tab behavior safe | ✅ | **hosted-verified** (412, no overwrite, no auto-merge, recovery) |
+| Stale input cannot overwrite newer data | ✅ | **hosted-verified** |
+| Assistant/manual state consistent | ✅ | no stateful assistant proposal exists yet (assistant = Phase 29); manual state consistent |
+| Backend restart recovery | ✅ | P27.6 deploy exercised; clients recover |
+| Tests / CI / Railway / Vercel / browser QA | ✅ | 751 backend + 383 frontend; CI `a50923d` success; Railway+Vercel healthy; hosted conflict-safety QA PASS (+ documented passive-poll caveat) |
+| Repo clean and synchronized | ✅ | `a50923d`, 0 ahead / 0 behind, clean |
+
+**Phase 27 = COMPLETE.** One honest, non-blocking caveat: the passive-poll banner cadence + offline
+indicator await a human two-window visual confirmation (deterministically unit-verified; hosted-blocked by
+CDP hidden-tab throttling). CQ: none open for Phase 27.
