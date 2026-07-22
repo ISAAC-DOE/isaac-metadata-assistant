@@ -14,13 +14,13 @@
 | Field | Value |
 |---|---|
 | **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.6-reset — Corrective Reset Demo semantics slice: reset must restore canonical CONTENT to baseline (2/1/1/1 + DONE artifact), invalidate pre-reset ETags, keep guards (next) |
-| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 FE propagation (`0112f5f`); P27.5-strict 428 enforcement (`d7a9fef`, deployed) |
-| **Next step** | Reset-semantics fix (mandate-ordered BEFORE P27.6 live-sync): re-materialise all 5 canonical to seed baseline on execute; then P27.6 live sync; P27.7 two-tab QA |
+| **Active ticket** | P27.6 — Live client synchronization (bounded revision-aware polling; SSE ruled out — see entry) (next) |
+| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content fix (`61c017f`, deployed + hosted-QA PASS) |
+| **Next step** | P27.6 live sync (bounded revision-aware polling per the SSE-vs-poll analysis); then P27.7 hosted two-tab QA; then Phase 27 checkpoint; then Phases 28–32 |
 | **Blockers** | none |
-| **Latest impl commit** | `d7a9fef` (P27.5-strict) |
-| **Latest checkpoint commit** | `d7a9fef` |
-| **Verification status** | full backend **728 passed**; frontend **361 passed**; CI green on `d7a9fef`; Railway serving `d7a9fef` synthetic-only; Vercel serving P27.5 bundle |
+| **Latest impl commit** | `61c017f` (reset-content) |
+| **Latest checkpoint commit** | `61c017f` |
+| **Verification status** | full backend **740 passed**; frontend **361 passed**; CI green on `61c017f`; Railway serving `61c017f` synthetic-only; Vercel P27.5 bundle; hosted demo restored to canonical 2/1/1/1 |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
 | **Next recommended action** | P27.4 — shared typed version contract + compat-rollout boundaries |
@@ -257,3 +257,21 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   prompts): hosted QA must never capture/replay Authorization values or bypass UI safety controls —
   header-name/request-shape observation only; exercise 428 via deterministic backend tests. Does not
   authorize any auth/identity redesign; the shared synthetic-demo auth limitation remains a future item.
+- **Reset-content fix** (`61c017f`, 2026-07-21, mandate-ordered before P27.6): "Reset Demo" now restores
+  canonical CONTENT, not just the id set. `reset_to_canonical_seed` execute re-materialises ALL 5 canonical
+  to seed baseline (each removed via internal path-safe `_remove_experiment_dir` — no public delete route —
+  and rebuilt via `_materialise_seed` under `record_lock(spec.id)`; fresh generation per id → all pre-reset
+  ETags invalid; DONE artifact restored by the real truth core; other four un-exported). Guards preserved:
+  ambiguous-refusal (zero changes), preview non-mutating, managed_legacy-only removal, idempotent content.
+  **Opus lifecycle/version-safety review = SHIP; its Important finding fixed**: ensure_seeded (runs on every
+  read) could materialise a missing id into a dir reset was rmtree-ing (ENOTEMPTY → 500). Fixed deadlock-safely
+  — per-record locks are now `RLock` (mutation handler holds `record_lock(id)` then `load_experiment`→
+  `ensure_seeded` may re-acquire it), and ensure_seeded materialises a missing id only under its id-lock with a
+  lock-free pre-check + re-check, one lock at a time (no lock-ordering cycle). Red-first test_reset_content.py
+  (11 incl. the deterministic ensure_seeded-observes-lock test). Full backend **740 passed**; snapshot regen +
+  gate 17; R4.3 full preflight PASS; CI green on `61c017f`; Railway serving `61c017f` synthetic-only.
+  - **Hosted reset QA (UI-only, no credential replay) = PASS:** drifted demo (extra Exported + partial answer)
+    → reset → exact **2/1/1/1**; record-level clearing verified (001 back to 5 pending; 003 un-exported → Ready;
+    005 sole Done with artifact); preview non-mutating; reload-persistent; **3× Synthetic Demo idempotent, no
+    duplicates**; no console errors. The hosted demo is now restored to canonical baseline. Also confirmed the
+    strict backend + deployed FE work normally (the UI answer submission used the If-Match path and succeeded).
