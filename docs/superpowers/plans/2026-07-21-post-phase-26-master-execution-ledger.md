@@ -14,9 +14,9 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 27 COMPLETE** (2026-07-22, with one documented passive-poll QA caveat) → Phase 28 — Workflow & Evidence Contracts |
-| **Active ticket** | P28.2 — Dependency-aware downstream invalidation (next) |
-| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`) |
-| **Next step** | Phase 28 P28.2 dep invalidation → P28.3 revisit/view/edit → P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
+| **Active ticket** | P28.3 — Revisit, summary & explicit edit (next) |
+| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`) |
+| **Next step** | Phase 28 P28.3 revisit/view/edit → P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -24,9 +24,9 @@
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | P28.2 — dependency-aware downstream invalidation (atomic recalc; field-level no-op; exported-artifact freshness) |
-| **Git sync** | `main` · local == `origin/main` == `e434de2` · 0/0 · clean |
-| **Exact-HEAD CI** | P28.0 `a0e2a09` green (run 29934124046); P28.1 `e434de2` green (run 29936948405) |
+| **Next recommended action** | P28.3 — revisit/summary/explicit-edit UI (completed steps open read-only; explicit Edit reuses If-Match + 412 recovery) |
+| **Git sync** | `main` · local == `origin/main` == `859309f` · 0/0 · clean (before P28.2 ledger commit) |
+| **Exact-HEAD CI** | P28.0 `a0e2a09`, P28.1 `e434de2` green; P28.2 `859309f` pending push-time verify |
 | **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
 | **Browser-QA** | P26 SearchDialog green (prior); P27.3 hosted no-regression smoke (pre-P27.5 FE unchanged); full two-tab concurrency QA at P27.7 |
@@ -348,6 +348,25 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   Snapshot deterministically regenerated (routes.py/workspace.py + 7 web files are manifest-listed). Deferred
   non-blocking: M1 (surface reopened context on the current step — folds into P28.2/P28.3 reason enrichment),
   M2 (memoize the double `status()`/`export_ready()` dry-run — micro-opt, negligible at 5-record scale → P32.2).
+- **P28.2** (`859309f`, 2026-07-22): dependency-aware downstream invalidation + exported-artifact freshness,
+  fully DERIVED (no new persisted field, no second workflow store). NEW `dependencies.py`:
+  `artifact_state(exp)` compares `transform(current_draft, now=<on-disk created_utc>)` canonical-JSON against the
+  on-disk exported record → `none|current|stale` (never throws; missing/unreadable → stale). `title`/`source`
+  are not in the official record, so a presentation-only change stays `current` while a scientific change goes
+  `stale`. Both authoritative mutations now return `workflow` + `invalidation {changed, rev, changed_fields,
+  reopened_steps, artifact, reason}`, built atomically inside the existing `record_lock` at the single
+  post-mutation rev; a byte-stable no-op invalidates nothing and does not bump rev. `_detail` carries `artifact`;
+  ExportReadiness shows a minimal honest `role=status` stale advisory. Single-artifact immutable policy: mark
+  stale (regeneration-required), never auto-delete/silently-current. Forward API mutations cannot un-complete a
+  step (`apply_answers` only fills pending) → `reopened_steps=[]` for forward mutations by design; reopen surfaces
+  via the derived GET workflow. **Test-first:** orchestrator pinned the 5 contract tests RED; Opus impl added 5
+  behavioral (incl. workspace-level regression + presentation-vs-scientific). Independent Opus review = **SHIP**
+  (no Crit/Imp; empirically disproved false-stale — exported records re-derive byte-identically). Backend **772**
+  (was 762), frontend **392** (was 390), tsc clean, build ok. Truth core untouched (`transform`/`export_draft`
+  read-only). Snapshot regenerated. **Known non-blocking limitations:** (a) sidecar (`.evidence.json`) freshness is
+  NOT tracked — `artifact_state` compares the official record only (matches the contract + sidecar-only fields per
+  CLAUDE.md §5) → note for P28.5/P32; (b) `changed_fields` lists submitted answer keys and may over-report on a
+  partial no-op (advisory only; staleness is content-derived).
 
 ---
 
