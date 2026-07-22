@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 28 COMPLETE** (2026-07-22; two documented non-blocking QA caveats) → Phase 29 — Assistant Experience |
-| **Active ticket** | P29.4b — wire agent intents + stage/confirm UI into the conversation panel (prerequisite for P29.5) → then P29.5 hosted assistant QA |
+| **Active ticket** | P29.5 — Hosted assistant QA (live read-intent surface + evidence honesty + degraded + reset + two-tab) → close Phase 29. Staging-trigger decision recorded below (write-path dormant-by-safest-design). |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 29 P29.0 live context builder → P29.1 ephemeral session context → P29.2 conversation UI → P29.3 deterministic workflow agent → P29.4 one shared state → P29.5 hosted agent QA |
 | **Blockers** | none |
@@ -517,6 +517,33 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
     the browser, a focused slice must surface: run-intent from prompts, present a staged proposal
     (inferred-candidate styling), an explicit Confirm control calling `confirmProposal`, and the version→
     invalidate→refuse path. This is the one remaining implementation step of Phase 29 before QA + close.
+
+- **P29.4b** (`cfd87ce`, 2026-07-22): wired the P29.3 agent into interactive conversation-panel UI. The inert
+  `void agentContext` is gone; RecordWorkbench surfaces 7 LIVE read-intent pills (all in the frozen `INTENTS`,
+  filtered by `INTENTS.includes`) that run the real agent against the P29.4 shared context; results append
+  chronologically, version-bound, stale-marked on record advance. Proposal card = UNCONFIRMED (field/value/
+  origin/classification-verbatim/explanation + "has not changed the official record"); Confirm is the ONLY
+  write path (routes through `confirmProposal`, never the api directly; `confirmingRef` → one call; If-Match =
+  current version; ok → clear + `onRefresh()` + confirmed summary; stale/412 → disabled/refuse, no retry/merge).
+  Evidence honesty in UI: unknown/conflicting render no value; inferred_candidate distinct + never as fact.
+  Leak-safe on the new path: agent results via P29.1 sanitizer; proposal values via `scrubForDisplay`
+  (= the same recursive `deepSanitize`, additive export, sanitizer NOT weakened). Manual-first degradation
+  preserved. Tests: `assistant-agent-ui.test.tsx` (21, red-first 20→green). Frontend **482** (was 461), tsc
+  clean, build ok. Frontend-only; truth path + frozen P29.3 contract byte-unchanged; snapshot regenerated.
+  Independent Opus security/stale/bypass review = **SHIP** (confirm-bypass, stale-mutate, nested-secret-on-
+  proposal.value all clean). **R4.3 preflight caught** a credential-shaped test fixture (`Bearer sk-…` + real
+  hex) pre-push → replaced with obviously-fake sentinels that still trip the sanitizer (amended before push).
+  - **STAGING-TRIGGER DECISION (write-path dormant-by-safest-design):** the Confirm/mutate contract is fully
+    implemented + panel-tested, but NO screen STAGES a proposal — so **no assistant-driven record mutation is
+    reachable from the deployed UI (the safest possible state; the independent review concurred).** Rationale:
+    the manual flow (GuidedCompletion answer + P28.3 `/edit`) already provides confirmed value-entry; adding a
+    second assistant staging path now would duplicate that UX and risk GuidedCompletion regression for no
+    truth/safety gain. Decision: keep the assistant a LIVE read/explain surface + the confirm machinery
+    built/tested for a future staging surface; document the dormant write-path as an explicit honest limitation
+    (cf. the P28 artifact-stale-not-UI-reachable caveat). Consequence for P29.5: the live read-intent surface,
+    evidence honesty, degraded, reset, and two-tab READ consistency are hosted-QA-able; the full
+    stage→confirm→mutate flow is unit/panel-verified only (not browser-reachable) and is carried as a caveat,
+    revisited if/when a staging surface is introduced (Phase 32 UI audit, or a dedicated future slice).
 
 ## Phase 28 Completion Gate (closed 2026-07-22 @ Phase-28 HEAD)
 
