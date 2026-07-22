@@ -14,9 +14,9 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 27 COMPLETE** (2026-07-22, with one documented passive-poll QA caveat) → Phase 28 — Workflow & Evidence Contracts |
-| **Active ticket** | P28.3 — Revisit, summary & explicit edit (next) |
-| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`) |
-| **Next step** | Phase 28 P28.3 revisit/view/edit → P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
+| **Active ticket** | P28.4 — Deterministic evidence classifications (next) |
+| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`) |
+| **Next step** | Phase 28 P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -24,9 +24,9 @@
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | P28.3 — revisit/summary/explicit-edit UI (completed steps open read-only; explicit Edit reuses If-Match + 412 recovery) |
-| **Git sync** | `main` · local == `origin/main` == `859309f` · 0/0 · clean (before P28.2 ledger commit) |
-| **Exact-HEAD CI** | P28.0 `a0e2a09`, P28.1 `e434de2` green; P28.2 `859309f` pending push-time verify |
+| **Next recommended action** | P28.4 — deterministic evidence classifications (backend-origin: supported/insufficient_evidence/conflicting_evidence/inferred_candidate/unknown; display layer, truth-plane frozen) |
+| **Git sync** | `main` · local == `origin/main` == `039ac1b` · 0/0 · clean (before P28.3 ledger commit) |
+| **Exact-HEAD CI** | P28.0 `a0e2a09`, P28.1 `e434de2`, P28.2 `859309f` green; P28.3 `039ac1b` pending push-time verify |
 | **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
 | **Browser-QA** | P26 SearchDialog green (prior); P27.3 hosted no-regression smoke (pre-P27.5 FE unchanged); full two-tab concurrency QA at P27.7 |
@@ -367,6 +367,23 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   NOT tracked — `artifact_state` compares the official record only (matches the contract + sidecar-only fields per
   CLAUDE.md §5) → note for P28.5/P32; (b) `changed_fields` lists submitted answer keys and may over-report on a
   partial no-op (advisory only; staleness is content-derived).
+- **P28.3** (`039ac1b`, 2026-07-22): revisit, summary-first & explicit edit. Backend NEW
+  `complete.apply_corrections` (non-truth authoring module, sibling to `apply_answers`) OVERWRITES an
+  already-confirmed field's value even at 0 pending, records a fresh `user_confirmation`, never touches
+  `pending`; same no-guessing contract (only supplied values; malformed sha/off-enum qc rejected; identical
+  value = byte-stable no-op, equality-guarded per branch → no evidence churn / no rev bump). NEW
+  `POST /experiments/{id}/edit` mirrors `post_answers` exactly (404→lock→404→422→If-Match 428/412/400→apply→
+  single save_versioned→P28.2 invalidation→workflow+ETag); unrecognized field → 422. Editing an exported
+  record stales the artifact (P28.2, derived). FE: summary-first read-only confirmed fields + a real
+  keyboard-accessible Edit button; inline GuidedPrompt prefilled with the current value; Save uses If-Match +
+  adopts resp.version + surfaces invalidation reason / stale note via role=status; Cancel = no mutation; 412
+  reuses the stale-write recovery (no auto-merge); viewing/editing never flips the backend-derived workflow;
+  completed styling persists. Tests: `test_edit_field.py` (10, RED-first) + `edit-field.test.tsx` (6). Backend
+  **782** (was 772), frontend **398** (was 392), tsc clean, build ok. Frozen truth path untouched;
+  `complete.py` extended additively (stdlib-only); `tests/test_complete.py` green. Independent Opus review =
+  **SHIP** (no Crit/Imp; no-guessing + no-op empirically clean). Non-blocking: qc-correction branch
+  unreachable via `/edit` (mirrors existing `/answers` wiring); descriptor/series no-op shape-sensitive & not
+  yet test-covered.
 
 ---
 
