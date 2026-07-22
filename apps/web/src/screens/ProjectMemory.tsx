@@ -1,6 +1,7 @@
 import './screens.css';
 import '../components/assistant.css';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
@@ -44,6 +45,14 @@ import type {
 export function ProjectMemory() {
   const graph = useFetch(() => api.getGraphStatus(), []);
 
+  // P26.5: deep-link readers so the ⌘K search palette's memory results actually
+  // land somewhere. `?concept=<id>` auto-opens that concept in Concept Lookup;
+  // `?file=<path>` auto-opens that file in the Source Index. Both reuse each
+  // card's existing accordion expand/fetch mechanics — nothing new is fetched.
+  const [params] = useSearchParams();
+  const focusConceptId = params.get('concept');
+  const focusFilePath = params.get('file');
+
   return (
     <AppShell
       variant="full"
@@ -82,8 +91,8 @@ export function ProjectMemory() {
         {/* Skip the second/third fetch when the screen already knows the backend
             is unreachable — one screen-level BackendDown, not three, mirroring
             how P24.3 owns that state for the whole page. */}
-        {graph.status !== 'error' && <SourceIndexCard />}
-        {graph.status !== 'error' && <ConceptLookupCard />}
+        {graph.status !== 'error' && <SourceIndexCard focusFilePath={focusFilePath} />}
+        {graph.status !== 'error' && <ConceptLookupCard focusConceptId={focusConceptId} />}
         <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
           <Network size={15} strokeWidth={2} aria-hidden="true" />
           Browse depth is out of scope for this first build.
@@ -321,7 +330,7 @@ function MemoryUnavailablePanel({ integrity }: { integrity: SnapshotIntegrity })
 // NOT a file browser, NOT a content viewer. `local_reference` is inert text;
 // nothing here ever fetches or renders file bytes.
 
-function SourceIndexCard() {
+function SourceIndexCard({ focusFilePath }: { focusFilePath?: string | null }) {
   const list = useFetch(() => api.getMemoryFiles(), []);
   return (
     <div className="card placeholder-card source-index-card">
@@ -333,7 +342,11 @@ function SourceIndexCard() {
       {list.status === 'loading' && <LoadingPanel label="Loading source index…" />}
       {list.status === 'error' && <BackendDown error={list.error} onRetry={list.reload} />}
       {list.status === 'data' && (
-        <SourceIndexList available={list.data.available} files={list.data.files} />
+        <SourceIndexList
+          available={list.data.available}
+          files={list.data.files}
+          focusFilePath={focusFilePath}
+        />
       )}
     </div>
   );
@@ -342,6 +355,7 @@ function SourceIndexCard() {
 interface SourceIndexListProps {
   available: boolean;
   files: ApiMemoryFileSummary[];
+  focusFilePath?: string | null;
 }
 
 /**
@@ -351,7 +365,7 @@ interface SourceIndexListProps {
  * inside an open panel can activate a different row the same way a click on
  * that row would.
  */
-function SourceIndexList({ available, files }: SourceIndexListProps) {
+function SourceIndexList({ available, files, focusFilePath }: SourceIndexListProps) {
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
 
   const toggle = useCallback((path: string) => {
@@ -360,6 +374,14 @@ function SourceIndexList({ available, files }: SourceIndexListProps) {
   const activate = useCallback((path: string) => {
     setExpandedPath(path);
   }, []);
+
+  // P26.5 deep link: `?file=<path>` from the search palette auto-opens that row
+  // (only when it is actually a served file in this list — never invented).
+  useEffect(() => {
+    if (focusFilePath && files.some((f) => f.path === focusFilePath)) {
+      setExpandedPath(focusFilePath);
+    }
+  }, [focusFilePath, files]);
 
   if (!available) {
     return (
@@ -581,7 +603,7 @@ function SourceIndexDetail({
 // for every real concept; the empty-leads note below is not a bug, it is the
 // current graph's honest state.
 
-function ConceptLookupCard() {
+function ConceptLookupCard({ focusConceptId }: { focusConceptId?: string | null }) {
   const list = useFetch(() => api.getMemoryConcepts(), []);
   const headingId = 'concept-lookup-heading';
   return (
@@ -599,6 +621,7 @@ function ConceptLookupCard() {
           available={list.data.available}
           concepts={list.data.concepts}
           headingId={headingId}
+          focusConceptId={focusConceptId}
         />
       )}
     </div>
@@ -609,6 +632,7 @@ interface ConceptLookupListProps {
   available: boolean;
   concepts: ApiMemoryConceptSummary[];
   headingId: string;
+  focusConceptId?: string | null;
 }
 
 /**
@@ -618,7 +642,12 @@ interface ConceptLookupListProps {
  * related-concept lead inside an open panel can activate a different concept
  * the same way a click on that concept would.
  */
-function ConceptLookupList({ available, concepts, headingId }: ConceptLookupListProps) {
+function ConceptLookupList({
+  available,
+  concepts,
+  headingId,
+  focusConceptId,
+}: ConceptLookupListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggle = useCallback((id: string) => {
@@ -627,6 +656,14 @@ function ConceptLookupList({ available, concepts, headingId }: ConceptLookupList
   const activate = useCallback((id: string) => {
     setExpandedId(id);
   }, []);
+
+  // P26.5 deep link: `?concept=<id>` from the search palette auto-opens that
+  // concept (only when it is actually in the fetched list — never invented).
+  useEffect(() => {
+    if (focusConceptId && concepts.some((c) => c.id === focusConceptId)) {
+      setExpandedId(focusConceptId);
+    }
+  }, [focusConceptId, concepts]);
 
   if (!available) {
     return (

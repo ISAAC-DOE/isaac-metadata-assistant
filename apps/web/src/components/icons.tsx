@@ -33,6 +33,7 @@ import {
   Circle,
   Download,
   LayoutList,
+  Search,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -94,6 +95,7 @@ export {
   Circle,
   Download,
   LayoutList,
+  Search,
   X,
 };
 export type { LucideIcon };

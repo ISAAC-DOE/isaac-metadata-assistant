@@ -5,6 +5,7 @@ import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { StatusChip } from './StatusChip';
 import { HelpPanel } from './HelpPanel';
+import { SearchDialog } from './SearchDialog';
 import type { ChipKind } from '../lib/status';
 
 function SyntheticChip() {
@@ -43,9 +44,10 @@ interface TopBarProps {
   surface?: string;
 }
 
-/** Identity, context/breadcrumb, the persistent Synthetic mode chip, and Help.
- * The mode chip is always mounted — it is load-bearing. There is no search:
- * this prototype doesn't have one, so the chrome doesn't pretend to. */
+/** Identity, context/breadcrumb, the persistent Synthetic mode chip, Help, and
+ * the ⌘K search command palette. The mode chip is always mounted — it is
+ * load-bearing. Search is real (P26): the SearchDialog affordance is mounted on
+ * every variant so ⌘K opens the API-backed palette from any surface. */
 export function TopBar({ variant, breadcrumb, title, filename, stateChip, recordId, surface }: TopBarProps) {
   return (
     <header className="topbar">
@@ -55,6 +57,7 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
         <>
           <div className="topbar-spacer" />
           <div className="topbar-right">
+            <SearchDialog />
             <SyntheticChip />
             <HelpPanel />
           </div>
@@ -69,6 +72,7 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
           </span>
           <div className="topbar-spacer" />
           <div className="topbar-right">
+            <SearchDialog />
             <SyntheticChip />
           </div>
         </>
@@ -108,6 +112,7 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
           </div>
           <div className="topbar-spacer" />
           <div className="topbar-right">
+            <SearchDialog />
             <SyntheticChip />
           </div>
         </>

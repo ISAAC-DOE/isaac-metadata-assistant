@@ -10392,7 +10392,7 @@
       },
       {
         "path": "apps/web/src/__tests__/help-and-honesty.test.tsx",
-        "sha256": "ed2b937d841f7cfc3ce34acc78c5d43e4f85b036bf24412b90e078d94342a257"
+        "sha256": "5b1cbc0fd802109e390b3d86ba7fdcc50671f306583185af03c4a4ad7690e6d6"
       },
       {
         "path": "apps/web/src/__tests__/interaction-states.test.ts",
@@ -10408,7 +10408,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
-        "sha256": "99d9b5a7a780724923f80d9590804d174bcfdcf69432d53615bea12d51a23315"
+        "sha256": "ed8bd19a06b1f2bffa34fb018429b342abce712126cb2300fb5a282348d16d03"
       },
       {
         "path": "apps/web/src/__tests__/memory-honesty.test.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
-        "sha256": "c6104c05255448f2e7a5fae79d8bee859a78c84ef391a454f8cae681b0a17b3e"
+        "sha256": "d2d412abaa82cb6340b08a9aa5de594aad594837cec52ba79abae0dd251dc48a"
       },
       {
         "path": "apps/web/src/components/LeftNav.tsx",
@@ -10528,7 +10528,7 @@
       },
       {
         "path": "apps/web/src/components/TopBar.tsx",
-        "sha256": "0db8d64cdb6beddac7ebec699d73fce5d992de3db242a26224fb170afa035d4f"
+        "sha256": "bd4c9161d6df1caded08e968d24ca29b7789e10590eaeb6bcf00cdb6ce950526"
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
@@ -10540,7 +10540,7 @@
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "c0f3e9dcc846e1fa94d2c23f66d4a43c4be1694a55b31cda94f65983aaf53cf6"
+        "sha256": "9eb9e247f5e7869b16a201c8bcf2913f7176928ac00c3437a712a841c6d0a496"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -10604,7 +10604,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "8be6ad6b06ec43d493f7c0e3301ededcf0931674eb706247c7c8108ea50a0ed2"
+        "sha256": "a96d1b4ce103ecc074655d4991b8b5fdfb3b948aee8ce0cb1e5a55c802fd05ef"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "c71a621f195b1660df3ec25190ee172f19ac14bbbf907f47698f73857a36a635"
+    "served_manifest_fingerprint": "95e2d90cfe28ae55f949c841cadb94b5d5be8edede565f103dab32b8cdb568e0"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { ProjectMemory } from '../screens/ProjectMemory';
@@ -7,6 +7,7 @@ import {
   graphStatusAvailable,
   memoryConceptsAvailable,
   memoryFilesAvailable,
+  searchRoutes,
   stubFetchRoutes,
 } from '../test/apiFixtures';
 
@@ -24,20 +25,42 @@ afterEach(() => {
 
 /*
  * P22D — remove fake/noop UI, make Help real.
- *  - the decorative search + the "⌘K" promise are gone (Decision 1)
  *  - Help is a real, working, honest popover (Decision 2)
  *  - the fake "Ada Lovelace · SSRL" user chip is gone (Decision 3)
  *  - Project Memory never claims a hardcoded "fresh" status (Decision 4)
+ *
+ * P26 supersedes P22D Decision 1: the decorative "⌘K" promise that P22D deleted
+ * has been replaced by a REAL, API-backed, keyboard-driven search command
+ * palette (SearchDialog). The old "no search" invariant is therefore RETIRED and
+ * replaced below by a functional-search assertion. The anti-fake principle is
+ * preserved intact: the affordance must be PRESENT *and* open a real dialog that
+ * queries the backend — never a dead decorative input.
  */
-describe('P22D · TopBar has no fake/noop UI', () => {
-  it('renders no search UI and no ⌘K promise', () => {
-    const { container, queryByText } = renderTopBar();
-    expect(container.querySelector('[role="search"]')).toBeNull();
-    expect(container.querySelector('.topbar-search')).toBeNull();
-    expect(queryByText(/⌘K/)).toBeNull();
-    expect(queryByText(/Search records/i)).toBeNull();
+describe('P26 · TopBar search affordance is real and functional', () => {
+  it('renders the search landmark, the .topbar-search trigger, and a ⌘K hint', () => {
+    const { container, getByText, getByRole } = renderTopBar();
+    expect(container.querySelector('[role="search"]')).not.toBeNull();
+    expect(container.querySelector('.topbar-search')).not.toBeNull();
+    expect(getByText(/⌘K/)).toBeInTheDocument();
+    expect(getByRole('button', { name: /search/i })).toBeInTheDocument();
   });
 
+  it('opens a real, backend-querying search dialog (not a dead decorative input)', async () => {
+    stubFetchRoutes(searchRoutes());
+    const view = renderTopBar();
+    fireEvent.click(view.getByRole('button', { name: /search/i }));
+
+    const dialog = await view.findByRole('dialog');
+    const box = within(dialog).getByRole('searchbox');
+    expect(box).toBeInTheDocument();
+
+    // Typing drives a real query and renders the server-supplied Workspace group.
+    fireEvent.change(box, { target: { value: 'xanes' } });
+    expect(await within(dialog).findByText(/workspace/i)).toBeInTheDocument();
+  });
+});
+
+describe('P22D · TopBar has no fake user identity', () => {
   it('renders no fake user identity chip', () => {
     const { queryByText, container } = renderTopBar();
     expect(queryByText(/Ada Lovelace/)).toBeNull();

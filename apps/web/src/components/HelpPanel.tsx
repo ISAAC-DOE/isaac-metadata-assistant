@@ -12,9 +12,10 @@ const WORKFLOW_STEPS: { label: string; text: string }[] = [
 ];
 
 /**
- * Static, honest Help popover — no search, no chat, nothing this prototype
- * doesn't actually do. Anchored to the Help button; hand-rolled (no dialog
- * library) per project dependency discipline.
+ * Static, honest Help popover — explains only what this prototype actually
+ * does (no chat, no fabricated features). Search IS real and lives in its own
+ * ⌘K command palette (SearchDialog), separate from this panel. Anchored to the
+ * Help button; hand-rolled (no dialog library) per project dependency discipline.
  */
 export function HelpPanel() {
   const [open, setOpen] = useState(false);
