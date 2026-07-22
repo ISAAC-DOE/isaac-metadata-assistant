@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 28 COMPLETE** (2026-07-22; two documented non-blocking QA caveats) → Phase 29 — Assistant Experience |
-| **Active ticket** | P29.2 — Conversation-style assistant UI (next) |
+| **Active ticket** | P29.3 — Bounded deterministic workflow agent (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 29 P29.0 live context builder → P29.1 ephemeral session context → P29.2 conversation UI → P29.3 deterministic workflow agent → P29.4 one shared state → P29.5 hosted agent QA |
 | **Blockers** | none |
@@ -469,6 +469,18 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   the orchestrator's initial leak test being top-level-only (Important gap); both fixed — recursive
   `deepSanitize` + a nested-secret regression test (RED→GREEN). Frontend **418** (was 408), tsc clean, build
   ok. Frontend-only; truth path untouched. Sonnet impl + Opus review (2 agents, within budget).
+
+- **P29.2** (`d3e450b`, 2026-07-22): conversation-style assistant UI. `AssistantPanel` reworked into a
+  chronological conversation (header → scrollable log oldest→newest → bottom prompt pills → notes) backed by
+  the P29.1 session; message bubbles distinguish user/assistant + kind (deterministic-result/advisory/
+  inferred-candidate/confirmation-request/degraded) + a reactive stale indicator (recordRev vs current), all
+  icon+text (not color-only). NEW pure `assistantConversation.classifyAnswer`. Safety boundary PRESERVED:
+  `hasVerdictLanguage` guard over the live reply AND every history bubble; no free-text/LLM/mutation (pills
+  swap/archive only). a11y: `role="log"` + `aria-live="off"` with the single live region on the current reply
+  (announced once, silent on polling — independent-review Minor fix); keyboard pills; focus→reply on submit;
+  respectful auto-scroll + Jump-to-Latest; reduced-motion honored. Tests: `assistant-conversation.test.tsx`
+  (13, red-first). Frontend **431** (was 418), tsc clean, build ok. Frontend-only; truth path untouched;
+  snapshot regenerated. Opus impl + Opus review (2 agents) = **SHIP** (verdict-guard + leak-safety hold).
 
 ## Phase 28 Completion Gate (closed 2026-07-22 @ Phase-28 HEAD)
 
