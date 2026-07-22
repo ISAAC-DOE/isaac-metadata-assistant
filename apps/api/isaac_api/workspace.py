@@ -18,12 +18,15 @@ in-memory dry-run of ``export_draft`` — nothing is written to derive status.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -141,7 +144,66 @@ def load_demo_answers() -> dict:
     return json.loads(ANSWERS_PATH.read_text(encoding="utf-8"))
 
 
+# --- per-record mutation lock -------------------------------------------------
+#
+# The deployed server is single-process uvicorn (no ``--workers``); sync route
+# handlers run in Starlette's threadpool, so concurrent writers are threads in ONE
+# process. This in-process per-record lock serialises the load->compare->mutate->
+# save compare-and-swap critical section so two writers holding the same token can
+# never both succeed — exactly one wins and the loser observes a stale token.
+
+_record_locks: dict[str, threading.Lock] = {}
+_record_locks_guard = threading.Lock()
+
+
+@contextlib.contextmanager
+def record_lock(experiment_id: str):
+    """Serialise the compare-and-swap critical section for one experiment id."""
+    with _record_locks_guard:
+        lock = _record_locks.setdefault(experiment_id, threading.Lock())
+    with lock:
+        yield
+
+
 # --- experiment record --------------------------------------------------------
+
+
+def _legacy_generation(rid: str) -> str:
+    """Deterministic generation fallback for a legacy / bare record.
+
+    A pre-P27.3 state file (or a bare construction) carries no ``generation``; this
+    derives a stable, non-empty nonce from the record id so such a record has a
+    consistent generation across every load (hence a stable ETag). Legacy records
+    are never recreated, so a deterministic value is safe for them.
+    """
+    return hashlib.sha256(("gen:" + rid).encode("utf-8")).hexdigest()[:16]
+
+
+def _new_generation() -> str:
+    """A fresh opaque generation nonce (16 lowercase hex chars).
+
+    Random with no secret meaning and no path/content — safe to expose in a token.
+    Minted at genuine (re)creation to defeat a rev-0 -> rev-0 ABA.
+    """
+    return secrets.token_hex(8)
+
+
+def _existing_generation(rid: str) -> str | None:
+    """The persisted ``generation`` of an on-disk record, or ``None``.
+
+    Reads ``workspace_root()/rid/experiment.json`` and returns its stored
+    non-empty ``generation`` string if the file exists and parses; otherwise
+    ``None`` (an ad-hoc new id has no prior file -> a fresh generation is minted).
+    Preserving the on-disk generation for an explicit existing id keeps a no-op
+    upsert (the idempotent demo) from churning the token.
+    """
+    state_path = workspace_root() / rid / "experiment.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        gen = state["generation"]
+        return gen if isinstance(gen, str) and gen else None
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
 
 
 def _authoritative_signature(exp: "Experiment") -> str:
@@ -149,10 +211,11 @@ def _authoritative_signature(exp: "Experiment") -> str:
 
     Covers exactly ``{title, source, draft, record_id}`` — the fields that define
     the record's scientific content. It EXCLUDES ``answer_log`` (an audit trail,
-    not scientific state), ``rev``/``updated_utc`` (version metadata this signature
-    drives), and ``created_utc`` (immutable identity). Two experiments with an
-    identical scientific state therefore hash identically, so a no-op re-entry is
-    detectable and never bumps ``rev``.
+    not scientific state), ``generation``/``rev``/``updated_utc`` (version metadata,
+    not scientific content — excluding ``generation`` keeps a byte-stable no-op from
+    churning the token), and ``created_utc`` (immutable identity). Two experiments
+    with an identical scientific state therefore hash identically, so a no-op
+    re-entry is detectable and never bumps ``rev``.
     """
     payload = {
         "title": exp.title,
@@ -181,6 +244,10 @@ class Experiment:
     #: ``created_utc`` (see ``__post_init__``) so a freshly-created or legacy
     #: record has a meaningful, non-empty timestamp.
     updated_utc: str = ""
+    #: A per-instantiation opaque nonce, minted fresh at genuine (re)creation and
+    #: PRESERVED across saves / loads / no-op re-entries. It makes the public token
+    #: differ across a delete->recreate even when ``rev`` returns to 0 (ABA-safe).
+    generation: str = ""
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -188,6 +255,10 @@ class Experiment:
         # never writes — only a real mutation rewrites the file.
         if not self.updated_utc:
             self.updated_utc = self.created_utc
+        # A legacy / bare record carries no ``generation``; anchor it to a
+        # deterministic id-derived fallback (stable across loads -> stable ETag).
+        if not self.generation:
+            self.generation = _legacy_generation(self.id)
 
     # -- filesystem --
 
@@ -202,6 +273,14 @@ class Experiment:
     @property
     def state_path(self) -> Path:
         return self.dir / "experiment.json"
+
+    def version_token(self) -> str:
+        """The public opaque concurrency token: ``<generation>.<rev>``."""
+        return f"{self.generation}.{self.rev}"
+
+    def etag(self) -> str:
+        """The HTTP ETag: the version token as a strong quoted validator."""
+        return f'"{self.version_token()}"'
 
     def record_path(self) -> Path | None:
         return self.records_dir / f"{self.record_id}.json" if self.record_id else None
@@ -223,6 +302,7 @@ class Experiment:
             "record_id": self.record_id,
             "rev": self.rev,
             "updated_utc": self.updated_utc,
+            "generation": self.generation,
         }
 
     def save(self) -> None:
@@ -281,6 +361,7 @@ class Experiment:
             record_id=state.get("record_id"),
             rev=int(state.get("rev") or 0),  # missing/legacy -> 0
             updated_utc=state.get("updated_utc") or "",  # __post_init__ -> created_utc
+            generation=state.get("generation") or "",  # missing/legacy -> deterministic fallback
         )
 
     # -- derived views --
@@ -344,13 +425,21 @@ def create_experiment(
     ``id`` / ``created_utc`` default to a random ULID + wall-clock timestamp for
     ad hoc use; the canonical seed and the idempotent demo pass EXPLICIT fixed
     values so identities/order are stable across restarts and fresh workspaces.
+
+    Generation minting: an ad-hoc new record (random id) has no prior on-disk file
+    -> a FRESH generation is minted. An explicit existing id (the idempotent demo
+    upsert) PRESERVES the on-disk generation so repeated no-op runs never churn the
+    token.
     """
+    rid = id or new_record_id()
+    generation = _existing_generation(rid) or _new_generation()
     exp = Experiment(
-        id=id or new_record_id(),
+        id=rid,
         title=title,
         created_utc=created_utc or _now_iso(),
         source=source,
         draft=draft,
+        generation=generation,
     )
     exp.save()
     return exp
@@ -472,6 +561,7 @@ def _materialise_seed(spec: "_SeedSpec") -> Experiment:
         created_utc=spec.created_utc,
         source=_seed_source(),
         draft=spec.draft_fn(),
+        generation=_new_generation(),
     )
     if spec.exported:
         # Reuse the REAL export output; let the truth core produce the record.

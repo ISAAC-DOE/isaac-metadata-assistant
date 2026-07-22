@@ -10,10 +10,11 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Header, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -56,6 +57,87 @@ def _not_found(experiment_id: str) -> JSONResponse:
         status_code=404,
         content={"error": "experiment_not_found", "id": experiment_id},
     )
+
+
+# --- If-Match precondition (P27.3 optimistic-concurrency contract) ------------
+#
+# RFC 9110 strong comparison for unsafe methods: only strong quoted validators are
+# accepted; weak (``W/"..."``) and malformed values are rejected 400. A mismatch is
+# 412 stale_write (with the current ETag echoed so the client refreshes in one
+# hop). A missing If-Match is temporarily ACCEPTED during the P27.3 compatibility
+# grace and flagged with a non-noisy deprecation header. No filesystem path,
+# secret, or raw record content ever appears in a token or error body.
+
+#: A strong ETag validator: a double-quoted opaque token, no ``W/`` prefix.
+_STRONG_TAG_RE = re.compile(r'^"[^"\\]+"$')
+
+
+def _expected_rev_from_token(token: str | None) -> int | None:
+    """The integer after the LAST ``.`` of a client token, else ``None``."""
+    if not token or "." not in token:
+        return None
+    try:
+        return int(token.rsplit(".", 1)[-1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _malformed_if_match(exp) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "malformed_if_match",
+            "experiment_id": exp.id,
+            "message": "If-Match must be one or more strong quoted validators.",
+        },
+    )
+
+
+def _stale_write(exp, expected_token: str | None) -> JSONResponse:
+    resp = JSONResponse(
+        status_code=412,
+        content={
+            "error": "stale_write",
+            "experiment_id": exp.id,
+            "expected_rev": _expected_rev_from_token(expected_token),
+            "current_rev": exp.rev,
+            "expected_version": expected_token,
+            "current_version": exp.version_token(),
+        },
+    )
+    # Echo the CURRENT strong validator so the client can refresh in one hop.
+    resp.headers["ETag"] = exp.etag()
+    return resp
+
+
+def _check_if_match(if_match: str | None, exp) -> tuple[JSONResponse | None, bool]:
+    """Classify an ``If-Match`` header against the loaded experiment.
+
+    Returns ``(error_response_or_None, used_compat_grace)``:
+      * ``(None, True)``  — header absent: proceed under the P27.3 grace.
+      * ``(None, False)`` — ``*`` (resource exists) or a strong match: proceed.
+      * ``(400, False)``  — any weak or malformed tag: whole header malformed.
+      * ``(412, False)``  — all tags valid strong validators but none match.
+    """
+    if if_match is None:
+        return None, True
+    raw = if_match.strip()
+    if raw == "*":
+        return None, False  # matches iff the resource exists — and we loaded it
+    # RFC 9110 #-list: recipients ignore empty list elements, so a trailing comma
+    # or an empty element is tolerated. A header that reduces to NO tags (e.g. just
+    # "," or whitespace) is malformed.
+    tags = [t for t in (part.strip() for part in raw.split(",")) if t]
+    if not tags:
+        return _malformed_if_match(exp), False
+    for tag in tags:
+        if tag.startswith("W/") or not _STRONG_TAG_RE.match(tag):
+            return _malformed_if_match(exp), False
+    if any(tag == exp.etag() for tag in tags):
+        return None, False
+    # All valid strong validators, none matched -> stale. Report the client's first.
+    first_token = tags[0][1:-1] if tags else None
+    return _stale_write(exp, first_token), False
 
 
 # --- summary / detail serialization -------------------------------------------
@@ -163,54 +245,60 @@ def demo_run(body: dict = Body(default=None)) -> dict:
         }
     )
 
-    exp = ws.create_experiment(
-        title=title,
-        source={
-            "description": "Synthetic XANES campaign (CuO, Cu K-edge) — committed demo fixtures",
-            "files": list(ws.SOURCE_FILES),
-        },
-        draft=draft,
-        id=target_id,
-        created_utc=created_utc,
-    )
-
-    if mode == "full":
-        # [3] apply_answers — the committed SIMULATED human answers, verbatim, so the
-        #     completion path matches run_synthetic_demo.py exactly.
-        answers = ws.load_demo_answers()
-        completed = apply_answers(draft, answers)
-        exp.draft = completed
-        exp.answer_log.append(
-            {"kind": "demo_fixture", "label": "Demo answers (synthetic)", "at": _now_iso()}
-        )
-        steps.append(
-            {
-                "name": "apply_answers",
-                "detail": (
-                    f"{len(completed.get('pending') or [])} pending remaining, "
-                    f"{len(completed.get('assets') or [])} assets resolved"
-                ),
-                "ok": True,
-            }
+    # The persistence of the fixed canonical target id is serialised under the same
+    # per-record lock the /answers and /export mutations use, so a concurrent
+    # mutation on this id can never lose an update. ensure_seeded/build_draft/
+    # validate_draft above stay outside the lock (ensure_seeded only creates MISSING
+    # ids; neither racily mutates the target's persisted authoritative state).
+    with ws.record_lock(target_id):
+        exp = ws.create_experiment(
+            title=title,
+            source={
+                "description": "Synthetic XANES campaign (CuO, Cu K-edge) — committed demo fixtures",
+                "files": list(ws.SOURCE_FILES),
+            },
+            draft=draft,
+            id=target_id,
+            created_utc=created_utc,
         )
 
-        # [4] export_draft — schema-gated transform, then write into the workspace.
-        result = export_draft(completed, REPO_ROOT, record_id=exp.id)
-        if result.ok:
-            _write_record(exp, result)
-        exp.save()
-        steps.append(
-            {
-                "name": "export_draft",
-                "detail": (
-                    f"official schema valid: "
-                    f"{result.official_report.ok if result.official_report else False}"
-                ),
-                "ok": result.ok,
-            }
-        )
-    else:
-        exp.save()
+        if mode == "full":
+            # [3] apply_answers — the committed SIMULATED human answers, verbatim, so the
+            #     completion path matches run_synthetic_demo.py exactly.
+            answers = ws.load_demo_answers()
+            completed = apply_answers(draft, answers)
+            exp.draft = completed
+            exp.answer_log.append(
+                {"kind": "demo_fixture", "label": "Demo answers (synthetic)", "at": _now_iso()}
+            )
+            steps.append(
+                {
+                    "name": "apply_answers",
+                    "detail": (
+                        f"{len(completed.get('pending') or [])} pending remaining, "
+                        f"{len(completed.get('assets') or [])} assets resolved"
+                    ),
+                    "ok": True,
+                }
+            )
+
+            # [4] export_draft — schema-gated transform, then write into the workspace.
+            result = export_draft(completed, REPO_ROOT, record_id=exp.id)
+            if result.ok:
+                _write_record(exp, result)
+            exp.save()
+            steps.append(
+                {
+                    "name": "export_draft",
+                    "detail": (
+                        f"official schema valid: "
+                        f"{result.official_report.ok if result.official_report else False}"
+                    ),
+                    "ok": result.ok,
+                }
+            )
+        else:
+            exp.save()
 
     return {"experiment_id": exp.id, "steps": steps, "status": exp.status()}
 
@@ -260,6 +348,11 @@ def _reset_response(data: dict, *, mode: str, status: str, http: int) -> JSONRes
 
 @router.post("/demo/reset")
 def demo_reset(req: DemoResetRequest):
+    # demo_reset is a single-user, confirmation-gated synthetic-demo admin reset: a
+    # whole-workspace rmtree-of-managed-legacy + reseed spanning MULTIPLE ids. It is
+    # intentionally NOT coordinated with the per-record mutation locks (which guard a
+    # single id's compare-and-swap); a multi-id admin reset has no meaningful single
+    # lock to take, and it is not part of the concurrent-writer contract.
     mode = req.mode
 
     # Governance gate: refuse outside synthetic-only mode (classification is
@@ -299,21 +392,27 @@ def list_experiments() -> dict:
 
 
 @router.get("/experiments/{experiment_id}")
-def get_experiment(experiment_id: str):
+def get_experiment(experiment_id: str, response: Response):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
-    return _detail(exp)
+    detail = _detail(exp)
+    detail["rev"] = exp.rev
+    detail["updated_utc"] = exp.updated_utc
+    detail["version"] = exp.version_token()
+    response.headers["ETag"] = exp.etag()
+    return detail
 
 
 # --- 5. draft (grouped) -------------------------------------------------------
 
 
 @router.get("/experiments/{experiment_id}/draft")
-def get_draft(experiment_id: str):
+def get_draft(experiment_id: str, response: Response):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
     return serialize.draft_to_groups(exp.draft)
 
 
@@ -321,10 +420,11 @@ def get_draft(experiment_id: str):
 
 
 @router.get("/experiments/{experiment_id}/pending")
-def get_pending(experiment_id: str):
+def get_pending(experiment_id: str, response: Response):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
     return serialize.pending_to_list(exp.draft, ws.load_demo_answers())
 
 
@@ -353,31 +453,54 @@ def _answers_to_apply_shape(answers_by_id: dict, draft: dict, timestamp: str) ->
 
 
 @router.post("/experiments/{experiment_id}/answers")
-def post_answers(experiment_id: str, body: dict = Body(...)):
-    exp = ws.load_experiment(experiment_id)
-    if exp is None:
+def post_answers(
+    experiment_id: str,
+    response: Response,
+    body: dict = Body(...),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    # Cheap existence pre-check OUTSIDE the lock so a bogus/non-existent id never
+    # creates a permanent entry in the never-evicting per-record lock map (bounds
+    # it to ids that actually resolve to a record).
+    if ws.load_experiment(experiment_id) is None:
         return _not_found(experiment_id)
-    if body.get("confirmed_by_user") is not True:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": "confirmation_required",
-                "message": "confirmed_by_user must be true to apply answers.",
-            },
-        )
-    timestamp = _now_iso()
-    apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
-    exp.draft = apply_answers(exp.draft, apply_shape)
-    # answer_log is EXCLUDED from the rev signature: log the submission only when it
-    # actually changes the authoritative draft, so an identical re-entry is neither
-    # logged nor rewritten (byte-stable) and never bumps rev. save_versioned decides
-    # by comparing the on-disk authoritative signature.
-    exp.answer_log.append({"applied": apply_shape, "at": timestamp})
-    if not exp.save_versioned():
-        exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
-    result = serialize.pending_to_list(exp.draft, ws.load_demo_answers())
-    result["status"] = exp.status()
-    return result
+    # The per-record lock serialises the entire load->precondition->mutate->save
+    # compare-and-swap; the experiment is loaded FRESH inside the lock so two
+    # writers holding the same token cannot both succeed.
+    with ws.record_lock(experiment_id):
+        exp = ws.load_experiment(experiment_id)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        if body.get("confirmed_by_user") is not True:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "confirmation_required",
+                    "message": "confirmed_by_user must be true to apply answers.",
+                },
+            )
+        err, used_grace = _check_if_match(if_match, exp)
+        if err is not None:
+            return err
+        timestamp = _now_iso()
+        apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
+        exp.draft = apply_answers(exp.draft, apply_shape)
+        # answer_log is EXCLUDED from the rev signature: log the submission only when it
+        # actually changes the authoritative draft, so an identical re-entry is neither
+        # logged nor rewritten (byte-stable) and never bumps rev. save_versioned decides
+        # by comparing the on-disk authoritative signature.
+        exp.answer_log.append({"applied": apply_shape, "at": timestamp})
+        if not exp.save_versioned():
+            exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
+        result = serialize.pending_to_list(exp.draft, ws.load_demo_answers())
+        result["status"] = exp.status()
+        result["rev"] = exp.rev
+        result["updated_utc"] = exp.updated_utc
+        result["version"] = exp.version_token()
+        response.headers["ETag"] = exp.etag()
+        if used_grace:
+            response.headers["X-ISAAC-Deprecation"] = "if-match-required-next-release"
+        return result
 
 
 # --- 8. export ----------------------------------------------------------------
@@ -394,45 +517,67 @@ def _write_record(exp: Experiment, result) -> None:
 
 
 @router.post("/experiments/{experiment_id}/export")
-def post_export(experiment_id: str):
-    exp = ws.load_experiment(experiment_id)
-    if exp is None:
+def post_export(
+    experiment_id: str,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    # Cheap existence pre-check OUTSIDE the lock so a bogus/non-existent id never
+    # creates a permanent entry in the never-evicting per-record lock map.
+    if ws.load_experiment(experiment_id) is None:
         return _not_found(experiment_id)
+    # The per-record lock serialises load->precondition->mutate->save; load FRESH
+    # inside the lock. The precondition (400/412) is evaluated BEFORE the export
+    # immutability 409 so a stale client refreshes before making a state decision.
+    with ws.record_lock(experiment_id):
+        exp = ws.load_experiment(experiment_id)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
 
-    # Immutability guard (mirrors cli.cmd_export): never overwrite an existing record.
-    record_path = exp.records_dir / f"{exp.id}.json"
-    if record_path.exists():
-        return JSONResponse(
-            status_code=409,
-            content={
-                "error": "record_exists",
-                "message": f"{record_path.name} already exists; records are immutable.",
-                "record_id": exp.id,
-            },
-        )
+        err, used_grace = _check_if_match(if_match, exp)
+        if err is not None:
+            return err
 
-    result = export_draft(exp.draft, REPO_ROOT, record_id=exp.id)
-    payload = serialize.export_result_to_dict(result)
-    if not result.ok:
-        # Nothing written. Surface the failing reports and a flat errors list.
-        errors = []
-        if payload["official_report"]:
-            errors = payload["official_report"]["errors"]
-        elif not result.draft_report.ok:
-            errors = payload["draft_report"]["errors"]
-        payload["errors"] = errors
-        return JSONResponse(status_code=200, content=payload)
+        # Immutability guard (mirrors cli.cmd_export): never overwrite an existing record.
+        record_path = exp.records_dir / f"{exp.id}.json"
+        if record_path.exists():
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "record_exists",
+                    "message": f"{record_path.name} already exists; records are immutable.",
+                    "record_id": exp.id,
+                },
+            )
 
-    _write_record(exp, result)
-    # export changes the authoritative state (record_id: None -> id), so this bumps
-    # rev and stamps updated_utc, persisting the state atomically.
-    exp.save_versioned()
-    payload["record_id"] = exp.record_id
-    payload["artifact_refs"] = {
-        "record_path": str(exp.record_path()),
-        "sidecar_path": str(exp.sidecar_path()),
-    }
-    return payload
+        result = export_draft(exp.draft, REPO_ROOT, record_id=exp.id)
+        payload = serialize.export_result_to_dict(result)
+        if not result.ok:
+            # Nothing written. Surface the failing reports and a flat errors list.
+            errors = []
+            if payload["official_report"]:
+                errors = payload["official_report"]["errors"]
+            elif not result.draft_report.ok:
+                errors = payload["draft_report"]["errors"]
+            payload["errors"] = errors
+            return JSONResponse(status_code=200, content=payload)
+
+        _write_record(exp, result)
+        # export changes the authoritative state (record_id: None -> id), so this bumps
+        # rev and stamps updated_utc, persisting the state atomically.
+        exp.save_versioned()
+        payload["record_id"] = exp.record_id
+        payload["artifact_refs"] = {
+            "record_path": str(exp.record_path()),
+            "sidecar_path": str(exp.sidecar_path()),
+        }
+        payload["rev"] = exp.rev
+        payload["updated_utc"] = exp.updated_utc
+        payload["version"] = exp.version_token()
+        response.headers["ETag"] = exp.etag()
+        if used_grace:
+            response.headers["X-ISAAC-Deprecation"] = "if-match-required-next-release"
+        return payload
 
 
 # --- 9. validate --------------------------------------------------------------
