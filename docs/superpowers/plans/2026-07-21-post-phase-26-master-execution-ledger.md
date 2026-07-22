@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 28 COMPLETE** (2026-07-22; two documented non-blocking QA caveats) → Phase 29 — Assistant Experience |
-| **Active ticket** | P29.4 — One shared authoritative state (next) |
+| **Active ticket** | P29.4b — wire agent intents + stage/confirm UI into the conversation panel (prerequisite for P29.5) → then P29.5 hosted assistant QA |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 29 P29.0 live context builder → P29.1 ephemeral session context → P29.2 conversation UI → P29.3 deterministic workflow agent → P29.4 one shared state → P29.5 hosted agent QA |
 | **Blockers** | none |
@@ -496,6 +496,27 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   untouched. Independent Opus authority review = **SHIP** (no Crit/Imp; scientific-integrity core clean); the
   two recommended client-side confirmation guards were added as defense-in-depth. Not yet wired into a screen
   (P29.4 integrates it into the shared record-session state). Opus impl + Opus review (2 agents).
+
+- **P29.4** (`30e3167`, 2026-07-22): one shared authoritative record-session state. NEW `apps/web/src/lib/
+  useRecordSession.ts` composes the EXISTING pieces (no new store/dependency): the screen's authoritative
+  detail bundle (sole version/rev source), exactly ONE `useRecordSync` poller per record (screens no longer
+  mount their own), the P29.1 session, and the P29.3 AgentContext. One poller/one ETag; poll change →
+  `invalidateStaleProposals(id, freshRev)` first then refresh + conflict; stale-async guard; Reset clears the
+  session (success path); MANUAL-FIRST degradation (manual workflow renders from the screen's own bundle,
+  never gated on the assistant). AssistantPanel gains optional agentContext/degraded props. Independent Opus
+  review = SHIP-WITH-FIXES → both Important fixes applied: degraded means FAILED not loading (no degraded
+  flash); `recordRev` DERIVED from the version string so version/rev can't desync (closes an S4/S6 confirm
+  window). Tests: `record-session.test.tsx` (10, red-first). Frontend **461** (was 451), tsc clean, build ok;
+  snapshot regenerated (AssistantPanel/screens are manifest-served — an implementer "no manifest file" claim
+  was inaccurate; the deterministic `--check` caught it pre-push). Frontend-only; truth path untouched.
+  Opus impl + Opus review (2 agents).
+  - **OPEN — P29.4b prerequisite for P29.5:** the P29.3 agent intents + stage/confirm flow are wired-in
+    (AgentContext threaded, honest degraded) but NOT yet surfaced as interactive UI in the panel (the panel
+    still renders composer prompts; `agentContext` is currently inert/`void`-referenced). Before P29.5 hosted
+    QA can validate the confirmation path (stage a proposal → confirm → If-Match → 412-on-stale) end-to-end in
+    the browser, a focused slice must surface: run-intent from prompts, present a staged proposal
+    (inferred-candidate styling), an explicit Confirm control calling `confirmProposal`, and the version→
+    invalidate→refuse path. This is the one remaining implementation step of Phase 29 before QA + close.
 
 ## Phase 28 Completion Gate (closed 2026-07-22 @ Phase-28 HEAD)
 
