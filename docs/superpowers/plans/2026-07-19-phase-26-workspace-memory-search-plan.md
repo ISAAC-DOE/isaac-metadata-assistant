@@ -37,8 +37,13 @@ both groups query_too_short (plan §12); every core call wrapped → degraded pr
 never 5xx; auth inherited from middleware. +18 route tests (deterministic memory-absent client fixture);
 backend suite 646 green; snapshot regenerated (routes.py served → sha256+fingerprint only). Independent Opus
 review APPROVE-WITH-MINORS (M2 provider-label fixed, M3 pass-through coverage added, M1 kept as plan-mandated).
-NEXT: P26.4 (frontend API client + types). See §20 for per-slice status.
-Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a/0b + P26.1/2/3 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+P26.4 RELEASED 2026-07-21 (commit `12c9c9e`, CI green run `29879274093`, Vercel+Railway healthy at HEAD):
+thin typed `api.search(q, {scope?,limit?,offset?})` in `lib/api.ts` (forwards to `GET /api/search`, auth+base
+via `request()`, deterministic query-string order, omits unspecified opts) + full envelope types in
+`types.ts` + reusable search fixtures in `apiFixtures.ts`. NO visible UI — legacy no-search tests stay green;
+frontend suite 330 green, tsc clean; snapshot regenerated (4 served frontend files → sha256+fingerprint only).
+NEXT: P26.5 (SearchDialog + ⌘K + TopBar trigger). See §20 for per-slice status.
+Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a/0b + P26.1/2/3/4 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
          (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
@@ -634,7 +639,19 @@ is isolated per arc decision #10.
   green. **Tests**: §16 route. **Report**: envelope example + auth confirmation. **Commit**: single.
   **Stop**: review before frontend.
 
-### P26.4 — Frontend API client + types (no visible UI)
+### P26.4 — Frontend API client + types (no visible UI) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `12c9c9e`, CI green run `29879274093`, Vercel+Railway healthy at HEAD.
+> `lib/api.ts` gains `search(q, {scope?,limit?,offset?}) -> Promise<ApiSearchResponse>` via `getJson` (auth
+> header + base inherited from `request()`); query string built deterministically (`q` always, then
+> scope/limit/offset in fixed order, only when provided). `lib/types.ts` gains the full envelope contract
+> (`ApiSearchResponse` + `ApiWorkspaceSearchGroup`/`ApiMemorySearchGroup` + result/match types + reason
+> unions) mirroring the P26.3 backend shapes. `test/apiFixtures.ts` gains reusable `searchResponse` /
+> `searchResponseMemoryDown` / `searchRoutes()` for the P26.5 dialog. **No chrome/UI change** — the legacy
+> "no search" tests (`help-and-honesty`, `memory-concepts`) stay green. **Verified**: frontend suite 330
+> green, `tsc -b` clean (no `any`), 5 `api.search` contract tests. Snapshot regenerated in-slice (api.ts/
+> types.ts/apiFixtures.ts/api.test.ts are manifest-served — diff confined to their sha256 + fingerprint;
+> generator unchanged). Sonnet implementation (mechanical wiring per §21); orchestrator diff-review + verify
+> gate (no separate Opus review needed for this mechanical slice). Backend untouched.
 - **Objective**: `api.search(q, {scope, limit, offset})` + result types in `lib/api.ts`; fixtures in
   `test/apiFixtures.ts`. No chrome change yet — legacy "no search" tests still pass.
 - **Files touched**: `lib/api.ts`, `test/apiFixtures.ts`, `api.test.ts`.
