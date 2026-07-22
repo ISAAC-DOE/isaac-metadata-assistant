@@ -14,11 +14,11 @@
 | Field | Value |
 |---|---|
 | **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.1 — Authoritative runtime mode (next to implement) |
-| **Completed** | T0 docs-truth (`859d36c`); P27.0 storage ground-truth (volume confirmed) |
-| **Next step** | P27.1 runtime-mode code + tests (red-first) → then authorized Railway var add |
+| **Active ticket** | P27.2 — Atomic writes + record version model (next to implement) |
+| **Completed** | T0 docs-truth (`859d36c`); P27.0 storage ground-truth; ledger+approval (`33825ff`); P27.1 runtime mode |
+| **Next step** | Add authorized `ISAAC_RUNTIME_MODE=synthetic-only` Railway var + verify health; then P27.2 |
 | **Blockers** | none |
-| **Latest impl commit** | _(none yet in Phase 27 code; governance commit pending)_ |
+| **Latest impl commit** | P27.1 (this commit) |
 | **Latest checkpoint commit** | `859d36c` |
 | **Verification status** | baseline verified; CI green on `859d36c`; Railway+Vercel healthy |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); `If-Match` strictness handled by P27.4 two-step |
@@ -153,3 +153,11 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   `/data/isaac-workspace` (34/500 MB) confirmed; `ISAAC_UI_WORKSPACE=/data/isaac-workspace`;
   `ISAAC_RUNTIME_MODE` absent. Classification: **Persistent Volume Confirmed.** No infra change. Storage
   docs reconciled additively in the governance commit.
+- **P27.1** (2026-07-21): authoritative synthetic-only runtime mode. NEW `runtime_mode.py` (single
+  fail-closed source), `is_synthetic_only()` delegates, `/api/health` mode + reset/upload guards read
+  it, `create_app()` validates at boot (invalid/`real` → refuse to boot). Opus impl (red-first, 18
+  tests) + independent Opus adversarial review = **SHIP**; folded in the upload `synthetic_only` test.
+  Full backend **664 passed**; snapshot regen (edited manifest files: app.py/routes.py/workspace.py/
+  test_api.py) + gate 17 green; R4.3 backend preflight passed. Follow-ups: (a) authorized Railway
+  `ISAAC_RUNTIME_MODE=synthetic-only` var add + health verify; (b) `runtime_mode.py` not yet
+  graph-indexed → P32.5 memory refresh. Truth-core untouched.

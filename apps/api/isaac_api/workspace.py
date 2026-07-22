@@ -79,21 +79,21 @@ def workspace_root() -> Path:
 def is_synthetic_only() -> bool:
     """Whether this deployment is the synthetic-only demo.
 
-    Hard-coded True to mirror the ``/health`` ``mode: "synthetic-only"`` banner:
-    the prototype only ever serves synthetic fixtures. The guarded reset gates on
-    this single function so tests can monkeypatch it to False to prove the reset
-    refuses outside synthetic-only mode.
+    Delegates to the single authoritative runtime-mode source
+    (``isaac_api.runtime_mode``) which both this guard and the ``/health`` mode
+    banner read from, so they can never drift apart. The function is kept defined
+    here because existing callers (and the reset test's monkeypatch) reference
+    ``ws.is_synthetic_only``; it now reflects the fail-closed
+    ``ISAAC_RUNTIME_MODE`` resolution instead of a literal.
 
-    NOTE (deferred to the post-Phase-26 architecture decision packet): this gate,
-    like the ``/health`` mode literal, is a CONSTANT today, so the 403 governance
-    refusal is only reachable under test. That is acceptable ONLY because the
-    prototype is synthetic-only by construction. The reset's real defence-in-depth
-    is provenance classification: a non-managed (e.g. real) record lacks
-    ``MANAGED_SOURCE_DESCRIPTION`` -> classifies AMBIGUOUS -> the whole reset
-    refuses with zero mutation. Before any real-data deployment, wire this to an
-    authoritative runtime signal instead of a literal.
+    The guarded reset gates on this function; its deeper defence-in-depth remains
+    provenance classification (a non-managed / real record lacks
+    ``MANAGED_SOURCE_DESCRIPTION`` -> classifies AMBIGUOUS -> the reset refuses
+    with zero mutation).
     """
-    return True
+    from . import runtime_mode
+
+    return runtime_mode.is_synthetic_only()
 
 
 def _now_iso() -> str:

@@ -447,3 +447,6 @@ def test_uploads_always_blocked(client):
     body = resp.json()
     assert body["blocked"] is True
     assert "approval-gated" in body["reason"]
+    # Refusal is tied to the authoritative runtime-mode source (P27.1): the
+    # payload echoes the same synthetic-only posture published on /api/health.
+    assert body["synthetic_only"] is True

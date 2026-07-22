@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
+from . import runtime_mode
 from .auth import ApiKeyAuthMiddleware
 from .routes import router
 
@@ -38,6 +39,10 @@ def _cors_origins() -> list[str]:
 
 
 def create_app() -> FastAPI:
+    # Fail-closed at boot: refuse to construct the app when the runtime mode is
+    # misconfigured (invalid value, or 'real' whose guardrails are not built), so
+    # a misconfigured container cannot silently boot in a permissive state.
+    runtime_mode.validate_runtime_mode_or_raise()
     app = FastAPI(
         title="ISAAC Metadata Assistant — local UI backend",
         version=__version__,

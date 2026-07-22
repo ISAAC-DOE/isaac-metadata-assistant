@@ -27,6 +27,7 @@ from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
 from . import memory
+from . import runtime_mode
 from . import search
 from . import serialize
 from . import sources
@@ -110,7 +111,7 @@ def _build_commit() -> str | None:
 def health() -> dict:
     return {
         "status": "ok",
-        "mode": "synthetic-only",
+        "mode": runtime_mode.runtime_mode(),
         "core": "isaac_records",
         "version": __version__,
         "commit": _build_commit(),
@@ -692,7 +693,11 @@ def graph_status() -> dict:
 @router.post("/uploads")
 def uploads():
     # Governance seam: no multipart is declared or parsed; no file is read or stored.
-    return JSONResponse(status_code=403, content=_UPLOAD_BLOCKED)
+    # The refusal is tied to the authoritative runtime-mode source; uploads stay
+    # blocked in synthetic-only mode (real-data ingestion is Phase 31, not here).
+    payload = dict(_UPLOAD_BLOCKED)
+    payload["synthetic_only"] = ws.is_synthetic_only()
+    return JSONResponse(status_code=403, content=payload)
 
 
 # --- 16. memory (project memory plane over HTTP) -------------------------------
