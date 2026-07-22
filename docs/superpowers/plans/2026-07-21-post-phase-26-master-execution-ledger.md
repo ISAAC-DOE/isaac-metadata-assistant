@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 28 COMPLETE** (2026-07-22; two documented non-blocking QA caveats) → Phase 29 — Assistant Experience |
-| **Active ticket** | P29.1 — Ephemeral session context (next) |
+| **Active ticket** | P29.2 — Conversation-style assistant UI (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 29 P29.0 live context builder → P29.1 ephemeral session context → P29.2 conversation UI → P29.3 deterministic workflow agent → P29.4 one shared state → P29.5 hosted agent QA |
 | **Blockers** | none |
@@ -456,6 +456,19 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   RED at P29.0 (span 4 slices → CI-noise/maintainability risk); instead per-slice red-first (the Phase-28
   pattern), with the 16 invariants distributed across P29.1/P29.3/P29.4 as the acceptance checklist. No new
   hard gate; external-LLM prohibition honored by a deterministic-agent design. Docs-only; truth path untouched.
+
+- **P29.1** (`ddf8106`, 2026-07-22): ephemeral assistant session context. NEW `apps/web/src/lib/
+  assistantSession.ts` — browser-session-scoped, per-experiment conversation + single staged proposal +
+  last-observed rev; sessionStorage + in-memory mirror; defensive (private-mode/malformed-JSON safe); NO
+  localStorage/IndexedDB/backend chat storage. Experiments fully isolated; a rev change marks a staged
+  proposal stale (never silently confirmable), historical messages never deleted; `clearAllSessions` = Reset
+  Demo. **Leak-safety:** DEEP recursive sanitizer scrubs secrets/bearer/auth/private-paths/≥32-hex + verdict/
+  confirmed-record keys at ANY depth (incl. the `unknown` `proposal.value`, arrays, allowlisted object-valued
+  keys, raw secret substrings in allowlisted strings). **Independent Opus review = DO-NOT-SHIP → SHIP after
+  fix:** caught the initial sanitizer being SHALLOW (nested secrets leaked to sessionStorage — Critical) and
+  the orchestrator's initial leak test being top-level-only (Important gap); both fixed — recursive
+  `deepSanitize` + a nested-secret regression test (RED→GREEN). Frontend **418** (was 408), tsc clean, build
+  ok. Frontend-only; truth path untouched. Sonnet impl + Opus review (2 agents, within budget).
 
 ## Phase 28 Completion Gate (closed 2026-07-22 @ Phase-28 HEAD)
 
