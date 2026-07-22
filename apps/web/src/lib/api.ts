@@ -91,6 +91,10 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(`${API_BASE}${path}`, {
       ...init,
+      // Thread the optional AbortSignal through so a caller (e.g. the P27.6 poller)
+      // can cancel an in-flight request. `...init` already carries it, but we make
+      // it explicit so the intent is obvious and existing callers stay unaffected.
+      signal: init?.signal,
       headers: {
         Accept: 'application/json',
         ...(key !== undefined ? { Authorization: `Bearer ${key}` } : {}),
@@ -149,6 +153,29 @@ export const api = {
 
   getExperiment(id: string): Promise<ApiExperimentDetail> {
     return getJson<ApiExperimentDetail>(`/experiments/${enc(id)}`);
+  },
+
+  // P27.6 — the client half of revision-aware live-sync. A conditional GET sends
+  // the held ETag as `If-None-Match: "<version>"`; the backend answers 304 (no
+  // body) when the record is unchanged or 200 + the fresh detail (+ new ETag)
+  // when it changed. We call request() directly — getJson throws on any non-2xx,
+  // and a 304 is deliberately non-ok. Branch on status: 304 → not changed; 200 →
+  // changed, hand back the fresh detail (the caller decides whether to refetch);
+  // anything else is a genuine error. A network failure from request() is already
+  // an ApiError({unreachable:true}) and simply propagates. `signal` lets the
+  // poller abort an in-flight check on unmount / record / version change.
+  async checkRecordVersion(
+    id: string,
+    version: string,
+    signal?: AbortSignal,
+  ): Promise<{ changed: boolean; detail?: ApiExperimentDetail }> {
+    const res = await request(`/experiments/${enc(id)}`, {
+      headers: { 'If-None-Match': `"${version}"` },
+      signal,
+    });
+    if (res.status === 304) return { changed: false };
+    if (res.ok) return { changed: true, detail: (await res.json()) as ApiExperimentDetail };
+    throw new ApiError('unexpected status', { status: res.status });
   },
 
   async getDraftGroups(id: string) {

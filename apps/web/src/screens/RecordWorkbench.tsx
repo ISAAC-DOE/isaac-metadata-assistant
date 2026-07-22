@@ -9,12 +9,14 @@ import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { SourceTypeToken } from '../components/EvidenceRow';
+import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleAlert, ExternalLink, FileText } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
+import { useRecordSync } from '../lib/useRecordSync';
 import {
   draftGroupsToFieldGroups,
   toAdvisoryResult,
@@ -36,6 +38,14 @@ export function RecordWorkbench() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getRecordBundle(id), [id]);
 
+  // P27.6 — read-only surface: on a change signal, silently refetch the bundle
+  // (never blanks to loading). The fetched bundle stays authoritative; the
+  // poller only tells us WHEN to refresh. Enabled only once we have a version.
+  const version = bundle.status === 'data' ? bundle.data.detail.version : undefined;
+  const { degraded } = useRecordSync(id, version, {
+    onChanged: () => bundle.reloadSilent(),
+  });
+
   if (bundle.status !== 'data') {
     return (
       <AppShell
@@ -53,10 +63,22 @@ export function RecordWorkbench() {
     );
   }
 
-  return <LoadedWorkbench id={id} bundle={bundle.data} />;
+  return (
+    <LoadedWorkbench id={id} bundle={bundle.data} degraded={degraded} onManualRefresh={bundle.reload} />
+  );
 }
 
-function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
+function LoadedWorkbench({
+  id,
+  bundle,
+  degraded,
+  onManualRefresh,
+}: {
+  id: string;
+  bundle: RecordBundle;
+  degraded: boolean;
+  onManualRefresh: () => void;
+}) {
   const navigate = useNavigate();
   const { detail, pending, validate, audit, warnings, evidence, graph } = bundle;
 
@@ -213,6 +235,8 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
       }
       mainPad="pad"
     >
+      <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
+
       {pending.length > 0 && (
         <div className="needsyou-banner" role="note">
           <CircleAlert className="needsyou-icon" size={20} strokeWidth={2.2} aria-hidden="true" />

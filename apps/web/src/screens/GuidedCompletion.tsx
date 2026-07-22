@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { GuidedPrompt } from '../components/GuidedPrompt';
 import { StatusChip } from '../components/StatusChip';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Check, CircleHelp } from '../components/icons';
 import { LABELS } from '../lib/labels';
@@ -17,6 +18,7 @@ import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
+import { useRecordSync } from '../lib/useRecordSync';
 import { answerValuePreview, pendingItemToBlocker } from '../lib/adapt';
 import type { ApiExperimentDetail, ApiPendingItem } from '../lib/types';
 
@@ -94,6 +96,17 @@ function LoadedCompletion({
   // and re-adopted from every accepted answer response; sent as If-Match on the
   // next submit so a concurrent edit elsewhere is caught (412) instead of clobbered.
   const [currentVersion, setCurrentVersion] = useState(detail.version);
+
+  // P27.6 — this surface holds STAGED, unsent input (the GuidedPrompt field), so
+  // a change signal must NOT auto-refetch (that would discard the input) and must
+  // NOT auto-merge. We only raise a proactive "changed elsewhere" banner; the
+  // submit stays ETag-guarded, so a stale submit still gets a 412 as the hard
+  // backstop. Refresh (below) re-loads via the parent and re-adopts the fresh
+  // version, which remounts this component and clears the banner + staged input.
+  const [changedElsewhere, setChangedElsewhere] = useState(false);
+  const { degraded } = useRecordSync(id, currentVersion, {
+    onChanged: () => setChangedElsewhere(true),
+  });
 
   const total = answered.length + pending.length;
   const remaining = pending.length;
@@ -217,6 +230,27 @@ function LoadedCompletion({
     </AppShell>
   );
 
+  // P27.6 — the proactive "changed elsewhere" notice (input-preserving) + the
+  // degraded indicator. Rendered at the top of both loaded branches. Refresh
+  // uses the parent reload, which remounts LoadedCompletion (fresh detail +
+  // version) and thereby clears the banner and re-adopts the current token.
+  const liveNotes = (
+    <>
+      {changedElsewhere && (
+        <div className="livesync-changed completion-submit-error" role="status">
+          <span className="livesync-changed-text">
+            This record changed elsewhere. Your input is kept — review the current record before
+            submitting.
+          </span>
+          <button type="button" className="btn btn-secondary" onClick={reload}>
+            Refresh
+          </button>
+        </div>
+      )}
+      <LiveSyncNote degraded={degraded} onRefresh={reload} />
+    </>
+  );
+
   const answeredRows = answered.map((ans) => (
     <div className="answered-row" key={ans.id}>
       <span className="answered-check" aria-hidden="true">
@@ -235,6 +269,7 @@ function LoadedCompletion({
   if (remaining === 0) {
     return shell(
       <>
+        {liveNotes}
         <div className="completion-header">
           <h1 className="completion-title">All Fields Resolved</h1>
           <span className={`completion-counter${total === 0 ? ' completion-counter-prose' : ''}`}>
@@ -276,6 +311,7 @@ function LoadedCompletion({
 
   return shell(
     <>
+      {liveNotes}
       <div className="completion-header">
         <h1 className="completion-title">Answer {total} Questions to Finish This Record</h1>
         <span className="completion-counter">

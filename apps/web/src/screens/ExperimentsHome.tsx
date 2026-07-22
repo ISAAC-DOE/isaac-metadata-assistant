@@ -1,5 +1,5 @@
 import './screens.css';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -22,6 +22,19 @@ import { queueSubcount, summariesToQueueGroups } from '../lib/adapt';
 export function ExperimentsHome() {
   const navigate = useNavigate();
   const result = useFetch(() => api.listExperiments(), []);
+
+  // P27.6 — the dashboard is NOT tightly polled (no interval). It only refetches
+  // the list once when the tab regains visibility, so a cross-tab reset/export
+  // shows up on return — silently (no loading-flip blank on every refocus),
+  // consistent with the rest of P27.6.
+  const { reloadSilent } = result;
+  useEffect(() => {
+    const onVisibility = () => {
+      if (!document.hidden) reloadSilent();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [reloadSilent]);
 
   let subcount = '';
   let body: ReactNode;

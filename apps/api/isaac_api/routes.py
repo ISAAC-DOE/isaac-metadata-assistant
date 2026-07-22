@@ -152,6 +152,29 @@ def _check_if_match(if_match: str | None, exp) -> JSONResponse | None:
     return _stale_write(exp, first_token)
 
 
+def _if_none_match_hit(if_none_match: str | None, exp) -> bool:
+    """True if the client's If-None-Match indicates the record is UNCHANGED (→304).
+
+    RFC 9110 uses weak comparison for If-None-Match; our validators are strong and
+    the client echoes them verbatim, so normalise a leading ``W/`` then string-match.
+    ``*`` matches iff the resource exists (it does here). Absent/empty/no-match → not
+    a hit (fall through to the full 200 bundle).
+    """
+    if not if_none_match:
+        return False
+    raw = if_none_match.strip()
+    if raw == "*":
+        return True
+    current = exp.etag()
+    for part in raw.split(","):
+        tag = part.strip()
+        if tag.startswith("W/"):
+            tag = tag[2:]
+        if tag == current:
+            return True
+    return False
+
+
 # --- summary / detail serialization -------------------------------------------
 
 
@@ -404,10 +427,20 @@ def list_experiments() -> dict:
 
 
 @router.get("/experiments/{experiment_id}")
-def get_experiment(experiment_id: str, response: Response):
+def get_experiment(
+    experiment_id: str,
+    response: Response,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
+    # Conditional GET (P27.6 live-sync polling): if the client's If-None-Match
+    # matches the current strong validator, the record is unchanged -> 304 with the
+    # ETag and NO body (a cheap change signal; polling is only a signal, the fetched
+    # snapshot remains authoritative).
+    if _if_none_match_hit(if_none_match, exp):
+        return Response(status_code=304, headers={"ETag": exp.etag()})
     detail = _detail(exp)
     detail.update(vc.version_fields(exp))
     response.headers["ETag"] = exp.etag()

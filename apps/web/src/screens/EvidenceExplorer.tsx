@@ -8,11 +8,13 @@ import { SourcePreview } from '../components/SourcePreview';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { StatusBar } from '../components/StatusBar';
+import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
+import { useRecordSync } from '../lib/useRecordSync';
 import {
   citedLinesForEntry,
   evidenceEntriesToTrail,
@@ -33,6 +35,12 @@ export function EvidenceExplorer() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getEvidenceBundle(id), [id]);
 
+  // P27.6 — read-only surface: silently refetch on a change signal (never blanks).
+  const version = bundle.status === 'data' ? bundle.data.detail.version : undefined;
+  const { degraded } = useRecordSync(id, version, {
+    onChanged: () => bundle.reloadSilent(),
+  });
+
   if (bundle.status !== 'data') {
     return (
       <AppShell
@@ -49,10 +57,27 @@ export function EvidenceExplorer() {
     );
   }
 
-  return <LoadedEvidence id={id} data={bundle.data} />;
+  return (
+    <LoadedEvidence
+      id={id}
+      data={bundle.data}
+      degraded={degraded}
+      onManualRefresh={bundle.reload}
+    />
+  );
 }
 
-function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
+function LoadedEvidence({
+  id,
+  data,
+  degraded,
+  onManualRefresh,
+}: {
+  id: string;
+  data: EvidenceBundle;
+  degraded: boolean;
+  onManualRefresh: () => void;
+}) {
   const { detail, evidence, artifacts, graph, sourcePreviews } = data;
 
   const entries = useMemo(() => evidenceEntriesToTrail(evidence), [evidence]);
@@ -152,6 +177,7 @@ function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
       }
       mainPad="none"
     >
+      <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
       <SourcePreview
         entry={selected}
         provenance={provenance}

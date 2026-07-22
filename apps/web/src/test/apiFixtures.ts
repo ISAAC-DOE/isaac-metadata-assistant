@@ -12,14 +12,33 @@ import { vi } from 'vitest';
 export interface StubbedRoute {
   status?: number;
   body: unknown;
+  /** Optional `ETag` response header (P27.6 conditional GET). */
+  etag?: string;
 }
+
+/** The per-call descriptor a route-thunk resolves to (P27.6 conditional GET). */
+export interface RouteResult {
+  status?: number;
+  body?: unknown;
+  etag?: string;
+}
+
+/**
+ * A route may be a static {@link StubbedRoute} OR a thunk called ONCE per fetch
+ * (with that request's `RequestInit`) that returns the response descriptor for
+ * that call — the latter lets a test sequence a record's conditional GET (e.g.
+ * 304, 304, then 200-with-new-version) with the status, body and ETag advancing
+ * in lockstep, and branch on the `If-None-Match` header so the SAME endpoint can
+ * serve a plain GET (no token) and a conditional GET (token) differently.
+ */
+export type RouteEntry = StubbedRoute | ((init?: RequestInit) => RouteResult);
 
 /**
  * Stub `fetch` with a `"METHOD /api/path" -> response` map. Returns the list of
  * keys actually requested (for asserting which endpoints were hit). Unknown
  * routes reject like a network error so tests fail loudly.
  */
-export function stubFetchRoutes(routes: Record<string, StubbedRoute>): string[] {
+export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
   const calls: string[] = [];
   const impl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =
@@ -29,16 +48,26 @@ export function stubFetchRoutes(routes: Record<string, StubbedRoute>): string[] 
     calls.push(key);
     const hit = routes[key];
     if (!hit) throw new TypeError(`fetch stub: no route for ${key}`);
-    const status = hit.status ?? 200;
-    // A `body` may be a thunk, re-evaluated on every hit, so a test can model an
-    // endpoint whose response changes over time (e.g. the experiment list before
-    // vs. after a reset). Plain-object bodies (the common case) are unaffected.
-    const body = typeof hit.body === 'function' ? (hit.body as () => unknown)() : hit.body;
+    // A whole-route thunk resolves the descriptor once per fetch (status/body/etag
+    // in sync); a plain StubbedRoute is used as-is, and its `body` may itself be a
+    // thunk re-evaluated per hit (e.g. the experiment list before/after a reset).
+    const resolved: RouteResult = typeof hit === 'function' ? hit(init) : hit;
+    const status = resolved.status ?? 200;
+    const body =
+      typeof resolved.body === 'function' ? (resolved.body as () => unknown)() : resolved.body;
+    const etag = resolved.etag;
+    // A minimal Headers-like shape: real fetch exposes `headers.get('ETag')` and
+    // a 304 carries no body (ok:false, status 304). checkRecordVersion branches
+    // on status before reading json(), so a 304 body is never consumed.
+    const headers = {
+      get: (name: string) => (name.toLowerCase() === 'etag' ? (etag ?? null) : null),
+    };
     return {
       ok: status < 400,
       status,
+      headers,
       json: async () => body,
-    } as Response;
+    } as unknown as Response;
   };
   vi.stubGlobal('fetch', vi.fn(impl));
   return calls;
@@ -1114,4 +1143,75 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
     [`GET ${base}/artifacts`]: { body: artifactsExported },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
+}
+
+// --- P27.6 conditional-GET (revision-aware live-sync) fixtures ---------------
+//
+// The backend now honours `If-None-Match` on GET /api/experiments/{id}: 304 (no
+// body) when unchanged, 200 + fresh detail + new ETag when changed. These model
+// the client half's poll of that one endpoint.
+
+/** The record AFTER a change elsewhere: a bumped rev + a NEW version/ETag. */
+export const experimentDetailChanged = {
+  ...experimentDetail,
+  rev: 9,
+  updated_utc: '2099-04-02T10:00:00Z',
+  version: '2.0',
+};
+
+/**
+ * A GET /api/experiments/{id} route-thunk that models a conditional GET: it
+ * answers 304 (unchanged, no body) for the first `unchangedTicks` polls, then
+ * 200 with a changed detail carrying a NEW version + ETag on every poll after.
+ * The client keeps sending its OLD If-None-Match token, so once the record has
+ * changed it keeps reading "changed" until the screen adopts the fresh version —
+ * which is exactly why the hook's stale-guard + onChanged-once wiring matters.
+ */
+export function conditionalGetSequence(
+  id: string = EXP_ID,
+  opts: { unchangedTicks?: number; newVersion?: string } = {},
+): () => RouteResult {
+  const unchanged = opts.unchangedTicks ?? 2;
+  const newVersion = opts.newVersion ?? experimentDetailChanged.version;
+  const changed = { ...experimentDetailChanged, id, version: newVersion };
+  let call = 0;
+  return () => {
+    call += 1;
+    if (call <= unchanged) return { status: 304, etag: `"${experimentDetail.version}"` };
+    return { status: 200, body: changed, etag: `"${newVersion}"` };
+  };
+}
+
+/**
+ * A stateful GET /api/experiments/{id} route that models real ETag semantics for
+ * live-sync integration tests. It serves BOTH the bundle's plain GET (no token →
+ * always the current detail) and the poller's conditional GET (token → 304 iff
+ * the token equals the current server version, else 200 + the fresh detail). Call
+ * `bump()` to simulate a change elsewhere: the version advances to `experiment
+ * DetailChanged.version`, so a poller still holding the old token next reads 200.
+ */
+export function liveDetailRoute(id: string = EXP_ID): {
+  route: (init?: RequestInit) => RouteResult;
+  bump: () => void;
+} {
+  let version = experimentDetail.version;
+  const detailFor = () => ({
+    ...experimentDetail,
+    id,
+    version,
+    rev: version === experimentDetail.version ? experimentDetail.rev : experimentDetailChanged.rev,
+  });
+  const bump = () => {
+    version = experimentDetailChanged.version;
+  };
+  const route = (init?: RequestInit): RouteResult => {
+    const inm = (init?.headers as Record<string, string> | undefined)?.['If-None-Match'];
+    if (inm) {
+      return inm === `"${version}"`
+        ? { status: 304, etag: `"${version}"` }
+        : { status: 200, body: detailFor(), etag: `"${version}"` };
+    }
+    return { status: 200, body: detailFor(), etag: `"${version}"` };
+  };
+  return { route, bump };
 }

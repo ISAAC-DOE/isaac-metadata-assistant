@@ -11,6 +11,7 @@ import { CoverageBadge } from '../components/CoverageBadge';
 import { AdvisoryChip } from '../components/AdvisoryChip';
 import { ArtifactCard } from '../components/ArtifactCard';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
 import { ROUTES } from '../lib/routes';
@@ -18,6 +19,7 @@ import { LABELS } from '../lib/labels';
 import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
 import { api, ApiError } from '../lib/api';
+import { useRecordSync } from '../lib/useRecordSync';
 import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
 import type {
   ApiExportResponse,
@@ -122,6 +124,13 @@ function LoadedExport({
   useEffect(() => {
     setCurrentVersion(detail.version);
   }, [detail.version]);
+
+  // P27.6 — no text input on this surface, so a change signal can safely trigger
+  // a SILENT refetch (updates the readiness signals without blanking). Export
+  // stays ETag-guarded, so a stale export still gets a 412 as the hard backstop.
+  const { degraded } = useRecordSync(id, currentVersion, {
+    onChanged: () => onRefresh(),
+  });
 
   // --- artifact "View JSON" modal: a real, focus-trapping dialog --------------
   const modalRef = useRef<HTMLDivElement>(null);
@@ -356,6 +365,8 @@ function LoadedExport({
       }
       mainPad="pad"
     >
+      <LiveSyncNote degraded={degraded} onRefresh={onRefresh} />
+
       {/* Post-export: the real, reserved verdict + the two export artifacts. */}
       {exported && realValidation && (
         <>
