@@ -7,7 +7,7 @@ import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
-import { AssistantPanel } from '../components/AssistantPanel';
+import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { SourceTypeToken } from '../components/EvidenceRow';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
@@ -51,6 +51,14 @@ export function RecordWorkbench() {
   });
   const degraded = session.syncDegraded;
 
+  // P29.4b — after a confirmed proposal write, recompute the shared record state
+  // (manual fields, workflow, evidence, export readiness) and refetch the bundle
+  // so the manual UI reflects the new value.
+  const onAgentRefresh = () => {
+    session.refresh();
+    bundle.reloadSilent();
+  };
+
   if (bundle.status !== 'data') {
     return (
       <AppShell
@@ -76,9 +84,24 @@ export function RecordWorkbench() {
       agentContext={session.context}
       agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
+      onAgentRefresh={onAgentRefresh}
     />
   );
 }
+
+// The review-screen INTENT pills. Every entry is an INTENTS-native, target-free
+// read intent with a repository-native Title Case label (the panel drops any that
+// are not in the frozen registry). Read-only: none mutates — the only write is an
+// explicit Confirm on a staged proposal, routed through confirmProposal.
+const REVIEW_AGENT_PROMPTS: AgentPrompt[] = [
+  { intent: 'explain_current_state', label: 'Explain the Current Step' },
+  { intent: 'identify_next_missing_field', label: 'Identify the Next Missing Field' },
+  { intent: 'explain_step_blocker', label: 'Explain What Is Blocking' },
+  { intent: 'show_inferred_candidates', label: 'Show Inferred Candidates' },
+  { intent: 'review_evidence_conflicts', label: 'Review Evidence Conflicts' },
+  { intent: 'explain_unknown', label: 'Explain Unknown Fields' },
+  { intent: 'review_export_readiness', label: 'Review Export Readiness' },
+];
 
 function LoadedWorkbench({
   id,
@@ -87,6 +110,7 @@ function LoadedWorkbench({
   agentContext,
   agentDegraded,
   onManualRefresh,
+  onAgentRefresh,
 }: {
   id: string;
   bundle: RecordBundle;
@@ -94,6 +118,7 @@ function LoadedWorkbench({
   agentContext: AgentContext | undefined;
   agentDegraded: boolean;
   onManualRefresh: () => void;
+  onAgentRefresh: () => void;
 }) {
   const navigate = useNavigate();
   const { detail, pending, validate, audit, warnings, evidence, graph } = bundle;
@@ -214,6 +239,8 @@ function LoadedWorkbench({
         availability={graph.availability}
         agentContext={agentContext}
         degraded={agentDegraded}
+        agentPrompts={REVIEW_AGENT_PROMPTS}
+        onRefresh={onAgentRefresh}
       />
     </aside>
   );

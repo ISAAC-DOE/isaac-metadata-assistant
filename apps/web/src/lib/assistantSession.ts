@@ -130,6 +130,18 @@ function deepSanitize(value: unknown): unknown {
 }
 
 /**
+ * P29.4b — reusable DISPLAY-path scrubber. The panel renders agent-supplied
+ * proposal values (an `unknown`-typed field that could carry a nested secret);
+ * running them through the SAME `deepSanitize` used before persistence keeps the
+ * render path leak-safe without weakening the persistence sanitizer. Returns the
+ * value with any unsafe string (bearer/token/path/long-hex) removed at any depth;
+ * a top-level unsafe string becomes `undefined`.
+ */
+export function scrubForDisplay(value: unknown): unknown {
+  return deepSanitize(value);
+}
+
+/**
  * Top-level sanitizer for a Msg/Proposal: keeps only presentation fields on
  * `SAFE_KEYS` (dropping everything else, including verdict/confirmed-record
  * keys and unsafe key names outright), then deep-sanitizes the VALUE of each
