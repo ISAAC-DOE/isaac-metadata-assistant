@@ -7,6 +7,59 @@
 
 import { vi } from 'vitest';
 
+import type { ApiWorkflow } from '../lib/types';
+
+// --- backend-derived workflow (P28.1) -----------------------------------
+// Mirrors apps/api/isaac_api/workflow.py `derive_workflow` so detail fixtures
+// carry the same shape the real backend ships. Kept here (not re-derived in the
+// app) because the app renders the workflow verbatim; only fixtures synthesize it.
+const WF_ORDER = [
+  'load_record',
+  'complete_metadata',
+  'review_evidence',
+  'review_export_readiness',
+  'export',
+] as const;
+const WF_LABELS: Record<string, string> = {
+  load_record: 'Load Record',
+  complete_metadata: 'Complete Metadata',
+  review_evidence: 'Review Evidence',
+  review_export_readiness: 'Review Export Readiness',
+  export: 'Export',
+};
+const WF_REOPENED_REASON =
+  'An upstream change reopened this step; it no longer reflects the current record.';
+
+export function fixtureWorkflow(s: {
+  pending_count: number;
+  draft_ok: boolean;
+  ready: boolean;
+  exported: boolean;
+  rev: number;
+}): ApiWorkflow {
+  const satisfied: Record<string, boolean> = {
+    load_record: true,
+    complete_metadata: s.pending_count === 0,
+    review_evidence: s.pending_count === 0 && s.draft_ok,
+    review_export_readiness: s.ready,
+    export: s.exported,
+  };
+  const currentStep = WF_ORDER.find((id) => !satisfied[id]) ?? null;
+  const currentLabel = currentStep ? WF_LABELS[currentStep] : null;
+  const ordered_steps = WF_ORDER.map((id, i) => {
+    if (satisfied[id]) {
+      return { id, label: WF_LABELS[id], state: 'completed' as const, current: false, reopened: false, blocked: false, reason: null };
+    }
+    const current = id === currentStep;
+    const reopened = WF_ORDER.slice(i + 1).some((later) => satisfied[later]);
+    const blocked = !current && !reopened;
+    const state = current ? ('current' as const) : reopened ? ('reopened' as const) : ('blocked' as const);
+    const reason = current ? null : reopened ? WF_REOPENED_REASON : `Complete '${currentLabel}' first.`;
+    return { id, label: WF_LABELS[id], state, current, reopened, blocked, reason };
+  });
+  return { ordered_steps, current_step: currentStep, record_rev: s.rev };
+}
+
 // --- fetch stub ---------------------------------------------------------
 
 export interface StubbedRoute {
@@ -124,6 +177,14 @@ export const experimentDetail = {
   draft_ok: true,
   artifact_refs: { record_path: null, sidecar_path: null },
   source_files: ['mock_campaign.csv', 'raw_scan_listing.txt'],
+  // needs_attention: load_record completed, complete_metadata current, rest blocked.
+  workflow: fixtureWorkflow({
+    pending_count: experimentSummary.pending_count,
+    draft_ok: true,
+    ready: false,
+    exported: false,
+    rev: VERSION_FIELDS.rev,
+  }),
 };
 
 export const draftResponse = {
@@ -879,7 +940,15 @@ export const exportConflict = {
 export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
   return {
-    [`GET ${base}`]: { body: { ...experimentDetail, id, status: 'ready_to_export', pending_count: 0 } },
+    [`GET ${base}`]: {
+      body: {
+        ...experimentDetail,
+        id,
+        status: 'ready_to_export',
+        pending_count: 0,
+        workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: false, rev: VERSION_FIELDS.rev }),
+      },
+    },
     [`GET ${base}/pending`]: { body: { pending: [] } },
     [`POST ${base}/validate`]: { body: validateReadyDryRun },
     [`POST ${base}/audit`]: { body: auditNotExported },
@@ -999,6 +1068,7 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
           record_path: artifactsExported.record_path,
           sidecar_path: artifactsExported.sidecar_path,
         },
+        workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
       },
     },
     [`GET ${base}/evidence`]: { body: evidenceExported },
@@ -1134,6 +1204,7 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
           record_path: artifactsExported.record_path,
           sidecar_path: artifactsExported.sidecar_path,
         },
+        workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
       },
     },
     [`GET ${base}/pending`]: { body: { pending: [] } },

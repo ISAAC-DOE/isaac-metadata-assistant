@@ -10320,7 +10320,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "3db84915ac8ae8d28336f30a65d8dc4c23f63e78189f50dfc6547f9aba338b43"
+        "sha256": "19216f1296c9c862656a082d07079d2d3bf8e6557044888624e90336f6540765"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10332,7 +10332,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "5e2f138623a1735fda495b7a5412b4bbbb23208074091e94a3470776ddf25359"
+        "sha256": "bae184bce161dd3a3a3eb680623f0e310a563c9c96ace4b702343ee628d85f30"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10428,7 +10428,7 @@
       },
       {
         "path": "apps/web/src/__tests__/navigation.test.tsx",
-        "sha256": "c2deceb5997442931aa1876c08e2d45615b156259e8b840a8ca17af9f4716d15"
+        "sha256": "5dc178277cac734eadae39e95913ca3ff7ca45831efab06fed7edcaa13d2d9de"
       },
       {
         "path": "apps/web/src/__tests__/no-vertical-rail.test.ts",
@@ -10536,7 +10536,7 @@
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
-        "sha256": "7954ee730d24486591d746016bd276df9f57cd0628497bdc6991b6f300856164"
+        "sha256": "2900d371542f66035c8fbdba55f4fc29c35b0eeec8fe69fa053403fb259506ea"
       },
       {
         "path": "apps/web/src/components/icons.tsx",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "aa5c93a91ec3a3ae9a37d273527bab152d08f26f8311116a451316ad9cd28bd3"
+        "sha256": "f07dd635cb86ce3efb851663e0646e16d8a5e4f977fc9f9c13e0443196856b27"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10588,7 +10588,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "6c0baf6139f78aec77ed2d63019c3501b8027596b2168bda68aa22cbb15ee296"
+        "sha256": "94c43ffa7038d329ca6511054dd96c4e4097903ee24b6a407f0f093890b7eec5"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10596,7 +10596,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "aa1ba1428d7c10ed0865efc289e1e3c74fc1861a43800d10f479511c9e691ffd"
+        "sha256": "3d4d130b894dd61c215a38482b5fec9888502d069dcfd3e38f9caf3021df9a5f"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10608,7 +10608,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "4f63c810cee843a76fa95a839f5777c7e9451f3fd2547ae175ab338a4d69e361"
+        "sha256": "c626c73ee3a5d9827e3c3377bb0bf1e4339458790b9825b308ffaeef9274ca96"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -10616,7 +10616,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "f2df898e40a6eb49587faadf66da16b0162d8b361102036e481382f23355c18b"
+        "sha256": "bdc4fc199d216d201eaf5944d754bb7e90bbbcfb2da50bd4909a7566034ec58c"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "a79bf9325355ffa61aa77aebb7eca7ab46e78e6e6e799ef70324b9a4ab4c26ff"
+    "served_manifest_fingerprint": "1b8f475c3d337e780f95b498c20b1e1be739f89c6202276c7eba53fe18c69345"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

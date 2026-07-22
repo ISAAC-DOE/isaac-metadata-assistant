@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
-import { WorkflowSpine, buildSpine } from '../components/WorkflowSpine';
+import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { AssistantPanel } from '../components/AssistantPanel';
@@ -51,7 +51,7 @@ export function RecordWorkbench() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenReview} />}
-        sidebar={<WorkflowSpine steps={buildSpine('draft')} recordId={id} />}
+        sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="pad"
       >
         {bundle.status === 'loading' ? (
@@ -90,7 +90,6 @@ function LoadedWorkbench({
     () => draftGroupsToFieldGroups(bundle.groups, evidenceByPath),
     [bundle.groups, evidenceByPath],
   );
-  const fieldCount = groups.reduce((n, g) => n + g.fields.length, 0);
 
   // User toggles override the group's default expandedness.
   const [toggles, setToggles] = useState<Record<string, boolean>>({});
@@ -199,14 +198,6 @@ function LoadedWorkbench({
     </aside>
   );
 
-  const spine = buildSpine(detail.exported ? 'validate' : 'draft', {
-    draft: { meta: `reviewing ${fieldCount} fields` },
-    complete: {
-      meta:
-        pending.length > 0 ? `${pending.length} fields need you` : 'all fields confirmed',
-    },
-  });
-
   return (
     <AppShell
       variant="record"
@@ -220,7 +211,7 @@ function LoadedWorkbench({
           stateChip={detail.exported ? 'exported' : 'draft'}
         />
       }
-      sidebar={<WorkflowSpine steps={spine} recordId={id} />}
+      sidebar={<WorkflowSpine workflow={detail.workflow} recordId={id} />}
       rightPanel={rightPanel}
       statusBar={
         <StatusBar

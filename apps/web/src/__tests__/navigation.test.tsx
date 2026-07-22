@@ -3,11 +3,12 @@ import type { ReactNode } from 'react';
 import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { WorkflowSpine, buildSpine } from '../components/WorkflowSpine';
+import { WorkflowSpine } from '../components/WorkflowSpine';
 import {
   bundleRoutes,
   evidenceBundleRoutes,
   exportReadyRoutes,
+  fixtureWorkflow,
   stubFetchDown,
   stubFetchRoutes,
 } from '../test/apiFixtures';
@@ -78,60 +79,58 @@ describe('P22B · navigation / no dead ends', () => {
     expect(leaf!.getAttribute('aria-current')).toBe('page');
   });
 
-  it('WorkflowSpine: done and active steps are links to their routes; locked steps are not', () => {
-    // Exported record: draft/complete/export = done, validate = active (no route),
-    // audit = locked.
-    const { container } = renderSpine(<WorkflowSpine steps={buildSpine('validate')} recordId="demo" />);
+  it('WorkflowSpine: completed steps link to their routes; the current step links + is aria-current', () => {
+    // Ready-to-export: everything before Export is completed; Export is current.
+    const wf = fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: false, rev: 3 });
+    const { container } = renderSpine(<WorkflowSpine workflow={wf} recordId="demo" />);
 
-    expect(stepLi(container, 'Draft').querySelector('a.spine-step-link')?.getAttribute('href')).toBe(
-      '/record/demo',
-    );
     expect(
-      stepLi(container, 'Complete').querySelector('a.spine-step-link')?.getAttribute('href'),
+      stepLi(container, 'Load Record').querySelector('a.spine-step-link')?.getAttribute('href'),
+    ).toBe('/record/demo');
+    expect(
+      stepLi(container, 'Complete Metadata').querySelector('a.spine-step-link')?.getAttribute('href'),
     ).toBe('/record/demo/complete');
     expect(
-      stepLi(container, 'Export').querySelector('a.spine-step-link')?.getAttribute('href'),
+      stepLi(container, 'Review Evidence').querySelector('a.spine-step-link')?.getAttribute('href'),
+    ).toBe('/record/demo/evidence');
+    expect(
+      stepLi(container, 'Review Export Readiness').querySelector('a.spine-step-link')?.getAttribute('href'),
     ).toBe('/record/demo/export');
 
-    // Validate is active but has no standalone route — never a link.
-    const validate = stepLi(container, 'Validate');
-    expect(validate.querySelector('a')).toBeNull();
-    expect(validate.getAttribute('aria-current')).toBe('step');
-
-    // Audit is locked — not a link, semantically disabled, not focusable as an action.
-    const audit = stepLi(container, 'Audit');
-    expect(audit.querySelector('a')).toBeNull();
-    expect(audit.getAttribute('aria-disabled')).toBe('true');
+    // Export is the current step: navigable AND marked aria-current="step".
+    const exportStep = stepLi(container, 'Export');
+    expect(exportStep.querySelector('a.spine-step-link')?.getAttribute('href')).toBe('/record/demo/export');
+    expect(exportStep.getAttribute('aria-current')).toBe('step');
   });
 
-  it('WorkflowSpine: an active step with a route links to it; locked future steps do not', () => {
-    // draft = done, complete = active, export/validate/audit = locked.
-    const { container } = renderSpine(<WorkflowSpine steps={buildSpine('complete')} recordId="demo" />);
+  it('WorkflowSpine: the current step links to its route; blocked future steps do not', () => {
+    // needs_attention: Complete Metadata current, everything after it blocked.
+    const wf = fixtureWorkflow({ pending_count: 5, draft_ok: false, ready: false, exported: false, rev: 3 });
+    const { container } = renderSpine(<WorkflowSpine workflow={wf} recordId="demo" />);
 
-    expect(
-      stepLi(container, 'Complete').querySelector('a.spine-step-link')?.getAttribute('href'),
-    ).toBe('/record/demo/complete');
+    const complete = stepLi(container, 'Complete Metadata');
+    expect(complete.querySelector('a.spine-step-link')?.getAttribute('href')).toBe('/record/demo/complete');
+    expect(complete.getAttribute('aria-current')).toBe('step');
 
-    // Export has a route but is a locked future gate — must NOT be a link (gating).
+    // Export is blocked (a prerequisite is unmet) — non-navigable + aria-disabled.
     const exportStep = stepLi(container, 'Export');
     expect(exportStep.querySelector('a')).toBeNull();
     expect(exportStep.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('WorkflowSpine: with no record id, no step is navigable', () => {
-    const { container } = renderSpine(<WorkflowSpine steps={buildSpine('validate')} />);
+    const wf = fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: false, rev: 3 });
+    const { container } = renderSpine(<WorkflowSpine workflow={wf} />);
     expect(container.querySelector('a.spine-step-link')).toBeNull();
   });
 
-  it('Review Record spine (record home): the done/active draft step links back to /record/:id', async () => {
-    // Exported demo: draft is done and links home from the record workbench itself.
+  it('Review Record spine (record home): the completed Load Record step links back to /record/:id', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo');
     await findByText('5 Fields Need Your Confirmation');
-    // The draft step links to /record/demo (self / hub), never a dead disc.
-    const draft = stepLi(container, 'Draft');
-    // draft is active (not exported fixture) -> active step with a route is a link.
-    expect(draft.querySelector('a.spine-step-link')?.getAttribute('href')).toBe('/record/demo');
+    // load_record is always completed and links to /record/demo (self / hub).
+    const load = stepLi(container, 'Load Record');
+    expect(load.querySelector('a.spine-step-link')?.getAttribute('href')).toBe('/record/demo');
   });
 });
 

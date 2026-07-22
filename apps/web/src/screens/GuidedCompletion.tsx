@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
-import { WorkflowSpine, buildSpine } from '../components/WorkflowSpine';
+import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { GuidedPrompt } from '../components/GuidedPrompt';
 import { StatusChip } from '../components/StatusChip';
@@ -46,7 +46,7 @@ export function GuidedCompletion() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenComplete} recordId={id} />}
-        sidebar={<WorkflowSpine steps={buildSpine('complete')} recordId={id} />}
+        sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="centered"
       >
         {load.status === 'loading' ? (
@@ -154,20 +154,6 @@ function LoadedCompletion({
     });
   };
 
-  const spine = buildSpine(remaining === 0 ? 'export' : 'complete', {
-    draft: { meta: `${detail.evidenced_field_count} fields reviewed` },
-    complete: {
-      number: answered.length,
-      // Only claim a real ratio — `total === 0` (no blockers ever existed) has
-      // nothing honest to count, so leave meta unset rather than render the
-      // same dishonest "0 of 0" the counter above was fixed to avoid.
-      ...(total > 0 ? { meta: `${answered.length} of ${total} answered` } : {}),
-    },
-    export: {
-      meta: remaining === 0 ? 'ready to export' : `${remaining} to go`,
-    },
-  });
-
   const statusBar =
     remaining === 0 ? (
       <StatusBar
@@ -221,7 +207,7 @@ function LoadedCompletion({
           surface={LABELS.screenComplete}
         />
       }
-      sidebar={<WorkflowSpine steps={spine} recordId={id} />}
+      sidebar={<WorkflowSpine workflow={detail.workflow} recordId={id} />}
       rightPanel={rightPanel}
       statusBar={statusBar}
       mainPad="centered"

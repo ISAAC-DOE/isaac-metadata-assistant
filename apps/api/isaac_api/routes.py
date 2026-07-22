@@ -34,6 +34,7 @@ from . import serialize
 from . import sources
 from . import version_contract as vc
 from . import workspace as ws
+from .workflow import derive_workflow
 from .workspace import REPO_ROOT, Experiment, atomic_write_text
 
 router = APIRouter(prefix="/api")
@@ -203,6 +204,13 @@ def _detail(exp: Experiment) -> dict:
                 "sidecar_path": str(sidecar_path) if exp.exported() else None,
             },
             "source_files": (exp.source or {}).get("files") or [],
+            "workflow": derive_workflow(
+                pending_count=exp.pending_count(),
+                draft_ok=exp.draft_ok(),
+                ready=exp.export_ready(),
+                exported=exp.exported(),
+                rev=exp.rev,
+            ),
         }
     )
     return detail

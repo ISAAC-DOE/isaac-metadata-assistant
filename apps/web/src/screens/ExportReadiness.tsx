@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
-import { WorkflowSpine, buildSpine } from '../components/WorkflowSpine';
+import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { VerdictCard } from '../components/VerdictCard';
 import { CoverageBadge } from '../components/CoverageBadge';
@@ -88,7 +88,7 @@ export function ExportReadiness() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenExport} recordId={id} />}
-        sidebar={<WorkflowSpine steps={buildSpine('export')} recordId={id} />}
+        sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="pad"
       >
         {load.name === 'loading' ? (
@@ -319,12 +319,6 @@ function LoadedExport({
     URL.revokeObjectURL(url);
   };
 
-  const spine = buildSpine(exported ? 'validate' : 'export', {
-    complete: { meta: `${detail.evidenced_field_count} fields · 0 pending` },
-    export: { meta: exported ? 'record written' : pendingZero ? 'ready' : `${pendingCount} to go` },
-    validate: { meta: exported ? 'official schema' : 'the hard gate' },
-  });
-
   const rightPanel = (
     <aside className="record-right narrow" aria-label="Assistant">
       <AssistantPanel
@@ -348,7 +342,7 @@ function LoadedExport({
           surface={LABELS.screenExport}
         />
       }
-      sidebar={<WorkflowSpine steps={spine} recordId={id} />}
+      sidebar={<WorkflowSpine workflow={detail.workflow} recordId={id} />}
       rightPanel={rightPanel}
       statusBar={
         <StatusBar

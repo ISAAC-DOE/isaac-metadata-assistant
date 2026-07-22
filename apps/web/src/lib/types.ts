@@ -271,16 +271,6 @@ export interface RunnerStage {
 
 // --- workflow spine ---------------------------------------------------
 
-export type SpineStepState = 'done' | 'active' | 'locked';
-
-export interface SpineStep {
-  key: string;
-  label: string;
-  state: SpineStepState;
-  meta?: string;
-  number?: number; // numbered variant (S4: "2 of 5 answered")
-}
-
 // --- experiment detail (record surfaces) ------------------------------
 
 export interface ExperimentDetail {
@@ -328,10 +318,32 @@ export interface VersionFields {
   version: string;
 }
 
+// P28.1 — the fixed canonical workflow, DERIVED by the backend from current
+// record truth and shipped inside every detail bundle. The client renders it
+// verbatim; it never re-derives step order or completion.
+export type ApiWorkflowStepState = 'completed' | 'current' | 'reopened' | 'blocked';
+
+export interface ApiWorkflowStep {
+  id: string;
+  label: string;
+  state: ApiWorkflowStepState;
+  current: boolean;
+  reopened: boolean;
+  blocked: boolean;
+  reason: string | null;
+}
+
+export interface ApiWorkflow {
+  ordered_steps: ApiWorkflowStep[];
+  current_step: string | null;
+  record_rev: number;
+}
+
 export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields {
   draft_ok: boolean;
   artifact_refs: { record_path: string | null; sidecar_path: string | null };
   source_files: string[];
+  workflow: ApiWorkflow;
 }
 
 export interface ApiDraftField {

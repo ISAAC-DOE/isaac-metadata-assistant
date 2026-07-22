@@ -416,6 +416,22 @@ class Experiment:
             return IN_REVIEW
         return READY_TO_EXPORT if result.ok else IN_REVIEW
 
+    def export_ready(self) -> bool:
+        """True iff a dry-run export of the CURRENT draft passes (pending==0 AND
+        the export gate succeeds), independent of whether it was already exported.
+
+        Unlike ``status()`` (which short-circuits to DONE for any exported
+        record), this reflects the CURRENT draft's export-readiness — so an
+        exported record edited back to pending>0 is correctly NOT export-ready.
+        Read-only dry-run, exactly as ``status()`` uses ``export_draft``.
+        """
+        if self.pending_count() > 0:
+            return False
+        try:
+            return export_draft(self.draft, REPO_ROOT).ok
+        except Exception:  # pragma: no cover - defensive, keeps the check non-throwing
+            return False
+
 
 # --- store operations ---------------------------------------------------------
 
