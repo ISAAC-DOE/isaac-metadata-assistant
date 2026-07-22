@@ -70,12 +70,19 @@ export const RUN_COMMAND =
 export class ApiError extends Error {
   readonly status?: number;
   readonly unreachable: boolean;
+  /** The parsed error body, when the caller read it (e.g. the P27.5 412
+   *  `stale_write` payload carrying `current_version`). Undefined otherwise. */
+  readonly body?: unknown;
 
-  constructor(message: string, opts: { status?: number; unreachable?: boolean } = {}) {
+  constructor(
+    message: string,
+    opts: { status?: number; unreachable?: boolean; body?: unknown } = {},
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = opts.status;
     this.unreachable = opts.unreachable ?? false;
+    this.body = opts.body;
   }
 }
 
@@ -112,6 +119,21 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * Build the ApiError for a non-OK mutation response. On a 412 (`stale_write`) or
+ * 400 (`malformed_if_match`) the JSON body is read and attached — it carries the
+ * P27.5 conflict payload (`current_version`, `current_rev`, …) the screen needs.
+ * A 409 (export immutability) and every other status keep the plain-error shape,
+ * so existing callers (e.g. the export 409 branch) are unaffected.
+ */
+async function mutationError(res: Response): Promise<ApiError> {
+  if (res.status === 412 || res.status === 400) {
+    const body = await res.json().catch(() => undefined);
+    return new ApiError(`Request failed (${res.status}).`, { status: res.status, body });
+  }
+  return new ApiError(`Request failed (${res.status}).`, { status: res.status });
+}
+
 const enc = encodeURIComponent;
 
 export const api = {
@@ -140,20 +162,38 @@ export const api = {
   // S4 — apply a confirmed answer to one blocker. The user has explicitly
   // confirmed (`confirmed_by_user:true`); the backend recomputes and returns the
   // remaining pending list + fresh status. Never called for "leave missing".
-  submitAnswer(
+  // P27.5: when a `version` token is threaded, it is sent as the optimistic-
+  // concurrency `If-Match: "<version>"` header (byte-identical to the ETag). A
+  // stale write returns 412 (or a malformed token 400) — the body carrying
+  // `current_version` is read and attached to the thrown ApiError so the screen
+  // can show the conflict; other non-OK statuses keep the plain-error behavior.
+  async submitAnswer(
     id: string,
     answersById: Record<string, unknown>,
+    version?: string,
   ): Promise<ApiAnswersResponse> {
-    return postJson<ApiAnswersResponse>(`/experiments/${enc(id)}/answers`, {
-      answers: answersById,
-      confirmed_by_user: true,
+    const res = await request(`/experiments/${enc(id)}/answers`, {
+      method: 'POST',
+      body: JSON.stringify({ answers: answersById, confirmed_by_user: true }),
+      // Truthiness guard: never send an empty `If-Match: ""` for a blank token.
+      ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
     });
+    if (res.ok) return (await res.json()) as ApiAnswersResponse;
+    throw await mutationError(res);
   },
 
   // S6 — the schema-gated export. A 409 (record already exists) is thrown as an
-  // ApiError(status:409); records are immutable and never overwritten.
-  exportRecord(id: string): Promise<ApiExportResponse> {
-    return postJson<ApiExportResponse>(`/experiments/${enc(id)}/export`);
+  // ApiError(status:409); records are immutable and never overwritten. P27.5: a
+  // threaded `version` is sent as `If-Match: "<version>"`; a 412 stale write (or
+  // 400 malformed token) is thrown as an ApiError carrying the parsed body.
+  async exportRecord(id: string, version?: string): Promise<ApiExportResponse> {
+    const res = await request(`/experiments/${enc(id)}/export`, {
+      method: 'POST',
+      // Truthiness guard: never send an empty `If-Match: ""` for a blank token.
+      ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
+    });
+    if (res.ok) return (await res.json()) as ApiExportResponse;
+    throw await mutationError(res);
   },
 
   // The three signals — each fetched from its own endpoint, never merged here.

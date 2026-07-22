@@ -10376,7 +10376,7 @@
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
-        "sha256": "04ffbe828b28d191eded31ac81a712c79f0580ca30a17e1624c287e6f9d81390"
+        "sha256": "0d5379c70b49091e9196071afd3c2f36c6a3d5316a396481c364201b962caf76"
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
@@ -10384,7 +10384,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "3e69e0b0c7f519fdc2986437e485dc31cec61077178ffdfcec8cba6b92e0f969"
+        "sha256": "d270fb597722fafa048f48557dd043efe35ccc8e04d02feb12c44e083e19ca5b"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10528,7 +10528,7 @@
       },
       {
         "path": "apps/web/src/components/TopBar.tsx",
-        "sha256": "bd4c9161d6df1caded08e968d24ca29b7789e10590eaeb6bcf00cdb6ce950526"
+        "sha256": "66007aa38814fd85e5c6f795d86ce78bfe391fa2170b6eab6f62dff85cd39e40"
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
@@ -10548,7 +10548,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "537c8f454733cc5e96368bc54c04a9e707df2399e9489ea5e39c70c53147704d"
+        "sha256": "4e2b7356f75cefe1723a3077c0080fecf060d8f8f5a2f4b7bb5ba830d72eb3bc"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "2d078338a1c89141395c151d59b5ab9dc9631280d0ea5f69814f2dfdd56184d1"
+        "sha256": "aa5c93a91ec3a3ae9a37d273527bab152d08f26f8311116a451316ad9cd28bd3"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10588,7 +10588,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "84091f82b7ab9493a940f37e89e4fe7f6f525c08735715d3cbade677669ee75c"
+        "sha256": "f549cd9d0862f42f4820b9325270cdf1b6b0f79fd38c1c811c89ea9cc68af765"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10596,7 +10596,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "c5a5eb0f1e0e38d4fefbc87095138a4be18a3a7fdefc489e5b75c1ebd0c88687"
+        "sha256": "b43621dd5693919bfaef571375db8933f4eb50937a7a97ab9e7699a401670ee4"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10616,7 +10616,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "a971251367258f73fe8254e13e581cd56eb7f669e7681ef3f3b25ac25258cbd7"
+        "sha256": "6b1e56ed4f11d20c6cf0bbcbd6127659a55b9772468adf75dd94ad2008eb9fb9"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "8c69af5063b7349f93a0d8b1eb6ac20e854d54fea70072f53b7d995473646d20"
+    "served_manifest_fingerprint": "6853a674c3e4b4c31e002241e5b4d5712ab4ab1cc6f1ab9dfbe6cdd52fa5a7e1"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

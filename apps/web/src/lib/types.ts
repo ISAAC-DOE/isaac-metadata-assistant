@@ -318,7 +318,17 @@ export interface ApiExperimentSummary {
   record_id: string | null;
 }
 
-export interface ApiExperimentDetail extends ApiExperimentSummary {
+// P27.5 — the optimistic-concurrency version triplet the backend now returns on
+// record detail and on every accepted mutation (POST /answers, POST /export).
+// `version` is the opaque If-Match token the client echoes back (wrapped in
+// double quotes) on the NEXT mutation; `rev`/`updated_utc` are informational.
+export interface VersionFields {
+  rev: number;
+  updated_utc: string;
+  version: string;
+}
+
+export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields {
   draft_ok: boolean;
   artifact_refs: { record_path: string | null; sidecar_path: string | null };
   source_files: string[];
@@ -676,8 +686,10 @@ export interface RecordBundle {
   graph: ApiGraphStatus;
 }
 
-// POST /answers response — the recomputed pending list + fresh derived status.
-export interface ApiAnswersResponse {
+// POST /answers response — the recomputed pending list + fresh derived status,
+// plus the P27.5 version triplet (the new If-Match token to adopt for the next
+// mutation).
+export interface ApiAnswersResponse extends VersionFields {
   pending: ApiPendingItem[];
   status: ApiExperimentStatus;
 }
@@ -692,7 +704,7 @@ export interface ApiReportError {
 // `ok:true` with record/sidecar/record_id/artifact_refs; on a gated failure
 // `ok:false` with a flat `errors` list. A 409 (already exported) is thrown as an
 // ApiError(status:409) by the client and never reaches this shape.
-export interface ApiExportResponse {
+export interface ApiExportResponse extends VersionFields {
   ok: boolean;
   draft_report: { ok: boolean; errors: ApiReportError[]; warnings: ApiReportError[] };
   official_report: { ok: boolean; errors: { path: string; message: string }[] } | null;

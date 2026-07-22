@@ -43,6 +43,7 @@ type ExportPhase =
   | { name: 'exporting' }
   | { name: 'done'; artifacts: ExportedArtifacts }
   | { name: 'conflict'; message: string }
+  | { name: 'stale'; message: string }
   | { name: 'failed'; errors: { path: string; message: string }[] }
   | { name: 'error'; error: ApiError };
 
@@ -113,6 +114,14 @@ function LoadedExport({
   const { detail, pending, validate, audit, warnings, graph, artifacts } = data;
   const [phase, setPhase] = useState<ExportPhase>({ name: 'idle' });
   const [viewing, setViewing] = useState<null | 'record' | 'sidecar'>(null);
+  // P27.5 — the optimistic-concurrency token, sent as If-Match on export. Adopted
+  // from a successful export and re-synced whenever a silent refetch swaps in a
+  // fresh detail (LoadedExport is not remounted on refresh, so this effect keeps
+  // the held token in step with the reloaded record — e.g. after a stale refresh).
+  const [currentVersion, setCurrentVersion] = useState(detail.version);
+  useEffect(() => {
+    setCurrentVersion(detail.version);
+  }, [detail.version]);
 
   // --- artifact "View JSON" modal: a real, focus-trapping dialog --------------
   const modalRef = useRef<HTMLDivElement>(null);
@@ -199,9 +208,10 @@ function LoadedExport({
   const doExport = () => {
     setPhase({ name: 'exporting' });
     api
-      .exportRecord(id)
+      .exportRecord(id, currentVersion)
       .then((resp: ApiExportResponse) => {
         if (resp.ok && resp.record && resp.sidecar) {
+          setCurrentVersion(resp.version); // adopt the post-export token
           setPhase({
             name: 'done',
             artifacts: {
@@ -224,7 +234,16 @@ function LoadedExport({
         }
       })
       .catch((e: ApiError) => {
-        if (e.status === 409) {
+        if (e.status === 412) {
+          // P27.5 stale write: a concurrent edit changed the record. Nothing was
+          // exported. We do NOT auto-refetch — the banner's Refresh reloads the
+          // current state (and adopts the fresh version) on the user's click.
+          setPhase({
+            name: 'stale',
+            message:
+              'This record changed elsewhere. Nothing was exported — no record was written. Refresh to load the current state, then export again.',
+          });
+        } else if (e.status === 409) {
           setPhase({
             name: 'conflict',
             message:
@@ -510,6 +529,24 @@ function LoadedExport({
         <div className="export-conflict" role="alert">
           <Lock size={16} strokeWidth={2} aria-hidden="true" />
           <span>{phase.message}</span>
+        </div>
+      )}
+
+      {phase.name === 'stale' && (
+        <div className="export-conflict" role="alert">
+          <TriangleAlert size={16} strokeWidth={2} aria-hidden="true" />
+          <span>{phase.message}</span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ marginLeft: 10 }}
+            onClick={() => {
+              onRefresh();
+              setPhase({ name: 'idle' });
+            }}
+          >
+            Refresh
+          </button>
         </div>
       )}
 

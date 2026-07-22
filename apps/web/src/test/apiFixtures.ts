@@ -80,8 +80,18 @@ export const exportedSummary = {
   record_id: '01SYNTHTESTRECORD000000000',
 };
 
+// P27.5 — the optimistic-concurrency version triplet the backend returns on
+// record detail + every accepted mutation. `version` is the opaque If-Match
+// token the client echoes back on the next mutation.
+export const VERSION_FIELDS = {
+  rev: 3,
+  updated_utc: '2099-04-02T09:15:00Z',
+  version: '1.0',
+};
+
 export const experimentDetail = {
   ...experimentSummary,
+  ...VERSION_FIELDS,
   draft_ok: true,
   artifact_refs: { record_path: null, sidecar_path: null },
   source_files: ['mock_campaign.csv', 'raw_scan_listing.txt'],
@@ -740,10 +750,25 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
 
 const SYNTH_SHA = 'c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345';
 
-/** POST /answers response after confirming the processing-notebook sha256. */
+/** POST /answers response after confirming the processing-notebook sha256. The
+ *  version triplet advances (rev 3 → 4, new token) — the client adopts it as the
+ *  If-Match token for the next submit. */
 export const answersAfterNotebook = {
   pending: pendingResponse.pending.slice(1),
   status: 'needs_attention',
+  rev: 4,
+  updated_utc: '2099-04-02T09:16:00Z',
+  version: '1.1',
+};
+
+/** POST /answers 412 stale_write payload (verbatim backend contract shape). */
+export const answersStaleWrite = {
+  error: 'stale_write',
+  experiment_id: EXP_ID,
+  expected_rev: 3,
+  current_rev: 7,
+  expected_version: '1.0',
+  current_version: '2.0',
 };
 
 /** Structured demo answer for the series blocker (shape-faithful, synthetic). */
@@ -799,6 +824,20 @@ export const exportSuccess = {
     record_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.json`,
     sidecar_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.evidence.json`,
   },
+  // P27.5 — the post-export version triplet the client adopts.
+  rev: 4,
+  updated_utc: '2099-04-02T09:20:00Z',
+  version: '2.0',
+};
+
+/** POST /export 412 stale_write payload (verbatim backend contract shape). */
+export const exportStaleWrite = {
+  error: 'stale_write',
+  experiment_id: EXP_ID,
+  expected_rev: 3,
+  current_rev: 7,
+  expected_version: '1.0',
+  current_version: '2.0',
 };
 
 export const exportConflict = {

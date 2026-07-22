@@ -2,10 +2,14 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { api, ApiError, API_BASE, RUN_COMMAND } from '../lib/api';
 import {
   EXP_ID,
+  answersAfterNotebook,
+  answersStaleWrite,
   bundleRoutes,
   demoRunDraftOnly,
   draftResponse,
   experimentSummary,
+  exportStaleWrite,
+  exportSuccess,
   pendingResponse,
   stubFetchDown,
   stubFetchRoutes,
@@ -164,6 +168,90 @@ describe('bearer auth header', () => {
     await api.health();
     const headers = seen[0].headers as Record<string, string>;
     expect(headers.Authorization).toBeUndefined();
+  });
+});
+
+// --- P27.5: optimistic-concurrency If-Match on the two mutations -------------
+//
+// submitAnswer / exportRecord take an optional `version` token. When threaded it
+// is sent as `If-Match: "<version>"` (byte-identical to the ETag); when omitted
+// no If-Match is sent. A 412 stale_write (and 400 malformed) is thrown as an
+// ApiError carrying the parsed body so the screen can read `current_version`.
+
+describe('P27.5 · If-Match send + 412 body handling', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function captureFetch(response: { ok?: boolean; status?: number; body?: unknown }): RequestInit[] {
+    const seen: RequestInit[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(init ?? {});
+        return {
+          ok: response.ok ?? true,
+          status: response.status ?? 200,
+          json: async () => response.body ?? {},
+        } as Response;
+      }),
+    );
+    return seen;
+  }
+
+  it('submitAnswer sends If-Match: "<version>" when a version is threaded', async () => {
+    const seen = captureFetch({ body: answersAfterNotebook });
+    await api.submitAnswer(EXP_ID, { 'asset://x': 'deadbeef' }, '1.0');
+    const headers = seen[0].headers as Record<string, string>;
+    expect(headers['If-Match']).toBe('"1.0"');
+  });
+
+  it('submitAnswer omits If-Match when no version is threaded (compat grace)', async () => {
+    const seen = captureFetch({ body: answersAfterNotebook });
+    await api.submitAnswer(EXP_ID, { 'asset://x': 'deadbeef' });
+    const headers = (seen[0].headers ?? {}) as Record<string, string>;
+    expect(headers['If-Match']).toBeUndefined();
+  });
+
+  it('exportRecord sends If-Match: "<version>" when a version is threaded', async () => {
+    const seen = captureFetch({ body: exportSuccess });
+    await api.exportRecord(EXP_ID, '2.0');
+    const headers = seen[0].headers as Record<string, string>;
+    expect(headers['If-Match']).toBe('"2.0"');
+  });
+
+  it('a 412 stale_write on submitAnswer throws ApiError{status:412} carrying current_version', async () => {
+    captureFetch({ ok: false, status: 412, body: answersStaleWrite });
+    await expect(api.submitAnswer(EXP_ID, { 'asset://x': 'v' }, '1.0')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 412,
+      body: { error: 'stale_write', current_version: '2.0', current_rev: 7 },
+    });
+  });
+
+  it('a 412 stale_write on exportRecord likewise carries the parsed body', async () => {
+    captureFetch({ ok: false, status: 412, body: exportStaleWrite });
+    await expect(api.exportRecord(EXP_ID, '1.0')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 412,
+      body: { current_version: '2.0' },
+    });
+  });
+
+  it('a 400 malformed If-Match also carries the parsed body', async () => {
+    captureFetch({ ok: false, status: 400, body: { error: 'malformed_if_match' } });
+    await expect(api.submitAnswer(EXP_ID, { x: 1 }, 'bad')).rejects.toMatchObject({
+      status: 400,
+      body: { error: 'malformed_if_match' },
+    });
+  });
+
+  it('keeps the existing 409 export behavior — status only, no body plumbing', async () => {
+    captureFetch({ ok: false, status: 409, body: { error: 'record_exists' } });
+    await expect(api.exportRecord(EXP_ID, '1.0')).rejects.toMatchObject({
+      status: 409,
+      body: undefined,
+    });
   });
 });
 

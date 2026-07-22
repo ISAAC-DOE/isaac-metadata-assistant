@@ -5,11 +5,13 @@ import { AppRoutes } from '../App';
 import { MEMORY_UNAVAILABLE_CAVEAT, ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import {
   answersAfterNotebook,
+  answersStaleWrite,
   auditExported,
   auditNotExported,
   bundleRoutes,
   exportConflict,
   exportReadyRoutes,
+  exportStaleWrite,
   exportSuccess,
   exportedReadyRoutes,
   pendingResponse,
@@ -43,6 +45,14 @@ function answerPosts(): { url: string; body: unknown }[] {
   return calls
     .filter(([url, init]) => init?.method === 'POST' && String(url).includes('/answers'))
     .map(([url, init]) => ({ url: String(url), body: JSON.parse(String(init?.body)) }));
+}
+
+/** The If-Match header sent on each POST /answers, in order (P27.5). */
+function answerIfMatchHeaders(): (string | undefined)[] {
+  const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+  return calls
+    .filter(([url, init]) => init?.method === 'POST' && String(url).includes('/answers'))
+    .map(([, init]) => (init?.headers as Record<string, string> | undefined)?.['If-Match']);
 }
 
 describe('S4 · Guided Completion (live)', () => {
@@ -314,6 +324,103 @@ describe('S6 · Ready to Export (live)', () => {
     ).toBeInTheDocument();
     // nothing was written in this session: no in-session artifact cards
     expect(container.querySelectorAll('.artifact')).toHaveLength(0);
+  });
+});
+
+describe('P27.5 · optimistic-concurrency conflict UX', () => {
+  const NOTEBOOK_Q = 'What is the sha256 of the processing notebook?';
+
+  it('answers: a successful confirm adopts the new version; the NEXT submit sends the updated If-Match', async () => {
+    let post = 0;
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      'POST /api/experiments/demo/answers': {
+        body: () => {
+          post += 1;
+          // 1st confirm → version 1.1; 2nd confirm → version 1.2.
+          return post === 1
+            ? answersAfterNotebook // version: '1.1'
+            : {
+                pending: pendingResponse.pending.slice(2),
+                status: 'needs_attention',
+                rev: 5,
+                updated_utc: '2099-04-02T09:17:00Z',
+                version: '1.2',
+              };
+        },
+      },
+    });
+    const { findByText, getByText, getByLabelText } = renderAt('/record/demo/complete');
+    await findByText(NOTEBOOK_Q);
+
+    // confirm #1 (detail.version is "1.0" from the loaded fixture)
+    fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'aaaa' } });
+    fireEvent.click(getByText('Confirm'));
+    await findByText('1 / 5');
+
+    // confirm #2 — question 2 (raw scan) is now current
+    fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'bbbb' } });
+    fireEvent.click(getByText('Confirm'));
+    await findByText('2 / 5');
+
+    // first submit echoes the loaded token, second echoes the adopted one
+    expect(answerIfMatchHeaders()).toEqual(['"1.0"', '"1.1"']);
+  });
+
+  it('answers: a 412 shows the conflict banner, preserves the typed input, and Refresh reloads', async () => {
+    const calls = stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      'POST /api/experiments/demo/answers': { status: 412, body: answersStaleWrite },
+    });
+    const { findByText, getByText, getByLabelText, queryByText } = renderAt('/record/demo/complete');
+    await findByText(NOTEBOOK_Q);
+
+    fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'staged-value' } });
+    fireEvent.click(getByText('Confirm'));
+
+    // the honest conflict banner — nothing applied, input kept
+    expect(
+      await findByText(/This record changed elsewhere\. Nothing was applied — your input is kept\./),
+    ).toBeInTheDocument();
+    // the typed input is preserved (GuidedPrompt was not unmounted)
+    expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
+    // NOT advanced: still 0/5, no answered "stored" row, question 1 still current
+    expect(getByText('0 / 5')).toBeInTheDocument();
+    expect(queryByText(/^stored /)).toBeNull();
+
+    // Refresh re-fetches current state via the parent useFetch reload
+    const before = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+    fireEvent.click(getByText('Refresh'));
+    await findByText(NOTEBOOK_Q); // reloaded to a fresh LoadedCompletion
+    const after = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it('export: a 412 shows the stale banner + Refresh and does NOT mark the record exported', async () => {
+    const calls = stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      'POST /api/experiments/demo/export': { status: 412, body: exportStaleWrite },
+    });
+    const { container, findByText, getByText } = renderAt('/record/demo/export');
+
+    fireEvent.click(await findByText('Export Official Record + Sidecar'));
+
+    // distinct stale copy (not the 409 immutability message) + a Refresh control
+    expect(
+      await findByText(/This record changed elsewhere\. Nothing was exported/),
+    ).toBeInTheDocument();
+    expect(getByText('Refresh')).toBeInTheDocument();
+    // not exported: no artifact cards, and the export gate is still offered
+    expect(container.querySelectorAll('.artifact')).toHaveLength(0);
+    expect(getByText('Export Official Record + Sidecar')).toBeInTheDocument();
+
+    // Refresh reloads current state (a fresh readiness fetch)
+    const before = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+    fireEvent.click(getByText('Refresh'));
+    await waitFor(() => {
+      const after = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+      expect(after).toBeGreaterThan(before);
+    });
   });
 });
 

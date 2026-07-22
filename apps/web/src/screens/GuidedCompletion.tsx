@@ -62,6 +62,7 @@ export function GuidedCompletion() {
       id={id}
       detail={load.data.detail}
       initialPending={load.data.pending}
+      reload={load.reload}
     />
   );
 }
@@ -76,10 +77,12 @@ function LoadedCompletion({
   id,
   detail,
   initialPending,
+  reload,
 }: {
   id: string;
   detail: ApiExperimentDetail;
   initialPending: ApiPendingItem[];
+  reload: () => void;
 }) {
   const navigate = useNavigate();
   const [pending, setPending] = useState<ApiPendingItem[]>(initialPending);
@@ -87,6 +90,10 @@ function LoadedCompletion({
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
+  // P27.5 — the optimistic-concurrency token. Initialized from the loaded detail
+  // and re-adopted from every accepted answer response; sent as If-Match on the
+  // next submit so a concurrent edit elsewhere is caught (412) instead of clobbered.
+  const [currentVersion, setCurrentVersion] = useState(detail.version);
 
   const total = answered.length + pending.length;
   const remaining = pending.length;
@@ -103,9 +110,10 @@ function LoadedCompletion({
     setSubmitting(true);
     setSubmitError(null);
     api
-      .submitAnswer(id, { [blockerId]: value })
+      .submitAnswer(id, { [blockerId]: value }, currentVersion)
       .then((resp) => {
         setPending(resp.pending);
+        setCurrentVersion(resp.version); // adopt the fresh token for the next submit
         setSkipped((prev) => {
           if (!prev.has(blockerId)) return prev;
           const next = new Set(prev);
@@ -328,6 +336,23 @@ function LoadedCompletion({
         <div style={{ marginTop: 12 }}>
           {submitError.unreachable ? (
             <BackendDown error={submitError} onRetry={() => setSubmitError(null)} />
+          ) : submitError.status === 412 ? (
+            // P27.5 stale write: a concurrent edit changed the record. Nothing was
+            // applied and the user's staged/unsent input stays put (GuidedPrompt is
+            // not unmounted here). Refresh re-fetches current state via the parent
+            // useFetch reload — no auto-retry, no auto-merge.
+            <div className="completion-submit-error" role="alert">
+              This record changed elsewhere. Nothing was applied — your input is kept. Refresh to
+              load the current state.
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ marginLeft: 10 }}
+                onClick={reload}
+              >
+                Refresh
+              </button>
+            </div>
           ) : (
             <div className="completion-submit-error" role="alert">
               That answer could not be applied ({submitError.status ?? 'error'}). Nothing was
