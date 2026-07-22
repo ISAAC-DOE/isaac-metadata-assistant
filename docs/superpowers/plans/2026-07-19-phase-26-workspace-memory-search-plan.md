@@ -42,8 +42,20 @@ thin typed `api.search(q, {scope?,limit?,offset?})` in `lib/api.ts` (forwards to
 via `request()`, deterministic query-string order, omits unspecified opts) + full envelope types in
 `types.ts` + reusable search fixtures in `apiFixtures.ts`. NO visible UI — legacy no-search tests stay green;
 frontend suite 330 green, tsc clean; snapshot regenerated (4 served frontend files → sha256+fingerprint only).
-NEXT: P26.5 (SearchDialog + ⌘K + TopBar trigger). See §20 for per-slice status.
-Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a/0b + P26.1/2/3/4 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+P26.5+P26.6 RELEASED 2026-07-21 (commit `1365b7f`, CI green run `29881081110`, deployed; hosted ⌘K smoke
+GREEN): the real ⌘K SearchDialog (self-contained TopBar affordance, focus-trapped, ⌘K/Ctrl-K, 200ms debounce
+with alive-flag race guard + <2-char client guard) rendering two clearly separated self-labeled groups —
+Workspace (truth) + Project Memory (advisory, leads-not-verdict note verbatim, non-verdict tint) — with
+offset-`<mark>` snippets, `hasVerdictLanguage` filter, honest loading/empty/too-short/backend-down/memory-
+unavailable states, and deep-link navigation (`/record/<id>`, `/memory?concept=|?file=` with a ProjectMemory
+param-reader that auto-opens only existing leads). Delivered in ONE strict-green commit WITH P26.6 (the two
+legacy "no-search" tests inverted absence→presence + a functional backend-querying assertion; anti-fake
+preserved; prose updated) so no pushed commit is red (D3). 16 search-command tests + rewritten legacy tests;
+frontend suite 348 green, tsc + vite build clean, no-vertical-rail green; independent Opus honesty review
+APPROVE-WITH-MINORS (invariant genuinely upgraded; M4 verdict-filter coverage added). Hosted browser QA:
+trigger live on home+record variants, grouped results with marks + why-matched, PROJECT MEMORY advisory note,
+result→/record/<id> navigation + dialog close verified, canonical five intact (2/1/1/1). NEXT: P26.7 (docs).
+Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a/0b + P26.1/2/3/4/5/6 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
          (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
@@ -660,7 +672,28 @@ is isolated per arc decision #10.
   green (legacy tests untouched + passing). **Tests**: request encoding + auth header + envelope
   parse. **Report**: method signature + types. **Commit**: single. **Stop**: review before P26.5.
 
-### P26.5 — SearchDialog + ⌘K + TopBar trigger (feature)
+### P26.5 — SearchDialog + ⌘K + TopBar trigger (feature) — ✅ RELEASED 2026-07-21 (with P26.6, atomic commit `1365b7f`)
+> **RELEASED 2026-07-21** — one strict-green commit `1365b7f` with P26.6 (D3: no transient-red push). CI green
+> run `29881081110`, Railway+Vercel healthy, hosted ⌘K smoke GREEN. `components/SearchDialog.tsx` (new,
+> mirrors ResetDemoDialog): visible `role="search"` `.topbar-search` trigger (Search glyph + ⌘K hint) mounted
+> in TopBar on every variant; document-level ⌘K/Ctrl-K opener; focus-trapped `role=dialog` (aria-modal,
+> resolvable aria-labelledby, capture-phase Tab containment, ESC close + focus return, autofocused
+> `type=search`). 200ms debounce → `api.search`, alive-flag ensures latest-query-wins, strict <2-char client
+> guard (no fetch). Two clearly separated self-labeled groups — Workspace (truth) + Project Memory (advisory,
+> `note` verbatim, `--advisory-*` tint + full border, NEVER a rail or verdict palette); rows show label +
+> why-matched reason + offset-`<mark>` snippet; `hasVerdictLanguage` filters snippets. Honest states: loading,
+> "No matches", too-short hint, backend-down (RUN_COMMAND, role=status), memory-unavailable (quiet non-alert
+> note, workspace still renders). `screens/ProjectMemory.tsx` reads `?concept=<id>`/`?file=<path>` and
+> auto-opens ONLY an existing lead. Mounted via TopBar (NOT AppShell — TopBar is the shared per-screen chrome).
+> **Files**: `SearchDialog.tsx`+`search-dialog.css` (new), `TopBar.tsx`, `HelpPanel.tsx`, `icons.tsx` (Search
+> glyph), `ProjectMemory.tsx`, new `search-command.test.tsx` (16). **Verified**: frontend suite 348 green, tsc
+> + vite build clean, no-vertical-rail green. **Review**: independent Opus honesty review APPROVE-WITH-MINORS
+> (debounce race guarded, plane honesty + a11y sound, invariant genuinely upgraded); M4 verdict-filter+`<mark>`
+> coverage added; M1/M2/M3/M5/M6 accepted (documented low-risk defense-in-depth / coverage follow-ups).
+> **Hosted QA GREEN**: trigger live (home+record), grouped results with marks + why-matched, PROJECT MEMORY
+> advisory note + honest "No memory leads", result→`/record/<id>` navigation + dialog close, canonical five
+> intact.
+### P26.5 — SearchDialog + ⌘K + TopBar trigger (feature) [original plan]
 - **Objective**: build the command palette (`SearchDialog.tsx`), global ⌘K in `AppShell.tsx`, a
   visible trigger in `TopBar.tsx`, grouped/plane-labeled result rendering, navigation, full a11y,
   all states (§13). New functional tests in `search-command.test.tsx`.
@@ -673,7 +706,20 @@ is isolated per arc decision #10.
   green-per-commit retire-then-replace). **Tests**: §16 frontend (functional). **Report**: the red
   legacy tests + the D3 approach chosen. **Commit**: single (feature only). **Stop**: review before P26.6.
 
-### P26.6 — DEDICATED "no-fake-search" invariant rewrite (reviewed slice)
+### P26.6 — DEDICATED "no-fake-search" invariant rewrite (reviewed slice) — ✅ RELEASED 2026-07-21 (atomic with P26.5, commit `1365b7f`)
+> **RELEASED 2026-07-21** — delivered in the SAME commit as P26.5 (`1365b7f`). D3 was resolved to STRICT
+> green-per-commit (no transient-red push); since P26.5's feature necessarily reddens the two legacy
+> "no-search" tests and only P26.6 can green them, they were shipped as ONE atomic commit — the rewrite kept
+> unburied in its own dedicated test files with rationale comments (arc-#10 intent honored). `help-and-honesty
+> .test.tsx`: the P22D absence assertions (`[role=search]`/`.topbar-search`/`⌘K`/`Search` all null) inverted
+> to PRESENCE + a functional test that opens the dialog, queries the backend via `searchRoutes()`, and asserts
+> the Workspace group renders (a dead decorative input fails it); anti-fake user-chip assertion preserved in
+> its own describe; P22D comment marks Decision 1 superseded by P26. `memory-concepts.test.tsx`: the two
+> "no inline searchbox" assertions KEPT (still true — the ⌘K palette is separate global chrome), title/comment
+> clarified, + a new `?concept=` deep-link auto-open test. Prose updated in `TopBar.tsx` + `HelpPanel.tsx`
+> docstrings ("no search" → the real ⌘K palette). Independent Opus review confirmed the honesty invariant was
+> genuinely upgraded (present + functional + verdict-free), not gutted; no guardrail silently dropped.
+### P26.6 — DEDICATED "no-fake-search" invariant rewrite (reviewed slice) [original plan]
 - **Objective (arc decision #10)**: rewrite ONLY the two legacy test files with rationale comments:
   (a) explain why the invariant changes — P26 shipped real, API-backed, keyboard-driven, tested
   search, so "search must not exist" is obsolete; (b) remove ONLY the obsolete absence assertions
