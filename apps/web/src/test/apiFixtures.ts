@@ -941,6 +941,115 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
   };
 }
 
+// --- P26.4 grouped search fixtures (reused by the P26.5 SearchDialog slice) ---
+// Shapes verbatim from the P26.3 backend envelope (GET /api/search): two
+// independently-honest groups, `workspace` (truth plane) and `memory`
+// (advisory leads) — neither group's availability affects the other.
+
+/** GET /api/search?q=xanes — one workspace hit + one memory hit, both available. */
+export const searchResponse = {
+  query: 'xanes',
+  normalized_query: 'xanes',
+  scope: 'all' as const,
+  workspace: {
+    plane: 'truth' as const,
+    provider: 'workspace-store',
+    available: true,
+    reason: null,
+    total: 1,
+    returned: 1,
+    limit: 10,
+    offset: 0,
+    results: [
+      {
+        kind: 'experiment' as const,
+        experiment_id: EXP_ID,
+        record_id: null,
+        title: experimentSummary.title,
+        label: experimentSummary.title,
+        status: 'needs_attention',
+        match: {
+          field: 'title',
+          snippet: experimentSummary.title,
+          reason: 'matched experiment title',
+          tier: 'substring' as const,
+          offsets: [[10, 15]] as [number, number][],
+        },
+        navigate_to: `/record/${EXP_ID}`,
+        plane: 'truth' as const,
+        source: 'workspace-store',
+      },
+    ],
+  },
+  memory: {
+    plane: 'memory' as const,
+    provider: 'memory:sanitized-snapshot',
+    note: MEMORY_NOTE,
+    available: true,
+    reason: null,
+    total: 1,
+    returned: 1,
+    limit: 10,
+    offset: 0,
+    results: [
+      {
+        kind: 'concept' as const,
+        id: 'concept-provenance',
+        path: null,
+        label: 'Provenance',
+        community_name: 'Export Pipeline',
+        match: {
+          field: 'concept.label',
+          snippet: 'Provenance',
+          reason: 'matched concept label',
+          tier: 'token' as const,
+          offsets: [[0, 10]] as [number, number][],
+        },
+        navigate_to: '/memory?concept=concept-provenance',
+        plane: 'memory' as const,
+        source: 'memory:sanitized-snapshot',
+      },
+    ],
+  },
+};
+
+/** Same query, but the memory graph is absent — workspace stays available (P26.5). */
+export const searchResponseMemoryDown = {
+  ...searchResponse,
+  memory: {
+    ...searchResponse.memory,
+    available: false,
+    reason: 'graph_absent' as const,
+    total: 0,
+    returned: 0,
+    results: [],
+  },
+};
+
+/**
+ * Route map for `GET /api/search` keyed exactly like `api.search` builds its
+ * query string (q, then scope, then limit, then offset — only when given).
+ * Defaults to the `q=xanes` case with the fully-available envelope; pass
+ * `query`/`scope`/`limit`/`offset` to match a different call, and `body` to
+ * serve a different envelope (e.g. `searchResponseMemoryDown`).
+ */
+export function searchRoutes(
+  opts: {
+    query?: string;
+    scope?: 'all' | 'workspace' | 'memory';
+    limit?: number;
+    offset?: number;
+    body?: unknown;
+  } = {},
+): Record<string, StubbedRoute> {
+  const query = opts.query ?? 'xanes';
+  let key = `GET /api/search?q=${encodeURIComponent(query)}`;
+  if (opts.scope !== undefined) key += `&scope=${encodeURIComponent(opts.scope)}`;
+  if (opts.limit !== undefined) key += `&limit=${opts.limit}`;
+  if (opts.offset !== undefined) key += `&offset=${opts.offset}`;
+  return { [key]: { body: opts.body ?? searchResponse } };
+}
+
 /** S6 routes for an ALREADY-exported experiment on fresh load (View/Download live). */
 export function exportedReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;

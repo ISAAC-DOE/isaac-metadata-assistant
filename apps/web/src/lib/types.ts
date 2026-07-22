@@ -560,6 +560,83 @@ export interface ApiMemoryConceptResponse {
   related: ApiMemoryRelated;
 }
 
+// GET /api/search — grouped truth+memory search (P26.3 backend envelope).
+// One query fans out to two independently-honest groups: `workspace` (truth
+// plane, the experiment/record store) and `memory` (advisory leads from the
+// snapshot graph). Neither group's availability/degradation affects the
+// other; the client parses this shape, it never merges or ranks the groups.
+export type ApiSearchScope = 'all' | 'workspace' | 'memory';
+export type ApiSearchTier = 'exact' | 'prefix' | 'token' | 'substring';
+
+export interface ApiSearchMatch {
+  field: string;
+  snippet: string;
+  reason: string;
+  tier: ApiSearchTier;
+  offsets: [number, number][];
+}
+
+export interface ApiWorkspaceSearchResult {
+  kind: 'experiment' | 'record_id' | 'draft_field' | 'evidence' | 'artifact' | 'source_ref';
+  experiment_id: string;
+  record_id: string | null;
+  title: string;
+  label: string;
+  status: string | null;
+  match: ApiSearchMatch;
+  navigate_to: string;
+  plane: 'truth';
+  source: string;
+}
+
+export interface ApiMemorySearchResult {
+  kind: 'concept' | 'file' | 'rationale';
+  id: string | null;
+  path: string | null;
+  label: string;
+  community_name: string | null;
+  match: ApiSearchMatch;
+  navigate_to: string;
+  plane: 'memory';
+  source: string;
+}
+
+export type ApiWorkspaceSearchReason = null | 'query_too_short';
+export type ApiMemorySearchReason = null | 'query_too_short' | 'graph_absent' | 'graph_unreadable';
+
+export interface ApiWorkspaceSearchGroup {
+  plane: 'truth';
+  provider: string;
+  available: boolean;
+  reason: ApiWorkspaceSearchReason;
+  total: number;
+  returned: number;
+  limit: number;
+  offset: number;
+  results: ApiWorkspaceSearchResult[];
+}
+
+export interface ApiMemorySearchGroup {
+  plane: 'memory';
+  provider: string;
+  note: string;
+  available: boolean;
+  reason: ApiMemorySearchReason;
+  total: number;
+  returned: number;
+  limit: number;
+  offset: number;
+  results: ApiMemorySearchResult[];
+}
+
+export interface ApiSearchResponse {
+  query: string;
+  normalized_query: string;
+  scope: ApiSearchScope;
+  workspace: ApiWorkspaceSearchGroup;
+  memory: ApiMemorySearchGroup;
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;

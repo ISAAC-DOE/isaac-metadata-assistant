@@ -27,6 +27,8 @@ import type {
   ApiMemoryFileResponse,
   ApiMemoryFilesResponse,
   ApiPendingResponse,
+  ApiSearchResponse,
+  ApiSearchScope,
   ApiSourcePreview,
   ApiDemoRunResponse,
   ApiDemoResetResult,
@@ -207,6 +209,23 @@ export const api = {
 
   getMemoryConcept(id: string): Promise<ApiMemoryConceptResponse> {
     return getJson<ApiMemoryConceptResponse>(`/memory/concepts/${enc(id)}`);
+  },
+
+  // P26.4 — grouped truth+memory search. One query fans out to the workspace
+  // (truth plane) and memory (advisory) groups server-side; this method only
+  // builds the query string and parses the envelope, never merges/ranks the
+  // two groups itself. Options are appended in a fixed order, and only when
+  // the caller actually provided them (the frozen contract test asserts the
+  // exact URL for both the full-options and q-only calls).
+  search(
+    q: string,
+    opts?: { scope?: ApiSearchScope; limit?: number; offset?: number },
+  ): Promise<ApiSearchResponse> {
+    let path = `/search?q=${enc(q)}`;
+    if (opts?.scope !== undefined) path += `&scope=${enc(opts.scope)}`;
+    if (opts?.limit !== undefined) path += `&limit=${opts.limit}`;
+    if (opts?.offset !== undefined) path += `&offset=${opts.offset}`;
+    return getJson<ApiSearchResponse>(path);
   },
 
   // S2 — run the synthetic pipeline; `draft_only` stops at the blockers.
