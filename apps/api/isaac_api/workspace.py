@@ -152,15 +152,23 @@ def load_demo_answers() -> dict:
 # save compare-and-swap critical section so two writers holding the same token can
 # never both succeed — exactly one wins and the loser observes a stale token.
 
-_record_locks: dict[str, threading.Lock] = {}
+_record_locks: dict[str, threading.RLock] = {}
 _record_locks_guard = threading.Lock()
 
 
 @contextlib.contextmanager
 def record_lock(experiment_id: str):
-    """Serialise the compare-and-swap critical section for one experiment id."""
+    """Serialise the compare-and-swap critical section for one experiment id.
+
+    A REENTRANT lock (``RLock``): across two threads it behaves exactly like a
+    plain ``Lock`` (they still serialise on the same id), but the SAME thread may
+    re-acquire it. That reentrancy is required because a mutation handler holds
+    ``record_lock(id)`` and then calls ``load_experiment`` -> ``ensure_seeded``,
+    which may itself take ``record_lock(id)`` for the same id to materialise a
+    missing canonical — a plain ``Lock`` would self-deadlock there.
+    """
     with _record_locks_guard:
-        lock = _record_locks.setdefault(experiment_id, threading.Lock())
+        lock = _record_locks.setdefault(experiment_id, threading.RLock())
     with lock:
         yield
 
@@ -468,7 +476,9 @@ SEED_REVIEW_ID = _SEED_ID_PREFIX + "4"
 SEED_DONE_ID = _SEED_ID_PREFIX + "5"
 
 #: The five fixed canonical seed ids. An experiment whose id is in this set is
-#: canonical and is NEVER a removal candidate.
+#: canonical and is NEVER a *managed_legacy* removal candidate (``remove_experiment``
+#: refuses it). Reset itself DOES remove + re-materialise each canonical id by
+#: design, to restore its content to the deterministic seed baseline.
 CANONICAL_IDS = frozenset(
     {SEED_NEW_DRAFT_ID, SEED_PARTIAL_ID, SEED_READY_ID, SEED_REVIEW_ID, SEED_DONE_ID}
 )
@@ -587,11 +597,32 @@ def ensure_seeded() -> None:
 
     Idempotent: only canonical ids not already present are (re)built, so repeated
     calls — and the idempotent demo pass — never grow the record count.
+
+    Locking: ``ensure_seeded`` runs on EVERY read (``list_experiments`` /
+    ``load_experiment``), so it can race a concurrent ``reset_to_canonical_seed``
+    that is mid-way through ``_remove_experiment_dir`` + ``_materialise_seed`` for
+    the same id — without coordination the reader could materialise into a dir the
+    reset is ``rmtree``-ing, raising an uncaught ``OSError`` (ENOTEMPTY) -> HTTP 500.
+    So the materialise of a MISSING id is done under ``record_lock(spec.id)``, the
+    SAME lock reset holds around its remove+materialise, closing that window.
+
+    Deadlock-free by construction: the common case (id present) takes NO lock; a
+    lock is acquired for at most ONE id at a time and released before the next, so
+    no thread ever holds two record locks — the classic lock-ordering cycle cannot
+    form. The lock is a reentrant ``RLock``, so a mutation handler that already
+    holds ``record_lock(id)`` and then calls ``load_experiment`` -> ``ensure_seeded``
+    (which may re-acquire the same id's lock to materialise it) does not self-deadlock.
     """
-    existing = {p.name for p in _experiment_dirs()}
     for spec in _seed_specs():
-        if spec.id not in existing:
-            _materialise_seed(spec)
+        # Cheap lock-free check first (common case: present -> no lock taken, so
+        # the hot read path stays contention-free and cannot deadlock).
+        if (workspace_root() / spec.id / "experiment.json").exists():
+            continue
+        with record_lock(spec.id):
+            # Re-check under the lock: reset may have just (re)created it, or another
+            # reader may have materialised it; only materialise if STILL missing.
+            if not (workspace_root() / spec.id / "experiment.json").exists():
+                _materialise_seed(spec)
 
 
 def list_experiments() -> list[Experiment]:
@@ -724,8 +755,12 @@ def reset_to_canonical_seed(*, dry_run: bool) -> dict:
 
     Refuses (makes NO changes) if ANY ambiguous record exists. Otherwise, on
     execute, removes ONLY the managed_legacy directories via ``remove_experiment``
-    (path-safe) and calls ``ensure_seeded`` to (re)create any missing canonical.
-    Idempotent. Returns typed, path-free data (no filesystem paths).
+    (path-safe), then re-materialises EVERY canonical scenario to its deterministic
+    seed baseline — a present-but-drifted canonical record (partial answers, stale
+    evidence, a wrongly-exported artifact) is removed and rebuilt from the seed, not
+    merely left in place. This restores CONTENT, not just the id set, and mints a
+    fresh generation per id (invalidating every pre-reset ETag). Idempotent in
+    content. Returns typed, path-free data (no filesystem paths).
     """
     experiments = _load_all_experiments()
     buckets: dict[str, list[Experiment]] = {
@@ -747,7 +782,18 @@ def reset_to_canonical_seed(*, dry_run: bool) -> dict:
         for exp in legacy:
             remove_experiment(exp)
             removed += 1
-        ensure_seeded()
+        # Restore canonical CONTENT to the deterministic seed baseline (not just
+        # fill missing). Each canonical id is removed and re-materialised, so
+        # drifted content, partial answers, and wrongly-exported artifacts are
+        # cleared, and a FRESH generation is minted (invalidating every pre-reset
+        # ETag). Targeted to the fixed canonical id set — NOT a broad filesystem
+        # wipe.
+        for spec in _seed_specs():
+            with record_lock(spec.id):
+                target = workspace_root() / spec.id
+                if target.exists():
+                    _remove_experiment_dir(target)  # path-safe (direct-child guard)
+                _materialise_seed(spec)  # baseline content + fresh generation + DONE artifact
 
     # final_count: nothing changes when refused; otherwise the reset guarantees
     # exactly the five canonical records (legacy removed, missing canonical rebuilt).

@@ -220,14 +220,16 @@ def test_noop_demo_run_does_not_churn_the_token(client):
     assert token1 == token2, "a no-op demo re-run must not churn the token"
 
 
-def test_reset_preserves_untouched_canonical_token(client):
-    """Reset leaves present canonical records untouched; their token stays valid
-    because nothing about them changed (documented reset semantics)."""
+def test_reset_mints_fresh_token_for_canonical(client):
+    """Reset re-materialises EVERY canonical record to its deterministic seed
+    baseline (P27.6-reset), minting a fresh generation per id. A present-but-drifted
+    canonical record must be restored, not left in place, so every pre-reset token is
+    invalid afterward — a stale client is forced to refetch."""
     before = _token_of(client, ws.SEED_READY_ID)
     r = client.post("/api/demo/reset", json={"mode": "execute", "confirmation": "RESET SYNTHETIC DEMO"})
     assert r.status_code == 200, r.text
     after = _token_of(client, ws.SEED_READY_ID)
-    assert before == after
+    assert before != after, "reset mints a fresh generation, invalidating the pre-reset token"
 
 
 # =============================================================================
