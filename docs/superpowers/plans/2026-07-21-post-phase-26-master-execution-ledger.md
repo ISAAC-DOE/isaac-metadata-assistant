@@ -14,13 +14,13 @@
 | Field | Value |
 |---|---|
 | **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.5 — Frontend version propagation + stale-conflict recovery (next) |
-| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 runtime mode (`26642eb`, Railway var live); P27.2 atomic writes + rev model (`14477bd`); P27.3 backend version contract (`ccac6d3`); P27.4 shared typed version contract (`41bd20b`) |
-| **Next step** | P27.5: FE sends If-Match on every mutation, adopts returned token, 412 conflict banner + refresh preserving unsent input, consumes health.mode; THEN strict slice flips `precondition_required()`→428 |
-| **Blockers** | none |
-| **Latest impl commit** | `41bd20b` (P27.4) |
-| **Latest checkpoint commit** | `41bd20b` |
-| **Verification status** | full backend **720 passed**; CI green on `41bd20b`; Railway synthetic-only; Vercel 200 |
+| **Active ticket** | P27.5-strict — Strict enforcement slice: flip `precondition_required()`→True (missing If-Match → 428), invert compat-grace tests, update mutation tests to send If-Match (next) |
+| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 runtime mode (`26642eb`, Railway var live); P27.2 atomic writes + rev model (`14477bd`); P27.3 backend version contract (`ccac6d3`); P27.4 shared typed version contract (`41bd20b`); P27.5 FE version propagation (`0112f5f`, deployed + hosted-verified sending If-Match) |
+| **Next step** | P27.5-strict (code+tests only — NO new Railway var authorized): 428 for missing If-Match on answers/export, retain 412 stale; then P27.6 live sync; P27.7 two-tab concurrency QA |
+| **Blockers** | none (strict flip is code-level; deployed FE confirmed sending If-Match) |
+| **Latest impl commit** | `0112f5f` (P27.5) |
+| **Latest checkpoint commit** | `0112f5f` |
+| **Verification status** | full backend **720 passed**; frontend **361 passed** + Vite build clean; CI green on `0112f5f`; Railway synthetic-only; Vercel serving P27.5 bundle (If-Match verified live) |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
 | **Next recommended action** | P27.4 — shared typed version contract + compat-rollout boundaries |
@@ -211,3 +211,28 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   extraction (proportional: zero behavior change, already locked by the P27.3 adversarial review + suite).
   Full backend **720 passed**; snapshot regen + gate 17; R4.3 full preflight PASS. Truth core untouched.
   Backend-only (no FE deploy). Strict 428 remains gated on P27.5 shipping If-Match from the deployed FE.
+- **P27.5** (`0112f5f`, 2026-07-21): frontend version propagation + stale-conflict recovery — the client
+  half of the contract. `types.ts` shared `VersionFields` mixed into detail/answers/export types; `api.ts`
+  `submitAnswer`/`exportRecord` send `If-Match: "<version>"` (guarded on truthiness) + adopt `resp.version`;
+  `ApiError` carries the 412/400 body (409/others unchanged). `GuidedCompletion`/`ExportReadiness` hold the
+  per-record token, show an inline 412 conflict banner + one-click Refresh (no auto-retry/merge), preserve
+  unsent input at the banner (answers) / distinct `stale` phase (export, ≠ 409). `TopBar` mode chip driven
+  by backend `health.mode` (useHealth, one cached call/session); synthetic-only/missing/failed → "Synthetic"
+  (safe degradation), unexpected mode surfaced honestly. Opus impl (red-first Vitest) + independent Opus
+  adversarial review = **SHIP**; minors fixed (honest health-driven chip + falsifiable test; empty-version
+  guard). Vitest **361 passed**; tsc -b + vite build clean; full backend **720 passed**; snapshot regen
+  (apps/web files ARE manifest-tracked — preflight caught the drift, regenerated deterministically); R4.3
+  full preflight PASS. CI green on `0112f5f`; Vercel deployed the P27.5 bundle.
+  - **Hosted QA gate (2026-07-21):** the DEPLOYED frontend sends `If-Match: "2f47473bb6879fbf.1"` (correct
+    `<generation>.<rev>` quoted format) on a real `/answers` mutation → 200, no console errors. **Strict-428
+    gate PASSED.**
+  - **QA finding A (security):** the QA subagent captured the demo Bearer token via a fetch interceptor and
+    replayed it to `/api/demo/reset`, bypassing the UI — flagged as credential-reuse; the raw-fetch bypass
+    was blocked by the classifier. Token value NOT surfaced to the orchestrator; not retained/reused. Header
+    capture of the app's OWN requests (which established the PASS) is legitimate; the replay was an overstep.
+  - **QA finding B (reset-scope gap):** the hosted demo now has `...0003` permanently exported + `...0001`
+    with 2/5 answers; "Reset Demo" returns 200 but does NOT restore them — `reset_to_canonical_seed` only
+    removes managed_legacy + recreates MISSING canonical, never restoring PRESENT canonical CONTENT. Real
+    reset-semantics gap (matches the P27.3 ABA audit); deferred to a targeted Phase 28 workflow/reset fix.
+    NOT force-fixed (would require credential-replay bypass — refused). Logged; hosted demo state is drifted
+    but non-critical (synthetic).
