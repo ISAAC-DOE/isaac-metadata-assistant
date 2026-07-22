@@ -27,6 +27,7 @@ from isaac_records.official import EXPECTED_VERSION, validate_official
 from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
+from . import dependencies
 from . import memory
 from . import runtime_mode
 from . import search
@@ -211,9 +212,24 @@ def _detail(exp: Experiment) -> dict:
                 exported=exp.exported(),
                 rev=exp.rev,
             ),
+            # Derived exported-artifact freshness (P28.2): none | current | stale.
+            "artifact": dependencies.artifact_state(exp),
         }
     )
     return detail
+
+
+def _workflow_for(exp: Experiment) -> dict:
+    """Derive the workflow from an experiment's current signals (same call as
+    ``_detail``). Used to capture the pre-mutation step states and to surface the
+    post-mutation workflow on a mutation response."""
+    return derive_workflow(
+        pending_count=exp.pending_count(),
+        draft_ok=exp.draft_ok(),
+        ready=exp.export_ready(),
+        exported=exp.exported(),
+        rev=exp.rev,
+    )
 
 
 # --- 1. health ----------------------------------------------------------------
@@ -533,6 +549,14 @@ def post_answers(
         err = _check_if_match(if_match, exp)
         if err is not None:
             return err
+        # Capture the PRE-mutation workflow so the invalidation can report the
+        # reopen DELTA (which completed steps regressed) after applying answers.
+        pre_steps = _workflow_for(exp)["ordered_steps"]
+        # The answer keys we are about to forward (non-blank, recognised). On a
+        # real change these are the fields written; on a no-op nothing is written.
+        submitted_fields = [
+            k for k, v in (body.get("answers") or {}).items() if v not in (None, "")
+        ]
         timestamp = _now_iso()
         apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
         exp.draft = apply_answers(exp.draft, apply_shape)
@@ -541,11 +565,23 @@ def post_answers(
         # logged nor rewritten (byte-stable) and never bumps rev. save_versioned decides
         # by comparing the on-disk authoritative signature.
         exp.answer_log.append({"applied": apply_shape, "at": timestamp})
-        if not exp.save_versioned():
+        changed = exp.save_versioned()
+        if not changed:
             exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
+        # Derived downstream invalidation (P28.2) at the post-mutation revision. A
+        # byte-stable no-op reports changed=False with empty deltas and no rev bump.
+        changed_fields = submitted_fields if changed else []
+        invalidation = dependencies.build_invalidation(
+            changed=changed,
+            changed_fields=changed_fields,
+            pre_steps=pre_steps,
+            post_exp=exp,
+        )
         result = serialize.pending_to_list(exp.draft, ws.load_demo_answers())
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
+        result["workflow"] = _workflow_for(exp)
+        result["invalidation"] = invalidation
         response.headers["ETag"] = exp.etag()
         return result
 
@@ -585,6 +621,10 @@ def post_export(
         if err is not None:
             return err
 
+        # Capture the PRE-export workflow for the reopen DELTA (export normally
+        # completes the final step, so no step reopens — but we report honestly).
+        pre_steps = _workflow_for(exp)["ordered_steps"]
+
         # Immutability guard (mirrors cli.cmd_export): never overwrite an existing record.
         record_path = exp.records_dir / f"{exp.id}.json"
         if record_path.exists():
@@ -601,12 +641,18 @@ def post_export(
         payload = serialize.export_result_to_dict(result)
         if not result.ok:
             # Nothing written. Surface the failing reports and a flat errors list.
+            # No mutation happened, so report an honest changed=False invalidation
+            # (never fabricate a mutation that did not occur).
             errors = []
             if payload["official_report"]:
                 errors = payload["official_report"]["errors"]
             elif not result.draft_report.ok:
                 errors = payload["draft_report"]["errors"]
             payload["errors"] = errors
+            payload["workflow"] = _workflow_for(exp)
+            payload["invalidation"] = dependencies.build_invalidation(
+                changed=False, changed_fields=[], pre_steps=pre_steps, post_exp=exp
+            )
             return JSONResponse(status_code=200, content=payload)
 
         _write_record(exp, result)
@@ -619,6 +665,14 @@ def post_export(
             "sidecar_path": str(exp.sidecar_path()),
         }
         payload.update(vc.version_fields(exp))
+        # export completes the final workflow step and makes the artifact current.
+        payload["workflow"] = _workflow_for(exp)
+        payload["invalidation"] = dependencies.build_invalidation(
+            changed=True,
+            changed_fields=["record_id"],
+            pre_steps=pre_steps,
+            post_exp=exp,
+        )
         response.headers["ETag"] = exp.etag()
         return payload
 

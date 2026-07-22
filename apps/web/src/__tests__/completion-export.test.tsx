@@ -325,6 +325,37 @@ describe('S6 · Ready to Export (live)', () => {
     // nothing was written in this session: no in-session artifact cards
     expect(container.querySelectorAll('.artifact')).toHaveLength(0);
   });
+
+  it('P28.2 · surfaces an honest advisory when the exported artifact is stale', async () => {
+    const routes = exportedReadyRoutes('demo');
+    const detailRoute = routes['GET /api/experiments/demo'] as { body: Record<string, unknown> };
+    detailRoute.body = {
+      ...(detailRoute.body as object),
+      artifact: {
+        state: 'stale',
+        reason:
+          'The record changed after export; the exported artifact no longer reflects the current record. Records are immutable — regenerate the record (or reset the demo) to refresh it.',
+      },
+    };
+    stubFetchRoutes(routes);
+    const { container, findByText } = renderAt('/record/demo/export');
+
+    // the honest advisory renders: text + icon (never color-only), role=status
+    expect(await findByText('Exported artifact is out of date.')).toBeInTheDocument();
+    const note = container.querySelector('.artifact-stale-note')!;
+    expect(note).not.toBeNull();
+    expect(note.getAttribute('role')).toBe('status');
+    expect(note.querySelector('svg')).not.toBeNull();
+    expect(note.textContent).toMatch(/no longer reflects the current record/);
+  });
+
+  it('P28.2 · shows NO stale advisory when the exported artifact is current', async () => {
+    stubFetchRoutes(exportedReadyRoutes('demo')); // detail.artifact.state === 'current'
+    const { container, findByText } = renderAt('/record/demo/export');
+
+    await findByText('Valid against official ISAAC schema v1.05.');
+    expect(container.querySelector('.artifact-stale-note')).toBeNull();
+  });
 });
 
 describe('P27.5 · optimistic-concurrency conflict UX', () => {

@@ -846,6 +846,25 @@
   color: var(--text-tertiary);
 }
 
+/* P28.2 — exported artifact is stale: an honest, non-gating advisory so the UI
+   never silently presents an out-of-date artifact as current. Amber advisory
+   tokens + an icon + text (never color-only). */
+.artifact-stale-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px 16px;
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner);
+  font-size: 12.5px;
+  color: var(--advisory-text);
+  line-height: 1.55;
+}
+.artifact-stale-note svg { flex: none; margin-top: 1px; color: var(--advisory-text); }
+.artifact-stale-note strong { color: var(--text-strong); }
+
 /* View JSON modal — read-only artifact content, fetched from the export call. */
 .artifact-modal-backdrop {
   position: fixed;

@@ -185,6 +185,8 @@ export const experimentDetail = {
     exported: false,
     rev: VERSION_FIELDS.rev,
   }),
+  // P28.2 — nothing exported yet, so there is no artifact to be fresh/stale.
+  artifact: { state: 'none', reason: null } as const,
 };
 
 export const draftResponse = {
@@ -1069,6 +1071,7 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
           sidecar_path: artifactsExported.sidecar_path,
         },
         workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
+        artifact: { state: 'current', reason: null },
       },
     },
     [`GET ${base}/evidence`]: { body: evidenceExported },
@@ -1205,6 +1208,7 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
           sidecar_path: artifactsExported.sidecar_path,
         },
         workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
+        artifact: { state: 'current', reason: null },
       },
     },
     [`GET ${base}/pending`]: { body: { pending: [] } },

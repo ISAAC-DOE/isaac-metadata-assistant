@@ -339,11 +339,35 @@ export interface ApiWorkflow {
   record_rev: number;
 }
 
+// P28.2 — derived exported-artifact freshness, carried on every detail bundle.
+// `none` = nothing exported; `current` = the on-disk record still matches the
+// current draft; `stale` = the record changed after export (or is unreadable) —
+// records are immutable, so a stale artifact must never be presented as current.
+export type ApiArtifactStateName = 'none' | 'current' | 'stale';
+
+export interface ApiArtifactState {
+  state: ApiArtifactStateName;
+  reason: string | null;
+}
+
+// P28.2 — the downstream-invalidation summary a mutation (POST /answers,
+// POST /export) returns, reported at the post-mutation revision. A byte-stable
+// no-op reports `changed:false` with empty `changed_fields`/`reopened_steps`.
+export interface ApiInvalidation {
+  changed: boolean;
+  rev: number;
+  changed_fields: string[];
+  reopened_steps: string[];
+  artifact: ApiArtifactState;
+  reason: string;
+}
+
 export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields {
   draft_ok: boolean;
   artifact_refs: { record_path: string | null; sidecar_path: string | null };
   source_files: string[];
   workflow: ApiWorkflow;
+  artifact: ApiArtifactState;
 }
 
 export interface ApiDraftField {
@@ -704,6 +728,9 @@ export interface RecordBundle {
 export interface ApiAnswersResponse extends VersionFields {
   pending: ApiPendingItem[];
   status: ApiExperimentStatus;
+  // P28.2 — the post-mutation workflow + downstream-invalidation summary.
+  workflow: ApiWorkflow;
+  invalidation: ApiInvalidation;
 }
 
 export interface ApiReportError {
@@ -725,6 +752,10 @@ export interface ApiExportResponse extends VersionFields {
   errors?: { path: string; message: string }[];
   record_id?: string;
   artifact_refs?: { record_path: string; sidecar_path: string };
+  // P28.2 — the post-export workflow + downstream-invalidation summary (present
+  // on both the success and the gated-failure paths).
+  workflow?: ApiWorkflow;
+  invalidation?: ApiInvalidation;
 }
 
 // Everything S6 needs to render the three signals + the export gate, fetched

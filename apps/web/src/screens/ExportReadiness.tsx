@@ -361,6 +361,20 @@ function LoadedExport({
     >
       <LiveSyncNote degraded={degraded} onRefresh={onRefresh} />
 
+      {/* P28.2 — the exported record changed after export (records are immutable):
+          surface an honest, non-gating advisory so a stale artifact is never
+          presented as current. Icon + text (not color-only), announced politely. */}
+      {detail.artifact.state === 'stale' && (
+        <div className="artifact-stale-note" role="status">
+          <TriangleAlert size={16} strokeWidth={2} aria-hidden="true" />
+          <span>
+            <strong>Exported artifact is out of date.</strong>{' '}
+            {detail.artifact.reason ??
+              'The record changed after export; the exported artifact no longer reflects the current record.'}
+          </span>
+        </div>
+      )}
+
       {/* Post-export: the real, reserved verdict + the two export artifacts. */}
       {exported && realValidation && (
         <>
