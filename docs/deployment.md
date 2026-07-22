@@ -134,21 +134,3 @@ deployed tag is a single tested commit. Recovery paths:
   readiness never receives traffic; the old ReplicaSet keeps serving.
 - **Workspace state** — untouched by rollbacks and disposable (see reset
   above).
-
-## Former hosting (Vercel + Railway) — teardown
-
-Until 2026-07 the frontend deployed to Vercel (`isaac-demo-web`) and the
-backend to Railway (`isaac-metadata-assistant`), both auto-deploying from the
-personal repo `Krish-Verma/isaac-metadata-assistant`. Those platforms run on
-personal accounts, so teardown is owned by that account holder:
-
-1. Delete (or pause) the Railway service/project `isaac-metadata-assistant`
-   (region sfo, volume `isaac-metadata-assistant-volume`).
-2. Delete the Vercel project `isaac-demo-web`
-   (https://isaac-demo-web.vercel.app).
-3. Archive `Krish-Verma/isaac-metadata-assistant` with a pointer to
-   `ISAAC-DOE/isaac-metadata-assistant` — otherwise pushes there keep
-   deploying to both platforms.
-
-The `RAILWAY_GIT_COMMIT_SHA` fallback in the health endpoint remains in code
-as harmless legacy.
