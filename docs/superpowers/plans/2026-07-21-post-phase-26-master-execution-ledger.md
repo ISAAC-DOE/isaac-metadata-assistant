@@ -14,9 +14,9 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 27 COMPLETE** (2026-07-22, with one documented passive-poll QA caveat) → Phase 28 — Workflow & Evidence Contracts |
-| **Active ticket** | P28.0 — Workflow & evidence audit (read-only baseline) (next) |
-| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS) |
-| **Next step** | Phase 28 P28.0 — read-only workflow/evidence audit; then P28.1 fixed order → P28.2 dep invalidation → P28.3 revisit/view/edit → P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
+| **Active ticket** | P28.1 — Fixed canonical workflow order (backend-derived) (next) |
+| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit (4 parallel read-only tracks) → plan `2026-07-22-phase-28-workflow-evidence-plan.md` |
+| **Next step** | Phase 28 P28.1 fixed order → P28.2 dep invalidation → P28.3 revisit/view/edit → P28.4 evidence classification → P28.5 evidence API+UI → P28.6 hosted QA |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -24,10 +24,10 @@
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | P27.4 — shared typed version contract + compat-rollout boundaries |
-| **Git sync** | `main` · local == `origin/main` == `ccac6d3` · 0/0 · clean |
-| **Exact-HEAD CI** | green on `ccac6d3` (run 29890264575) |
-| **Railway** | Online · commit `ccac6d3` · `mode: synthetic-only` · volume `/data/isaac-workspace`; `expose_headers=[ETag]` live |
+| **Next recommended action** | P28.1 — fixed canonical workflow order (backend-derived; replace the frontend-only `WorkflowSpine` state machine) |
+| **Git sync** | `main` · local == `origin/main` == `92ea16f` · 0/0 · clean (before P28.0 plan commit) |
+| **Exact-HEAD CI** | green on `92ea16f` (run 29901071582) |
+| **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
 | **Browser-QA** | P26 SearchDialog green (prior); P27.3 hosted no-regression smoke (pre-P27.5 FE unchanged); full two-tab concurrency QA at P27.7 |
 
@@ -94,7 +94,11 @@ addendum records the new approvals without rewriting the past.
 
 ## 5. Current phase / active slice / completed slices
 
-- **Current phase:** 27. **Active slice:** P27.1 (next). **Completed:** T0, P27.0.
+- **Current phase:** 28 (Workflow & Evidence Contracts). **Active slice:** P28.1 (next).
+  **Completed:** all of Phase 27 (T0 → P27.7); Phase 28 P28.0 audit + plan.
+- (The authoritative live status is the STATUS BLOCK at the top of this file; this section is the
+  narrative pointer and was reconciled forward on 2026-07-22 — it had stale-carried "phase 27 / P27.1
+  next" wording from ledger creation.)
 
 ## 6. Verification evidence (as of `859d36c`)
 
@@ -314,6 +318,20 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   - 428-on-missing-If-Match not produced via UI (the FE always sends If-Match); covered by deterministic
     backend tests (test_strict_precondition.py). No credential value captured/copied/replayed; DevTools not
     used for token access.
+- **P28.0** (read-only audit, 2026-07-22): confirmed `92ea16f` exact-HEAD CI (run `29901071582`) **success**;
+  Railway `92ea16f` synthetic-only; Vercel 200; clean 0/0. Four parallel read-only tracks (backend workflow,
+  evidence/audit/export, frontend nav, tests/docs/snapshot) produced an evidence-anchored current-state map
+  → plan `docs/superpowers/plans/2026-07-22-phase-28-workflow-evidence-plan.md`. **Key findings:** no backend
+  workflow-step model (single derived `status()`, completion never persisted); the frontend `WorkflowSpine`
+  is a hardcoded 5-step array with `active` re-derived per-screen = the forbidden frontend-only completion
+  model; evidence has two orthogonal truth axes (field-status + source_type) with a committed Phase-21
+  vocabulary; no conflict/insufficient/unknown/general-inferred-candidate class exists; exported artifacts
+  can silently drift with **no** staleness representation (same class as the reset-content gap fixed in
+  `61c017f`, not generalized); the five concepts (schema validity / evidence support / workflow completion /
+  export readiness / advisory) are already cleanly distinct. **No hard gate:** the only potential
+  spec-collision (P28.4 `inferred_candidate` vs committed `inferred`-exports) is resolved by scoping P28.4 as
+  a display/classification layer that does not change truth-core gating (plan §2.1). Truth plane untouched;
+  audit was read-only.
 
 ---
 
