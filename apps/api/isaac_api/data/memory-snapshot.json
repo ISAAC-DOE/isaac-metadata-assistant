@@ -10716,7 +10716,7 @@
       },
       {
         "path": "docs/project-memory-map.md",
-        "sha256": "26efef51475ee554996ce79eb8325d683725d6e76758a220f920cfcfee0c7e91"
+        "sha256": "b2118a6eced9edf3e337afc176f5d952e78e7cfbb90aed354dfa5710381528a0"
       },
       {
         "path": "docs/proposal-v2.md",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "95e2d90cfe28ae55f949c841cadb94b5d5be8edede565f103dab32b8cdb568e0"
+    "served_manifest_fingerprint": "f10c4847f5563f742ba9b6c05b915c204bd93ca1f1305575292a1d5ba5dcbc40"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

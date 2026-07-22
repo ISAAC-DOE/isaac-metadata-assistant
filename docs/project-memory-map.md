@@ -71,7 +71,10 @@ A read-only browsing surface over this same Graphify layer: four `GET /api/memor
 (`apps/api/isaac_api/memory.py`, routed in `apps/api/isaac_api/routes.py`) plus additive fields on
 `GET /api/graph/status`, and the `ProjectMemory` screen
 (`apps/web/src/screens/ProjectMemory.tsx`) — a status card, a Source Index, and Concept Lookup.
-Explicitly **metadata-only**: no file contents are ever served, and there is no search box.
+Explicitly **metadata-only**: no file contents are ever served. This data is also reachable
+through the global ⌘K search shipped in Phase 26 (see [`search-architecture.md`](search-architecture.md));
+there is still no inline search box on this screen itself — search is global chrome, not
+per-screen.
 
 Guardrails:
 
@@ -347,6 +350,8 @@ Project-owner direction as of July 2026:
 | Second domain — electrochemistry / performance | **Back burner** (recommended next domain when resumed; exercises conditional-required rules) |
 | Web UI | **Built** — `apps/api` (FastAPI) + `apps/web` (React/Vite), a synthetic-only prototype since Phase 19, with a protection-gated demo deployment since Phase 20 (see [`deployment.md`](deployment.md)); production hardening is not planned |
 | Project Memory browsing (Phase 24) | **Built** — read-only metadata/provenance surface (status card, Source Index, Concept Lookup) over `/api/memory/*`; never a validator; hosted deployment serves a committed sanitized snapshot (P24.9 — real counts, honest `stale`/unavailable freshness) |
+| Real, cross-resource search (Phase 26) | **Built** — deterministic, API-backed `GET /api/search`; global ⌘K + visible TopBar trigger; grouped, plane-labeled workspace (truth) + project-memory (advisory) results, no verdicts. See [`search-architecture.md`](search-architecture.md) |
+| Vector / semantic / embedding search | **Back burner** — explicitly **not built** (Phase 26 decision D4); Phase 26 search is deterministic token-matching only, no LLM, no embeddings |
 | CI / GitHub Actions | **Implemented** — `.github/workflows/ci.yml` runs two jobs on push/PR to `main`: a backend job (tests, the synthetic demo, official validation, advisory warnings, the evidence audit) and a frontend job (`apps/web`: vitest, build) |
 | License | **Pending** mentor/project decision — no license is asserted yet |
 | Real / sanitized-data pilot | Requires **explicit written data-governance approval** first |
