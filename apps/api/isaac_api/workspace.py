@@ -19,9 +19,11 @@ in-memory dry-run of ``export_draft`` — nothing is written to derive status.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -100,12 +102,66 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically and durably (crash-safe).
+
+    A partially-written file must NEVER be observable by a reader: the bytes are
+    written to a uniquely-named temp file in the SAME directory (so the final
+    ``os.replace`` is an atomic same-filesystem rename), flushed + ``os.fsync``-ed,
+    then renamed over the target. ``os.replace`` swaps atomically, so a concurrent
+    reader always sees the complete OLD or complete NEW file — never a truncated
+    one. On any failure the temp file is removed and the exception re-raised,
+    leaving the previous target (if any) untouched.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp: Path | None = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+        )
+        tmp = Path(tmp_name)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)  # atomic swap; no partial-target window
+        tmp = None  # ownership transferred to the target
+    finally:
+        # If we failed before/at the swap, drop the orphaned temp file so no
+        # ``.experiment.json.*.tmp`` litter survives a crashed write.
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:  # pragma: no cover - already gone
+                pass
+
+
 def load_demo_answers() -> dict:
     """The committed synthetic completion answers (SIMULATED human input)."""
     return json.loads(ANSWERS_PATH.read_text(encoding="utf-8"))
 
 
 # --- experiment record --------------------------------------------------------
+
+
+def _authoritative_signature(exp: "Experiment") -> str:
+    """Deterministic hash of the AUTHORITATIVE scientific state of an experiment.
+
+    Covers exactly ``{title, source, draft, record_id}`` — the fields that define
+    the record's scientific content. It EXCLUDES ``answer_log`` (an audit trail,
+    not scientific state), ``rev``/``updated_utc`` (version metadata this signature
+    drives), and ``created_utc`` (immutable identity). Two experiments with an
+    identical scientific state therefore hash identically, so a no-op re-entry is
+    detectable and never bumps ``rev``.
+    """
+    payload = {
+        "title": exp.title,
+        "source": exp.source,
+        "draft": exp.draft,
+        "record_id": exp.record_id,
+    }
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -117,6 +173,21 @@ class Experiment:
     draft: dict
     answer_log: list = field(default_factory=list)
     record_id: str | None = None
+    #: Monotonic per-record version. Starts at 0 on create and on the canonical
+    #: seed; bumped ONLY by ``save_versioned`` when the authoritative scientific
+    #: state actually changes. Never derived — it is stored.
+    rev: int = 0
+    #: Wall-clock UTC of the last authoritative change. Defaults to
+    #: ``created_utc`` (see ``__post_init__``) so a freshly-created or legacy
+    #: record has a meaningful, non-empty timestamp.
+    updated_utc: str = ""
+
+    def __post_init__(self) -> None:
+        # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
+        # carries no ``updated_utc``; anchor it to ``created_utc`` in memory. This
+        # never writes — only a real mutation rewrites the file.
+        if not self.updated_utc:
+            self.updated_utc = self.created_utc
 
     # -- filesystem --
 
@@ -150,13 +221,53 @@ class Experiment:
             "draft": self.draft,
             "answer_log": self.answer_log,
             "record_id": self.record_id,
+            "rev": self.rev,
+            "updated_utc": self.updated_utc,
         }
 
     def save(self) -> None:
-        self.dir.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(
-            json.dumps(self.to_state(), indent=2) + "\n", encoding="utf-8"
-        )
+        atomic_write_text(self.state_path, json.dumps(self.to_state(), indent=2) + "\n")
+
+    def _persisted_sig_and_rev(self) -> tuple[str | None, int]:
+        """``(authoritative signature, rev)`` of the CURRENTLY on-disk state, or
+        ``(None, 0)`` if the file is absent or unreadable (missing/corrupt). Read
+        once so ``save_versioned`` can both detect a no-op AND keep the on-disk
+        ``rev`` monotonic even when this in-memory instance is stale."""
+        if not self.state_path.exists():
+            return None, 0
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            sig = _authoritative_signature(Experiment.from_state(state))
+            return sig, int(state.get("rev") or 0)
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            # Defensive: a missing/corrupt state file is treated as "no prior
+            # state" so a real save still proceeds rather than crashing.
+            return None, 0
+
+    def save_versioned(self) -> bool:
+        """Persist atomically ONLY if the authoritative scientific state changed.
+
+        Compares this record's authoritative signature (title/source/draft/
+        record_id — ``answer_log``/``rev``/``updated_utc``/``created_utc`` are
+        deliberately EXCLUDED) against the last-persisted signature. If it changed
+        (or there is no prior file), bump ``rev``, stamp ``updated_utc``, persist,
+        and return ``True``. If it is byte-for-byte the same authoritative state,
+        do NOT bump and do NOT rewrite the file (byte-stable no-op) — return
+        ``False``. This guarantees an identical scientific re-entry never bumps
+        ``rev``.
+
+        The bump is taken from ``max(self.rev, on-disk rev) + 1`` so a stale
+        in-memory instance can never *regress* the persisted ``rev`` (defence in
+        depth; the API rejects stale writes via ``If-Match`` in P27.3).
+        """
+        old_sig, disk_rev = self._persisted_sig_and_rev()
+        new_sig = _authoritative_signature(self)
+        if old_sig is not None and old_sig == new_sig:
+            return False
+        self.rev = max(self.rev, disk_rev) + 1
+        self.updated_utc = _now_iso()
+        self.save()
+        return True
 
     @classmethod
     def from_state(cls, state: dict) -> "Experiment":
@@ -168,6 +279,8 @@ class Experiment:
             draft=state.get("draft") or {},
             answer_log=state.get("answer_log") or [],
             record_id=state.get("record_id"),
+            rev=int(state.get("rev") or 0),  # missing/legacy -> 0
+            updated_utc=state.get("updated_utc") or "",  # __post_init__ -> created_utc
         )
 
     # -- derived views --
@@ -340,11 +453,13 @@ def _write_seed_record(exp: Experiment, result) -> None:
     """
     exp.records_dir.mkdir(parents=True, exist_ok=True)
     exp.record_id = result.record["record_id"]
-    (exp.records_dir / f"{exp.record_id}.json").write_text(
-        json.dumps(result.record, indent=2) + "\n", encoding="utf-8"
+    atomic_write_text(
+        exp.records_dir / f"{exp.record_id}.json",
+        json.dumps(result.record, indent=2) + "\n",
     )
-    (exp.records_dir / f"{exp.record_id}.evidence.json").write_text(
-        json.dumps(result.sidecar, indent=2) + "\n", encoding="utf-8"
+    atomic_write_text(
+        exp.records_dir / f"{exp.record_id}.evidence.json",
+        json.dumps(result.sidecar, indent=2) + "\n",
     )
 
 

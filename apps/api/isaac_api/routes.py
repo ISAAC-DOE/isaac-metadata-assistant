@@ -32,7 +32,7 @@ from . import search
 from . import serialize
 from . import sources
 from . import workspace as ws
-from .workspace import REPO_ROOT, Experiment
+from .workspace import REPO_ROOT, Experiment, atomic_write_text
 
 router = APIRouter(prefix="/api")
 
@@ -368,8 +368,13 @@ def post_answers(experiment_id: str, body: dict = Body(...)):
     timestamp = _now_iso()
     apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
     exp.draft = apply_answers(exp.draft, apply_shape)
+    # answer_log is EXCLUDED from the rev signature: log the submission only when it
+    # actually changes the authoritative draft, so an identical re-entry is neither
+    # logged nor rewritten (byte-stable) and never bumps rev. save_versioned decides
+    # by comparing the on-disk authoritative signature.
     exp.answer_log.append({"applied": apply_shape, "at": timestamp})
-    exp.save()
+    if not exp.save_versioned():
+        exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
     result = serialize.pending_to_list(exp.draft, ws.load_demo_answers())
     result["status"] = exp.status()
     return result
@@ -384,8 +389,8 @@ def _write_record(exp: Experiment, result) -> None:
     exp.record_id = result.record["record_id"]
     record_path = exp.records_dir / f"{exp.record_id}.json"
     sidecar_path = exp.records_dir / f"{exp.record_id}.evidence.json"
-    record_path.write_text(json.dumps(result.record, indent=2) + "\n", encoding="utf-8")
-    sidecar_path.write_text(json.dumps(result.sidecar, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(record_path, json.dumps(result.record, indent=2) + "\n")
+    atomic_write_text(sidecar_path, json.dumps(result.sidecar, indent=2) + "\n")
 
 
 @router.post("/experiments/{experiment_id}/export")
@@ -419,7 +424,9 @@ def post_export(experiment_id: str):
         return JSONResponse(status_code=200, content=payload)
 
     _write_record(exp, result)
-    exp.save()
+    # export changes the authoritative state (record_id: None -> id), so this bumps
+    # rev and stamps updated_utc, persisting the state atomically.
+    exp.save_versioned()
     payload["record_id"] = exp.record_id
     payload["artifact_refs"] = {
         "record_path": str(exp.record_path()),

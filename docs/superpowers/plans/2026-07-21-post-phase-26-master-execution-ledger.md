@@ -14,11 +14,11 @@
 | Field | Value |
 |---|---|
 | **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.2 — Atomic writes + record version model (next to implement) |
-| **Completed** | T0 docs-truth (`859d36c`); P27.0 storage ground-truth; ledger+approval (`33825ff`); P27.1 runtime mode |
-| **Next step** | Add authorized `ISAAC_RUNTIME_MODE=synthetic-only` Railway var + verify health; then P27.2 |
+| **Active ticket** | P27.3 — Backend version contract (ETag/If-Match, 412/428) (next) |
+| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 runtime mode (`26642eb`, Railway var live); P27.2 atomic writes + rev model |
+| **Next step** | P27.3: expose `rev` (ETag + body), `If-Match` on answers/export, typed 412 (P27.4 adds 428 rollout) |
 | **Blockers** | none |
-| **Latest impl commit** | P27.1 (this commit) |
+| **Latest impl commit** | P27.2 (this commit) |
 | **Latest checkpoint commit** | `859d36c` |
 | **Verification status** | baseline verified; CI green on `859d36c`; Railway+Vercel healthy |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); `If-Match` strictness handled by P27.4 two-step |
@@ -161,3 +161,17 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   test_api.py) + gate 17 green; R4.3 backend preflight passed. Follow-ups: (a) authorized Railway
   `ISAAC_RUNTIME_MODE=synthetic-only` var add + health verify; (b) `runtime_mode.py` not yet
   graph-indexed → P32.5 memory refresh. Truth-core untouched.
+  - **Railway var (P27.1 completion, 2026-07-21):** `ISAAC_RUNTIME_MODE=synthetic-only` added to
+    production; redeployed; **Online**; `/api/health` → `mode: synthetic-only` on `26642eb`. Only this
+    one var changed. Deploy verified.
+- **P27.2** (2026-07-21): per-record version model + atomic writes. `Experiment` gains `rev:int`
+  (monotonic) + `updated_utc`; NEW `atomic_write_text` (mkstemp→fsync→`os.replace`, temp-cleanup on
+  failure) wired into every workspace write; `save_versioned()` bumps `rev` (from `max(in-mem, on-disk)+1`)
+  + stamps `updated_utc` ONLY when the authoritative signature `{title,source,draft,record_id}` changes —
+  identical re-entry is a byte-stable no-op (answer_log excluded, speculative append popped on no-op).
+  Seeds/`demo_run` stay `rev 0` + byte-reproducible. Legacy files load rev 0 / updated_utc=created_utc,
+  not rewritten on read. Opus impl (red-first, 12 tests) + Opus adversarial review = **SHIP** (no
+  Crit/Imp); folded in a rev-monotonicity hardening + regression test (13th). Full backend **677 passed**;
+  synthetic demo byte-identical; snapshot regen + gate 17 green. NO HTTP conflict contract yet (P27.3).
+  Truth-core/schema/export untouched. Known-accepted (deferred to P27.3): last-write-wins across
+  concurrent instances (no If-Match yet).
