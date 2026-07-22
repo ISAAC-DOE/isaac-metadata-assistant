@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **Phase 27 COMPLETE** (2026-07-22, with one documented passive-poll QA caveat) → Phase 28 — Workflow & Evidence Contracts |
-| **Active ticket** | P28.6 — Hosted workflow & evidence QA (next; gated on Railway reaching Phase-28 HEAD) |
+| **Current phase** | **Phase 28 COMPLETE** (2026-07-22; two documented non-blocking QA caveats) → Phase 29 — Assistant Experience |
+| **Active ticket** | P29.0 — Live context builder (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
-| **Next step** | Phase 28 P28.6 hosted QA → close & checkpoint Phase 28 → Phase 29 |
+| **Next step** | Phase 29 P29.0 live context builder → P29.1 ephemeral session context → P29.2 conversation UI → P29.3 deterministic workflow agent → P29.4 one shared state → P29.5 hosted agent QA |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -24,9 +24,9 @@
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | P28.6 — hosted workflow & evidence QA (after Railway/Vercel reach Phase-28 HEAD) |
-| **Git sync** | `main` · local == `origin/main` == `bea0a01` · 0/0 · clean (before P28.5 ledger commit) |
-| **Exact-HEAD CI** | P28.0–P28.4 green; P28.5 `bea0a01` pending push-time verify |
+| **Next recommended action** | P29.0 — live context builder (assistant reads authoritative live record/workflow/evidence state; no external LLM; confirm-gated) |
+| **Git sync** | `main` · local == `origin/main` == `938c4e4` · 0/0 · clean (before Phase-28 closure commit) |
+| **Exact-HEAD CI** | P28.0–P28.5 green (`bea0a01`, `938c4e4` = success); closure commit pending push-time verify |
 | **Railway note** | 2026-07-22: rapid P28.1–P28.5 pushes queued serial Railway builds (each Docker build ~minutes on the metal builder). Builds SUCCEED (image push + healthcheck pass in logs); serving `37713d7`, draining the backlog toward HEAD. Not stalled/failed. Confirm Railway == Phase-28 HEAD (has `/edit` + `/evidence-classification`) before P28.6 hosted QA. |
 | **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
@@ -413,6 +413,59 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   classification.test.tsx` (10). Backend **806** (was 798), frontend **408** (was 398), tsc clean, build ok.
   Truth path + P28.4 classifier untouched. Snapshot regenerated. Independent Opus review = **SHIP** (candidate
   != confirmed invariant holds; leak-safe end-to-end; axis-clean; no regression).
+- **Railway deploy queue-stall incident** (2026-07-22): the rapid P28.1–P28.5 pushes (each impl + ledger)
+  overwhelmed Railway's serial builder — deployments **built and healthchecked successfully** but the next one
+  sat `Queued` ~20–28 min while live stayed behind HEAD. User authorized ONE bounded recovery nudge (`railway
+  up`/redeploy of clean HEAD, existing Krish-owned service, no config/identity/volume/secret change). Before
+  using it, the queue **self-drained** (status went Queued → Building → Deploying → serving `938c4e4`), so the
+  authorized nudge was **NOT used** (avoided a redundant deployment — the least-disruptive outcome). Deploy
+  reached HEAD `938c4e4` synthetic-only, volume `/data/isaac-workspace` 36/500 MB intact. Lesson: batch fewer
+  rapid pushes, or expect serial-build lag; recovery = wait (self-drains) or one bounded `railway up`.
+- **P28.6** (hosted QA, 2026-07-22, UI-only, no credential capture/replay; against Railway `938c4e4` + Vercel):
+  full matrix **PASS** (A–H), **no functional defects**. Fixed workflow order verified across needs-attention/
+  ready/exported states (order never reorders; completed/current/blocked distinct by icon+text, not
+  color-only; deep-links + refresh preserve state). Summary-first + explicit Edit: pre-fill, Cancel=no-op,
+  same-value=no-op (`/edit`→200), new-value persists. Evidence panel: `Supported` (27) vs `Inferred Candidate`
+  (1) visually + textually distinct, candidate shows NO value as fact; ⓘ keyboard-operable; sources leak-safe
+  (only synthetic locators, no token/`/Users/`). Two-tab stale write → **412** exact banner "changed elsewhere
+  … nothing applied … input kept", no auto-merge. Exported artifact shows honest **current** (validate --official
+  exit 0, audit 33/33). Reset → canonical **2/1/1/1**, no duplicates. No red console errors; all API 200/304
+  except the one intentional 412; no request storm. **Two honest NOT-OBSERVED (non-blocking):** (1) passive
+  idle-poll ~8s banner — CDP tab `visibilityState=hidden` blocks visibility-gated passive polling (carry the
+  human two-window follow-up); (2) artifact **stale transition** — the deployed UI exposes no field-edit path
+  on an EXPORTED (immutable) record, so staleness can't be triggered via UI; it is backend + unit-verified
+  (`test_editing_exported_record_stales_the_artifact`) and the UI never shows stale-as-current (by-design
+  immutability). Minor observations (not defects): a single Reset confirm issued two idempotent `/demo/reset`
+  200s (end-state correct); a "Use This Suggestion" input occasionally needed a beat (worked on retry) → note
+  for P32 UI audit. Demo left at canonical 2/1/1/1.
+
+---
+
+## Phase 28 Completion Gate (closed 2026-07-22 @ Phase-28 HEAD)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| Workflow order fixed; steps never reorder | ✅ | P28.1 backend-derived `workflow.py`; hosted QA B across 3 states |
+| Completed steps accurate + revisitable | ✅ | derived-on-read; hosted QA B/C |
+| Summary-first + explicit Edit | ✅ | P28.3; hosted QA C (pre-fill/Cancel/no-op/persist) |
+| Unchanged edits are no-ops | ✅ | `save_versioned` signature guard; QA C same-value no-op |
+| Dependency-aware downstream invalidation | ✅ | P28.2 derived workflow + artifact freshness; `test_dependency_invalidation.py` |
+| Reopened steps have clear reasons | ✅ | P28.1/P28.2 derived reopened + reason; unit-verified |
+| Artifact freshness truthful | ✅ | P28.2 content-based freshness; QA E current; stale unit-verified (not UI-reachable on exported) |
+| Deterministic evidence classes, 5 distinct | ✅ | P28.4 `evidence_classify.py`; QA D Supported≠Inferred Candidate |
+| Validation vs evidence-support stay distinct | ✅ | P28.5 axis-clean endpoint (no validity keys); panel disclaimer |
+| No inferred candidate enters the record w/o confirmation | ✅ | truth-core no-guessing preserved; candidate value never shown as fact |
+| Assistant uses authoritative evidence result | ⏳ N/A | assistant is Phase 29; typed result is the authoritative source it will read |
+| Two-tab stale-write safety intact | ✅ | QA F → 412, no auto-merge |
+| Live synchronization intact | ✅ | P27.6 preserved; classification folded into bundle refetch |
+| Backend + frontend suites pass | ✅ | backend 806, frontend 408 |
+| Validation + audit pass | ✅ | QA E validate --official exit 0, audit 33/33 |
+| Snapshot + preflight pass | ✅ | committed-snapshot gate 17; R4.3 full each slice |
+| Hosted QA passes | ✅ | P28.6 A–H PASS + 2 honest NOT-OBSERVED |
+| CI + deploys green | ✅ | CI success P28.0–P28.5; Railway `938c4e4` synthetic-only; Vercel 200 |
+| Repo clean + synced | ✅ | (verified at closure commit) |
+
+**Non-blocking caveats carried forward:** (1) human TWO-VISIBLE-WINDOW passive-poll check (idle live banner + ~8s cadence + offline indicator) — unit-verified, not automation-observable; close at first human-visible QA or Phase 32 UI audit. (2) artifact stale-transition not UI-reachable on exported records — revisit in Phase 32 UI audit if an exported-record edit path is ever surfaced.
 
 ---
 

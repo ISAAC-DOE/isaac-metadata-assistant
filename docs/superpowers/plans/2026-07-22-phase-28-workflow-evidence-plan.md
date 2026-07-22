@@ -1,6 +1,9 @@
 # Phase 28 — Workflow & Evidence Contracts (plan)
 
-Status: **P28.0 audit complete (2026-07-22).** Active slice: **P28.1 (next).**
+Status: **Phase 28 COMPLETE (2026-07-22).** All slices P28.0–P28.6 shipped, independently reviewed
+(all SHIP), CI-green, deployed (Railway `938c4e4` synthetic-only, Vercel 200), hosted-QA PASS. Two
+non-blocking caveats carried forward (human two-window passive-poll check; artifact stale-transition not
+UI-reachable on exported records) — see the master ledger's Phase 28 Completion Gate. Next: Phase 29.
 Baseline: `main @ 92ea16f` · CI `29901071582` success · Railway `synthetic-only` · Vercel 200 ·
 backend 751 · frontend 383.
 
