@@ -14,13 +14,13 @@
 | Field | Value |
 |---|---|
 | **Current phase** | Phase 27 — Runtime Safety Foundation |
-| **Active ticket** | P27.6 — Live client synchronization (bounded revision-aware polling; SSE ruled out — see entry) (next) |
-| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content fix (`61c017f`, deployed + hosted-QA PASS) |
-| **Next step** | P27.6 live sync (bounded revision-aware polling per the SSE-vs-poll analysis); then P27.7 hosted two-tab QA; then Phase 27 checkpoint; then Phases 28–32 |
+| **Active ticket** | P27.7 — Hosted two-tab concurrency QA (then Phase 27 close) (next) |
+| **Completed** | T0 (`859d36c`); P27.0; ledger+approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 live sync (`ef31f5b`, deployed) |
+| **Next step** | P27.7 hosted two-tab QA (normal sync, stale-write→412, export conflict, reset, disconnect/reconnect, restart); then Phase 27 completion gate + checkpoint; then Phase 28 |
 | **Blockers** | none |
-| **Latest impl commit** | `61c017f` (reset-content) |
-| **Latest checkpoint commit** | `61c017f` |
-| **Verification status** | full backend **740 passed**; frontend **361 passed**; CI green on `61c017f`; Railway serving `61c017f` synthetic-only; Vercel P27.5 bundle; hosted demo restored to canonical 2/1/1/1 |
+| **Latest impl commit** | `ef31f5b` (P27.6) |
+| **Latest checkpoint commit** | `ef31f5b` |
+| **Verification status** | full backend **751 passed**; frontend **383 passed** + build clean; CI green on `ef31f5b`; Railway `ef31f5b` synthetic-only; Vercel P27.6 bundle live (polling active) |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
 | **Next recommended action** | P27.4 — shared typed version contract + compat-rollout boundaries |
@@ -275,3 +275,22 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
     005 sole Done with artifact); preview non-mutating; reload-persistent; **3× Synthetic Demo idempotent, no
     duplicates**; no console errors. The hosted demo is now restored to canonical baseline. Also confirmed the
     strict backend + deployed FE work normally (the UI answer submission used the If-Match path and succeeded).
+- **P27.6** (`ef31f5b`, 2026-07-22): live client synchronization — bounded revision-aware polling.
+  SSE ruled out (EventSource can't send the Bearer header; no cookie auth; sync single-process
+  deployment) — validated against the code. Backend (Option A, no new route): `GET /experiments/{id}`
+  honours `If-None-Match` → 304 (unchanged, ETag, no body) or 200 + bundle + new ETag; `_if_none_match_hit`
+  normalises W/, handles tag-list + `*`, never false-304s a changed record; If-Match mutation path
+  untouched; 304 carries CORS ACAO + Expose-Headers:ETag. Frontend: `checkRecordVersion` + `useRecordSync`
+  (ONE per-record poller — records are separate routes, one mounted at a time): 8s base, setTimeout-chain +
+  in-flight guard (non-overlap), AbortController + version/id stale-guard, visibility pause + immediate
+  check on regain, bounded backoff (cap 60s) + ±20% jitter, honest `degraded` after 3 real failures. Poll
+  machinery is per-effect-run LOCALS (not shared refs). Wiring: S3/S5 silent refetch; S4 proactive
+  "changed elsewhere, input preserved" banner + Refresh (no auto-refetch/merge; submit stays If-Match →
+  412 backstop); S6 silent readiness refetch; dashboard visibility-regain silent reload only; `LiveSyncNote`
+  (role=status) honest paused indicator. Opus adversarial review = **DO-NOT-SHIP → SHIP after fix**: its
+  Important finding (shared-ref scheduler could silently kill polling on an in-place version change → stale
+  without signal) fixed via the per-effect-locals refactor with a red-green liveness regression test
+  (fails pre-fix); minors fixed (dashboard silent reload; degraded reset on version change). Backend
+  live-sync tests 11; full backend **751 passed**; frontend **383 passed**; tsc -b + vite build clean;
+  snapshot regen + gate 17; R4.3 full preflight PASS; CI green on `ef31f5b`; Railway `ef31f5b`
+  synthetic-only; Vercel P27.6 bundle live. Truth core untouched; no credential in URL/query/log/output.
