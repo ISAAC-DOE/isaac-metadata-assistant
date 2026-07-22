@@ -14,9 +14,9 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 27 COMPLETE** (2026-07-22, with one documented passive-poll QA caveat) → Phase 28 — Workflow & Evidence Contracts |
-| **Active ticket** | P28.5 — Typed evidence API + UI (next) |
-| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`) |
-| **Next step** | Phase 28 P28.5 evidence API+UI → P28.6 hosted QA (confirm Railway caught up to Phase-28 HEAD first) |
+| **Active ticket** | P28.6 — Hosted workflow & evidence QA (next; gated on Railway reaching Phase-28 HEAD) |
+| **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
+| **Next step** | Phase 28 P28.6 hosted QA → close & checkpoint Phase 28 → Phase 29 |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -24,10 +24,10 @@
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | P28.5 — typed evidence API + UI (expose classify_fields per record, bound to record_rev; accessible Review-Evidence UI; assistant explain-only) |
-| **Git sync** | `main` · local == `origin/main` == `b1b9cd0` · 0/0 · clean (before P28.4 ledger commit) |
-| **Exact-HEAD CI** | P28.0–P28.3 green; P28.4 `b1b9cd0` pending push-time verify |
-| **Railway note** | 2026-07-22: rapid P28.1–P28.4 pushes queued serial Railway builds; serving `37713d7`, `Online · Queued`, catching up (not stalled/failed). Confirm Railway == Phase-28 HEAD before P28.6 hosted QA. |
+| **Next recommended action** | P28.6 — hosted workflow & evidence QA (after Railway/Vercel reach Phase-28 HEAD) |
+| **Git sync** | `main` · local == `origin/main` == `bea0a01` · 0/0 · clean (before P28.5 ledger commit) |
+| **Exact-HEAD CI** | P28.0–P28.4 green; P28.5 `bea0a01` pending push-time verify |
+| **Railway note** | 2026-07-22: rapid P28.1–P28.5 pushes queued serial Railway builds (each Docker build ~minutes on the metal builder). Builds SUCCEED (image push + healthcheck pass in logs); serving `37713d7`, draining the backlog toward HEAD. Not stalled/failed. Confirm Railway == Phase-28 HEAD (has `/edit` + `/evidence-classification`) before P28.6 hosted QA. |
 | **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
 | **Browser-QA** | P26 SearchDialog green (prior); P27.3 hosted no-regression smoke (pre-P27.5 FE unchanged); full two-tab concurrency QA at P27.7 |
@@ -399,6 +399,20 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   leak-safety property (independent-review must-fix, added by orchestrator). Backend **798** (was 782); truth
   path untouched; NO route/FE change (API+UI = P28.5). Independent Opus review = **SHIP** after the leak test
   (no code bug; correct/pure/truth-safe/leak-safe on every probed dimension).
+- **P28.5** (`bea0a01`, 2026-07-22): typed evidence-classification API + Review-Evidence UI. Backend NEW
+  `GET /experiments/{id}/evidence-classification` → `{record_rev, field_results, counts}` (read-only, typed
+  404, auth-gated, ETag; calls the frozen P28.4 `classify_fields`; no lock/mutation). Axis-clean: only the
+  evidence-support axis (no valid/ok/exportable/complete/blocking/warnings); `counts` is a same-axis 5-class
+  histogram (chosen over the mandate's sample `audit_summary` to honor the separate-axes rule). FE: NEW
+  `EvidenceClassificationPanel` on S5 renders each field's class with icon + text + explanation + safe sources
+  + keyboard-operable info affordance; scientific honesty — `inferred_candidate` is unmistakably distinct from
+  a supported/confirmed value (dashed chip, distinct label/icon) and the panel NEVER renders a candidate's
+  value; `unknown` = plainly absent; `conflicting_evidence` = no auto-winner. Folded into `getEvidenceBundle`
+  (refetches coherently on live-sync); honest `role=status` "may be out of date" affordance when view rev !=
+  record rev (no auto-flip). Tests: `test_evidence_classification_api.py` (8, RED-first) + `evidence-
+  classification.test.tsx` (10). Backend **806** (was 798), frontend **408** (was 398), tsc clean, build ok.
+  Truth path + P28.4 classifier untouched. Snapshot regenerated. Independent Opus review = **SHIP** (candidate
+  != confirmed invariant holds; leak-safe end-to-end; axis-clean; no regression).
 
 ---
 
