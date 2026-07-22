@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
+import { EvidenceClassificationPanel } from '../components/EvidenceClassificationPanel';
 import { SourcePreview } from '../components/SourcePreview';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { GraphStatusChip } from '../components/GraphStatusChip';
@@ -78,7 +79,16 @@ function LoadedEvidence({
   degraded: boolean;
   onManualRefresh: () => void;
 }) {
-  const { detail, evidence, artifacts, graph, sourcePreviews } = data;
+  const { detail, evidence, artifacts, graph, sourcePreviews, classification } = data;
+
+  // P28.5 — the evidence-support view is bound to `record_rev`. Compare it to the
+  // rev encoded in the loaded detail's version token (`generation.rev`, so the
+  // last segment is the rev — the exact value the backend reports as record_rev).
+  // If they disagree the view may be behind the record; we surface a subtle
+  // refresh affordance rather than silently flipping the classification.
+  const detailRev = Number(detail.version.split('.').pop());
+  const classificationStale =
+    Number.isFinite(detailRev) && detailRev !== classification.record_rev;
 
   const entries = useMemo(() => evidenceEntriesToTrail(evidence), [evidence]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -178,6 +188,11 @@ function LoadedEvidence({
       mainPad="none"
     >
       <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
+      <EvidenceClassificationPanel
+        classification={classification}
+        stale={classificationStale}
+        onRefresh={onManualRefresh}
+      />
       <SourcePreview
         entry={selected}
         provenance={provenance}

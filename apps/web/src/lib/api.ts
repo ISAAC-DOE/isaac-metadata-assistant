@@ -15,6 +15,7 @@ import type {
   ApiArtifactsResponse,
   ApiAuditResponse,
   ApiDraftResponse,
+  ApiEvidenceClassification,
   ApiEvidenceEntry,
   ApiEvidenceResponse,
   ApiExperimentDetail,
@@ -261,6 +262,15 @@ export const api = {
     return (await getJson<ApiEvidenceResponse>(`/experiments/${enc(id)}/evidence`)).evidence;
   },
 
+  // P28.5 — the typed evidence-SUPPORT classification for the current record,
+  // bound to `record_rev`. A separate axis from validation/audit/advisory; the
+  // client parses it, it never computes a class or a verdict.
+  getEvidenceClassification(id: string): Promise<ApiEvidenceClassification> {
+    return getJson<ApiEvidenceClassification>(
+      `/experiments/${enc(id)}/evidence-classification`,
+    );
+  },
+
   // S5 — one cited source fixture, read-only (governance-gated to the allowlist).
   getSourcePreview(id: string, source: string): Promise<ApiSourcePreview> {
     return getJson<ApiSourcePreview>(
@@ -387,11 +397,12 @@ export const api = {
   // freshness, then the previews of every source fixture the evidence cites
   // (fetched after so we know which fixtures are actually referenced).
   async getEvidenceBundle(id: string): Promise<EvidenceBundle> {
-    const [detail, evidence, artifacts, graph] = await Promise.all([
+    const [detail, evidence, artifacts, graph, classification] = await Promise.all([
       this.getExperiment(id),
       this.getEvidence(id),
       this.getArtifacts(id),
       this.getGraphStatus(),
+      this.getEvidenceClassification(id),
     ]);
     const files = citedSourceFiles(evidence);
     const previews = await Promise.all(files.map((f) => this.getSourcePreview(id, f)));
@@ -399,7 +410,7 @@ export const api = {
     files.forEach((f, i) => {
       sourcePreviews[f] = previews[i];
     });
-    return { detail, evidence, artifacts, graph, sourcePreviews };
+    return { detail, evidence, artifacts, graph, sourcePreviews, classification };
   },
 } as const;
 

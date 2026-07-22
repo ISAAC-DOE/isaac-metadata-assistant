@@ -448,6 +448,43 @@ export interface ApiEvidenceResponse {
   evidence: ApiEvidenceEntry[];
 }
 
+// P28.5 — the deterministic evidence-SUPPORT classification (a display view over
+// the P28.4 classifier). This is a THIRD axis, distinct from schema validity /
+// workflow completion / advisory warnings — the wire body deliberately carries
+// none of `valid`/`ok`/`exportable`/`complete`/`blocking`/`warnings`. Bound to
+// `record_rev` so the client can detect a stale view. Mirrors
+// apps/api/isaac_api/routes.py `get_evidence_classification` + evidence_classify.py.
+export type EvidenceClass =
+  | 'supported'
+  | 'inferred_candidate'
+  | 'insufficient_evidence'
+  | 'conflicting_evidence'
+  | 'unknown';
+
+export type EvidenceValueState = 'confirmed' | 'candidate' | 'none';
+
+// One safe, already-present source reference (never a raw answer/quote/secret/
+// absolute path — the backend strips those in evidence_classify._safe_locator).
+export interface ApiClassificationSource {
+  source_type: SourceType;
+  locator?: string;
+}
+
+export interface ApiFieldClassification {
+  field: string; // dotted path OR namespaced (assets: / descriptors: / implicit:)
+  classification: EvidenceClass;
+  value_state: EvidenceValueState;
+  explanation: string; // deterministic, human-readable
+  sources: ApiClassificationSource[];
+}
+
+export interface ApiEvidenceClassification {
+  record_rev: number; // authoritative rev the view is bound to
+  field_results: ApiFieldClassification[];
+  // same-axis histogram of the 5 classes (sum === field_results.length).
+  counts: Record<EvidenceClass, number>;
+}
+
 // GET /source-preview?source= — the real fixture lines + the line numbers cited
 // by the experiment's evidence (empty for a fixture cited by field, not by line).
 export interface ApiSourcePreview {
@@ -781,4 +818,7 @@ export interface EvidenceBundle {
   artifacts: ApiArtifactsResponse;
   graph: ApiGraphStatus;
   sourcePreviews: Record<string, ApiSourcePreview>;
+  // P28.5 — the evidence-support classification for this record, fetched in the
+  // SAME bundle so it stays coherent with `detail` across live-sync refetches.
+  classification: ApiEvidenceClassification;
 }

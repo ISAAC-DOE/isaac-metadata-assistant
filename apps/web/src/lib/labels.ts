@@ -142,6 +142,13 @@ export const LABELS = {
   chipDraft: 'Draft',
   modeSynthetic: 'Synthetic',
 
+  // Evidence-support classes (P28.5) — a separate axis from the status chips above.
+  chipEvSupported: 'Supported',
+  chipEvCandidate: 'Inferred Candidate',
+  chipEvInsufficient: 'Insufficient Evidence',
+  chipEvConflicting: 'Conflicting Evidence',
+  chipEvUnknown: 'Unknown',
+
   // Signals
   signalValidation: 'Validation',
   signalCoverage: 'Coverage',

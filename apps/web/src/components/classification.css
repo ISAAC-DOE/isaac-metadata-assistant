@@ -1,0 +1,168 @@
+/*
+ * P28.5 · Evidence Support panel. A distinct axis from the status/verdict/
+ * advisory palettes (its chips live in signals.css under .chip-ev-*). Neutral
+ * card, no colored rail; the class signal is carried by icon + text, never color
+ * alone. The panel scrolls inside the record main column; it never forces the
+ * page body to scroll sideways.
+ */
+
+.evclass {
+  padding: 20px 24px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.evclass-head {
+  margin-bottom: 14px;
+}
+.evclass-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.evclass-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  max-width: 64ch;
+}
+
+/* stale / out-of-date hint (subtle, advisory — never an error) */
+.evclass-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-inner, 8px);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+}
+.evclass-stale-text {
+  font-size: 12px;
+  color: var(--advisory-text);
+}
+.evclass-stale-btn {
+  flex: none;
+}
+
+.evclass-empty {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+/* summary histogram */
+.evclass-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.evclass-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.evclass-count-n {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* field rows */
+.evclass-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.evclass-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--border-hair);
+}
+.evclass-row:first-child {
+  border-top: 0;
+}
+.evclass-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.evclass-field {
+  font-size: 12.5px;
+  color: var(--text-heading);
+  word-break: break-all;
+}
+.evclass-info-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.evclass-info-btn:hover {
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+}
+.evclass-info-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.evclass-info-btn[aria-expanded='true'] {
+  background: var(--action-tint, var(--surface-subtle));
+  color: var(--text-secondary);
+}
+
+.evclass-explanation {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.evclass-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.evclass-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.evclass-locator {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.evclass-info {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-inner, 8px);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hair);
+}
+.evclass-info p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.evclass-info p + p {
+  margin-top: 6px;
+}
+.evclass-info strong {
+  color: var(--text-heading);
+  font-weight: 600;
+}

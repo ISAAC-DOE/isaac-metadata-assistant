@@ -32,6 +32,14 @@
 .chip-mentor    { color: var(--action-hover);   background: var(--action-tint);  border-color: var(--action-selected-border); }
 .chip-draft     { color: var(--text-muted);     background: var(--screen-base);  border-color: var(--border-input); }
 
+/* Evidence-support axis (P28.5). Distinct from the status chips above; a
+ * candidate/unknown is DASHED so it can never read as a confirmed fact. */
+.chip-ev-supported    { color: var(--verified-text); background: var(--verified-bg); border-color: var(--verified-border); }
+.chip-ev-candidate    { color: var(--inferred-text);  background: var(--inferred-bg);  border-color: var(--inferred-border);  border-style: dashed; }
+.chip-ev-insufficient { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border); }
+.chip-ev-conflicting  { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);      font-weight: 600; }
+.chip-ev-unknown      { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);   border-style: dashed; }
+
 /* ---- VerdictCard — the hard gate (largest, most saturated) ---------- */
 .verdict {
   display: flex;

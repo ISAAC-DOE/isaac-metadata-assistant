@@ -28,6 +28,7 @@ from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
 from . import dependencies
+from . import evidence_classify
 from . import memory
 from . import runtime_mode
 from . import search
@@ -876,6 +877,41 @@ def get_evidence(experiment_id: str):
     else:
         entries = serialize.evidence_trail_from_draft(exp.draft)
     return {"evidence": entries}
+
+
+# --- 12b. evidence classification (P28.5, evidence-support axis, read-only) ----
+
+#: The five evidence-support classes, in the display precedence used everywhere.
+#: The single source for the ``counts`` histogram key set.
+_EVIDENCE_CLASSES = (
+    "supported",
+    "inferred_candidate",
+    "insufficient_evidence",
+    "conflicting_evidence",
+    "unknown",
+)
+
+
+@router.get("/experiments/{experiment_id}/evidence-classification")
+def get_evidence_classification(experiment_id: str, response: Response):
+    """Typed evidence-support classification for the CURRENT record (P28.4 view).
+
+    Read-only; carries ONLY the evidence-support axis — ``field_results`` (from the
+    frozen ``evidence_classify.classify_fields``) plus a same-axis ``counts``
+    histogram — bound to the authoritative ``record_rev`` so a client can detect a
+    stale view. It deliberately carries NO validity/completion/advisory verdict
+    (no ``valid``/``ok``/``exportable``/``complete``/``blocking``/``warnings``);
+    those stay in their own endpoints. No lock is taken (pure read).
+    """
+    exp = ws.load_experiment(experiment_id)
+    if exp is None:
+        return _not_found(experiment_id)
+    field_results = evidence_classify.classify_fields(exp.draft)
+    counts = {c: 0 for c in _EVIDENCE_CLASSES}
+    for fr in field_results:
+        counts[fr["classification"]] += 1
+    response.headers["ETag"] = exp.etag()
+    return {"record_rev": exp.rev, "field_results": field_results, "counts": counts}
 
 
 # --- 13. source preview -------------------------------------------------------

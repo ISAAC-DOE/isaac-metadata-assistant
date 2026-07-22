@@ -148,12 +148,19 @@ describe('P27.6 · live-sync screen wiring', () => {
     stubFetchRoutes({ ...evidenceBundleRoutes('demo'), 'GET /api/experiments/demo': live.route });
     renderAt('/record/demo/evidence');
 
+    // Count only the /evidence endpoint (not the P28.5 /evidence-classification,
+    // which shares the `/evidence` prefix) as the proxy for one bundle load.
+    const countEvidence = () =>
+      ((globalThis.fetch as Mock).mock.calls as [string, RequestInit?][]).filter(([url]) =>
+        String(url).endsWith('/experiments/demo/evidence'),
+      ).length;
+
     await settle();
-    expect(countCalls('/experiments/demo/evidence')).toBe(1); // bundle loaded once
+    expect(countEvidence()).toBe(1); // bundle loaded once
 
     live.bump();
     await settle(POLL_INTERVAL_MS);
-    expect(countCalls('/experiments/demo/evidence')).toBe(2); // one silent refetch
+    expect(countEvidence()).toBe(2); // one silent refetch
   });
 
   it('S4: a change elsewhere shows the input-preserving banner; staged input survives; Refresh reloads', async () => {

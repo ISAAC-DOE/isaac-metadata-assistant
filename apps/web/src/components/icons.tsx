@@ -52,6 +52,13 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   exported: Check,
   mentorReview: MessageSquare,
   draft: Pencil,
+  // Evidence-support axis (P28.5) — distinct glyphs so the class is never
+  // signalled by color alone, and a candidate never wears the confirmed check.
+  evSupported: ShieldCheck,
+  evCandidate: CornerDownRight,
+  evInsufficient: CircleAlert,
+  evConflicting: TriangleAlert,
+  evUnknown: CircleHelp,
 };
 
 // Evidence source-type glyphs (icons-and-symbols.md).

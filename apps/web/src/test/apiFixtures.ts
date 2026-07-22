@@ -1045,6 +1045,63 @@ export const evidenceExported = {
   ],
 };
 
+// P28.5 — the evidence-support classification for the S5 record. `record_rev`
+// matches the rev encoded in `experimentDetail.version` ('1.0' → last segment 0),
+// so the default view is coherent (never falsely "stale"). One field per class so
+// all five render and `counts` sums to field_results.length.
+export const evidenceClassificationResponse = {
+  record_rev: Number(VERSION_FIELDS.version.split('.').pop()),
+  field_results: [
+    {
+      field: 'system.technique',
+      classification: 'supported' as const,
+      value_state: 'confirmed' as const,
+      explanation: 'Backed by observed evidence.',
+      sources: [
+        { source_type: 'spreadsheet' as const, locator: "Sheet 'Campaign Info', field=technique" },
+      ],
+    },
+    {
+      field: 'implicit:edge',
+      classification: 'inferred_candidate' as const,
+      value_state: 'candidate' as const,
+      explanation: 'Proposed by a derivation rule; unconfirmed — not entered as fact.',
+      sources: [{ source_type: 'derivation' as const }],
+    },
+    {
+      field: 'measurement.reduced_spectrum',
+      classification: 'insufficient_evidence' as const,
+      value_state: 'none' as const,
+      explanation: 'Evidence present but the value is not established.',
+      sources: [{ source_type: 'user_confirmation' as const }],
+    },
+    {
+      field: 'sample.material.formula',
+      classification: 'conflicting_evidence' as const,
+      value_state: 'candidate' as const,
+      explanation: 'Evidence asserts incompatible values; needs human resolution.',
+      sources: [
+        { source_type: 'user_confirmation' as const },
+        { source_type: 'spreadsheet' as const, locator: "Sheet 'Sample', field=formula" },
+      ],
+    },
+    {
+      field: 'sample.notes',
+      classification: 'unknown' as const,
+      value_state: 'none' as const,
+      explanation: 'No defensible value.',
+      sources: [],
+    },
+  ],
+  counts: {
+    supported: 1,
+    inferred_candidate: 1,
+    insufficient_evidence: 1,
+    conflicting_evidence: 1,
+    unknown: 1,
+  },
+};
+
 export const artifactsExported = {
   record: {
     record_id: EXP_ID,
@@ -1106,6 +1163,7 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
       },
     },
     [`GET ${base}/evidence`]: { body: evidenceExported },
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: { ...artifactsExported, record: { ...artifactsExported.record, record_id: id }, sidecar: { ...artifactsExported.sidecar, record_id: id } } },
     [`GET ${base}/source-preview?source=mock_campaign.csv`]: { body: sourcePreviewCsv },
     [`GET ${base}/source-preview?source=raw_scan_listing.txt`]: { body: sourcePreviewListing },
