@@ -39,6 +39,124 @@
   font-size: 11px;
   color: var(--text-slate);
 }
+/* ---- Conversation log (P29.2) --------------------------------------- */
+/* Scrollable message list: older → newest, newest near the bottom. Never
+ * inverted. The live reply block is the last (newest) child. */
+.assistant-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+.assistant-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  /* long field values / explanations wrap instead of overflowing */
+  overflow-wrap: anywhere;
+}
+/* User turns sit to the right, tinted; assistant turns to the left, on the
+ * assistant panel surface. Distinction never relies on color alone — each
+ * carries an icon + a text role label in .assistant-msg-role. */
+.assistant-msg-user {
+  align-self: flex-end;
+  max-width: 88%;
+  background: var(--cover-bg);
+  border-color: var(--cover-border);
+}
+.assistant-msg-assistant {
+  align-self: stretch;
+  background: var(--assist-panel-bg);
+  border-color: var(--assist-border);
+}
+.assistant-msg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.assistant-msg-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+}
+.assistant-msg-user .assistant-msg-role { color: var(--text-slate); }
+.assistant-msg-assistant .assistant-msg-role { color: var(--assist-text); }
+.assistant-msg-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--radius-token);
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+  background: var(--surface);
+}
+/* Kind badges — icon + label already distinguish them; the tints are a
+ * secondary reinforcement, never the sole signal. */
+.kind-badge-deterministic { color: var(--assist-text); border-color: var(--assist-border); background: var(--assist-tint); }
+.kind-badge-advisory { color: var(--text-slate); }
+.kind-badge-inferred { color: var(--advisory-text); border-color: var(--advisory-border); background: var(--advisory-bg); }
+.kind-badge-confirm { color: var(--advisory-text); border-color: var(--advisory-border); background: var(--advisory-bg); }
+.kind-badge-degraded { color: var(--text-quaternary); }
+/* Stale — an assistant message grounded in an older record revision. Icon +
+ * text ("Based on an earlier version"), plus a dashed, dimmed treatment. */
+.assistant-msg.is-stale {
+  border-style: dashed;
+  opacity: 0.82;
+}
+.assistant-msg-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--advisory-text);
+}
+.assistant-msg-text {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* Jump to Latest — appears only when new content arrives while scrolled up. */
+.assistant-jump {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 5px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--assist-border);
+  background: var(--assist-panel-bg);
+  color: var(--assist-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.assistant-jump:hover { background: var(--assist-tint); }
+.assistant-jump:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
+.assistant-reply-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .assistant-reply {
   padding: 12px 13px;
   background: var(--assist-panel-bg);
@@ -47,7 +165,10 @@
   font-size: 12.5px;
   color: var(--text-secondary);
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
+.assistant-reply:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+.assistant-reply-block .assistant-sources { margin-top: 0; }
 .assistant-sources {
   margin-top: 10px;
   display: flex;

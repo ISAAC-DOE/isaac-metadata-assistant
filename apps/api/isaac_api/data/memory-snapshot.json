@@ -10384,7 +10384,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "f45b267dc916a5352ebbe469eb4cb0a42f889ffb9b049a61071701c39bd24cba"
+        "sha256": "e4b029f9217a10dabbe714b48b9ac406c20d6d9e45d48bef4f47e40b2b126370"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "d6303ed0ae080e68563381943ffa8820413368c63ac77d28df046ba9b680f2cb"
+        "sha256": "1b3263dc26a68a1fff2b85a90b1488e8c209b77206c205f1fab6a2f186e20b94"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10580,7 +10580,7 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "a3a24ab008d8aa6f4b140d0602b1f4c3da3e866cffd57725f009e4bcd9786fc0"
+        "sha256": "a3a7110cc898a8e6080fb941bee2e5447c23ffa529d210e1ad0c97b6a4ab30ca"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
@@ -10588,7 +10588,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "6037aeac194ae7b30e35164e2c575930834bb8e699f83e334e4fc5620a8a6f7b"
+        "sha256": "941f2dc1e93b135c80e6ec34223ca5a876214da6fa12382f924faf1ecac5e0a0"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10596,7 +10596,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "7c77d40c7d200052a630173525e27ff02a958482779bf22646db626a07bed008"
+        "sha256": "f26fe4292f1ca2ee9ce8a8db21e0893e003242d8fca17bbafd511cd40bb13edc"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10604,11 +10604,11 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "a96d1b4ce103ecc074655d4991b8b5fdfb3b948aee8ce0cb1e5a55c802fd05ef"
+        "sha256": "ec14852a1ed1bd229410ce36b669338b57731c89928383430e04f8456d1dab23"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "c626c73ee3a5d9827e3c3377bb0bf1e4339458790b9825b308ffaeef9274ca96"
+        "sha256": "2c136e8ae03644f02574f40382275b3059842f31ff32dc6723afba34b851ff7a"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -10620,7 +10620,7 @@
       },
       {
         "path": "apps/web/src/test/setup.ts",
-        "sha256": "a9a82b313a2099baa50447024f5f13aef7295d937bd438df08856f99d313fecb"
+        "sha256": "f0652274bff1dc20bcbc27513e81d7e4b83add76ee1adb74295e4b023b8ad9e5"
       },
       {
         "path": "apps/web/src/vite-env.d.ts",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "140fc6f07e8c0215646001acdd1d2bdda998fc71d5fd07d00e4ec0358db318eb"
+    "served_manifest_fingerprint": "d93b90f3dc43dac3afdabd285679cec984492d6399145fc9c3dd84f1cb7ca421"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

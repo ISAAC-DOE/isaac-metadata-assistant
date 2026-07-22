@@ -595,7 +595,13 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
 
     fireEvent.click(panel.getByText('What does this question want?').closest('button')!);
     expect(panel.getByText(EXPLAIN_CURRENT)).toBeInTheDocument();
-    expect(panel.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
+    // P29.2: scope the source-label assertion to the LIVE reply block — the
+    // prior (also workflow-sourced) turn now archives into the conversation log
+    // with its own identical `answered from:` label, so the panel-wide query is
+    // legitimately ambiguous. The intent (the explain chip's live answer is
+    // Workflow & Artifacts-sourced) is unchanged.
+    const replyBlock = within(assistant.querySelector('.assistant-reply-block') as HTMLElement);
+    expect(replyBlock.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
   });
 
   it('the missing-field chip routes to the deterministic schema check, answered from Schema Rules', async () => {

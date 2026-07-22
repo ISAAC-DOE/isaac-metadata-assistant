@@ -323,6 +323,8 @@ function LoadedExport({
     <aside className="record-right narrow" aria-label="Assistant">
       <AssistantPanel
         {...compose({ context: 'export', bundle: data })}
+        experimentId={detail.id}
+        recordRev={detail.rev}
         availability={graph.availability}
         note={ROUTE_TO_CLI_NOTE}
       />

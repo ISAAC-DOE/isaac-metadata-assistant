@@ -29,6 +29,10 @@ export type Msg = {
   resultType?: string;
   authority?: string;
   actionability?: string;
+  // P29.2 — the source category (an AssistantSource enum value) used to render
+  // the honest `answered from: <label>` line on an assistant message. It is a
+  // safe machine enum ('schema' | 'audit' | …), never free text.
+  answeredFrom?: string;
   stale?: boolean;
   id?: string;
   timestamp?: number;
@@ -59,6 +63,7 @@ const SAFE_KEYS = new Set([
   'resultType',
   'authority',
   'actionability',
+  'answeredFrom',
   'stale',
   'id',
   'field',

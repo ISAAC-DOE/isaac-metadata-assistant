@@ -145,6 +145,8 @@ function LoadedEvidence({
     <aside className="record-right narrow" aria-label="Assistant">
       <AssistantPanel
         {...compose({ context: 'evidence', bundle: data, selectedPath: selected.key })}
+        experimentId={detail.id}
+        recordRev={detail.rev}
         availability={graph.availability}
       />
     </aside>

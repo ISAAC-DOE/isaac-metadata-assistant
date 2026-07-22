@@ -193,6 +193,8 @@ function LoadedWorkbench({
 
       <AssistantPanel
         {...compose({ context: 'review', bundle })}
+        experimentId={id}
+        recordRev={detail.rev}
         availability={graph.availability}
       />
     </aside>

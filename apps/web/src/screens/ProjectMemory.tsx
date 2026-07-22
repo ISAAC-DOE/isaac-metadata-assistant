@@ -84,6 +84,7 @@ export function ProjectMemory() {
           <div className="card placeholder-card memory-assistant-card">
             <AssistantPanel
               {...compose({ context: 'memory', graph: graph.data })}
+              experimentId="project-memory"
               availability={graph.data.availability}
             />
           </div>

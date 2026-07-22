@@ -247,6 +247,8 @@ function LoadedCompletion({
           pending,
           selectedPendingId: currentItem?.id,
         })}
+        experimentId={detail.id}
+        recordRev={detail.rev}
         // P25.7: this screen loads only {detail, pending} — it never consults the
         // memory/graph plane, so it makes NO memory-availability claim. We pass
         // no `availability`, and the panel then renders neither the `memory:`
