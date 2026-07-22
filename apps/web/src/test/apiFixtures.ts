@@ -833,6 +833,9 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
     [`GET ${base}/evidence`]: { body: evidenceResponse },
+    // P29.4 — the AgentContext evidence-support input the shared record-session
+    // owner fetches on every record screen (not just S5).
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
@@ -986,6 +989,8 @@ export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRo
     [`POST ${base}/validate`]: { body: validateReadyDryRun },
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
+    // P29.4 — the shared record-session owner's AgentContext evidence input.
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
@@ -1164,6 +1169,8 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
     },
     [`GET ${base}/evidence`]: { body: evidenceExported },
     [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
+    // P29.4 — the shared record-session owner's AgentContext pending input.
+    [`GET ${base}/pending`]: { body: { pending: [] } },
     [`GET ${base}/artifacts`]: { body: { ...artifactsExported, record: { ...artifactsExported.record, record_id: id }, sidecar: { ...artifactsExported.sidecar, record_id: id } } },
     [`GET ${base}/source-preview?source=mock_campaign.csv`]: { body: sourcePreviewCsv },
     [`GET ${base}/source-preview?source=raw_scan_listing.txt`]: { body: sourcePreviewListing },
@@ -1304,6 +1311,8 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
     [`POST ${base}/validate`]: { body: validateExported },
     [`POST ${base}/audit`]: { body: auditExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
+    // P29.4 — the shared record-session owner's AgentContext evidence input.
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsExported },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };

@@ -16,7 +16,8 @@ import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
-import { useRecordSync } from '../lib/useRecordSync';
+import { useRecordSession } from '../lib/useRecordSession';
+import type { AgentContext } from '../lib/assistantAgent';
 import {
   draftGroupsToFieldGroups,
   toAdvisoryResult,
@@ -38,13 +39,17 @@ export function RecordWorkbench() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getRecordBundle(id), [id]);
 
-  // P27.6 — read-only surface: on a change signal, silently refetch the bundle
-  // (never blanks to loading). The fetched bundle stays authoritative; the
-  // poller only tells us WHEN to refresh. Enabled only once we have a version.
-  const version = bundle.status === 'data' ? bundle.data.detail.version : undefined;
-  const { degraded } = useRecordSync(id, version, {
-    onChanged: () => bundle.reloadSilent(),
+  // P29.4 — the ONE shared record-session owner for this record: the single
+  // poller + the authoritative version + the live P29.3 AgentContext the
+  // assistant reads. On a change signal it invalidates any stale staged proposal
+  // and silently refetches this read-only bundle (never blanks to loading). The
+  // fetched bundle stays authoritative; the poller only tells us WHEN to refresh.
+  const detail = bundle.status === 'data' ? bundle.data.detail : undefined;
+  const session = useRecordSession(id, {
+    detail,
+    onChange: () => bundle.reloadSilent(),
   });
+  const degraded = session.syncDegraded;
 
   if (bundle.status !== 'data') {
     return (
@@ -64,7 +69,14 @@ export function RecordWorkbench() {
   }
 
   return (
-    <LoadedWorkbench id={id} bundle={bundle.data} degraded={degraded} onManualRefresh={bundle.reload} />
+    <LoadedWorkbench
+      id={id}
+      bundle={bundle.data}
+      degraded={degraded}
+      agentContext={session.context}
+      agentDegraded={session.degraded}
+      onManualRefresh={bundle.reload}
+    />
   );
 }
 
@@ -72,11 +84,15 @@ function LoadedWorkbench({
   id,
   bundle,
   degraded,
+  agentContext,
+  agentDegraded,
   onManualRefresh,
 }: {
   id: string;
   bundle: RecordBundle;
   degraded: boolean;
+  agentContext: AgentContext | undefined;
+  agentDegraded: boolean;
   onManualRefresh: () => void;
 }) {
   const navigate = useNavigate();
@@ -196,6 +212,8 @@ function LoadedWorkbench({
         experimentId={id}
         recordRev={detail.rev}
         availability={graph.availability}
+        agentContext={agentContext}
+        degraded={agentDegraded}
       />
     </aside>
   );

@@ -15,7 +15,8 @@ import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
-import { useRecordSync } from '../lib/useRecordSync';
+import { useRecordSession } from '../lib/useRecordSession';
+import type { AgentContext } from '../lib/assistantAgent';
 import {
   citedLinesForEntry,
   evidenceEntriesToTrail,
@@ -36,11 +37,15 @@ export function EvidenceExplorer() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getEvidenceBundle(id), [id]);
 
-  // P27.6 — read-only surface: silently refetch on a change signal (never blanks).
-  const version = bundle.status === 'data' ? bundle.data.detail.version : undefined;
-  const { degraded } = useRecordSync(id, version, {
-    onChanged: () => bundle.reloadSilent(),
+  // P29.4 — the ONE shared record-session owner (single poller + authoritative
+  // version + live AgentContext). Read-only surface: silently refetch on a change
+  // signal (never blanks); the owner also invalidates any stale staged proposal.
+  const detail = bundle.status === 'data' ? bundle.data.detail : undefined;
+  const session = useRecordSession(id, {
+    detail,
+    onChange: () => bundle.reloadSilent(),
   });
+  const degraded = session.syncDegraded;
 
   if (bundle.status !== 'data') {
     return (
@@ -63,6 +68,8 @@ export function EvidenceExplorer() {
       id={id}
       data={bundle.data}
       degraded={degraded}
+      agentContext={session.context}
+      agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
     />
   );
@@ -72,11 +79,15 @@ function LoadedEvidence({
   id,
   data,
   degraded,
+  agentContext,
+  agentDegraded,
   onManualRefresh,
 }: {
   id: string;
   data: EvidenceBundle;
   degraded: boolean;
+  agentContext: AgentContext | undefined;
+  agentDegraded: boolean;
   onManualRefresh: () => void;
 }) {
   const { detail, evidence, artifacts, graph, sourcePreviews, classification } = data;
@@ -148,6 +159,8 @@ function LoadedEvidence({
         experimentId={detail.id}
         recordRev={detail.rev}
         availability={graph.availability}
+        agentContext={agentContext}
+        degraded={agentDegraded}
       />
     </aside>
   );

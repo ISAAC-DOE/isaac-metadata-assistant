@@ -200,6 +200,19 @@
   color: var(--text-tertiary);
   line-height: 1.5;
 }
+/* P29.4 — honest, manual-first degraded state. Subordinate tint (never a verdict
+   color); it only tells the reader the assistant cannot verify the record right
+   now, and never disables the surrounding manual workflow. */
+.assistant-degraded {
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
 .assistant-suggested-eyebrow {
   margin: 16px 0 8px;
 }

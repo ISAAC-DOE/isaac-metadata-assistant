@@ -18,7 +18,7 @@ import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
-import { useRecordSync } from '../lib/useRecordSync';
+import { useRecordSession } from '../lib/useRecordSession';
 import { answerValuePreview, pendingItemToBlocker } from '../lib/adapt';
 import type {
   ApiExperimentDetail,
@@ -121,9 +121,17 @@ function LoadedCompletion({
   // backstop. Refresh (below) re-loads via the parent and re-adopts the fresh
   // version, which remounts this component and clears the banner + staged input.
   const [changedElsewhere, setChangedElsewhere] = useState(false);
-  const { degraded } = useRecordSync(id, currentVersion, {
-    onChanged: () => setChangedElsewhere(true),
+  // P29.4 — the ONE shared record-session owner. This surface holds STAGED,
+  // unsent input, so the owner's `onChange` must ONLY raise the proactive banner
+  // (never auto-refetch / auto-merge, which would discard the input). The owner
+  // still invalidates any stale staged assistant proposal and exposes the SAME
+  // authoritative version/AgentContext the assistant reads, so the assistant and
+  // this form can never disagree on the current revision.
+  const session = useRecordSession(id, {
+    detail: { ...detail, version: currentVersion },
+    onChange: () => setChangedElsewhere(true),
   });
+  const degraded = session.syncDegraded;
 
   const total = answered.length + pending.length;
   const remaining = pending.length;
@@ -249,6 +257,8 @@ function LoadedCompletion({
         })}
         experimentId={detail.id}
         recordRev={detail.rev}
+        agentContext={session.context}
+        degraded={session.degraded}
         // P25.7: this screen loads only {detail, pending} — it never consults the
         // memory/graph plane, so it makes NO memory-availability claim. We pass
         // no `availability`, and the panel then renders neither the `memory:`

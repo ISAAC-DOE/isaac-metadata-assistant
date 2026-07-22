@@ -19,7 +19,7 @@ import { LABELS } from '../lib/labels';
 import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
 import { api, ApiError } from '../lib/api';
-import { useRecordSync } from '../lib/useRecordSync';
+import { useRecordSession } from '../lib/useRecordSession';
 import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
 import type {
   ApiExportResponse,
@@ -125,12 +125,18 @@ function LoadedExport({
     setCurrentVersion(detail.version);
   }, [detail.version]);
 
-  // P27.6 — no text input on this surface, so a change signal can safely trigger
-  // a SILENT refetch (updates the readiness signals without blanking). Export
-  // stays ETag-guarded, so a stale export still gets a 412 as the hard backstop.
-  const { degraded } = useRecordSync(id, currentVersion, {
-    onChanged: () => onRefresh(),
+  // P29.4 — the ONE shared record-session owner. No text input on this surface,
+  // so a change signal can safely trigger a SILENT refetch (updates the readiness
+  // signals without blanking); the owner also invalidates any stale staged
+  // proposal. Export stays ETag-guarded, so a stale export still gets a 412 as
+  // the hard backstop. The poller tracks the held If-Match token (`currentVersion`,
+  // which advances on export before the refetch remounts), so we hand the owner a
+  // detail carrying it.
+  const session = useRecordSession(id, {
+    detail: { ...detail, version: currentVersion },
+    onChange: () => onRefresh(),
   });
+  const degraded = session.syncDegraded;
 
   // --- artifact "View JSON" modal: a real, focus-trapping dialog --------------
   const modalRef = useRef<HTMLDivElement>(null);
@@ -327,6 +333,8 @@ function LoadedExport({
         recordRev={detail.rev}
         availability={graph.availability}
         note={ROUTE_TO_CLI_NOTE}
+        agentContext={session.context}
+        degraded={session.degraded}
       />
     </aside>
   );

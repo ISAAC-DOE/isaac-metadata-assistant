@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { api, RESET_CONFIRMATION } from '../lib/api';
+import { clearAllSessions } from '../lib/assistantSession';
 import { useFetch } from '../lib/useFetch';
 import { LABELS } from '../lib/labels';
 import { TriangleAlert } from './icons';
@@ -81,6 +82,12 @@ export function ResetDemoDialog({ onResetComplete }: { onResetComplete: () => vo
       .resetDemo('execute', RESET_CONFIRMATION)
       .then((res) => {
         if (res.status === 'ok') {
+          // P29.4 — the demo state was rebuilt, so every ephemeral assistant
+          // session (conversation + staged proposals) is now grounded in records
+          // that no longer exist. Clear them all so a stale proposal can never be
+          // confirmed after a reset, and no prior conversation leaks into the
+          // fresh canonical scenarios.
+          clearAllSessions();
           setExecuteState('done');
           onResetComplete(); // re-fetch the list from the backend
           closeDialog();

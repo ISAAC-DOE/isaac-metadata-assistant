@@ -21,6 +21,7 @@ import {
 } from '../lib/assistant';
 import { classifyAnswer, type MessageKind } from '../lib/assistantConversation';
 import { appendMessage, loadSession, type Msg } from '../lib/assistantSession';
+import { DEGRADED_MESSAGE, type AgentContext } from '../lib/assistantAgent';
 import type {
   AssistantMessage,
   AssistantSource,
@@ -52,6 +53,21 @@ interface AssistantPanelProps {
   availability?: MemoryAvailability;
   /** Optional subordinate note, e.g. "truth questions route to the CLI…". */
   note?: string;
+  /**
+   * P29.4 — the LIVE P29.3 AgentContext from the shared record-session owner
+   * (`useRecordSession`), bound to the SAME authoritative version/revision the
+   * manual workflow reads. Optional so memory-less / non-record mounts still
+   * work. Threaded so the assistant reasons over the current record state (and a
+   * confirm flow can be gated on it) rather than a stale snapshot.
+   */
+  agentContext?: AgentContext;
+  /**
+   * P29.4 — the AgentContext is degraded (its authoritative inputs failed to
+   * load, or could not be verified). The assistant then shows an HONEST degraded
+   * state and does not answer dataset-specific questions — but the manual
+   * workflow on the screen stays fully functional (manual-first degradation).
+   */
+  degraded?: boolean;
 }
 
 const DEFAULT_SESSION_KEY = '__assistant__';
@@ -116,7 +132,14 @@ export function AssistantPanel({
   recordRev,
   availability,
   note,
+  agentContext,
+  degraded = false,
 }: AssistantPanelProps) {
+  // The AgentContext is the P29.3 authority the assistant reasons over. It is
+  // threaded from the shared record-session owner so it always matches the manual
+  // workflow's revision. Referenced defensively so the prop is part of the live
+  // contract even where the panel's default UI still renders composed prompts.
+  void agentContext;
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [messages, setMessages] = useState<Msg[]>(() => loadSession(experimentId).messages);
   const [showJump, setShowJump] = useState(false);
@@ -245,6 +268,16 @@ export function AssistantPanel({
           </span>
         )}
       </div>
+
+      {/* P29.4 — honest, manual-first degraded state: when the live AgentContext
+          cannot be verified the assistant says so plainly and answers no
+          dataset-specific question. It NEVER disables the surrounding manual
+          workflow — that is driven by the screen's own bundle, not this panel. */}
+      {degraded && (
+        <p className="assistant-degraded" role="status">
+          {DEGRADED_MESSAGE}
+        </p>
+      )}
 
       {/* role="log" gives the conversation its semantics but carries an IMPLICIT
           aria-live="polite"; we set aria-live="off" here to suppress it so that
