@@ -224,6 +224,10 @@ freshness: "fresh|stale|missing", disclaimer: "memory plane — not a validity v
   an explicit output dir.
 - **Ephemeral**: drafts in progress, completion answers, demo output (`/tmp/isaac-demo`-style),
   validation/audit responses. These can be regenerated deterministically and need not persist.
+  > **Deployment note (2026-07-21, P27.0):** on the hosted Railway service the workspace is **not**
+  > ephemeral — `ISAAC_UI_WORKSPACE` points at a persistent Railway volume mounted at
+  > `/data/isaac-workspace`, so experiment state survives restarts/redeploys. This bullet describes the
+  > design-era regeneration property, not hosted persistence. See `docs/deployment.md`.
 - **Persisted (only on explicit user action)**: an exported record + sidecar the user chooses to keep,
   written into the workspace dir. Exported filenames follow the core convention `<ULID>.json` +
   `<ULID>.evidence.json`.

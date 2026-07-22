@@ -83,6 +83,15 @@ Retain the current hosted workspace as: **synthetic-only · shared · ephemeral 
 after restart · not presented as durable or per-user.** Do **not** add a production database or a
 Railway volume merely to make the demo look more complete.
 
+> **CORRECTION (2026-07-21, P27.0 — additive, does not rewrite the 2026-07-20 decision).** The
+> "ephemeral · no volume" characterization above was **inaccurate**: a Railway volume
+> (`isaac-metadata-assistant-volume`, mounted at `/data/isaac-workspace`) was already provisioned in
+> Phase 20 and is used via `ISAAC_UI_WORKSPACE=/data/isaac-workspace`. The hosted workspace **is
+> persistent** (verified read-only via `railway status`/`railway variables`). No new volume/DB was
+> added; the earlier text simply mischaracterized existing infra. The synthetic-only · shared ·
+> honest-reseed · not-per-user posture is unchanged. Authoritative going forward:
+> `docs/deployment.md` and `2026-07-21-post-phase-26-master-execution-ledger.md` (§4, P27.0).
+
 ---
 
 ## 5. Richer synthetic seed (required)

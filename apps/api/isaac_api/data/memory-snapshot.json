@@ -10808,7 +10808,7 @@
       },
       {
         "path": "docs/ui-handoff/technical-architecture.md",
-        "sha256": "37b4cefb4e120d16333ab69f46deaa84c09f9e1b695b2ff0a9d8fc0cb957840f"
+        "sha256": "e033e9b82ab05f1e330b6ba471e0403da555d83a982f7bfb8c3fe4d2790f2682"
       },
       {
         "path": "docs/ui-handoff/user-workflows.md",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "774e804513eb6629bb337843ec41a6fd757d6a7dcf1f0a0b4b6da3838eba93be"
+    "served_manifest_fingerprint": "4a5c084c3475d5da81921288a40548eb2c122c7c5e4a153a4a21eded1588c89a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
