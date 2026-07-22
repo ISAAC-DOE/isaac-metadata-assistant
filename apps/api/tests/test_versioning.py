@@ -58,6 +58,12 @@ def _fresh_draft():
     return ws.build_draft(ws.CSV_PATH, ws.LISTING_PATH)
 
 
+def _if_match(client, exp_id):
+    """The current authoritative ETag as an If-Match header (strict preconditions)."""
+    v = client.get(f"/api/experiments/{exp_id}").json()["version"]
+    return {"If-Match": f'"{v}"'}
+
+
 # --- 1. new experiment starts at rev 0 with updated_utc set -------------------
 
 
@@ -250,7 +256,10 @@ def test_reset_yields_canonical_rev_zero(tmp_ws):
 
 def test_export_bumps_rev_and_persists(client):
     # the READY seed has 0 pending and passes the dry-run export
-    r = client.post(f"/api/experiments/{ws.SEED_READY_ID}/export")
+    r = client.post(
+        f"/api/experiments/{ws.SEED_READY_ID}/export",
+        headers=_if_match(client, ws.SEED_READY_ID),
+    )
     assert r.status_code == 200
     body = r.json()
     assert body.get("ok") is True
@@ -272,13 +281,22 @@ def test_http_answers_noop_reentry_does_not_bump_rev(client):
     payload["answers"]["series"] = answers.get("series")
     payload["answers"]["descriptor"] = answers.get("descriptor")
 
-    first = client.post(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers", json=payload)
+    first = client.post(
+        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
+        json=payload,
+        headers=_if_match(client, ws.SEED_NEW_DRAFT_ID),
+    )
     assert first.status_code == 200
     rev_after_first = ws.load_experiment(ws.SEED_NEW_DRAFT_ID).rev
     assert rev_after_first >= 1
 
-    # re-submit the IDENTICAL answers — authoritative draft does not change
-    second = client.post(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers", json=payload)
+    # re-submit the IDENTICAL answers — authoritative draft does not change.
+    # Fetch a FRESH ETag: the first submission bumped rev, so the prior token is stale.
+    second = client.post(
+        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
+        json=payload,
+        headers=_if_match(client, ws.SEED_NEW_DRAFT_ID),
+    )
     assert second.status_code == 200
     rev_after_second = ws.load_experiment(ws.SEED_NEW_DRAFT_ID).rev
     assert rev_after_second == rev_after_first  # no bump on identical re-entry

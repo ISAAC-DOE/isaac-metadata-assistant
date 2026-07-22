@@ -25,6 +25,12 @@ def client(tmp_path, monkeypatch):
 # --- helpers ------------------------------------------------------------------
 
 
+def _if_match(client, exp_id: str) -> dict:
+    """The current authoritative ETag as an If-Match header (strict preconditions)."""
+    v = client.get(f"/api/experiments/{exp_id}").json()["version"]
+    return {"If-Match": f'"{v}"'}
+
+
 def _seed_id(client) -> str:
     """The canonical New Draft scenario id (raw, 5-pending) among the five seeds.
 
@@ -49,6 +55,7 @@ def _complete_seed(client, exp_id: str) -> dict:
     resp = client.post(
         f"/api/experiments/{exp_id}/answers",
         json={"answers": answers, "confirmed_by_user": True},
+        headers=_if_match(client, exp_id),
     )
     assert resp.status_code == 200
     return resp.json()
@@ -191,6 +198,7 @@ def test_blank_answers_not_applied(client):
     resp = client.post(
         f"/api/experiments/{exp_id}/answers",
         json={"answers": {"series": "", "descriptor": None}, "confirmed_by_user": True},
+        headers=_if_match(client, exp_id),
     )
     assert resp.status_code == 200
     # Nothing was answerable -> all 5 blockers remain.
@@ -203,7 +211,7 @@ def test_blank_answers_not_applied(client):
 def test_export_success_writes_record_and_sidecar(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    resp = client.post(f"/api/experiments/{exp_id}/export")
+    resp = client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
@@ -221,14 +229,18 @@ def test_export_success_writes_record_and_sidecar(client):
 def test_export_second_time_is_409(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    assert client.post(f"/api/experiments/{exp_id}/export").json()["ok"] is True
-    resp = client.post(f"/api/experiments/{exp_id}/export")
+    assert (
+        client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
+        .json()["ok"]
+        is True
+    )
+    resp = client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     assert resp.status_code == 409
 
 
 def test_export_refused_when_incomplete(client):
     exp_id = _seed_id(client)  # seed still has 5 open blockers
-    resp = client.post(f"/api/experiments/{exp_id}/export")
+    resp = client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is False
@@ -258,7 +270,7 @@ def test_validate_dry_run_fail_then_pass(client):
 def test_validate_on_exported_record(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    client.post(f"/api/experiments/{exp_id}/export")
+    client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     body = client.post(f"/api/experiments/{exp_id}/validate").json()
     assert body["dry_run"] is False
     assert body["ok"] is True
@@ -284,7 +296,7 @@ def test_validate_corrupt_draft_returns_errors_not_exception(client, tmp_path):
 def test_audit_full_coverage_after_export(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    client.post(f"/api/experiments/{exp_id}/export")
+    client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     body = client.post(f"/api/experiments/{exp_id}/audit").json()
     assert len(body["records"]) == 1
     rec = body["records"][0]
@@ -310,7 +322,7 @@ def test_audit_empty_before_export(client):
 def test_warnings_advisory_non_gating_with_no_links(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    client.post(f"/api/experiments/{exp_id}/export")
+    client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     body = client.get(f"/api/experiments/{exp_id}/warnings").json()
     assert body["advisory"] is True
     assert body["gating"] is False
@@ -335,7 +347,7 @@ def test_evidence_pre_and_post_export(client):
     assert all({"path", "value", "status", "evidence"} <= set(e) for e in pre)
 
     _complete_seed(client, exp_id)
-    client.post(f"/api/experiments/{exp_id}/export")
+    client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     post = client.get(f"/api/experiments/{exp_id}/evidence").json()["evidence"]
     assert post
     blob = json.dumps(post)
@@ -397,7 +409,9 @@ def test_artifacts_before_export_are_null(client):
 def test_artifacts_after_export_returns_record_and_sidecar(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    export = client.post(f"/api/experiments/{exp_id}/export").json()
+    export = client.post(
+        f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id)
+    ).json()
     body = client.get(f"/api/experiments/{exp_id}/artifacts").json()
     # Both payloads present and distinct.
     assert body["record"] is not None and body["sidecar"] is not None

@@ -26,9 +26,9 @@ unquoted token) AND set the strong ``ETag`` header. The frontend echoes the
 authoritative token; it never reconstructs one.
 
 If-Match on the two scientific-record mutations (``/answers``, ``/export``):
-  * absent           -> ACCEPTED in P27.3 (one-release compatibility grace) with a
-                        non-noisy server deprecation header; becomes 428 in the
-                        later strict slice.
+  * absent           -> 428 precondition_required (the P27.3 one-release grace has
+                        been retired; the full strict contract is pinned in
+                        test_strict_precondition.py).
   * ``*``            -> matches iff the record exists (it does) -> proceed.
   * strong match     -> proceed.
   * strong mismatch  -> 412 stale_write (typed body; current ETag echoed).
@@ -231,41 +231,21 @@ def test_reset_preserves_untouched_canonical_token(client):
 
 
 # =============================================================================
-# 3. Compatibility grace (P27.3) — missing If-Match accepted, signalled
+# 3. Strict preconditions (P27.5) — missing If-Match rejected 428
 # =============================================================================
+#
+# The P27.3 one-release compatibility grace is retired: a version-less mutation
+# is no longer accepted. (The full strict contract lives in
+# test_strict_precondition.py; this single case guards the behaviour flip here.)
 
 
-def test_missing_if_match_is_accepted_during_grace(client):
+def test_missing_if_match_is_rejected_428(client):
     r = client.post(
         f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
         json=_real_answers_payload(),
     )
-    assert r.status_code == 200, "P27.3 temporarily accepts a version-less mutation"
-
-
-def test_missing_if_match_carries_deprecation_signal(client):
-    r = client.post(
-        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
-        json=_real_answers_payload(),
-    )
-    assert r.status_code == 200
-    signal = r.headers.get("X-ISAAC-Deprecation", "")
-    assert "if-match" in signal.lower(), (
-        "a version-less mutation must carry a non-noisy deprecation signal header"
-    )
-
-
-def test_if_match_present_does_not_carry_deprecation_signal(client):
-    token = _token_of(client, ws.SEED_NEW_DRAFT_ID)
-    r = client.post(
-        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
-        json=_real_answers_payload(),
-        headers={"If-Match": _quote(token)},
-    )
-    assert r.status_code == 200
-    assert not r.headers.get("X-ISAAC-Deprecation"), (
-        "a properly-versioned mutation must NOT be flagged deprecated"
-    )
+    assert r.status_code == 428, "the grace is retired: a version-less mutation is rejected"
+    assert r.json()["error"] == "precondition_required"
 
 
 # =============================================================================
@@ -596,14 +576,6 @@ def test_no_deprecation_header_on_malformed_400(client):
     )
     assert r.status_code == 400
     assert not r.headers.get("X-ISAAC-Deprecation")
-
-
-def test_export_grace_emits_deprecation_header(client):
-    """The export path, like answers, must flag a version-less mutation during the
-    P27.3 compatibility grace."""
-    r = client.post(f"/api/experiments/{ws.SEED_READY_ID}/export")  # no If-Match
-    assert r.status_code == 200, r.text
-    assert "if-match" in r.headers.get("X-ISAAC-Deprecation", "").lower()
 
 
 def test_if_match_tolerates_trailing_comma(client):

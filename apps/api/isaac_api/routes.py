@@ -60,14 +60,15 @@ def _not_found(experiment_id: str) -> JSONResponse:
     )
 
 
-# --- If-Match precondition (P27.3 optimistic-concurrency contract) ------------
+# --- If-Match precondition (P27.5-strict optimistic-concurrency contract) -----
 #
 # RFC 9110 strong comparison for unsafe methods: only strong quoted validators are
 # accepted; weak (``W/"..."``) and malformed values are rejected 400. A mismatch is
 # 412 stale_write (with the current ETag echoed so the client refreshes in one
-# hop). A missing If-Match is temporarily ACCEPTED during the P27.3 compatibility
-# grace and flagged with a non-noisy deprecation header. No filesystem path,
-# secret, or raw record content ever appears in a token or error body.
+# hop). A MISSING If-Match is now rejected 428 precondition_required — the
+# one-release compatibility grace is retired (``vc.precondition_required()`` is
+# True). No filesystem path, secret, or raw record content ever appears in a token
+# or error body.
 
 #: A strong ETag validator: a double-quoted opaque token, no ``W/`` prefix.
 _STRONG_TAG_RE = re.compile(r'^"[^"\\]+"$')
@@ -81,6 +82,13 @@ def _expected_rev_from_token(token: str | None) -> int | None:
         return int(token.rsplit(".", 1)[-1])
     except (TypeError, ValueError):
         return None
+
+
+def _precondition_required(exp) -> JSONResponse:
+    return JSONResponse(
+        status_code=428,
+        content={"error": "precondition_required", "experiment_id": exp.id},
+    )
 
 
 def _malformed_if_match(exp) -> JSONResponse:
@@ -111,34 +119,37 @@ def _stale_write(exp, expected_token: str | None) -> JSONResponse:
     return resp
 
 
-def _check_if_match(if_match: str | None, exp) -> tuple[JSONResponse | None, bool]:
+def _check_if_match(if_match: str | None, exp) -> JSONResponse | None:
     """Classify an ``If-Match`` header against the loaded experiment.
 
-    Returns ``(error_response_or_None, used_compat_grace)``:
-      * ``(None, True)``  — header absent: proceed under the P27.3 grace.
-      * ``(None, False)`` — ``*`` (resource exists) or a strong match: proceed.
-      * ``(400, False)``  — any weak or malformed tag: whole header malformed.
-      * ``(412, False)``  — all tags valid strong validators but none match.
+    Returns an error ``JSONResponse`` to short-circuit, or ``None`` to proceed:
+      * absent      -> 428 precondition_required (grace retired; always enforced).
+      * ``*``       -> None (matches iff the resource exists — and we loaded it).
+      * strong match-> None (proceed).
+      * weak/malformed/empty-list -> 400 (whole header malformed).
+      * all valid strong validators but none match -> 412 stale_write.
     """
     if if_match is None:
-        return None, True
+        if vc.precondition_required():
+            return _precondition_required(exp)
+        return None
     raw = if_match.strip()
     if raw == "*":
-        return None, False  # matches iff the resource exists — and we loaded it
+        return None  # matches iff the resource exists — and we loaded it
     # RFC 9110 #-list: recipients ignore empty list elements, so a trailing comma
     # or an empty element is tolerated. A header that reduces to NO tags (e.g. just
     # "," or whitespace) is malformed.
     tags = [t for t in (part.strip() for part in raw.split(",")) if t]
     if not tags:
-        return _malformed_if_match(exp), False
+        return _malformed_if_match(exp)
     for tag in tags:
         if tag.startswith("W/") or not _STRONG_TAG_RE.match(tag):
-            return _malformed_if_match(exp), False
+            return _malformed_if_match(exp)
     if any(tag == exp.etag() for tag in tags):
-        return None, False
+        return None
     # All valid strong validators, none matched -> stale. Report the client's first.
     first_token = tags[0][1:-1] if tags else None
-    return _stale_write(exp, first_token), False
+    return _stale_write(exp, first_token)
 
 
 # --- summary / detail serialization -------------------------------------------
@@ -478,7 +489,7 @@ def post_answers(
                     "message": "confirmed_by_user must be true to apply answers.",
                 },
             )
-        err, used_grace = _check_if_match(if_match, exp)
+        err = _check_if_match(if_match, exp)
         if err is not None:
             return err
         timestamp = _now_iso()
@@ -495,10 +506,6 @@ def post_answers(
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
         response.headers["ETag"] = exp.etag()
-        if used_grace:
-            # When vc.precondition_required() becomes True, a missing If-Match
-            # returns 428 here instead of proceeding under the grace.
-            response.headers[vc.DEPRECATION_HEADER] = vc.DEPRECATION_VALUE
         return result
 
 
@@ -533,7 +540,7 @@ def post_export(
         if exp is None:
             return _not_found(experiment_id)  # deleted in the pre-check→lock race window
 
-        err, used_grace = _check_if_match(if_match, exp)
+        err = _check_if_match(if_match, exp)
         if err is not None:
             return err
 
@@ -572,10 +579,6 @@ def post_export(
         }
         payload.update(vc.version_fields(exp))
         response.headers["ETag"] = exp.etag()
-        if used_grace:
-            # When vc.precondition_required() becomes True, a missing If-Match
-            # returns 428 here instead of proceeding under the grace.
-            response.headers[vc.DEPRECATION_HEADER] = vc.DEPRECATION_VALUE
         return payload
 
 

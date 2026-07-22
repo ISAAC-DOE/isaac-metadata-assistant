@@ -11,13 +11,12 @@ to 428. This is a maintainability/rollout-safety slice.
 Pinned here:
   * a module `isaac_api.version_contract` exposes: `VersionEnvelope` (typed
     rev/updated_utc/version), `version_fields(exp)` (the single producer of the
-    envelope dict), `DEPRECATION_HEADER` / `DEPRECATION_VALUE` (the non-noisy
-    missing-If-Match signal), and `precondition_required()` (the ONE grace toggle
-    — False during the P27.3/P27.4 grace; the strict slice flips it after the
-    deployed frontend is verified sending If-Match).
+    envelope dict), and `precondition_required()` (the ONE toggle — now True: the
+    P27.3/P27.4 one-release grace has been retired now that the deployed frontend
+    is verified sending If-Match, so a missing precondition is rejected 428).
   * the three version-bearing responses (detail, answers, export) all serialise
     the SAME envelope shape, and it validates against `VersionEnvelope`.
-  * the grace is a single boolean point, not a scattered magic string.
+  * the precondition state is a single boolean point, not a scattered magic string.
 
 All fixtures synthetic; truth core untouched.
 """
@@ -55,18 +54,16 @@ def test_version_contract_module_exposes_the_contract():
 
     assert hasattr(vc, "VersionEnvelope")
     assert hasattr(vc, "version_fields")
-    assert isinstance(vc.DEPRECATION_HEADER, str) and vc.DEPRECATION_HEADER
-    assert isinstance(vc.DEPRECATION_VALUE, str) and "if-match" in vc.DEPRECATION_VALUE.lower()
     assert hasattr(vc, "precondition_required")
 
 
-def test_precondition_required_is_the_single_grace_toggle():
-    """During the P27.3/P27.4 grace the toggle is OFF (missing If-Match is
-    accepted). It is one boolean function — the single point the strict slice
-    flips — not a scattered constant."""
+def test_precondition_required_is_the_single_toggle():
+    """The one-release grace is retired: the single toggle is now ON, so a missing
+    If-Match on a version-gated mutation is rejected 428. It remains one boolean
+    function — the single enforced-state point — not a scattered constant."""
     from isaac_api import version_contract as vc
 
-    assert vc.precondition_required() is False
+    assert vc.precondition_required() is True
 
 
 def test_version_fields_produces_a_valid_envelope(tmp_path, monkeypatch):
@@ -97,23 +94,18 @@ def test_detail_response_conforms_to_envelope(client):
 def test_answers_and_export_responses_conform_to_envelope(client):
     from isaac_api import version_contract as vc
 
+    def _im(exp_id):
+        v = client.get(f"/api/experiments/{exp_id}").json()["version"]
+        return {"If-Match": f'"{v}"'}
+
     a = client.post(
-        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers", json=_real_answers_payload()
+        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
+        json=_real_answers_payload(),
+        headers=_im(ws.SEED_NEW_DRAFT_ID),
     ).json()
     vc.VersionEnvelope(**{k: a[k] for k in ("rev", "updated_utc", "version")})
 
-    e = client.post(f"/api/experiments/{ws.SEED_READY_ID}/export").json()
+    e = client.post(
+        f"/api/experiments/{ws.SEED_READY_ID}/export", headers=_im(ws.SEED_READY_ID)
+    ).json()
     vc.VersionEnvelope(**{k: e[k] for k in ("rev", "updated_utc", "version")})
-
-
-# --- 3. the deprecation signal is the module's named value --------------------
-
-
-def test_missing_if_match_uses_the_named_deprecation_signal(client):
-    from isaac_api import version_contract as vc
-
-    r = client.post(
-        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers", json=_real_answers_payload()
-    )
-    assert r.status_code == 200
-    assert r.headers.get(vc.DEPRECATION_HEADER) == vc.DEPRECATION_VALUE
