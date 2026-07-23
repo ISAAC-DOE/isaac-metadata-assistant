@@ -10292,7 +10292,7 @@
       },
       {
         "path": "README.md",
-        "sha256": "fd602a1dd8febc217167f272ac70ddb666b733e661452576963fb0b9f8e266c1"
+        "sha256": "ef2673ed3e3dd0dd860fcc49145eb17d392e86abf571b0a70d760838f056c2b5"
       },
       {
         "path": "SECURITY.md",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "8233d2738490cbcd76f95b03bcafd7d1c5d78ca50c128a16cd1ced257434cc69"
+    "served_manifest_fingerprint": "f000d3f5115220a9a359255a096dc83daf1dd2139ef1f4b1dad55a061c1effeb"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -1,10 +1,11 @@
 # Phase 32 — Issue Register (initial seed)
 
-Status: **OPEN / in progress.** Created 2026-07-23 at HEAD `265e23f` (P31.3 shipped, Phase 31 not yet
-closed). This register seeds Phase 32 with the **known carried-forward findings** from the independent
-reviews, prior-phase QA caveats, and a bounded read-only codebase hygiene grep. It is NOT a completed
-whole-codebase audit — the exhaustive audit + fixes proceed as Phase 32 slices, each independently
-reviewed. Nothing here is fabricated; each row cites concrete evidence.
+Status: **CLOSED 2026-07-23** at HEAD `058fccc` (see the Phase 32 Closure section at the end).
+Created 2026-07-23 at HEAD `265e23f` (P31.3 shipped, Phase 31 not yet
+closed). This register seeded Phase 32 with the **known carried-forward findings** from the independent
+reviews, prior-phase QA caveats, and a bounded read-only codebase hygiene grep, then grew into the full
+whole-codebase audit + fixes across slices S1–S6, each independently reviewed. Nothing here is
+fabricated; each row cites concrete evidence.
 
 Orchestrator this session: **Opus 4.8** (Fable 5 unconfirmed in-account; ratified fallback per CLAUDE.md
 §17). Implementation is delegated to Opus/Sonnet subagents; subagents do not commit/push.
@@ -128,3 +129,76 @@ offline/degraded on canonical data) beyond the CSV surface already QA'd; static 
 (after code+docs stabilize); narrow-viewport responsive **human** check (automation renders at fixed
 ~1483px — see §C). Each implementation slice: test-first, affected full suite, snapshot/R4.3, independent
 Opus review, hosted QA when user-visible, ≤5 subagents, subagents never commit.
+
+---
+
+## Phase 32 Closure (CLOSED 2026-07-23 @ `058fccc`)
+
+**Verdict: SHIP.** Final independent Opus review (fresh reviewer, did not implement any slice) over the
+cumulative range `266340e..058fccc`: **0 Critical, 0 Important**; every register disposition verified
+against the actual code; both audit corrections (FE-1 reachable-for-400, BK-3 buffer-already-bounded)
+independently confirmed accurate.
+
+### Slice commits (each: test-first → focused + full suite → tsc/build → snapshot regen if manifest-listed → independent Opus review → commit → push → exact-HEAD CI green)
+- **S1** `a93ea0a` — TC-1 CI-stability (5 `await findByText` fixes; sibling B1 `e45db20`).
+- **S2** `bf85578` — FE-2 a11y (`tabIndex={-1}` on the hidden CSV input + 3 tests).
+- **S3** `225bcb4` — documentation truth (TC-4/5/6/7, TR-1) + register/ledger reconciliation.
+- **S4** `3ccfd10` — FE-4 warning contract + honest render; FE-1 kept (reachable-for-400, corrected); FE-3 wire-mirror documented; FE-6 accepted.
+- **S5** `058fccc` — BK-1 fixed error message + server log; F3 BOM tests; BK-3 accepted (premise corrected).
+- **S6** (this closure) — README counts 894/550, register closure, ledger, known limitations; final review + verification.
+
+### Final disposition of every finding
+| Finding | Final status |
+|---|---|
+| TC-1 (Important, CI flake) | **FIXED** `a93ea0a` |
+| TC-4 (Important, README counts) | **FIXED** `3ccfd10` doc-truth → finalized **894/550** in S6 |
+| FE-2 / A3 (a11y) | **FIXED** `bf85578` |
+| FE-4 / F1 (warning type + count) | **FIXED** `3ccfd10` |
+| FE-1 / A1 (trusted-body branch) | **FIXED / KEPT** `3ccfd10` — proven reachable for 400; audit "dead" label corrected |
+| FE-3 / A2 (per-item `stale`) | **KEPT** `3ccfd10` — documented wire mirror |
+| FE-6 (zero-evidence panel) | **ACCEPTED / working-as-intended** — honest empty state; documented intentional panel exclusion |
+| BK-1 (defensive `{exc}` echo) | **FIXED** `058fccc` — fixed message + server-side log |
+| BK-3 (bounded-body peak) | **ACCEPTED** `058fccc` — buffer already bounded ≤cap; audit premise corrected |
+| F3 (BOM test) | **FIXED** `058fccc` — 4 pinning tests |
+| F2 (media-type gate) | **NOT A DEFECT** — structural boundary (decode/header/256KB) authoritative; 415 adds no security |
+| FE-5 / F4 (prop staleness) | **NOT A DEFECT** — works via the poller; test-codified |
+| TR-1 (5-vs-7 write-surface shorthand) | **DOCUMENTED** — corrected where cited; reconciliation is read-only |
+| TR-2 (CSV write) | **NOT A DEFECT** — pure read; no `apply_answers`/`save_versioned` in the CSV path |
+| TC-2 (assistant defensive `findByText`) | **DEFERRED** — bare `render`, no router/fetch race; not observed flaking; optional hardening |
+| TC-3 / TC-5 / TC-6 / TC-7 | **FIXED** (S3) |
+| BK-2 (auth-off if key unset) | **DOCUMENTED / hosted-verified** — production returns 401 on protected routes (key IS set on Railway); confirmed by S6 hosted probe |
+| B2 (1 skip marker) | **ACCEPTED** — a `@pytest.mark.skipif(not _REAL_GRAPH.exists())` env-gate on an optional real-graph fixture (`test_memory.py:856`), not a disabled test. No `.only`, no unconditional `.skip`, no vitest skips. |
+| C1 (two-window live-sync) | **HUMAN-ONLY** — CDP hidden-tab throttling; unit-covered; not claimed hosted-observed |
+| C2 (exported-artifact stale) | **HUMAN-ONLY / documentation** — not UI-reachable (read-only exports) |
+| C3 (degraded/insufficient states) | **DOCUMENTATION** — unit-verified; not in canonical seed |
+| C4 (`absent_from_record` hosted) | **HUMAN-ONLY** — unreachable on the canonical seed (all FIELD_MAP paths populated); unit-covered |
+
+**Zero unresolved Critical. Zero unresolved Important.** Residual items are Minor-deferred (TC-2),
+accepted-with-rationale (FE-6, BK-3, F2, FE-5, TR-2, B2, BK-2), or honestly-scoped human-only (C1/C2/C4)
+and narrow-viewport responsive.
+
+### Final verification (clean tree @ `058fccc`)
+Backend **894 passed** · frontend **550 passed** · tsc 0 · Vite build clean · snapshot `--check` no-drift ·
+committed-snapshot gate 17/17 · synthetic demo byte-identical · `isaac validate --official` PASS v1.05 ·
+evidence audit PASS 33/33 · secret/path/raw-content/`.only`/`.skip`/TODO scans clean · no raw-CSV
+persistence · `examples/` unstaged.
+
+### Hosted verification (read-only, observation-only — no auth capture/replay, no mutation)
+- Railway `/api/health` → `{status: ok, mode: "synthetic-only", commit: "058fccc…"}` — serving the exact
+  final runtime commit in synthetic-only mode.
+- Protected routes (`/api`, `/api/experiments`, `/api/runtime`) → **401** (auth boundary active in prod).
+- Vercel frontend → **200**; the canonical baseline renders exactly: **2/1/1/1** (Needs Attention 2,
+  In Review 1, Ready to Export 1, Done 1 · exported `01SYNTHXANESSEED0000000005`), "Synthetic" mode chip,
+  "1 ready to export"; console clean (no errors/exceptions).
+- **Human-only (NOT claimed hosted-observed):** the full interactive mutation journey (edit/stale/
+  conflict/export/CSV upload matrix), two-visible-window passive-poll live-sync (C1), `absent_from_record`
+  (C4), and narrow-viewport reflow. These are covered deterministically by the 894 backend + 550 frontend
+  tests (CSV reconciliation matrix, ETag/concurrency, assistant, export, search, degradation); CDP
+  hidden-tab throttling + the observation-only credential rule + the canonical seed prevent visual
+  automation proof. A human two-window session against the deployed demo remains the recommended check.
+
+### Deployment sync (four axes, independently confirmed)
+Local↔GitHub `0/0` clean · GitHub↔CI green · GitHub↔Vercel 200 · GitHub↔Railway serving `058fccc`
+synthetic-only. Service identities unchanged (existing Krish-owned GitHub/Railway/Vercel).
+
+Phase 32 is complete. No new phase started; the next phase requires explicit user approval.

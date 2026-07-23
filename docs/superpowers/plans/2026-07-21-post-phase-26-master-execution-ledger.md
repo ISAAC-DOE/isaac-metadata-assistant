@@ -707,6 +707,36 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
     gate green). Independent Opus review = SHIP. No §13 truth-path file, no frontend, all fixtures synthetic
     (the fake path string in the BK-1 test is the negative input proving the no-leak guard, not a real path).
 
+- **P32 S6 — Phase 32 closure** (2026-07-23 @ `058fccc`): finalized README test counts to **894 Python /
+  550 frontend** (the S3→S5 deferred sequencing); appended the register "Phase 32 Closure" section giving
+  every finding a terminal disposition (0 unresolved Critical, 0 unresolved Important); dispositioned the
+  remaining seeds — B2 = a `@pytest.mark.skipif(not _REAL_GRAPH.exists())` env-gate (correct, not a
+  disabled test), TC-2 deferred (no observed flake), BK-2 documented + hosted-verified (prod returns 401 on
+  protected routes → key IS set). Static Project Memory: the served snapshot (`memory-snapshot.json`) is the
+  committed memory input and was regenerated deterministically per slice (drift --check clean each time);
+  `graphify-out/` is the non-committed navigation plane. Final independent Opus review (fresh reviewer) over
+  `266340e..058fccc` = **SHIP** (0 Critical / 0 Important; both audit corrections verified). Hosted (read-only,
+  observation-only): Railway `/api/health` = `synthetic-only` @ commit `058fccc`; protected routes 401;
+  Vercel 200 with the canonical **2/1/1/1** baseline rendering + console clean. Human-only (not claimed
+  hosted-observed): full interactive mutation journey, two-window live-sync (C1), `absent_from_record` (C4),
+  narrow-viewport — all deterministically covered by 894+550 tests.
+
+## Phase 32 Completion Gate (CLOSED 2026-07-23 @ `058fccc`)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| Whole-codebase audit + issue register | ✅ | `68fb78c` audit; register CLOSED with terminal dispositions for all findings |
+| 0 unresolved Critical / Important | ✅ | final independent review `266340e..058fccc` = SHIP; register closure table |
+| All slices test-first, independently reviewed, CI-green | ✅ | S1 `a93ea0a` · S2 `bf85578` · S3 `225bcb4` · S4 `3ccfd10` · S5 `058fccc` — each exact-HEAD CI success |
+| Truth path untouched / no confirmed-write or authority expansion | ✅ | `git diff --stat 266340e..HEAD` — no §13 file; `src/isaac_records/` absent from range |
+| CSV reconciliation still read-only | ✅ | `csv_ingest.py` no write/mutate; panel has no write control; rev-unchanged tests |
+| Full deterministic verification | ✅ | backend 894 · frontend 550 · tsc 0 · build clean · snapshot no-drift · gate 17/17 · demo byte-identical · official validate PASS v1.05 · evidence audit 33/33 |
+| Data governance (synthetic-only, no raw persistence/leak) | ✅ | secret/path/raw scans clean; no file-write in CSV path; `examples/` unstaged |
+| Deployment (4 axes) | ✅ | Local↔GitHub 0/0 · CI green · Vercel 200 · Railway `058fccc` synthetic-only |
+| Human-only items honestly scoped | ✅ | C1/C2/C4 + narrow-viewport recorded human-only; not claimed hosted-observed |
+
+**Phase 32 = COMPLETE.** No new phase started; the next phase requires explicit user approval.
+
 ## Phase 31 Completion Gate (CLOSED 2026-07-23)
 
 | Criterion | Status | Evidence |

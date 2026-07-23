@@ -36,7 +36,7 @@ Working prototype (`v0.1.0`), **synthetic data only**.
   (ETag/If-Match), export artifacts, and **reconciliation-only** CSV ingestion — upload a synthetic
   campaign sheet and preview each value reconciled against the record as evidence; it **never**
   mutates the official record.
-- **887** passing Python tests plus **545** frontend tests, including a test that the truth plane never imports Graphify.
+- **894** passing Python tests plus **550** frontend tests, including a test that the truth plane never imports Graphify.
 
 **Not built yet**
 
