@@ -134,6 +134,29 @@ describe('CsvReconcilePanel — pre-upload', () => {
   });
 });
 
+// --- FE-2: no phantom tab stop on the hidden file input -----------------------
+
+describe('FE-2 accessibility', () => {
+  it('the hidden file input is removed from the tab order (tabIndex -1)', () => {
+    renderPanel();
+    const input = screen.getByLabelText('Upload a campaign metadata sheet (CSV)');
+    expect(input.tabIndex).toBe(-1);
+  });
+
+  it('the visible "Upload CSV File" button remains keyboard-reachable', () => {
+    renderPanel();
+    const button = screen.getByRole('button', { name: /upload csv file/i });
+    expect(button.tabIndex).toBe(0);
+  });
+
+  it('the hidden input keeps its accessible name and file type', () => {
+    renderPanel();
+    const input = screen.getByLabelText('Upload a campaign metadata sheet (CSV)') as HTMLInputElement;
+    expect(input).toHaveAccessibleName('Upload a campaign metadata sheet (CSV)');
+    expect(input.type).toBe('file');
+  });
+});
+
 // --- upload + reconciliation review -------------------------------------------
 
 describe('CsvReconcilePanel — reconciliation review', () => {

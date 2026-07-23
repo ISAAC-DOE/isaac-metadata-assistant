@@ -159,6 +159,7 @@ export function CsvReconcilePanel({
         accept=".csv,text/csv"
         className="csv-recon-visually-hidden"
         aria-label="Upload a campaign metadata sheet (CSV)"
+        tabIndex={-1}
         onChange={onFileChange}
       />
 
