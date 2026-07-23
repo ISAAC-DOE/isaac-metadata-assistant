@@ -122,11 +122,13 @@ describe('S5 · Evidence & File Preview (live)', () => {
 
   it('mounts the memory-plane graph status chip in the status bar', async () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
-    const { findByText, getByText } = renderAt('/record/demo/evidence');
+    const { findByText, getByText, getByLabelText } = renderAt('/record/demo/evidence');
     await findByText('Direct Fields');
-    // the /graph/status chip (unavailable in this fixture) degrades quietly
-    expect(getByText('Memory: Unavailable')).toBeInTheDocument();
-    expect(getByText('memory plane')).toBeInTheDocument();
+    // the /graph/status chip (unavailable in this fixture) degrades quietly.
+    // P33 S3 (D7): the state is ONE Title-Case text node; the memory-plane
+    // framing moved off the redundant visible label onto the accessible name.
+    expect(getByText('Memory Unavailable')).toBeInTheDocument();
+    expect(getByLabelText(/memory plane, advisory only/i)).toBeInTheDocument();
   });
 });
 
@@ -220,17 +222,19 @@ describe('S5 · grounded assistant (P25.5) — subordinate, guided-only, LLM-fre
 describe('GraphStatusChip shows the availability axis, never implies validation', () => {
   it('renders Available / Unavailable with the memory-plane note', () => {
     for (const [availability, label] of [
-      ['available', 'Available'],
-      ['unavailable', 'Unavailable'],
+      ['available', 'Memory Available'],
+      ['unavailable', 'Memory Unavailable'],
     ] as const) {
-      const { getByText, container, unmount } = render(
+      const { getByText, getByLabelText, container, unmount } = render(
         <GraphStatusChip
           availability={availability}
           note="Project Memory provides leads and provenance, never a correctness ruling."
         />,
       );
-      expect(getByText(`Memory: ${label}`)).toBeInTheDocument();
-      expect(getByText('memory plane')).toBeInTheDocument();
+      // P33 S3 (D7): single Title-Case state text node (no "Memory:" colon form);
+      // the memory-plane framing now lives in the accessible name, not a redundant label.
+      expect(getByText(label)).toBeInTheDocument();
+      expect(getByLabelText(/memory plane, advisory only/i)).toBeInTheDocument();
       // never a verdict / validity claim on the memory plane
       expect(container.textContent).not.toMatch(/\b(PASS|FAIL|valid|invalid)\b/i);
       unmount();
@@ -239,7 +243,7 @@ describe('GraphStatusChip shows the availability axis, never implies validation'
 
   it('unavailable degrades quietly (not an error state)', () => {
     const { getByText, container } = render(<GraphStatusChip availability="unavailable" />);
-    expect(getByText('Memory: Unavailable')).toBeInTheDocument();
+    expect(getByText('Memory Unavailable')).toBeInTheDocument();
     expect(container.querySelector('.graph-unavailable')).not.toBeNull();
   });
 });

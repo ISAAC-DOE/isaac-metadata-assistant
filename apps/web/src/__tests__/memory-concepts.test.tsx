@@ -23,11 +23,17 @@ import {
  */
 
 function renderScreen() {
-  return render(
+  const view = render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ProjectMemory />
     </MemoryRouter>,
   );
+  // P33 S3 (D6): the Concept Lookup moved behind the "Concepts" internal tab.
+  // These tests exercise the SAME card through the tabbed IA — the tablist
+  // renders immediately (independent of the graph fetch), so open it here. The
+  // ?concept= deep-link test below renders its own tree and auto-selects the tab.
+  fireEvent.click(view.getByRole('tab', { name: 'Concepts' }));
+  return view;
 }
 
 /** The provenance panel <div> for a given row button (sibling inside the row's <li>). */

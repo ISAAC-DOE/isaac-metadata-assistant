@@ -247,6 +247,9 @@ a:hover {
 .dot-processing { background: var(--processing); animation: dot-pulse 1.6s ease-in-out infinite; }
 .dot-idle { background: var(--idle); }
 .dot-memory { background: var(--text-slate); }
+/* Memory available — green confirmation (matches the GraphStatusChip's memory-
+ * plane teal); the "memory: available" text remains the state signal. */
+.dot-memory-available { background: var(--verified-text); }
 
 @keyframes dot-pulse {
   0%, 100% { opacity: 1; }

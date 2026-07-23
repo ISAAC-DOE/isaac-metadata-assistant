@@ -144,7 +144,7 @@ describe('P22D · Project Memory never fabricates a freshness claim', () => {
         <ProjectMemory />
       </MemoryRouter>,
     );
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
     expect(container.textContent).not.toMatch(/project memory: fresh/i);
   });
 

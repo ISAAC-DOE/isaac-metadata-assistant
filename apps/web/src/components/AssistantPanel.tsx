@@ -539,7 +539,10 @@ export function AssistantPanel({
         <span className="assistant-label">{LABELS.assistant}</span>
         {availability && (
           <span className="assistant-memory">
-            <span className="dot dot-memory" aria-hidden="true" />
+            <span
+              className={`dot dot-memory${availability === 'available' ? ' dot-memory-available' : ''}`}
+              aria-hidden="true"
+            />
             memory: {availability}
           </span>
         )}

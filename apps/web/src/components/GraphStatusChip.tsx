@@ -11,11 +11,13 @@ interface GraphStatusChipProps {
 
 // The primary chip reports the memory plane's AVAILABILITY only — the finer
 // axes (Snapshot Integrity / Memory Policy / Indexed Sources) live on the
-// Project Memory screen. Unavailable degrades quietly (neutral, never an
-// error): the memory plane is optional and advisory.
+// Project Memory screen. Only the two REAL backend states exist; unavailable
+// degrades quietly (neutral, never an error): the memory plane is optional and
+// advisory. The state is ONE Title-Case text node — carried by text, never
+// colour alone (the green is confirmation, not the signal).
 const LABEL: Record<MemoryAvailability, string> = {
-  available: 'Available',
-  unavailable: 'Unavailable',
+  available: 'Memory Available',
+  unavailable: 'Memory Unavailable',
 };
 
 /**
@@ -30,11 +32,10 @@ export function GraphStatusChip({ availability, note }: GraphStatusChipProps) {
     <span
       className={`graph-chip graph-${availability}`}
       title={note}
-      aria-label={`Project memory: ${label} — memory plane, advisory only, never a validator`}
+      aria-label={`Project memory ${availability} — memory plane, advisory only, never a validator`}
     >
       <Network size={13} strokeWidth={2} aria-hidden="true" />
-      <span className="graph-chip-label">Memory: {label}</span>
-      <span className="graph-chip-plane">memory plane</span>
+      <span className="graph-chip-label">{label}</span>
     </span>
   );
 }

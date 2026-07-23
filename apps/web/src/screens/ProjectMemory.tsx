@@ -1,6 +1,6 @@
 import './screens.css';
 import '../components/assistant.css';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -42,6 +42,21 @@ import type {
  * per-concept provenance detail from `GET /api/memory/concepts/{id}`. This is
  * the last UI slice for Phase 24 — nothing beyond concepts is built here.
  */
+// P33 S3 (D6) — the three internal sections of Project Memory. These are LOCAL
+// page tabs (never added to the global LeftNav): Overview carries the memory
+// health/status, Sources holds the Source Index, Concepts holds the Concept
+// Lookup. The grounded assistant lives in the right rail across ALL three.
+type MemoryTab = 'overview' | 'sources' | 'concepts';
+
+const MEMORY_TABS: { id: MemoryTab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'sources', label: 'Sources' },
+  { id: 'concepts', label: 'Concepts' },
+];
+
+const tabId = (id: MemoryTab) => `memory-tab-${id}`;
+const panelId = (id: MemoryTab) => `memory-tabpanel-${id}`;
+
 export function ProjectMemory() {
   const graph = useFetch(() => api.getGraphStatus(), []);
 
@@ -53,11 +68,47 @@ export function ProjectMemory() {
   const focusConceptId = params.get('concept');
   const focusFilePath = params.get('file');
 
+  // P33 S3 (D6): a deep link selects the tab that owns the target — `?file=`
+  // lands on Sources, `?concept=` on Concepts — so the auto-opened item is
+  // visible on arrival; otherwise the page opens on Overview.
+  const [activeTab, setActiveTab] = useState<MemoryTab>(
+    focusFilePath ? 'sources' : focusConceptId ? 'concepts' : 'overview',
+  );
+
+  // A ⌘K jump to a memory item navigates /memory → /memory?file=… / ?concept=…
+  // — the SAME route, so React Router never remounts this screen and the
+  // once-per-mount initializer above cannot react to it. Sync the owning tab
+  // whenever a deep-link param becomes present, so an in-page jump still selects
+  // (and thus mounts) the target card. It ONLY forces a tab when a param exists —
+  // with neither param it leaves the user's manual tab selection alone.
+  useEffect(() => {
+    if (focusFilePath) setActiveTab('sources');
+    else if (focusConceptId) setActiveTab('concepts');
+  }, [focusFilePath, focusConceptId]);
+
+  // P25.7 / P33 S3 (D6): the grounded assistant, now in the right rail so it is
+  // visible across all three tabs. It grounds ENTIRELY in the already-fetched
+  // graph status (no new fetch) and mounts only once that status has loaded —
+  // loading → not shown; error → the Overview BackendDown carries the state.
+  const rightPanel =
+    graph.status === 'data' ? (
+      <aside className="memory-right" aria-label="Assistant (advisory)">
+        <div className="card placeholder-card memory-assistant-card">
+          <AssistantPanel
+            {...compose({ context: 'memory', graph: graph.data })}
+            experimentId="project-memory"
+            availability={graph.data.availability}
+          />
+        </div>
+      </aside>
+    ) : undefined;
+
   return (
     <AppShell
       variant="full"
       topBar={<TopBar variant="home" />}
       sidebar={<LeftNav active="memory" />}
+      rightPanel={rightPanel}
       mainPad="pad"
     >
       <div className="placeholder">
@@ -69,37 +120,92 @@ export function ProjectMemory() {
           surfaces related files and concepts, prior documents, and "how is this connected?" answers
           as leads to verify — it never validates, completes, or supplies a value.
         </p>
-        <div className="card placeholder-card">
-          {graph.status === 'loading' && <LoadingPanel label="Checking memory status…" />}
-          {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
-          {graph.status === 'data' && <MemoryStatusDetail data={graph.data} />}
-        </div>
-        {/* P25.7: the grounded assistant, subordinate to the memory-status card
-            above (truth/status first, advisory assistant below). It grounds
-            ENTIRELY in the already-fetched graph status — no new fetch — and is
-            shown only once that status has loaded (loading → not shown; error →
-            the screen-level BackendDown above). It carries a REAL memory
-            availability claim because this screen genuinely fetched it. */}
-        {graph.status === 'data' && (
-          <div className="card placeholder-card memory-assistant-card">
-            <AssistantPanel
-              {...compose({ context: 'memory', graph: graph.data })}
-              experimentId="project-memory"
-              availability={graph.data.availability}
-            />
+
+        <SectionTabs active={activeTab} onSelect={setActiveTab} />
+
+        {activeTab === 'overview' && (
+          <div id={panelId('overview')} role="tabpanel" aria-labelledby={tabId('overview')} tabIndex={0}>
+            <div className="card placeholder-card">
+              {graph.status === 'loading' && <LoadingPanel label="Checking memory status…" />}
+              {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
+              {graph.status === 'data' && <MemoryStatusDetail data={graph.data} />}
+            </div>
+            <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
+              <Network size={15} strokeWidth={2} aria-hidden="true" />
+              Browse depth is out of scope for this first build.
+            </p>
           </div>
         )}
-        {/* Skip the second/third fetch when the screen already knows the backend
-            is unreachable — one screen-level BackendDown, not three, mirroring
-            how P24.3 owns that state for the whole page. */}
-        {graph.status !== 'error' && <SourceIndexCard focusFilePath={focusFilePath} />}
-        {graph.status !== 'error' && <ConceptLookupCard focusConceptId={focusConceptId} />}
-        <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
-          <Network size={15} strokeWidth={2} aria-hidden="true" />
-          Browse depth is out of scope for this first build.
-        </p>
+
+        {activeTab === 'sources' && (
+          <div id={panelId('sources')} role="tabpanel" aria-labelledby={tabId('sources')} tabIndex={0}>
+            <SourceIndexCard focusFilePath={focusFilePath} />
+          </div>
+        )}
+
+        {activeTab === 'concepts' && (
+          <div id={panelId('concepts')} role="tabpanel" aria-labelledby={tabId('concepts')} tabIndex={0}>
+            <ConceptLookupCard focusConceptId={focusConceptId} />
+          </div>
+        )}
       </div>
     </AppShell>
+  );
+}
+
+// --- internal page tabs (P33 S3 · D6) ------------------------------------
+// A local tablist — Overview · Sources · Concepts — NOT part of the global
+// LeftNav. Roving tabindex + arrow/Home/End keyboard navigation (automatic
+// activation); native buttons carry Enter/Space activation.
+
+function SectionTabs({
+  active,
+  onSelect,
+}: {
+  active: MemoryTab;
+  onSelect: (tab: MemoryTab) => void;
+}) {
+  function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      nextIndex = (index + 1) % MEMORY_TABS.length;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      nextIndex = (index - 1 + MEMORY_TABS.length) % MEMORY_TABS.length;
+    } else if (e.key === 'Home') {
+      nextIndex = 0;
+    } else if (e.key === 'End') {
+      nextIndex = MEMORY_TABS.length - 1;
+    }
+    if (nextIndex === null) return;
+    e.preventDefault();
+    const next = MEMORY_TABS[nextIndex];
+    onSelect(next.id);
+    // Move focus to the newly selected tab (roving tabindex).
+    (document.getElementById(tabId(next.id)) as HTMLButtonElement | null)?.focus();
+  }
+
+  return (
+    <div className="section-tabs" role="tablist" aria-label="Project Memory sections">
+      {MEMORY_TABS.map((tab, i) => {
+        const selected = active === tab.id;
+        return (
+          <button
+            key={tab.id}
+            id={tabId(tab.id)}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-controls={panelId(tab.id)}
+            tabIndex={selected ? 0 : -1}
+            className={`section-tab${selected ? ' active' : ''}`}
+            onClick={() => onSelect(tab.id)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

@@ -68,7 +68,7 @@ describe('router-level smoke: each surface renders without error', () => {
     const { getByText, findByText } = renderAt('/memory');
     expect(getByText('Memory / Query Plane')).toBeInTheDocument();
     // Freshness is live from the endpoint, not a hardcoded claim.
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
   });
 
   it('the index route redirects into the queue', async () => {

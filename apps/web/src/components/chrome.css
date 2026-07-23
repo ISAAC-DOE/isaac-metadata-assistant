@@ -295,11 +295,6 @@
   font-size: 11px;
 }
 .graph-chip svg { color: var(--text-slate); flex: none; }
-.graph-chip-plane {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--text-quaternary);
-}
 /* Available: the graph is present and serving leads — a calm, affirmative
    memory-plane tone (the field-status teal), deliberately NOT the export
    pass/fail verdict palette (memory is advisory, never a verdict). */
