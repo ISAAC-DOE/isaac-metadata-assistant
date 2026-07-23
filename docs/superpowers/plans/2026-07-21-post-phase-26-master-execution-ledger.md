@@ -1058,3 +1058,24 @@ Search disambiguation (NAV-1) + free-form Q&A deferred.
   assistant.ts/assistant.css manifest members). CI `a4e8f36` success; Railway `synthetic-only`
   serving `a4e8f36`; Vercel 200. Hosted QA PASS — composer/helper/reorder/lavender live; inert submit
   shows the honest notice, input clears, no answer fabricated, console clean.
+
+- **S3 — Project Memory** (2026-07-23 @ `c7b7825`): presentation/layout/IA/copy only (D6/D7); no
+  fetch/availability/deep-link/assistant-logic change. Test-first (orchestrator wrote the D7
+  GraphStatusChip red contract → 2 failed), Opus 4.8 implemented + wrote the D6 tab tests, independent
+  Opus review = **SHIP** (1 Important fixed: in-page ⌘K deep-link didn't switch tabs because activeTab
+  was only set in the useState initializer and the same-path param change doesn't remount — added a
+  `useEffect` syncing activeTab to `focusFilePath`/`focusConceptId`, manual selection preserved when no
+  param; +2 in-page tests). D6: internal Overview/Sources/Concepts tablist (role=tablist/tab/tabpanel +
+  Arrow/Home/End, not in global nav); AssistantPanel moved into the AppShell right-rail (visible across
+  all tabs); Overview omits the Source Index/Concept Lookup cards (Sources/Concepts hold them verbatim);
+  deep links auto-select the owning tab (fresh mount + in-page). D7: single Title-Case 'Memory
+  Available'/'Memory Unavailable' state (redundant 'memory plane' visible label removed, kept in the
+  accessible name + the on-screen explanation), green only when available; assistant-header memory dot
+  greened when available; only the two real states. 7 existing tests re-expressed (stronger/fair, not
+  weakened). **Accepted Minors → S5:** inactive-tab `aria-controls` references unmounted panel ids;
+  lazy-mount refetch flicker + accordion-reset on tab switch (inherent tabbed-IA consequence, no data
+  change). Verify: full FE **588 passed**, `npm run build` clean, snapshot regen + gate 17/17
+  (GraphStatusChip/ProjectMemory/AssistantPanel/chrome.css/base.css/screens.css manifest members). CI
+  `c7b7825` success; Railway `synthetic-only` serving `c7b7825`; Vercel 200. Hosted QA PASS — tabs,
+  right-rail assistant, green memory dot, single 'Memory Available' state, Sources tab reveals Source
+  Index, console clean. (Also incidentally resolves the audit POL-2 empty-right-half finding.)
