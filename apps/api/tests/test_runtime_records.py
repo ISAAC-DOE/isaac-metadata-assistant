@@ -189,6 +189,33 @@ def test_unrecognized_filter_matches_nothing_never_the_full_set(client):
         assert body["records"] == []
 
 
+def test_reset_is_reflected_freshly(client):
+    """P30.4 by-construction: after Reset Demo, the projection re-derives the
+    canonical 2/1/1/1 with no stale cache (export a record to drift, then reset)."""
+    etag = client.get(f"/api/experiments/{ws.SEED_READY_ID}").headers["ETag"]
+    client.post(f"/api/experiments/{ws.SEED_READY_ID}/export", headers={"If-Match": etag})
+    # drifted: the ready seed is now done
+    assert any(r["status"] == "done" and r["experiment_id"] == ws.SEED_READY_ID
+               for r in _records(client)["records"])
+    r = client.post("/api/demo/reset", json={"mode": "execute", "confirmation": "RESET SYNTHETIC DEMO"})
+    assert r.status_code == 200
+    after = _records(client)
+    counts: dict[str, int] = {}
+    for rec in after["records"]:
+        counts[rec["status"]] = counts.get(rec["status"], 0) + 1
+    assert counts.get("needs_attention") == 2 and counts.get("ready_to_export") == 1
+    assert counts.get("in_review") == 1 and counts.get("done") == 1  # back to canonical
+
+
+def test_deletion_is_reflected_by_construction_no_stale_retention():
+    """P30.4 by-construction: the projection is a pure derivation over the passed
+    scan — a record absent from the scan is absent from the projection (no cache
+    could retain a deleted record). Function-level, no workspace needed."""
+    from isaac_api.runtime_records import project_records
+
+    assert project_records([]) == []  # empty scan → empty projection, never stale
+
+
 def test_requires_auth_when_key_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
