@@ -31,6 +31,7 @@ from . import dependencies
 from . import evidence_classify
 from . import memory
 from . import runtime_mode
+from . import runtime_records
 from . import search
 from . import serialize
 from . import sources
@@ -1327,3 +1328,39 @@ def search_records(
         "workspace": workspace_group,
         "memory": memory_group,
     }
+
+
+# --- 18. runtime records (thin read-only cross-record projection, P30.1) -------
+#
+# A DERIVED read model over the SAME ``list_experiments()`` snapshot search uses —
+# no index, no cache, no lock, current-by-construction. It emits ONLY the safe
+# confirmed-facts allow-set (see ``runtime_records``) plus freshness metadata, and
+# accepts a few typed filters the cross-record triage consumer uses. Auth is
+# enforced by the app-wide middleware exactly like the other reads (401 when the
+# key is set). It never mutates and never touches the truth path.
+
+
+@router.get("/runtime/records")
+def runtime_record_projection(
+    status: str | None = None,
+    workflow_state: str | None = None,
+    artifact: str | None = None,
+    has_conflict: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
+) -> dict:
+    filters = {
+        "status": status,
+        "workflow_state": workflow_state,
+        "artifact": artifact,
+        "has_conflict": has_conflict,
+    }
+    # Fresh scan each call → project → filter. ``total`` is the filtered count
+    # BEFORE pagination so a client can page without losing the denominator.
+    records = runtime_records.project_records(ws.list_experiments(), filters=filters)
+    total = len(records)
+    start = max(0, offset)
+    records = records[start:]
+    if limit is not None:
+        records = records[: max(0, limit)]
+    return {"records": records, "total": total}
