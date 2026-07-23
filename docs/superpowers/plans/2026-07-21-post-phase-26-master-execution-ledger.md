@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 30 COMPLETE** (2026-07-22): Runtime-retrieval proof gate REJECTED a persistent index (measured); shipped a thin Workspace-derived runtime provider (`/runtime/records`, no index/cache/service) + a cross-record triage consumer (SearchDialog), hosted-QA PASS (correct matching, honest empty states, current-by-construction, clean handoff to authoritative record). → Phase 31. |
-| **Active ticket** | P31.1 — safe CSV ingress boundary (next). P31.0 proof gate COMPLETE — SELECTED CSV (existing extract.structured parser; stdlib; no human gate). |
+| **Active ticket** | P31.2 — candidate/evidence staging into the P29.6 confirm flow (next; reuse the frozen CSV v1 contract + limits). P31.1 ingress shipped (`80042f3`). |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 31 (Synthetic/Public File Ingestion) — P31.0 format selection (human-gate 5 possible) → P31.1 upload boundary → P31.2 deterministic parser → P31.3 assistant/manual review → P31.4 QA. Strict: synthetic/public only, NO real/private data, sandboxed, deterministic; candidates stay candidates (reuse P28.4/P29.6). |
 | **Blockers** | none |
@@ -523,6 +523,26 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   real-data). Architecture: bounded IN-MEMORY read (no temp file → eliminates the filesystem-safety threat
   category); reuse parse_structured + P29.6 candidates/confirm + P28.4 classify. Threat model + limits +
   candidate/evidence contract + 6 leaner slices in the plan. Truth path untouched; docs-only.
+
+- **P31.1** (`80042f3`, 2026-07-22): safe CSV ingress + read-only typed preview. NEW `POST /experiments/{id}/
+  ingestion/csv/preview` — RAW `text/csv` body (NOT multipart), BOUNDED stream read (`_read_bounded_body`:
+  async-for `request.stream()`, 413 before full allocation; NO python-multipart / UploadFile /
+  SpooledTemporaryFile / temp file / new dep — all-in-memory by construction). Order: auth(middleware) →
+  runtime-mode 403 → 404 → If-Match 428/412/400 → bounded read → utf-8-sig strict (empty/invalid-utf8/NUL →
+  400) → CSV v1 validate → in-memory parse → typed preview. READ-ONLY (no write/rev-bump/export/index/persist).
+  CSV v1 = ISAAC campaign sheet (`section,field,value,unit,notes`), comma-only (no Sniffer), FIELD_MAP-only
+  (unmapped skipped/never guessed), dup/empty/missing-header → typed 422, unknown → warning, centralized limits
+  (256KB/500/64/4KB/200). Formula cells fail strict numeric coercion → needs_confirmation, NEVER evaluated;
+  negatives pass. Every candidate `value_state="candidate"`. X-Filename → bounded path-free basename. Typed
+  errors only; metadata-only logs. NEW `csv_ingest.py` (limits + typed error). `extract/structured.py` +
+  `parse_structured_text` (in-memory) — path-based byte-identical (extract tests green). Tests:
+  `test_csv_ingress.py` (16, orchestrator red-first) + `test_csv_ingress_matrix.py` (24). Backend **866** (was
+  826); §13 truth path untouched; snapshot regenerated. Independent Opus security review = **SHIP** (bounded/
+  no-spool/no-temp verified; no mutation; formula never executed; leak-safe; version-bound). **Deployed** CI
+  `80042f3` success, Railway `80042f3` synthetic-only, live route probe → 401 (registered + auth-gated,
+  credential-free). Backend-only (no visible upload UI yet → verified via integration tests + route
+  registration + Railway provenance, no fabricated hosted flow). Deferred non-blocking (P32): explicit
+  per-chunk cap; source_name leading-formula neutralization; precise unmapped-field count.
 
 ## Phase 30 Completion Gate (CLOSED 2026-07-22 @ `47e91ae`)
 
