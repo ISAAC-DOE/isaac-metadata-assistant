@@ -1038,3 +1038,23 @@ Search disambiguation (NAV-1) + free-form Q&A deferred.
   gate 17/17 (labels/types/adapt manifest members). CI `3ab9a1b` success; Railway `synthetic-only`
   serving `3ab9a1b`; Vercel 200. Hosted desktop QA PASS (clean titles, badges, chevron-only groups,
   2/1/1/1, console clean). Narrow-width deferred to human-assisted (R3).
+
+- **S2 — Shared Assistant shell** (2026-07-23 @ `9364f21`, build-gate fix `a4e8f36`): presentation/
+  layout/copy only (D3/D4/D5/C3/C4); ZERO assistant-logic change. Test-first (orchestrator wrote the
+  composer-honesty red contract → 3 failed/1 passed), Opus 4.8 implemented, independent Opus review =
+  **SHIP** (1 Important fixed: helper/caption bumped to `--text-secondary` for AA on the tint). New
+  region order: header → honest visual-only composer → Suggested Questions → Agent Actions →
+  conversation log (newest reply at bottom) → single advisory caption. Composer is INERT — submit does
+  `preventDefault` + local state only (no fetch/message/session/persistence/mutation/reroute), one
+  accessible `role=status` notice, persistent "Guided Questions Only" helper before interaction,
+  secondary-styled send; standalone guided-note de-duped; lavender rail via `--assist` tint +
+  full-perimeter border, white inner cards. compose/intents/proposals/confirm-path/session sanitizer/
+  verdict-guard/aria-live/auto-scroll all unchanged. 6 existing tests re-expressed (stronger, not
+  weakened). **Note:** CI first failed on `9364f21` — the app-config `tsc --noEmit` passed but CI's
+  `npm run build` (`tsc -b`) type-checks tests and caught two errors in the new composer test
+  (SuggestedPrompt.answeredFrom; `global` untyped). Fixed test-only in `a4e8f36` (added answeredFrom;
+  `vi.stubGlobal`). Lesson: run `npm run build`, not just `vite build`, as the local build gate.
+  Verify: full FE **576 passed**, `npm run build` clean, snapshot regen + gate 17/17 (AssistantPanel/
+  assistant.ts/assistant.css manifest members). CI `a4e8f36` success; Railway `synthetic-only`
+  serving `a4e8f36`; Vercel 200. Hosted QA PASS — composer/helper/reorder/lavender live; inert submit
+  shows the honest notice, input clears, no answer fabricated, console clean.
