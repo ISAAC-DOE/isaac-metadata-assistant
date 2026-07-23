@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 30 COMPLETE** (2026-07-22): Runtime-retrieval proof gate REJECTED a persistent index (measured); shipped a thin Workspace-derived runtime provider (`/runtime/records`, no index/cache/service) + a cross-record triage consumer (SearchDialog), hosted-QA PASS (correct matching, honest empty states, current-by-construction, clean handoff to authoritative record). → Phase 31. |
-| **Active ticket** | P31.2 — candidate/evidence staging into the P29.6 confirm flow (next; reuse the frozen CSV v1 contract + limits). P31.1 ingress shipped (`80042f3`). |
+| **Active ticket** | P31.3 — reconciliation + evidence review UI (next). Phase 31 is RECONCILIATION-ONLY (human decision 2026-07-22): CSV ingestion parses + reconciles + reviews evidence; it does NOT mutate the mapped official fields and the confirmed-write surface is NOT extended. P31.1 ingress (`80042f3`) + P31.2 reconciliation (`3ecda47`) shipped. |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 31 (Synthetic/Public File Ingestion) — P31.0 format selection (human-gate 5 possible) → P31.1 upload boundary → P31.2 deterministic parser → P31.3 assistant/manual review → P31.4 QA. Strict: synthetic/public only, NO real/private data, sandboxed, deterministic; candidates stay candidates (reuse P28.4/P29.6). |
 | **Blockers** | none |
@@ -543,6 +543,37 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   credential-free). Backend-only (no visible upload UI yet → verified via integration tests + route
   registration + Railway provenance, no fabricated hosted flow). Deferred non-blocking (P32): explicit
   per-chunk cap; source_name leading-formula neutralization; precise unmapped-field count.
+
+- **Architecture gate → human decision (2026-07-22): Phase 31 is RECONCILIATION-ONLY.** Before P31.2 the
+  orchestrator proved (source + live probe) that the confirmed-write surface (`/answers` + `/edit` →
+  `_answers_to_apply_shape` → `apply_answers`) recognizes ONLY `{asset-uri, series, descriptor,
+  descriptor_label, edge}`, DISJOINT from the CSV `FIELD_MAP` official paths — confirming `series` bumped rev
+  `…077.0→.1` (applied) while confirming `system.facility.beamline` left rev unchanged (silent no-op). So a CSV
+  candidate cannot mutate the record via the existing contract. The user WITHDREW the literal
+  `upload→confirm→mutation` requirement and chose Option 1 (reconciliation-only); the confirmed-write surface is
+  NOT extended in Phase 31/32. Making more official paths CSV-writable is deferred to a future, separately
+  approval-gated **"Future — CSV-Assisted Official Field Write Contract"** phase (must first define schema-path
+  authorization, validation, workflow invalidation, evidence effects, concurrency, rollback). Plan §11 records
+  the corrected contract.
+
+- **P31.2** (`3ecda47`, 2026-07-23): CSV reconciliation staging (reconciliation-only). Enriches the READ-ONLY
+  `/ingestion/csv/preview` into a version-bound reconciliation: each FIELD_MAP-mapped value is compared to the
+  CURRENT authoritative record value at its official path and classified `matches_current` /
+  `conflicts_with_current` / `absent_from_record`. Both values preserved on conflict (NO winner); blank cells
+  create no item; unmapped rows never guessed; two rows→same field preserved (no dedupe). Per-item
+  `experiment_id`, safe `field_label` (path-free), `current_value`, row+`column` locator, `source_name`,
+  `parser_id`/`parser_version`, `source_record_rev`, `stale=false`, P28 `evidence_classification`, `explanation`
+  + top-level `reconciliation_summary`. **NO mutation / rev bump / workflow / export / runtime-retrieval /
+  Project-Memory / search-index change** (all asserted). Route builds the record view
+  (`evidence_trail_from_draft` + `classify_fields`) and passes it in; `csv_ingest` stays workspace-free. §13
+  truth path + the confirmed-write surface (`apply_answers`/`/answers`/`/edit`) UNTOUCHED; no new dep. Tests:
+  +21 orchestrator red-first (`test_csv_reconcile.py`: pure-builder incl. seed-unreachable `absent_from_record`
+  + endpoint match/conflict/no-mutation/no-index/leak-safe/version-bound). Backend **887** (was 866). Independent
+  Opus adversarial review = **SHIP-WITH-FIXES**; fixed the one Important finding (blank cell on a populated
+  field mislabeled `absent` with a contradicting explanation → blank cells now create no item) + strengthened
+  the test; all other invariants (no write, no winner, no leak/index, deterministic, version-bound) verified
+  clean. Preflight PASSED; CI `3ecda47` success; Railway `3ecda47` synthetic-only; Vercel 200; live route probe
+  → 401 (registered + auth-gated, credential-free). Backend-only (review UI is P31.3).
 
 ## Phase 30 Completion Gate (CLOSED 2026-07-22 @ `47e91ae`)
 
