@@ -1023,4 +1023,18 @@ Search disambiguation (NAV-1) + free-form Q&A deferred.
   recorded desktop before-captures from the audit session, locked casing/rail/evidence-nav/responsive
   rules, confirmed reuse strategy (extend `StatusChip`/`.tab`/tokens/`.btn`/dots/evidence/`/evidence`
   route; new primitives introduced in their consuming slices, none in S0). Docs only; no code, no
-  speculative files.
+  speculative files. Committed `7434c26`; CI green; no snapshot drift (register + ledger are not
+  manifest members).
+
+- **S1 — Dashboard cards** (2026-07-23 @ `3ab9a1b`): presentation-only (D1/D2/C1). Test-first
+  (orchestrator wrote the red card contract → 7 failed/4 passed), Sonnet 5 implemented, independent
+  Opus review = **SHIP** (1 Important fixed + pinned: `<time dateTime>` now a machine ISO via a new
+  `FormattedDate.iso`; Minors — dead `technique`/`idOrDraft`/`meta` + dead `.exp-tag/.exp-id/.exp-meta`
+  CSS — carried to S5/S6). Card now: clean title (server lifecycle suffix stripped, known-set + safe
+  fallback), no technique badge, ONE lifecycle StatusChip (Draft/Exported) + ONE neutral dated `<time>`
+  badge, right side = field-count chip (Needs Attention) or chevron-only (In Review/Ready/Done),
+  accessible name = title + lifecycle + group + count. 2/1/1/1 preserved; no grouping/count/server/
+  truth-path change. Verify: full FE **572 passed**, tsc clean, Vite build clean, snapshot regen +
+  gate 17/17 (labels/types/adapt manifest members). CI `3ab9a1b` success; Railway `synthetic-only`
+  serving `3ab9a1b`; Vercel 200. Hosted desktop QA PASS (clean titles, badges, chevron-only groups,
+  2/1/1/1, console clean). Narrow-width deferred to human-assisted (R3).
