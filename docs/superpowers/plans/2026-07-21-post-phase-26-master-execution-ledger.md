@@ -1099,3 +1099,21 @@ Search disambiguation (NAV-1) + free-form Q&A deferred.
   Hosted QA PASS — numbered legible banner (concise label + locator once, no raw-identifier primary),
   right rail assistant-only, Evidence Trail link beneath the spine → /evidence, inline field evidence
   retained, console clean.
+
+- **S5 — Casing + semantic headings + a11y** (2026-07-23 @ `ee7f5f6`): presentation/copy/attributes
+  only; no logic/route/data/behavior change. Test-first (orchestrator wrote the A11Y-1 one-h1-per-screen
+  red contract → 6 failed), Opus 4.8 implemented, independent Opus review = **SHIP** (0 Critical/
+  Important). A11Y-1: exactly one screen-level h1 per routed surface — sr-only h1 on Record/Evidence/
+  Export (all render branches), page-title h2→h1 on ProjectMemory/Governance/Settings, sublevels
+  cascaded gap-free (fixed a real pre-existing ProjectMemory-Concepts h3→h5→h6 skip); VerdictCard h3→h2
+  (ExportReadiness-only consumer). D10: two label-tier casing fixes ('Answer Now', 'Out of Date') — no
+  body/question/helper recasing, no technical-token recase (audited + enumerated). C4: HelpPanel close
+  icon aria-hidden (button keeps its name); inactive Project-Memory tabs omit `aria-controls` (S3
+  residual). Carried residuals (focus/tab-order/non-color/touch-target) reviewed — no genuine gaps.
+  Verify: full FE **606 passed**, `npm run build` clean, snapshot regen + gate 17/17. CI `ee7f5f6`
+  success; Railway `synthetic-only` serving `ee7f5f6`; Vercel 200. Hosted QA PASS — placeholder h1
+  renders cleanly, no visual regression, console clean. **Accepted Minors → S6:** (M1) GuidedCompletion
+  backend-down error shell has an h2 without an h1 (transient/error-only), (M2) HelpPanel trigger icon
+  not aria-hidden (cosmetic), (M3) AdvisoryChip '{n} advisory' lowercase (defensible count phrase);
+  plus carried from S4 — orphaned `.ev-panel-*`/`.ev-field` CSS + inert FieldGroup `selectedPath`/
+  `onSelectField` props.
