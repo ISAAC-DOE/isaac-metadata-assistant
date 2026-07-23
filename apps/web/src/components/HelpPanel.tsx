@@ -66,7 +66,7 @@ export function HelpPanel() {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <CircleHelp size={16} strokeWidth={2} />
+        <CircleHelp size={16} strokeWidth={2} aria-hidden="true" />
       </button>
 
       {open && (

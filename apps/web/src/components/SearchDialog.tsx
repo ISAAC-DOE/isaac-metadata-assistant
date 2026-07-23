@@ -104,13 +104,21 @@ interface ResultRowProps {
   label: string;
   match: ApiSearchMatch;
   onSelect: () => void;
+  /**
+   * P33 S6 (D12) — the owning experiment/record this match belongs to, shown so
+   * two results with the SAME field label (e.g. "Beamline" on two experiments)
+   * are distinguishable. Purely presentational: it reads an already-present field
+   * on the result object and never affects ranking or retrieval.
+   */
+  context?: string;
 }
 
-function ResultRow({ label, match, onSelect }: ResultRowProps) {
+function ResultRow({ label, match, onSelect, context }: ResultRowProps) {
   return (
     <li className="search-result">
       <button type="button" className="search-result-btn" onClick={onSelect}>
         <span className="search-result-label">{label}</span>
+        {context && <span className="search-result-context">in {context}</span>}
         <span className="search-result-reason">{match.reason}</span>
         {/* The snippet is shown only when it adds context beyond the label — a
             snippet identical to the label is redundant, so it is not repeated. */}
@@ -503,6 +511,9 @@ function SearchResults({ data, wsHeadId, memHeadId, onSelect }: SearchResultsPro
                 key={`${r.experiment_id}:${r.match.field}`}
                 label={r.label}
                 match={r.match}
+                // The owning experiment/record title — shown only when it adds
+                // information beyond the label itself (never repeated verbatim).
+                context={r.title && r.title !== r.label ? r.title : undefined}
                 onSelect={() => onSelect(r.navigate_to)}
               />
             ))}

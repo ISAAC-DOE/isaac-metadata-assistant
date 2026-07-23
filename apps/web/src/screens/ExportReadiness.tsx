@@ -11,6 +11,7 @@ import { CoverageBadge } from '../components/CoverageBadge';
 import { AdvisoryChip } from '../components/AdvisoryChip';
 import { ArtifactCard } from '../components/ArtifactCard';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
@@ -334,7 +335,7 @@ function LoadedExport({
   };
 
   const rightPanel = (
-    <aside className="record-right narrow" aria-label="Assistant">
+    <AssistantDrawer railClassName="record-right narrow">
       <AssistantPanel
         {...compose({ context: 'export', bundle: data })}
         experimentId={detail.id}
@@ -344,7 +345,7 @@ function LoadedExport({
         agentContext={session.context}
         degraded={session.degraded}
       />
-    </aside>
+    </AssistantDrawer>
   );
 
   return (

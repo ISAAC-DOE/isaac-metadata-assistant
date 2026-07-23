@@ -352,3 +352,44 @@
 .gov-banner .gov-action:active {
   background: var(--action-selected-border);
 }
+
+/* ---- Responsive chrome (P33 S6 · RESP-1) ---------------------------- */
+/* Additive only: every rule below lives inside a max-width media query, so the
+   desktop layout (≥1024px) is byte-identical. Target = no horizontal PAGE
+   overflow + usable stacking/collapse, not a pixel-perfect mobile redesign. */
+@media (max-width: 1024px) {
+  .app { padding: 10px; }
+  .screen-card { min-height: calc(100vh - 20px); }
+
+  /* Panes stack vertically instead of sitting in a fixed-width row. */
+  .screen-body { flex-direction: column; }
+
+  /* LeftNav collapses from a 230px column into a compact, wrapping top nav
+     (a simple layout collapse — no new nav paradigm). */
+  .leftnav {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 10px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-item { width: auto; }
+  .nav-footer {
+    margin-top: 0;
+    margin-left: auto;
+    padding: 0 6px;
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar { gap: 8px; padding: 0 12px; }
+  /* Trim the search trigger to its icon and drop the supplementary mono
+     filename so the topbar never overflows at phone widths. */
+  .topbar-search-label,
+  .topbar-search-kbd { display: none; }
+  .record-file { display: none; }
+}

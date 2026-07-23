@@ -55,49 +55,6 @@
   color: var(--confirmed-text);
 }
 
-/* ---- Evidence panel card (S3 right panel) -------------------------- */
-.ev-panel-card {
-  padding: 12px 14px;
-}
-.ev-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.ev-panel-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text-strong);
-}
-.ev-panel-badge {
-  font-size: 10.5px;
-  color: var(--text-tertiary);
-}
-.ev-panel-for {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  margin-bottom: 10px;
-}
-.ev-panel-for .mono { color: var(--text-slate); }
-.ev-field {
-  padding: 8px 10px;
-  background: var(--surface-subtle);
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-token);
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 10px;
-  font-size: 11.5px;
-}
-.ev-field dt { color: var(--text-tertiary); }
-.ev-field dd { margin: 0; font-family: var(--font-mono); color: var(--text-secondary); }
-.ev-field dd.quote { color: var(--action-hover); }
-
 /* ---- EvidenceTrailPanel (S5 left, 404px) --------------------------- */
 .trail {
   flex: none;
@@ -411,4 +368,32 @@
 .copy-btn:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 2px;
+}
+
+/* ---- Part B (P33 S6) — long-content safety, width-independent ------- */
+/* Only engages when a token would otherwise overflow, so non-overflowing
+   desktop content is visually identical. Long file paths / evidence locators
+   wrap at safe boundaries (never mid-token) rather than pushing the page wide. */
+.ev-file,
+.ev-locator,
+.ev-quote {
+  overflow-wrap: anywhere;
+}
+/* The read-only JSON preview scrolls within its own box rather than the page. */
+.preview-json {
+  overflow-x: auto;
+}
+
+/* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
+@media (max-width: 1024px) {
+  /* The 404px evidence trail becomes a full-width block above the preview. */
+  .trail {
+    width: 100%;
+    max-height: 320px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+@media (max-width: 640px) {
+  .preview { padding: 16px 14px; }
 }

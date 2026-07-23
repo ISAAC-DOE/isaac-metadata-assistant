@@ -1,8 +1,7 @@
 /*
  * FieldGroup / FieldRow (S3). Human label leads; the JSON path + evidence are
- * one glance away. A selected row uses selected-row bg + full quiet border —
- * never a colored left edge. Blocker groups collapse with an amber chip so the
- * draft never reads as a wall of errors.
+ * one glance away. Blocker groups collapse with an amber chip so the draft never
+ * reads as a wall of errors.
  */
 .field-group {
   background: var(--surface);
@@ -52,11 +51,6 @@
   border-top: 1px solid var(--border-hair);
 }
 .field-row:first-child { border-top: 0; }
-.field-row.selectable { cursor: pointer; }
-.field-row.selected {
-  background: var(--selected-row-bg);
-  box-shadow: inset 0 0 0 1px var(--action-selected-border);
-}
 .field-label-col {
   width: 190px;
   flex: none;
@@ -102,4 +96,25 @@
 }
 .field-evidence {
   margin-top: 8px;
+}
+
+/* ---- Part B (P33 S6) — long-content safety, width-independent ------- */
+/* Only engages on overflow, so non-overflowing desktop rows are unchanged.
+   A long JSON path or scientific value wraps at safe boundaries, never
+   mid-token, instead of pushing the page horizontally. */
+.field-path,
+.field-value {
+  overflow-wrap: anywhere;
+}
+
+/* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
+@media (max-width: 640px) {
+  /* Stack the fixed 190px label column above the value so neither is squeezed. */
+  .field-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .field-label-col {
+    width: auto;
+  }
 }

@@ -144,3 +144,14 @@
   color: var(--text-tertiary);
   line-height: 1.4;
 }
+
+/* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
+/* The 212px spine becomes a full-width block above the main content; the
+   vertical connector line + row layout are unchanged. Desktop untouched. */
+@media (max-width: 1024px) {
+  .spine {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}

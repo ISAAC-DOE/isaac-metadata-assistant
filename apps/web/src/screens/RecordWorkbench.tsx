@@ -8,6 +8,7 @@ import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleAlert, ExternalLink } from '../components/icons';
@@ -160,7 +161,7 @@ function LoadedWorkbench({
   // lives inline on every field row (truth, in the main column); the whole-record
   // Evidence Trail affordance now sits beneath the WorkflowSpine (see `sidebar`).
   const rightPanel = (
-    <aside className="record-right narrow" aria-label="Assistant">
+    <AssistantDrawer railClassName="record-right narrow">
       <AssistantPanel
         {...compose({ context: 'review', bundle })}
         experimentId={id}
@@ -171,7 +172,7 @@ function LoadedWorkbench({
         agentPrompts={REVIEW_AGENT_PROMPTS}
         onRefresh={onAgentRefresh}
       />
-    </aside>
+    </AssistantDrawer>
   );
 
   // D8 — the whole-record Evidence Trail affordance, moved out of the (removed)

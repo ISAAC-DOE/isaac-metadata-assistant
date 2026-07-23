@@ -7,6 +7,7 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Network, ChevronDown, ChevronRight } from '../components/icons';
 import { LABELS } from '../lib/labels';
@@ -92,7 +93,7 @@ export function ProjectMemory() {
   // loading → not shown; error → the Overview BackendDown carries the state.
   const rightPanel =
     graph.status === 'data' ? (
-      <aside className="memory-right" aria-label="Assistant (advisory)">
+      <AssistantDrawer railClassName="memory-right" label="Assistant (advisory)">
         <div className="card placeholder-card memory-assistant-card">
           <AssistantPanel
             {...compose({ context: 'memory', graph: graph.data })}
@@ -100,7 +101,7 @@ export function ProjectMemory() {
             availability={graph.data.availability}
           />
         </div>
-      </aside>
+      </AssistantDrawer>
     ) : undefined;
 
   return (

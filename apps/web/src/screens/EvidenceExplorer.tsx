@@ -8,6 +8,7 @@ import { EvidenceClassificationPanel } from '../components/EvidenceClassificatio
 import { CsvReconcilePanel } from '../components/CsvReconcilePanel';
 import { SourcePreview } from '../components/SourcePreview';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { StatusBar } from '../components/StatusBar';
 import { LiveSyncNote } from '../components/LiveSyncNote';
@@ -158,7 +159,7 @@ function LoadedEvidence({
   // mounts ONLY on this loaded path — never in loading / backend-down / the
   // zero-evidence empty state, where there is no record data to be subordinate to.
   const rightPanel = (
-    <aside className="record-right narrow" aria-label="Assistant">
+    <AssistantDrawer railClassName="record-right narrow">
       <AssistantPanel
         {...compose({ context: 'evidence', bundle: data, selectedPath: selected.key })}
         experimentId={detail.id}
@@ -167,7 +168,7 @@ function LoadedEvidence({
         agentContext={agentContext}
         degraded={agentDegraded}
       />
-    </aside>
+    </AssistantDrawer>
   );
 
   return (

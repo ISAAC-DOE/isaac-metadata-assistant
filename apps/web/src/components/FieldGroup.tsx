@@ -2,14 +2,12 @@ import './fields.css';
 import { ChevronDown, ChevronRight } from './icons';
 import { StatusChip } from './StatusChip';
 import { FieldRow } from './FieldRow';
-import type { DraftField, FieldGroupData } from '../lib/types';
+import type { FieldGroupData } from '../lib/types';
 
 interface FieldGroupProps {
   group: FieldGroupData;
   expanded: boolean;
   onToggle: () => void;
-  selectedPath?: string;
-  onSelectField?: (field: DraftField) => void;
 }
 
 /**
@@ -22,8 +20,6 @@ export function FieldGroup({
   group,
   expanded,
   onToggle,
-  selectedPath,
-  onSelectField,
 }: FieldGroupProps) {
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
@@ -46,12 +42,7 @@ export function FieldGroup({
       {expanded && (
         <div className="fg-body">
           {group.fields.map((field) => (
-            <FieldRow
-              key={field.path}
-              field={field}
-              selected={field.path === selectedPath}
-              onSelect={onSelectField}
-            />
+            <FieldRow key={field.path} field={field} />
           ))}
         </div>
       )}

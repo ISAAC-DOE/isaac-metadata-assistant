@@ -1093,3 +1093,38 @@
   padding: 14px 18px;
   border-top: 1px solid var(--border);
 }
+
+/* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
+/* Desktop (≥1024px) is byte-identical: every rule is inside a max-width query.
+   The assistant right rail (.record-right / .memory-right) collapses into the
+   AssistantDrawer slide-over — its narrow overrides live in assistant-drawer.css
+   and are keyed on [data-open], so nothing here needs to touch those widths. */
+@media (max-width: 1024px) {
+  /* The record left aside (WorkflowSpine + Evidence Trail link) becomes a
+     full-width block above the main content. */
+  .record-aside {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 640px) {
+  .screen-main.pad { padding: 16px 14px; }
+  .centered-col { padding: 16px 14px; }
+  .centered-col.narrow { max-width: 100%; }
+
+  .page-header { flex-wrap: wrap; }
+
+  /* Two-up grids collapse to a single column so nothing is squeezed. */
+  .signal-row,
+  .artifact-row,
+  .memory-figures {
+    grid-template-columns: 1fr;
+  }
+  .source-index-panel-figures {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .artifact-modal-backdrop { padding: 16px; }
+}

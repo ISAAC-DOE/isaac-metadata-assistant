@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { GuidedPrompt } from '../components/GuidedPrompt';
 import { StatusChip } from '../components/StatusChip';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Check, CircleHelp, Pencil } from '../components/icons';
@@ -54,6 +55,10 @@ export function GuidedCompletion() {
         sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="centered"
       >
+        {/* M1 (P33 S6) — the non-data branch renders FetchStates' <h2> with no
+            <h1>; give the surface a screen-level heading so its document outline
+            starts at h1 like every other routed surface (A11Y-1 contract). */}
+        <h1 className="sr-only">{LABELS.screenComplete}</h1>
         {load.status === 'loading' ? (
           <LoadingPanel label="Loading the blockers from the local backend…" />
         ) : (
@@ -261,7 +266,7 @@ function LoadedCompletion({
     : undefined;
 
   const rightPanel = (
-    <aside className="record-right narrow" aria-label="Assistant">
+    <AssistantDrawer railClassName="record-right narrow">
       <AssistantPanel
         {...compose({
           context: 'complete',
@@ -291,7 +296,7 @@ function LoadedCompletion({
         // availability="available" to dodge the spec-§6-flagged-false caveat;
         // omitting it is the honest fix — the screen never fetched graph status.)
       />
-    </aside>
+    </AssistantDrawer>
   );
 
   const shell = (children: ReactNode) => (

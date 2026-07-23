@@ -239,6 +239,13 @@
   font-size: 11px;
   color: var(--text-tertiary);
 }
+/* D12 — the owning experiment/record, so same-label field matches are
+   distinguishable. A quiet context line, never louder than the label. */
+.search-result-context {
+  font-size: 11px;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
 .search-snippet {
   font-size: 11.5px;
   color: var(--text-secondary);
