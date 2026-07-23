@@ -10404,7 +10404,7 @@
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
-        "sha256": "7665e49db0622e8ab4a25c487c63640b56229052bfab9f74c70401fe25ec0a82"
+        "sha256": "23f85dd51891a898db6f73073f2952da24969e89dafd4ec3709e333f7d01db7d"
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "d9446a6b862e8c54c891a7b6b4b5cb89c248edae3d1ea66e0e818ec34b395427"
+        "sha256": "f57fc1d18b13f79009c2581df8aa66f1e2a90779699f14016b82c5e314d36e1e"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10608,7 +10608,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "dad87504f7d241f6fad3454bfdac8741c9b33c078ecf365281ee1768ddb23379"
+        "sha256": "47222dbb7533e148cb425446b2953594566a69a29961bfac5f6b3b8e78492121"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "5e3aec33510dfc66a8caaa48966c6081aed27fd19c5fa0ff453753a00e189561"
+    "served_manifest_fingerprint": "7cd01338890cecc05365100e47fe4eed771de84956c94a768fa0e35b1f29dab0"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

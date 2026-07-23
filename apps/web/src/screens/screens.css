@@ -29,7 +29,55 @@
   flex: none;
 }
 
-/* ---- record right panel (Evidence over Assistant, hard divider) ---- */
+/* ---- record left aside (WorkflowSpine + Evidence Trail link) -------- */
+/* D8 — the spine and the whole-record Evidence Trail affordance share one
+ * bordered column so the neutral region divider stays continuous. The spine's
+ * own border-right is suppressed here (the wrapper owns it); GuidedCompletion
+ * still uses the spine standalone, so that surface is unaffected. */
+.record-aside {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-subtle);
+  border-right: 1px solid var(--border); /* neutral region divider, not a rail */
+}
+.record-aside .spine {
+  border-right: none;
+}
+.evidence-trail-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 16px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.evidence-trail-link:hover {
+  background: var(--border-faint);
+}
+.evidence-trail-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.evidence-trail-link-label {
+  flex: 1;
+}
+.evidence-trail-link-count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+/* ---- record right panel (Assistant only) --------------------------- */
 .record-right {
   flex: none;
   width: 342px;
@@ -41,15 +89,6 @@
 }
 .record-right.narrow {
   width: 308px;
-}
-.record-right .evidence-slot {
-  padding: 4px 4px 0;
-}
-/* the hard 1px divider separating Evidence (truth) from Assistant (advisory) */
-.right-divider {
-  height: 1px;
-  background: var(--border-strong);
-  margin: 6px 0 0;
 }
 
 /* ---- needs-you banner (S3) ----------------------------------------- */
@@ -692,14 +731,16 @@
   color: var(--text-secondary);
 }
 
-/* Live pending blockers listed inside the needs-you banner (S3). */
+/* Live pending blockers listed inside the needs-you banner (S3), as a NUMBERED
+ * list: a visible ordinal badge, the concise label as the primary line, and the
+ * technical locator demoted to a mono token beneath it (shown exactly once). */
 .needsyou-list {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .needsyou-list li {
   display: flex;
@@ -708,11 +749,32 @@
   font-size: 12px;
   color: var(--text-secondary);
 }
-.needsyou-q { line-height: 1.45; }
+.needsyou-num {
+  flex: none;
+  min-width: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--advisory-text);
+  font-variant-numeric: tabular-nums;
+}
+.needsyou-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.needsyou-q {
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--text-primary);
+}
 .needsyou-about {
   font-size: 11px;
   color: var(--text-tertiary);
-  word-break: break-all;
+  /* HIER-2: wrap a long locator at safe boundaries, never mid-token — a break-all
+   * split a URI like "…/notebook" into "…/n" + "otebook". */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ---- S4 live completion states -------------------------------------- */

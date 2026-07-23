@@ -251,6 +251,23 @@ export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
 }
 
 /**
+ * P33 S4 (D9/C2) — the presentation-only summary for one /pending item in the
+ * S3 missing-fields banner. It NEVER rewrites, guesses, or parses meaning from
+ * the backend question:
+ *  - `label` is a CONCISE label read straight from the structured `kind`
+ *    (reusing KIND_LABEL). When `kind` is not a known structured kind, it falls
+ *    back to the FULL original question verbatim — never a re-cased/parsed guess.
+ *  - `locator` is the technical locator (`about`) surfaced exactly once, or null.
+ * Pure: it does not mutate the item, and the underlying question is unchanged.
+ */
+export function pendingSummary(item: ApiPendingItem): { label: string; locator: string | null } {
+  return {
+    label: KIND_LABEL[item.kind] ?? item.question,
+    locator: item.about ?? null,
+  };
+}
+
+/**
  * A short, honest one-line summary of a confirmed/demo value — never invented.
  * A pasted sha256 is truncated; a structured series/descriptor object is
  * summarized from its own fields.

@@ -8,10 +8,9 @@ import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
-import { SourceTypeToken } from '../components/EvidenceRow';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { CircleAlert, ExternalLink, FileText } from '../components/icons';
+import { CircleAlert, ExternalLink } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
@@ -20,12 +19,13 @@ import { useRecordSession } from '../lib/useRecordSession';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
   draftGroupsToFieldGroups,
+  pendingSummary,
   toAdvisoryResult,
   toAuditResult,
   toValidationResult,
 } from '../lib/adapt';
 import { compose } from '../lib/assistantComposer';
-import type { ApiEvidenceEntry, DraftField, RecordBundle } from '../lib/types';
+import type { ApiEvidenceEntry, RecordBundle } from '../lib/types';
 
 /**
  * S3 · Review Record — the core workbench, live from the record bundle
@@ -137,18 +137,6 @@ function LoadedWorkbench({
   const isExpanded = (block: string, collapsedByDefault: boolean) =>
     toggles[block] ?? !collapsedByDefault;
 
-  const firstPath = groups[0]?.fields[0]?.path;
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const effectivePath = selectedPath ?? firstPath;
-
-  const selectedField = useMemo<DraftField | undefined>(() => {
-    for (const group of groups) {
-      const found = group.fields.find((f) => f.path === effectivePath);
-      if (found) return found;
-    }
-    return undefined;
-  }, [groups, effectivePath]);
-
   // --- the three signals, each from its own endpoint, each its own segment ---
   // Pre-export, validation is a DRY-RUN and audit has nothing to count — those
   // segments carry the live server result as a note; the reserved PASS/FAIL chip
@@ -167,71 +155,11 @@ function LoadedWorkbench({
       ? `Draft assembled · ${pending.length} fields to confirm`
       : 'Draft complete · ready to export';
 
+  // D8 — the right rail is the assistant ONLY (advisory). Deterministic evidence
+  // lives inline on every field row (truth, in the main column); the whole-record
+  // Evidence Trail affordance now sits beneath the WorkflowSpine (see `sidebar`).
   const rightPanel = (
-    <aside className="record-right" aria-label="Evidence and assistant">
-      <div className="evidence-slot">
-        <section className="card ev-panel-card" aria-label="Evidence for selected field">
-          <div className="ev-panel-head">
-            <span className="ev-panel-title">
-              <FileText size={15} strokeWidth={2} aria-hidden="true" />
-              {LABELS.evidence}
-            </span>
-            <span className="ev-panel-badge">deterministic</span>
-          </div>
-          {selectedField ? (
-            <>
-              <div className="ev-panel-for">
-                for <span className="mono">{selectedField.path}</span>
-              </div>
-              {(selectedField.evidence ?? []).map((ev, i) => (
-                <dl className="ev-field" key={i} style={{ marginBottom: 8 }}>
-                  <dt style={{ gridColumn: '1 / -1', marginBottom: 2 }}>
-                    <SourceTypeToken sourceType={ev.source_type} />
-                  </dt>
-                  {ev.source_file && (
-                    <>
-                      <dt>source_file</dt>
-                      <dd>{ev.source_file}</dd>
-                    </>
-                  )}
-                  {ev.locator && (
-                    <>
-                      <dt>locator</dt>
-                      <dd>{ev.locator}</dd>
-                    </>
-                  )}
-                  {ev.quote && (
-                    <>
-                      <dt>quote</dt>
-                      <dd className="quote">"{ev.quote}"</dd>
-                    </>
-                  )}
-                  {ev.rule && (
-                    <>
-                      <dt>rule</dt>
-                      <dd style={{ whiteSpace: 'normal' }}>{ev.rule}</dd>
-                    </>
-                  )}
-                </dl>
-              ))}
-            </>
-          ) : (
-            <p className="ev-panel-for">Select a field to load its evidence.</p>
-          )}
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}
-            onClick={() => navigate(ROUTES.evidence(id))}
-          >
-            <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
-            {LABELS.evidenceTrail} · {evidence.length} entries
-          </button>
-        </section>
-      </div>
-
-      <div className="right-divider" aria-hidden="true" />
-
+    <aside className="record-right narrow" aria-label="Assistant">
       <AssistantPanel
         {...compose({ context: 'review', bundle })}
         experimentId={id}
@@ -243,6 +171,26 @@ function LoadedWorkbench({
         onRefresh={onAgentRefresh}
       />
     </aside>
+  );
+
+  // D8 — the whole-record Evidence Trail affordance, moved out of the (removed)
+  // right-rail evidence panel to sit directly beneath the workflow. It reuses the
+  // EXISTING /evidence route (ROUTES.evidence) — no new route or evidence system.
+  const sidebar = (
+    <div className="record-aside">
+      <WorkflowSpine workflow={detail.workflow} recordId={id} />
+      <button
+        type="button"
+        className="evidence-trail-link"
+        onClick={() => navigate(ROUTES.evidence(id))}
+      >
+        <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
+        <span className="evidence-trail-link-label">{LABELS.evidenceTrail}</span>
+        <span className="evidence-trail-link-count">
+          {evidence.length} {evidence.length === 1 ? 'entry' : 'entries'}
+        </span>
+      </button>
+    </div>
   );
 
   return (
@@ -258,7 +206,7 @@ function LoadedWorkbench({
           stateChip={detail.exported ? 'exported' : 'draft'}
         />
       }
-      sidebar={<WorkflowSpine workflow={detail.workflow} recordId={id} />}
+      sidebar={sidebar}
       rightPanel={rightPanel}
       statusBar={
         <StatusBar
@@ -286,14 +234,28 @@ function LoadedWorkbench({
               These are values the system refuses to guess. Confirm each before this record can
               export — expected, not a failure.
             </p>
-            <ul className="needsyou-list">
-              {pending.map((p) => (
-                <li key={p.id}>
-                  <span className="needsyou-q">{p.question}</span>
-                  {p.about && <span className="needsyou-about mono">{p.about}</span>}
-                </li>
-              ))}
-            </ul>
+            {/* D9/C2 — a NUMBERED list: each item shows the concise structured
+             * label as the primary line (never the raw identifier) and its
+             * technical locator exactly once as a demoted mono token. The
+             * pending data, questions, and ordering are unchanged. */}
+            <ol className="needsyou-list">
+              {pending.map((p, i) => {
+                const summary = pendingSummary(p);
+                return (
+                  <li key={p.id}>
+                    <span className="needsyou-num" aria-hidden="true">
+                      {i + 1}
+                    </span>
+                    <span className="needsyou-item">
+                      <span className="needsyou-q">{summary.label}</span>
+                      {summary.locator && (
+                        <span className="needsyou-about mono">{summary.locator}</span>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
           </div>
           <button
             type="button"
@@ -316,8 +278,6 @@ function LoadedWorkbench({
               [group.block]: !isExpanded(group.block, group.collapsedByDefault),
             }))
           }
-          selectedPath={effectivePath}
-          onSelectField={(field) => setSelectedPath(field.path)}
         />
       ))}
     </AppShell>
