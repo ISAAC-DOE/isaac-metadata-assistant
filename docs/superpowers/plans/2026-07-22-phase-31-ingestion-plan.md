@@ -177,3 +177,17 @@ unchanged; the truth path (§13) is untouched; `apply_answers` is NOT modified. 
 evidence review UI (no Stage/Confirm/Apply/Import/Overwrite controls; a visible "CSV values are review evidence —
 uploading does not change the official record" banner; safe actions only + navigate-to-existing-manual-surface
 where the field is manually editable, else read-only evidence).
+
+## 12. Release status
+
+- **P31.0** proof gate · **P31.1** `80042f3` (safe ingress) · **P31.2** `3ecda47` (reconciliation staging) —
+  RELEASED.
+- **P31.3** `7b202b6` (2026-07-23) — RELEASED. Reconciliation + evidence review UI, reconciliation-only, no
+  mutation. Recovered intact after a Warp crash (RESUME EXISTING WIP; no file discarded). Independent Opus
+  review SHIP (0 critical / 0 important); frontend 542 + backend 887 + build/tsc/snapshot-gate green; CI
+  `7b202b6` success; Railway + Vercel healthy; hosted QA PASS with two honest NOT-OBSERVED (`absent_from_record`
+  unreachable on the canonical seed; two-tab passive-poll staleness under CDP hidden-tab throttling). Details in
+  the master execution ledger's P31.3 entry.
+- **P31.4** — NEXT: lifecycle/degradation confirmation (raw CSV never persists; preview ephemeral &
+  experiment-scoped; record mutation → stale; Reset clears; restart does not resurrect; ingestion failure leaves
+  the manual workflow usable) + the full valid/invalid CSV QA matrix, then Phase 31 closure gate.
