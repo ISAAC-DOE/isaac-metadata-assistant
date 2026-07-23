@@ -616,6 +616,21 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   (stateless backend + reconciliation is client-ephemeral; each push auto-redeployed Railway, health
   `commit` tracked HEAD). CI-flake B1 (`memory-status.test.tsx`) root-fixed (`e45db20`).
 
+- **P32.0 whole-codebase read-only audit** (2026-07-23, HEAD `266340e`): 4 read-only subagents (backend/
+  security · frontend a11y/responsive · truth/authority · tests/CI/docs) + orchestrator hosted survey, then
+  an independent challenge-reviewer. **0 Critical; 0 Important product/security/truth.** Backend security
+  boundaries + truth/authority path audited CLEAN (single-source workflow/classifier/ETag; runtime-retrieval
+  is a projection; no-guessing enforced; confirmed-write surface NOT extended by P31 — TR-1 confirms qc/
+  timestamp predate P31). 2 Important: TC-1 (5 B1-shape test-flake assertions in `completion-export.test.tsx`
+  → CI stability) + TC-4 (README stale counts 411/138 vs 887/542). Minors: FE-2 (phantom focus stop), FE-6
+  (zero-evidence panel), FE-4/F1 (top-level `warnings` type+dropped count), FE-1/FE-3 cleanup, F3 (BOM test),
+  BK-1/BK-3 backend, TC-2/5/6/7 test+doc. Doc-only: TR-1 (7-key write surface), BK-2 (auth-env; mitigated —
+  hosted 401 observed). Rejected Not-a-defect w/ evidence: F2 (media-type gate), FE-5/F4 (prop-driven
+  staleness), TR-2 (reconciliation read-only), TC-3 (legit skip). Challenge-review VERDICT: register
+  substantively accurate (2 citation fixes only). Full register: `2026-07-23-phase-32-issue-register.md` §G/§H.
+  Implementation order: S1 CI-stability → S2 a11y → S3 docs → S4 FE cleanup → S5 BE cleanup/tests → S6
+  governance/memory/E2E/closure.
+
 ## Phase 31 Completion Gate (CLOSED 2026-07-23)
 
 | Criterion | Status | Evidence |
