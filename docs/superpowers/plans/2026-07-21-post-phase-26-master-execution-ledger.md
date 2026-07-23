@@ -1079,3 +1079,23 @@ Search disambiguation (NAV-1) + free-form Q&A deferred.
   `c7b7825` success; Railway `synthetic-only` serving `c7b7825`; Vercel 200. Hosted QA PASS — tabs,
   right-rail assistant, green memory dot, single 'Memory Available' state, Sources tab reveals Source
   Index, console clean. (Also incidentally resolves the audit POL-2 empty-right-half finding.)
+
+- **S4 — Record editor + Guided Completion + Evidence** (2026-07-23 @ `5665132`): presentation/layout/
+  copy only (D8/D9/C2 + HIER-2); no pending/question/computation/confirmation/validation/
+  evidence-classification or nav-target change. Test-first (orchestrator wrote the C2 `pendingSummary`
+  red contract → 4 failed), Opus 4.8 implemented, independent Opus review = **SHIP** (0 Critical/
+  Important). D9/C2: pure `pendingSummary()` (concise `KIND_LABEL`, verbatim-question fallback for
+  unknown kinds, locator once) drives a numbered `<ol>` banner — concise label primary, locator demoted
+  once, raw identifiers (`reduced_spectrum`/`required_for_evidence_record`) never the primary label,
+  dynamic count; Guided Completion keeps the full original question (covered by completion-export test).
+  HIER-2: `.needsyou-about` no longer `word-break:break-all` (safe wrapping). D8: right rail is the
+  AssistantPanel only (evidence panel + divider removed); a compact "Evidence Trail · N entries" link
+  sits beneath the WorkflowSpine and reuses the existing `/evidence` route (no new evidence system);
+  inline per-field evidence retained (FieldRow drops its interactive role when unselected — no dead
+  handler). 1 test re-expressed (tightened). **Accepted Minors → S6:** orphaned `.ev-panel-*`/`.ev-field`
+  CSS + inert optional FieldGroup `selectedPath`/`onSelectField` props (both inert). Verify: full FE
+  **594 passed**, `npm run build` clean, snapshot regen + gate 17/17 (adapt/RecordWorkbench/screens.css
+  manifest members). CI `5665132` success; Railway `synthetic-only` serving `5665132`; Vercel 200.
+  Hosted QA PASS — numbered legible banner (concise label + locator once, no raw-identifier primary),
+  right rail assistant-only, Evidence Trail link beneath the spine → /evidence, inline field evidence
+  retained, console clean.
