@@ -59,4 +59,66 @@ Each candidate retains: `{candidate_id, experiment_id, field (official dotted pa
 | **P31.5** retention/reset/degradation | in-memory (nothing persisted); reset clears; manual-first degradation | reset contract, useRecordSession |
 | **P31.6** hosted QA + closure | valid/malformed/oversized/conflict/duplicate/inferred/unknown/confirm/cancel/stale/reset/security/a11y | — |
 
-## 7. Test-first per slice; independent Opus review per release slice; verification loop per the mandate. Human gates: none (ledger §9 unchanged); stop only if a new native dep/service/real-data proves necessary (it does not — CSV is stdlib).
+## 7. MEMORY-SAFETY CORRECTION (P31.1 revalidation — the "in-memory" claim, verified against the real framework)
+
+The P30.0/§3 claim "bounded in-memory eliminates the filesystem threat category" was UNVERIFIED. Verified now:
+FastAPI + uvicorn; **`python-multipart` is NOT a dependency** → the app cannot parse multipart today, and adding
+`UploadFile`/multipart would (a) add a dependency and (b) inherit Starlette's `SpooledTemporaryFile` (spools to
+disk >1 MB) — reintroducing the filesystem risk. **Corrected design: accept the CSV as a RAW `text/csv` request
+body (NOT multipart)**, read via a BOUNDED stream (`request.stream()` accumulating ≤ MAX+1 bytes, reject 413
+before full allocation). This is genuinely all-in-memory with **no multipart, no SpooledTemporaryFile, no temp
+file, no new dependency** — Outcome A (proven bounded memory) achieved BY CONSTRUCTION, not assumed. Auth
+(middleware, header-only) + runtime-mode + experiment-404 + If-Match all run before the endpoint reads the body.
+The filesystem-threat category is genuinely N/A because the body never touches disk — proven, not claimed.
+
+## 8. CSV v1 CONTRACT (frozen — ONE deliberately narrow dialect; NOT "arbitrary CSV")
+
+Named honestly: **"ISAAC campaign metadata sheet (CSV)"** — the LONG format the existing `extract.structured`
+parser reads (it is campaign-specific, not a general scientific-CSV parser).
+- **File count:** exactly 1 (raw body = one document; a 2nd file is impossible without multipart).
+- **Extension/MIME:** `.csv` only (case-insensitive suffix; reject multi-extension like `.csv.exe`); `Content-Type`
+  `text/csv` (or `text/plain`) — advisory, validated by the contract below (CSV has no magic number).
+- **Encoding:** UTF-8 strict; a leading BOM tolerated deterministically (`utf-8-sig`); reject invalid UTF-8,
+  reject any NUL byte. NO charset auto-detection.
+- **Dialect:** comma delimiter, standard CSV quoting, universal newlines. **NO `csv.Sniffer`** / no delimiter
+  inference.
+- **Header:** required columns `field` + `value` (at least); optional `section`,`unit`,`notes`. Case-normalized
+  (lower, trimmed). Duplicate header → reject (`duplicate_header`). Empty header → reject. Missing `field` or
+  `value` → reject (`missing_required_header`). Unknown EXTRA columns → typed non-actionable WARNING, never
+  mapped. Header count ≤ 64.
+- **Rows:** LONG format — one row per metadata field; ALL rows apply to the ONE target experiment in the route
+  path (no guessing which row belongs where). Blank-`field` rows skipped. Row count ≤ 500.
+- **Cells:** max cell length 4 KB; max total decoded chars 256 KB (== file-size cap); whitespace trimmed on
+  field/section/unit (parser behavior); empty `value` → `needs_confirmation`/absent (never a fabricated value).
+  Numeric fields: strict Python numeric coercion per `FIELD_MAP` py_type (int/float/_to_number), NO locale
+  parsing; coercion failure → `needs_confirmation` (never crash, never guess). NO unit guessing (unit is a
+  passthrough column, never inferred). Candidate count ≤ 200.
+- **Mapping:** `FIELD_MAP` ONLY (field → official dotted path + type); unmapped fields skipped, never guessed;
+  contributors handled separately. Each candidate carries a `spreadsheet` evidence entry `{source_type,
+  source_file (basename), locator ("row N, field=<field>"), quote}` — NO server path (P30.6).
+- **Formula safety:** numeric fields use strict numeric grammar (a formula cell `=SUM(...)` fails coercion →
+  `needs_confirmation`, never executed); text fields are inert untrusted text (kept verbatim, never executed);
+  legitimate NEGATIVE numbers accepted (`-1.5` coerces fine — do NOT blanket-reject leading `-`); if any value
+  is ever re-exported to CSV/spreadsheet, prefix-escape `= + - @`. Regression tests for `= + - @` in numeric AND
+  text fields.
+
+**Parser suitability:** `parse_structured` uses `FIELD_MAP`, official paths, row/field locators, skips unmapped,
+never guesses units, never mutates, is deterministic + tested — SUITABLE for CSV v1, but campaign-sheet-specific;
+the user-facing format is named "ISAAC campaign metadata sheet", not "scientific CSV". P31 adds an in-memory
+adaptation (parse from bounded text, not a path) in the NON-truth `extract` layer; the path-based behavior stays
+unchanged + tested.
+
+## 9. P31.1 endpoint (safe ingress + read-only typed preview)
+
+`POST /api/experiments/{id}/ingestion/csv/preview`, `Content-Type: text/csv`, raw bounded body. Order: auth
+(middleware) → runtime-mode synthetic-only (else typed 403) → experiment 404 → **If-Match** (Option A: current
+ETag required; stale → 412) → bounded body read (413 if > cap; reject empty/NUL/invalid-UTF-8) → CSV v1 validate
+(typed errors) → in-memory `parse_structured` → typed preview `{safe_filename?, format, parser_id+version,
+source_record_rev, row_count, recognized_header_count, unknown_header_warnings, candidate_count, candidates[
+{field, proposed_value, value_state, evidence_classification, locator, source_format}], warnings[], }`.
+**NO mutation** (read-only preview; nothing written, no rev change, no runtime-retrieval/Project-Memory
+indexing, no persisted upload). Confirmation UI + staging into the P29.6 confirm flow = later slices (P31.2+).
+Note: the source_filename is client-supplied metadata (a raw text/csv body has no filename) — if the FE sends an
+`X-Filename` header it is sanitized to a bounded basename for display/attribution only, never a path/ID/value.
+
+## 10. Test-first per slice; independent Opus review per release slice; verification loop per the mandate. Human gates: none (ledger §9 unchanged); stop only if a new native dep/service/real-data proves necessary (it does not — CSV is stdlib, raw-body needs no multipart dep).

@@ -23,6 +23,7 @@ declared numeric coercion fails, the raw string is kept and the field is marked
 from __future__ import annotations
 
 import csv
+import io
 from collections import namedtuple
 from pathlib import Path
 from typing import Callable
@@ -132,20 +133,53 @@ def _coerce(raw, py_type: Callable):
         return raw, "needs_confirmation"
 
 
+def _row_from_record(record: dict, locator_fn: Callable[[str, str], str]) -> _Row | None:
+    """Normalize one ``csv.DictReader`` record into a ``_Row``, or ``None``.
+
+    Shared by the path-based CSV reader and the in-memory text reader so the two
+    stay byte-identical in field/section/unit handling; only the locator differs
+    (a sheet-relative locator vs a row-number locator), supplied by ``locator_fn``.
+    Blank-``field`` rows return ``None`` (skipped, never guessed).
+    """
+    field = (record.get("field") or "").strip()
+    if not field:
+        return None
+    section = (record.get("section") or "").strip()
+    value = record.get("value")
+    unit_raw = (record.get("unit") or "").strip()
+    unit = unit_raw or None
+    return _Row(section, field, value, unit, locator_fn(section, field))
+
+
 def _read_csv(path: Path) -> list[_Row]:
-    """Read a ``section,field,value,unit,notes`` CSV into normalized rows."""
+    """Read a ``section,field,value,unit,notes`` CSV file into normalized rows."""
     rows: list[_Row] = []
     with open(path, newline="", encoding="utf-8") as fh:
         for record in csv.DictReader(fh):
-            field = (record.get("field") or "").strip()
-            if not field:
-                continue
-            section = (record.get("section") or "").strip()
-            value = record.get("value")
-            unit_raw = (record.get("unit") or "").strip()
-            unit = unit_raw or None
-            locator = f"Sheet '{section}', field={field}"
-            rows.append(_Row(section, field, value, unit, locator))
+            row = _row_from_record(
+                record, lambda section, field: f"Sheet '{section}', field={field}"
+            )
+            if row is not None:
+                rows.append(row)
+    return rows
+
+
+def _read_csv_text(text: str) -> list[_Row]:
+    """Read campaign-sheet CSV from IN-MEMORY text into normalized rows.
+
+    The in-memory counterpart of :func:`_read_csv` (P31.1 safe ingress): parses
+    from a string, never a filesystem path, so the uploaded body is never written
+    to disk. Locators are row-number based (``row N, field=<field>``); the header
+    is row 1, so the first data row is row 2 (mirroring the xlsx reader's row 2
+    data start). No file is opened and nothing is persisted.
+    """
+    rows: list[_Row] = []
+    for n, record in enumerate(csv.DictReader(io.StringIO(text)), start=2):
+        row = _row_from_record(
+            record, lambda section, field, _n=n: f"row {_n}, field={field}"
+        )
+        if row is not None:
+            rows.append(row)
     return rows
 
 
@@ -224,6 +258,39 @@ def parse_structured(path) -> list[ExtractedField]:
     return fields
 
 
+def parse_structured_text(text: str, *, source_name: str) -> list[ExtractedField]:
+    """In-memory sibling of :func:`parse_structured` (P31.1 safe CSV ingress).
+
+    Parses the campaign-sheet CSV from an already-decoded string instead of a
+    filesystem path — the uploaded body is NEVER written to disk. Uses the SAME
+    :data:`FIELD_MAP`, :func:`_coerce`, and :func:`_evidence` as the path-based
+    reader: only rows whose ``field`` is in :data:`FIELD_MAP` are emitted; unmapped
+    rows are skipped (never guessed); a failed numeric coercion keeps the raw
+    string as ``needs_confirmation`` (never crash, never evaluate a formula cell).
+
+    ``source_name`` is a caller-sanitized display basename recorded as the evidence
+    ``source_file`` — never a server path (P30.6). Each field carries exactly one
+    ``spreadsheet`` evidence entry with a ``row N, field=<field>`` locator.
+    """
+    fields: list[ExtractedField] = []
+    for row in _read_csv_text(text):
+        mapping = FIELD_MAP.get(row.field)
+        if mapping is None:
+            continue  # contributor or unmapped/3B-deferred row: skip, never guess
+        official_path, py_type = mapping
+        value, status = _coerce(row.value, py_type)
+        fields.append(
+            ExtractedField(
+                path=official_path,
+                value=value,
+                status=status,
+                unit=row.unit,
+                evidence=(_evidence(source_name, row.locator, row.value),),
+            )
+        )
+    return fields
+
+
 def parse_contributors(path) -> list[dict]:
     """Parse experimenter rows into contributor dicts for ``attribution`` (3B).
 
@@ -269,4 +336,10 @@ def parse_rows(path) -> list[dict]:
     ]
 
 
-__all__ = ["FIELD_MAP", "parse_structured", "parse_contributors", "parse_rows"]
+__all__ = [
+    "FIELD_MAP",
+    "parse_structured",
+    "parse_structured_text",
+    "parse_contributors",
+    "parse_rows",
+]

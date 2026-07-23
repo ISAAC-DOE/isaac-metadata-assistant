@@ -14,7 +14,9 @@ import re
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Body, Header, Response
+import logging
+
+from fastapi import APIRouter, Body, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -27,6 +29,7 @@ from isaac_records.official import EXPECTED_VERSION, validate_official
 from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
+from . import csv_ingest
 from . import dependencies
 from . import evidence_classify
 from . import memory
@@ -41,6 +44,8 @@ from .workflow import derive_workflow
 from .workspace import REPO_ROOT, Experiment, atomic_write_text
 
 router = APIRouter(prefix="/api")
+
+_log = logging.getLogger("isaac_api.csv_ingest")
 
 SCHEMA_LABEL = f"ISAAC v{EXPECTED_VERSION}"
 
@@ -774,6 +779,107 @@ def post_export(
         )
         response.headers["ETag"] = exp.etag()
         return payload
+
+
+# --- 8b. CSV ingestion preview (P31.1 — read-only, no mutation) ---------------
+
+
+def _csv_error(err: csv_ingest.CsvIngestError) -> JSONResponse:
+    """Serialize a typed CSV-ingress rejection (stable code, never a stack)."""
+    return JSONResponse(
+        status_code=err.http_status,
+        content={"error": err.code, "message": err.message},
+    )
+
+
+async def _read_bounded_body(request: Request, max_bytes: int) -> bytes:
+    """Accumulate the raw request body from ``request.stream()``, BOUNDED.
+
+    Aborts with a typed ``request_too_large`` (413) the moment the running total
+    exceeds ``max_bytes`` — the full body is NEVER allocated when oversized, and
+    nothing is spooled to disk (no multipart, no ``SpooledTemporaryFile``, no temp
+    file). Genuinely all-in-memory by construction.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise csv_ingest.CsvIngestError(
+                "request_too_large",
+                413,
+                f"The body exceeds the {max_bytes}-byte limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post("/experiments/{experiment_id}/ingestion/csv/preview")
+async def post_csv_preview(
+    experiment_id: str,
+    request: Request,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    x_filename: str | None = Header(default=None, alias="X-Filename"),
+):
+    """READ-ONLY typed preview of an uploaded campaign-sheet CSV (P31.1).
+
+    Accepts a RAW ``text/csv`` body (NOT multipart), bounded in-memory. Order:
+    auth (middleware) -> runtime-mode synthetic-only -> experiment 404 -> If-Match
+    (428/412/400) -> bounded body read (413) -> utf-8-sig decode (empty/NUL/invalid
+    -> typed) -> CSV v1 validate (typed) -> in-memory FIELD_MAP parse -> typed
+    preview. Performs NO mutation: no Workspace write, no rev bump, no export, no
+    retrieval/Project-Memory indexing, no persisted upload. Logs metadata only.
+    """
+    # Runtime-mode gate: this synthetic preview path is refused outside
+    # synthetic-only mode (fail-closed; the app also refuses to boot in real mode).
+    if not runtime_mode.is_synthetic_only():
+        _log.info("csv_preview outcome=runtime_mode_denied experiment=%s", experiment_id)
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "runtime_mode_denied",
+                "message": "CSV preview is available only in synthetic-only mode.",
+            },
+        )
+    # Existence BEFORE If-Match (an unknown id 404s regardless of headers).
+    exp = ws.load_experiment(experiment_id)
+    if exp is None:
+        _log.info("csv_preview outcome=experiment_not_found experiment=%s", experiment_id)
+        return _not_found(experiment_id)
+    # Version binding: current ETag required (missing -> 428, malformed -> 400,
+    # stale -> 412). Evaluated BEFORE the body is read so a stale client refreshes
+    # without us consuming a (potentially large) body.
+    err = _check_if_match(if_match, exp)
+    if err is not None:
+        _log.info("csv_preview outcome=precondition experiment=%s", experiment_id)
+        return err
+
+    started = datetime.now(timezone.utc)
+    source_name = csv_ingest.safe_source_name(x_filename)
+    try:
+        raw = await _read_bounded_body(request, csv_ingest.MAX_BODY_BYTES)
+        text = csv_ingest.decode_body(raw)
+        preview = csv_ingest.build_preview(
+            text, source_name=source_name, source_record_rev=exp.rev
+        )
+    except csv_ingest.CsvIngestError as e:
+        # Metadata only — never the raw body / rows / candidate values / filename.
+        _log.info("csv_preview outcome=rejected code=%s experiment=%s", e.code, experiment_id)
+        return _csv_error(e)
+
+    duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+    _log.info(
+        "csv_preview outcome=ok experiment=%s bytes=%d rows=%d candidates=%d duration_ms=%d",
+        experiment_id,
+        len(raw),
+        preview["row_count"],
+        preview["candidate_count"],
+        duration_ms,
+    )
+    # Read-only: rev is unchanged; echo the current validator for convenience.
+    response.headers["ETag"] = exp.etag()
+    return preview
 
 
 # --- 9. validate --------------------------------------------------------------
