@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 29 COMPLETE (corrected)** (2026-07-22): after the premature `09cfaee` closure was retracted, the actionability gap was closed by **P29.6** (`d267be7`) and the previously-missing **stage→confirm→mutate flow is now hosted-QA-verified PASS** (one POST/answers→200 on Confirm, 412 on stale, idempotent double-click, reset invalidates). Now genuinely → Phase 30. Documented non-blocking caveats: passive-poll two-window; degraded/live-conflicting-classes not hosted-exercised. |
-| **Active ticket** | P30.0 — Runtime Retrieval Proof Gate (next) |
+| **Active ticket** | P30.1 — Runtime record projection + typed filters (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 30 P30.0 Runtime Retrieval **PROOF-GATE** — prove what P26 Workspace search cannot already answer BEFORE building anything; strong bias to NO new persistent index (prefer: existing search → thin runtime provider → short-lived rev-keyed cache → persistent index only with measured justification); confirmed-facts-only; Workspace-subordinate |
 | **Blockers** | none |
@@ -440,6 +440,24 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   for P32 UI audit. Demo left at canonical 2/1/1/1.
 
 ---
+
+## Phase 30 — Live Runtime Record Retrieval (in progress)
+
+- **P30.0** (Runtime Retrieval PROOF GATE, read-only, 2026-07-22): 2 parallel tracks (search-capability +
+  use-case matrix; performance at 5/50/100/500 synthetic) → plan
+  `docs/superpowers/plans/2026-07-22-phase-30-runtime-retrieval-plan.md`. **Findings:** P26 search is a fresh
+  index-free live scan (current-by-construction, leak-scrubbed); the status-axis cross-record triage already
+  ships (ExperimentsHome); the one real in-scope gap is that the assistant is strictly single-record. **Perf
+  (near-worst-case):** full `/search` ~9 ms @5, ~108 ms @100, ~560 ms @500; bottleneck = `status()`'s
+  per-record export dry-run (NOT disk/index-absence); memory negligible. **Decision:** **Option D (persistent
+  index) REJECTED** (no measured need; fresh scan already exists; durable second store unjustified); **Option
+  C (cache) rejected** (direct derivation interactive at ≤100); **Option A insufficient alone** (free-text
+  can't do structured derived-state filters); **SELECTED Option B — a thin read-only Workspace-derived
+  runtime provider over the SAME scan** (no index/cache/service/secret), emitting safe confirmed-facts +
+  record_rev + navigate_to, with ONLY the typed filters a concrete consumer uses — a deterministic
+  cross-record assistant triage intent + a SearchDialog filter. Speculative filters (missing-field, full
+  evidence-class sweep) SCOPED OUT (no consumer → not built; "no provider ahead of its consumer"). No human
+  gate; no infra change → proceed. Truth path untouched; docs-only.
 
 ## Phase 29 — Assistant Experience (in progress)
 
