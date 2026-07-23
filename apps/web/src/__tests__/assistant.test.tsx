@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
-import { GUIDED_ONLY_NOTE, MEMORY_UNAVAILABLE_CAVEAT, hasVerdictLanguage } from '../lib/assistant';
+import {
+  COMPOSER_GUIDED_HELPER,
+  GUIDED_ONLY_NOTE,
+  MEMORY_UNAVAILABLE_CAVEAT,
+  hasVerdictLanguage,
+} from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
 import {
   experimentDetail,
@@ -176,20 +181,25 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
     ).toBeInTheDocument();
   });
 
-  it('is honestly guided-prompts-only: no free-text input, no fake chat affordance; a subordinate caption is visible', () => {
+  it('is honestly guided-first: an inert visual-only composer (SECONDARY send) with a persistent guided-only helper; the standalone guided-note is de-duped and the subordinate caption is the single advisory footer', () => {
     const out = evidenceOut();
-    const { getByText, queryByRole, queryByLabelText } = render(
+    const { getByRole, getByText, queryByText, getByLabelText } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
-    // P25.2: the disabled free-text input + send button are removed entirely —
-    // there is no textbox and no "Send" affordance to mislead a user into
-    // thinking free-text chat is available.
-    expect(queryByRole('textbox')).toBeNull();
-    expect(queryByRole('button', { name: /^send$/i })).toBeNull();
-    expect(queryByLabelText(/ask the assistant/i)).toBeNull();
-    // the honest guided-only note replaces it
-    expect(getByText(GUIDED_ONLY_NOTE)).toBeInTheDocument();
-    // subordinate-to-deterministic-validation caption
+    // P33 S2 (D3/C3): the panel now shows an HONEST visual-only composer — a real
+    // labelled text input plus a SECONDARY-styled send control (never the primary
+    // action), with the persistent guided-only helper visible before interaction.
+    const box = getByRole('textbox');
+    expect(box).toBeInTheDocument();
+    expect(getByLabelText(/ask the assistant/i)).toBe(box);
+    const send = getByRole('button', { name: /send/i });
+    expect(send.className).toMatch(/btn-secondary/);
+    expect(send.className).not.toMatch(/btn-primary/); // never styled as the primary action
+    // the persistent guided-only helper states the limitation up front …
+    expect(getByText(COMPOSER_GUIDED_HELPER)).toBeInTheDocument();
+    // … and the now-redundant standalone guided-note is de-duped away.
+    expect(queryByText(GUIDED_ONLY_NOTE)).toBeNull();
+    // subordinate-to-deterministic-validation caption remains the single footer
     expect(getByText(/advisory — it explains/i)).toBeInTheDocument();
     expect(getByText(/never validates/i)).toBeInTheDocument();
   });

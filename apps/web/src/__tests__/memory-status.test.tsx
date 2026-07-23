@@ -255,14 +255,22 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     expect(statusChip.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('is guided-prompts-only — no textbox, no send button', async () => {
+  it('surfaces an honest visual-only composer — a guided-only helper + a SECONDARY send, replacing the standalone guided-note', async () => {
     stubFetchRoutes(availableRoutes);
-    const { findByText, container, queryByRole } = renderScreen();
+    const { findByText, container } = renderScreen();
     await findByText('Memory: Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;
-    expect(within(assistant).queryByRole('textbox')).toBeNull();
-    expect(queryByRole('button', { name: /^send$/i })).toBeNull();
-    expect(assistant.textContent).toMatch(/Guided prompts only/i);
+    const panel = within(assistant);
+    // P33 S2 (D3/C3): the textbox now exists but free-form Q&A is not wired; the
+    // persistent guided-only helper states the limitation before any interaction,
+    // and the send control is SECONDARY (never the primary action).
+    expect(panel.getByRole('textbox')).toBeInTheDocument();
+    const send = panel.getByRole('button', { name: /send/i });
+    expect(send.className).toMatch(/btn-secondary/);
+    expect(send.className).not.toMatch(/btn-primary/);
+    expect(assistant.textContent).toMatch(/Guided Questions Only/i);
+    // the redundant standalone guided-note ("Guided prompts only …") is de-duped
+    expect(assistant.textContent).not.toMatch(/Guided prompts only — the assistant answers/i);
   });
 
   it('renders the memory: available head line but NO unavailable caveat (unchanged behavior)', async () => {

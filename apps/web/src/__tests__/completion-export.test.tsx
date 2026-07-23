@@ -674,18 +674,26 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
   });
 
-  it('is guided-prompts-only — the note is present and there is NO textbox/send button', async () => {
+  it('surfaces an honest visual-only composer — a persistent guided-only helper + a SECONDARY send, and free-text has no textarea', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
-    const { container, findByText, getByText, queryByRole } = renderAt('/record/demo/complete');
+    const { container, findByText } = renderAt('/record/demo/complete');
 
     await findByText('Answer 5 Questions to Finish This Record');
-    expect(
-      getByText('Guided prompts only — the assistant answers the suggested questions above.'),
-    ).toBeInTheDocument();
-    // no free-text affordance inside the assistant panel
+    const assistant = within(container.querySelector('.assistant') as HTMLElement);
+    // P33 S2 (D3/C3): the composer is a single-line input (never a multi-line
+    // chat textarea) with a SECONDARY send control and a persistent guided-only
+    // helper; the redundant standalone guided-note is de-duped.
     expect(container.querySelector('.assistant textarea')).toBeNull();
-    expect(container.querySelector('.assistant input')).toBeNull();
-    expect(queryByRole('button', { name: /send/i })).toBeNull();
+    expect(assistant.getByRole('textbox')).toBeInTheDocument();
+    const send = assistant.getByRole('button', { name: /send/i });
+    expect(send.className).toMatch(/btn-secondary/);
+    expect(send.className).not.toMatch(/btn-primary/);
+    expect(
+      assistant.getByText('Guided Questions Only — choose a suggested question below for an answer.'),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('.assistant')!.textContent,
+    ).not.toMatch(/Guided prompts only — the assistant answers/i);
   });
 
   it('clicking a chip issues NO new network request (pure, LLM-free)', async () => {

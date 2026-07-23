@@ -83,11 +83,15 @@ describe('P29.2 conversation layout — chronological, not inverted', () => {
     expect(last.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('places the prompt pills BELOW the message list (never answer-above-prompt)', () => {
+  it('places the prompt pills ABOVE the message log (P33 S2 · D4 reorder — controls lead, log trails)', () => {
+    // P33 S2 (D4) reordered the panel: the composer + Suggested Questions +
+    // Agent Actions controls now lead, and the conversation LOG (history + the
+    // live reply at the bottom) trails below them. The live reply block stays the
+    // newest element at the bottom of the log (asserted in the test above).
     const { container } = panel();
     const log = container.querySelector('.assistant-log')!;
     const prompts = container.querySelector('.assistant-prompts')!;
-    expect(log.compareDocumentPosition(prompts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(prompts.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

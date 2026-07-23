@@ -1,5 +1,5 @@
 import './assistant.css';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   MessageSquare,
   ChevronRight,
@@ -17,7 +17,8 @@ import {
 } from './icons';
 import { LABELS } from '../lib/labels';
 import {
-  GUIDED_ONLY_NOTE,
+  COMPOSER_GUIDED_HELPER,
+  COMPOSER_UNSUPPORTED_NOTICE,
   MEMORY_UNAVAILABLE_CAVEAT,
   SOURCE_LABELS,
   SUBORDINATE_CAPTION,
@@ -218,14 +219,16 @@ function prefersReducedMotion(): boolean {
 const NEAR_BOTTOM_PX = 64;
 
 /**
- * Conversation-style assistant (P29.2). Layout top→bottom: header → scrollable
- * message log (older → newest, newest at the BOTTOM) → guided prompt pills →
- * subordinate caption. The panel presents the P29.1 ephemeral session as a
- * conversation and preserves every honesty guard: `answered from:` on each
- * reply, the guided-only note, the memory-availability caveat, and the
- * verdict-language guard over ALL rendered assistant text. It explains and
- * points to sources — it never renders a verdict, never mutates a record, and
- * offers no free-text input (mutation/confirmation is P29.3).
+ * Conversation-style assistant (P29.2, reordered P33 S2 · D4). Layout top→bottom:
+ * header → honest visual-only composer (P33 S2 · D3/C3) → Suggested Questions
+ * pills → Agent Actions → the scrollable message log (older → newest, newest at
+ * the BOTTOM) → StageAnswer/ProposalCard → the single subordinate caption. The
+ * panel presents the P29.1 ephemeral session as a conversation and preserves
+ * every honesty guard: `answered from:` on each reply, the composer's persistent
+ * guided-only helper, the memory-availability caveat, and the verdict-language
+ * guard over ALL rendered assistant text. It explains and points to sources — it
+ * never renders a verdict, never mutates a record from the composer, and the
+ * composer performs no fetch/append/persist (mutation/confirmation is P29.3).
  */
 export function AssistantPanel({
   reply,
@@ -245,6 +248,15 @@ export function AssistantPanel({
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [messages, setMessages] = useState<Msg[]>(() => loadSession(experimentId).messages);
   const [showJump, setShowJump] = useState(false);
+
+  // P33 S2 (D3/C3) — the honest, visual-only composer. `composerText` is LOCAL
+  // transient state that is NEVER written to the session/log/storage and never
+  // sent anywhere; `composerNotice` gates the accessible inline limitation that
+  // appears only after a free-text submit. This composer performs no fetch,
+  // appends no message, and reroutes nothing — it exists to be honest about the
+  // guided-only boundary, not to add a chat path.
+  const [composerText, setComposerText] = useState('');
+  const [composerNotice, setComposerNotice] = useState(false);
 
   // P29.4b — the live staged proposal, seeded from the prop and owned locally so
   // Cancel can clear it and a stale/412 confirm can mark it. The record is never
@@ -426,6 +438,17 @@ export function AssistantPanel({
     replyRef.current?.focus();
   }
 
+  // P33 S2 (D3/C3) — the composer submit. Intentionally INERT: it makes NO
+  // network request, appends NO conversation message, persists nothing, and
+  // never reroutes the typed text into a suggested-question request. It only
+  // surfaces the accessible inline limitation and drops the transient text.
+  // Free-form Q&A is not wired in this build; the composer is honest about it.
+  function onComposerSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setComposerNotice(true);
+    setComposerText('');
+  }
+
   const agentActive = !!agentContext && !degraded && !agentContext.degraded;
 
   // The narrow staging affordance shows only for the CURRENT pending field, only
@@ -532,10 +555,81 @@ export function AssistantPanel({
         </p>
       )}
 
-      {/* role="log" gives the conversation its semantics but carries an IMPLICIT
-          aria-live="polite"; we set aria-live="off" here to suppress it so that
-          archiving prior turns into the log does NOT announce them. The single
-          live region is the current reply below — announced once, politely. */}
+      {/* P33 S2 (D3/C3) — the honest, visual-only composer. A real text input +
+          a SECONDARY-styled send control, with a PERSISTENT guided-only helper
+          visible BEFORE any interaction. Submitting is INERT: `onComposerSubmit`
+          makes no fetch, appends no message, persists nothing, and reroutes no
+          text — it only surfaces the accessible inline limitation below. This is
+          honesty about the guided-only boundary, not a chat path. */}
+      <form className="assistant-composer" onSubmit={onComposerSubmit}>
+        <input
+          type="text"
+          className="assistant-composer-input"
+          aria-label="Ask the assistant a question"
+          value={composerText}
+          onChange={(e) => setComposerText(e.target.value)}
+        />
+        <button
+          type="submit"
+          className="btn btn-secondary assistant-composer-send"
+          aria-label="Send question"
+        >
+          <CornerDownRight size={15} strokeWidth={2} aria-hidden="true" />
+        </button>
+      </form>
+      <p className="assistant-composer-helper">{COMPOSER_GUIDED_HELPER}</p>
+      {composerNotice && (
+        <p className="assistant-composer-notice" role="status">
+          {COMPOSER_UNSUPPORTED_NOTICE}
+        </p>
+      )}
+
+      <div className="assistant-suggested-eyebrow eyebrow">{LABELS.suggestedQuestions}</div>
+      <div className="assistant-prompts">
+        {prompts.map((p, i) => (
+          <button
+            type="button"
+            className={`assistant-prompt${activeIndex === i ? ' active' : ''}`}
+            key={p.text}
+            aria-pressed={activeIndex === i}
+            disabled={!p.answer}
+            onClick={() => ask(i)}
+          >
+            <span>{p.text}</span>
+            <ChevronRight className="chev" size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+
+      {/* P29.4b — the INTENT pills. Each RUNS a real agent intent against the live
+          context; the result is appended to the conversation below. Disabled while
+          the context is degraded/absent (manual-first: composed prompts stay live). */}
+      {shownAgentPrompts.length > 0 && (
+        <>
+          <div className="assistant-suggested-eyebrow eyebrow">Agent Actions</div>
+          <div className="assistant-agent-prompts">
+            {shownAgentPrompts.map((p) => (
+              <button
+                type="button"
+                className="assistant-agent-prompt"
+                key={p.intent}
+                data-intent={p.intent}
+                disabled={!agentActive}
+                onClick={() => runAgentIntent(p)}
+              >
+                <span>{p.label}</span>
+                <ChevronRight className="chev" size={15} strokeWidth={2} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* P33 S2 (D4) — the conversation LOG moved BELOW the prompt controls
+          (newest at the bottom). role="log" carries an IMPLICIT aria-live="polite";
+          we set aria-live="off" here to suppress it so archiving prior turns into
+          the log does NOT announce them. The single live region is the current
+          reply below — announced once, politely. */}
       <div
         className="assistant-log"
         ref={logRef}
@@ -596,49 +690,8 @@ export function AssistantPanel({
         />
       )}
 
-      <div className="assistant-suggested-eyebrow eyebrow">{LABELS.suggestedQuestions}</div>
-      <div className="assistant-prompts">
-        {prompts.map((p, i) => (
-          <button
-            type="button"
-            className={`assistant-prompt${activeIndex === i ? ' active' : ''}`}
-            key={p.text}
-            aria-pressed={activeIndex === i}
-            disabled={!p.answer}
-            onClick={() => ask(i)}
-          >
-            <span>{p.text}</span>
-            <ChevronRight className="chev" size={15} strokeWidth={2} aria-hidden="true" />
-          </button>
-        ))}
-      </div>
-
-      {/* P29.4b — the INTENT pills. Each RUNS a real agent intent against the live
-          context; the result is appended to the conversation above. Disabled while
-          the context is degraded/absent (manual-first: composed prompts stay live). */}
-      {shownAgentPrompts.length > 0 && (
-        <>
-          <div className="assistant-suggested-eyebrow eyebrow">Agent Actions</div>
-          <div className="assistant-agent-prompts">
-            {shownAgentPrompts.map((p) => (
-              <button
-                type="button"
-                className="assistant-agent-prompt"
-                key={p.intent}
-                data-intent={p.intent}
-                disabled={!agentActive}
-                onClick={() => runAgentIntent(p)}
-              >
-                <span>{p.label}</span>
-                <ChevronRight className="chev" size={15} strokeWidth={2} aria-hidden="true" />
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      <p className="assistant-guided-note">{GUIDED_ONLY_NOTE}</p>
-
+      {/* P33 S2 (D4) — the SINGLE advisory footer. The standalone guided-only note
+          was removed here as redundant with the composer helper above. */}
       <p className="assistant-caption">{SUBORDINATE_CAPTION}</p>
     </section>
   );

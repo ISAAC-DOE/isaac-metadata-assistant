@@ -117,12 +117,22 @@ describe('P29.6 the "Stage Answer" trigger appears for the current pending field
     expect(stage.textContent).toMatch(/series-42/); // the labeled synthetic suggestion
   });
 
-  it('stays guided-prompts-only — NO freeform chat composer (no textbox/textarea/send)', () => {
-    const { queryByRole, container } = panel();
-    expect(container.querySelector('.assistant input')).toBeNull();
-    expect(container.querySelector('.assistant textarea')).toBeNull();
-    expect(queryByRole('textbox')).toBeNull();
-    expect(queryByRole('button', { name: /^send$/i })).toBeNull();
+  it('the STAGING affordance is a single labeled button — NOT a freeform chat composer (no input/textarea inside it)', () => {
+    // P33 S2 (D3): the panel now has a separate, INERT visual-only composer, but
+    // the STAGING path itself must never be a chat box — it stays a single
+    // labeled "Stage Answer" button that routes only the synthetic suggestion.
+    const { container } = panel();
+    const stage = container.querySelector('.agent-stage') as HTMLElement;
+    expect(stage).not.toBeNull();
+    expect(stage.querySelector('input')).toBeNull();
+    expect(stage.querySelector('textarea')).toBeNull();
+    expect(stage.querySelector('button')).not.toBeNull();
+    expect(stage.textContent).toMatch(/stage answer/i);
+    // the panel's P33 S2 composer input is inert (visual-only) and lives OUTSIDE
+    // the staging affordance — staging never routes free text through it.
+    const composerInput = container.querySelector('.assistant-composer-input');
+    expect(composerInput).not.toBeNull();
+    expect(stage.contains(composerInput)).toBe(false);
   });
 
   it('renders NO staging trigger when there is no current pending field (never a blanket write)', () => {
