@@ -535,7 +535,7 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // states a verdict and never echoes validate.ok
     fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
     expect(
-      panel.getByText(
+      await panel.findByText(
         'No blocking paths are listed in the current validation response. ' +
           'Open Validate to run the deterministic schema check.',
       ),
@@ -557,7 +557,7 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
 
     fireEvent.click(panel.getByText('Explain the advisory warning').closest('button')!);
     expect(
-      panel.getByText(
+      await panel.findByText(
         'NO_LINKS — no relationships declared (advisory, non-gating; where: record.links).',
       ),
     ).toBeInTheDocument();
@@ -647,7 +647,7 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     const panel = within(assistant);
 
     fireEvent.click(panel.getByText('What does this question want?').closest('button')!);
-    expect(panel.getByText(EXPLAIN_CURRENT)).toBeInTheDocument();
+    expect(await panel.findByText(EXPLAIN_CURRENT)).toBeInTheDocument();
     // P29.2: scope the source-label assertion to the LIVE reply block — the
     // prior (also workflow-sourced) turn now archives into the conversation log
     // with its own identical `answered from:` label, so the panel-wide query is
@@ -666,7 +666,7 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     const panel = within(assistant);
 
     fireEvent.click(panel.getByText('What if I leave one missing?').closest('button')!);
-    expect(panel.getByText(MISSING_BEHAVIOR)).toBeInTheDocument();
+    expect(await panel.findByText(MISSING_BEHAVIOR)).toBeInTheDocument();
     expect(panel.getByText('answered from: Schema Rules')).toBeInTheDocument();
 
     // the routed truth chip never states a verdict / validity conclusion
@@ -697,7 +697,7 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     const before = calls.length;
 
     fireEvent.click(panel.getByText('What if I leave one missing?').closest('button')!);
-    expect(panel.getByText(MISSING_BEHAVIOR)).toBeInTheDocument();
+    expect(await panel.findByText(MISSING_BEHAVIOR)).toBeInTheDocument();
     expect(calls.length).toBe(before);
   });
 
