@@ -14,19 +14,19 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 30 COMPLETE** (2026-07-22): Runtime-retrieval proof gate REJECTED a persistent index (measured); shipped a thin Workspace-derived runtime provider (`/runtime/records`, no index/cache/service) + a cross-record triage consumer (SearchDialog), hosted-QA PASS (correct matching, honest empty states, current-by-construction, clean handoff to authoritative record). → Phase 31. |
-| **Active ticket** | P31.4 — final Phase-31 QA + closure (next). Phase 31 is RECONCILIATION-ONLY (human decision 2026-07-22): CSV ingestion parses + reconciles + reviews evidence; it does NOT mutate the mapped official fields and the confirmed-write surface is NOT extended. P31.1 ingress (`80042f3`) + P31.2 reconciliation (`3ecda47`) + P31.3 review UI (`7b202b6`) shipped. |
+| **Active ticket** | **Phase 32 (final: QA + hardening) — next.** Phase 31 CLOSED 2026-07-23 (RECONCILIATION-ONLY): P31.1 ingress (`80042f3`) + P31.2 reconciliation (`3ecda47`) + P31.3 review UI (`7b202b6`) + docs (`265e23f`) + B1 flake fix (`e45db20`) + P31.4/closure. Independent review SHIP; CSV parses/reconciles/reviews evidence only — no official-field mutation, confirmed-write surface NOT extended. Phase 32 issue register seeded at `docs/superpowers/plans/2026-07-23-phase-32-issue-register.md`. |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 31 (Synthetic/Public File Ingestion) — P31.0 format selection (human-gate 5 possible) → P31.1 upload boundary → P31.2 deterministic parser → P31.3 assistant/manual review → P31.4 QA. Strict: synthetic/public only, NO real/private data, sandboxed, deterministic; candidates stay candidates (reuse P28.4/P29.6). |
 | **Blockers** | none |
-| **Latest impl commit** | `7b202b6` (P31.3 CSV review UI) |
-| **Latest checkpoint commit** | this P31.3 docs commit (pending push) |
-| **Verification status** | full backend **887 passed**; frontend **542 passed** + build clean + tsc 0; snapshot gate 17/17; CI green on `7b202b6`; Railway `7b202b6` synthetic-only; Vercel `isaac-demo-web.vercel.app` P31.3 bundle live; hosted QA PASS (2 honest NOT-OBSERVED) |
+| **Latest impl commit** | `7b202b6` (P31.3 CSV review UI); `e45db20` (B1 flake fix) |
+| **Latest checkpoint commit** | this Phase 31 closure docs commit (pending push) |
+| **Verification status** | full backend **887 passed**; frontend **542 passed** + build clean + tsc 0; snapshot gate 17/17; 61 CSV tests; truth export PASS (v1.05) + audit 21/21; CI green on `e45db20`; Railway `synthetic-only` @ HEAD; Vercel `isaac-demo-web.vercel.app` P31.3 bundle live; independent review SHIP; hosted QA PASS (2 honest human-only NOT-OBSERVED) |
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
 | **Next recommended action** | P31.0 — choose the supported synthetic/public ingestion file format from repo evidence (single XANES/characterization path); STOP for human-gate 5 if none is defensibly derivable. No real/private data. |
-| **Git sync** | `main` · local == `origin/main` == `7b202b6` · 0/0 · clean (before this P31.3 docs commit) |
-| **Exact-HEAD CI** | P31.3 `7b202b6` green (run 29990266606, conclusion success); this docs commit pending push-time verify |
+| **Git sync** | `main` · local == `origin/main` == `e45db20` · 0/0 · clean (before this Phase 31 closure docs commit) |
+| **Exact-HEAD CI** | `e45db20` green (run success); P31.3 `7b202b6` green (29990266606); this closure docs commit pending push-time verify |
 | **Railway note** | 2026-07-22: rapid P28.1–P28.5 pushes queued serial Railway builds (each Docker build ~minutes on the metal builder). Builds SUCCEED (image push + healthcheck pass in logs); serving `37713d7`, draining the backlog toward HEAD. Not stalled/failed. Confirm Railway == Phase-28 HEAD (has `/edit` + `/evidence-classification`) before P28.6 hosted QA. |
 | **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
@@ -597,6 +597,47 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   (manual surface, no insertion, no mutation), network (only `/preview`, no `/answers`|`/edit`), console-clean
   → ALL PASS. Two honest NOT-OBSERVED: `absent_from_record` (unreachable on canonical seed — all FIELD_MAP paths
   populated; unit-covered) and two-tab/passive-poll staleness (CDP hidden-tab throttling; unit-verified).
+
+- **P31.4 + Phase 31 closure** (2026-07-23): lifecycle/degradation verification + closure. NO new production
+  code (P31.4 is verification/closure). Verified deterministically: raw CSV never persisted
+  (`test_raw_body_is_never_persisted`), no rev bump (`test_preview_does_not_bump_rev`), no mutation /
+  no-search-index / stale-after-mutation / stale-after-reset / no-path-secret-leak
+  (`test_csv_reconcile.py`), invalid-input matrix (`test_csv_ingress_matrix.py`) — 61 CSV tests green.
+  Truth validation against actual records: `isaac export` synthetic draft → PASS (official schema v1.05);
+  `isaac audit` → PASS 21/21, 0 failing (ephemeral artifacts removed; tree kept clean). Independent Opus
+  reviewer (separate agent, review-only) → **SHIP, 0 critical / 0 important**; 4 minors logged (register
+  F1 TS `warnings` type mismatch on an unrendered field; F2 no `text/csv` media-type gate — defense-in-depth
+  covers; F3 no dedicated BOM test; F4 prop-driven client staleness) + a documentation overclaim it caught
+  in this register's §D (now corrected: `extract/structured.py` was refactored in P31.1; the §13-enumerated
+  truth path was not). Hosted lifecycle QA (Claude-in-Chrome, synthetic fixtures): reset-invalidation
+  (5 records, 2/1/1/1, reconciliation cleared, new preview binds to post-reset rev), degradation
+  (dup-header + empty → typed path-safe errors, manual workflow usable), matching/conflict, navigation,
+  network (only `/preview`, no `/answers`|`/edit`), console-clean → PASS. Restart-safety = architectural
+  (stateless backend + reconciliation is client-ephemeral; each push auto-redeployed Railway, health
+  `commit` tracked HEAD). CI-flake B1 (`memory-status.test.tsx`) root-fixed (`e45db20`).
+
+## Phase 31 Completion Gate (CLOSED 2026-07-23)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| Independent review SHIP; 0 critical / 0 important | ✅ | separate Opus reviewer, review-only, traced every invariant to code+tests |
+| CSV v1 narrow; ingress authenticated + bounded | ✅ | `csv_ingest.py` limits; `routes.py` auth + runtime-mode gate + If-Match |
+| Reconciliation read-only; no confirmed-write expansion | ✅ | FIELD_MAP paths disjoint from write keys; `apply_answers` untouched |
+| No CSV-driven Workspace mutation; no rev bump | ✅ | `test_endpoint_performs_no_mutation`, `test_preview_does_not_bump_rev`; hosted network |
+| Raw CSV never persists / logged / indexed | ✅ | `test_raw_body_is_never_persisted`; handler logs metadata only |
+| Matching no-op safe; conflict keeps both (no winner); absent unconfirmed; unknown = warning | ✅ | `test_csv_reconcile.py`; hosted matching + conflict |
+| Stale cannot be shown as current | ✅ (unit) / ⚠️ hosted human-only | version-bound If-Match; `test_endpoint_stale_after_*`; live 2-tab transition NOT-OBSERVED (CDP throttling) |
+| Reset clears ingestion state; restart does not resurrect | ✅ | hosted reset (cleared, 2/1/1/1); stateless backend + client-ephemeral state |
+| Degradation leaves manual workflow usable | ✅ | hosted typed errors; manual `/complete` reachable |
+| Truth validation + evidence audit pass on actual records | ✅ | export PASS (v1.05); audit 21/21, 0 failing |
+| Backend 887 / frontend 542 / tsc / build / snapshot gate 17 / R4.3 | ✅ | this session |
+| CI green; Railway healthy synthetic-only; Vercel serving | ✅ | CI `e45db20` success; Railway `commit=HEAD` synthetic-only; Vercel panel bundle 200 |
+
+**Phase 31 = COMPLETE (RECONCILIATION-ONLY).** Honest non-blocking caveats carried to Phase 32:
+(1) live two-tab/passive-poll stale transition NOT-OBSERVED under CDP hidden-tab throttling — human-only,
+unit-covered (register C1/F4); (2) `absent_from_record` hosted-unreachable on the canonical seed —
+unit-only (register C4); (3) 4 review minors F1–F4 + the §D doc correction. No confirmed-write expansion;
+truth path (§13) untouched.
 
 ## Phase 30 Completion Gate (CLOSED 2026-07-22 @ `47e91ae`)
 

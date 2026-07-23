@@ -40,7 +40,28 @@ Classification: Critical · Important · Minor · Documentation-only · Human-on
 - TODO/FIXME/HACK/XXX in `apps/api/isaac_api`, `apps/web/src`, `src/isaac_records`: **0**.
 - `.only` focused tests in `apps/web/src`: **0**.
 - Skipped tests (frontend+backend): **1** (see B2).
-- Truth path untouched by P31 (`src/isaac_records/`, `schema/` unchanged).
+- **§13-enumerated truth path** (`schema/isaac_record_v1.json`, `official.py`, `draft_validator.py`,
+  `export.py`, `audit.py`, `cli.py`) unchanged across all of Phase 31 (verified: `git show --stat 80042f3`
+  touches none of them). **Correction (indep. review 2026-07-23):** an earlier draft of this line said
+  "`src/isaac_records/` unchanged" — that OVERCLAIMED. P31.1 (`80042f3`) modified the NON-truth extract
+  layer `src/isaac_records/extract/structured.py` (+95): added `parse_structured_text`/`_read_csv_text`
+  (in-memory) and refactored the shared row reader; the path-based `parse_structured`/`_read_csv` behavior
+  is byte-identical and regression-covered (11 extract tests green). The ledger P31.1 entry documents this
+  correctly; this register line is now reconciled to it.
+
+## F. P31.4 / Phase-31 closure independent-review findings (verdict: SHIP, 0 critical / 0 important)
+
+| # | File:line | Behavior | Risk | Test requirement | Disposition | Category |
+|---|---|---|---|---|---|---|
+| F1 | `apps/web/src/lib/types.ts:552` | `ApiCsvPreview.warnings: string[]` mismatches the backend, which emits `list[dict]` `{code,count,message}` (`csv_ingest.py:363-370`). Inert today — `CsvReconcilePanel` never reads `preview.warnings` (only `unknown_header_warnings`); fixtures use `[]`, so tsc/tests don't catch it. Consequence: the backend `unmapped_fields_skipped` count is never surfaced in the UI. | Low — no runtime effect; wrong type + a deferred UI count. | A typed fixture with a populated `warnings` dict + either render it or correct the type. | Minor — fix in Phase 32 (align type; decide whether to surface the count, consistent with the ledger's deferred "precise unmapped-field count"). | functional + documentation |
+| F2 | `apps/api/isaac_api/routes.py:817-833` | No `text/csv` media-type gate — the endpoint accepts the raw body regardless of `Content-Type`. | Low — defense-in-depth already rejects non-UTF-8 (`decode_body`) and non-CSV structure (`_validate_header`); no bypass found. | A test asserting a non-CSV media type is rejected (415) if a gate is added. | Minor — evaluate a 415 media-type gate in the Phase 32 backend-security slice. | security (low) |
+| F3 | `apps/api/tests/` | UTF-8 BOM handling is by-design (`csv_ingest.py:120` `utf-8-sig`) but has no dedicated test; every other matrix cell is covered. | Low — behavior correct, coverage gap only. | Add a BOM-prefixed CSV regression test. | Minor — add in the Phase 32 test-hardening slice. | test |
+| F4 | `apps/web/src/components/CsvReconcilePanel.tsx:95,262` | Client staleness (`previewVersion !== version`) only fires when the parent re-renders with a changed `version` prop; auto-staleness depends on live-sync cadence, else a manual refresh. Backend stays version-bound via If-Match regardless. | Low — UX-freshness gap, not a correctness hole (dupe of the C1 live-sync automation caveat). | Covered by `csv-reconcile-panel.test.tsx:256-264`; consider an in-panel "re-check" affordance. | Minor — consider in Phase 32; overlaps C1. | functional / accessibility |
+
+Residual risks recorded by the reviewer (all non-blocking): `absent_from_record` hosted-unreachable on the
+canonical seed (C4; unit-only); no explicit per-chunk memory cap (`_read_bounded_body` caps the running
+total after each chunk → peak = `MAX_BODY_BYTES` + one chunk; ledger defers explicit per-chunk cap to P32);
+two-window passive-poll staleness human-only (C1).
 
 ## E. Not yet audited (Phase 32 slices to run)
 

@@ -188,6 +188,12 @@ where the field is manually editable, else read-only evidence).
   `7b202b6` success; Railway + Vercel healthy; hosted QA PASS with two honest NOT-OBSERVED (`absent_from_record`
   unreachable on the canonical seed; two-tab passive-poll staleness under CDP hidden-tab throttling). Details in
   the master execution ledger's P31.3 entry.
-- **P31.4** — NEXT: lifecycle/degradation confirmation (raw CSV never persists; preview ephemeral &
-  experiment-scoped; record mutation → stale; Reset clears; restart does not resurrect; ingestion failure leaves
-  the manual workflow usable) + the full valid/invalid CSV QA matrix, then Phase 31 closure gate.
+- **P31.4 + closure** (2026-07-23) — DONE; **Phase 31 CLOSED**. Lifecycle/degradation verified
+  deterministically (raw CSV never persisted/logged/indexed; no rev bump; no mutation; stale-after-mutation
+  + stale-after-reset; invalid-input matrix — 61 CSV tests green) + truth validation (export→validate→audit
+  PASS on actual records). Independent Opus review **SHIP** (0 critical/important; 4 minors F1–F4 + a §D doc
+  correction → Phase 32 register). Hosted QA PASS (reset-invalidation, degradation, matching/conflict,
+  navigation, network, console); restart-safety architectural (stateless + client-ephemeral). Honest
+  non-blocking caveats: live 2-tab stale transition + `absent_from_record` are automation-unreachable
+  (unit-covered, human-only). See the master execution ledger's "Phase 31 Completion Gate" for the full
+  criteria table.
