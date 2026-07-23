@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 30 COMPLETE** (2026-07-22): Runtime-retrieval proof gate REJECTED a persistent index (measured); shipped a thin Workspace-derived runtime provider (`/runtime/records`, no index/cache/service) + a cross-record triage consumer (SearchDialog), hosted-QA PASS (correct matching, honest empty states, current-by-construction, clean handoff to authoritative record). → Phase 31. |
-| **Active ticket** | P31.0 — supported synthetic/public file-format selection (NOTE: ledger human-gate 5 — stop if a format cannot be chosen from repo evidence) (next) |
+| **Active ticket** | P31.0 — format-selection + ingestion-threat-model proof gate (in progress; human-gate 5 possible). Preceded by P30.6 artifact-path-leak fix (`b5cf608`). |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 31 (Synthetic/Public File Ingestion) — P31.0 format selection (human-gate 5 possible) → P31.1 upload boundary → P31.2 deterministic parser → P31.3 assistant/manual review → P31.4 QA. Strict: synthetic/public only, NO real/private data, sandboxed, deterministic; candidates stay candidates (reuse P28.4/P29.6). |
 | **Blockers** | none |
@@ -496,6 +496,18 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   safe. NOT-OBSERVED: triage fetch-failure degradation (not safely UI-inducible — unit-tested in P30.3).
   Pre-existing non-P30 note: the EXPORT detail screen shows the Railway volume path `/data/isaac-workspace/…`
   (an artifact path shown since Phase 20; not a triage-row leak) → flag for the P32 UI audit.
+
+- **P30.6** (`b5cf608`, 2026-07-22): internal artifact-path exposure correction (pulled forward from P32 per
+  review — fix the user-facing path leak BEFORE ingestion adds stored-file concepts). The API leaked ABSOLUTE
+  server paths (`/data/isaac-workspace/…`) to the browser at THREE sites (`_detail.artifact_refs`,
+  `POST /export`, `GET /artifacts`, all `str(exp.record_path())`). Fixed at the serialization boundary (not
+  CSS): all three return `record_filename`/`sidecar_filename` = basename only (None when not exported);
+  server-side file resolution unchanged (from record id, no traversal); View/Download unchanged (JSON content
+  Blob, not path). FE migrated (types/ExportReadiness/assistantComposer/fixtures) — grep confirms zero
+  `record_path`/`recordPath` refs left, no `/data/` can render. Tests: `test_artifact_path_safety.py` (5,
+  red-first) sweeping all 3 sites + a FE no-path test + a snapshot no-leak guard. Backend **826**, frontend
+  **525**, tsc clean; truth path frozen; snapshot regenerated. Independent Opus review = SHIP (leak eliminated
+  at the boundary; no residual absolute-path field anywhere; access preserved).
 
 ## Phase 30 Completion Gate (CLOSED 2026-07-22 @ `47e91ae`)
 
