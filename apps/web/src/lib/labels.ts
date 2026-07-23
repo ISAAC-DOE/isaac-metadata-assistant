@@ -149,6 +149,13 @@ export const LABELS = {
   chipEvConflicting: 'Conflicting Evidence',
   chipEvUnknown: 'Unknown',
 
+  // CSV reconciliation states (P31.3) — a separate axis again. These never mean
+  // valid / complete / exportable; they only compare a proposed CSV value to the
+  // current record, and the value is always read-only evidence.
+  chipReconMatch: 'Matches Record',
+  chipReconConflict: 'Conflicts',
+  chipReconAbsent: 'Absent From Record',
+
   // Signals
   signalValidation: 'Validation',
   signalCoverage: 'Coverage',

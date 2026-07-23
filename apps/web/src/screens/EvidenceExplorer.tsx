@@ -1,10 +1,11 @@
 import './screens.css';
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
 import { EvidenceClassificationPanel } from '../components/EvidenceClassificationPanel';
+import { CsvReconcilePanel } from '../components/CsvReconcilePanel';
 import { SourcePreview } from '../components/SourcePreview';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { GraphStatusChip } from '../components/GraphStatusChip';
@@ -16,6 +17,7 @@ import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
+import { ROUTES } from '../lib/routes';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
   citedLinesForEntry,
@@ -91,6 +93,7 @@ function LoadedEvidence({
   onManualRefresh: () => void;
 }) {
   const { detail, evidence, artifacts, graph, sourcePreviews, classification } = data;
+  const navigate = useNavigate();
 
   // P28.5 — the evidence-support view is bound to `record_rev`. Compare it to the
   // rev encoded in the loaded detail's version token (`generation.rev`, so the
@@ -207,6 +210,11 @@ function LoadedEvidence({
         classification={classification}
         stale={classificationStale}
         onRefresh={onManualRefresh}
+      />
+      <CsvReconcilePanel
+        experimentId={id}
+        version={detail.version}
+        onOpenRecord={() => navigate(ROUTES.complete(id))}
       />
       <SourcePreview
         entry={selected}

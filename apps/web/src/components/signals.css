@@ -40,6 +40,12 @@
 .chip-ev-conflicting  { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);      font-weight: 600; }
 .chip-ev-unknown      { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);   border-style: dashed; }
 
+/* Reconciliation axis (P31.3). An absent value is DASHED so it never reads as an
+ * established fact; a conflict borrows the fail palette (needs human review). */
+.chip-recon-match    { color: var(--verified-text); background: var(--verified-bg); border-color: var(--verified-border); }
+.chip-recon-conflict { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);      font-weight: 600; }
+.chip-recon-absent   { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);   border-style: dashed; }
+
 /* ---- VerdictCard — the hard gate (largest, most saturated) ---------- */
 .verdict {
   display: flex;

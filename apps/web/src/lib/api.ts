@@ -15,6 +15,7 @@ import type {
   ApiAnswersResponse,
   ApiArtifactsResponse,
   ApiAuditResponse,
+  ApiCsvPreview,
   ApiDraftResponse,
   ApiEvidenceClassification,
   ApiEvidenceEntry,
@@ -229,6 +230,31 @@ export const api = {
       ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
     });
     if (res.ok) return (await res.json()) as ApiAnswersResponse;
+    throw await mutationError(res);
+  },
+
+  // P31.3 — CSV reconciliation preview (RECONCILIATION-ONLY). Uploads the raw
+  // CSV text (Content-Type: text/csv) and reconciles every mapped value against
+  // the CURRENT record; the backend NEVER mutates the record. Same optimistic-
+  // concurrency contract as editField: `If-Match: "<version>"` is REQUIRED
+  // (missing → 428). The header spread puts `Content-Type: text/csv` last so it
+  // overrides request()'s default JSON content-type. Non-OK responses are thrown
+  // via mutationError (identical error handling to editField).
+  async previewCsv(
+    id: string,
+    csvText: string,
+    opts: { version: string; filename?: string },
+  ): Promise<ApiCsvPreview> {
+    const res = await request(`/experiments/${enc(id)}/ingestion/csv/preview`, {
+      method: 'POST',
+      body: csvText,
+      headers: {
+        'Content-Type': 'text/csv',
+        'If-Match': `"${opts.version}"`,
+        ...(opts.filename ? { 'X-Filename': opts.filename } : {}),
+      },
+    });
+    if (res.ok) return (await res.json()) as ApiCsvPreview;
     throw await mutationError(res);
   },
 

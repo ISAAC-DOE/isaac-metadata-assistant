@@ -492,6 +492,66 @@ export interface ApiEvidenceClassification {
   counts: Record<EvidenceClass, number>;
 }
 
+// P31.3 — CSV reconciliation (RECONCILIATION-ONLY). A synthetic campaign-sheet
+// CSV is previewed against the CURRENT record: every mapped value is reconciled
+// as EVIDENCE and NEVER written. The three states are the only verdict this
+// surface carries; it decides nothing about validity/completion/export. Mirrors
+// the backend POST /experiments/{id}/ingestion/csv/preview response.
+export type ReconciliationState =
+  | 'matches_current'
+  | 'conflicts_with_current'
+  | 'absent_from_record';
+
+// One unknown CSV column the parser ignored (never mapped to an official field).
+export interface ApiCsvUnknownHeaderWarning {
+  code: string;
+  header: string;
+  message: string;
+}
+
+// One reconciled candidate: an official dotted field, its proposed CSV value, the
+// current record value (when present), and the reconciliation verdict + safe
+// provenance. Read-only evidence — there is no editable/confirmable CSV field.
+export interface ApiCsvReconcileItem {
+  field: string; // official dotted path (FIELD_MAP output)
+  field_label: string;
+  experiment_id: string;
+  proposed_value: unknown; // from the CSV
+  current_value: unknown; // from the record (null when absent)
+  reconciliation_state: ReconciliationState;
+  evidence_classification: EvidenceClass;
+  locator: string; // e.g. "row 3, field=formula" — never an absolute path
+  column: string;
+  source_name: string;
+  source_format: string;
+  parser_id: string;
+  parser_version: string;
+  source_record_rev: number;
+  stale: boolean;
+  value_state: EvidenceValueState;
+  status: FieldStatus;
+  explanation: string;
+}
+
+export interface ApiCsvPreview {
+  format: string; // e.g. 'isaac_campaign_csv'
+  source_name: string;
+  parser_id: string;
+  parser_version: string;
+  source_record_rev: number;
+  row_count: number;
+  recognized_header_count: number;
+  unknown_header_warnings: ApiCsvUnknownHeaderWarning[];
+  candidate_count: number;
+  reconciliation_summary: {
+    matches_current: number;
+    conflicts_with_current: number;
+    absent_from_record: number;
+  };
+  candidates: ApiCsvReconcileItem[];
+  warnings: string[];
+}
+
 // GET /source-preview?source= — the real fixture lines + the line numbers cited
 // by the experiment's evidence (empty for a fixture cited by field, not by line).
 export interface ApiSourcePreview {

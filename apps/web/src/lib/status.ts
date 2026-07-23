@@ -5,7 +5,12 @@
  * You render consistently everywhere (react-build-notes.md).
  */
 
-import type { EvidenceClass, FieldStatus, SourceType } from './types';
+import type {
+  EvidenceClass,
+  FieldStatus,
+  ReconciliationState,
+  SourceType,
+} from './types';
 import { LABELS } from './labels';
 
 export type ChipKind =
@@ -26,7 +31,13 @@ export type ChipKind =
   | 'evCandidate'
   | 'evInsufficient'
   | 'evConflicting'
-  | 'evUnknown';
+  | 'evUnknown'
+  // P31.3 — the CSV reconciliation axis (RECONCILIATION-ONLY). These describe
+  // only how a proposed CSV value compares to the CURRENT record; they never
+  // mean valid / complete / exportable, and no reconciled field is editable.
+  | 'reconMatch'
+  | 'reconConflict'
+  | 'reconAbsent';
 
 export interface ChipMeta {
   label: string;
@@ -51,6 +62,22 @@ export const CHIP_META: Record<ChipKind, ChipMeta> = {
   evInsufficient: { label: LABELS.chipEvInsufficient, className: 'chip-ev-insufficient' },
   evConflicting: { label: LABELS.chipEvConflicting, className: 'chip-ev-conflicting' },
   evUnknown: { label: LABELS.chipEvUnknown, className: 'chip-ev-unknown' },
+  // Reconciliation axis (P31.3). `reconAbsent` is dashed so an unmatched value is
+  // never styled as an established fact.
+  reconMatch: { label: LABELS.chipReconMatch, className: 'chip-recon-match' },
+  reconConflict: { label: LABELS.chipReconConflict, className: 'chip-recon-conflict' },
+  reconAbsent: { label: LABELS.chipReconAbsent, className: 'chip-recon-absent' },
+};
+
+/**
+ * Map a CSV reconciliation state to its chip kind (single source). A separate
+ * axis from field status and evidence support — a reconciled value is only ever
+ * read-only evidence, never a write to the record.
+ */
+export const RECONCILE_STATE_CHIP: Record<ReconciliationState, ChipKind> = {
+  matches_current: 'reconMatch',
+  conflicts_with_current: 'reconConflict',
+  absent_from_record: 'reconAbsent',
 };
 
 /**

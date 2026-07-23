@@ -59,6 +59,11 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   evInsufficient: CircleAlert,
   evConflicting: TriangleAlert,
   evUnknown: CircleHelp,
+  // Reconciliation axis (P31.3) — distinct glyphs so the state is never signalled
+  // by color alone, and an absent value never wears the confirmed check.
+  reconMatch: Check,
+  reconConflict: TriangleAlert,
+  reconAbsent: CircleDashed,
 };
 
 // Evidence source-type glyphs (icons-and-symbols.md).
