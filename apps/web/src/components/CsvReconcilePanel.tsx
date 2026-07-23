@@ -5,7 +5,7 @@ import { LoadingPanel, BackendDown } from './FetchStates';
 import { Upload } from './icons';
 import { api, ApiError } from '../lib/api';
 import { RECONCILE_STATE_CHIP, EVIDENCE_CLASS_CHIP } from '../lib/status';
-import type { ApiCsvPreview, ApiCsvReconcileItem } from '../lib/types';
+import type { ApiCsvPreview, ApiCsvReconcileItem, ApiCsvWarning } from '../lib/types';
 
 /**
  * P31.3 · CSV Reconciliation (RECONCILIATION-ONLY).
@@ -50,9 +50,32 @@ function formatValue(v: unknown): string {
 }
 
 /**
+ * A SAFE display string for a top-level ingress warning: the string `message`,
+ * plus the numeric `count` in parentheses when it is a finite number > 0 (so the
+ * count is surfaced honestly, never silently dropped). Reads ONLY `message` and
+ * `count` — never the raw object — so an unexpected wire shape can never render
+ * `[object Object]` or leak an extra field.
+ */
+function warningText(w: ApiCsvWarning): string {
+  const message = typeof w.message === 'string' ? w.message : '';
+  const { count } = w;
+  return typeof count === 'number' && Number.isFinite(count) && count > 0
+    ? `${message} (${count})`
+    : message;
+}
+
+/**
  * A SAFE, typed message for a non-OK ingress response — never a server path or
  * stack. A trusted, path-free `body.message` is preferred; otherwise a per-status
  * sentence. `unreachable` is handled separately (the BackendDown state).
+ *
+ * The trusted-body branch IS reachable on the CSV path: api.ts `mutationError`
+ * attaches `.body` only for 400/412. The 412 (`stale_write`) body has no `message`,
+ * but several 400 `CsvIngestError` bodies carry a curated, path-free `message`
+ * (empty body / NUL byte / invalid UTF-8 / no rows / malformed If-Match). There is
+ * no `case 400` in the switch, so without this branch every one of those would fall
+ * to the generic default sentence — it stays (pinned by the FE-1 tests). The guard
+ * still rejects any body.message containing a path / Traceback / workspace mount.
  */
 function safeErrorMessage(err: ApiError): string {
   const bodyMsg = (err.body as { message?: unknown } | undefined)?.message;
@@ -244,6 +267,19 @@ function ReconResults({
           {preview.unknown_header_warnings.map((w) => (
             <li key={w.header} className="csv-recon-warning">
               {w.message}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Top-level ingress warnings (e.g. skipped unrecognized field-rows) — a
+          SEPARATE list from the unknown-header warnings above. Only the safe
+          message + numeric count are rendered (never the raw object). */}
+      {preview.warnings.length > 0 && (
+        <ul className="csv-recon-warnings" aria-label="Processing warnings">
+          {preview.warnings.map((w, i) => (
+            <li key={`${w.code}-${i}`} className="csv-recon-warning">
+              {warningText(w)}
             </li>
           ))}
         </ul>

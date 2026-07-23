@@ -657,6 +657,30 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   already stands as written in the register (no change needed there). No source code, no snapshot, and
   no truth-path files touched — documentation only.
 
+- **P32 S4** (2026-07-23): frontend cleanup — FE-4/F1, FE-1/A1, FE-3/A2, FE-6.
+  - **FE-4/F1 (FIXED):** added an authoritative `ApiCsvWarning {code, message, count?}` type; corrected
+    `ApiCsvPreview.warnings` from `string[]` → `ApiCsvWarning[]`; rendered top-level ingress warnings as
+    a separate "Processing warnings" list via a `warningText()` helper that reads ONLY `message` +
+    `count` (finite>0) — never the raw object, so no `[object Object]` / unknown-field / path leak. The
+    previously-dropped `unmapped_fields_skipped` count is now surfaced honestly. +3 render tests.
+  - **FE-1/A1 (KEPT — audit correction):** the `safeErrorMessage` trusted-`body.message` branch was
+    labelled "near-dead/unreachable" in the audit; that was imprecise. Proven REACHABLE for status 400 —
+    `api.ts mutationError` attaches `.body` for 400/412, the 412 body has no `message`, but several 400
+    `CsvIngestError` bodies (empty/NUL/invalid-UTF-8/no-rows/malformed-If-Match) carry curated path-free
+    messages, and there is no `case 400` in the switch. Branch retained + 2 pins (safe-400 renders;
+    path/Traceback-bearing 400 rejected → per-status fallback). Independent review caught an inaccurate
+    enumeration in the rationale comment (it singled out `malformed_if_match`); comment corrected.
+  - **FE-3/A2 (KEPT):** per-item `stale` retained as a deliberate wire mirror; interface + field comments
+    document that staleness is component-derived and the field must not be trimmed piecemeal.
+  - **FE-6 (ACCEPTED / working-as-intended):** the zero-evidence early-return in `EvidenceExplorer.tsx`
+    is an honest empty state, and excluding subordinate panels from it is a documented intentional design
+    decision (`:151-157`). Reconciliation is reachable for every record with evidence. Hosting it on a
+    bare empty-state screen is a UX/product expansion, deferred — not an audit fix. No code change.
+  - Verification: frontend **545 → 550** passing; tsc 0; Vite build clean; `types.ts` is a served-manifest
+    file (index 78) so the snapshot was regenerated deterministically (drift --check clean, gate 17/17);
+    leak scan clean (only the intentional path-bearing negative-test fixture matched). Independent Opus
+    review = SHIP (one comment-accuracy fix applied). No backend/`.py` and no truth-path files touched.
+
 ## Phase 31 Completion Gate (CLOSED 2026-07-23)
 
 | Criterion | Status | Evidence |

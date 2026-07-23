@@ -509,9 +509,24 @@ export interface ApiCsvUnknownHeaderWarning {
   message: string;
 }
 
+// One top-level ingress warning (DISTINCT from a per-column unknown-header
+// warning): a stable `code`, a SAFE human `message`, and an optional `count`
+// (e.g. the number of unrecognized field-rows skipped). Authoritative mirror of
+// the backend `warnings[]` contract (apps/api/isaac_api/csv_ingest.py).
+export interface ApiCsvWarning {
+  code: string;
+  message: string;
+  count?: number;
+}
+
 // One reconciled candidate: an official dotted field, its proposed CSV value, the
 // current record value (when present), and the reconciliation verdict + safe
 // provenance. Read-only evidence — there is no editable/confirmable CSV field.
+//
+// This interface is a FAITHFUL 1:1 mirror of the backend reconcile-item wire shape
+// (apps/api/isaac_api/csv_ingest.py). Fields are kept as-shipped even when the panel
+// does not read every one — do not trim the interface field-by-field to match
+// current component usage (see `stale` below).
 export interface ApiCsvReconcileItem {
   field: string; // official dotted path (FIELD_MAP output)
   field_label: string;
@@ -527,6 +542,10 @@ export interface ApiCsvReconcileItem {
   parser_id: string;
   parser_version: string;
   source_record_rev: number;
+  // Deliberate wire mirror of the backend field (always `false` at build time).
+  // The panel does NOT read this — it derives staleness itself by comparing the
+  // live record version against the previewed one. Kept for a faithful 1:1 shape;
+  // do not delete it to "fix" the unused field.
   stale: boolean;
   value_state: EvidenceValueState;
   status: FieldStatus;
@@ -549,7 +568,7 @@ export interface ApiCsvPreview {
     absent_from_record: number;
   };
   candidates: ApiCsvReconcileItem[];
-  warnings: string[];
+  warnings: ApiCsvWarning[];
 }
 
 // GET /source-preview?source= — the real fixture lines + the line numbers cited

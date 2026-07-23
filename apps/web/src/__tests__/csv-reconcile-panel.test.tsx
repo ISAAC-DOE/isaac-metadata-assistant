@@ -252,6 +252,60 @@ describe('CsvReconcilePanel — reconciliation review', () => {
   });
 });
 
+// --- FE-4: top-level `warnings` contract + honest count rendering --------------
+
+describe('FE-4 top-level warnings (honest count)', () => {
+  it('renders a top-level warning message AND its count (count never silently dropped)', async () => {
+    stubFetchRoutes({
+      [PREVIEW_URL]: {
+        body: previewFixture({
+          warnings: [
+            {
+              code: 'unmapped_fields_skipped',
+              count: 3,
+              message: 'Unrecognized field rows were skipped (never guessed).',
+            },
+          ],
+        }),
+      },
+    });
+    renderPanel();
+    await selectCsv();
+    await screen.findByText(/Beamline/);
+    // message rendered, and the count surfaced honestly on the same node
+    const warning = screen.getByText(/Unrecognized field rows were skipped/);
+    expect(warning).toBeInTheDocument();
+    expect(warning).toHaveTextContent(/\(3\)/);
+    // it is a SEPARATE list from the unknown-header ("Ignored columns") list
+    expect(screen.getByRole('list', { name: /processing warnings/i })).toBeInTheDocument();
+  });
+
+  it('renders no warning list when top-level warnings is empty', async () => {
+    stubFetchRoutes({ [PREVIEW_URL]: { body: previewFixture({ warnings: [] }) } });
+    renderPanel();
+    await selectCsv();
+    await screen.findByText(/Beamline/);
+    expect(screen.queryByRole('list', { name: /processing warnings/i })).toBeNull();
+  });
+
+  it('never renders [object Object] or leaks an unexpected warning field', async () => {
+    stubFetchRoutes({
+      [PREVIEW_URL]: {
+        body: previewFixture({
+          warnings: [{ code: 'x', message: 'm', count: 2, future: 'zz' }],
+        }),
+      },
+    });
+    renderPanel();
+    await selectCsv();
+    await screen.findByText(/Beamline/);
+    // only the safe message + numeric count render — never the raw object or extras
+    expect(screen.getByText('m (2)')).toBeInTheDocument();
+    expect(screen.queryByText('[object Object]')).toBeNull();
+    expect(screen.queryByText(/zz/)).toBeNull();
+  });
+});
+
 // --- errors, staleness, discard ------------------------------------------------
 
 describe('CsvReconcilePanel — errors & lifecycle', () => {
@@ -265,6 +319,46 @@ describe('CsvReconcilePanel — errors & lifecycle', () => {
     expect(msg).toBeInTheDocument();
     const blob = document.body.textContent ?? '';
     for (const bad of ['/data/', '/Users/', 'Traceback', 'isaac-workspace']) {
+      expect(blob).not.toContain(bad);
+    }
+  });
+
+  // FE-1: the trusted `body.message` branch of safeErrorMessage IS reachable on the
+  // CSV path. mutationError attaches `.body` only for 400/412; the 412 body has no
+  // `message`, but several 400 CsvIngestError bodies carry a path-free `message`
+  // (empty/NUL/invalid-UTF-8/no-rows/malformed-If-Match) — `malformed_if_match` below
+  // is one representative. That branch fires for a 400 and would otherwise fall to the
+  // generic default. These pin both halves (safe message renders; path-bearing rejected).
+  it('renders a trusted, path-free body.message for a reachable status (400)', async () => {
+    stubFetchRoutes({
+      [PREVIEW_URL]: {
+        status: 400,
+        body: {
+          error: 'malformed_if_match',
+          experiment_id: EXP,
+          message: 'If-Match must be one or more strong quoted validators.',
+        },
+      },
+    });
+    renderPanel();
+    await selectCsv();
+    expect(
+      await screen.findByText(/If-Match must be one or more strong quoted validators\./),
+    ).toBeInTheDocument();
+  });
+
+  it('rejects a body.message carrying a path/stack and falls back to a safe per-status sentence', async () => {
+    stubFetchRoutes({
+      [PREVIEW_URL]: {
+        status: 400,
+        body: { error: 'x', message: 'boom at /data/isaac-workspace/foo Traceback' },
+      },
+    });
+    renderPanel();
+    await selectCsv();
+    expect(await screen.findByText(/could not be processed/i)).toBeInTheDocument();
+    const blob = document.body.textContent ?? '';
+    for (const bad of ['/data/', 'isaac-workspace', 'Traceback']) {
       expect(blob).not.toContain(bad);
     }
   });
