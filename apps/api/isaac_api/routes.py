@@ -928,8 +928,12 @@ def post_validate(experiment_id: str):
         else:
             errors = []
         ok = result.ok
-    except Exception as exc:  # pragma: no cover - defensive; return errors, not 500
-        ok, errors = False, [{"path": "$", "message": f"validation error: {exc}"}]
+    except Exception:
+        # Defensive: never 500, and never interpolate the exception (path/stack/
+        # secret) into the client response. Return a fixed, path-free message and
+        # log the real detail server-side for operators.
+        _log.exception("validate dry-run failed experiment=%s", experiment_id)
+        ok, errors = False, [{"path": "$", "message": "Validation could not be completed."}]
 
     return {"ok": ok, "errors": errors, "schema": SCHEMA_LABEL, "dry_run": True}
 

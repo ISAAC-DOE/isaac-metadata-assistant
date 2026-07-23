@@ -10320,7 +10320,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "a7b700176abac11e57853c2e7c1afcd1d9e087dfe96db09344715744c9e33b62"
+        "sha256": "82d7cb03e8d490e37714c29946067c031cbd8084d547914ec1f1854e687219d0"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10336,7 +10336,7 @@
       },
       {
         "path": "apps/api/tests/test_api.py",
-        "sha256": "a50a401a2b560aafb3c77294a104e645e3dc9c80765f9fc30d6c4e1813a20ac3"
+        "sha256": "30a76fa834c597c044ff89280a7615e6c2591386487810868439ac1921d713fd"
       },
       {
         "path": "apps/api/tests/test_build_memory_snapshot.py",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "6b07b36c8737c7088561347177482991ba961f9d84cfa8cad9cdcaf2101d87c6"
+    "served_manifest_fingerprint": "8233d2738490cbcd76f95b03bcafd7d1c5d78ca50c128a16cd1ced257434cc69"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

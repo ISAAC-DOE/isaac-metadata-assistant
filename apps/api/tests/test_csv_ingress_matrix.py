@@ -9,11 +9,16 @@ never persisted to disk. All fixtures synthetic; the endpoint is read-only.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
 import isaac_api.csv_ingest as ci
+import isaac_api.routes as routes
 import isaac_api.workspace as ws
+
+BOM = b"\xef\xbb\xbf"  # UTF-8 byte-order mark
 
 URL = "/api/experiments/{id}/ingestion/csv/preview"
 CT = {"Content-Type": "text/csv"}
@@ -191,3 +196,95 @@ def test_preview_does_not_bump_rev(client):
     _post(client, VALID_CSV)
     after = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json()["version"]
     assert before == after
+
+
+# --- F3: UTF-8 BOM regression (frozen CSV v1 contract; parser behavior unchanged)
+#
+# BOM handling is correct BY DESIGN (``decode_body`` uses ``utf-8-sig``). These
+# tests PIN that contract so a future refactor can never silently reintroduce a
+# contaminated first header. They assert existing behavior only — the parser is
+# NOT modified.
+
+
+def test_decode_body_strips_leading_bom():
+    # A leading BOM is consumed by utf-8-sig; the decoded text must NOT begin with
+    # the invisible U+FEFF that would otherwise contaminate the first header cell.
+    text = ci.decode_body(BOM + b"section,field,value\nsystem,beamline,BL-1\n")
+    assert not text.startswith("﻿")
+    assert text.startswith("section,")
+
+
+def test_bom_prefixed_csv_previews_with_clean_first_header(client):
+    # The valid sheet, byte-identical except for a leading UTF-8 BOM.
+    r = _post(client, BOM + VALID_CSV.encode("utf-8"))
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    # First header ("section") is recognized as if no BOM were present: all five
+    # known columns are counted, and NO unknown-header warning is raised (a
+    # BOM-contaminated "﻿section" would drop the count and warn).
+    assert payload["recognized_header_count"] == 5
+    assert payload["unknown_header_warnings"] == []
+    # The mapped candidate still resolves to its official FIELD_MAP path.
+    assert any(c["field"] == "system.facility.beamline" for c in payload["candidates"])
+    # No invisible BOM char leaks anywhere into the response.
+    assert "﻿" not in r.text
+
+
+def test_bom_prefixed_csv_is_read_only_no_rev_bump(client):
+    # Governance: the BOM path is still the read-only preview path — no mutation.
+    before = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json()["version"]
+    assert _post(client, BOM + VALID_CSV.encode("utf-8")).status_code == 200
+    after = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json()["version"]
+    assert before == after
+
+
+def test_invalid_encoding_still_rejected_bom_unrelated():
+    # The frozen contract still rejects non-UTF-8 bytes (a lone UTF-16 BOM here is
+    # not valid UTF-8) — BOM tolerance must NOT weaken encoding validation.
+    with pytest.raises(ci.CsvIngestError) as ei:
+        ci.decode_body(b"\xff\xfe" + b"s\x00e\x00")
+    assert ei.value.code == "invalid_encoding"
+    assert ei.value.http_status == 400
+
+
+# --- BK-3: bounded-body reader is memory-bounded at the cap (evidence, no fix) --
+#
+# ``_read_bounded_body`` checks the running total and raises BEFORE appending the
+# crossing chunk, so the retained buffer never exceeds the cap and the reader
+# aborts the moment the total crosses it (it does NOT drain the whole body first).
+# These tests PIN that behavior; no production code is changed (see BK-3 report).
+
+
+def test_bounded_body_under_cap_returns_all_bytes():
+    async def _stream():
+        yield b"x" * 100
+        yield b"x" * 100
+
+    class _Req:
+        def stream(self):
+            return _stream()
+
+    out = asyncio.run(routes._read_bounded_body(_Req(), 250))
+    assert out == b"x" * 200  # all retained; buffer <= cap
+
+
+def test_bounded_body_aborts_at_crossing_chunk_not_after_draining():
+    consumed = []
+
+    async def _stream():
+        # 10 x 100-byte chunks; cap=250 => the 3rd chunk crosses (total 300 > 250).
+        for i in range(10):
+            consumed.append(i)
+            yield b"x" * 100
+
+    class _Req:
+        def stream(self):
+            return _stream()
+
+    with pytest.raises(ci.CsvIngestError) as ei:
+        asyncio.run(routes._read_bounded_body(_Req(), 250))
+    assert ei.value.code == "request_too_large"
+    assert ei.value.http_status == 413
+    # Aborted AT the crossing chunk (3 consumed), never buffered the whole body:
+    # the retained buffer is bounded at the cap, not cap + rest-of-body.
+    assert consumed == [0, 1, 2]

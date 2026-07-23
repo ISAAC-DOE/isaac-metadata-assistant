@@ -295,6 +295,44 @@ def test_validate_corrupt_draft_returns_errors_not_exception(client, tmp_path):
     assert body["errors"]
 
 
+def test_validate_unexpected_exception_is_fixed_message_and_logged(
+    client, monkeypatch, caplog
+):
+    """BK-1: the defensive ``except`` in ``post_validate`` must NOT interpolate the
+    exception into the client response (no path/stack/secret leak), and must log the
+    real detail server-side instead. Forces the ``except`` by making the dry-run
+    ``export_draft`` raise (synthetic data does not otherwise trigger it)."""
+    import logging as _logging
+
+    import isaac_api.routes as routes
+
+    exp_id = _seed_id(client)  # non-exported -> takes the dry-run try/except branch
+
+    # A distinctive message carrying tokens that MUST NOT reach the client.
+    secret = "boom /Users/someone/isaac-workspace/private detail Traceback-marker"
+
+    def _raise(*_a, **_k):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(routes, "export_draft", _raise)
+
+    with caplog.at_level(_logging.ERROR):
+        resp = client.post(f"/api/experiments/{exp_id}/validate")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Same response shape and dry-run/schema fields, ok=False.
+    assert body["ok"] is False
+    assert body["dry_run"] is True
+    assert body["schema"] == "ISAAC v1.05"
+    # (a/b) fixed, path-free message; the exception text is NOT interpolated.
+    assert body["errors"][0]["message"] == "Validation could not be completed."
+    for leaked in (secret, "boom", "Traceback", "isaac-workspace", "/Users/"):
+        assert leaked not in resp.text, f"client response leaked {leaked!r}"
+    # (c) the real exception detail WAS captured server-side (via logger + exc_info).
+    assert secret in caplog.text, "exception detail was not logged server-side"
+
+
 # --- 10. audit ----------------------------------------------------------------
 
 

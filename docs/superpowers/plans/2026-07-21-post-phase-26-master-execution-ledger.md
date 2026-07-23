@@ -681,6 +681,32 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
     leak scan clean (only the intentional path-bearing negative-test fixture matched). Independent Opus
     review = SHIP (one comment-accuracy fix applied). No backend/`.py` and no truth-path files touched.
 
+- **P32 S5** (2026-07-23): backend cleanup/tests — BK-1, F3, BK-3.
+  - **BK-1 (FIXED):** `post_validate`'s defensive `except` interpolated the raw exception (`f"validation
+    error: {exc}"`) into the client response. Now returns a fixed path-free `"Validation could not be
+    completed."` (same `{ok, errors, schema, dry_run}` shape, HTTP 200) and logs the real detail
+    server-side via `_log.exception`. Test-first (`test_api.py`): forces the branch by monkeypatching
+    `routes.export_draft` to raise, and asserts the client body carries the fixed sentence with no
+    exc/path/`Traceback`/`isaac-workspace`/`/Users/` leak, while `caplog` confirms the detail was logged
+    server-side. `# pragma: no cover` removed (branch is now exercised).
+  - **F3 (FIXED):** 4 UTF-8-BOM pinning tests in `test_csv_ingress_matrix.py` — `decode_body` strips the
+    leading BOM (`utf-8-sig`); a BOM-prefixed preview recognizes all 5 headers with a clean first header
+    (no BOM contamination, no unknown-header warning); the path stays read-only (no rev bump); invalid
+    non-UTF-8 bytes are still rejected (`invalid_encoding`/400). Parser behavior UNCHANGED (`csv_ingest.py`
+    untouched) — coverage-only.
+  - **BK-3 (ACCEPTED — no code change; audit premise corrected):** the audit said `_read_bounded_body`
+    checks size AFTER appending (peak = cap + one chunk). WRONG — it does `total += len(chunk)` then raises
+    `if total > max_bytes` BEFORE `chunks.append(chunk)`, so the crossing chunk is never retained and the
+    buffer is bounded at ≤ `MAX_BODY_BYTES` (256 KB). The only overshoot is the single transient stream
+    chunk the ASGI server already read (inherent to any streaming reader; unavoidable). The proposed
+    "check before append" fix is semantically identical → churn with streaming-path regression risk for
+    zero benefit. Pinned by 2 tests (under-cap returns all bytes; over-cap raises `request_too_large`/413
+    at the crossing chunk, `consumed==[0,1,2]`, never draining the full body).
+  - Verification: backend `apps/api/tests` **755 → 762** (+7); full-repo pytest re-run at commit. `routes.py`
+    is a served-manifest file (index 16) → snapshot regenerated deterministically (drift --check clean,
+    gate green). Independent Opus review = SHIP. No §13 truth-path file, no frontend, all fixtures synthetic
+    (the fake path string in the BK-1 test is the negative input proving the no-leak guard, not a real path).
+
 ## Phase 31 Completion Gate (CLOSED 2026-07-23)
 
 | Criterion | Status | Evidence |
