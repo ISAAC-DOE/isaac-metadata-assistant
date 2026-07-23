@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **Phase 29 COMPLETE (corrected)** (2026-07-22): after the premature `09cfaee` closure was retracted, the actionability gap was closed by **P29.6** (`d267be7`) and the previously-missing **stage→confirm→mutate flow is now hosted-QA-verified PASS** (one POST/answers→200 on Confirm, 412 on stale, idempotent double-click, reset invalidates). Now genuinely → Phase 30. Documented non-blocking caveats: passive-poll two-window; degraded/live-conflicting-classes not hosted-exercised. |
-| **Active ticket** | P30.3 — cross-record assistant/search consumer (P30.2 filters folded into P30.1) (next) |
+| **Current phase** | **Phase 30 COMPLETE** (2026-07-22): Runtime-retrieval proof gate REJECTED a persistent index (measured); shipped a thin Workspace-derived runtime provider (`/runtime/records`, no index/cache/service) + a cross-record triage consumer (SearchDialog), hosted-QA PASS (correct matching, honest empty states, current-by-construction, clean handoff to authoritative record). → Phase 31. |
+| **Active ticket** | P31.0 — supported synthetic/public file-format selection (NOTE: ledger human-gate 5 — stop if a format cannot be chosen from repo evidence) (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
-| **Next step** | Phase 30 P30.0 Runtime Retrieval **PROOF-GATE** — prove what P26 Workspace search cannot already answer BEFORE building anything; strong bias to NO new persistent index (prefer: existing search → thin runtime provider → short-lived rev-keyed cache → persistent index only with measured justification); confirmed-facts-only; Workspace-subordinate |
+| **Next step** | Phase 31 (Synthetic/Public File Ingestion) — P31.0 format selection (human-gate 5 possible) → P31.1 upload boundary → P31.2 deterministic parser → P31.3 assistant/manual review → P31.4 QA. Strict: synthetic/public only, NO real/private data, sandboxed, deterministic; candidates stay candidates (reuse P28.4/P29.6). |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -24,9 +24,9 @@
 | **Open QA caveat** | P27.7 scenarios 1 (idle passive-poll banner + ~8s cadence) & 5 (offline degraded indicator) NOT hosted-observed — Claude-in-Chrome drives tabs `visibilityState=hidden` and polling is correctly visibility-gated, so an automated hidden tab doesn't passively poll. Both behaviors are deterministically unit-tested (visibility pause/resume, backoff, degraded, LiveSyncNote) + the conflict path is hosted-verified. Recommend a human TWO-WINDOW (both visible) session to visually confirm. Not a defect; not a blocker. |
 | **Open decisions** | ledger→resume skill wiring (skill edit needs approval); strict 428 enforcement gated on deployed-FE sending If-Match (P27.4/P27.5) |
 | **Approved constraints** | synthetic-only; no LLM; no real data; no new cloud service; no account/billing change (except `ISAAC_RUNTIME_MODE` add) |
-| **Next recommended action** | P30.0 — live runtime record retrieval PROOF + contract (a proof-gate: prove the need + define the read-only, confirmed-facts-only projection before any index is built; retrieval subordinate to Workspace truth) |
-| **Git sync** | `main` · local == `origin/main` == `c501425` · 0/0 · clean (before Phase-29 closure commit) |
-| **Exact-HEAD CI** | Phase 29 P29.0–P29.4b green (`cfd87ce` = run success); closure commit pending push-time verify |
+| **Next recommended action** | P31.0 — choose the supported synthetic/public ingestion file format from repo evidence (single XANES/characterization path); STOP for human-gate 5 if none is defensibly derivable. No real/private data. |
+| **Git sync** | `main` · local == `origin/main` == `47e91ae` · 0/0 · clean (before Phase-30 closure commit) |
+| **Exact-HEAD CI** | Phase 30 P30.1 `964a7ec` + P30.3 `8346d7b` green (run success); closure commit pending push-time verify |
 | **Railway note** | 2026-07-22: rapid P28.1–P28.5 pushes queued serial Railway builds (each Docker build ~minutes on the metal builder). Builds SUCCEED (image push + healthcheck pass in logs); serving `37713d7`, draining the backlog toward HEAD. Not stalled/failed. Confirm Railway == Phase-28 HEAD (has `/edit` + `/evidence-classification`) before P28.6 hosted QA. |
 | **Railway** | Online · commit `92ea16f` · `mode: synthetic-only` · volume `/data/isaac-workspace`; host `isaac-metadata-assistant-production.up.railway.app` |
 | **Vercel** | 200 · `isaac-demo-web.vercel.app` (canonical per `.vercel/project.json`; `isaac-demo.vercel.app` also 200) |
@@ -471,6 +471,47 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   crafted-secret probe). Backend **819** (was 806), truth path frozen, snapshot regenerated. Independent Opus
   review = SHIP-WITH-FIXES → fixed. Non-gating: export_draft dry-runs twice per ready/in_review record (fine at
   demo scale; memoize if scale grows). P30.2 (filters/pagination) folded in here.
+- **P30.3** (`8346d7b`, 2026-07-22): cross-record triage consumer (justifies the P30.1 provider). NEW pure
+  `crossRecordTriage(records, intent)` (needs_attention/blocked/has_conflict/exportable) over the SAFE
+  projection → `{text, matches:[{experiment_id,title,navigate_to,reason}]}`; `navigate_to` reconstructed as
+  `/record/<id>` (no foreign target), reasons count/flag only (never a value/winner/verdict), unknown→empty.
+  `api.getRuntimeRecords`; a self-labeled SearchDialog "Cross-record triage · Workspace-derived · a lead, not
+  the record truth · never a verdict" quick-actions surface (empty-query state; two-plane separation intact);
+  opening a match HANDS OFF to the authoritative `/record/<id>` load; fetch failure → honest role=status
+  unavailable, search still works. Tests: `cross-record-triage.test.ts` (8, red-first) + `-ui.test.tsx` (7).
+  Frontend **524** (was 509), tsc clean; truth path + backend untouched (no new endpoint); snapshot
+  regenerated. Independent Opus review = **SHIP** (truth-substitution boundary + no inferred/conflict-as-fact
+  clean; no open-redirect — backend ULID ids + same-origin route). Deferred nits → P32: encodeURIComponent id
+  guard; error-chip aria-pressed.
+- **P30.4** (`47e91ae`, 2026-07-22): refresh/reset/degradation — VERIFICATION-ONLY (no new code). The provider
+  is stateless-derived, so freshness holds by construction; added confirming tests (reset re-derives canonical
+  2/1/1/1 with no stale retention; `project_records([])` → [] — a record absent from the scan is absent from
+  the projection). Degradation covered by P30.3 UI tests. Backend **821**.
+- **P30.5** (hosted QA, 2026-07-22, UI-only, no credential capture; Railway `8346d7b` + Vercel): PASS A–G (F
+  NOT-OBSERVED). Triage chips return correct records vs workspace (needs-attention 2, blocked 3, ready 1,
+  has-conflict honestly EMPTY); labeled Workspace-derived lead, separate from Project Memory, no verdict/value/
+  winner; **handoff** verified (Ready-to-Export row → `/record/…003` → authoritative record view, not inline
+  summary); **freshness** verified (exporting …003 dropped it from Ready-to-Export, no stale cache); Reset →
+  2/1/1/1 no duplicates; single-fetch-per-click, no polling storm, no console errors, no row leak; credential-
+  safe. NOT-OBSERVED: triage fetch-failure degradation (not safely UI-inducible — unit-tested in P30.3).
+  Pre-existing non-P30 note: the EXPORT detail screen shows the Railway volume path `/data/isaac-workspace/…`
+  (an artifact path shown since Phase 20; not a triage-row leak) → flag for the P32 UI audit.
+
+## Phase 30 Completion Gate (CLOSED 2026-07-22 @ `47e91ae`)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| P30.0 proves the architecture; no unnecessary index | ✅ | measured perf → index REJECTED; thin Option-B provider selected |
+| Runtime retrieval Workspace-subordinate; current record uses direct truth | ✅ | derived scan; QA C handoff to authoritative `/record/<id>` |
+| Only safe confirmed facts in projections; inferred not as facts | ✅ | strict allow-set + crafted-secret guard; counts-only evidence |
+| Freshness visible + version-bound; reset/deletion correct | ✅ | record_rev; current-by-construction; QA D/E; P30.4 tests |
+| Provider failure doesn't block truth workflows | ✅ | P30.3 degradation UI (unit); hosted F NOT-OBSERVED |
+| Consumer labels source authority | ✅ | "Workspace-derived · a lead · never a verdict"; plane-separated |
+| Backend + frontend suites; tsc + build; truth validation + audit | ✅ | backend 821, frontend 524; truth path frozen all phase |
+| Snapshot + preflight; CI + deploys green; clean + synced | ✅ | preflight green each slice; CI green; Railway/Vercel `8346d7b`; 0/0 |
+| Hosted QA passes | ✅ | P30.5 A–G PASS + 1 documented NOT-OBSERVED |
+
+**Non-blocking caveats carried forward:** (1) triage fetch-failure degradation not hosted-inducible (unit-tested); (2) export-screen shows the Railway volume artifact path (pre-Phase-30; P32 UI audit); (3) P30.3 deferred nits (id encodeURIComponent, error-chip aria-pressed) → P32.
 
 ## Phase 29 — Assistant Experience (in progress)
 

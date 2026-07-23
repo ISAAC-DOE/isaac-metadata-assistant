@@ -1,6 +1,11 @@
 # Phase 30 — Live Runtime Record Retrieval (P30.0 proof gate + plan)
 
-Status: **P30.0 proof gate COMPLETE (2026-07-22).** Active slice: **P30.1 (next).**
+Status: **Phase 30 COMPLETE (2026-07-22).** P30.0 proof gate REJECTED a persistent index on measured
+evidence; shipped the thin Option-B provider (P30.1 `/runtime/records`, no index/cache/service) + one real
+consumer (P30.3 cross-record triage in SearchDialog) + verification (P30.4) + hosted QA PASS (P30.5). Each
+slice independently reviewed (all SHIP; P30.1 +2 leak/filter guards). Backend 821, frontend 524, truth path
+frozen. Non-blocking caveats (triage-degradation not hosted-inducible; export-screen artifact path; two
+P30.3 nits) in the ledger's Phase 30 gate. Next: Phase 31 (P31.0 format selection — possible human-gate 5).
 Baseline: `main @ 5a935b8` · CI green · Railway `5a935b8` synthetic-only · Vercel 200 · backend 806 · frontend 509.
 
 Derived from the P30.0 read-only proof (2 parallel tracks: search-capability/use-case audit; performance
