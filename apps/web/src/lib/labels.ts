@@ -215,3 +215,46 @@ export const LABELS = {
 } as const;
 
 export type LabelKey = keyof typeof LABELS;
+
+// --- date formatting (P33 S1) ------------------------------------------
+// Fixed month-name arrays (never `Date`/`Intl` locale formatting) so the
+// dashboard card's date badge is deterministic across environments.
+const SHORT_MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+const FULL_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+export interface FormattedDate {
+  iso: string; // "2026-07-12" — machine-readable, for <time dateTime>
+  display: string; // "Jul 12, 2026"
+  accessible: string; // "Created July 12, 2026"
+}
+
+/**
+ * Parse the `YYYY-MM-DD` prefix of an ISO date/datetime string into a
+ * deterministic machine + display + accessible triple. Never uses `Date`
+ * parsing/locale — a fixed month-name lookup keeps rendering identical in every
+ * environment. `iso` is the exact date prefix so a `<time dateTime>` carries a
+ * valid machine value.
+ */
+export function formatCreatedDate(isoDate: string): FormattedDate | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate);
+  if (!m) return undefined;
+  const [, year, monthStr, dayStr] = m;
+  const monthIndex = Number(monthStr) - 1;
+  const day = Number(dayStr);
+  if (monthIndex < 0 || monthIndex > 11 || Number.isNaN(day) || day < 1 || day > 31) {
+    return undefined;
+  }
+  const shortMonth = SHORT_MONTHS[monthIndex];
+  const fullMonth = FULL_MONTHS[monthIndex];
+  return {
+    iso: `${year}-${monthStr}-${dayStr}`,
+    display: `${shortMonth} ${day}, ${year}`,
+    accessible: `Created ${fullMonth} ${day}, ${year}`,
+  };
+}

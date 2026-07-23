@@ -5,7 +5,7 @@
  * from the server and are passed through faithfully.
  */
 
-import { LABELS, titleCase } from './labels';
+import { LABELS, formatCreatedDate, titleCase } from './labels';
 import type {
   AdvisoryResult,
   ApiAuditResponse,
@@ -54,27 +54,48 @@ const GROUP_ORDER: { key: QueueGroupKey; label: string }[] = [
 
 // --- S1 queue -----------------------------------------------------------
 
-function trailingFor(s: ApiExperimentSummary, group: QueueGroupKey): ExperimentTrailing {
+// P33 S1 (D1) — the server-authored title carries a trailing lifecycle suffix
+// (e.g. "… · New Draft"). The dashboard card now shows its own lifecycle badge,
+// so a KNOWN suffix is stripped for display; anything else (unrecognized or
+// absent) is a safe fallback that keeps the full title untouched.
+const KNOWN_TITLE_SUFFIXES = [
+  ' · New Draft',
+  ' · Partially Completed',
+  ' · Export Review Required',
+  ' · Ready to Export',
+  ' · Exported Record',
+] as const;
+
+function stripLifecycleSuffix(title: string): string {
+  const hit = KNOWN_TITLE_SUFFIXES.find((suffix) => title.endsWith(suffix));
+  return hit ? title.slice(0, -hit.length) : title;
+}
+
+/** Exported for direct unit testing (P33 S1); not otherwise used outside this file. */
+export function trailingFor(s: ApiExperimentSummary, group: QueueGroupKey): ExperimentTrailing {
   switch (group) {
     case 'needsAttention':
       return { needsYouCount: s.pending_count };
-    case 'done':
-      return { exported: true };
     default:
-      // in_review / ready: the group header names the state; no PASS is claimed on
-      // a row (the reserved verdict only appears after real validation, on S6).
+      // in_review / ready / done: the group header (and, for done, the lifecycle
+      // badge) already names the state; no PASS/exported chip is claimed on a
+      // row (the reserved verdict only appears after real validation, on S6).
       return {};
   }
 }
 
-function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary {
+/** Exported for direct unit testing (P33 S1); the queue mapping below is the
+ * only real caller. */
+export function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary {
   const group = STATUS_TO_GROUP[s.status];
   return {
     id: s.id,
-    title: s.title,
+    title: stripLifecycleSuffix(s.title),
     technique: TECHNIQUE,
     idOrDraft: s.exported && s.record_id ? s.record_id : 'draft',
     meta: s.created_utc ? `created ${s.created_utc.slice(0, 10)}` : undefined,
+    lifecycle: s.exported ? 'exported' : 'draft',
+    date: s.created_utc ? formatCreatedDate(s.created_utc) : undefined,
     group,
     trailing: trailingFor(s, group),
   };

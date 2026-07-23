@@ -319,10 +319,15 @@ describe('P26.0b · Reset Demo — success refreshes the dashboard', () => {
     await waitFor(() =>
       expect(countCalls(view.calls, 'GET /api/experiments')).toBeGreaterThanOrEqual(2),
     );
-    // and the refreshed dashboard reflects exactly the five canonical scenarios
-    await waitFor(() => expect(view.getByText(/· Exported Record$/)).toBeInTheDocument());
-    expect(view.getByText(/· New Draft$/)).toBeInTheDocument();
-    expect(view.getByText(/· Ready to Export$/)).toBeInTheDocument();
+    // and the refreshed dashboard reflects exactly the five canonical scenarios.
+    // P33 S1 redesigned the card: the server-authored lifecycle suffix (e.g.
+    // "· Exported Record") is no longer shown on the title — the row now carries
+    // ONE clean title plus a lifecycle badge, so the five scenarios are counted by
+    // row count + lifecycle badge distribution instead of by title text.
+    await waitFor(() => expect(view.container.querySelectorAll('.exp-row')).toHaveLength(5));
+    const queue = within(view.container.querySelector('.queue') as HTMLElement);
+    expect(queue.getAllByText('Exported')).toHaveLength(1);
+    expect(queue.getAllByText('Draft')).toHaveLength(4);
     await waitFor(() => expect(view.queryAllByText(/Demo \(demo\/run\)/)).toHaveLength(0));
   });
 

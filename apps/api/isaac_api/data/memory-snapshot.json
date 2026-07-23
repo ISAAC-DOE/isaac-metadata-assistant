@@ -10476,7 +10476,7 @@
       },
       {
         "path": "apps/web/src/components/ExperimentRow.tsx",
-        "sha256": "0e8b21758491297f6da6c15c53138f2dc79c85f8bb8076edef9c3a4a823f31f2"
+        "sha256": "911e3bee9cc9be2ff54353fb76ce8a92119be71b6bd7be1edb4684a976df5e9c"
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "43f28b85e97e8e6e27b93cd502a602fa8e74dcc27d2bc4cd5da58e610782637c"
+        "sha256": "d9446a6b862e8c54c891a7b6b4b5cb89c248edae3d1ea66e0e818ec34b395427"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10556,7 +10556,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "0061187be5012b96f3382822f79490ee048f6c09a7f9fe542a6e8cad183c3309"
+        "sha256": "6ea69f60de4b89da4f6d8b4238c92d60b777878031fde371cb0c87117cc45d14"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "8333ce76af280d053483bcd681f58a12b83ee190b34d485c9db49ba7cf4a90c4"
+        "sha256": "178f8afea7bdaa500d1197acd2716bae6700d715ae0cf3af0a9de4ef74665a0b"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "f000d3f5115220a9a359255a096dc83daf1dd2139ef1f4b1dad55a061c1effeb"
+    "served_manifest_fingerprint": "80ca2c8ef5401a397a60c9d0ffa01bd599d0b36101a01d0308e598af7bed1d17"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

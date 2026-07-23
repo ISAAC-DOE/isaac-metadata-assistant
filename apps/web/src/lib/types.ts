@@ -248,6 +248,12 @@ export interface ExperimentSummary {
   technique: string; // Cu K-edge XANES
   idOrDraft: string; // mono ULID or "draft · name"
   meta?: string; // "updated 2099-04-02" | "with G. Hopper"
+  // P33 S1 — the dashboard card's ONE lifecycle badge (Draft/Exported), distinct
+  // from the queue `group` (needsAttention/inReview/ready/done).
+  lifecycle: 'draft' | 'exported';
+  // P33 S1 — the neutral created-date badge; a display string plus a full,
+  // unambiguous accessible string. Undefined when the server sent no created_utc.
+  date?: { iso: string; display: string; accessible: string };
   group: QueueGroupKey;
   trailing: ExperimentTrailing;
 }
