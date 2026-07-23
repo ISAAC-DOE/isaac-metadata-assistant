@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 29 COMPLETE (corrected)** (2026-07-22): after the premature `09cfaee` closure was retracted, the actionability gap was closed by **P29.6** (`d267be7`) and the previously-missing **stage→confirm→mutate flow is now hosted-QA-verified PASS** (one POST/answers→200 on Confirm, 412 on stale, idempotent double-click, reset invalidates). Now genuinely → Phase 30. Documented non-blocking caveats: passive-poll two-window; degraded/live-conflicting-classes not hosted-exercised. |
-| **Active ticket** | P30.1 — Runtime record projection + typed filters (next) |
+| **Active ticket** | P30.3 — cross-record assistant/search consumer (P30.2 filters folded into P30.1) (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 30 P30.0 Runtime Retrieval **PROOF-GATE** — prove what P26 Workspace search cannot already answer BEFORE building anything; strong bias to NO new persistent index (prefer: existing search → thin runtime provider → short-lived rev-keyed cache → persistent index only with measured justification); confirmed-facts-only; Workspace-subordinate |
 | **Blockers** | none |
@@ -458,6 +458,19 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   cross-record assistant triage intent + a SearchDialog filter. Speculative filters (missing-field, full
   evidence-class sweep) SCOPED OUT (no consumer → not built; "no provider ahead of its consumer"). No human
   gate; no infra change → proceed. Truth path untouched; docs-only.
+
+- **P30.1** (`964a7ec`, 2026-07-22): thin read-only runtime record projection + typed filters (Option-B). NEW
+  `runtime_records.py` `project_records(experiments, *, filters)` — pure, Graphify-free, over the SAME
+  `list_experiments()` scan; NO index/cache/service/secret; current-by-construction. Emits ONLY the safe
+  confirmed-facts allow-set (evidence counts-only, workflow current_step+2 booleans, artifact_state string,
+  record_rev/updated_utc, navigate_to=`/record/<id>`); reuses status/derive_workflow/classify_fields/
+  artifact_state read-only. `GET /runtime/records` → {records,total}, conjunctive typed filters (status/
+  workflow_state/artifact/has_conflict), unrecognized value → matches NOTHING, deterministic order, auth via
+  middleware. Tests: `test_runtime_records.py` (13, red-first) incl. a CRAFTED-SECRET projection guard +
+  unrecognized-filter-empty guard (the two independent-review must-fix test-gaps; impl was already secure per a
+  crafted-secret probe). Backend **819** (was 806), truth path frozen, snapshot regenerated. Independent Opus
+  review = SHIP-WITH-FIXES → fixed. Non-gating: export_draft dry-runs twice per ready/in_review record (fine at
+  demo scale; memoize if scale grows). P30.2 (filters/pagination) folded in here.
 
 ## Phase 29 — Assistant Experience (in progress)
 
