@@ -24,7 +24,32 @@ import { api, ApiError, RUN_COMMAND } from '../lib/api';
 import { LoadingPanel } from './FetchStates';
 import { hasVerdictLanguage } from '../lib/assistant';
 import { Search } from './icons';
+import { crossRecordTriage } from '../lib/crossRecordTriage';
+import type { TriageIntent, TriageResult } from '../lib/crossRecordTriage';
 import type { ApiSearchMatch, ApiSearchResponse } from '../lib/types';
+
+/**
+ * The four cross-record triage intents, each with its display label and the
+ * SERVER-side filter it sends to GET /api/runtime/records. The provider filters
+ * (justifying the P30.1 typed filters); the pure `crossRecordTriage` then formats
+ * the SAFE, verdict-free summary + the /record/<id> handoff for each row.
+ */
+const TRIAGE_CHIPS: {
+  intent: TriageIntent;
+  label: string;
+  filter: Parameters<typeof api.getRuntimeRecords>[0];
+}[] = [
+  { intent: 'needs_attention', label: 'Needs Attention', filter: { status: 'needs_attention' } },
+  { intent: 'blocked', label: 'Blocked', filter: { workflow_state: 'blocked' } },
+  { intent: 'has_conflict', label: 'Has Conflicts', filter: { has_conflict: true } },
+  { intent: 'exportable', label: 'Ready to Export', filter: { status: 'ready_to_export' } },
+];
+
+type Triage =
+  | { status: 'idle' }
+  | { status: 'loading'; intent: TriageIntent }
+  | { status: 'error'; intent: TriageIntent }
+  | { status: 'data'; intent: TriageIntent; result: TriageResult };
 
 /** A normalized query below this length never fetches (guarded client-side). */
 const MIN_QUERY = 2;
@@ -102,6 +127,7 @@ export function SearchDialog() {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [results, setResults] = useState<Results>({ status: 'idle' });
+  const [triage, setTriage] = useState<Triage>({ status: 'idle' });
 
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -110,6 +136,7 @@ export function SearchDialog() {
   const titleId = useId();
   const wsHeadId = useId();
   const memHeadId = useId();
+  const triageHeadId = useId();
 
   const closeDialog = useCallback(() => setOpen(false), []);
 
@@ -117,8 +144,30 @@ export function SearchDialog() {
     setQuery('');
     setDebounced('');
     setResults({ status: 'idle' });
+    setTriage({ status: 'idle' });
     setOpen(true);
   }, []);
+
+  // P30.3 — run one cross-record triage intent: fetch the SAFE runtime-record
+  // projection (server-filtered for this intent), then format it through the
+  // pure, deterministic `crossRecordTriage`. The result reflects the fetch time
+  // (Workspace-derived, current-by-construction on the backend) — a LEAD, not
+  // record truth. A fetch failure degrades to an honest "unavailable" state that
+  // never blocks the query search below. Never mutates and never rules a verdict.
+  const runTriage = useCallback(
+    (intent: TriageIntent, filter: Parameters<typeof api.getRuntimeRecords>[0]) => {
+      setTriage({ status: 'loading', intent });
+      api
+        .getRuntimeRecords(filter)
+        .then(({ records }) => {
+          setTriage({ status: 'data', intent, result: crossRecordTriage(records, intent) });
+        })
+        .catch(() => {
+          setTriage({ status: 'error', intent });
+        });
+    },
+    [],
+  );
 
   // Global ⌘K / Ctrl-K opens the palette from anywhere (always mounted).
   useEffect(() => {
@@ -277,6 +326,18 @@ export function SearchDialog() {
             </div>
 
             <div className="search-body">
+              {/* Cross-record triage is the zero-query "quick actions" surface;
+                  typing switches the palette to search mode (so the two never
+                  compete, and the plane labels below stay unambiguous). */}
+              {query.trim() === '' && (
+                <TriagePanel
+                  triage={triage}
+                  headId={triageHeadId}
+                  onRun={runTriage}
+                  onSelect={select}
+                />
+              )}
+
               {normalized.length === 0 && (
                 <p className="search-hint">
                   Type to search workspace records and project-memory leads.
@@ -315,6 +376,93 @@ export function SearchDialog() {
         </div>
       )}
     </div>
+  );
+}
+
+interface TriagePanelProps {
+  triage: Triage;
+  headId: string;
+  onRun: (intent: TriageIntent, filter: Parameters<typeof api.getRuntimeRecords>[0]) => void;
+  onSelect: (to: string) => void;
+}
+
+/**
+ * The CROSS-RECORD triage surface — a deterministic consumer of the P30.1 runtime
+ * projection. Four intent chips fetch the SAFE projection and format it through
+ * `crossRecordTriage`; each match is a navigable row that HANDS OFF to a direct
+ * Workspace load (`/record/<id>`), where the authoritative record is loaded — the
+ * triage row is a lead, never the record truth.
+ *
+ * It is a THIRD, self-labeled surface, kept separate from both the Workspace-search
+ * (truth) and Project-Memory (advisory) groups below — it is Workspace-derived and
+ * never merged with the memory plane. It never renders a verdict, never presents an
+ * inferred candidate as fact, and never picks a conflict winner (the pure function
+ * guarantees this; the summaries only count and flag for human review).
+ */
+function TriagePanel({ triage, headId, onRun, onSelect }: TriagePanelProps) {
+  return (
+    <section className="search-triage" aria-labelledby={headId}>
+      <h3 id={headId} className="search-group-head">
+        Cross-record triage
+      </h3>
+      <p className="search-group-sub">
+        Workspace-derived · current as of this fetch. A lead across all records — open
+        one to load the authoritative record. Never a verdict.
+      </p>
+
+      <div className="search-triage-chips" role="group" aria-label="Cross-record triage filters">
+        {TRIAGE_CHIPS.map((chip) => {
+          const active = triage.status !== 'idle' && triage.intent === chip.intent;
+          const loading = triage.status === 'loading' && triage.intent === chip.intent;
+          return (
+            <button
+              key={chip.intent}
+              type="button"
+              className="search-triage-chip"
+              aria-pressed={active}
+              onClick={() => onRun(chip.intent, chip.filter)}
+            >
+              {chip.label}
+              {loading && <span className="search-triage-chip-spin" aria-hidden="true" />}
+            </button>
+          );
+        })}
+      </div>
+
+      {triage.status === 'loading' && <LoadingPanel label="Triaging records…" />}
+
+      {triage.status === 'error' && (
+        // Honest degradation — the cross-record projection could not be fetched.
+        // A quiet status note (never role=alert / verdict color); the query search
+        // below is completely unaffected.
+        <p className="search-triage-unavailable" role="status">
+          Cross-record triage is unavailable right now — the runtime projection could not
+          be loaded. Search below is unaffected.
+        </p>
+      )}
+
+      {triage.status === 'data' && (
+        <div className="search-triage-result">
+          <p className="search-triage-summary">{triage.result.text}</p>
+          {triage.result.matches.length > 0 && (
+            <ul className="search-result-list">
+              {triage.result.matches.map((m) => (
+                <li key={m.experiment_id} className="search-result">
+                  <button
+                    type="button"
+                    className="search-result-btn"
+                    onClick={() => onSelect(m.navigate_to)}
+                  >
+                    <span className="search-result-label">{m.title}</span>
+                    <span className="search-result-reason">{m.reason}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

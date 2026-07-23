@@ -5,6 +5,11 @@
  * client; the UI renders these shapes, it never computes them.
  */
 
+// P30.3 — the SAFE cross-record runtime projection (GET /api/runtime/records).
+// Defined next to the pure triage consumer that owns its contract; re-exported
+// here so it reads alongside the other Api* shapes.
+export type { RuntimeRecord } from './crossRecordTriage';
+
 // --- primitives -------------------------------------------------------
 
 export type Mode = 'synthetic';

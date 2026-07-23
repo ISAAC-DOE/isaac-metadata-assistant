@@ -10548,7 +10548,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "deff74b02a7c7d600825d47785d209cf6e7caeed6d8dac9bd2ae80da44b3af28"
+        "sha256": "89f6a1f5cfd05339834dee34a7cfb00f5bc7c24a6bf2c0bb40e47724325a896c"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "9c8ae48699a53acda6aaa1ca98a08004c6eec6cb3f2bcff271d0f8563eb2eaa1"
+        "sha256": "8f459a21fcc5ca7909c34c1375e1abca6c8815d2ddafe0b0143d0dfe053f0c57"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10616,7 +10616,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "b2252f0a0cd0ab298fa519444692752ba6d491ca75227802f9a231336942f29c"
+        "sha256": "9d4e136b32f0d6e9355b75ce3da3a5727ca87e2b86815dc6f08fbace2e750b56"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "79e61308fac75dca867c56c39525f5d3c039129f2329707c7a604b07358e8209"
+    "served_manifest_fingerprint": "75c03d9ff53eae9c3139ddafae60552d62610a9a98ea710ad798648d2d091162"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

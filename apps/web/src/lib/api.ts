@@ -10,6 +10,7 @@
  * can render the "Backend Not Running" state — never fabricated data.
  */
 
+import type { RuntimeRecord } from './crossRecordTriage';
 import type {
   ApiAnswersResponse,
   ApiArtifactsResponse,
@@ -324,6 +325,37 @@ export const api = {
     if (opts?.limit !== undefined) path += `&limit=${opts.limit}`;
     if (opts?.offset !== undefined) path += `&offset=${opts.offset}`;
     return getJson<ApiSearchResponse>(path);
+  },
+
+  // P30.3 — the cross-record runtime projection consumer (client half of the
+  // P30.1 provider). Fetches the SAFE, current-by-construction projection of
+  // ALL records (confirmed facts + freshness only — no draft values, evidence
+  // bodies, or per-field classifications) so the deterministic crossRecordTriage
+  // function can answer "which records need attention / are blocked / have
+  // conflicts / are exportable now". This is a LEAD surface, not record truth —
+  // opening a match hands off to a direct Workspace load. The typed filters map
+  // 1:1 to the backend query params; each is appended only when provided, in a
+  // fixed order, and this method only parses the {records,total} envelope (it
+  // never computes triage or a verdict itself).
+  getRuntimeRecords(filters?: {
+    status?: string;
+    workflow_state?: 'blocked' | 'reopened' | 'current';
+    artifact?: 'none' | 'current' | 'stale';
+    has_conflict?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ records: RuntimeRecord[]; total: number }> {
+    let path = '/runtime/records';
+    const params: string[] = [];
+    if (filters?.status !== undefined) params.push(`status=${enc(filters.status)}`);
+    if (filters?.workflow_state !== undefined)
+      params.push(`workflow_state=${enc(filters.workflow_state)}`);
+    if (filters?.artifact !== undefined) params.push(`artifact=${enc(filters.artifact)}`);
+    if (filters?.has_conflict) params.push('has_conflict=true');
+    if (filters?.limit !== undefined) params.push(`limit=${filters.limit}`);
+    if (filters?.offset !== undefined) params.push(`offset=${filters.offset}`);
+    if (params.length > 0) path += `?${params.join('&')}`;
+    return getJson<{ records: RuntimeRecord[]; total: number }>(path);
   },
 
   // S2 — run the synthetic pipeline; `draft_only` stops at the blockers.

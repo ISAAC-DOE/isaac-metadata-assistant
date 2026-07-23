@@ -99,6 +99,75 @@
   color: var(--text-tertiary);
 }
 
+/* ---- P30.3 cross-record triage surface ------------------------------ */
+/* A third, self-labeled surface (Workspace-derived leads) kept visually
+ * separate from the query results below. Neutral chrome only — never a
+ * status/verdict color. */
+.search-triage {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.search-triage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.search-triage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-input);
+  background: var(--screen-base);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.search-triage-chip:hover {
+  background: var(--border-faint);
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+.search-triage-chip:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.search-triage-chip[aria-pressed='true'] {
+  border-color: var(--action);
+  color: var(--text-heading);
+  font-weight: 600;
+}
+.search-triage-chip-spin {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--action);
+  animation: search-triage-spin 0.7s linear infinite;
+}
+@keyframes search-triage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.search-triage-result {
+  margin-top: 10px;
+}
+.search-triage-summary {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.search-triage-unavailable {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
 /* ---- Grouped results ------------------------------------------------ */
 .search-groups {
   display: flex;

@@ -1287,6 +1287,103 @@ export function searchRoutes(
   return { [key]: { body: opts.body ?? searchResponse } };
 }
 
+// --- P30.3 cross-record runtime-record projection fixtures ------------------
+// Shapes verbatim from apps/api/isaac_api/runtime_records.py `_project_one` (the
+// SAFE allow-set: confirmed facts + freshness only). Values are unmistakably
+// synthetic. Consumed by the deterministic crossRecordTriage + the SearchDialog
+// triage surface. These are LEADS (Workspace-derived), never record truth.
+
+const TRIAGE_IDS = [
+  '01SYNTHTRIAGE00000000000001',
+  '01SYNTHTRIAGE00000000000002',
+  '01SYNTHTRIAGE00000000000003',
+  '01SYNTHTRIAGE00000000000004',
+];
+
+/** Four projected records spanning the triage states (needs-attention+blocked,
+ * ready-to-export, in-review-with-conflict, exported/done). */
+export const runtimeRecords = [
+  {
+    experiment_id: TRIAGE_IDS[0],
+    title: 'Synthetic XANES — Needs Attention',
+    status: 'needs_attention',
+    pending_count: 5,
+    exported: false,
+    record_id: null,
+    workflow: { current_step: 'complete_metadata', blocked: true, reopened: false },
+    evidence_counts: { supported: 3, inferred_candidate: 1, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 2 },
+    artifact_state: 'none',
+    record_rev: 4,
+    updated_utc: '2099-07-01T00:00:00Z',
+    navigate_to: `/record/${TRIAGE_IDS[0]}`,
+  },
+  {
+    experiment_id: TRIAGE_IDS[1],
+    title: 'Synthetic XANES — Ready to Export',
+    status: 'ready_to_export',
+    pending_count: 0,
+    exported: false,
+    record_id: null,
+    workflow: { current_step: 'export', blocked: false, reopened: false },
+    evidence_counts: { supported: 9, inferred_candidate: 0, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 0 },
+    artifact_state: 'none',
+    record_rev: 7,
+    updated_utc: '2099-07-02T00:00:00Z',
+    navigate_to: `/record/${TRIAGE_IDS[1]}`,
+  },
+  {
+    experiment_id: TRIAGE_IDS[2],
+    title: 'Synthetic XANES — Conflicting Evidence',
+    status: 'in_review',
+    pending_count: 0,
+    exported: false,
+    record_id: null,
+    workflow: { current_step: 'review_export_readiness', blocked: false, reopened: true },
+    evidence_counts: { supported: 5, inferred_candidate: 0, insufficient_evidence: 1, conflicting_evidence: 2, unknown: 0 },
+    artifact_state: 'none',
+    record_rev: 11,
+    updated_utc: '2099-07-03T00:00:00Z',
+    navigate_to: `/record/${TRIAGE_IDS[2]}`,
+  },
+  {
+    experiment_id: TRIAGE_IDS[3],
+    title: 'Synthetic XANES — Exported Record',
+    status: 'done',
+    pending_count: 0,
+    exported: true,
+    record_id: TRIAGE_IDS[3],
+    workflow: { current_step: null, blocked: false, reopened: false },
+    evidence_counts: { supported: 9, inferred_candidate: 0, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 0 },
+    artifact_state: 'stale',
+    record_rev: 13,
+    updated_utc: '2099-07-04T00:00:00Z',
+    navigate_to: `/record/${TRIAGE_IDS[3]}`,
+  },
+];
+
+/**
+ * Route map for GET /api/runtime/records keyed exactly as `api.getRuntimeRecords`
+ * builds each chip's query string. Each body is pre-filtered to mirror the real
+ * backend's server-side filter (so the fixture is faithful, not a merged blob).
+ */
+export function runtimeRecordsRoutes(): Record<string, StubbedRoute> {
+  const body = (rows: typeof runtimeRecords) => ({ records: rows, total: rows.length });
+  return {
+    'GET /api/runtime/records?status=needs_attention': {
+      body: body(runtimeRecords.filter((r) => r.status === 'needs_attention')),
+    },
+    'GET /api/runtime/records?workflow_state=blocked': {
+      body: body(runtimeRecords.filter((r) => r.workflow.blocked)),
+    },
+    'GET /api/runtime/records?has_conflict=true': {
+      body: body(runtimeRecords.filter((r) => r.evidence_counts.conflicting_evidence >= 1)),
+    },
+    'GET /api/runtime/records?status=ready_to_export': {
+      body: body(runtimeRecords.filter((r) => r.status === 'ready_to_export')),
+    },
+  };
+}
+
 /** S6 routes for an ALREADY-exported experiment on fresh load (View/Download live). */
 export function exportedReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
