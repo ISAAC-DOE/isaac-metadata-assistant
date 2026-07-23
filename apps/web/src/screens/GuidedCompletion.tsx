@@ -577,7 +577,7 @@ function LoadedCompletion({
                 className="leftmissing-answer"
                 onClick={() => answerLater(item.id)}
               >
-                Answer now
+                Answer Now
               </button>
             </div>
           ))}

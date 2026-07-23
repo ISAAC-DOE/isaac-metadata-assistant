@@ -67,6 +67,7 @@ export function RecordWorkbench() {
         sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="pad"
       >
+        <h1 className="sr-only">{LABELS.screenReview}</h1>
         {bundle.status === 'loading' ? (
           <LoadingPanel label="Loading the record from the local backend…" />
         ) : (
@@ -221,6 +222,7 @@ function LoadedWorkbench({
       }
       mainPad="pad"
     >
+      <h1 className="sr-only">{LABELS.screenReview}</h1>
       <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
 
       {pending.length > 0 && (

@@ -56,6 +56,7 @@ export function EvidenceExplorer() {
         topBar={<TopBar variant="record" title={LABELS.screenEvidence} recordId={id} />}
         mainPad="pad"
       >
+        <h1 className="sr-only">{LABELS.screenEvidence}</h1>
         {bundle.status === 'loading' ? (
           <LoadingPanel label="Loading the evidence trail from the local backend…" />
         ) : (
@@ -136,6 +137,7 @@ function LoadedEvidence({
         }
         mainPad="pad"
       >
+        <h1 className="sr-only">{LABELS.screenEvidence}</h1>
         <p className="preview-empty" role="note">
           No evidence has been recorded for this experiment yet.
         </p>
@@ -205,6 +207,7 @@ function LoadedEvidence({
       }
       mainPad="none"
     >
+      <h1 className="sr-only">{LABELS.screenEvidence}</h1>
       <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
       <EvidenceClassificationPanel
         classification={classification}

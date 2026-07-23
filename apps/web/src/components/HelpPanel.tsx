@@ -87,7 +87,7 @@ export function HelpPanel() {
               aria-label="Close help"
               onClick={() => setOpen(false)}
             >
-              <X size={14} strokeWidth={2} />
+              <X size={14} strokeWidth={2} aria-hidden="true" />
             </button>
           </div>
 

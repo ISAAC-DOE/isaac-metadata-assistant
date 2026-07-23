@@ -93,6 +93,7 @@ export function ExportReadiness() {
         sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="pad"
       >
+        <h1 className="sr-only">{LABELS.screenExport}</h1>
         {load.name === 'loading' ? (
           <LoadingPanel label="Loading validation, coverage and advisory from the local backend…" />
         ) : (
@@ -376,6 +377,7 @@ function LoadedExport({
       }
       mainPad="pad"
     >
+      <h1 className="sr-only">{LABELS.screenExport}</h1>
       <LiveSyncNote degraded={degraded} onRefresh={onRefresh} />
 
       {/* P28.2 — the exported record changed after export (records are immutable):
@@ -524,7 +526,7 @@ function LoadedExport({
 
           {pendingZero && !dryRunOk && (
             <section className="preexport-blocked card">
-              <h3>Would Not Validate Yet</h3>
+              <h2>Would Not Validate Yet</h2>
               <p className="preexport-text">
                 The in-memory dry-run does not pass the official ISAAC schema, so export stays gated.
                 Nothing was written. Resolve these in the draft, then return.

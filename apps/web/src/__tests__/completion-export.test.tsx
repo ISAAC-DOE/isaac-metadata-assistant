@@ -112,7 +112,7 @@ describe('S4 · Guided Completion (live)', () => {
     expect(getByText('5 of 5 fields still to confirm')).toBeInTheDocument();
 
     // the skipped question can be answered later
-    fireEvent.click(getByText('Answer now'));
+    fireEvent.click(getByText('Answer Now'));
     expect(getByText('What is the sha256 of the processing notebook?')).toBeInTheDocument();
   });
 

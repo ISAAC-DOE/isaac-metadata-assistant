@@ -109,7 +109,7 @@
   margin-top: 14px;
   padding: 16px 18px;
 }
-.schema-errors h3 {
+.schema-errors h2 {
   font-size: 14px;
   font-weight: 600;
   color: var(--fail-text);

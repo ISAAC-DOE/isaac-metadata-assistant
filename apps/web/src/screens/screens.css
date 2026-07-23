@@ -161,7 +161,7 @@
 .placeholder {
   max-width: 640px;
 }
-.placeholder h2 {
+.placeholder > h1 {
   font-size: 22px;
   font-weight: 600;
   color: var(--text-heading);
@@ -887,7 +887,7 @@
 }
 .preexport-ready .btn { margin-top: 12px; }
 .preexport-blocked { padding: 16px 18px; }
-.preexport-blocked h3 { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.preexport-blocked h2 { font-size: 14px; font-weight: 600; color: var(--text-heading); }
 .preexport-errors {
   margin: 10px 0 12px;
   padding: 0;

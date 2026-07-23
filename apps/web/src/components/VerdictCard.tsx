@@ -54,7 +54,7 @@ export function VerdictCard({ result, onRevalidate, onBackToComplete }: VerdictC
 
       {!pass && (
         <div className="card schema-errors">
-          <h3>Schema Errors</h3>
+          <h2>Schema Errors</h2>
           {result.errors.map((err) => (
             <div className="schema-error-row" key={err.path}>
               <span className="schema-error-path mono">{err.path}</span> — {err.message}

@@ -113,7 +113,7 @@ export function ProjectMemory() {
     >
       <div className="placeholder">
         <span className="eyebrow">Memory / Query Plane</span>
-        <h2>{LABELS.navMemory}</h2>
+        <h1>{LABELS.navMemory}</h1>
         <p>
           Project Memory is the assistant's memory and navigation surface — Graphify plus project
           docs. It is deliberately separate from the experiment queue and never appears inside it. It
@@ -195,7 +195,11 @@ function SectionTabs({
             type="button"
             role="tab"
             aria-selected={selected}
-            aria-controls={panelId(tab.id)}
+            // Only the SELECTED tab's panel is mounted (panels render
+            // conditionally), so an inactive tab must not point aria-controls at
+            // an id that isn't in the DOM — matching the accordion convention
+            // used by the Concept Lookup / Source Index rows below.
+            aria-controls={selected ? panelId(tab.id) : undefined}
             tabIndex={selected ? 0 : -1}
             className={`section-tab${selected ? ' active' : ''}`}
             onClick={() => onSelect(tab.id)}
@@ -271,7 +275,7 @@ const INTEGRITY_AXIS: Record<SnapshotIntegrity, AxisPresentation> = {
 
 const CONSISTENCY_AXIS: Record<MemoryConsistency, AxisPresentation> = {
   current: { label: 'Current', tone: 'ok' },
-  stale: { label: 'Out of date', tone: 'warn' },
+  stale: { label: 'Out of Date', tone: 'warn' },
   unknown: { label: 'Unknown', tone: 'quiet' },
 };
 
@@ -441,7 +445,7 @@ function SourceIndexCard({ focusFilePath }: { focusFilePath?: string | null }) {
   const list = useFetch(() => api.getMemoryFiles(), []);
   return (
     <div className="card placeholder-card source-index-card">
-      <h3 className="source-index-heading">Source Index</h3>
+      <h2 className="source-index-heading">Source Index</h2>
       <p className="source-index-subtitle">
         Files Graphify indexed for project memory — metadata and provenance only, never file
         contents.
@@ -508,10 +512,10 @@ function SourceIndexList({ available, files, focusFilePath }: SourceIndexListPro
           const headingId = domId('si-group', group.key);
           return (
             <div className="source-index-group" key={group.key}>
-              <h4 id={headingId} className="source-index-group-heading">
+              <h3 id={headingId} className="source-index-group-heading">
                 {group.label}
                 <span className="source-index-group-count">{group.files.length}</span>
-              </h4>
+              </h3>
               <ul className="source-index-rows" aria-labelledby={headingId}>
                 {group.files.map((file) => (
                   <SourceIndexRow
@@ -647,7 +651,7 @@ function SourceIndexDetail({
       )}
 
       <div className="source-index-section">
-        <h5 className="source-index-section-heading">Why memory draws on this file</h5>
+        <h4 className="source-index-section-heading">Why memory draws on this file</h4>
         {rationales.length > 0 ? (
           <ul className="source-index-rationale-list">
             {rationales.map((rationale, i) => (
@@ -660,7 +664,7 @@ function SourceIndexDetail({
       </div>
 
       <div className="source-index-section">
-        <h5 className="source-index-section-heading">Related files</h5>
+        <h4 className="source-index-section-heading">Related files</h4>
         {related.files.length > 0 ? (
           <ul className="source-index-related-list">
             {related.files.map((rf) => (
@@ -682,7 +686,7 @@ function SourceIndexDetail({
       </div>
 
       <div className="source-index-section">
-        <h5 className="source-index-section-heading">Related concepts</h5>
+        <h4 className="source-index-section-heading">Related concepts</h4>
         {related.concepts.length > 0 ? (
           <ul className="source-index-related-list">
             {related.concepts.map((rc) => (
@@ -715,9 +719,9 @@ function ConceptLookupCard({ focusConceptId }: { focusConceptId?: string | null 
   const headingId = 'concept-lookup-heading';
   return (
     <div className="card placeholder-card concept-lookup-card">
-      <h3 id={headingId} className="concept-lookup-heading">
+      <h2 id={headingId} className="concept-lookup-heading">
         Concept Lookup
-      </h3>
+      </h2>
       <p className="concept-lookup-subtitle">
         Concepts Graphify anchored in project docs — memory leads, not scientific conclusions.
       </p>
@@ -907,12 +911,12 @@ function ConceptLookupDetail({
       </dl>
 
       <div className="concept-lookup-section">
-        <h5 className="concept-lookup-section-heading">Related leads</h5>
+        <h3 className="concept-lookup-section-heading">Related leads</h3>
         {hasLeads ? (
           <>
             {related.files.length > 0 && (
               <div className="concept-lookup-subsection">
-                <h6 className="concept-lookup-subsection-heading">Files</h6>
+                <h4 className="concept-lookup-subsection-heading">Files</h4>
                 {/* Related files are inert labeled text in this slice — no
                     cross-card navigation into the Source Index card, per the
                     P24.5 scope boundary. */}
@@ -931,7 +935,7 @@ function ConceptLookupDetail({
             )}
             {related.concepts.length > 0 && (
               <div className="concept-lookup-subsection">
-                <h6 className="concept-lookup-subsection-heading">Concepts</h6>
+                <h4 className="concept-lookup-subsection-heading">Concepts</h4>
                 <ul className="concept-lookup-related-list">
                   {related.concepts.map((rc) => (
                     <li key={rc.id}>
