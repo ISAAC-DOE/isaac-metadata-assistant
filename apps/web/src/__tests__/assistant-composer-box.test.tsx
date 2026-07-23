@@ -15,19 +15,21 @@ import type { AssistantMessage, SuggestedPrompt } from '../lib/types';
 
 const reply: AssistantMessage = { text: 'Here is some guidance.', answeredFrom: 'workflow' };
 const prompts: SuggestedPrompt[] = [
-  { text: 'What still needs me?', answer: { text: 'Two fields still need you.', answeredFrom: 'workflow' } },
+  {
+    text: 'What still needs me?',
+    answeredFrom: 'workflow',
+    answer: { text: 'Two fields still need you.', answeredFrom: 'workflow' },
+  },
 ];
 
 let fetchSpy: ReturnType<typeof vi.fn>;
-const originalFetch = global.fetch;
 
 beforeEach(() => {
   fetchSpy = vi.fn(() => Promise.reject(new Error('no network in a visual-only composer')));
-  // @ts-expect-error test shim
-  global.fetch = fetchSpy;
+  vi.stubGlobal('fetch', fetchSpy);
 });
 afterEach(() => {
-  global.fetch = originalFetch;
+  vi.unstubAllGlobals();
 });
 
 function renderPanel(key: string) {
