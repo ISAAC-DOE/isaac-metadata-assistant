@@ -179,25 +179,96 @@ def _validate_header(header: list[str]) -> tuple[int, list[dict]]:
     return recognized_count, unknown_warnings
 
 
-def _classify(status: str) -> str:
-    """Honest evidence-support label for a preview candidate.
+# --- P31.2 reconciliation helpers (pure, deterministic) -----------------------
 
-    A preview only ever PROPOSES, so this never says "confirmed": a
-    strictly-coerced value is ``supported`` (backed by the sheet cell), an
-    un-coercible/blank one is ``needs_review``.
+#: The literal CSV column a mapped value comes from in the v1 long format.
+_VALUE_COLUMN = "value"
+
+_RECONCILE_EXPLANATIONS = {
+    "matches_current": "This value matches the current record; no change is needed.",
+    "conflicts_with_current": (
+        "This value differs from the current record. The record is left unchanged "
+        "and this disagreement needs human review."
+    ),
+    "absent_from_record": (
+        "The record has no confirmed value here; this value is unconfirmed and was "
+        "not written to the record."
+    ),
+}
+
+
+def _field_label(path: str) -> str:
+    """Derive a safe human display name from an official dotted path's LAST segment.
+
+    Deterministic and path-free: ``system.facility.beamline`` -> ``"Beamline"``,
+    ``sample.composition.CuO2_mass_fraction`` -> ``"CuO2 Mass Fraction"``. Only the
+    final segment is used, then ``_`` splits into words whose first letter is
+    upper-cased WITHOUT lower-casing the rest (so ``CuO2`` is preserved). The result
+    can never contain a ``.`` or ``/`` — it never leaks a path.
     """
-    return "supported" if status == "verified" else "needs_review"
+    segment = path.rsplit(".", 1)[-1]
+    words = [w for w in segment.split("_") if w]
+    return " ".join(w[:1].upper() + w[1:] for w in words)
+
+
+def _is_number(x) -> bool:
+    """True for a real JSON number (int/float) — but NOT ``bool``."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _normalized_equal(a, b) -> bool:
+    """Compare two values: numerically when BOTH are numbers, else trimmed strings."""
+    if _is_number(a) and _is_number(b):
+        return float(a) == float(b)
+    return str(a).strip() == str(b).strip()
+
+
+def _is_blank(v) -> bool:
+    """A missing/empty value: ``None`` or an all-whitespace string."""
+    return v is None or (isinstance(v, str) and v.strip() == "")
+
+
+def _reconcile(path: str, proposed, record_fields: dict) -> tuple[str, object]:
+    """Classify a proposed value against the current record value at ``path``.
+
+    Returns ``(reconciliation_state, current_value)``. NO mutation; a pure read of
+    the caller-supplied record view. Callers must not pass a blank proposed value:
+    build_preview skips blank cells before reconciling, so a blank never reaches
+    here to be mislabeled.
+    """
+    entry = record_fields.get(path)
+    current = entry.get("value") if isinstance(entry, dict) else None
+    if entry is None or _is_blank(current):
+        return "absent_from_record", current
+    if _normalized_equal(current, proposed):
+        return "matches_current", current
+    return "conflicts_with_current", current
 
 
 def build_preview(
-    text: str, *, source_name: str, source_record_rev: int
+    text: str,
+    *,
+    source_name: str,
+    source_record_rev: int,
+    experiment_id: str | None = None,
+    record_fields: dict | None = None,
 ) -> dict:
-    """Validate CSV v1 + build the READ-ONLY typed preview. No mutation, no disk.
+    """Validate CSV v1 + build the READ-ONLY typed RECONCILIATION preview.
 
-    Order: parse rows → header validation → cell/row limits → in-memory
-    FIELD_MAP mapping → candidate limit → typed preview. Every candidate's
-    ``value_state`` is ``"candidate"`` (a preview proposes, never confirms).
+    P31.2 (reconciliation-only): each FIELD_MAP-mapped candidate is compared —
+    without any mutation, rev bump, or write — against the CURRENT authoritative
+    value at its official path (supplied by the caller as ``record_fields``:
+    ``path -> {"value": <current or None>, "classification": <P28 class or None>}``)
+    and classified ``matches_current`` / ``conflicts_with_current`` /
+    ``absent_from_record``. No winner is selected; both the proposed and current
+    values are preserved.
+
+    Order: parse rows → header validation → cell/row limits → in-memory FIELD_MAP
+    mapping → candidate limit → reconciliation enrichment → typed preview. Every
+    candidate's ``value_state`` is ``"candidate"`` (a preview proposes, never
+    confirms).
     """
+    record_fields = record_fields or {}
     rows = _read_all_rows(text)
     if not rows:
         raise CsvIngestError("empty_file", 400, "The CSV has no rows.")
@@ -232,19 +303,56 @@ def build_preview(
             f"More than {MAX_CANDIDATES} candidate fields.",
         )
 
-    candidates = [
-        {
-            "field": f.path,
-            "proposed_value": f.value,
-            # A preview PROPOSES; it never confirms. Always "candidate".
-            "value_state": "candidate",
-            "status": f.status,  # verified | needs_confirmation (from _coerce)
-            "evidence_classification": _classify(f.status),
-            "locator": f.evidence[0]["locator"] if f.evidence else "",
-            "source_format": "csv",
-        }
-        for f in fields
-    ]
+    candidates: list[dict] = []
+    summary = {
+        "matches_current": 0,
+        "conflicts_with_current": 0,
+        "absent_from_record": 0,
+    }
+    for f in fields:
+        # A blank sheet cell for a mapped field proposes NO value — it must NOT
+        # create a reconciliation item (never a fabricated match/conflict, and
+        # never a contradictory "absent" item that still carries a current value).
+        # It stays out of `candidates` and the summary; the skipped-row warning is
+        # computed from `fields` (below), so its count is unaffected.
+        if _is_blank(f.value):
+            continue
+        state, current_value = _reconcile(f.path, f.value, record_fields)
+        summary[state] += 1
+        rf_entry = record_fields.get(f.path)
+        classification = (
+            rf_entry.get("classification")
+            if isinstance(rf_entry, dict) and rf_entry.get("classification")
+            else "unknown"
+        )
+        candidates.append(
+            {
+                "field": f.path,
+                "proposed_value": f.value,
+                # A preview PROPOSES; it never confirms. Always "candidate".
+                "value_state": "candidate",
+                "status": f.status,  # verified | needs_confirmation (from _coerce)
+                "locator": f.evidence[0]["locator"] if f.evidence else "",
+                "source_format": "csv",
+                # --- P31.2 reconciliation enrichment (read-only) --------------
+                "experiment_id": experiment_id,
+                "field_label": _field_label(f.path),
+                "current_value": current_value,
+                "reconciliation_state": state,
+                "column": _VALUE_COLUMN,
+                "source_name": source_name,
+                "parser_id": PARSER_ID,
+                "parser_version": PARSER_VERSION,
+                "source_record_rev": source_record_rev,
+                # Freshly built == current; the client detects staleness by a rev
+                # mismatch against the live record.
+                "stale": False,
+                # The CURRENT record field's P28 evidence-support class (NOT the
+                # raw CSV status): describes how well the record value is backed.
+                "evidence_classification": classification,
+                "explanation": _RECONCILE_EXPLANATIONS[state],
+            }
+        )
 
     warnings: list[dict] = []
     # Report skipped-unmapped-row COUNT only — never the unmapped field name/value.
@@ -272,6 +380,7 @@ def build_preview(
         "unknown_header_warnings": unknown_warnings,
         "candidate_count": len(candidates),
         "candidates": candidates,
+        "reconciliation_summary": summary,
         "warnings": warnings,
     }
 

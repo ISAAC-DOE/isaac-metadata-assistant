@@ -1,7 +1,9 @@
 # Phase 31 — Synthetic/Public File Ingestion (P31.0 proof gate + plan)
 
-Status: **P31.0 format + threat-model proof gate COMPLETE (2026-07-22). No human gate triggered.** Active slice: **P31.1 (next).**
-Baseline: `main @ b5cf608` (P30.6) · Railway synthetic-only · backend 826 · frontend 525.
+Status: **P31.0 + P31.1 COMPLETE (2026-07-22).** Human decision 2026-07-22: **Phase 31 is RECONCILIATION-ONLY**
+(§11) — the confirmed-write surface is NOT extended; CSV ingestion parses + reconciles + reviews evidence and
+never mutates the mapped official fields. Active slice: **P31.2 (reconciliation staging).**
+Baseline for P31.2: `main @ 0387d72` · CI green · Railway synthetic-only · backend 866 · frontend 525.
 
 Derived from a targeted read-only audit (extract layer, schema, upload seam, deps — done by the orchestrator with `rg`/`Read`, no swarm). Obeys the master ledger; not a competing master plan.
 
@@ -54,10 +56,10 @@ Each candidate retains: `{candidate_id, experiment_id, field (official dotted pa
 |---|---|---|
 | **P31.1** safe ingress | authenticated synthetic-only CSV endpoint; size/count/row/col limits; MIME/ext allow-list; bounded in-memory read; typed rejections | `/uploads` seam, runtime_mode |
 | **P31.2** deterministic parse | adapt `parse_structured` to in-memory CSV text; bounded; malformed→typed error; no-guessing preserved | `extract.structured` (mostly wiring) |
-| **P31.3** candidate/evidence staging | map parsed fields → candidates + locators; conflict/duplicate/version binding; NO mutation | P29.6 proposeForField, P28.4 classify |
-| **P31.4** review + confirm UI | file select + synthetic-only warning + validation summary + candidate review + confirm/cancel | P29.6 ProposalCard/confirm, P28.5 evidence UI |
-| **P31.5** retention/reset/degradation | in-memory (nothing persisted); reset clears; manual-first degradation | reset contract, useRecordSession |
-| **P31.6** hosted QA + closure | valid/malformed/oversized/conflict/duplicate/inferred/unknown/confirm/cancel/stale/reset/security/a11y | — |
+| **P31.2** reconciliation staging (CORRECTED, §11) | enrich the preview into version-bound reconciliation items (matches/conflicts/absent) over the current record view; NO mutation, NO confirm, NO write-surface change | `evidence_trail_from_draft`, P28.4 `classify_fields`, `parse_structured_text` |
+| **P31.3** reconciliation + evidence review UI | file select + synthetic-only warning + "review evidence, not a write" banner + reconciliation review (match/conflict/absent) + navigate-to-existing-manual-surface; NO Stage/Confirm/Apply/Import/Overwrite | P28.5 evidence UI, existing manual edit surface |
+| **P31.4** retention/reset/degradation | in-memory (nothing persisted); reset/rev-change → stale; manual-first degradation | reset contract, useRecordSession |
+| **P31.5** hosted QA + closure | valid/malformed/oversized/conflict/absent/matching/unknown/stale/reset/navigation/security/a11y | — |
 
 ## 7. MEMORY-SAFETY CORRECTION (P31.1 revalidation — the "in-memory" claim, verified against the real framework)
 
@@ -122,3 +124,56 @@ Note: the source_filename is client-supplied metadata (a raw text/csv body has n
 `X-Filename` header it is sanitized to a bounded basename for display/attribution only, never a path/ID/value.
 
 ## 10. Test-first per slice; independent Opus review per release slice; verification loop per the mandate. Human gates: none (ledger §9 unchanged); stop only if a new native dep/service/real-data proves necessary (it does not — CSV is stdlib, raw-body needs no multipart dep).
+
+## 11. P31.2 CORRECTED CONTRACT — RECONCILIATION-ONLY (human decision 2026-07-22)
+
+**Architecture gate (proven, not assumed).** Before implementing P31.2 the orchestrator traced "candidate/
+evidence staging INTO the P29.6 confirm flow" to ground truth and probed it live:
+
+- The confirmed-mutation surface (`POST /answers` + `POST /edit` → `_answers_to_apply_shape` → `apply_answers`)
+  recognizes ONLY the keys `{asset-uri, series, descriptor, descriptor_label, edge}`; unknown keys are
+  deliberately ignored ("never invented into the draft").
+- The CSV v1 `FIELD_MAP` produces ONLY official paths `{system.facility.*, system.technique,
+  system.configuration.*, timestamps.*, sample.material.*, sample.composition.*, sample.geometry.*,
+  context.*}`. **The two sets are DISJOINT.**
+- Empirical probe: confirming `series` (a real blocker key) bumped rev `…077.0 → …077.1` (mutation applied);
+  confirming `system.facility.beamline` (a FIELD_MAP path) returned 200 but left rev **unchanged** — a silent
+  no-op. So a CSV FIELD_MAP candidate CANNOT be written through the existing confirm contract.
+- Every seed record is built by `build_draft(CSV_PATH, …)`, so all 25 FIELD_MAP paths are ALREADY populated
+  (extraction-backed). A re-uploaded campaign sheet is therefore *reconciliation* (agreement/conflict against
+  existing values), not net-new fills. `absent_from_record` is unreachable via the canonical seeds → covered at
+  the pure-builder unit level with a crafted record view.
+
+**Decision (human, 2026-07-22): Option 1 — reconciliation-only.** The earlier "CSV candidate → confirm →
+official field mutation" requirement is WITHDRAWN as insufficiently grounded in the actual confirmed-write
+architecture. The confirmed-write surface (`apply_answers`/`/answers`/`/edit`) is NOT extended in Phase 31 or
+Phase 32. Making additional official paths CSV-writable is deferred to a future, separately approval-gated
+**"Future — CSV-Assisted Official Field Write Contract"** phase (must first define schema-path authorization,
+validation, workflow invalidation, evidence effects, concurrency, and rollback). This is a deliberate authority
+boundary, NOT a defect.
+
+**Corrected Phase-31 flow:** `Upload → Parse → Reconcile (version-bound) → Review Evidence → Navigate to the
+existing approved manual workflow where supported`. NEVER `Upload → Confirm → CSV field mutation`.
+
+**P31.2 reconciliation item** (read-only; NO mutation, NO rev bump, NO workflow/export/runtime/Project-Memory
+change; no winner selection): `{experiment_id, field (official path), field_label (safe display), proposed_value,
+current_value (or absent), reconciliation_state ∈ {matches_current, conflicts_with_current, absent_from_record},
+evidence_classification (current field's P28 class where applicable), source_name (safe basename), parser_id,
+parser_version, locator (row), column, source_record_rev, stale (version-bound), explanation}`.
+- **matches_current** → supporting/matching evidence; locator preserved; no mutation, no rev bump, no proposal.
+- **conflicts_with_current** → BOTH values shown; conflict marked; human review; no overwrite; no winner.
+- **absent_from_record** → labeled unconfirmed + absent; not written; not auto-staged into any write path.
+- Two CSV rows mapping to the same field with different values → BOTH preserved (distinct row locators), no
+  winner (the parser emits both in row order; reconciliation never dedupes them).
+- **Stale** when the record rev changes / Reset Demo / Run Synthetic Demo / experiment switch / reparse against
+  a newer record / a relevant current field changes. Backend is stateless → staleness is version-binding by
+  construction (`source_record_rev`); the client detects a rev mismatch.
+
+Implemented by ENRICHING the existing `POST /ingestion/csv/preview` endpoint (no second endpoint, no second
+ETag owner, no second candidate model): the route computes the current record view (`evidence_trail_from_draft`
+values + `classify_fields` classes) and passes it to `csv_ingest.build_preview`, which adds the reconciliation
+fields to each item + a `reconciliation_summary` count. P31.1's ingress/limits/version-gate/leak-safety are
+unchanged; the truth path (§13) is untouched; `apply_answers` is NOT modified. P31.3 builds the reconciliation/
+evidence review UI (no Stage/Confirm/Apply/Import/Overwrite controls; a visible "CSV values are review evidence —
+uploading does not change the official record" banner; safe actions only + navigate-to-existing-manual-surface
+where the field is manually editable, else read-only evidence).

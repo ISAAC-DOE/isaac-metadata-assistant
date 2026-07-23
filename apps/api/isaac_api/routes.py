@@ -857,11 +857,23 @@ async def post_csv_preview(
 
     started = datetime.now(timezone.utc)
     source_name = csv_ingest.safe_source_name(x_filename)
+    # P31.2 — build the CURRENT authoritative record view (READ-ONLY) the
+    # reconciliation compares against: official path -> {value, P28 classification}.
+    _values = {e["path"]: e["value"] for e in serialize.evidence_trail_from_draft(exp.draft)}
+    _classes = {r["field"]: r["classification"] for r in evidence_classify.classify_fields(exp.draft)}
+    record_fields = {
+        path: {"value": v, "classification": _classes.get(path)}
+        for path, v in _values.items()
+    }
     try:
         raw = await _read_bounded_body(request, csv_ingest.MAX_BODY_BYTES)
         text = csv_ingest.decode_body(raw)
         preview = csv_ingest.build_preview(
-            text, source_name=source_name, source_record_rev=exp.rev
+            text,
+            source_name=source_name,
+            source_record_rev=exp.rev,
+            experiment_id=experiment_id,
+            record_fields=record_fields,
         )
     except csv_ingest.CsvIngestError as e:
         # Metadata only — never the raw body / rows / candidate values / filename.
