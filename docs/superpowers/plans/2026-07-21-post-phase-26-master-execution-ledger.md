@@ -14,7 +14,7 @@
 | Field | Value |
 |---|---|
 | **Current phase** | **Phase 30 COMPLETE** (2026-07-22): Runtime-retrieval proof gate REJECTED a persistent index (measured); shipped a thin Workspace-derived runtime provider (`/runtime/records`, no index/cache/service) + a cross-record triage consumer (SearchDialog), hosted-QA PASS (correct matching, honest empty states, current-by-construction, clean handoff to authoritative record). → Phase 31. |
-| **Active ticket** | P31.0 — format-selection + ingestion-threat-model proof gate (in progress; human-gate 5 possible). Preceded by P30.6 artifact-path-leak fix (`b5cf608`). |
+| **Active ticket** | P31.1 — safe CSV ingress boundary (next). P31.0 proof gate COMPLETE — SELECTED CSV (existing extract.structured parser; stdlib; no human gate). |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
 | **Next step** | Phase 31 (Synthetic/Public File Ingestion) — P31.0 format selection (human-gate 5 possible) → P31.1 upload boundary → P31.2 deterministic parser → P31.3 assistant/manual review → P31.4 QA. Strict: synthetic/public only, NO real/private data, sandboxed, deterministic; candidates stay candidates (reuse P28.4/P29.6). |
 | **Blockers** | none |
@@ -508,6 +508,21 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   red-first) sweeping all 3 sites + a FE no-path test + a snapshot no-leak guard. Backend **826**, frontend
   **525**, tsc clean; truth path frozen; snapshot regenerated. Independent Opus review = SHIP (leak eliminated
   at the boundary; no residual absolute-path field anywhere; access preserved).
+
+## Phase 31 — Synthetic/Public File Ingestion (in progress)
+
+- **P31.0** (format + threat-model PROOF GATE, read-only, 2026-07-22): targeted `rg`/`Read` audit → plan
+  `docs/superpowers/plans/2026-07-22-phase-31-ingestion-plan.md`. **Decisive repo evidence:** a deterministic
+  parser ALREADY exists — `extract.structured.parse_structured` reads a campaign metadata sheet (.csv stdlib /
+  .xlsx openpyxl) via an explicit `FIELD_MAP` (field→official dotted path + type, no-guessing) with
+  `spreadsheet` evidence locators (tested); `POST /uploads` is an existing governance refusal seam; P29.6
+  confirm + P28.4 classify + P27 version all reusable. **DECISION: initial format = CSV** (stdlib csv, zero new
+  dep, lowest attack surface, existing tested parser + FIELD_MAP + evidence locators); xlsx DEFERRED (parser +
+  openpyxl dep exist, but ZIP surface); HDF5/NeXus/CIF/XML/ZIP/Office/PDF/images/binary REJECTED (no repo
+  evidence, dangerous). **No human gate** (format grounded in an existing parser; no new dep/service/secret/
+  real-data). Architecture: bounded IN-MEMORY read (no temp file → eliminates the filesystem-safety threat
+  category); reuse parse_structured + P29.6 candidates/confirm + P28.4 classify. Threat model + limits +
+  candidate/evidence contract + 6 leaner slices in the plan. Truth path untouched; docs-only.
 
 ## Phase 30 Completion Gate (CLOSED 2026-07-22 @ `47e91ae`)
 
