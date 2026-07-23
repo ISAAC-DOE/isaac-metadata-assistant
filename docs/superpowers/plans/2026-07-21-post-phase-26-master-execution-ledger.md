@@ -1005,3 +1005,22 @@ path, not a direct empty-trigger instance.
 **Phase 27 = COMPLETE.** One honest, non-blocking caveat: the passive-poll banner cadence + offline
 indicator await a human two-window visual confirmation (deterministically unit-verified; hosted-blocked by
 CDP hidden-tab throttling). CQ: none open for Phase 27.
+
+---
+
+## Phase 33 — UI/UX Refinement (in progress)
+
+Approved 2026-07-23 (multi-round Claude↔GPT plan debate; final locked plan + 5 corrections in
+`2026-07-23-phase-33-ui-refinement.md` §8). **Strictly visual / layout / copy-hierarchy / responsive /
+a11y — no functional, truth, assistant, evidence, validation, export, reconciliation, or schema change.**
+Baseline: `main` @ `46eea62` (Phase 32 closure), 0/0, CI green, Railway `synthetic-only`, Vercel 200.
+Slices S0→S6; per-slice loop = red test → delegate Opus/Sonnet → focused+full FE suite → tsc → build →
+a11y → snapshot check/regen → independent Opus review → deploy → hosted QA → commit → CI → checkpoint.
+Search disambiguation (NAV-1) + free-form Q&A deferred.
+
+- **S0 — Plan Lock & Minimal Foundations** (2026-07-23): wrote the final locked plan into the register
+  (§8), promoted RESP-1/A11Y-1 into scope, mapped the 8 approved screenshots to routes/components,
+  recorded desktop before-captures from the audit session, locked casing/rail/evidence-nav/responsive
+  rules, confirmed reuse strategy (extend `StatusChip`/`.tab`/tokens/`.btn`/dots/evidence/`/evidence`
+  route; new primitives introduced in their consuming slices, none in S0). Docs only; no code, no
+  speculative files.
