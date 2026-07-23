@@ -13,10 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **Phase 29 REOPENED** (2026-07-22 — the `09cfaee` "COMPLETE" closure is RETRACTED as premature): the committed scope (plan §3 P29.5 "confirmation flow" hosted QA; the approved mandate's P29.5 "Confirm THROUGH THE VISIBLE UI") required a visible stage→confirm→mutate path; the write-path was left DORMANT by a unilateral orchestrator decision, NOT an approved deferral. Reopened for one bounded gap → **P29.6 Agent Actionability Closure**. Phase 30 BLOCKED until P29.6 + hosted confirmation QA pass. |
-| **Active ticket** | P29.6 — Agent Actionability Closure (visible, narrow, deterministic staging → confirm; then hosted QA) |
+| **Current phase** | **Phase 29 COMPLETE (corrected)** (2026-07-22): after the premature `09cfaee` closure was retracted, the actionability gap was closed by **P29.6** (`d267be7`) and the previously-missing **stage→confirm→mutate flow is now hosted-QA-verified PASS** (one POST/answers→200 on Confirm, 412 on stale, idempotent double-click, reset invalidates). Now genuinely → Phase 30. Documented non-blocking caveats: passive-poll two-window; degraded/live-conflicting-classes not hosted-exercised. |
+| **Active ticket** | P30.0 — Runtime Retrieval Proof Gate (next) |
 | **Completed** | **Phase 27 (all slices)**: T0 (`859d36c`); P27.0; approval (`33825ff`); P27.1 (`26642eb`); P27.2 (`14477bd`); P27.3 (`ccac6d3`); P27.4 (`41bd20b`); P27.5 (`0112f5f`); P27.5-strict (`d7a9fef`); reset-content (`61c017f`); P27.6 (`ef31f5b`); P27.7 hosted two-tab QA (conflict-safety hosted-PASS). **Phase 28**: P28.0 audit + plan (`a0e2a09`); P28.1 fixed workflow order (`e434de2`); P28.2 dep invalidation + artifact freshness (`859309f`); P28.3 revisit/summary/edit (`039ac1b`); P28.4 evidence classifier (`b1b9cd0`); P28.5 typed evidence API+UI (`bea0a01`) |
-| **Next step** | **P29.6 Agent Actionability Closure** (visible narrow deterministic staging→confirm; test-first; hosted QA) → corrected Phase 29 closure → THEN Phase 30 P30.0 proof-GATE (index only if justified; bias to NO new persistent index if P26 Workspace search suffices) |
+| **Next step** | Phase 30 P30.0 Runtime Retrieval **PROOF-GATE** — prove what P26 Workspace search cannot already answer BEFORE building anything; strong bias to NO new persistent index (prefer: existing search → thin runtime provider → short-lived rev-keyed cache → persistent index only with measured justification); confirmed-facts-only; Workspace-subordinate |
 | **Blockers** | none |
 | **Latest impl commit** | `ef31f5b` (P27.6) |
 | **Latest checkpoint commit** | `a50923d` (Phase 27 closure docs) |
@@ -571,8 +571,27 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   Actionability Closure** (Path A). Phase 29 gate below is **PROVISIONAL** pending P29.6 + hosted confirmation
   QA. (Record is completable via the manual flow + P28.3 `/edit`; the missing piece is specifically the
   agent's visible stage→confirm→mutate path required by P29.3/P29.5.)
+- **P29.6** (`d267be7`, 2026-07-22): Agent Actionability Closure — closed the retracted gap. NEW pure guard
+  `proposeForField(ctx,{field,value?,source})`: source `user` → focused named-field answer labeled
+  user-provided, NO evidence classification (stripped unconditionally); source `candidate` → grounded in the
+  field's real classification (unknown→null / no fabrication; conflicting→null unless an explicit option is
+  selected / no auto-winner; inferred/supported→proposal); source `memory`/`graph`→null (Project Memory can
+  never propose); empty field→null. Visible NARROW button trigger ("Use This Suggestion / Stage Answer") on
+  GuidedCompletion for the current pending field only (NOT a free-text composer — `.assistant input===null`
+  invariant preserved) → the P29.4b `ProposalCard` (UNCONFIRMED) → Confirm via the UNCHANGED `confirmProposal`
+  (If-Match, one mutation, stale/412 refuse) or Cancel (no mutation). Tests: `assistant-propose.test.ts` (7,
+  orchestrator red-first) + `assistant-staging-ui.test.tsx` (20). Frontend **509** (was 482), tsc clean;
+  truth path + P29.3 agent/confirmProposal byte-unchanged; snapshot regenerated. Independent Opus authority/
+  security review = **SHIP** (guard doesn't fabricate/auto-resolve/memory-propose; no mutation before confirm;
+  leak-safe) + applied its recommended hardening (user value strips classification unconditionally). **Hosted
+  confirmation QA = PASS** (frontend-only; Vercel `d267be7`): stage → UNCONFIRMED, zero network at stage;
+  Confirm → exactly ONE `POST /answers`→200, pending 5→4, recalc, summary; two-tab stale → **412**, no
+  write/retry/merge, Re-Evaluate; double-click Confirm → one POST (idempotent); Reset → 2/1/1/1 + staged
+  proposal invalidated (412 post-reset); no fabrication/leak/console-errors; credential-safe. QA caveat: no
+  genuinely-Unknown/no-suggestion pending field exists in the seeded synthetic record, so F's empty-trigger
+  negative case was verified via the "leave honestly missing / nothing invented" path instead.
 
-## Phase 29 Completion Gate (PROVISIONAL — reopened for P29.6; closed criteria pending visible staging + hosted confirm QA)
+## Phase 29 Completion Gate (CLOSED 2026-07-22 @ `d267be7`; the visible-staging + hosted-confirm criterion now MET after the P29.6 correction)
 
 | Criterion | Status | Evidence |
 |---|---|---|
@@ -582,21 +601,22 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
 | Conversation chronological; pills clear + accessible; auto-scroll respectful | ✅ | P29.2 + QA A/B |
 | Deterministic-result / advisory / inferred / confirmation visually distinct | ✅ | P29.2/P29.4b + QA C |
 | Deterministic agent handles approved intents; Unknown not guessed; conflicts not auto-resolved; candidates unconfirmed | ✅ | P29.3 + QA B/C (7 live intents) |
-| Every mutation requires human confirmation; stale proposals cannot mutate | ✅ | P29.3/P29.4b confirmProposal (unit/panel; write-path dormant in UI = safest) |
+| Every mutation requires human confirmation; stale proposals cannot mutate; visible stage→confirm→mutate | ✅ | P29.3/P29.4b confirmProposal + **P29.6 visible staging trigger; hosted QA PASS** (one POST on Confirm, 412 on stale, idempotent) |
 | Assistant + manual share one authoritative record state | ✅ | P29.4 `useRecordSession` (one poller/ETag) |
 | Live synchronization intact; manual-first degradation | ✅ | P27.6 preserved; P29.4 manual-first (unit); QA G |
 | Backend + frontend suites pass; tsc + build | ✅ | backend 806, frontend 482 |
 | Truth validation + evidence audit pass | ✅ | unchanged from P28.6; truth path frozen all phase |
 | Snapshot + preflight pass; CI + deploys green; clean + synced | ✅ | preflight green each slice; CI green; Railway/Vercel `cfd87ce`; 0/0 |
-| Hosted QA passes | ✅ | P29.5 A–H PASS + documented NOT-OBSERVED |
+| Hosted QA passes | ✅ | P29.5 A–H PASS + **P29.6 confirmation-flow hosted QA PASS** (stage/confirm/stale/reset/idempotent) |
 
-**Non-blocking caveats carried forward:** (1) **dormant write-path** — the assistant stage→confirm→mutate flow
-is built + unit/panel-verified but has NO staging trigger in the UI (safest state; no assistant-driven mutation
-reachable); revisit if/when a staging surface is introduced (Phase 32 UI audit or a dedicated slice). (2)
-**passive-poll two-window** check (idle live banner + ~8s cadence + offline indicator + continuous cross-tab
-sync) — unit-verified, not automation-observable (CDP hidden tab); close at a human two-visible-window session
-or Phase 32. (3) **degraded assistant** hosted-inducement + **live conflicting/insufficient/unknown** evidence
-states — unit-verified / architecturally sound but not exercised on canonical synthetic data.
+**Non-blocking caveats carried forward** (the dormant-write-path caveat is RESOLVED by P29.6 — stage→confirm→
+mutate is now visible + hosted-QA-verified): (1) **passive-poll two-window** check (idle live banner + ~8s
+cadence + offline indicator + continuous cross-tab sync) — unit-verified, not automation-observable (CDP hidden
+tab); close at a human two-visible-window session or Phase 32. (2) **degraded assistant** hosted-inducement +
+**live conflicting/insufficient/unknown** evidence states — unit-verified / architecturally sound but not
+exercised on canonical synthetic data (no such states in the seed). (3) **no genuinely-Unknown/no-suggestion
+pending field** in the seed → P29.6 QA step F's empty-trigger negative verified via the "nothing invented"
+path, not a direct empty-trigger instance.
 
 ## Phase 28 Completion Gate (closed 2026-07-22 @ Phase-28 HEAD)
 

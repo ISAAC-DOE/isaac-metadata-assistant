@@ -1,11 +1,13 @@
 # Phase 29 — Assistant Experience (plan)
 
-Status: **Phase 29 COMPLETE (2026-07-22).** All slices shipped (P29.0 audit → P29.1 session → P29.2
-conversation UI → P29.3 deterministic agent → P29.4 shared record-session → P29.4b agent→UI wiring →
-P29.5 hosted QA), each independently reviewed (all SHIP; P29.1 caught+fixed a nested-secret leak, P29.4
-two Important fixes), CI-green, deployed (`cfd87ce`), hosted-QA PASS. Non-blocking caveats (dormant
-write-path; passive-poll two-window; degraded not UI-induced) recorded in the master ledger's Phase 29
-Completion Gate. Next: Phase 30 (P30.0 proof-gate).
+Status: **Phase 29 COMPLETE — corrected (2026-07-22).** An initial closure (`09cfaee`) was RETRACTED as
+premature (the agent write-path was left dormant, out of the committed P29.3/P29.5 scope); the gap was
+closed by **P29.6 Agent Actionability Closure** (`d267be7`) and the visible stage→confirm→mutate flow is
+now **hosted-QA-verified PASS**. All slices shipped (P29.0 → P29.1 → P29.2 → P29.3 → P29.4 → P29.4b →
+P29.5 → P29.6), each independently reviewed (all SHIP; P29.1 caught+fixed a nested-secret leak, P29.4 two
+Important fixes, P29.6 a hardening), CI-green, deployed. Remaining non-blocking caveats (passive-poll
+two-window; degraded/live-conflicting-classes not hosted-exercised) in the ledger's Phase 29 gate. Next:
+Phase 30 (P30.0 proof-gate — bias to NO new persistent index).
 Baseline: `main @ 414b633` · CI green · Railway `414b633` synthetic-only · Vercel 200 · backend 806 · frontend 408.
 
 Derived from the P29.0 read-only audit (targeted `rg` + `Read` by the orchestrator — no agent swarm, per the mandate's "prefer rg / don't swarm / ≤5 agents per session"). Obeys the master ledger; does not create a competing master plan.
