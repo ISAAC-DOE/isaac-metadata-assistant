@@ -322,26 +322,27 @@ export const EVIDENCE_CATALOG: GroundedChip[] = [
     source: 'workflow',
     resolve(state): AssistantMessage | null {
       if (state.context !== 'evidence') return null;
-      const { record_path, sidecar_path } = state.bundle.artifacts;
-      // isUsableStr uniformly handles null / undefined / empty-string, so a path
-      // is echoed ONLY when it is a present, non-empty string.
-      const hasRecord = isUsableStr(record_path);
-      const hasSidecar = isUsableStr(sidecar_path);
+      const { record_filename, sidecar_filename } = state.bundle.artifacts;
+      // isUsableStr uniformly handles null / undefined / empty-string, so a
+      // filename is echoed ONLY when it is a present, non-empty string. These
+      // are safe basenames (P30.6) — never an absolute server/mount path.
+      const hasRecord = isUsableStr(record_filename);
+      const hasSidecar = isUsableStr(sidecar_filename);
       if (hasRecord && hasSidecar) {
         return {
-          text: `Exported: record ${record_path} and its evidence sidecar ${sidecar_path}.`,
+          text: `Exported: record ${record_filename} and its evidence sidecar ${sidecar_filename}.`,
           answeredFrom: 'workflow',
         };
       }
       if (hasRecord) {
         return {
-          text: `Exported: record ${record_path}. No evidence sidecar path is recorded.`,
+          text: `Exported: record ${record_filename}. No evidence sidecar filename is recorded.`,
           answeredFrom: 'workflow',
         };
       }
       if (hasSidecar) {
         return {
-          text: `Exported: evidence sidecar ${sidecar_path}. No record path is recorded.`,
+          text: `Exported: evidence sidecar ${sidecar_filename}. No record filename is recorded.`,
           answeredFrom: 'workflow',
         };
       }

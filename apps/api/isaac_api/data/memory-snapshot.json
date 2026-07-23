@@ -10320,7 +10320,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "d4248f8a29e11ab626fa3fef9f74ed402ff549e5173b7b5e51671a4e918e1866"
+        "sha256": "b6da6b947cb8e3bd1b90a1fe8a594396ddf29b74830f1a1d04cf409d061373d5"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10336,7 +10336,7 @@
       },
       {
         "path": "apps/api/tests/test_api.py",
-        "sha256": "6b0edb30c20ce25e0c57e14da9c451b9d1793f263bc65e939d09fbbf1c1e6191"
+        "sha256": "a50a401a2b560aafb3c77294a104e645e3dc9c80765f9fc30d6c4e1813a20ac3"
       },
       {
         "path": "apps/api/tests/test_build_memory_snapshot.py",
@@ -10384,7 +10384,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "e4b029f9217a10dabbe714b48b9ac406c20d6d9e45d48bef4f47e40b2b126370"
+        "sha256": "c1fdb0f349530136a2a6546744989f3dcd8c1c08fdeb85f54f0edc5cd9f997a4"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "8f459a21fcc5ca7909c34c1375e1abca6c8815d2ddafe0b0143d0dfe053f0c57"
+        "sha256": "4ca080da529e03bbceefc7805ee5328d8c29bc554eba7ef30707a2f6094c4b25"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10588,7 +10588,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "d8935b563a8ffa6c89cbe20a5b42f2ad42b4173877a1c6cd53c84b32cd0f03e8"
+        "sha256": "a0ef0576e5b4c601e188727c6f5668f46f1cfd5c1e8ac7c9c7cfbdb16462e6eb"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10616,7 +10616,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "9d4e136b32f0d6e9355b75ce3da3a5727ca87e2b86815dc6f08fbace2e750b56"
+        "sha256": "db44ae210bfdcfe23ed98f8f4100bfaae0e1177ebd4ef8f020f15e1630569b9c"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "75c03d9ff53eae9c3139ddafae60552d62610a9a98ea710ad798648d2d091162"
+    "served_manifest_fingerprint": "27ef3d58f89ba9abe2886810f60e42f48575686ca164cc8277d9bff5210e65c4"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -35,8 +35,10 @@ type Load =
 interface ExportedArtifacts {
   record: Record<string, unknown>;
   sidecar: Record<string, unknown>;
-  recordPath: string;
-  sidecarPath: string;
+  // P30.6 — safe basenames only (e.g. "<id>.json"), never an absolute
+  // server/mount path. Used to label the artifact cards and name downloads.
+  recordFilename: string;
+  sidecarFilename: string;
   validation: ValidationResult;
 }
 
@@ -232,8 +234,8 @@ function LoadedExport({
             artifacts: {
               record: resp.record,
               sidecar: resp.sidecar,
-              recordPath: resp.artifact_refs?.record_path ?? '',
-              sidecarPath: resp.artifact_refs?.sidecar_path ?? '',
+              recordFilename: resp.artifact_refs?.record_filename ?? '',
+              sidecarFilename: resp.artifact_refs?.sidecar_filename ?? '',
               validation: {
                 verdict: resp.official_report?.ok ? 'pass' : 'fail',
                 ok: !!resp.official_report?.ok,
@@ -280,8 +282,8 @@ function LoadedExport({
       ? {
           record: artifacts.record,
           sidecar: artifacts.sidecar,
-          recordPath: artifacts.record_path ?? '',
-          sidecarPath: artifacts.sidecar_path ?? '',
+          recordFilename: artifacts.record_filename ?? '',
+          sidecarFilename: artifacts.sidecar_filename ?? '',
         }
       : null;
   // The artifacts to View/Download: this session's export, else the fetched files.
@@ -289,8 +291,8 @@ function LoadedExport({
     ? {
         record: inSession.record,
         sidecar: inSession.sidecar,
-        recordPath: inSession.recordPath,
-        sidecarPath: inSession.sidecarPath,
+        recordFilename: inSession.recordFilename,
+        sidecarFilename: inSession.sidecarFilename,
       }
     : freshArtifacts;
   const realValidation: ValidationResult | null = inSession
@@ -301,19 +303,24 @@ function LoadedExport({
   const coverage = audit.records.length > 0 ? toAuditResult(audit) : 'pending';
   const advisory = toAdvisoryResult(warnings);
 
-  const recordPath =
-    inSession?.recordPath || detail.artifact_refs.record_path || `records/${detail.record_id}.json`;
-  const sidecarPath =
-    inSession?.sidecarPath ||
-    detail.artifact_refs.sidecar_path ||
-    `records/${detail.record_id}.evidence.json`;
+  // P30.6 — safe basenames only (never a server path). The API returns null
+  // until exported; the fallback below is a locally-constructed filename, not
+  // a server-provided path.
+  const recordFilename =
+    inSession?.recordFilename ||
+    detail.artifact_refs.record_filename ||
+    `${detail.record_id}.json`;
+  const sidecarFilename =
+    inSession?.sidecarFilename ||
+    detail.artifact_refs.sidecar_filename ||
+    `${detail.record_id}.evidence.json`;
   // Never invent a coverage total: while audit data hasn't arrived yet, the
   // sidecar card simply omits the path-count badge (ArtifactCard renders
   // nothing when pathCount is undefined) rather than guessing a number.
   const coverageTotal = coverage === 'pending' ? undefined : coverage.total;
 
-  const download = (content: unknown, path: string) => {
-    const name = path.split('/').pop() || 'artifact.json';
+  const download = (content: unknown, filename: string) => {
+    const name = filename || 'artifact.json';
     const blob = new Blob([JSON.stringify(content, null, 2) + '\n'], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -346,7 +353,7 @@ function LoadedExport({
         <TopBar
           variant="record"
           title={detail.title}
-          filename={exported ? recordPath.split('/').pop() : `draft · ${detail.id}`}
+          filename={exported ? recordFilename : `draft · ${detail.id}`}
           stateChip={exported ? 'exported' : undefined}
           recordId={id}
           surface={LABELS.screenExport}
@@ -418,17 +425,17 @@ function LoadedExport({
 
               <div className="artifact-row">
                 <ArtifactCard
-                  artifact={{ kind: 'record', path: recordPath, verdict: 'pass' }}
+                  artifact={{ kind: 'record', path: recordFilename, verdict: 'pass' }}
                   onView={viewArtifacts ? (e) => openViewer('record', e.currentTarget) : undefined}
                   onDownload={
-                    viewArtifacts ? () => download(viewArtifacts.record, recordPath) : undefined
+                    viewArtifacts ? () => download(viewArtifacts.record, recordFilename) : undefined
                   }
                 />
                 <ArtifactCard
-                  artifact={{ kind: 'sidecar', path: sidecarPath, pathCount: coverageTotal }}
+                  artifact={{ kind: 'sidecar', path: sidecarFilename, pathCount: coverageTotal }}
                   onView={viewArtifacts ? (e) => openViewer('sidecar', e.currentTarget) : undefined}
                   onDownload={
-                    viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarPath) : undefined
+                    viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarFilename) : undefined
                   }
                 />
               </div>

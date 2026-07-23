@@ -132,7 +132,8 @@ def test_detail_shape(client):
     exp_id = _seed_id(client)
     detail = client.get(f"/api/experiments/{exp_id}").json()
     assert detail["draft_ok"] is True
-    assert detail["artifact_refs"] == {"record_path": None, "sidecar_path": None}
+    # P30.6 — safe basenames only, never an absolute server/mount path.
+    assert detail["artifact_refs"] == {"record_filename": None, "sidecar_filename": None}
     assert set(detail["source_files"]) == {"mock_campaign.csv", "raw_scan_listing.txt"}
 
 
@@ -208,19 +209,23 @@ def test_blank_answers_not_applied(client):
 # --- 8. export ----------------------------------------------------------------
 
 
-def test_export_success_writes_record_and_sidecar(client):
+def test_export_success_writes_record_and_sidecar(client, tmp_path):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
     resp = client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
-    record_path = body["artifact_refs"]["record_path"]
-    sidecar_path = body["artifact_refs"]["sidecar_path"]
-    assert record_path != sidecar_path
-    with open(record_path, encoding="utf-8") as fh:
+    # P30.6 — the response carries safe basenames only, never an absolute path;
+    # the file location is derived from the known workspace layout for this test.
+    record_filename = body["artifact_refs"]["record_filename"]
+    sidecar_filename = body["artifact_refs"]["sidecar_filename"]
+    assert record_filename != sidecar_filename
+    assert "/" not in record_filename and "/" not in sidecar_filename
+    records_dir = tmp_path / "ws" / exp_id / "records"
+    with open(records_dir / record_filename, encoding="utf-8") as fh:
         record = json.load(fh)
-    with open(sidecar_path, encoding="utf-8") as fh:
+    with open(records_dir / sidecar_filename, encoding="utf-8") as fh:
         sidecar = json.load(fh)
     assert record["record_id"] == exp_id
     assert sidecar["record_id"] == exp_id
@@ -401,8 +406,8 @@ def test_artifacts_before_export_are_null(client):
     assert body == {
         "record": None,
         "sidecar": None,
-        "record_path": None,
-        "sidecar_path": None,
+        "record_filename": None,
+        "sidecar_filename": None,
     }
 
 
@@ -421,10 +426,11 @@ def test_artifacts_after_export_returns_record_and_sidecar(client):
     # Read from disk matches exactly what export returned/wrote.
     assert body["record"] == export["record"]
     assert body["sidecar"] == export["sidecar"]
-    # The two artifacts live at distinct paths.
-    assert body["record_path"] != body["sidecar_path"]
-    assert body["record_path"].endswith(f"{exp_id}.json")
-    assert body["sidecar_path"].endswith(f"{exp_id}.evidence.json")
+    # The two artifacts have distinct safe basenames (never an absolute path).
+    assert body["record_filename"] != body["sidecar_filename"]
+    assert body["record_filename"] == f"{exp_id}.json"
+    assert body["sidecar_filename"] == f"{exp_id}.evidence.json"
+    assert "/" not in body["record_filename"] and "/" not in body["sidecar_filename"]
 
 
 def test_artifacts_unknown_id_404(client):

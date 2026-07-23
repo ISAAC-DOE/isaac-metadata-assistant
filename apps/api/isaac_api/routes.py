@@ -202,9 +202,12 @@ def _detail(exp: Experiment) -> dict:
     detail.update(
         {
             "draft_ok": exp.draft_ok(),
+            # P30.6 — SAFE basename only, never the absolute server/mount path
+            # (CLAUDE.md path-boundary rules). The client labels + names the
+            # download from the filename; JSON content comes from /artifacts.
             "artifact_refs": {
-                "record_path": str(record_path) if exp.exported() else None,
-                "sidecar_path": str(sidecar_path) if exp.exported() else None,
+                "record_filename": record_path.name if exp.exported() and record_path else None,
+                "sidecar_filename": sidecar_path.name if exp.exported() and sidecar_path else None,
             },
             "source_files": (exp.source or {}).get("files") or [],
             "workflow": derive_workflow(
@@ -755,9 +758,10 @@ def post_export(
         # rev and stamps updated_utc, persisting the state atomically.
         exp.save_versioned()
         payload["record_id"] = exp.record_id
+        # P30.6 — SAFE basename only (see _detail); never the absolute path.
         payload["artifact_refs"] = {
-            "record_path": str(exp.record_path()),
-            "sidecar_path": str(exp.sidecar_path()),
+            "record_filename": exp.record_path().name,
+            "sidecar_filename": exp.sidecar_path().name,
         }
         payload.update(vc.version_fields(exp))
         # export completes the final workflow step and makes the artifact current.
@@ -965,8 +969,8 @@ def get_artifacts(experiment_id: str):
         return {
             "record": None,
             "sidecar": None,
-            "record_path": None,
-            "sidecar_path": None,
+            "record_filename": None,
+            "sidecar_filename": None,
         }
     record_path = exp.record_path()
     sidecar_path = exp.sidecar_path()
@@ -975,8 +979,9 @@ def get_artifacts(experiment_id: str):
     return {
         "record": record,
         "sidecar": sidecar,
-        "record_path": str(record_path),
-        "sidecar_path": str(sidecar_path),
+        # P30.6 — SAFE basename only, never the absolute server/mount path.
+        "record_filename": record_path.name,
+        "sidecar_filename": sidecar_path.name,
     }
 
 

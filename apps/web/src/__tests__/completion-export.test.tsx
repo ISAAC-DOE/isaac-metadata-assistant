@@ -6,6 +6,7 @@ import { MEMORY_UNAVAILABLE_CAVEAT, ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import {
   answersAfterNotebook,
   answersStaleWrite,
+  artifactsExported,
   auditExported,
   auditNotExported,
   bundleRoutes,
@@ -20,6 +21,10 @@ import {
   stubFetchRoutes,
   validateDryRun,
 } from '../test/apiFixtures';
+
+// P30.6 — the API returns a SAFE basename only (never an absolute server/mount
+// path). These markers must never reach the rendered screen.
+const UNSAFE_PATH_MARKERS = ['/data/', '/Users/', '/var/', '/tmp/', 'isaac-workspace', '\\'];
 
 function renderAt(path: string) {
   return render(
@@ -273,13 +278,61 @@ describe('S6 · Ready to Export (live)', () => {
     );
   });
 
+  it('P30.6 — a just-exported record renders SAFE filenames only, never an absolute path; View + Download still work', async () => {
+    stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      'POST /api/experiments/demo/audit': { body: auditExported },
+      'POST /api/experiments/demo/export': { body: exportSuccess },
+    });
+    const { container, findByText, getByText, getAllByText } = renderAt('/record/demo/export');
+
+    fireEvent.click(await findByText('Export Official Record + Sidecar'));
+    await findByText('Valid against official ISAAC schema v1.05.');
+
+    // the safe basenames from the export response are what's rendered as labels
+    // (the record filename also appears in the TopBar chip, so it's not unique)
+    expect(getAllByText(exportSuccess.artifact_refs.record_filename).length).toBeGreaterThan(0);
+    expect(getByText(exportSuccess.artifact_refs.sidecar_filename)).toBeInTheDocument();
+    expect(exportSuccess.artifact_refs.record_filename.endsWith('.json')).toBe(true);
+    expect(exportSuccess.artifact_refs.sidecar_filename.endsWith('.json')).toBe(true);
+
+    // never an absolute/server/mount path anywhere on the rendered screen
+    for (const marker of UNSAFE_PATH_MARKERS) {
+      expect(container.textContent).not.toContain(marker);
+    }
+
+    // View still opens the real fetched JSON content
+    fireEvent.click(getByText('View JSON'));
+    await waitFor(() => expect(container.querySelector('.artifact-modal')).not.toBeNull());
+    expect(container.querySelector('.artifact-modal-body')!.textContent).toContain('record_id');
+    fireEvent.click(getByText('Close'));
+
+    // Download still functions: it names the file from the safe basename, never a path
+    const createObjectURL = vi.fn(() => 'blob:mock-url');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    const recordCard = getByText('Official Record').closest('.artifact') as HTMLElement;
+    fireEvent.click(within(recordCard).getByText('Download'));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+  });
+
   it('a fresh load of an exported record can View + Download via the artifacts endpoint', async () => {
     stubFetchRoutes(exportedReadyRoutes('demo'));
-    const { container, findByText, getByText } = renderAt('/record/demo/export');
+    const { container, findByText, getByText, getAllByText } = renderAt('/record/demo/export');
 
     // the real post-export verdict shows (no re-export needed)
     expect(await findByText('Valid against official ISAAC schema v1.05.')).toBeInTheDocument();
     expect(container.querySelectorAll('.artifact')).toHaveLength(2);
+
+    // P30.6 — the /artifacts-sourced filenames are safe basenames, never an
+    // absolute/server/mount path anywhere on the rendered screen (the record
+    // filename also appears in the TopBar chip, so it's not unique).
+    expect(getAllByText(artifactsExported.record_filename).length).toBeGreaterThan(0);
+    expect(getByText(artifactsExported.sidecar_filename)).toBeInTheDocument();
+    for (const marker of UNSAFE_PATH_MARKERS) {
+      expect(container.textContent).not.toContain(marker);
+    }
 
     // View/Download are live from the fetched content, not disabled with a "session" hint
     const viewJson = getByText('View JSON').closest('button')!;

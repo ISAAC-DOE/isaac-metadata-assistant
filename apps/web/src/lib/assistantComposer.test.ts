@@ -743,8 +743,8 @@ function evidenceState(
 }
 
 const NOTEBOOK_PATH = 'assets:processing_notebook';
-const RECORD_PATH = artifactsExported.record_path;
-const SIDECAR_PATH = artifactsExported.sidecar_path;
+const RECORD_FILENAME = artifactsExported.record_filename;
+const SIDECAR_FILENAME = artifactsExported.sidecar_filename;
 
 describe('EVIDENCE_CATALOG — the three evidence chips (order + source labels)', () => {
   it('is exactly [evidence_multiplicity, sidecar_convention, artifact_paths] in order', () => {
@@ -930,7 +930,7 @@ describe('artifact_paths — safe, never renders undefined/null/empty', () => {
   it('both paths present → names record + sidecar', () => {
     const answer = artifacts(evidenceState({ artifacts: artifactsExported }));
     expect(answer).toEqual({
-      text: `Exported: record ${RECORD_PATH} and its evidence sidecar ${SIDECAR_PATH}.`,
+      text: `Exported: record ${RECORD_FILENAME} and its evidence sidecar ${SIDECAR_FILENAME}.`,
       answeredFrom: 'workflow',
     });
   });
@@ -938,22 +938,22 @@ describe('artifact_paths — safe, never renders undefined/null/empty', () => {
   it('record only → names record, states no sidecar path', () => {
     const answer = artifacts(
       evidenceState({
-        artifacts: { record: null, sidecar: null, record_path: RECORD_PATH, sidecar_path: null },
+        artifacts: { record: null, sidecar: null, record_filename: RECORD_FILENAME, sidecar_filename: null },
       }),
     );
     expect(answer.text).toBe(
-      `Exported: record ${RECORD_PATH}. No evidence sidecar path is recorded.`,
+      `Exported: record ${RECORD_FILENAME}. No evidence sidecar filename is recorded.`,
     );
   });
 
   it('sidecar only → names sidecar, states no record path', () => {
     const answer = artifacts(
       evidenceState({
-        artifacts: { record: null, sidecar: null, record_path: null, sidecar_path: SIDECAR_PATH },
+        artifacts: { record: null, sidecar: null, record_filename: null, sidecar_filename: SIDECAR_FILENAME },
       }),
     );
     expect(answer.text).toBe(
-      `Exported: evidence sidecar ${SIDECAR_PATH}. No record path is recorded.`,
+      `Exported: evidence sidecar ${SIDECAR_FILENAME}. No record filename is recorded.`,
     );
   });
 
@@ -967,10 +967,10 @@ describe('artifact_paths — safe, never renders undefined/null/empty', () => {
 
   it('empty-string / null / undefined path values each produce a safe message', () => {
     const variants = [
-      { record_path: '', sidecar_path: '' },
-      { record_path: null, sidecar_path: null },
-      { record_path: undefined, sidecar_path: undefined },
-      { record_path: '   ', sidecar_path: '   ' },
+      { record_filename: '', sidecar_filename: '' },
+      { record_filename: null, sidecar_filename: null },
+      { record_filename: undefined, sidecar_filename: undefined },
+      { record_filename: '   ', sidecar_filename: '   ' },
     ];
     for (const v of variants) {
       const answer = artifacts(
@@ -995,10 +995,10 @@ describe('compose evidence — no-verdict / no-undefined sweep over every compos
     evidenceState({}, 'no.such.path'),
     evidenceState({ artifacts: artifactsExported }),
     evidenceState({
-      artifacts: { record: null, sidecar: null, record_path: RECORD_PATH, sidecar_path: null },
+      artifacts: { record: null, sidecar: null, record_filename: RECORD_FILENAME, sidecar_filename: null },
     }),
     evidenceState({
-      artifacts: { record: null, sidecar: null, record_path: null, sidecar_path: SIDECAR_PATH },
+      artifacts: { record: null, sidecar: null, record_filename: null, sidecar_filename: SIDECAR_FILENAME },
     }),
     evidenceState({
       evidence: [

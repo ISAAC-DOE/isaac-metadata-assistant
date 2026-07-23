@@ -369,7 +369,9 @@ export interface ApiInvalidation {
 
 export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields {
   draft_ok: boolean;
-  artifact_refs: { record_path: string | null; sidecar_path: string | null };
+  // P30.6 — safe basenames only (e.g. "<id>.json"), never an absolute
+  // server/mount path. Null when not yet exported.
+  artifact_refs: { record_filename: string | null; sidecar_filename: string | null };
   source_files: string[];
   workflow: ApiWorkflow;
   artifact: ApiArtifactState;
@@ -504,8 +506,9 @@ export interface ApiSourcePreview {
 export interface ApiArtifactsResponse {
   record: Record<string, unknown> | null;
   sidecar: Record<string, unknown> | null;
-  record_path: string | null;
-  sidecar_path: string | null;
+  // P30.6 — safe basenames only, never an absolute server/mount path.
+  record_filename: string | null;
+  sidecar_filename: string | null;
 }
 
 export interface ApiDemoStep {
@@ -793,7 +796,8 @@ export interface ApiExportResponse extends VersionFields {
   sidecar?: Record<string, unknown>;
   errors?: { path: string; message: string }[];
   record_id?: string;
-  artifact_refs?: { record_path: string; sidecar_path: string };
+  // P30.6 — safe basenames only, never an absolute server/mount path.
+  artifact_refs?: { record_filename: string; sidecar_filename: string };
   // P28.2 — the post-export workflow + downstream-invalidation summary (present
   // on both the success and the gated-failure paths).
   workflow?: ApiWorkflow;

@@ -175,7 +175,7 @@ export const experimentDetail = {
   ...experimentSummary,
   ...VERSION_FIELDS,
   draft_ok: true,
-  artifact_refs: { record_path: null, sidecar_path: null },
+  artifact_refs: { record_filename: null, sidecar_filename: null },
   source_files: ['mock_campaign.csv', 'raw_scan_listing.txt'],
   // needs_attention: load_record completed, complete_metadata current, rest blocked.
   workflow: fixtureWorkflow({
@@ -661,8 +661,8 @@ export const memoryConceptDetailWithheldAnchor = {
 export const artifactsNull = {
   record: null,
   sidecar: null,
-  record_path: null,
-  sidecar_path: null,
+  record_filename: null,
+  sidecar_filename: null,
 };
 
 export const demoRunDraftOnly = {
@@ -946,9 +946,10 @@ export const exportSuccess = {
   record: { record_id: EXP_ID, schema_version: '1.05', assets: [{ sha256: SYNTH_SHA }] },
   sidecar: { record_id: EXP_ID, schema_version: '1.05', evidence: {} },
   record_id: EXP_ID,
+  // P30.6 — safe basenames only, never an absolute server/mount path.
   artifact_refs: {
-    record_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.json`,
-    sidecar_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.evidence.json`,
+    record_filename: `${EXP_ID}.json`,
+    sidecar_filename: `${EXP_ID}.evidence.json`,
   },
   // P27.5 — the post-export version triplet the client adopts.
   rev: 4,
@@ -1120,8 +1121,9 @@ export const artifactsExported = {
     generated_utc: '2099-03-05T21:05:48Z',
     evidence: { 'system.technique': [{ source_type: 'spreadsheet' }] },
   },
-  record_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.json`,
-  sidecar_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.evidence.json`,
+  // P30.6 — safe basenames only, never an absolute server/mount path.
+  record_filename: `${EXP_ID}.json`,
+  sidecar_filename: `${EXP_ID}.evidence.json`,
 };
 
 export const sourcePreviewListing = {
@@ -1160,8 +1162,8 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
         exported: true,
         record_id: id,
         artifact_refs: {
-          record_path: artifactsExported.record_path,
-          sidecar_path: artifactsExported.sidecar_path,
+          record_filename: artifactsExported.record_filename,
+          sidecar_filename: artifactsExported.sidecar_filename,
         },
         workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
         artifact: { state: 'current', reason: null },
@@ -1397,8 +1399,8 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
         exported: true,
         record_id: id,
         artifact_refs: {
-          record_path: artifactsExported.record_path,
-          sidecar_path: artifactsExported.sidecar_path,
+          record_filename: artifactsExported.record_filename,
+          sidecar_filename: artifactsExported.sidecar_filename,
         },
         workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
         artifact: { state: 'current', reason: null },
