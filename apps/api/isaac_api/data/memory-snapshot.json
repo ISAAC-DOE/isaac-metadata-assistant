@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "63657729a95a9b9fc5fff22d453ce2065f46e313ee8e699d19aba91a13987a43"
+        "sha256": "94adac80118cf20a65abe67aeb239508551759b5322d91a38d15e155f5961ebb"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10556,7 +10556,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "275bff8288433ba583a579324a7a1192a9a79830846fe03f434f44fb014f44a2"
+        "sha256": "8afb47345803d00bec108855a75a4954af3e6d9ffce67c222edaf617493ad970"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10596,7 +10596,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "84c7d7ec7fdef2c392d4af99055e296a59c1f439b6467607a4da7b0837ec9bbe"
+        "sha256": "292e50c17bd9de46b1c5c3558a258029c1ada7a6210f657e221783eca18d3bb4"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "0c5330d0a1073b305873856a42f9a7938f2de15ce1794f443705b240211fa2b2"
+    "served_manifest_fingerprint": "eb8bac68bb374cf9aecf10755021ec5f4d56777df9b92208f3f5db6cdcac0cb7"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -246,6 +246,20 @@ function LoadedCompletion({
   // propose→stage→confirm. `selectedPendingId = currentItem?.id` keeps the
   // "what does this question want?" answer aligned with the active question.
   // Mounted on BOTH loaded branches via `shell`, never on loading / backend-down.
+  // P29.6 — the assistant's narrow staging option for the current pending field:
+  // its identity + the SAME labeled synthetic demo value the manual GuidedPrompt
+  // offers. No demo value (e.g. a pasted-hash blocker) ⇒ no `suggestedValue`, so
+  // the assistant surfaces no staging trigger and never invents one.
+  const currentBlocker = currentItem ? pendingItemToBlocker(currentItem) : null;
+  const stageField = currentBlocker
+    ? {
+        id: currentBlocker.id,
+        label: currentBlocker.about ?? currentBlocker.question ?? currentBlocker.id,
+        suggestedValue: currentBlocker.demo_answer?.value,
+        suggestedValueLabel: currentBlocker.demo_answer?.label,
+      }
+    : undefined;
+
   const rightPanel = (
     <aside className="record-right narrow" aria-label="Assistant">
       <AssistantPanel
@@ -259,6 +273,17 @@ function LoadedCompletion({
         recordRev={detail.rev}
         agentContext={session.context}
         degraded={session.degraded}
+        // P29.6 — the current pending question is the ONE field the assistant may
+        // offer to STAGE an answer for. It reuses the SAME labeled synthetic demo
+        // value the manual GuidedPrompt exposes via "Use This Suggestion" (the
+        // assistant never invents a value — no `suggestedValue` ⇒ no trigger); the
+        // user selects it, it is guarded through `proposeForField(source:'user')`
+        // into an UNCONFIRMED card, and Confirm writes through the SAME
+        // confirmProposal path the manual form's If-Match uses. `reload` re-syncs
+        // BOTH surfaces after a write (unmount→remount re-fetches detail+pending);
+        // the manual GuidedPrompt below still works independently (manual parity).
+        stageField={stageField}
+        onRefresh={reload}
         // P25.7: this screen loads only {detail, pending} — it never consults the
         // memory/graph plane, so it makes NO memory-availability claim. We pass
         // no `availability`, and the panel then renders neither the `memory:`

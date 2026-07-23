@@ -29,6 +29,7 @@ import {
   DEGRADED_MESSAGE,
   INTENTS,
   confirmProposal,
+  proposeForField,
   runIntent,
   type AgentContext,
   type AgentOpts,
@@ -110,6 +111,34 @@ interface AssistantPanelProps {
    * NEVER calls these directly — the ONLY write path is `confirmProposal`.
    */
   confirmApi?: ConfirmApi;
+  /**
+   * P29.6 — the CURRENT pending field the assistant may offer to STAGE an answer
+   * for (the guided-completion S4 surface passes its active question here). When
+   * present with a `suggestedValue` (and the live context is healthy, and no
+   * proposal is already staged) a narrow "Stage Answer" affordance renders: the
+   * user SELECTS the labeled synthetic suggestion (reusing GuidedPrompt's "Use
+   * This Suggestion" value entry — NOT a freeform chat composer, so the assistant
+   * stays guided-prompts + one narrow staging button, never a fake chatbot), and
+   * it is routed through the GUARDED `proposeForField(..., source:'user')` to
+   * create the SAME unconfirmed ProposalCard as every other staged value. The
+   * assistant never INVENTS a value to stage: with no `suggestedValue` there is no
+   * trigger (never a blanket write). It stages exactly ONE named field and confirms
+   * through the existing `confirmProposal` path — it never infers another field.
+   */
+  stageField?: StageFieldOption;
+}
+
+/**
+ * P29.6 — the current pending field + the labeled synthetic value the assistant
+ * may offer to stage for it. `suggestedValue` is the SAME demo answer the manual
+ * GuidedPrompt exposes via "Use This Suggestion" — the assistant never fabricates
+ * one; absent ⇒ no staging trigger.
+ */
+export interface StageFieldOption {
+  id: string;
+  label: string;
+  suggestedValue?: unknown;
+  suggestedValueLabel?: string;
 }
 
 /**
@@ -211,6 +240,7 @@ export function AssistantPanel({
   proposal: proposalProp,
   onRefresh,
   confirmApi = api,
+  stageField,
 }: AssistantPanelProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [messages, setMessages] = useState<Msg[]>(() => loadSession(experimentId).messages);
@@ -397,6 +427,30 @@ export function AssistantPanel({
   }
 
   const agentActive = !!agentContext && !degraded && !agentContext.degraded;
+
+  // The narrow staging affordance shows only for the CURRENT pending field, only
+  // when the live context is healthy, only when a synthetic suggested value exists
+  // to stage (the assistant never invents one), and only when no proposal is
+  // already staged (one staged value at a time). Omitting `stageField` — or a field
+  // with no `suggestedValue` — disables it entirely (never a blanket write).
+  const canStage =
+    agentActive && !!stageField && stageField.suggestedValue !== undefined && !proposal;
+
+  // P29.6 — STAGE the current field's synthetic suggested value as a focused USER
+  // answer. It is routed through the GUARDED `proposeForField` (source:'user'),
+  // which labels it user-provided, never auto-classifies it as evidence-supported,
+  // binds it to the current revision, and returns a PENDING proposal — never a
+  // write. Displaying the resulting card mutates nothing; only an explicit Confirm
+  // writes, through the SAME `confirmProposal` path.
+  function onStageUserAnswer() {
+    if (!agentContext || !canStage || !stageField) return;
+    const staged = proposeForField(agentContext, {
+      field: stageField.id,
+      value: stageField.suggestedValue,
+      source: 'user',
+    });
+    if (staged) setProposal(staged);
+  }
   const shownAgentPrompts = agentContext
     ? (agentPrompts ?? []).filter((p) => INTENTS.includes(p.intent))
     : [];
@@ -515,6 +569,16 @@ export function AssistantPanel({
           <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
           Jump to Latest
         </button>
+      )}
+
+      {/* P29.6 — the narrow STAGING trigger. For the CURRENT pending field only,
+          the user SELECTS the labeled synthetic suggestion; it is routed through
+          the guarded `proposeForField` (source:'user') to create the same
+          UNCONFIRMED ProposalCard below. Nothing here mutates — staging just fills
+          the card. Hidden once a proposal is staged (one at a time), when degraded,
+          or when the screen passes no current pending field / no suggested value. */}
+      {canStage && stageField && (
+        <StageAnswer field={stageField} onStage={onStageUserAnswer} />
       )}
 
       {/* P29.4b — the UNCONFIRMED staged proposal. It states plainly that it has
@@ -640,6 +704,49 @@ function ConversationMessage({ message, currentRev }: { message: Msg; currentRev
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * P29.6 — the narrow "Stage Answer" affordance for the CURRENT pending field. It
+ * reuses GuidedPrompt's "Use This Suggestion" value entry: the user SELECTS the
+ * labeled synthetic suggestion (one field, one value) — it is NOT a freeform chat
+ * composer (no textbox / textarea / send) and NOT a record writer. Clicking hands
+ * the suggested value to the guarded `proposeForField` (source:'user'); nothing
+ * mutates until the user confirms the resulting card. The suggestion is scrubbed
+ * through the leak-safe display path so a secret-shaped value never renders here.
+ * A single real, keyboard-focusable button.
+ */
+function StageAnswer({
+  field,
+  onStage,
+}: {
+  field: StageFieldOption;
+  onStage: () => void;
+}) {
+  const preview = displayValue(field.suggestedValue);
+  return (
+    <div className="agent-stage" role="group" aria-label="Stage an answer for the current field">
+      <div className="agent-stage-head">
+        <CornerDownRight size={14} strokeWidth={2} aria-hidden="true" />
+        {LABELS.actionStageAnswer} · <span className="mono">{field.label}</span>
+      </div>
+      <p className="agent-stage-note">
+        {field.suggestedValueLabel ?? 'Suggested value'} — not a value until you confirm. Staging
+        records it as your answer (user-provided) and shows it UNCONFIRMED below; the assistant never
+        fills it in or classifies it as evidence, and nothing is written until you confirm.
+      </p>
+      {preview && <p className="agent-stage-value mono">{preview}</p>}
+      <div className="agent-stage-row">
+        <button
+          type="button"
+          className="btn btn-secondary agent-stage-submit"
+          onClick={onStage}
+        >
+          {LABELS.actionStageAnswer}
+        </button>
+      </div>
     </div>
   );
 }

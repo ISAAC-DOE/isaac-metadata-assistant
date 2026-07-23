@@ -335,6 +335,85 @@ export function stageAnswer(
   };
 }
 
+/**
+ * P29.6 — the source a staging request comes FROM. This is the whole point of the
+ * guard: only a focused USER answer or an evidence-grounded CANDIDATE may ever
+ * create a proposal. Project Memory / graph is a MEMORY plane and can NEVER
+ * propose a scientific value (§7 of the project instructions).
+ */
+export type ProposeSource = 'user' | 'candidate' | 'memory' | 'graph';
+
+/** One staging request: a NAMED field, the source it comes from, and (for a
+ *  user answer or an explicitly-selected conflict option) the value verbatim. */
+export interface ProposeInput {
+  field: string;
+  value?: unknown;
+  source: ProposeSource;
+}
+
+/**
+ * P29.6 — the GUARDED staging entry. A PURE guard that decides WHETHER a source
+ * may stage a proposal for a field, and with what honest origin/classification.
+ * It never mutates `ctx`, never calls the api, and never fabricates a value.
+ *
+ * The rules (truth-critical):
+ *   - `memory` / `graph` → ALWAYS null. Project Memory is not record evidence and
+ *     can never propose a scientific value.
+ *   - no field named → null (a focused answer is bound to ONE named field; never a
+ *     blanket write).
+ *   - `user`: a focused answer to a named field stages a PENDING proposal labeled
+ *     `user-provided`. The raw user value is NEVER auto-classified as
+ *     evidence-supported — any matching classification is copied for context, but
+ *     a `supported` classification is stripped (a user typing a value does not make
+ *     it evidence-backed). It is the only path that may answer a field the evidence
+ *     calls Unknown or Conflicting — the user is providing the value, not the agent.
+ *   - `candidate`: pulls the field's classification from `ctx.evidence`.
+ *       · `unknown`             → null (never fabricate a value).
+ *       · `conflicting_evidence`→ null (never auto-pick a winner) UNLESS an explicit
+ *                                 `value` is supplied, in which case it stages for
+ *                                 REVIEW (still pending, never auto-confirmed).
+ *       · `inferred_candidate`  → a proposal carrying `inferred_candidate` verbatim
+ *                                 (explicitly inferred/unconfirmed, never as fact).
+ *       · `supported`           → a proposal.
+ *       · anything else / no evidence → null (nothing defensible to stage).
+ */
+export function proposeForField(
+  ctx: AgentContext,
+  { field, value, source }: ProposeInput,
+): Proposal | null {
+  // A focused answer is always bound to ONE named field.
+  if (!field) return null;
+  // Project Memory / graph can never propose a scientific value.
+  if (source !== 'user' && source !== 'candidate') return null;
+
+  if (source === 'user') {
+    // A user answer is labeled user-provided and carries NO evidence
+    // classification at all — a user-typed value is never described by the
+    // field's evidence classification, so strip any copied classification
+    // unconditionally (defensive hardening from the P29.6 independent review).
+    const p = stageAnswer(ctx, { field, value, origin: 'user-provided' });
+    delete p.classification;
+    return p;
+  }
+
+  // source === 'candidate' — must be grounded in the field's real classification.
+  const evidence = ctx.evidence.find((e) => e.field === field);
+  if (!evidence) return null;
+  switch (evidence.classification) {
+    case 'unknown':
+      return null; // never fabricate a value for an Unknown
+    case 'conflicting_evidence':
+      // Never auto-pick a winner; only an explicitly selected option may stage.
+      if (value === undefined) return null;
+      return stageAnswer(ctx, { field, value, origin: 'candidate (evidence-grounded)' });
+    case 'inferred_candidate':
+    case 'supported':
+      return stageAnswer(ctx, { field, value, origin: 'candidate (evidence-grounded)' });
+    default:
+      return null; // insufficient/other → nothing defensible to stage
+  }
+}
+
 function statusOf(err: unknown): number | undefined {
   if (typeof err === 'object' && err !== null && 'status' in err) {
     return (err as { status?: number }).status;

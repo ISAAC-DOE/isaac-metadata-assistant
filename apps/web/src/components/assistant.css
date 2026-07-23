@@ -349,6 +349,48 @@
 .agent-proposal-conflicting { border-color: var(--advisory-icon); }
 .agent-proposal-unknown { border-style: dashed; }
 .agent-proposal.is-stale { opacity: 0.92; }
+
+/* P29.6 — the narrow "Stage Answer" affordance for the current pending field. One
+   focused value entry (NOT a freeform composer); staging just fills the
+   unconfirmed proposal card below, and nothing is written until Confirm. */
+.agent-stage {
+  margin: 14px 0 4px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+}
+.agent-stage-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.agent-stage-head .mono { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; }
+.agent-stage-note {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+.agent-stage-value {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--surface-sunken, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  overflow-wrap: anywhere;
+}
+.agent-stage-row { display: flex; gap: 8px; }
+.agent-stage-submit { white-space: nowrap; }
+
 /* P25.2: honest guided-only line, replacing the removed disabled free-text input. */
 .assistant-guided-note {
   margin-top: 14px;

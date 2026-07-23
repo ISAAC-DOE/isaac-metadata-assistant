@@ -199,6 +199,7 @@ export const LABELS = {
   assistant: 'Assistant',
   assistantSuggestion: 'Assistant Suggestion',
   suggestedQuestions: 'Suggested Questions',
+  actionStageAnswer: 'Stage Answer',
 
   // Export artifacts
   officialRecord: 'Official Record',
