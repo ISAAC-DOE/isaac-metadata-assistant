@@ -288,8 +288,10 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
 
     const before = (globalThis.fetch as Mock).mock.calls.length;
     fireEvent.click(panel.getByText('What sources are included?').closest('button')!);
-    // the scope chip echoes file_count (190), grounded, deterministic
-    expect(panel.getByText(/This snapshot indexes 190 project files/)).toBeInTheDocument();
+    // the scope chip echoes file_count (190), grounded, deterministic.
+    // findByText (retry-until-present) — the answer swaps in on a later tick, so a
+    // synchronous getByText is a CI race (B1 in the Phase 32 issue register).
+    expect(await panel.findByText(/This snapshot indexes 190 project files/)).toBeInTheDocument();
     const after = (globalThis.fetch as Mock).mock.calls.length;
     expect(after).toBe(before); // clicking a guided chip is pure — never fetches
   });
