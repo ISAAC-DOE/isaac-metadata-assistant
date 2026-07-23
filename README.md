@@ -24,13 +24,19 @@ Working prototype (`v0.1.0`), **synthetic data only**.
   per-field evidence sidecar.
 - No-guessing enforcement at authoring time — no finalized field without evidence or user confirmation.
 - One-command reproducible synthetic XANES demo (regenerates the committed sample byte-for-byte).
-- `isaac` CLI (`validate` / `export` / `audit` / `new-id`) and five Claude authoring skills.
+- `isaac` CLI (`validate` / `export` / `audit` / `new-id`) and eight `isaac-*` Claude skills
+  (five authoring/query — draft/complete/validate/query/export — plus checkpoint/profile/resume).
 - Non-gating portal-style advisory soft-warnings (local seam) and a Graphify memory/query reviewer demo.
 - A read-only **Project Memory** browsing surface (Phase 24) over the `/api/memory/*` endpoints —
   status card, source index, concept lookup. Metadata/provenance only, no file contents served, no
   search box. It is a **memory plane**, never a truth plane: it never validates a record or
   authorizes export. See [`docs/project-memory-map.md`](docs/project-memory-map.md).
-- 411 passing Python tests (plus 138 frontend tests), including a test that the truth plane never imports Graphify.
+- Post-Phase-24 work (Phases 25–31): a grounded assistant (read/explain/staged-proposal, human
+  confirms every mutation), record search + runtime triage, optimistic-concurrency editing
+  (ETag/If-Match), export artifacts, and **reconciliation-only** CSV ingestion — upload a synthetic
+  campaign sheet and preview each value reconciled against the record as evidence; it **never**
+  mutates the official record.
+- **887** passing Python tests plus **545** frontend tests, including a test that the truth plane never imports Graphify.
 
 **Not built yet**
 
@@ -84,7 +90,7 @@ survives after export.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,api]'
-.venv/bin/pytest                                   # 411 tests: golden records validate, transform is gated
+.venv/bin/pytest                                   # full Python suite — golden records validate, transform is gated
 ```
 
 **Run the synthetic end-to-end demo** (structured sheet → evidenced draft → human-answered blockers →

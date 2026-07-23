@@ -10292,7 +10292,7 @@
       },
       {
         "path": "README.md",
-        "sha256": "df8632c9332733ea3afdc3a08e599bf7ba5447444969ff7918c9fbe3af050206"
+        "sha256": "fd602a1dd8febc217167f272ac70ddb666b733e661452576963fb0b9f8e266c1"
       },
       {
         "path": "SECURITY.md",
@@ -10648,7 +10648,7 @@
       },
       {
         "path": "docs/architecture.md",
-        "sha256": "504687d290cc551a03789a026a4d761c1687a0dfd6fcd56bfc15dec117dff7de"
+        "sha256": "1f77c699468a44fd856b74c54b477bb20504cf315fc151f5167f7d98ab2688e7"
       },
       {
         "path": "docs/claude-workflow.md",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "5bbb85237273c1f317a5975f383738600769eb773beaf229a5e13353b9a20cbb"
+    "served_manifest_fingerprint": "bf3610bde1d5f502b03653e5260345a33f0295aa8d14b91bece9fa69e419de33"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

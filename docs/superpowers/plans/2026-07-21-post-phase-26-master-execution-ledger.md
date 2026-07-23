@@ -631,6 +631,32 @@ tests/validation/audit/demo/snapshot/preflight/CI/deploy pass · git clean+synce
   Implementation order: S1 CI-stability → S2 a11y → S3 docs → S4 FE cleanup → S5 BE cleanup/tests → S6
   governance/memory/E2E/closure.
 
+- **P32 S1** (`a93ea0a`, 2026-07-23): CI-stability fix for TC-1. Hardened the 5 flaky
+  `completion-export.test.tsx` assertions carrying the confirmed B1 flake shape (`fireEvent.click` an
+  AssistantPanel guided chip → synchronous `getByText` on the async-swapped answer) to `await
+  findByText`, mirroring the earlier B1 fix in `memory-status.test.tsx` (`e45db20`). Test-only; no
+  production behavior change. De-risks the CI-green gate for every downstream Phase 32 closure commit.
+
+- **P32 S2** (`bf85578`, 2026-07-23): FE-2 (A3) accessibility fix. Added `tabIndex={-1}` to the
+  always-mounted hidden CSV file `<input>` in `CsvReconcilePanel.tsx`, removing the phantom tab stop
+  (the labeled trigger `<button>` remains the single logical focus stop) + 3 new a11y tests. Independent
+  Opus review = **SHIP**. Frontend suite **542 → 545** passing.
+
+- **P32 S3** (this docs pass, 2026-07-23): documentation-truth reconciliation. Fixed TC-4 (README's
+  hardcoded stale test counts "411 Python / 138 frontend" → **887 Python / 545 frontend**, consolidated
+  to one authoritative line; the quickstart comment no longer repeats a hardcoded number), TC-6 (README
+  "five Claude authoring skills" → "eight `isaac-*` Claude skills", matching the 8 skills present in
+  `.claude/skills/`), TC-5 (added a "Works today" bullet summarizing the delivered post-Phase-24 work:
+  Phases 25–31 — grounded assistant, record search/runtime triage, ETag/If-Match editing, export
+  artifacts, and reconciliation-only CSV ingestion, explicitly noted as never mutating the official
+  record), and TC-7 (added a scope note to the top of `docs/architecture.md` stating it covers the
+  deterministic CLI/truth pipeline only, pointing to `README.md` and `docs/project-memory-map.md` for
+  the web/api/memory/ingestion surfaces; architecture content itself unchanged). Also reconciled the
+  Phase 32 issue register (`2026-07-23-phase-32-issue-register.md`): marked TC-1, FE-2/A3, TC-4, TC-5,
+  TC-6, TC-7 FIXED with commit citations; confirmed TR-1's 7-key write-surface shorthand correction
+  already stands as written in the register (no change needed there). No source code, no snapshot, and
+  no truth-path files touched — documentation only.
+
 ## Phase 31 Completion Gate (CLOSED 2026-07-23)
 
 | Criterion | Status | Evidence |
