@@ -1,5 +1,6 @@
 import './assistant.css';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   MessageSquare,
   ChevronRight,
@@ -47,6 +48,7 @@ import {
 import { api } from '../lib/api';
 import type {
   AssistantMessage,
+  AssistantQuerySource,
   AssistantSource,
   MemoryAvailability,
   SuggestedPrompt,
@@ -229,6 +231,16 @@ const KIND_META: Record<MessageKind, { label: string; Icon: LucideIcon; classNam
   },
   degraded: { label: 'Memory Unavailable', Icon: CircleDashed, className: 'kind-badge-degraded' },
 };
+
+// P34.3 — a source's `navigate_to` is followed ONLY when it is a known in-app
+// client route (the record workbench or the memory plane). Anything else — an
+// absolute server path, an external URL, a bare token — is rendered as a plain,
+// non-navigating label chip. This is the render-time complement to the session
+// sanitizer, which strips any '/'-prefixed string on persistence: nav targets
+// are never persisted, only followed live for an explicitly-allowlisted route.
+function isClientRoute(nav: string | null | undefined): nav is string {
+  return typeof nav === 'string' && (nav.startsWith('/record') || nav.startsWith('/memory'));
+}
 
 let msgSeq = 0;
 function uid(): string {
@@ -619,6 +631,23 @@ export function AssistantPanel({
       ? MEMORY_UNAVAILABLE_CAVEAT
       : undefined;
 
+  // P34.3 — the live answer is STALE when it was grounded in an older record
+  // revision than the current one (mirrors ConversationMessage's rule exactly). A
+  // record change NEVER auto-refetches — the answer is simply marked stale and an
+  // explicit "Ask again" re-queries at the current rev. Present only for a real
+  // resolved answer that carries a numeric rev (the unavailable turn carries none).
+  const liveStale =
+    !!liveAnswer &&
+    typeof liveAnswer.recordRev === 'number' &&
+    typeof recordRev === 'number' &&
+    liveAnswer.recordRev !== recordRev;
+
+  // The cited sources + suggested follow-ups stashed on the live turn (P34.2).
+  // Both are presentation-only and route through the SAME read-only paths.
+  const liveSources = (liveAnswer?.sources as AssistantQuerySource[] | undefined) ?? [];
+  const liveFollowups = (liveAnswer?.followups as string[] | undefined) ?? [];
+  const staleDescId = liveStale ? 'assistant-live-stale' : undefined;
+
   // Clicking a pill "asks" that PRECOMPOSED question: the previous live turn is
   // archived into the log, the pill's static answer becomes the new live turn, and
   // focus moves to it. No fetch, no mutation — presentation + P29.1 session wiring
@@ -788,6 +817,7 @@ export function AssistantPanel({
             tabIndex={-1}
             aria-live="polite"
             aria-busy={loading || undefined}
+            aria-describedby={staleDescId}
           >
             {liveText}
           </p>
@@ -796,6 +826,58 @@ export function AssistantPanel({
               <span className="answered-from">
                 answered from: {SOURCE_LABELS[liveAnswer.answeredFrom as AssistantSource]}
               </span>
+            </div>
+          )}
+          {/* P34.3 — the cited-source chips: the citation detail beneath the plane
+              label. For a Project-Memory answer these are the leads to verify. */}
+          {!loading && liveAnswer && liveSources.length > 0 && (
+            <ProvenanceChips sources={liveSources} />
+          )}
+          {/* P34.3 — the COMPACT live-answer staleness indicator (same visual as an
+              archived message's stale badge) + an explicit "Ask again". A record
+              change never auto-refetches; only this re-queries, at the current rev.
+              The indicator is associated with the answer via aria-describedby above
+              — no second live region is created. */}
+          {!loading && liveStale && (
+            <div className="assistant-live-stale-row">
+              <span id={staleDescId} className="assistant-msg-stale">
+                <CircleDashed size={12} strokeWidth={2} aria-hidden="true" />
+                Based on an earlier version
+              </span>
+              {liveQuestion && (
+                <button
+                  type="button"
+                  className="assistant-ask-again"
+                  aria-label="Ask again with the current record"
+                  disabled={loading}
+                  onClick={() => {
+                    if (liveQuestion) void submitQuestion(liveQuestion);
+                  }}
+                >
+                  <CornerDownRight size={13} strokeWidth={2} aria-hidden="true" />
+                  Ask again
+                </button>
+              )}
+            </div>
+          )}
+          {/* P34.3 — suggested next questions. Shown only for a CURRENT (not stale,
+              not loading) answer; each re-queries through the SAME read-only
+              submitQuestion path — never a mutation. Capped at two, visually
+              distinct from the provenance chips and the Suggested Questions. */}
+          {!loading && liveAnswer && !liveStale && liveFollowups.length > 0 && (
+            <div className="assistant-followups" aria-label="Suggested next questions">
+              {liveFollowups.slice(0, 2).map((f) => (
+                <button
+                  type="button"
+                  className="assistant-followup"
+                  key={f}
+                  disabled={loading}
+                  onClick={() => void submitQuestion(f)}
+                >
+                  <span>{f}</span>
+                  <ChevronRight className="chev" size={13} strokeWidth={2} aria-hidden="true" />
+                </button>
+              ))}
             </div>
           )}
           {caveat && <p className="assistant-caveat">{caveat}</p>}
@@ -903,6 +985,53 @@ function ConversationMessage({ message, currentRev }: { message: Msg; currentRev
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * P34.3 — one cited-source chip that NAVIGATES to an in-app client route via the
+ * app's react-router navigation (the SAME mechanism SearchDialog / cross-record
+ * triage use). Rendered only for a source whose `navigate_to` passed
+ * `isClientRoute`, so the route followed here is always an allowlisted workspace
+ * (`/record…`) or memory (`/memory…`) route — never an arbitrary/external target.
+ * Its accessible name is the source label; navigation is read-only (a view
+ * change), it mutates nothing.
+ */
+function NavSourceChip({ label, to }: { label: string; to: string }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      className="assistant-source-chip assistant-source-chip-nav"
+      onClick={() => navigate(to)}
+    >
+      <span>{label}</span>
+      <ChevronRight className="chev" size={13} strokeWidth={2} aria-hidden="true" />
+    </button>
+  );
+}
+
+/**
+ * P34.3 — the live answer's citation detail: the cited sources rendered as a
+ * compact, accessible list beneath the `answered from:` plane label. A source
+ * with a safe client route is an interactive nav chip (verify the lead in-app);
+ * a source without one — or with a non-client target — is a plain label chip.
+ * For a Project-Memory answer these ARE the leads the user can go verify; the
+ * answer text already carries the "leads to verify" advisory framing.
+ */
+function ProvenanceChips({ sources }: { sources: AssistantQuerySource[] }) {
+  return (
+    <ul className="assistant-provenance" aria-label="Cited sources">
+      {sources.map((s, i) => (
+        <li key={`${s.label}-${i}`} className="assistant-provenance-item">
+          {isClientRoute(s.navigate_to) ? (
+            <NavSourceChip label={s.label} to={s.navigate_to} />
+          ) : (
+            <span className="assistant-source-chip">{s.label}</span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

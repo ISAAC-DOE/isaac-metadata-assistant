@@ -257,6 +257,115 @@
   color: var(--text-tertiary);
   line-height: 1.5;
 }
+
+/* P34.3 — cited-source provenance chips: the citation detail beneath the
+ * `answered from:` plane label. Restrained and secondary; a nav chip and a
+ * plain-label chip share the base treatment (the chevron + hover is the only
+ * added affordance on a navigable one — never color alone). For a Project-Memory
+ * answer these are the leads the reader can open and verify. */
+.assistant-provenance {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.assistant-provenance-item {
+  display: inline-flex;
+}
+.assistant-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: var(--radius-token);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+button.assistant-source-chip-nav {
+  cursor: pointer;
+  color: var(--assist-text);
+  border-color: var(--assist-border);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+button.assistant-source-chip-nav .chev {
+  color: var(--text-quaternary);
+  flex: 0 0 auto;
+}
+button.assistant-source-chip-nav:hover {
+  background: var(--assist-tint);
+  border-color: var(--assist-border);
+}
+button.assistant-source-chip-nav:focus-visible {
+  outline: 2px solid var(--assist);
+  outline-offset: 2px;
+}
+
+/* P34.3 — the compact live-answer staleness row: the same stale badge visual an
+ * archived message wears (.assistant-msg-stale — CircleDashed + text), alongside
+ * an explicit "Ask again". No large standalone card; a record change never
+ * auto-refetches. */
+.assistant-live-stale-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.assistant-ask-again {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--assist-border);
+  background: var(--assist-panel-bg);
+  color: var(--assist-text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.assistant-ask-again:hover:not(:disabled) { background: var(--assist-tint); }
+.assistant-ask-again:disabled { opacity: 0.55; cursor: default; }
+.assistant-ask-again:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
+/* P34.3 — suggested next-question chips for a CURRENT answer. Visually distinct
+ * from the provenance chips (bordered, chevron-led, question text) and routed
+ * through the same read-only submit path. */
+.assistant-followups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.assistant-followup {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  border: 1px dashed var(--assist-border);
+  background: transparent;
+  color: var(--assist-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.assistant-followup .chev { color: var(--text-quaternary); flex: 0 0 auto; }
+.assistant-followup:hover:not(:disabled) { background: var(--assist-tint); border-style: solid; }
+.assistant-followup:disabled { opacity: 0.55; cursor: default; }
+.assistant-followup:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
 /* P29.4 — honest, manual-first degraded state. Subordinate tint (never a verdict
    color); it only tells the reader the assistant cannot verify the record right
    now, and never disables the surrounding manual workflow. */
