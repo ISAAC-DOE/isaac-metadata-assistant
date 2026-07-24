@@ -5,11 +5,14 @@ import { AppRoutes } from '../App';
 import { MEMORY_UNAVAILABLE_CAVEAT, ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import {
   answersAfterNotebook,
+  answersStaleWrite,
+  artifactsExported,
   auditExported,
   auditNotExported,
   bundleRoutes,
   exportConflict,
   exportReadyRoutes,
+  exportStaleWrite,
   exportSuccess,
   exportedReadyRoutes,
   pendingResponse,
@@ -18,6 +21,10 @@ import {
   stubFetchRoutes,
   validateDryRun,
 } from '../test/apiFixtures';
+
+// P30.6 — the API returns a SAFE basename only (never an absolute server/mount
+// path). These markers must never reach the rendered screen.
+const UNSAFE_PATH_MARKERS = ['/data/', '/Users/', '/var/', '/tmp/', 'isaac-workspace', '\\'];
 
 function renderAt(path: string) {
   return render(
@@ -43,6 +50,14 @@ function answerPosts(): { url: string; body: unknown }[] {
   return calls
     .filter(([url, init]) => init?.method === 'POST' && String(url).includes('/answers'))
     .map(([url, init]) => ({ url: String(url), body: JSON.parse(String(init?.body)) }));
+}
+
+/** The If-Match header sent on each POST /answers, in order (P27.5). */
+function answerIfMatchHeaders(): (string | undefined)[] {
+  const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+  return calls
+    .filter(([url, init]) => init?.method === 'POST' && String(url).includes('/answers'))
+    .map(([, init]) => (init?.headers as Record<string, string> | undefined)?.['If-Match']);
 }
 
 describe('S4 · Guided Completion (live)', () => {
@@ -97,7 +112,7 @@ describe('S4 · Guided Completion (live)', () => {
     expect(getByText('5 of 5 fields still to confirm')).toBeInTheDocument();
 
     // the skipped question can be answered later
-    fireEvent.click(getByText('Answer now'));
+    fireEvent.click(getByText('Answer Now'));
     expect(getByText('What is the sha256 of the processing notebook?')).toBeInTheDocument();
   });
 
@@ -263,13 +278,61 @@ describe('S6 · Ready to Export (live)', () => {
     );
   });
 
+  it('P30.6 — a just-exported record renders SAFE filenames only, never an absolute path; View + Download still work', async () => {
+    stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      'POST /api/experiments/demo/audit': { body: auditExported },
+      'POST /api/experiments/demo/export': { body: exportSuccess },
+    });
+    const { container, findByText, getByText, getAllByText } = renderAt('/record/demo/export');
+
+    fireEvent.click(await findByText('Export Official Record + Sidecar'));
+    await findByText('Valid against official ISAAC schema v1.05.');
+
+    // the safe basenames from the export response are what's rendered as labels
+    // (the record filename also appears in the TopBar chip, so it's not unique)
+    expect(getAllByText(exportSuccess.artifact_refs.record_filename).length).toBeGreaterThan(0);
+    expect(getByText(exportSuccess.artifact_refs.sidecar_filename)).toBeInTheDocument();
+    expect(exportSuccess.artifact_refs.record_filename.endsWith('.json')).toBe(true);
+    expect(exportSuccess.artifact_refs.sidecar_filename.endsWith('.json')).toBe(true);
+
+    // never an absolute/server/mount path anywhere on the rendered screen
+    for (const marker of UNSAFE_PATH_MARKERS) {
+      expect(container.textContent).not.toContain(marker);
+    }
+
+    // View still opens the real fetched JSON content
+    fireEvent.click(getByText('View JSON'));
+    await waitFor(() => expect(container.querySelector('.artifact-modal')).not.toBeNull());
+    expect(container.querySelector('.artifact-modal-body')!.textContent).toContain('record_id');
+    fireEvent.click(getByText('Close'));
+
+    // Download still functions: it names the file from the safe basename, never a path
+    const createObjectURL = vi.fn(() => 'blob:mock-url');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    const recordCard = getByText('Official Record').closest('.artifact') as HTMLElement;
+    fireEvent.click(within(recordCard).getByText('Download'));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+  });
+
   it('a fresh load of an exported record can View + Download via the artifacts endpoint', async () => {
     stubFetchRoutes(exportedReadyRoutes('demo'));
-    const { container, findByText, getByText } = renderAt('/record/demo/export');
+    const { container, findByText, getByText, getAllByText } = renderAt('/record/demo/export');
 
     // the real post-export verdict shows (no re-export needed)
     expect(await findByText('Valid against official ISAAC schema v1.05.')).toBeInTheDocument();
     expect(container.querySelectorAll('.artifact')).toHaveLength(2);
+
+    // P30.6 — the /artifacts-sourced filenames are safe basenames, never an
+    // absolute/server/mount path anywhere on the rendered screen (the record
+    // filename also appears in the TopBar chip, so it's not unique).
+    expect(getAllByText(artifactsExported.record_filename).length).toBeGreaterThan(0);
+    expect(getByText(artifactsExported.sidecar_filename)).toBeInTheDocument();
+    for (const marker of UNSAFE_PATH_MARKERS) {
+      expect(container.textContent).not.toContain(marker);
+    }
 
     // View/Download are live from the fetched content, not disabled with a "session" hint
     const viewJson = getByText('View JSON').closest('button')!;
@@ -315,6 +378,134 @@ describe('S6 · Ready to Export (live)', () => {
     // nothing was written in this session: no in-session artifact cards
     expect(container.querySelectorAll('.artifact')).toHaveLength(0);
   });
+
+  it('P28.2 · surfaces an honest advisory when the exported artifact is stale', async () => {
+    const routes = exportedReadyRoutes('demo');
+    const detailRoute = routes['GET /api/experiments/demo'] as { body: Record<string, unknown> };
+    detailRoute.body = {
+      ...(detailRoute.body as object),
+      artifact: {
+        state: 'stale',
+        reason:
+          'The record changed after export; the exported artifact no longer reflects the current record. Records are immutable — regenerate the record (or reset the demo) to refresh it.',
+      },
+    };
+    stubFetchRoutes(routes);
+    const { container, findByText } = renderAt('/record/demo/export');
+
+    // the honest advisory renders: text + icon (never color-only), role=status
+    expect(await findByText('Exported artifact is out of date.')).toBeInTheDocument();
+    const note = container.querySelector('.artifact-stale-note')!;
+    expect(note).not.toBeNull();
+    expect(note.getAttribute('role')).toBe('status');
+    expect(note.querySelector('svg')).not.toBeNull();
+    expect(note.textContent).toMatch(/no longer reflects the current record/);
+  });
+
+  it('P28.2 · shows NO stale advisory when the exported artifact is current', async () => {
+    stubFetchRoutes(exportedReadyRoutes('demo')); // detail.artifact.state === 'current'
+    const { container, findByText } = renderAt('/record/demo/export');
+
+    await findByText('Valid against official ISAAC schema v1.05.');
+    expect(container.querySelector('.artifact-stale-note')).toBeNull();
+  });
+});
+
+describe('P27.5 · optimistic-concurrency conflict UX', () => {
+  const NOTEBOOK_Q = 'What is the sha256 of the processing notebook?';
+
+  it('answers: a successful confirm adopts the new version; the NEXT submit sends the updated If-Match', async () => {
+    let post = 0;
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      'POST /api/experiments/demo/answers': {
+        body: () => {
+          post += 1;
+          // 1st confirm → version 1.1; 2nd confirm → version 1.2.
+          return post === 1
+            ? answersAfterNotebook // version: '1.1'
+            : {
+                pending: pendingResponse.pending.slice(2),
+                status: 'needs_attention',
+                rev: 5,
+                updated_utc: '2099-04-02T09:17:00Z',
+                version: '1.2',
+              };
+        },
+      },
+    });
+    const { findByText, getByText, getByLabelText } = renderAt('/record/demo/complete');
+    await findByText(NOTEBOOK_Q);
+
+    // confirm #1 (detail.version is "1.0" from the loaded fixture)
+    fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'aaaa' } });
+    fireEvent.click(getByText('Confirm'));
+    await findByText('1 / 5');
+
+    // confirm #2 — question 2 (raw scan) is now current
+    fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'bbbb' } });
+    fireEvent.click(getByText('Confirm'));
+    await findByText('2 / 5');
+
+    // first submit echoes the loaded token, second echoes the adopted one
+    expect(answerIfMatchHeaders()).toEqual(['"1.0"', '"1.1"']);
+  });
+
+  it('answers: a 412 shows the conflict banner, preserves the typed input, and Refresh reloads', async () => {
+    const calls = stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      'POST /api/experiments/demo/answers': { status: 412, body: answersStaleWrite },
+    });
+    const { findByText, getByText, getByLabelText, queryByText } = renderAt('/record/demo/complete');
+    await findByText(NOTEBOOK_Q);
+
+    fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'staged-value' } });
+    fireEvent.click(getByText('Confirm'));
+
+    // the honest conflict banner — nothing applied, input kept
+    expect(
+      await findByText(/This record changed elsewhere\. Nothing was applied — your input is kept\./),
+    ).toBeInTheDocument();
+    // the typed input is preserved (GuidedPrompt was not unmounted)
+    expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
+    // NOT advanced: still 0/5, no answered "stored" row, question 1 still current
+    expect(getByText('0 / 5')).toBeInTheDocument();
+    expect(queryByText(/^stored /)).toBeNull();
+
+    // Refresh re-fetches current state via the parent useFetch reload
+    const before = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+    fireEvent.click(getByText('Refresh'));
+    await findByText(NOTEBOOK_Q); // reloaded to a fresh LoadedCompletion
+    const after = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it('export: a 412 shows the stale banner + Refresh and does NOT mark the record exported', async () => {
+    const calls = stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      'POST /api/experiments/demo/export': { status: 412, body: exportStaleWrite },
+    });
+    const { container, findByText, getByText } = renderAt('/record/demo/export');
+
+    fireEvent.click(await findByText('Export Official Record + Sidecar'));
+
+    // distinct stale copy (not the 409 immutability message) + a Refresh control
+    expect(
+      await findByText(/This record changed elsewhere\. Nothing was exported/),
+    ).toBeInTheDocument();
+    expect(getByText('Refresh')).toBeInTheDocument();
+    // not exported: no artifact cards, and the export gate is still offered
+    expect(container.querySelectorAll('.artifact')).toHaveLength(0);
+    expect(getByText('Export Official Record + Sidecar')).toBeInTheDocument();
+
+    // Refresh reloads current state (a fresh readiness fetch)
+    const before = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+    fireEvent.click(getByText('Refresh'));
+    await waitFor(() => {
+      const after = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+      expect(after).toBeGreaterThan(before);
+    });
+  });
 });
 
 describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
@@ -325,17 +516,20 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     stubFetchRoutes(exportReadyRoutes('demo')); // audit records:[], dry-run would pass, 1 advisory
     const { container, findByText } = renderAt('/record/demo/export');
 
-    // reply defaults to the coverage chip (lead), grounded in the LIVE audit
-    // bundle: pre-export there are no coverage figures yet.
-    await findByText('No coverage figures yet — coverage appears after export.');
+    // the three approved export chips are the guided prompts
+    await findByText('Is coverage the same as valid?');
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const panel = within(assistant);
-    expect(panel.getByText('answered from: Evidence Audit')).toBeInTheDocument();
-
-    // the three approved export chips are the guided prompts
-    expect(panel.getByText('Is coverage the same as valid?')).toBeInTheDocument();
     expect(panel.getByText("What's left before export?")).toBeInTheDocument();
     expect(panel.getByText('Explain the advisory warning')).toBeInTheDocument();
+
+    // P34.2: the coverage lead is surfaced by clicking its chip (the on-mount
+    // auto-reply was removed). Pre-export there are no coverage figures yet.
+    fireEvent.click(panel.getByText('Is coverage the same as valid?').closest('button')!);
+    expect(
+      await panel.findByText('No coverage figures yet — coverage appears after export.'),
+    ).toBeInTheDocument();
+    expect(panel.getByText('answered from: Evidence Audit')).toBeInTheDocument();
 
     // ROUTE_TO_CLI_NOTE is preserved on the panel
     expect(panel.getByText(ROUTE_TO_CLI_NOTE)).toBeInTheDocument();
@@ -344,7 +538,7 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // states a verdict and never echoes validate.ok
     fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
     expect(
-      panel.getByText(
+      await panel.findByText(
         'No blocking paths are listed in the current validation response. ' +
           'Open Validate to run the deterministic schema check.',
       ),
@@ -361,12 +555,12 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
   it('pre-export: the advisory chip echoes the LIVE warning, flagged advisory / non-gating', async () => {
     stubFetchRoutes(exportReadyRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/export');
-    await findByText('No coverage figures yet — coverage appears after export.');
+    await findByText('Explain the advisory warning');
     const panel = within(container.querySelector('.assistant') as HTMLElement);
 
     fireEvent.click(panel.getByText('Explain the advisory warning').closest('button')!);
     expect(
-      panel.getByText(
+      await panel.findByText(
         'NO_LINKS — no relationships declared (advisory, non-gating; where: record.links).',
       ),
     ).toBeInTheDocument();
@@ -382,9 +576,11 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const panel = within(assistant);
 
-    // the assistant reply is the LIVE coverage figure — a count, not a verdict
+    // P34.2: the coverage figure is surfaced by clicking its chip — a count, not a
+    // verdict (the on-mount auto-reply was removed).
+    fireEvent.click(panel.getByText('Is coverage the same as valid?').closest('button')!);
     expect(
-      panel.getByText(
+      await panel.findByText(
         'Coverage is 33/33 evidenced fields. It describes how many expected fields carry ' +
           'evidence; the schema check is separate.',
       ),
@@ -428,8 +624,10 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(panel.getByText('What if I leave one missing?')).toBeInTheDocument();
     expect(assistant.querySelectorAll('.assistant-prompt').length).toBe(3);
 
-    // reply defaults to the pending-summary chip, grounded in the LIVE pending list
-    expect(panel.getByText(PENDING_SUMMARY)).toBeInTheDocument();
+    // P34.2: the pending-summary lead is surfaced by clicking its chip (the
+    // on-mount auto-reply was removed), grounded in the LIVE pending list.
+    fireEvent.click(panel.getByText('Which fields still need me?').closest('button')!);
+    expect(await panel.findByText(PENDING_SUMMARY)).toBeInTheDocument();
     expect(panel.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
 
     // honesty (P25.7): this memory-less screen never fetches graph status, so it
@@ -456,8 +654,14 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     const panel = within(assistant);
 
     fireEvent.click(panel.getByText('What does this question want?').closest('button')!);
-    expect(panel.getByText(EXPLAIN_CURRENT)).toBeInTheDocument();
-    expect(panel.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
+    expect(await panel.findByText(EXPLAIN_CURRENT)).toBeInTheDocument();
+    // P29.2: scope the source-label assertion to the LIVE reply block — the
+    // prior (also workflow-sourced) turn now archives into the conversation log
+    // with its own identical `answered from:` label, so the panel-wide query is
+    // legitimately ambiguous. The intent (the explain chip's live answer is
+    // Workflow & Artifacts-sourced) is unchanged.
+    const replyBlock = within(assistant.querySelector('.assistant-reply-block') as HTMLElement);
+    expect(replyBlock.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
   });
 
   it('the missing-field chip routes to the deterministic schema check, answered from Schema Rules', async () => {
@@ -469,7 +673,7 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     const panel = within(assistant);
 
     fireEvent.click(panel.getByText('What if I leave one missing?').closest('button')!);
-    expect(panel.getByText(MISSING_BEHAVIOR)).toBeInTheDocument();
+    expect(await panel.findByText(MISSING_BEHAVIOR)).toBeInTheDocument();
     expect(panel.getByText('answered from: Schema Rules')).toBeInTheDocument();
 
     // the routed truth chip never states a verdict / validity conclusion
@@ -477,18 +681,29 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
   });
 
-  it('is guided-prompts-only — the note is present and there is NO textbox/send button', async () => {
+  it('surfaces an honest visual-only composer — a persistent guided-only helper + a SECONDARY send, and free-text has no textarea', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
-    const { container, findByText, getByText, queryByRole } = renderAt('/record/demo/complete');
+    const { container, findByText } = renderAt('/record/demo/complete');
 
     await findByText('Answer 5 Questions to Finish This Record');
-    expect(
-      getByText('Guided prompts only — the assistant answers the suggested questions above.'),
-    ).toBeInTheDocument();
-    // no free-text affordance inside the assistant panel
+    const assistant = within(container.querySelector('.assistant') as HTMLElement);
+    // P33 S2 (D3/C3): the composer is a single-line input (never a multi-line
+    // chat textarea) with a SECONDARY send control and a persistent guided-only
+    // helper; the redundant standalone guided-note is de-duped.
     expect(container.querySelector('.assistant textarea')).toBeNull();
-    expect(container.querySelector('.assistant input')).toBeNull();
-    expect(queryByRole('button', { name: /send/i })).toBeNull();
+    expect(assistant.getByRole('textbox')).toBeInTheDocument();
+    const send = assistant.getByRole('button', { name: /send/i });
+    expect(send.className).toMatch(/btn-secondary/);
+    expect(send.className).not.toMatch(/btn-primary/);
+    // P34.2: the persistent helper names the grounded scopes the resolver answers over
+    expect(
+      assistant.getByText(
+        'Ask about this record, its evidence, workflow, export readiness, or project-memory leads.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('.assistant')!.textContent,
+    ).not.toMatch(/Guided prompts only — the assistant answers/i);
   });
 
   it('clicking a chip issues NO new network request (pure, LLM-free)', async () => {
@@ -500,7 +715,7 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     const before = calls.length;
 
     fireEvent.click(panel.getByText('What if I leave one missing?').closest('button')!);
-    expect(panel.getByText(MISSING_BEHAVIOR)).toBeInTheDocument();
+    expect(await panel.findByText(MISSING_BEHAVIOR)).toBeInTheDocument();
     expect(calls.length).toBe(before);
   });
 
@@ -533,8 +748,12 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(assistant).not.toBeNull();
     const panel = within(assistant);
 
-    // pending is empty → the honest empty-state summary, still guided-only
-    expect(panel.getByText('This draft currently has no pending fields listed.')).toBeInTheDocument();
+    // pending is empty → clicking the pending chip surfaces the honest empty-state
+    // summary (P34.2: the on-mount auto-reply was removed), still guided-only.
+    fireEvent.click(panel.getByText('Which fields still need me?').closest('button')!);
+    expect(
+      await panel.findByText('This draft currently has no pending fields listed.'),
+    ).toBeInTheDocument();
     expect(assistant.querySelectorAll('.assistant-prompt').length).toBe(3);
   });
 

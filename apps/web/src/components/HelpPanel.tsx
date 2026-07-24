@@ -12,9 +12,10 @@ const WORKFLOW_STEPS: { label: string; text: string }[] = [
 ];
 
 /**
- * Static, honest Help popover — no search, no chat, nothing this prototype
- * doesn't actually do. Anchored to the Help button; hand-rolled (no dialog
- * library) per project dependency discipline.
+ * Static, honest Help popover — explains only what this prototype actually
+ * does (no chat, no fabricated features). Search IS real and lives in its own
+ * ⌘K command palette (SearchDialog), separate from this panel. Anchored to the
+ * Help button; hand-rolled (no dialog library) per project dependency discipline.
  */
 export function HelpPanel() {
   const [open, setOpen] = useState(false);
@@ -65,7 +66,7 @@ export function HelpPanel() {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <CircleHelp size={16} strokeWidth={2} />
+        <CircleHelp size={16} strokeWidth={2} aria-hidden="true" />
       </button>
 
       {open && (
@@ -86,7 +87,7 @@ export function HelpPanel() {
               aria-label="Close help"
               onClick={() => setOpen(false)}
             >
-              <X size={14} strokeWidth={2} />
+              <X size={14} strokeWidth={2} aria-hidden="true" />
             </button>
           </div>
 

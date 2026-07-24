@@ -6,8 +6,6 @@ import type { DraftField } from '../lib/types';
 
 interface FieldRowProps {
   field: DraftField;
-  selected?: boolean;
-  onSelect?: (field: DraftField) => void;
 }
 
 /**
@@ -15,30 +13,13 @@ interface FieldRowProps {
  * route to its evidence. Missing/needs-you read honest and expected — never a
  * red error. No value is shown without a path to its evidence.
  */
-export function FieldRow({ field, selected, onSelect }: FieldRowProps) {
+export function FieldRow({ field }: FieldRowProps) {
   const kind = fieldChipKind(field.status, field.source_types);
   const needsYou = field.status === 'needs_confirmation';
   const missing = field.status === 'missing' || field.status === 'rejected';
-  const selectable = Boolean(onSelect);
 
   return (
-    <div
-      className={`field-row${selectable ? ' selectable' : ''}${selected ? ' selected' : ''}`}
-      onClick={selectable ? () => onSelect?.(field) : undefined}
-      role={selectable ? 'button' : undefined}
-      tabIndex={selectable ? 0 : undefined}
-      aria-pressed={selectable ? selected : undefined}
-      onKeyDown={
-        selectable
-          ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onSelect?.(field);
-              }
-            }
-          : undefined
-      }
-    >
+    <div className="field-row">
       <div className="field-label-col">
         <div className="field-label">{field.label}</div>
         <div className="field-path">{field.path}</div>

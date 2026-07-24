@@ -1,6 +1,17 @@
 # Phase 26 — Real Workspace + Project Memory Search
 
 ```
+Status: ✅ PHASE 26 COMPLETE 2026-07-21 — all slices P26.0a/0b + P26.1–P26.7 RELEASED, deployed, and
+browser-verified. Completion gate PASSED at HEAD `a6f5746`: backend 646 + frontend 348 + tsc/vite build
+green; truth validation PASS (official v1.05) + evidence audit PASS (33/33) + synthetic demo byte-identical;
+snapshot no drift (builder unchanged); R4.3 preflight PASS; exact-HEAD CI green; Railway+Vercel healthy;
+clean synced git (0/0). Full hosted ⌘K search-QA matrix GREEN (visible-trigger + keyboard open, ESC close +
+focus return, two-plane grouped results with all three memory kinds live, marks + why-matched, distinct-query
+isolation, advisory leads-not-verdict memory note, governance-clean paths, result→/record navigation,
+canonical five 2/1/1/1 intact). Independent Opus FINAL review: PHASE-26-COMPLETE-APPROVE (backend↔frontend
+contract consistent field-for-field; truth core byte-for-byte untouched; one accepted cosmetic defensive-only
+provider-label nit at memory.py:547). NEXT per master directive: post-Phase-26 architecture decision packet
+(present + STOP for user approval; do NOT implement). Prior status line retained below for history.
 Status: ACTIVE — Phase 25 COMPLETE (fresh-session Chrome resilience PASSED, gate closed at 19a2300);
 Phase 26 activated under the 2026-07-20 master authorization. P26.0 gate resolved 2026-07-21: D1–D6
 unchanged; the four decision-lock §12 open items closed — result cap 50 / page 10, min query length 2,
@@ -8,8 +19,54 @@ D2 = 5-scenario seed (all 4 states), D3 = strict green-per-commit (no transient-
 reconciled to post-P25 HEAD (routes 21→22 w/ /api/search; MemoryReader = 7 methods, no search() yet;
 backend/web tests 500/299 not 461/137; backend files byte-identical to f534a4c so §8–§11 citations hold).
 P26.0a RELEASED (deterministic 5-scenario seed + idempotent demo; 18 behavior tests + full suite green,
-independent Opus adversarial review APPROVE). NEXT: P26.1 (workspace search core). See §20 for per-slice status.
-Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
+independent Opus adversarial review APPROVE). P26.0b RELEASED 2026-07-21 (guarded synthetic-demo reset —
+`POST /api/demo/reset` + Reset Demo control; commit `68fd910`, CI green run `29872521920`, deployed;
+hosted QA GREEN — preview 13→ canonical 5 / legacy 8 / ambiguous 0, execute → exactly the five
+(needs_attention 2 / in_review 1 / ready_to_export 1 / done 1), Run Demo ×3 held at 5). CQ-1 (demo/run
+unbounded accumulation) CLOSED by P26.0a (prevention) + P26.0b (cleanup), verified live.
+P26.1 RELEASED 2026-07-21 (commit `173780f`, CI green run `29876044687`, deployed): pure deterministic
+`search.workspace_search(query, experiments, *, limit, offset)` — NFC/casefold/whitespace normalization,
+token-AND, four-tier ranking (exact>prefix>token>substring), cap 50 / page 10 / min-len 2, snippet +
+offsets + reason, six truth-plane result kinds; NO route, NO verdict, NO truth-core import, NO filesystem
+traversal, defensive path-leak sanitizer; 53 behavior tests, backend suite 589 green, snapshot no drift,
+R4.3 preflight PASS; two independent Opus reviews (APPROVE-WITH-MINORS → the Important path-leak-
+enforcement gap + minors fixed).
+P26.2 RELEASED 2026-07-21 (commit `51e8b24`, CI green run `29877645942`, Railway+Vercel healthy at HEAD):
+`MemoryReader.search(query, limit, offset)` on the Protocol + BOTH providers via one shared pure helper —
+NFC/casefold/whitespace normalization, token-AND four-tier ranking, cap 50 / page 10 / min-len 2, three
+result kinds (concept / file / rationale), each `plane:"memory"`, `source:"memory:<provider_kind>"`,
+`navigate_to /memory?concept=|?file=`; governance inherited by delegating ONLY to the public read surface
+(no excluded/secret/unsafe path can surface), honest degradation never raises, stdlib-only (isolation
+holds). 21 frozen local tests + snapshot search + non-vacuous local↔snapshot parity; backend suite 628
+green; snapshot regenerated in-slice (§17 predictable drift, generator unchanged); independent Opus review
+APPROVE.
+P26.3 RELEASED 2026-07-21 (commit `f9d6b0a`, CI green run `29878778089`, Railway+Vercel healthy at HEAD,
+`/api/search` live+auth-gated): `GET /api/search?q=&scope=all|workspace|memory&limit=10&offset=0` composes
+both cores into ONE grouped, plane-labeled, no-verdict envelope (workspace/truth + memory groups, each with
+own available/reason; memory carries MEMORY_NOTE). Out-of-scope plane present-but-blank; too-short query →
+both groups query_too_short (plan §12); every core call wrapped → degraded provider yields a shaped 200,
+never 5xx; auth inherited from middleware. +18 route tests (deterministic memory-absent client fixture);
+backend suite 646 green; snapshot regenerated (routes.py served → sha256+fingerprint only). Independent Opus
+review APPROVE-WITH-MINORS (M2 provider-label fixed, M3 pass-through coverage added, M1 kept as plan-mandated).
+P26.4 RELEASED 2026-07-21 (commit `12c9c9e`, CI green run `29879274093`, Vercel+Railway healthy at HEAD):
+thin typed `api.search(q, {scope?,limit?,offset?})` in `lib/api.ts` (forwards to `GET /api/search`, auth+base
+via `request()`, deterministic query-string order, omits unspecified opts) + full envelope types in
+`types.ts` + reusable search fixtures in `apiFixtures.ts`. NO visible UI — legacy no-search tests stay green;
+frontend suite 330 green, tsc clean; snapshot regenerated (4 served frontend files → sha256+fingerprint only).
+P26.5+P26.6 RELEASED 2026-07-21 (commit `1365b7f`, CI green run `29881081110`, deployed; hosted ⌘K smoke
+GREEN): the real ⌘K SearchDialog (self-contained TopBar affordance, focus-trapped, ⌘K/Ctrl-K, 200ms debounce
+with alive-flag race guard + <2-char client guard) rendering two clearly separated self-labeled groups —
+Workspace (truth) + Project Memory (advisory, leads-not-verdict note verbatim, non-verdict tint) — with
+offset-`<mark>` snippets, `hasVerdictLanguage` filter, honest loading/empty/too-short/backend-down/memory-
+unavailable states, and deep-link navigation (`/record/<id>`, `/memory?concept=|?file=` with a ProjectMemory
+param-reader that auto-opens only existing leads). Delivered in ONE strict-green commit WITH P26.6 (the two
+legacy "no-search" tests inverted absence→presence + a functional backend-querying assertion; anti-fake
+preserved; prose updated) so no pushed commit is red (D3). 16 search-command tests + rewritten legacy tests;
+frontend suite 348 green, tsc + vite build clean, no-vertical-rail green; independent Opus honesty review
+APPROVE-WITH-MINORS (invariant genuinely upgraded; M4 verdict-filter coverage added). Hosted browser QA:
+trigger live on home+record variants, grouped results with marks + why-matched, PROJECT MEMORY advisory note,
+result→/record/<id> navigation + dialog close verified, canonical five intact (2/1/1/1). NEXT: P26.7 (docs).
+Date: 2026-07-19 (decisions locked 2026-07-20; activated + P26.0a/0b + P26.1/2/3/4/5/6 2026-07-21)  ·  Baseline commit: f534a4c  ·  Author: Claude (planning)
 Related: 2026-07-16-phases-23-26-arc-decisions.md (arc item 9 governs); `2026-07-20-remaining-work-decision-lock.md`
          (authoritative); P24 specs (2026-07-16-phase-24-project-memory-design.md,
           2026-07-19-phase-24-10-memory-freshness-semantics.md); this doc EXTENDS the approved arc.
@@ -460,7 +517,77 @@ is isolated per arc decision #10.
   single. **Stop**: review before P26.1. *(Placement in Phase 26 is decided by the decision-lock;
   Stabilization only verifies it — it is not re-implemented there.)*
 
-### P26.1 — Workspace search core (no route)
+### P26.0b — Guarded synthetic-demo reset (corrective; closes CQ-1) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `68fd910`, CI green run `29872521920`, deployed to Railway + Vercel.
+> An UNPLANNED corrective slice: P26.0a prevented FUTURE accumulation, but the hosted shared Railway
+> volume still held 8 stale pre-P26.0a random-id `demo/run` records (13 total). Adds
+> `POST /api/demo/reset` (preview/execute) + a guarded, subordinate-destructive **Reset Demo** control on
+> My Experiments, restoring the shared synthetic workspace to EXACTLY the five canonical scenarios.
+> **Safety model**: typed `DemoResetRequest` (`extra="forbid"` → caller ids/paths rejected 422); removes
+> ONLY records proven managed-legacy by the exact `source.description` marker; REFUSES with zero mutation
+> if ANY ambiguous record is present; deterministic reseed via the truth core; idempotent; path-free
+> typed response; NO general per-experiment DELETE route. **Frontend**: fail-closed synthetic-only gate
+> (`GET /api/health` mode), preview-before-execute, shared-workspace disclosure, type-"RESET" arming,
+> sync single-submit guard, refuse-with-no-bypass on ambiguous, focus-trap/return a11y, list refresh on
+> success. **Concurrency**: two simultaneous resets can never raise an uncaught 500 — the remove path AND
+> both read paths (`_load_all_experiments`, `list_experiments`) tolerate a dir removed mid-operation; a
+> deterministic read-race regression test proves the guard (verified to FAIL without the fix).
+> **Files**: `workspace.py`, `routes.py`, new `apps/api/tests/test_reset.py` (18); `apps/web` — new
+> `components/ResetDemoDialog.tsx`, `lib/{api,types,labels}.ts`, `screens/ExperimentsHome.tsx`,
+> `screens/screens.css`, `styles/base.css`, `test/apiFixtures.ts`, new `__tests__/reset-demo.test.tsx`
+> (26); regenerated `memory-snapshot.json` (202 unchanged). **Verified**: backend 536, frontend 325,
+> `tsc -b` + `vite build` clean, snapshot no drift, committed-snapshot gate 17, R4.3 full preflight PASS.
+> **Review**: two independent Opus reviews (backend, then full-slice); the full-slice review found the
+> read-path concurrency race (IMPORTANT) → fixed + deterministic test; two MINORs (constant synthetic
+> gate → documented + deferred; Escape preventDefault → accepted). All Critical/Important resolved.
+> **Hosted QA GREEN (production, browser-verified 2026-07-21)**: Reset Demo live and subordinate; preview
+> reported exactly Current 13 / Canonical Preserved 5 / Legacy Removed 8 / Ambiguous 0 / Final 5; execute
+> → ONE mutation request (`POST /demo/reset` 200) + one list refresh (`GET /experiments` 200); dashboard
+> refreshed to EXACTLY five with distribution needs_attention 2 / in_review 1 / ready_to_export 1 / done
+> 1; the Exported Record (`01SYNTHXANESSEED0000000005`) retained its Exported artifact; reload preserved
+> the five; **Run Synthetic Demo ×3 held the count at 5** (each upserts the canonical `…0001`, all 200);
+> Railway health 200 at `68fd910`; console clean; no failed request.
+> **CQ-1 disposition — CLOSED**: root cause = `demo/run` created a new experiment on every call
+> (unbounded accumulation, `routes.py`); PREVENTION = deterministic canonical ids + idempotent seeding
+> (P26.0a); CLEANUP = this guarded reset (P26.0b); hosted result = 13→5 and three repeated demo runs stay
+> at 5. Both prevention and cleanup are verified on production.
+- **Not in the original §20**: surfaced from the P26.0a hosted-QA finding (the persistent Railway volume
+  retained pre-P26.0a random-id demo records). Scoped, TDD, independently reviewed, one implementation
+  commit.
+- **Forbidden (honored)**: `src/isaac_records/*`, `schema/*`, `auth.py`, `memory.py`, `examples/`,
+  `graphify-out/` — none touched. No new dependency, no new env var, no DELETE route.
+- **Deferred to the post-Phase-26 architecture decision packet**: persistent-vs-ephemeral workspace
+  storage, and wiring `is_synthetic_only()` / `/health` mode to an authoritative runtime signal (both are
+  constants today — acceptable only because the prototype is synthetic-only by construction; the real
+  defense is provenance → ambiguous → refuse).
+
+### P26.1 — Workspace search core (no route) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `173780f`, CI green run `29876044687`, Railway+Vercel healthy at HEAD.
+> Added `apps/api/isaac_api/search.py`: pure, deterministic `workspace_search(query, experiments, *,
+> limit, offset) -> WorkspaceSearchResults` (frozen dataclasses `MatchInfo`/`WorkspaceResult`/
+> `WorkspaceSearchResults`). Normalization = NFC + casefold + whitespace-collapse, 256-char input cap,
+> min length 2 (`query_too_short`). Token-AND matching over four tiers **exact > prefix > token >
+> substring**; stable TOTAL-order rank `(tier, facet_priority, created_utc, id, match.field)`; result cap
+> **50**, default page **10**, `limit`/`offset` clamped, `total = len(truncated)`; per-hit `snippet` +
+> structured `offsets` + human `reason` + `tier`. Six navigable truth-plane kinds — `experiment`,
+> `record_id`, `draft_field` (incl. pending blockers → `/complete`), `evidence`, `artifact`, `source_ref`
+> — each `plane:"truth"`, `source:"workspace-store"`, `navigate_to:/record/<id>[/complete|/evidence|
+> /export]`. **The signature intentionally OMITS the conceptual `loaders` param**: all searchable content
+> is in-memory on the `Experiment`/draft, so no loader is required (directive §9 "where required"); the
+> core is pure over the hardened `list_experiments()` snapshot and does ZERO filesystem access, so a
+> concurrent reset can never make search raise (P26.0b read-race contract). **Governance**: no verdict
+> keys/language, no truth-core import, stdlib-only (`re`/`unicodedata`); a defensive `_is_pathlike`
+> sanitizer drops path-like aspects AND labels so `examples/**`, absolute, `/tmp`, and workspace-internal
+> paths never surface even on dirty draft content. Lead dedup by `(experiment, kind, label, snippet,
+> reason, tier)` collapses byte-identical leads while keeping distinct-label same-value fields.
+> **Files**: `apps/api/isaac_api/search.py` (new), `apps/api/tests/test_search.py` (new, 53 behavior
+> tests). No route, no frontend, no `memory.py`, no truth-core edit. **Verified**: full backend suite 589
+> green, snapshot no drift, committed-snapshot gate 17, R4.3 full preflight PASS. **Review**: independent
+> Opus adversarial review → APPROVE-WITH-MINORS; the one Important (docstring/plan no-leak guarantee not
+> enforced + the plan-§15 dirty-data test missing) FIXED (sanitizer + 5 adversarial governance tests);
+> minors (dedup fidelity for same-value distinct fields; docstring plane-label + ranking-premise
+> precision) fixed. **Hosted QA**: backend-library-only slice not wired into any route → hosted browser QA
+> not independently meaningful; regression check = Railway/Vercel healthy at `173780f`, no visible change.
 - **Objective**: `apps/api/isaac_api/search.py` — pure `workspace_search(query, experiments, loaders,
   limit, offset)` returning typed workspace results; normalization, token-AND matching, ranking,
   caps, pagination, snippet + reason. TDD.
@@ -470,7 +597,32 @@ is isolated per arc decision #10.
   pagination/governance/no-verdict tests green; no truth-core import. **Tests**: as §16 workspace.
 - **Report**: contract + ranking rules + what fields are searched. **Commit**: single. **Stop**: review before P26.2.
 
-### P26.2 — MemoryReader.search() (no route)
+### P26.2 — MemoryReader.search() (no route) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `51e8b24`, CI green run `29877645942`, Railway+Vercel healthy at HEAD.
+> Added `search(self, query, limit=10, offset=0) -> dict` to the `MemoryReader` Protocol and implemented it
+> in BOTH `LocalGraphArtifactSource` and `SanitizedSnapshotSource` via ONE shared pure module-level
+> `_run_memory_search(reader, query, limit, offset)` (+ `_mem_normalize`/`_mem_tier`/`_mem_snippet_and_offsets`/
+> `_mem_best_aspect`, `_MEM_*` constants). Deterministic: NFC + casefold + whitespace-collapse (256 cap,
+> min length 2 → `query_too_short`), token-AND four-tier match (exact>prefix>token>substring), stable
+> total-order rank `(tier, facet, natural_key, match.field)`, cap 50 / page 10, per-hit snippet + offsets +
+> reason + tier. Three kinds — `concept` (label/id/community), `file` (path/type/community), `rationale`
+> (file-detail text) — each `plane:"memory"`, `source:"memory:<provider_kind>"`, `navigate_to
+> /memory?concept=<id> | ?file=<path>`. **Governance inherited**: the helper reads ONLY the reader's public
+> methods (`overview/concepts/files/file/status`), never raw `_GraphState`/`_SnapshotState`, so every
+> path/secret/anchor filter is inherited — adversarially probed, no excluded/secret/unsafe file can surface.
+> **Honest degradation** (`graph_absent`/`graph_unreadable` → safe empties, never raises); `query_too_short`
+> keeps `available:true`. **Stdlib-only** (adds `unicodedata`; no `re`, no truth-core/graphify/fastapi/
+> `search.py` import) — `test_memory_module_imports_only_stdlib` still green (`_STDLIB_ROOTS` += `unicodedata`).
+> **Snapshot generator UNTOUCHED** (plan §18 assumption held): `search()` scans the already-served
+> projection at request time; `scripts/build_memory_snapshot.py` git-clean. **Files**: `memory.py`,
+> `tests/test_memory.py` (21 frozen local behavior tests + isolation/protocol update), `tests/test_snapshot_
+> source.py` (snapshot search + non-vacuous local↔snapshot parity), regenerated `memory-snapshot.json`
+> (§17 predictable drift — memory.py + the two test files are manifest-listed served content; diff confined
+> to their sha256 + `served_manifest_fingerprint`). **Verified**: backend suite 628 green, snapshot no drift,
+> committed-snapshot gate 17, R4.3 full preflight PASS. **Review**: independent Opus adversarial review →
+> APPROVE (only Minors: post-cap `total` intentional/consistent, per-file `file()` for rationales fine at
+> demo scale, parity non-emptiness guard added). Backend-library-only → no hosted browser QA needed;
+> Railway/Vercel healthy at `51e8b24`.
 - **Objective**: add `search(query, limit, offset)` to the `MemoryReader` Protocol and implement in
   `LocalGraphArtifactSource` + `SanitizedSnapshotSource`; reuse existing governance/path-safety
   filters; honest degradation; stdlib-only. Confirm the snapshot generator needs no change (§18). TDD.
@@ -481,7 +633,27 @@ is isolated per arc decision #10.
   test `test_memory.py:813` still green. **Tests**: §16 memory. **Report**: whether the generator
   was touched and why. **Commit**: single. **Stop**: review before P26.3.
 
-### P26.3 — GET /api/search route
+### P26.3 — GET /api/search route — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `f9d6b0a`, CI green run `29878778089`, Railway+Vercel healthy at HEAD;
+> `/api/search` live and auth-gated on Railway (401 without bearer). Added `GET /api/search` (routes.py §17,
+> `search_records`) composing `search.workspace_search` + `memory.get_default_reader().search` into one
+> grouped envelope: `{query, normalized_query, scope, workspace{plane:truth,provider,available,reason,
+> total,returned,limit,offset,results}, memory{plane:memory,provider:"memory:<kind>",note:MEMORY_NOTE,
+> available,reason,total,returned,limit,offset,results}}`. `scope` all|workspace|memory (unknown→all); an
+> out-of-scope plane stays present with true availability but blank rows; a too-short query sets both
+> groups' reason=query_too_short (§12) with each plane's own available honest; every core call wrapped so a
+> degraded provider yields a shaped 200 — NEVER 5xx. WorkspaceResults serialized via `dataclasses.asdict`;
+> memory results already JSON-ready. Auth inherited from `ApiKeyAuthMiddleware` (no per-route code). **Files**:
+> `routes.py`, `tests/test_search.py` (+18 route tests: envelope shape, scope filtering, per-group
+> independence with memory degraded, query_too_short, memory-available via golden snapshot, pagination
+> pass-through, adversarial-params-never-5xx, no-verdict, auth-gating; deterministic memory-absent `client`
+> fixture), regenerated `memory-snapshot.json` (routes.py served → sha256+fingerprint only; generator
+> git-clean). `serialize.py` NOT needed (asdict); `test_deploy_config.py` unchanged (no route-enumeration
+> test). **Verified**: backend suite 646 green, snapshot no drift, committed-snapshot gate 17, R4.3 preflight
+> PASS. **Review**: independent Opus adversarial review (17 TestClient probes) → APPROVE-WITH-MINORS: M2
+> (`memory:None` label edge) fixed, M3 (route pass-through coverage) added, M1 (query_too_short precedence)
+> kept as the plan-mandated symmetric-envelope behavior. Not yet UI-consumed (P26.4/P26.5) → no hosted
+> browser QA; regression check = Railway/Vercel healthy at `f9d6b0a`, `/api/search` reachable+gated.
 - **Objective**: wire both cores into one grouped, plane-labeled, no-verdict envelope; `scope`,
   caps, pagination; auth inherited; per-group independence; never 5xx on a degraded provider.
 - **Files touched**: `routes.py`, optionally `serialize.py`, extend `test_search.py` /
@@ -490,7 +662,19 @@ is isolated per arc decision #10.
   green. **Tests**: §16 route. **Report**: envelope example + auth confirmation. **Commit**: single.
   **Stop**: review before frontend.
 
-### P26.4 — Frontend API client + types (no visible UI)
+### P26.4 — Frontend API client + types (no visible UI) — ✅ RELEASED 2026-07-21
+> **RELEASED 2026-07-21** — commit `12c9c9e`, CI green run `29879274093`, Vercel+Railway healthy at HEAD.
+> `lib/api.ts` gains `search(q, {scope?,limit?,offset?}) -> Promise<ApiSearchResponse>` via `getJson` (auth
+> header + base inherited from `request()`); query string built deterministically (`q` always, then
+> scope/limit/offset in fixed order, only when provided). `lib/types.ts` gains the full envelope contract
+> (`ApiSearchResponse` + `ApiWorkspaceSearchGroup`/`ApiMemorySearchGroup` + result/match types + reason
+> unions) mirroring the P26.3 backend shapes. `test/apiFixtures.ts` gains reusable `searchResponse` /
+> `searchResponseMemoryDown` / `searchRoutes()` for the P26.5 dialog. **No chrome/UI change** — the legacy
+> "no search" tests (`help-and-honesty`, `memory-concepts`) stay green. **Verified**: frontend suite 330
+> green, `tsc -b` clean (no `any`), 5 `api.search` contract tests. Snapshot regenerated in-slice (api.ts/
+> types.ts/apiFixtures.ts/api.test.ts are manifest-served — diff confined to their sha256 + fingerprint;
+> generator unchanged). Sonnet implementation (mechanical wiring per §21); orchestrator diff-review + verify
+> gate (no separate Opus review needed for this mechanical slice). Backend untouched.
 - **Objective**: `api.search(q, {scope, limit, offset})` + result types in `lib/api.ts`; fixtures in
   `test/apiFixtures.ts`. No chrome change yet — legacy "no search" tests still pass.
 - **Files touched**: `lib/api.ts`, `test/apiFixtures.ts`, `api.test.ts`.
@@ -499,7 +683,28 @@ is isolated per arc decision #10.
   green (legacy tests untouched + passing). **Tests**: request encoding + auth header + envelope
   parse. **Report**: method signature + types. **Commit**: single. **Stop**: review before P26.5.
 
-### P26.5 — SearchDialog + ⌘K + TopBar trigger (feature)
+### P26.5 — SearchDialog + ⌘K + TopBar trigger (feature) — ✅ RELEASED 2026-07-21 (with P26.6, atomic commit `1365b7f`)
+> **RELEASED 2026-07-21** — one strict-green commit `1365b7f` with P26.6 (D3: no transient-red push). CI green
+> run `29881081110`, Railway+Vercel healthy, hosted ⌘K smoke GREEN. `components/SearchDialog.tsx` (new,
+> mirrors ResetDemoDialog): visible `role="search"` `.topbar-search` trigger (Search glyph + ⌘K hint) mounted
+> in TopBar on every variant; document-level ⌘K/Ctrl-K opener; focus-trapped `role=dialog` (aria-modal,
+> resolvable aria-labelledby, capture-phase Tab containment, ESC close + focus return, autofocused
+> `type=search`). 200ms debounce → `api.search`, alive-flag ensures latest-query-wins, strict <2-char client
+> guard (no fetch). Two clearly separated self-labeled groups — Workspace (truth) + Project Memory (advisory,
+> `note` verbatim, `--advisory-*` tint + full border, NEVER a rail or verdict palette); rows show label +
+> why-matched reason + offset-`<mark>` snippet; `hasVerdictLanguage` filters snippets. Honest states: loading,
+> "No matches", too-short hint, backend-down (RUN_COMMAND, role=status), memory-unavailable (quiet non-alert
+> note, workspace still renders). `screens/ProjectMemory.tsx` reads `?concept=<id>`/`?file=<path>` and
+> auto-opens ONLY an existing lead. Mounted via TopBar (NOT AppShell — TopBar is the shared per-screen chrome).
+> **Files**: `SearchDialog.tsx`+`search-dialog.css` (new), `TopBar.tsx`, `HelpPanel.tsx`, `icons.tsx` (Search
+> glyph), `ProjectMemory.tsx`, new `search-command.test.tsx` (16). **Verified**: frontend suite 348 green, tsc
+> + vite build clean, no-vertical-rail green. **Review**: independent Opus honesty review APPROVE-WITH-MINORS
+> (debounce race guarded, plane honesty + a11y sound, invariant genuinely upgraded); M4 verdict-filter+`<mark>`
+> coverage added; M1/M2/M3/M5/M6 accepted (documented low-risk defense-in-depth / coverage follow-ups).
+> **Hosted QA GREEN**: trigger live (home+record), grouped results with marks + why-matched, PROJECT MEMORY
+> advisory note + honest "No memory leads", result→`/record/<id>` navigation + dialog close, canonical five
+> intact.
+### P26.5 — SearchDialog + ⌘K + TopBar trigger (feature) [original plan]
 - **Objective**: build the command palette (`SearchDialog.tsx`), global ⌘K in `AppShell.tsx`, a
   visible trigger in `TopBar.tsx`, grouped/plane-labeled result rendering, navigation, full a11y,
   all states (§13). New functional tests in `search-command.test.tsx`.
@@ -512,7 +717,20 @@ is isolated per arc decision #10.
   green-per-commit retire-then-replace). **Tests**: §16 frontend (functional). **Report**: the red
   legacy tests + the D3 approach chosen. **Commit**: single (feature only). **Stop**: review before P26.6.
 
-### P26.6 — DEDICATED "no-fake-search" invariant rewrite (reviewed slice)
+### P26.6 — DEDICATED "no-fake-search" invariant rewrite (reviewed slice) — ✅ RELEASED 2026-07-21 (atomic with P26.5, commit `1365b7f`)
+> **RELEASED 2026-07-21** — delivered in the SAME commit as P26.5 (`1365b7f`). D3 was resolved to STRICT
+> green-per-commit (no transient-red push); since P26.5's feature necessarily reddens the two legacy
+> "no-search" tests and only P26.6 can green them, they were shipped as ONE atomic commit — the rewrite kept
+> unburied in its own dedicated test files with rationale comments (arc-#10 intent honored). `help-and-honesty
+> .test.tsx`: the P22D absence assertions (`[role=search]`/`.topbar-search`/`⌘K`/`Search` all null) inverted
+> to PRESENCE + a functional test that opens the dialog, queries the backend via `searchRoutes()`, and asserts
+> the Workspace group renders (a dead decorative input fails it); anti-fake user-chip assertion preserved in
+> its own describe; P22D comment marks Decision 1 superseded by P26. `memory-concepts.test.tsx`: the two
+> "no inline searchbox" assertions KEPT (still true — the ⌘K palette is separate global chrome), title/comment
+> clarified, + a new `?concept=` deep-link auto-open test. Prose updated in `TopBar.tsx` + `HelpPanel.tsx`
+> docstrings ("no search" → the real ⌘K palette). Independent Opus review confirmed the honesty invariant was
+> genuinely upgraded (present + functional + verdict-free), not gutted; no guardrail silently dropped.
+### P26.6 — DEDICATED "no-fake-search" invariant rewrite (reviewed slice) [original plan]
 - **Objective (arc decision #10)**: rewrite ONLY the two legacy test files with rationale comments:
   (a) explain why the invariant changes — P26 shipped real, API-backed, keyboard-driven, tested
   search, so "search must not exist" is obsolete; (b) remove ONLY the obsolete absence assertions

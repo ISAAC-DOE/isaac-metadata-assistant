@@ -29,27 +29,76 @@
   flex: none;
 }
 
-/* ---- record right panel (Evidence over Assistant, hard divider) ---- */
+/* ---- record left aside (WorkflowSpine + Evidence Trail link) -------- */
+/* D8 — the spine and the whole-record Evidence Trail affordance share one
+ * bordered column so the neutral region divider stays continuous. The spine's
+ * own border-right is suppressed here (the wrapper owns it); GuidedCompletion
+ * still uses the spine standalone, so that surface is unaffected. */
+.record-aside {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-subtle);
+  border-right: 1px solid var(--border); /* neutral region divider, not a rail */
+}
+.record-aside .spine {
+  border-right: none;
+}
+.evidence-trail-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 16px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.evidence-trail-link:hover {
+  background: var(--border-faint);
+}
+.evidence-trail-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.evidence-trail-link-label {
+  flex: 1;
+}
+.evidence-trail-link-count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+/* ---- record right panel (Assistant only) --------------------------- */
+/* P33 HQA #3/#4 — the WHOLE column reads as the Assistant region: it carries the
+ * lavender tint so no gray shows beneath short content, and it owns the internal
+ * padding now that the .assistant card chrome is scoped off inside the rail (see
+ * assistant.css). The lavender BACKGROUND is what distinguishes the rail; the
+ * left edge stays the NEUTRAL 1px --border region divider (the permanent
+ * no-vertical-rail rule forbids a colored accent edge). The rail is the single
+ * height-bounded scroll container (overflow-y:auto against the min-height:0 flex
+ * chain); the generous bottom padding keeps the caption / a staged proposal from
+ * ever sitting flush against the scroll edge. */
 .record-right {
   flex: none;
   width: 342px;
-  background: var(--surface-subtle);
-  border-left: 1px solid var(--border); /* neutral region divider, not a rail */
+  background: var(--assist-tint);
+  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  padding: 16px 16px 24px;
 }
 .record-right.narrow {
   width: 308px;
-}
-.record-right .evidence-slot {
-  padding: 4px 4px 0;
-}
-/* the hard 1px divider separating Evidence (truth) from Assistant (advisory) */
-.right-divider {
-  height: 1px;
-  background: var(--border-strong);
-  margin: 6px 0 0;
 }
 
 /* ---- needs-you banner (S3) ----------------------------------------- */
@@ -122,7 +171,7 @@
 .placeholder {
   max-width: 640px;
 }
-.placeholder h2 {
+.placeholder > h1 {
   font-size: 22px;
   font-weight: 600;
   color: var(--text-heading);
@@ -142,10 +191,61 @@
   margin-top: 18px;
   padding: 18px 20px;
 }
-/* P25.7: the grounded assistant carries its own inner padding (.assistant),
-   so its card wrapper keeps only the border/background/radius chrome. */
+/* P25.7 / P33 HQA #3: in the memory rail the .memory-right COLUMN is the single
+   lavender region, so this wrapper drops all card chrome (no floating inner card,
+   no double border) and lets the panel sit directly on the rail — matching the
+   record surfaces' .record-right. */
 .placeholder-card.memory-assistant-card {
+  margin-top: 0;
   padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ---- Project Memory internal tabs (P33 S3 · D6) -------------------- */
+/* A local tablist (Overview · Sources · Concepts), NOT the global LeftNav.
+   Same visual language as the evidence-preview tabs: underline-on-active,
+   quiet otherwise. */
+.section-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0 16px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.section-tab {
+  padding: 7px 12px;
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.section-tab:hover { color: var(--text-secondary); }
+.section-tab.active {
+  color: var(--action-hover);
+  border-bottom-color: var(--action);
+  font-weight: 600;
+}
+.section-tab:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+
+/* P33 S3 (D6): the assistant right rail on the Project Memory screen — the
+   full-variant analogue of the record surfaces' .record-right, so the assistant
+   stays visible across all three tabs. Neutral region divider, never a rail. */
+.memory-right {
+  flex: none;
+  width: 342px;
+  background: var(--assist-tint);
+  border-left: 1px solid var(--border); /* neutral divider; lavender bg distinguishes the rail */
+  overflow-y: auto;
+  padding: 16px 16px 24px;
 }
 
 /* ---- Project Memory status detail card (P24.3) ---------------------- */
@@ -648,14 +748,16 @@
   color: var(--text-secondary);
 }
 
-/* Live pending blockers listed inside the needs-you banner (S3). */
+/* Live pending blockers listed inside the needs-you banner (S3), as a NUMBERED
+ * list: a visible ordinal badge, the concise label as the primary line, and the
+ * technical locator demoted to a mono token beneath it (shown exactly once). */
 .needsyou-list {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .needsyou-list li {
   display: flex;
@@ -664,11 +766,32 @@
   font-size: 12px;
   color: var(--text-secondary);
 }
-.needsyou-q { line-height: 1.45; }
+.needsyou-num {
+  flex: none;
+  min-width: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--advisory-text);
+  font-variant-numeric: tabular-nums;
+}
+.needsyou-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.needsyou-q {
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--text-primary);
+}
 .needsyou-about {
   font-size: 11px;
   color: var(--text-tertiary);
-  word-break: break-all;
+  /* HIER-2: wrap a long locator at safe boundaries, never mid-token — a break-all
+   * split a URI like "…/notebook" into "…/n" + "otebook". */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ---- S4 live completion states -------------------------------------- */
@@ -781,7 +904,7 @@
 }
 .preexport-ready .btn { margin-top: 12px; }
 .preexport-blocked { padding: 16px 18px; }
-.preexport-blocked h3 { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.preexport-blocked h2 { font-size: 14px; font-weight: 600; color: var(--text-heading); }
 .preexport-errors {
   margin: 10px 0 12px;
   padding: 0;
@@ -796,6 +919,33 @@
 .preexport-coverage { padding: 14px 16px; }
 .preexport-coverage-title { font-size: 13px; font-weight: 600; color: var(--text-slate); }
 .coverage-loading { padding: 14px 16px; font-size: 12.5px; color: var(--text-tertiary); }
+
+/* P27.6 — "live updates paused" indicator (degraded poller). Honest + calm:
+   neutral surface, never red, and it explicitly disclaims freshness. */
+.livesync-degraded {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.livesync-degraded-text { flex: 1 1 auto; }
+.livesync-degraded-refresh { flex: none; }
+
+/* P27.6 — "this record changed elsewhere" proactive notice (S4). Reuses the
+   calm completion-submit-error treatment; nothing was lost, input is kept. */
+.livesync-changed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.livesync-changed .livesync-changed-text { flex: 1 1 auto; }
 
 /* Immutability / refused-export message (factual, never an overwrite path). */
 .export-conflict {
@@ -818,6 +968,25 @@
   font-size: 11.5px;
   color: var(--text-tertiary);
 }
+
+/* P28.2 — exported artifact is stale: an honest, non-gating advisory so the UI
+   never silently presents an out-of-date artifact as current. Amber advisory
+   tokens + an icon + text (never color-only). */
+.artifact-stale-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px 16px;
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner);
+  font-size: 12.5px;
+  color: var(--advisory-text);
+  line-height: 1.55;
+}
+.artifact-stale-note svg { flex: none; margin-top: 1px; color: var(--advisory-text); }
+.artifact-stale-note strong { color: var(--text-strong); }
 
 /* View JSON modal — read-only artifact content, fetched from the export call. */
 .artifact-modal-backdrop {
@@ -864,4 +1033,115 @@
   line-height: 1.55;
   color: var(--text-secondary);
   background: var(--surface-subtle);
+}
+
+/* Guarded synthetic-demo reset dialog (P26.0b) — reuses .artifact-modal shell. */
+.reset-dialog { width: min(560px, 100%); }
+.reset-loading {
+  padding: 18px 22px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.reset-dialog-body {
+  padding: 18px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.reset-disclosure {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.reset-counts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.reset-count-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 13px;
+  font-size: 12px;
+  background: var(--surface);
+}
+.reset-count-row dt { color: var(--text-secondary); margin: 0; }
+.reset-count-row dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.reset-count-final {
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--border);
+}
+.reset-refused {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--fail-border);
+  background: var(--fail-bg);
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fail-text);
+}
+.reset-confirm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.reset-confirm-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.reset-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
+/* Desktop (≥1024px) is byte-identical: every rule is inside a max-width query.
+   The assistant right rail (.record-right / .memory-right) collapses into the
+   AssistantDrawer slide-over — its narrow overrides live in assistant-drawer.css
+   and are keyed on [data-open], so nothing here needs to touch those widths. */
+@media (max-width: 1024px) {
+  /* The record left aside (WorkflowSpine + Evidence Trail link) becomes a
+     full-width block above the main content. */
+  .record-aside {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 640px) {
+  .screen-main.pad { padding: 16px 14px; }
+  .centered-col { padding: 16px 14px; }
+  .centered-col.narrow { max-width: 100%; }
+
+  .page-header { flex-wrap: wrap; }
+
+  /* Two-up grids collapse to a single column so nothing is squeezed. */
+  .signal-row,
+  .artifact-row,
+  .memory-figures {
+    grid-template-columns: 1fr;
+  }
+  .source-index-panel-figures {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .artifact-modal-backdrop { padding: 16px; }
 }

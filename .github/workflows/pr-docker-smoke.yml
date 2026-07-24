@@ -1,0 +1,165 @@
+name: PR Docker Smoke
+
+# Non-publishing PR smoke test.
+#
+# Builds the EXACT production Dockerfile locally on the runner and exercises the
+# running container against the baked /krish base path. It is deliberately inert
+# with respect to release infrastructure:
+#   * triggers ONLY on pull_request -> main (never push, never tags, never
+#     workflow_dispatch), so it can NEVER overlap build-push.yaml, whose triggers
+#     are push:main + v* tags;
+#   * permissions are contents:read ONLY — no packages:write, no id-token:, no
+#     contents:write, so it cannot push an image, log in to GHCR, mint a tag, or
+#     create a release;
+#   * it references NO secrets (not even GITHUB_TOKEN) and logs in to NO registry;
+#   * the image is built with push:false / load:true under a LOCAL throwaway tag,
+#     so nothing ever leaves the runner;
+#   * synthetic-only: the production image ships only committed synthetic fixtures.
+# It does not, and cannot, invoke build-push.yaml or affect the Flux GitOps deploy.
+
+on:
+  pull_request:
+    branches: [main]
+
+# Read-only. Nothing here can push a package, request an OIDC token, write repo
+# contents, or create a tag/release.
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    name: build + smoke-test production image (local, no push)
+    runs-on: ubuntu-latest
+
+    env:
+      # LOCAL, run-scoped tag only. Never pushed, never logged in for.
+      IMAGE_TAG: isaac-pr-smoke:${{ github.run_id }}
+      CONTAINER_NAME: isaac-pr-smoke-${{ github.run_id }}
+      # The commit we bake into the image; the health endpoint must echo it back.
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # Base path is baked to /krish in the Dockerfile; everything is under it.
+      BASE_URL: http://localhost:8000/krish
+
+    steps:
+      - name: Check out PR
+        uses: actions/checkout@v4
+
+      - name: Build production image (LOCAL tag only, push:false)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_TAG }}
+          build-args: |
+            ISAAC_BUILD_COMMIT=${{ github.event.pull_request.head.sha }}
+
+      - name: Run container (synthetic default, writable workspace)
+        run: |
+          docker run -d --name "$CONTAINER_NAME" \
+            -p 8000:8000 \
+            -e ISAAC_UI_WORKSPACE=/tmp/isaac-ws \
+            "$IMAGE_TAG"
+
+      - name: Wait for readiness (bounded ~60s)
+        run: |
+          ready=""
+          last="000"
+          for _ in $(seq 1 30); do
+            last=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/health" || true)
+            if [ "$last" = "200" ]; then ready="yes"; break; fi
+            sleep 2
+          done
+          if [ -z "$ready" ]; then
+            echo "::error::container not ready within ~60s (last health code=$last)"
+            echo "---- container logs ----"
+            docker logs "$CONTAINER_NAME" || true
+            exit 1
+          fi
+          echo "container ready (health=200)"
+
+      - name: Smoke test (all under baked /krish base)
+        run: |
+          BODY="$(mktemp)"
+          INDEX="$(mktemp)"
+
+          fail() {
+            echo "::error::$1"
+            echo "---- container logs ----"
+            docker logs "$CONTAINER_NAME" || true
+            exit 1
+          }
+
+          # 1. Health -> 200 JSON, status ok, commit == baked head sha.
+          resp=$(curl -s -o "$BODY" -w '%{http_code} %{content_type}' "$BASE_URL/api/health" || true)
+          code=${resp%% *}; ct=${resp#* }
+          [ "$code" = "200" ] || fail "1 health: expected 200 got '$code'"
+          case "$ct" in *json*) ;; *) fail "1 health: content-type not JSON ('$ct')";; esac
+          [ "$(jq -r '.status' "$BODY")" = "ok" ] || fail "1 health: status != ok"
+          commit=$(jq -r '.commit // empty' "$BODY")
+          [ "$commit" = "$HEAD_SHA" ] || fail "1 health: commit '$commit' != head sha '$HEAD_SHA'"
+          echo "1 health OK (commit=$commit)"
+
+          # 2. API routing -> real route returns 200 JSON (auth disabled: no key set,
+          #    so we expect 200, NOT 401).
+          resp=$(curl -s -o "$BODY" -w '%{http_code} %{content_type}' "$BASE_URL/api/experiments" || true)
+          code=${resp%% *}; ct=${resp#* }
+          [ "$code" = "200" ] || fail "2 experiments: expected 200 (auth disabled) got '$code'"
+          case "$ct" in *json*) ;; *) fail "2 experiments: content-type not JSON ('$ct')";; esac
+          jq -e 'has("experiments")' "$BODY" >/dev/null || fail "2 experiments: missing 'experiments' key"
+          echo "2 API routing OK"
+
+          # 3. Compiled SPA -> 200 HTML at the base root.
+          resp=$(curl -s -o "$BODY" -w '%{http_code} %{content_type}' "$BASE_URL/" || true)
+          code=${resp%% *}; ct=${resp#* }
+          [ "$code" = "200" ] || fail "3 spa root: expected 200 got '$code'"
+          case "$ct" in *html*) ;; *) fail "3 spa root: content-type not HTML ('$ct')";; esac
+          grep -qi '<div id="root"' "$BODY" || fail "3 spa root: served body is not the SPA index HTML"
+          cp "$BODY" "$INDEX"
+          echo "3 SPA root OK"
+
+          # 4. /krish base + nested deep-link refresh -> SPA fallback returns 200 HTML.
+          for path in "/experiments" "/experiments/DEMO/evidence"; do
+            resp=$(curl -s -o "$BODY" -w '%{http_code} %{content_type}' "$BASE_URL$path" || true)
+            code=${resp%% *}; ct=${resp#* }
+            [ "$code" = "200" ] || fail "4 deep-link $path: expected 200 got '$code'"
+            case "$ct" in *html*) ;; *) fail "4 deep-link $path: content-type not HTML ('$ct')";; esac
+            grep -qi '<div id="root"' "$BODY" || fail "4 deep-link $path: not SPA fallback HTML"
+          done
+          echo "4 deep-link SPA fallback OK"
+
+          # 5. Static assets -> parse an asset URL from the served index and fetch it.
+          asset=$(grep -oE '/krish/assets/[^"]+\.(js|css)' "$INDEX" | head -n1)
+          [ -n "$asset" ] || fail "5 asset: no /krish/assets/*.{js,css} URL found in index HTML"
+          resp=$(curl -s -o "$BODY" -w '%{http_code} %{content_type}' "http://localhost:8000$asset" || true)
+          code=${resp%% *}; ct=${resp#* }
+          [ "$code" = "200" ] || fail "5 asset $asset: expected 200 got '$code'"
+          case "$ct" in *javascript*|*css*) ;; *) fail "5 asset $asset: content-type not JS/CSS ('$ct')";; esac
+          echo "5 static asset OK ($asset)"
+
+          # 6. Unknown API path -> 404 JSON, NOT the SPA HTML (proves API 404s do
+          #    not fall through to the client-side app).
+          resp=$(curl -s -o "$BODY" -w '%{http_code} %{content_type}' "$BASE_URL/api/does-not-exist" || true)
+          code=${resp%% *}; ct=${resp#* }
+          [ "$code" = "404" ] || fail "6 unknown-api: expected 404 got '$code'"
+          case "$ct" in *json*) ;; *) fail "6 unknown-api: content-type not JSON ('$ct') — may have fallen through to SPA";; esac
+          grep -qi '<!doctype html' "$BODY" && fail "6 unknown-api: body is SPA HTML — API 404 fell through to the SPA"
+          echo "6 unknown-API 404 (no SPA fallthrough) OK"
+
+          # 7. (Optional) root leak check: base is /krish, so bare / must NOT be 200.
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8000/" || true)
+          [ "$code" != "200" ] || fail "7 root leak: GET / returned 200 (base should be /krish)"
+          echo "7 root leak check OK (GET / -> $code)"
+
+          echo "ALL SMOKE CHECKS PASSED"
+
+      - name: Container logs on failure (safe app logs only)
+        if: failure()
+        run: docker logs "$CONTAINER_NAME" || true
+
+      - name: Tear down container and local image
+        if: always()
+        run: |
+          docker rm -f "$CONTAINER_NAME" || true
+          docker rmi "$IMAGE_TAG" || true

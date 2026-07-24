@@ -5,6 +5,11 @@
  * client; the UI renders these shapes, it never computes them.
  */
 
+// P30.3 — the SAFE cross-record runtime projection (GET /api/runtime/records).
+// Defined next to the pure triage consumer that owns its contract; re-exported
+// here so it reads alongside the other Api* shapes.
+export type { RuntimeRecord } from './crossRecordTriage';
+
 // --- primitives -------------------------------------------------------
 
 export type Mode = 'synthetic';
@@ -184,6 +189,48 @@ export interface SuggestedPrompt {
   answer?: AssistantMessage;
 }
 
+// --- grounded assistant query (P34.1 endpoint / P34.2 composer) --------
+// POST /api/experiments/{id}/assistant/query — the READ-ONLY grounded resolver.
+// It never mutates the record; it resolves a free-form question against the
+// current record/evidence/workflow/memory context and returns a source-labeled
+// answer. The client parses this shape; it never computes an answer or a verdict.
+
+export interface AssistantQueryRequest {
+  question: string;
+  grounded_rev?: string | null;
+  history?: unknown[] | null;
+}
+
+// How the resolver handled the question — NOT a validity verdict.
+export type AssistantQueryResult =
+  | 'answered'
+  | 'insufficient_context'
+  | 'unsupported'
+  | 'ambiguous';
+
+// One cited source: a display label + an optional in-app navigation target.
+export interface AssistantQuerySource {
+  label: string;
+  navigate_to: string | null;
+}
+
+export interface AssistantQueryResponse {
+  answer: string;
+  result: AssistantQueryResult;
+  // The source planes the answer drew on (schema | audit | files | advisory |
+  // workflow | graph). The first entry drives the `answered from:` label.
+  grounding: AssistantSource[];
+  sources: AssistantQuerySource[];
+  // The record-scope endpoint carries a numeric rev + version token; the
+  // record-agnostic Project-Memory endpoint (P34.4) has no record, so both are
+  // null there (and `stale` is always false — there is no revision to be stale
+  // against). A numeric rev is what drives the live-answer stale badge.
+  record_rev: number | null;
+  version: string | null;
+  stale: boolean;
+  followups: string[];
+}
+
 // --- grounded assistant composer (P25.1) ------------------------------
 // The composer is a pure, synchronous function over the bundle a screen has
 // ALREADY fetched — zero new fetches, zero backend endpoint, zero truth-path
@@ -243,6 +290,12 @@ export interface ExperimentSummary {
   technique: string; // Cu K-edge XANES
   idOrDraft: string; // mono ULID or "draft · name"
   meta?: string; // "updated 2099-04-02" | "with G. Hopper"
+  // P33 S1 — the dashboard card's ONE lifecycle badge (Draft/Exported), distinct
+  // from the queue `group` (needsAttention/inReview/ready/done).
+  lifecycle: 'draft' | 'exported';
+  // P33 S1 — the neutral created-date badge; a display string plus a full,
+  // unambiguous accessible string. Undefined when the server sent no created_utc.
+  date?: { iso: string; display: string; accessible: string };
   group: QueueGroupKey;
   trailing: ExperimentTrailing;
 }
@@ -270,16 +323,6 @@ export interface RunnerStage {
 }
 
 // --- workflow spine ---------------------------------------------------
-
-export type SpineStepState = 'done' | 'active' | 'locked';
-
-export interface SpineStep {
-  key: string;
-  label: string;
-  state: SpineStepState;
-  meta?: string;
-  number?: number; // numbered variant (S4: "2 of 5 answered")
-}
 
 // --- experiment detail (record surfaces) ------------------------------
 
@@ -318,10 +361,68 @@ export interface ApiExperimentSummary {
   record_id: string | null;
 }
 
-export interface ApiExperimentDetail extends ApiExperimentSummary {
+// P27.5 — the optimistic-concurrency version triplet the backend now returns on
+// record detail and on every accepted mutation (POST /answers, POST /export).
+// `version` is the opaque If-Match token the client echoes back (wrapped in
+// double quotes) on the NEXT mutation; `rev`/`updated_utc` are informational.
+export interface VersionFields {
+  rev: number;
+  updated_utc: string;
+  version: string;
+}
+
+// P28.1 — the fixed canonical workflow, DERIVED by the backend from current
+// record truth and shipped inside every detail bundle. The client renders it
+// verbatim; it never re-derives step order or completion.
+export type ApiWorkflowStepState = 'completed' | 'current' | 'reopened' | 'blocked';
+
+export interface ApiWorkflowStep {
+  id: string;
+  label: string;
+  state: ApiWorkflowStepState;
+  current: boolean;
+  reopened: boolean;
+  blocked: boolean;
+  reason: string | null;
+}
+
+export interface ApiWorkflow {
+  ordered_steps: ApiWorkflowStep[];
+  current_step: string | null;
+  record_rev: number;
+}
+
+// P28.2 — derived exported-artifact freshness, carried on every detail bundle.
+// `none` = nothing exported; `current` = the on-disk record still matches the
+// current draft; `stale` = the record changed after export (or is unreadable) —
+// records are immutable, so a stale artifact must never be presented as current.
+export type ApiArtifactStateName = 'none' | 'current' | 'stale';
+
+export interface ApiArtifactState {
+  state: ApiArtifactStateName;
+  reason: string | null;
+}
+
+// P28.2 — the downstream-invalidation summary a mutation (POST /answers,
+// POST /export) returns, reported at the post-mutation revision. A byte-stable
+// no-op reports `changed:false` with empty `changed_fields`/`reopened_steps`.
+export interface ApiInvalidation {
+  changed: boolean;
+  rev: number;
+  changed_fields: string[];
+  reopened_steps: string[];
+  artifact: ApiArtifactState;
+  reason: string;
+}
+
+export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields {
   draft_ok: boolean;
-  artifact_refs: { record_path: string | null; sidecar_path: string | null };
+  // P30.6 — safe basenames only (e.g. "<id>.json"), never an absolute
+  // server/mount path. Null when not yet exported.
+  artifact_refs: { record_filename: string | null; sidecar_filename: string | null };
   source_files: string[];
+  workflow: ApiWorkflow;
+  artifact: ApiArtifactState;
 }
 
 export interface ApiDraftField {
@@ -402,6 +503,122 @@ export interface ApiEvidenceResponse {
   evidence: ApiEvidenceEntry[];
 }
 
+// P28.5 — the deterministic evidence-SUPPORT classification (a display view over
+// the P28.4 classifier). This is a THIRD axis, distinct from schema validity /
+// workflow completion / advisory warnings — the wire body deliberately carries
+// none of `valid`/`ok`/`exportable`/`complete`/`blocking`/`warnings`. Bound to
+// `record_rev` so the client can detect a stale view. Mirrors
+// apps/api/isaac_api/routes.py `get_evidence_classification` + evidence_classify.py.
+export type EvidenceClass =
+  | 'supported'
+  | 'inferred_candidate'
+  | 'insufficient_evidence'
+  | 'conflicting_evidence'
+  | 'unknown';
+
+export type EvidenceValueState = 'confirmed' | 'candidate' | 'none';
+
+// One safe, already-present source reference (never a raw answer/quote/secret/
+// absolute path — the backend strips those in evidence_classify._safe_locator).
+export interface ApiClassificationSource {
+  source_type: SourceType;
+  locator?: string;
+}
+
+export interface ApiFieldClassification {
+  field: string; // dotted path OR namespaced (assets: / descriptors: / implicit:)
+  classification: EvidenceClass;
+  value_state: EvidenceValueState;
+  explanation: string; // deterministic, human-readable
+  sources: ApiClassificationSource[];
+}
+
+export interface ApiEvidenceClassification {
+  record_rev: number; // authoritative rev the view is bound to
+  field_results: ApiFieldClassification[];
+  // same-axis histogram of the 5 classes (sum === field_results.length).
+  counts: Record<EvidenceClass, number>;
+}
+
+// P31.3 — CSV reconciliation (RECONCILIATION-ONLY). A synthetic campaign-sheet
+// CSV is previewed against the CURRENT record: every mapped value is reconciled
+// as EVIDENCE and NEVER written. The three states are the only verdict this
+// surface carries; it decides nothing about validity/completion/export. Mirrors
+// the backend POST /experiments/{id}/ingestion/csv/preview response.
+export type ReconciliationState =
+  | 'matches_current'
+  | 'conflicts_with_current'
+  | 'absent_from_record';
+
+// One unknown CSV column the parser ignored (never mapped to an official field).
+export interface ApiCsvUnknownHeaderWarning {
+  code: string;
+  header: string;
+  message: string;
+}
+
+// One top-level ingress warning (DISTINCT from a per-column unknown-header
+// warning): a stable `code`, a SAFE human `message`, and an optional `count`
+// (e.g. the number of unrecognized field-rows skipped). Authoritative mirror of
+// the backend `warnings[]` contract (apps/api/isaac_api/csv_ingest.py).
+export interface ApiCsvWarning {
+  code: string;
+  message: string;
+  count?: number;
+}
+
+// One reconciled candidate: an official dotted field, its proposed CSV value, the
+// current record value (when present), and the reconciliation verdict + safe
+// provenance. Read-only evidence — there is no editable/confirmable CSV field.
+//
+// This interface is a FAITHFUL 1:1 mirror of the backend reconcile-item wire shape
+// (apps/api/isaac_api/csv_ingest.py). Fields are kept as-shipped even when the panel
+// does not read every one — do not trim the interface field-by-field to match
+// current component usage (see `stale` below).
+export interface ApiCsvReconcileItem {
+  field: string; // official dotted path (FIELD_MAP output)
+  field_label: string;
+  experiment_id: string;
+  proposed_value: unknown; // from the CSV
+  current_value: unknown; // from the record (null when absent)
+  reconciliation_state: ReconciliationState;
+  evidence_classification: EvidenceClass;
+  locator: string; // e.g. "row 3, field=formula" — never an absolute path
+  column: string;
+  source_name: string;
+  source_format: string;
+  parser_id: string;
+  parser_version: string;
+  source_record_rev: number;
+  // Deliberate wire mirror of the backend field (always `false` at build time).
+  // The panel does NOT read this — it derives staleness itself by comparing the
+  // live record version against the previewed one. Kept for a faithful 1:1 shape;
+  // do not delete it to "fix" the unused field.
+  stale: boolean;
+  value_state: EvidenceValueState;
+  status: FieldStatus;
+  explanation: string;
+}
+
+export interface ApiCsvPreview {
+  format: string; // e.g. 'isaac_campaign_csv'
+  source_name: string;
+  parser_id: string;
+  parser_version: string;
+  source_record_rev: number;
+  row_count: number;
+  recognized_header_count: number;
+  unknown_header_warnings: ApiCsvUnknownHeaderWarning[];
+  candidate_count: number;
+  reconciliation_summary: {
+    matches_current: number;
+    conflicts_with_current: number;
+    absent_from_record: number;
+  };
+  candidates: ApiCsvReconcileItem[];
+  warnings: ApiCsvWarning[];
+}
+
 // GET /source-preview?source= — the real fixture lines + the line numbers cited
 // by the experiment's evidence (empty for a fixture cited by field, not by line).
 export interface ApiSourcePreview {
@@ -416,8 +633,9 @@ export interface ApiSourcePreview {
 export interface ApiArtifactsResponse {
   record: Record<string, unknown> | null;
   sidecar: Record<string, unknown> | null;
-  record_path: string | null;
-  sidecar_path: string | null;
+  // P30.6 — safe basenames only, never an absolute server/mount path.
+  record_filename: string | null;
+  sidecar_filename: string | null;
 }
 
 export interface ApiDemoStep {
@@ -560,11 +778,107 @@ export interface ApiMemoryConceptResponse {
   related: ApiMemoryRelated;
 }
 
+// GET /api/search — grouped truth+memory search (P26.3 backend envelope).
+// One query fans out to two independently-honest groups: `workspace` (truth
+// plane, the experiment/record store) and `memory` (advisory leads from the
+// snapshot graph). Neither group's availability/degradation affects the
+// other; the client parses this shape, it never merges or ranks the groups.
+export type ApiSearchScope = 'all' | 'workspace' | 'memory';
+export type ApiSearchTier = 'exact' | 'prefix' | 'token' | 'substring';
+
+export interface ApiSearchMatch {
+  field: string;
+  snippet: string;
+  reason: string;
+  tier: ApiSearchTier;
+  offsets: [number, number][];
+}
+
+export interface ApiWorkspaceSearchResult {
+  kind: 'experiment' | 'record_id' | 'draft_field' | 'evidence' | 'artifact' | 'source_ref';
+  experiment_id: string;
+  record_id: string | null;
+  title: string;
+  label: string;
+  status: string | null;
+  match: ApiSearchMatch;
+  navigate_to: string;
+  plane: 'truth';
+  source: string;
+}
+
+export interface ApiMemorySearchResult {
+  kind: 'concept' | 'file' | 'rationale';
+  id: string | null;
+  path: string | null;
+  label: string;
+  community_name: string | null;
+  match: ApiSearchMatch;
+  navigate_to: string;
+  plane: 'memory';
+  source: string;
+}
+
+export type ApiWorkspaceSearchReason = null | 'query_too_short';
+export type ApiMemorySearchReason = null | 'query_too_short' | 'graph_absent' | 'graph_unreadable';
+
+export interface ApiWorkspaceSearchGroup {
+  plane: 'truth';
+  provider: string;
+  available: boolean;
+  reason: ApiWorkspaceSearchReason;
+  total: number;
+  returned: number;
+  limit: number;
+  offset: number;
+  results: ApiWorkspaceSearchResult[];
+}
+
+export interface ApiMemorySearchGroup {
+  plane: 'memory';
+  provider: string;
+  note: string;
+  available: boolean;
+  reason: ApiMemorySearchReason;
+  total: number;
+  returned: number;
+  limit: number;
+  offset: number;
+  results: ApiMemorySearchResult[];
+}
+
+export interface ApiSearchResponse {
+  query: string;
+  normalized_query: string;
+  scope: ApiSearchScope;
+  workspace: ApiWorkspaceSearchGroup;
+  memory: ApiMemorySearchGroup;
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;
   core: string;
   version: string;
+}
+
+// POST /api/demo/reset — the guarded synthetic-demo reset (DemoResetResponse in
+// apps/api/isaac_api/routes.py). The SAME shape carries both success (status
+// "ok") and a safe refusal (status "refused"), returned at HTTP 200/403/409.
+// Every field is a server-derived count/id; the client renders them, it never
+// computes a reset decision.
+export interface ApiDemoResetResult {
+  status: 'ok' | 'refused';
+  mode: 'preview' | 'execute';
+  previous_count: number;
+  canonical_count: number;
+  legacy_count: number;
+  ambiguous_count: number;
+  removed_count: number;
+  final_count: number;
+  canonical_ids: string[];
+  removable: { id: string; title: string }[];
+  state_counts: Record<string, number>;
 }
 
 // Everything S3 needs, fetched concurrently but kept as separate values so the
@@ -580,10 +894,15 @@ export interface RecordBundle {
   graph: ApiGraphStatus;
 }
 
-// POST /answers response — the recomputed pending list + fresh derived status.
-export interface ApiAnswersResponse {
+// POST /answers response — the recomputed pending list + fresh derived status,
+// plus the P27.5 version triplet (the new If-Match token to adopt for the next
+// mutation).
+export interface ApiAnswersResponse extends VersionFields {
   pending: ApiPendingItem[];
   status: ApiExperimentStatus;
+  // P28.2 — the post-mutation workflow + downstream-invalidation summary.
+  workflow: ApiWorkflow;
+  invalidation: ApiInvalidation;
 }
 
 export interface ApiReportError {
@@ -596,7 +915,7 @@ export interface ApiReportError {
 // `ok:true` with record/sidecar/record_id/artifact_refs; on a gated failure
 // `ok:false` with a flat `errors` list. A 409 (already exported) is thrown as an
 // ApiError(status:409) by the client and never reaches this shape.
-export interface ApiExportResponse {
+export interface ApiExportResponse extends VersionFields {
   ok: boolean;
   draft_report: { ok: boolean; errors: ApiReportError[]; warnings: ApiReportError[] };
   official_report: { ok: boolean; errors: { path: string; message: string }[] } | null;
@@ -604,7 +923,12 @@ export interface ApiExportResponse {
   sidecar?: Record<string, unknown>;
   errors?: { path: string; message: string }[];
   record_id?: string;
-  artifact_refs?: { record_path: string; sidecar_path: string };
+  // P30.6 — safe basenames only, never an absolute server/mount path.
+  artifact_refs?: { record_filename: string; sidecar_filename: string };
+  // P28.2 — the post-export workflow + downstream-invalidation summary (present
+  // on both the success and the gated-failure paths).
+  workflow?: ApiWorkflow;
+  invalidation?: ApiInvalidation;
 }
 
 // Everything S6 needs to render the three signals + the export gate, fetched
@@ -630,4 +954,7 @@ export interface EvidenceBundle {
   artifacts: ApiArtifactsResponse;
   graph: ApiGraphStatus;
   sourcePreviews: Record<string, ApiSourcePreview>;
+  // P28.5 — the evidence-support classification for this record, fetched in the
+  // SAME bundle so it stays coherent with `detail` across live-sync refetches.
+  classification: ApiEvidenceClassification;
 }

@@ -1,21 +1,38 @@
 import './queue.css';
 import { Link } from 'react-router-dom';
-import { ChevronRight, FileText } from './icons';
+import { ChevronRight } from './icons';
 import { StatusChip } from './StatusChip';
 import { ROUTES } from '../lib/routes';
-import type { ExperimentSummary } from '../lib/types';
+import { LABELS } from '../lib/labels';
+import type { ExperimentSummary, QueueGroupKey } from '../lib/types';
 
 interface ExperimentRowProps {
   exp: ExperimentSummary;
 }
 
+const GROUP_STATE_LABEL: Record<QueueGroupKey, string> = {
+  needsAttention: LABELS.groupNeedsAttention,
+  inReview: LABELS.groupInReview,
+  ready: LABELS.groupReady,
+  done: LABELS.groupDone,
+};
+
+const LIFECYCLE_LABEL: Record<ExperimentSummary['lifecycle'], string> = {
+  draft: LABELS.chipDraft,
+  exported: LABELS.chipExported,
+};
+
 /**
- * One experiment as a calm row that opens the workbench. Coverage and verdict
- * stay two distinct tokens on ready rows — never merged into one badge.
+ * One experiment as a calm row that opens the workbench. The metadata row
+ * carries exactly one lifecycle badge (Draft/Exported) plus, when known, a
+ * neutral created-date badge — never a technique tag or raw ULID on the card
+ * face. The trailing side carries an actionable field-count chip only when
+ * the row needs you; every other state is named by its group, not repeated
+ * as a chip.
  */
 export function ExperimentRow({ exp }: ExperimentRowProps) {
   const t = exp.trailing;
-  const accessibleName = `${exp.title} — ${describeTrailing(exp)}`;
+  const accessibleName = describeAccessibleName(exp);
   return (
     <Link
       to={ROUTES.record(exp.id)}
@@ -25,9 +42,12 @@ export function ExperimentRow({ exp }: ExperimentRowProps) {
       <div className="exp-main">
         <div className="exp-title">{exp.title}</div>
         <div className="exp-sub">
-          <span className="exp-tag">{exp.technique}</span>
-          <span className="exp-id">{exp.idOrDraft}</span>
-          {exp.meta && <span className="exp-meta">{exp.meta}</span>}
+          <StatusChip kind={exp.lifecycle} />
+          {exp.date && (
+            <time className="exp-date" dateTime={exp.date.iso} aria-label={exp.date.accessible}>
+              {exp.date.display}
+            </time>
+          )}
         </div>
       </div>
 
@@ -35,30 +55,17 @@ export function ExperimentRow({ exp }: ExperimentRowProps) {
         {t.needsYouCount !== undefined && (
           <StatusChip kind="needsYou" label={`${t.needsYouCount} Fields Need You`} />
         )}
-        {t.mentorReview && <StatusChip kind="mentorReview" />}
-        {t.coverage && (
-          <span className="exp-coverage">
-            <FileText size={13} strokeWidth={2} aria-hidden="true" />
-            {t.coverage.resolved}/{t.coverage.total}
-          </span>
-        )}
-        {t.verdict === 'pass' && <StatusChip kind="pass" />}
-        {t.exported && <StatusChip kind="exported" />}
         <ChevronRight className="exp-chevron" size={18} strokeWidth={2} aria-hidden="true" />
       </div>
     </Link>
   );
 }
 
-function describeTrailing(exp: ExperimentSummary): string {
+function describeAccessibleName(exp: ExperimentSummary): string {
   const t = exp.trailing;
-  if (t.needsYouCount !== undefined) return `${t.needsYouCount} fields need you`;
-  if (t.mentorReview) return 'Mentor Review';
-  if (t.verdict === 'pass') {
-    return t.coverage ? `coverage ${t.coverage.resolved}/${t.coverage.total}, PASS` : 'PASS';
-  }
-  if (t.exported) {
-    return t.coverage ? `coverage ${t.coverage.resolved}/${t.coverage.total}, Exported` : 'Exported';
-  }
-  return 'open record';
+  const lifecycleLabel = LIFECYCLE_LABEL[exp.lifecycle];
+  const groupStateLabel = GROUP_STATE_LABEL[exp.group];
+  const count = t.needsYouCount;
+  const countPart = count !== undefined ? `, ${count} field${count === 1 ? '' : 's'} need you` : '';
+  return `${exp.title} — ${lifecycleLabel}, ${groupStateLabel}${countPart}`;
 }

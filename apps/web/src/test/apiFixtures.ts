@@ -7,19 +7,91 @@
 
 import { vi } from 'vitest';
 
+import type { ApiWorkflow } from '../lib/types';
+
+// --- backend-derived workflow (P28.1) -----------------------------------
+// Mirrors apps/api/isaac_api/workflow.py `derive_workflow` so detail fixtures
+// carry the same shape the real backend ships. Kept here (not re-derived in the
+// app) because the app renders the workflow verbatim; only fixtures synthesize it.
+const WF_ORDER = [
+  'load_record',
+  'complete_metadata',
+  'review_evidence',
+  'review_export_readiness',
+  'export',
+] as const;
+const WF_LABELS: Record<string, string> = {
+  load_record: 'Load Record',
+  complete_metadata: 'Complete Metadata',
+  review_evidence: 'Review Evidence',
+  review_export_readiness: 'Review Export Readiness',
+  export: 'Export',
+};
+const WF_REOPENED_REASON =
+  'An upstream change reopened this step; it no longer reflects the current record.';
+
+export function fixtureWorkflow(s: {
+  pending_count: number;
+  draft_ok: boolean;
+  ready: boolean;
+  exported: boolean;
+  rev: number;
+}): ApiWorkflow {
+  const satisfied: Record<string, boolean> = {
+    load_record: true,
+    complete_metadata: s.pending_count === 0,
+    review_evidence: s.pending_count === 0 && s.draft_ok,
+    review_export_readiness: s.ready,
+    export: s.exported,
+  };
+  const currentStep = WF_ORDER.find((id) => !satisfied[id]) ?? null;
+  const currentLabel = currentStep ? WF_LABELS[currentStep] : null;
+  const ordered_steps = WF_ORDER.map((id, i) => {
+    if (satisfied[id]) {
+      return { id, label: WF_LABELS[id], state: 'completed' as const, current: false, reopened: false, blocked: false, reason: null };
+    }
+    const current = id === currentStep;
+    const reopened = WF_ORDER.slice(i + 1).some((later) => satisfied[later]);
+    const blocked = !current && !reopened;
+    const state = current ? ('current' as const) : reopened ? ('reopened' as const) : ('blocked' as const);
+    const reason = current ? null : reopened ? WF_REOPENED_REASON : `Complete '${currentLabel}' first.`;
+    return { id, label: WF_LABELS[id], state, current, reopened, blocked, reason };
+  });
+  return { ordered_steps, current_step: currentStep, record_rev: s.rev };
+}
+
 // --- fetch stub ---------------------------------------------------------
 
 export interface StubbedRoute {
   status?: number;
   body: unknown;
+  /** Optional `ETag` response header (P27.6 conditional GET). */
+  etag?: string;
 }
+
+/** The per-call descriptor a route-thunk resolves to (P27.6 conditional GET). */
+export interface RouteResult {
+  status?: number;
+  body?: unknown;
+  etag?: string;
+}
+
+/**
+ * A route may be a static {@link StubbedRoute} OR a thunk called ONCE per fetch
+ * (with that request's `RequestInit`) that returns the response descriptor for
+ * that call — the latter lets a test sequence a record's conditional GET (e.g.
+ * 304, 304, then 200-with-new-version) with the status, body and ETag advancing
+ * in lockstep, and branch on the `If-None-Match` header so the SAME endpoint can
+ * serve a plain GET (no token) and a conditional GET (token) differently.
+ */
+export type RouteEntry = StubbedRoute | ((init?: RequestInit) => RouteResult);
 
 /**
  * Stub `fetch` with a `"METHOD /api/path" -> response` map. Returns the list of
  * keys actually requested (for asserting which endpoints were hit). Unknown
  * routes reject like a network error so tests fail loudly.
  */
-export function stubFetchRoutes(routes: Record<string, StubbedRoute>): string[] {
+export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
   const calls: string[] = [];
   const impl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =
@@ -29,12 +101,26 @@ export function stubFetchRoutes(routes: Record<string, StubbedRoute>): string[] 
     calls.push(key);
     const hit = routes[key];
     if (!hit) throw new TypeError(`fetch stub: no route for ${key}`);
-    const status = hit.status ?? 200;
+    // A whole-route thunk resolves the descriptor once per fetch (status/body/etag
+    // in sync); a plain StubbedRoute is used as-is, and its `body` may itself be a
+    // thunk re-evaluated per hit (e.g. the experiment list before/after a reset).
+    const resolved: RouteResult = typeof hit === 'function' ? hit(init) : hit;
+    const status = resolved.status ?? 200;
+    const body =
+      typeof resolved.body === 'function' ? (resolved.body as () => unknown)() : resolved.body;
+    const etag = resolved.etag;
+    // A minimal Headers-like shape: real fetch exposes `headers.get('ETag')` and
+    // a 304 carries no body (ok:false, status 304). checkRecordVersion branches
+    // on status before reading json(), so a 304 body is never consumed.
+    const headers = {
+      get: (name: string) => (name.toLowerCase() === 'etag' ? (etag ?? null) : null),
+    };
     return {
       ok: status < 400,
       status,
-      json: async () => hit.body,
-    } as Response;
+      headers,
+      json: async () => body,
+    } as unknown as Response;
   };
   vi.stubGlobal('fetch', vi.fn(impl));
   return calls;
@@ -76,11 +162,31 @@ export const exportedSummary = {
   record_id: '01SYNTHTESTRECORD000000000',
 };
 
+// P27.5 — the optimistic-concurrency version triplet the backend returns on
+// record detail + every accepted mutation. `version` is the opaque If-Match
+// token the client echoes back on the next mutation.
+export const VERSION_FIELDS = {
+  rev: 3,
+  updated_utc: '2099-04-02T09:15:00Z',
+  version: '1.0',
+};
+
 export const experimentDetail = {
   ...experimentSummary,
+  ...VERSION_FIELDS,
   draft_ok: true,
-  artifact_refs: { record_path: null, sidecar_path: null },
+  artifact_refs: { record_filename: null, sidecar_filename: null },
   source_files: ['mock_campaign.csv', 'raw_scan_listing.txt'],
+  // needs_attention: load_record completed, complete_metadata current, rest blocked.
+  workflow: fixtureWorkflow({
+    pending_count: experimentSummary.pending_count,
+    draft_ok: true,
+    ready: false,
+    exported: false,
+    rev: VERSION_FIELDS.rev,
+  }),
+  // P28.2 — nothing exported yet, so there is no artifact to be fresh/stale.
+  artifact: { state: 'none', reason: null } as const,
 };
 
 export const draftResponse = {
@@ -555,8 +661,8 @@ export const memoryConceptDetailWithheldAnchor = {
 export const artifactsNull = {
   record: null,
   sidecar: null,
-  record_path: null,
-  sidecar_path: null,
+  record_filename: null,
+  sidecar_filename: null,
 };
 
 export const demoRunDraftOnly = {
@@ -578,6 +684,143 @@ export const uploadsBlocked = {
     'Real or private data upload is approval-gated and not enabled in this synthetic prototype.',
 };
 
+// --- P26.0b guarded synthetic-demo reset fixtures ------------------------
+// Shapes verbatim from DemoResetResponse (apps/api/isaac_api/routes.py); the
+// five canonical scenarios use the fixed ids from workspace.py (SEED_*).
+
+/** GET /api/health — authoritative synthetic-mode signal the Reset control gates on. */
+export const healthSynthetic = {
+  status: 'ok',
+  mode: 'synthetic-only',
+  core: 'isaac_records',
+  version: '0.1.0',
+};
+
+/** A non-synthetic health body — the Reset control must NOT render for this. */
+export const healthNonSynthetic = { ...healthSynthetic, mode: 'production' };
+
+export const CANONICAL_RESET_IDS = [
+  '01SYNTHXANESSEED0000000001',
+  '01SYNTHXANESSEED0000000002',
+  '01SYNTHXANESSEED0000000003',
+  '01SYNTHXANESSEED0000000004',
+  '01SYNTHXANESSEED0000000005',
+];
+
+const RESET_TITLE_BASE = 'Synthetic XANES — CuO (Cu K-edge)';
+
+/** The five canonical scenarios as a summary list (post-reset dashboard).
+ * Distribution: needs_attention:2, ready_to_export:1, in_review:1, done:1. */
+export const canonicalFiveSummaries = [
+  { id: CANONICAL_RESET_IDS[0], title: `${RESET_TITLE_BASE} · New Draft`, status: 'needs_attention', created_utc: '2026-07-12T00:00:01Z', pending_count: 5, evidenced_field_count: 26, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[1], title: `${RESET_TITLE_BASE} · Partially Completed`, status: 'needs_attention', created_utc: '2026-07-12T00:00:02Z', pending_count: 2, evidenced_field_count: 30, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[2], title: `${RESET_TITLE_BASE} · Ready to Export`, status: 'ready_to_export', created_utc: '2026-07-12T00:00:03Z', pending_count: 0, evidenced_field_count: 33, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[3], title: `${RESET_TITLE_BASE} · Export Review Required`, status: 'in_review', created_utc: '2026-07-12T00:00:04Z', pending_count: 0, evidenced_field_count: 33, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[4], title: `${RESET_TITLE_BASE} · Exported Record`, status: 'done', created_utc: '2026-07-12T00:00:05Z', pending_count: 0, evidenced_field_count: 33, exported: true, record_id: CANONICAL_RESET_IDS[4] },
+];
+
+/** Two managed-legacy demo records (random ids + the committed demo marker). */
+const LEGACY_REMOVABLE = [
+  { id: '01SYNTHLEGACYDEMORUN0000001', title: `${RESET_TITLE_BASE} Demo (demo/run)` },
+  { id: '01SYNTHLEGACYDEMORUN0000002', title: `${RESET_TITLE_BASE} Demo (demo/run)` },
+];
+
+const RESET_STATE_COUNTS = { needs_attention: 2, ready_to_export: 1, in_review: 1, done: 1 };
+
+/** POST /api/demo/reset {mode:'preview'} — 5 canonical + 2 legacy present, 0 ambiguous. */
+export const demoResetPreviewClean = {
+  status: 'ok' as const,
+  mode: 'preview' as const,
+  previous_count: 7,
+  canonical_count: 5,
+  legacy_count: 2,
+  ambiguous_count: 0,
+  removed_count: 0,
+  final_count: 5,
+  canonical_ids: CANONICAL_RESET_IDS,
+  removable: LEGACY_REMOVABLE,
+  state_counts: RESET_STATE_COUNTS,
+};
+
+/** POST /api/demo/reset {mode:'execute', confirmation:'RESET SYNTHETIC DEMO'} — success. */
+export const demoResetExecuteOk = {
+  ...demoResetPreviewClean,
+  mode: 'execute' as const,
+  previous_count: 7,
+  removed_count: 2,
+  final_count: 5,
+};
+
+/** Preview when an ambiguous (unmanaged) record is present — refused (HTTP 200). */
+export const demoResetPreviewAmbiguous = {
+  status: 'refused' as const,
+  mode: 'preview' as const,
+  previous_count: 8,
+  canonical_count: 5,
+  legacy_count: 2,
+  ambiguous_count: 1,
+  removed_count: 0,
+  final_count: 8,
+  canonical_ids: CANONICAL_RESET_IDS,
+  removable: LEGACY_REMOVABLE,
+  state_counts: RESET_STATE_COUNTS,
+};
+
+/**
+ * Route map for the My Experiments page with the Reset Demo control wired.
+ * `experiments` defaults to a thunk that returns 7 rows (5 canonical + 2 legacy)
+ * until `flipToFive()` is called, then the canonical five — so a test can prove
+ * the list is re-fetched from the backend after a successful reset.
+ */
+export function resetDemoRoutes(
+  opts: {
+    mode?: string;
+    preview?: unknown;
+    execute?: unknown;
+    executeStatus?: number;
+  } = {},
+): { routes: Record<string, StubbedRoute>; flipToFive: () => void } {
+  const legacySummaries = LEGACY_REMOVABLE.map((r, i) => ({
+    id: r.id,
+    title: r.title,
+    status: 'needs_attention',
+    created_utc: `2025-01-0${i + 1}T00:00:00Z`,
+    pending_count: 5,
+    evidenced_field_count: 26,
+    exported: false,
+    record_id: null,
+  }));
+  let five = false;
+  const flipToFive = () => {
+    five = true;
+  };
+  // The dialog issues the preview POST on open, then the execute POST on submit —
+  // same METHOD+path, so the body is served by call order: 1st = preview, 2nd+ =
+  // execute (which also flips the list to the canonical five, mirroring the real
+  // backend so a subsequent GET /experiments reflects the reset).
+  const previewBody = opts.preview ?? demoResetPreviewClean;
+  const executeBody = opts.execute ?? demoResetExecuteOk;
+  let postCalls = 0;
+  const routes: Record<string, StubbedRoute> = {
+    'GET /api/health': { body: { ...healthSynthetic, mode: opts.mode ?? 'synthetic-only' } },
+    'GET /api/experiments': {
+      body: () => ({
+        experiments: five ? canonicalFiveSummaries : [...canonicalFiveSummaries, ...legacySummaries],
+      }),
+    },
+    'POST /api/demo/reset': {
+      status: opts.executeStatus,
+      body: () => {
+        postCalls += 1;
+        if (postCalls === 1) return previewBody;
+        five = true;
+        return executeBody;
+      },
+    },
+  };
+  return { routes, flipToFive };
+}
+
 /** The full route map for one S3 record bundle (plus S1's list) for `id`. */
 export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
@@ -590,6 +833,9 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
     [`GET ${base}/evidence`]: { body: evidenceResponse },
+    // P29.4 — the AgentContext evidence-support input the shared record-session
+    // owner fetches on every record screen (not just S5).
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
@@ -599,10 +845,56 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
 
 const SYNTH_SHA = 'c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345';
 
-/** POST /answers response after confirming the processing-notebook sha256. */
+/** POST /answers response after confirming the processing-notebook sha256. The
+ *  version triplet advances (rev 3 → 4, new token) — the client adopts it as the
+ *  If-Match token for the next submit. */
 export const answersAfterNotebook = {
   pending: pendingResponse.pending.slice(1),
   status: 'needs_attention',
+  rev: 4,
+  updated_utc: '2099-04-02T09:16:00Z',
+  version: '1.1',
+};
+
+/** POST /edit response after correcting the processing-notebook sha256 (P28.3).
+ *  Same bundle shape as /answers (pending/status/version/workflow/invalidation);
+ *  the version advances (the client adopts it) and the invalidation reports a real
+ *  change with no downstream reopen. */
+export const editApplied = {
+  pending: [],
+  status: 'ready_to_export',
+  rev: 4,
+  updated_utc: '2099-04-02T09:18:00Z',
+  version: '1.1',
+  workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: false, rev: 4 }),
+  invalidation: {
+    changed: true,
+    rev: 4,
+    changed_fields: ['ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb'],
+    reopened_steps: [],
+    artifact: { state: 'none', reason: null },
+    reason: 'Updated 1 field(s); no downstream steps reopened.',
+  },
+};
+
+/** POST /edit 412 stale_write payload (verbatim backend contract shape). */
+export const editStaleWrite = {
+  error: 'stale_write',
+  experiment_id: EXP_ID,
+  expected_rev: 3,
+  current_rev: 7,
+  expected_version: '1.0',
+  current_version: '2.0',
+};
+
+/** POST /answers 412 stale_write payload (verbatim backend contract shape). */
+export const answersStaleWrite = {
+  error: 'stale_write',
+  experiment_id: EXP_ID,
+  expected_rev: 3,
+  current_rev: 7,
+  expected_version: '1.0',
+  current_version: '2.0',
 };
 
 /** Structured demo answer for the series blocker (shape-faithful, synthetic). */
@@ -654,10 +946,25 @@ export const exportSuccess = {
   record: { record_id: EXP_ID, schema_version: '1.05', assets: [{ sha256: SYNTH_SHA }] },
   sidecar: { record_id: EXP_ID, schema_version: '1.05', evidence: {} },
   record_id: EXP_ID,
+  // P30.6 — safe basenames only, never an absolute server/mount path.
   artifact_refs: {
-    record_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.json`,
-    sidecar_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.evidence.json`,
+    record_filename: `${EXP_ID}.json`,
+    sidecar_filename: `${EXP_ID}.evidence.json`,
   },
+  // P27.5 — the post-export version triplet the client adopts.
+  rev: 4,
+  updated_utc: '2099-04-02T09:20:00Z',
+  version: '2.0',
+};
+
+/** POST /export 412 stale_write payload (verbatim backend contract shape). */
+export const exportStaleWrite = {
+  error: 'stale_write',
+  experiment_id: EXP_ID,
+  expected_rev: 3,
+  current_rev: 7,
+  expected_version: '1.0',
+  current_version: '2.0',
 };
 
 export const exportConflict = {
@@ -670,11 +977,21 @@ export const exportConflict = {
 export function exportReadyRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
   return {
-    [`GET ${base}`]: { body: { ...experimentDetail, id, status: 'ready_to_export', pending_count: 0 } },
+    [`GET ${base}`]: {
+      body: {
+        ...experimentDetail,
+        id,
+        status: 'ready_to_export',
+        pending_count: 0,
+        workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: false, rev: VERSION_FIELDS.rev }),
+      },
+    },
     [`GET ${base}/pending`]: { body: { pending: [] } },
     [`POST ${base}/validate`]: { body: validateReadyDryRun },
     [`POST ${base}/audit`]: { body: auditNotExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
+    // P29.4 — the shared record-session owner's AgentContext evidence input.
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
@@ -734,6 +1051,63 @@ export const evidenceExported = {
   ],
 };
 
+// P28.5 — the evidence-support classification for the S5 record. `record_rev`
+// matches the rev encoded in `experimentDetail.version` ('1.0' → last segment 0),
+// so the default view is coherent (never falsely "stale"). One field per class so
+// all five render and `counts` sums to field_results.length.
+export const evidenceClassificationResponse = {
+  record_rev: Number(VERSION_FIELDS.version.split('.').pop()),
+  field_results: [
+    {
+      field: 'system.technique',
+      classification: 'supported' as const,
+      value_state: 'confirmed' as const,
+      explanation: 'Backed by observed evidence.',
+      sources: [
+        { source_type: 'spreadsheet' as const, locator: "Sheet 'Campaign Info', field=technique" },
+      ],
+    },
+    {
+      field: 'implicit:edge',
+      classification: 'inferred_candidate' as const,
+      value_state: 'candidate' as const,
+      explanation: 'Proposed by a derivation rule; unconfirmed — not entered as fact.',
+      sources: [{ source_type: 'derivation' as const }],
+    },
+    {
+      field: 'measurement.reduced_spectrum',
+      classification: 'insufficient_evidence' as const,
+      value_state: 'none' as const,
+      explanation: 'Evidence present but the value is not established.',
+      sources: [{ source_type: 'user_confirmation' as const }],
+    },
+    {
+      field: 'sample.material.formula',
+      classification: 'conflicting_evidence' as const,
+      value_state: 'candidate' as const,
+      explanation: 'Evidence asserts incompatible values; needs human resolution.',
+      sources: [
+        { source_type: 'user_confirmation' as const },
+        { source_type: 'spreadsheet' as const, locator: "Sheet 'Sample', field=formula" },
+      ],
+    },
+    {
+      field: 'sample.notes',
+      classification: 'unknown' as const,
+      value_state: 'none' as const,
+      explanation: 'No defensible value.',
+      sources: [],
+    },
+  ],
+  counts: {
+    supported: 1,
+    inferred_candidate: 1,
+    insufficient_evidence: 1,
+    conflicting_evidence: 1,
+    unknown: 1,
+  },
+};
+
 export const artifactsExported = {
   record: {
     record_id: EXP_ID,
@@ -747,8 +1121,9 @@ export const artifactsExported = {
     generated_utc: '2099-03-05T21:05:48Z',
     evidence: { 'system.technique': [{ source_type: 'spreadsheet' }] },
   },
-  record_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.json`,
-  sidecar_path: `/tmp/isaac-ui-workspace/${EXP_ID}/records/${EXP_ID}.evidence.json`,
+  // P30.6 — safe basenames only, never an absolute server/mount path.
+  record_filename: `${EXP_ID}.json`,
+  sidecar_filename: `${EXP_ID}.evidence.json`,
 };
 
 export const sourcePreviewListing = {
@@ -787,16 +1162,227 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
         exported: true,
         record_id: id,
         artifact_refs: {
-          record_path: artifactsExported.record_path,
-          sidecar_path: artifactsExported.sidecar_path,
+          record_filename: artifactsExported.record_filename,
+          sidecar_filename: artifactsExported.sidecar_filename,
         },
+        workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
+        artifact: { state: 'current', reason: null },
       },
     },
     [`GET ${base}/evidence`]: { body: evidenceExported },
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
+    // P29.4 — the shared record-session owner's AgentContext pending input.
+    [`GET ${base}/pending`]: { body: { pending: [] } },
     [`GET ${base}/artifacts`]: { body: { ...artifactsExported, record: { ...artifactsExported.record, record_id: id }, sidecar: { ...artifactsExported.sidecar, record_id: id } } },
     [`GET ${base}/source-preview?source=mock_campaign.csv`]: { body: sourcePreviewCsv },
     [`GET ${base}/source-preview?source=raw_scan_listing.txt`]: { body: sourcePreviewListing },
     'GET /api/graph/status': { body: graphStatusUnavailable },
+  };
+}
+
+// --- P26.4 grouped search fixtures (reused by the P26.5 SearchDialog slice) ---
+// Shapes verbatim from the P26.3 backend envelope (GET /api/search): two
+// independently-honest groups, `workspace` (truth plane) and `memory`
+// (advisory leads) — neither group's availability affects the other.
+
+/** GET /api/search?q=xanes — one workspace hit + one memory hit, both available. */
+export const searchResponse = {
+  query: 'xanes',
+  normalized_query: 'xanes',
+  scope: 'all' as const,
+  workspace: {
+    plane: 'truth' as const,
+    provider: 'workspace-store',
+    available: true,
+    reason: null,
+    total: 1,
+    returned: 1,
+    limit: 10,
+    offset: 0,
+    results: [
+      {
+        kind: 'experiment' as const,
+        experiment_id: EXP_ID,
+        record_id: null,
+        title: experimentSummary.title,
+        label: experimentSummary.title,
+        status: 'needs_attention',
+        match: {
+          field: 'title',
+          snippet: experimentSummary.title,
+          reason: 'matched experiment title',
+          tier: 'substring' as const,
+          offsets: [[10, 15]] as [number, number][],
+        },
+        navigate_to: `/record/${EXP_ID}`,
+        plane: 'truth' as const,
+        source: 'workspace-store',
+      },
+    ],
+  },
+  memory: {
+    plane: 'memory' as const,
+    provider: 'memory:sanitized-snapshot',
+    note: MEMORY_NOTE,
+    available: true,
+    reason: null,
+    total: 1,
+    returned: 1,
+    limit: 10,
+    offset: 0,
+    results: [
+      {
+        kind: 'concept' as const,
+        id: 'concept-provenance',
+        path: null,
+        label: 'Provenance',
+        community_name: 'Export Pipeline',
+        match: {
+          field: 'concept.label',
+          snippet: 'Provenance',
+          reason: 'matched concept label',
+          tier: 'token' as const,
+          offsets: [[0, 10]] as [number, number][],
+        },
+        navigate_to: '/memory?concept=concept-provenance',
+        plane: 'memory' as const,
+        source: 'memory:sanitized-snapshot',
+      },
+    ],
+  },
+};
+
+/** Same query, but the memory graph is absent — workspace stays available (P26.5). */
+export const searchResponseMemoryDown = {
+  ...searchResponse,
+  memory: {
+    ...searchResponse.memory,
+    available: false,
+    reason: 'graph_absent' as const,
+    total: 0,
+    returned: 0,
+    results: [],
+  },
+};
+
+/**
+ * Route map for `GET /api/search` keyed exactly like `api.search` builds its
+ * query string (q, then scope, then limit, then offset — only when given).
+ * Defaults to the `q=xanes` case with the fully-available envelope; pass
+ * `query`/`scope`/`limit`/`offset` to match a different call, and `body` to
+ * serve a different envelope (e.g. `searchResponseMemoryDown`).
+ */
+export function searchRoutes(
+  opts: {
+    query?: string;
+    scope?: 'all' | 'workspace' | 'memory';
+    limit?: number;
+    offset?: number;
+    body?: unknown;
+  } = {},
+): Record<string, StubbedRoute> {
+  const query = opts.query ?? 'xanes';
+  let key = `GET /api/search?q=${encodeURIComponent(query)}`;
+  if (opts.scope !== undefined) key += `&scope=${encodeURIComponent(opts.scope)}`;
+  if (opts.limit !== undefined) key += `&limit=${opts.limit}`;
+  if (opts.offset !== undefined) key += `&offset=${opts.offset}`;
+  return { [key]: { body: opts.body ?? searchResponse } };
+}
+
+// --- P30.3 cross-record runtime-record projection fixtures ------------------
+// Shapes verbatim from apps/api/isaac_api/runtime_records.py `_project_one` (the
+// SAFE allow-set: confirmed facts + freshness only). Values are unmistakably
+// synthetic. Consumed by the deterministic crossRecordTriage + the SearchDialog
+// triage surface. These are LEADS (Workspace-derived), never record truth.
+
+const TRIAGE_IDS = [
+  '01SYNTHTRIAGE00000000000001',
+  '01SYNTHTRIAGE00000000000002',
+  '01SYNTHTRIAGE00000000000003',
+  '01SYNTHTRIAGE00000000000004',
+];
+
+/** Four projected records spanning the triage states (needs-attention+blocked,
+ * ready-to-export, in-review-with-conflict, exported/done). */
+export const runtimeRecords = [
+  {
+    experiment_id: TRIAGE_IDS[0],
+    title: 'Synthetic XANES — Needs Attention',
+    status: 'needs_attention',
+    pending_count: 5,
+    exported: false,
+    record_id: null,
+    workflow: { current_step: 'complete_metadata', blocked: true, reopened: false },
+    evidence_counts: { supported: 3, inferred_candidate: 1, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 2 },
+    artifact_state: 'none',
+    record_rev: 4,
+    updated_utc: '2099-07-01T00:00:00Z',
+    navigate_to: `/record/${TRIAGE_IDS[0]}`,
+  },
+  {
+    experiment_id: TRIAGE_IDS[1],
+    title: 'Synthetic XANES — Ready to Export',
+    status: 'ready_to_export',
+    pending_count: 0,
+    exported: false,
+    record_id: null,
+    workflow: { current_step: 'export', blocked: false, reopened: false },
+    evidence_counts: { supported: 9, inferred_candidate: 0, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 0 },
+    artifact_state: 'none',
+    record_rev: 7,
+    updated_utc: '2099-07-02T00:00:00Z',
+    navigate_to: `/record/${TRIAGE_IDS[1]}`,
+  },
+  {
+    experiment_id: TRIAGE_IDS[2],
+    title: 'Synthetic XANES — Conflicting Evidence',
+    status: 'in_review',
+    pending_count: 0,
+    exported: false,
+    record_id: null,
+    workflow: { current_step: 'review_export_readiness', blocked: false, reopened: true },
+    evidence_counts: { supported: 5, inferred_candidate: 0, insufficient_evidence: 1, conflicting_evidence: 2, unknown: 0 },
+    artifact_state: 'none',
+    record_rev: 11,
+    updated_utc: '2099-07-03T00:00:00Z',
+    navigate_to: `/record/${TRIAGE_IDS[2]}`,
+  },
+  {
+    experiment_id: TRIAGE_IDS[3],
+    title: 'Synthetic XANES — Exported Record',
+    status: 'done',
+    pending_count: 0,
+    exported: true,
+    record_id: TRIAGE_IDS[3],
+    workflow: { current_step: null, blocked: false, reopened: false },
+    evidence_counts: { supported: 9, inferred_candidate: 0, insufficient_evidence: 0, conflicting_evidence: 0, unknown: 0 },
+    artifact_state: 'stale',
+    record_rev: 13,
+    updated_utc: '2099-07-04T00:00:00Z',
+    navigate_to: `/record/${TRIAGE_IDS[3]}`,
+  },
+];
+
+/**
+ * Route map for GET /api/runtime/records keyed exactly as `api.getRuntimeRecords`
+ * builds each chip's query string. Each body is pre-filtered to mirror the real
+ * backend's server-side filter (so the fixture is faithful, not a merged blob).
+ */
+export function runtimeRecordsRoutes(): Record<string, StubbedRoute> {
+  const body = (rows: typeof runtimeRecords) => ({ records: rows, total: rows.length });
+  return {
+    'GET /api/runtime/records?status=needs_attention': {
+      body: body(runtimeRecords.filter((r) => r.status === 'needs_attention')),
+    },
+    'GET /api/runtime/records?workflow_state=blocked': {
+      body: body(runtimeRecords.filter((r) => r.workflow.blocked)),
+    },
+    'GET /api/runtime/records?has_conflict=true': {
+      body: body(runtimeRecords.filter((r) => r.evidence_counts.conflicting_evidence >= 1)),
+    },
+    'GET /api/runtime/records?status=ready_to_export': {
+      body: body(runtimeRecords.filter((r) => r.status === 'ready_to_export')),
+    },
   };
 }
 
@@ -813,16 +1399,91 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
         exported: true,
         record_id: id,
         artifact_refs: {
-          record_path: artifactsExported.record_path,
-          sidecar_path: artifactsExported.sidecar_path,
+          record_filename: artifactsExported.record_filename,
+          sidecar_filename: artifactsExported.sidecar_filename,
         },
+        workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
+        artifact: { state: 'current', reason: null },
       },
     },
     [`GET ${base}/pending`]: { body: { pending: [] } },
     [`POST ${base}/validate`]: { body: validateExported },
     [`POST ${base}/audit`]: { body: auditExported },
     [`GET ${base}/warnings`]: { body: warningsDryRun },
+    // P29.4 — the shared record-session owner's AgentContext evidence input.
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsExported },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
+}
+
+// --- P27.6 conditional-GET (revision-aware live-sync) fixtures ---------------
+//
+// The backend now honours `If-None-Match` on GET /api/experiments/{id}: 304 (no
+// body) when unchanged, 200 + fresh detail + new ETag when changed. These model
+// the client half's poll of that one endpoint.
+
+/** The record AFTER a change elsewhere: a bumped rev + a NEW version/ETag. */
+export const experimentDetailChanged = {
+  ...experimentDetail,
+  rev: 9,
+  updated_utc: '2099-04-02T10:00:00Z',
+  version: '2.0',
+};
+
+/**
+ * A GET /api/experiments/{id} route-thunk that models a conditional GET: it
+ * answers 304 (unchanged, no body) for the first `unchangedTicks` polls, then
+ * 200 with a changed detail carrying a NEW version + ETag on every poll after.
+ * The client keeps sending its OLD If-None-Match token, so once the record has
+ * changed it keeps reading "changed" until the screen adopts the fresh version —
+ * which is exactly why the hook's stale-guard + onChanged-once wiring matters.
+ */
+export function conditionalGetSequence(
+  id: string = EXP_ID,
+  opts: { unchangedTicks?: number; newVersion?: string } = {},
+): () => RouteResult {
+  const unchanged = opts.unchangedTicks ?? 2;
+  const newVersion = opts.newVersion ?? experimentDetailChanged.version;
+  const changed = { ...experimentDetailChanged, id, version: newVersion };
+  let call = 0;
+  return () => {
+    call += 1;
+    if (call <= unchanged) return { status: 304, etag: `"${experimentDetail.version}"` };
+    return { status: 200, body: changed, etag: `"${newVersion}"` };
+  };
+}
+
+/**
+ * A stateful GET /api/experiments/{id} route that models real ETag semantics for
+ * live-sync integration tests. It serves BOTH the bundle's plain GET (no token →
+ * always the current detail) and the poller's conditional GET (token → 304 iff
+ * the token equals the current server version, else 200 + the fresh detail). Call
+ * `bump()` to simulate a change elsewhere: the version advances to `experiment
+ * DetailChanged.version`, so a poller still holding the old token next reads 200.
+ */
+export function liveDetailRoute(id: string = EXP_ID): {
+  route: (init?: RequestInit) => RouteResult;
+  bump: () => void;
+} {
+  let version = experimentDetail.version;
+  const detailFor = () => ({
+    ...experimentDetail,
+    id,
+    version,
+    rev: version === experimentDetail.version ? experimentDetail.rev : experimentDetailChanged.rev,
+  });
+  const bump = () => {
+    version = experimentDetailChanged.version;
+  };
+  const route = (init?: RequestInit): RouteResult => {
+    const inm = (init?.headers as Record<string, string> | undefined)?.['If-None-Match'];
+    if (inm) {
+      return inm === `"${version}"`
+        ? { status: 304, etag: `"${version}"` }
+        : { status: 200, body: detailFor(), etag: `"${version}"` };
+    }
+    return { status: 200, body: detailFor(), etag: `"${version}"` };
+  };
+  return { route, bump };
 }

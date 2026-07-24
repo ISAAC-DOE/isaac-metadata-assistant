@@ -4,25 +4,30 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
-import { WorkflowSpine, buildSpine } from '../components/WorkflowSpine';
+import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
-import { AssistantPanel } from '../components/AssistantPanel';
-import { SourceTypeToken } from '../components/EvidenceRow';
+import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
+import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { CircleAlert, ExternalLink, FileText } from '../components/icons';
+import { CircleAlert, ExternalLink } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
+import { useRecordSession } from '../lib/useRecordSession';
+import type { AgentContext } from '../lib/assistantAgent';
 import {
   draftGroupsToFieldGroups,
+  pendingSummary,
+  stripLifecycleSuffix,
   toAdvisoryResult,
   toAuditResult,
   toValidationResult,
 } from '../lib/adapt';
 import { compose } from '../lib/assistantComposer';
-import type { ApiEvidenceEntry, DraftField, RecordBundle } from '../lib/types';
+import type { ApiEvidenceEntry, RecordBundle } from '../lib/types';
 
 /**
  * S3 · Review Record — the core workbench, live from the record bundle
@@ -36,14 +41,35 @@ export function RecordWorkbench() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getRecordBundle(id), [id]);
 
+  // P29.4 — the ONE shared record-session owner for this record: the single
+  // poller + the authoritative version + the live P29.3 AgentContext the
+  // assistant reads. On a change signal it invalidates any stale staged proposal
+  // and silently refetches this read-only bundle (never blanks to loading). The
+  // fetched bundle stays authoritative; the poller only tells us WHEN to refresh.
+  const detail = bundle.status === 'data' ? bundle.data.detail : undefined;
+  const session = useRecordSession(id, {
+    detail,
+    onChange: () => bundle.reloadSilent(),
+  });
+  const degraded = session.syncDegraded;
+
+  // P29.4b — after a confirmed proposal write, recompute the shared record state
+  // (manual fields, workflow, evidence, export readiness) and refetch the bundle
+  // so the manual UI reflects the new value.
+  const onAgentRefresh = () => {
+    session.refresh();
+    bundle.reloadSilent();
+  };
+
   if (bundle.status !== 'data') {
     return (
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenReview} />}
-        sidebar={<WorkflowSpine steps={buildSpine('draft')} recordId={id} />}
+        sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="pad"
       >
+        <h1 className="sr-only">{LABELS.screenReview}</h1>
         {bundle.status === 'loading' ? (
           <LoadingPanel label="Loading the record from the local backend…" />
         ) : (
@@ -53,10 +79,50 @@ export function RecordWorkbench() {
     );
   }
 
-  return <LoadedWorkbench id={id} bundle={bundle.data} />;
+  return (
+    <LoadedWorkbench
+      id={id}
+      bundle={bundle.data}
+      degraded={degraded}
+      agentContext={session.context}
+      agentDegraded={session.degraded}
+      onManualRefresh={bundle.reload}
+      onAgentRefresh={onAgentRefresh}
+    />
+  );
 }
 
-function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
+// The review-screen INTENT pills. Every entry is an INTENTS-native, target-free
+// read intent with a repository-native Title Case label (the panel drops any that
+// are not in the frozen registry). Read-only: none mutates — the only write is an
+// explicit Confirm on a staged proposal, routed through confirmProposal.
+const REVIEW_AGENT_PROMPTS: AgentPrompt[] = [
+  { intent: 'explain_current_state', label: 'Explain the Current Step' },
+  { intent: 'identify_next_missing_field', label: 'Identify the Next Missing Field' },
+  { intent: 'explain_step_blocker', label: 'Explain What Is Blocking' },
+  { intent: 'show_inferred_candidates', label: 'Show Inferred Candidates' },
+  { intent: 'review_evidence_conflicts', label: 'Review Evidence Conflicts' },
+  { intent: 'explain_unknown', label: 'Explain Unknown Fields' },
+  { intent: 'review_export_readiness', label: 'Review Export Readiness' },
+];
+
+function LoadedWorkbench({
+  id,
+  bundle,
+  degraded,
+  agentContext,
+  agentDegraded,
+  onManualRefresh,
+  onAgentRefresh,
+}: {
+  id: string;
+  bundle: RecordBundle;
+  degraded: boolean;
+  agentContext: AgentContext | undefined;
+  agentDegraded: boolean;
+  onManualRefresh: () => void;
+  onAgentRefresh: () => void;
+}) {
   const navigate = useNavigate();
   const { detail, pending, validate, audit, warnings, evidence, graph } = bundle;
 
@@ -68,24 +134,10 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
     () => draftGroupsToFieldGroups(bundle.groups, evidenceByPath),
     [bundle.groups, evidenceByPath],
   );
-  const fieldCount = groups.reduce((n, g) => n + g.fields.length, 0);
 
-  // User toggles override the group's default expandedness.
+  // Every group starts collapsed on initial load; user toggles override that.
   const [toggles, setToggles] = useState<Record<string, boolean>>({});
-  const isExpanded = (block: string, collapsedByDefault: boolean) =>
-    toggles[block] ?? !collapsedByDefault;
-
-  const firstPath = groups[0]?.fields[0]?.path;
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const effectivePath = selectedPath ?? firstPath;
-
-  const selectedField = useMemo<DraftField | undefined>(() => {
-    for (const group of groups) {
-      const found = group.fields.find((f) => f.path === effectivePath);
-      if (found) return found;
-    }
-    return undefined;
-  }, [groups, effectivePath]);
+  const isExpanded = (block: string) => toggles[block] ?? false;
 
   // --- the three signals, each from its own endpoint, each its own segment ---
   // Pre-export, validation is a DRY-RUN and audit has nothing to count — those
@@ -105,85 +157,43 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
       ? `Draft assembled · ${pending.length} fields to confirm`
       : 'Draft complete · ready to export';
 
+  // D8 — the right rail is the assistant ONLY (advisory). Deterministic evidence
+  // lives inline on every field row (truth, in the main column); the whole-record
+  // Evidence Trail affordance now sits beneath the WorkflowSpine (see `sidebar`).
   const rightPanel = (
-    <aside className="record-right" aria-label="Evidence and assistant">
-      <div className="evidence-slot">
-        <section className="card ev-panel-card" aria-label="Evidence for selected field">
-          <div className="ev-panel-head">
-            <span className="ev-panel-title">
-              <FileText size={15} strokeWidth={2} aria-hidden="true" />
-              {LABELS.evidence}
-            </span>
-            <span className="ev-panel-badge">deterministic</span>
-          </div>
-          {selectedField ? (
-            <>
-              <div className="ev-panel-for">
-                for <span className="mono">{selectedField.path}</span>
-              </div>
-              {(selectedField.evidence ?? []).map((ev, i) => (
-                <dl className="ev-field" key={i} style={{ marginBottom: 8 }}>
-                  <dt style={{ gridColumn: '1 / -1', marginBottom: 2 }}>
-                    <SourceTypeToken sourceType={ev.source_type} />
-                  </dt>
-                  {ev.source_file && (
-                    <>
-                      <dt>source_file</dt>
-                      <dd>{ev.source_file}</dd>
-                    </>
-                  )}
-                  {ev.locator && (
-                    <>
-                      <dt>locator</dt>
-                      <dd>{ev.locator}</dd>
-                    </>
-                  )}
-                  {ev.quote && (
-                    <>
-                      <dt>quote</dt>
-                      <dd className="quote">"{ev.quote}"</dd>
-                    </>
-                  )}
-                  {ev.rule && (
-                    <>
-                      <dt>rule</dt>
-                      <dd style={{ whiteSpace: 'normal' }}>{ev.rule}</dd>
-                    </>
-                  )}
-                </dl>
-              ))}
-            </>
-          ) : (
-            <p className="ev-panel-for">Select a field to load its evidence.</p>
-          )}
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}
-            onClick={() => navigate(ROUTES.evidence(id))}
-          >
-            <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
-            {LABELS.evidenceTrail} · {evidence.length} entries
-          </button>
-        </section>
-      </div>
-
-      <div className="right-divider" aria-hidden="true" />
-
+    <AssistantDrawer railClassName="record-right narrow">
       <AssistantPanel
         {...compose({ context: 'review', bundle })}
+        experimentId={id}
+        recordRev={detail.rev}
         availability={graph.availability}
+        agentContext={agentContext}
+        degraded={agentDegraded}
+        agentPrompts={REVIEW_AGENT_PROMPTS}
+        onRefresh={onAgentRefresh}
       />
-    </aside>
+    </AssistantDrawer>
   );
 
-  const spine = buildSpine(detail.exported ? 'validate' : 'draft', {
-    draft: { meta: `reviewing ${fieldCount} fields` },
-    complete: {
-      meta:
-        pending.length > 0 ? `${pending.length} fields need you` : 'all fields confirmed',
-    },
-  });
+  // D8 — the whole-record Evidence Trail affordance, moved out of the (removed)
+  // right-rail evidence panel to sit directly beneath the workflow. It reuses the
+  // EXISTING /evidence route (ROUTES.evidence) — no new route or evidence system.
+  const sidebar = (
+    <div className="record-aside">
+      <WorkflowSpine workflow={detail.workflow} recordId={id} />
+      <button
+        type="button"
+        className="evidence-trail-link"
+        onClick={() => navigate(ROUTES.evidence(id))}
+      >
+        <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
+        <span className="evidence-trail-link-label">{LABELS.evidenceTrail}</span>
+        <span className="evidence-trail-link-count">
+          {evidence.length} {evidence.length === 1 ? 'entry' : 'entries'}
+        </span>
+      </button>
+    </div>
+  );
 
   return (
     <AppShell
@@ -191,14 +201,14 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
       topBar={
         <TopBar
           variant="record"
-          title={detail.title}
+          title={stripLifecycleSuffix(detail.title)}
           filename={
-            detail.exported && detail.record_id ? `${detail.record_id}.json` : `draft · ${detail.id}`
+            detail.exported && detail.record_id ? `${detail.record_id}.json` : `${detail.id}`
           }
           stateChip={detail.exported ? 'exported' : 'draft'}
         />
       }
-      sidebar={<WorkflowSpine steps={spine} recordId={id} />}
+      sidebar={sidebar}
       rightPanel={rightPanel}
       statusBar={
         <StatusBar
@@ -213,6 +223,9 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
       }
       mainPad="pad"
     >
+      <h1 className="sr-only">{LABELS.screenReview}</h1>
+      <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
+
       {pending.length > 0 && (
         <div className="needsyou-banner" role="note">
           <CircleAlert className="needsyou-icon" size={20} strokeWidth={2.2} aria-hidden="true" />
@@ -224,14 +237,28 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
               These are values the system refuses to guess. Confirm each before this record can
               export — expected, not a failure.
             </p>
-            <ul className="needsyou-list">
-              {pending.map((p) => (
-                <li key={p.id}>
-                  <span className="needsyou-q">{p.question}</span>
-                  {p.about && <span className="needsyou-about mono">{p.about}</span>}
-                </li>
-              ))}
-            </ul>
+            {/* D9/C2 — a NUMBERED list: each item shows the concise structured
+             * label as the primary line (never the raw identifier) and its
+             * technical locator exactly once as a demoted mono token. The
+             * pending data, questions, and ordering are unchanged. */}
+            <ol className="needsyou-list">
+              {pending.map((p, i) => {
+                const summary = pendingSummary(p);
+                return (
+                  <li key={p.id}>
+                    <span className="needsyou-num" aria-hidden="true">
+                      {i + 1}
+                    </span>
+                    <span className="needsyou-item">
+                      <span className="needsyou-q">{summary.label}</span>
+                      {summary.locator && (
+                        <span className="needsyou-about mono">{summary.locator}</span>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
           </div>
           <button
             type="button"
@@ -247,15 +274,13 @@ function LoadedWorkbench({ id, bundle }: { id: string; bundle: RecordBundle }) {
         <FieldGroup
           key={group.block}
           group={group}
-          expanded={isExpanded(group.block, group.collapsedByDefault)}
+          expanded={isExpanded(group.block)}
           onToggle={() =>
             setToggles((prev) => ({
               ...prev,
-              [group.block]: !isExpanded(group.block, group.collapsedByDefault),
+              [group.block]: !isExpanded(group.block),
             }))
           }
-          selectedPath={effectivePath}
-          onSelectField={(field) => setSelectedPath(field.path)}
         />
       ))}
     </AppShell>

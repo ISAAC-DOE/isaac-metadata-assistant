@@ -15,7 +15,7 @@ export function SettingsPage() {
     >
       <div className="placeholder">
         <span className="eyebrow">Local Configuration</span>
-        <h2>{LABELS.navSettings}</h2>
+        <h1>{LABELS.navSettings}</h1>
         <p>
           Local, offline settings only — no telemetry, no analytics, no cloud sync. The data regime
           is fixed to synthetic in this build. Minimal placeholder for the first build.

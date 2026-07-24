@@ -5,7 +5,7 @@
  * from the server and are passed through faithfully.
  */
 
-import { LABELS, titleCase } from './labels';
+import { LABELS, formatCreatedDate, titleCase } from './labels';
 import type {
   AdvisoryResult,
   ApiAuditResponse,
@@ -54,27 +54,48 @@ const GROUP_ORDER: { key: QueueGroupKey; label: string }[] = [
 
 // --- S1 queue -----------------------------------------------------------
 
-function trailingFor(s: ApiExperimentSummary, group: QueueGroupKey): ExperimentTrailing {
+// P33 S1 (D1) — the server-authored title carries a trailing lifecycle suffix
+// (e.g. "… · New Draft"). The dashboard card now shows its own lifecycle badge,
+// so a KNOWN suffix is stripped for display; anything else (unrecognized or
+// absent) is a safe fallback that keeps the full title untouched.
+const KNOWN_TITLE_SUFFIXES = [
+  ' · New Draft',
+  ' · Partially Completed',
+  ' · Export Review Required',
+  ' · Ready to Export',
+  ' · Exported Record',
+] as const;
+
+export function stripLifecycleSuffix(title: string): string {
+  const hit = KNOWN_TITLE_SUFFIXES.find((suffix) => title.endsWith(suffix));
+  return hit ? title.slice(0, -hit.length) : title;
+}
+
+/** Exported for direct unit testing (P33 S1); not otherwise used outside this file. */
+export function trailingFor(s: ApiExperimentSummary, group: QueueGroupKey): ExperimentTrailing {
   switch (group) {
     case 'needsAttention':
       return { needsYouCount: s.pending_count };
-    case 'done':
-      return { exported: true };
     default:
-      // in_review / ready: the group header names the state; no PASS is claimed on
-      // a row (the reserved verdict only appears after real validation, on S6).
+      // in_review / ready / done: the group header (and, for done, the lifecycle
+      // badge) already names the state; no PASS/exported chip is claimed on a
+      // row (the reserved verdict only appears after real validation, on S6).
       return {};
   }
 }
 
-function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary {
+/** Exported for direct unit testing (P33 S1); the queue mapping below is the
+ * only real caller. */
+export function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary {
   const group = STATUS_TO_GROUP[s.status];
   return {
     id: s.id,
-    title: s.title,
+    title: stripLifecycleSuffix(s.title),
     technique: TECHNIQUE,
     idOrDraft: s.exported && s.record_id ? s.record_id : 'draft',
     meta: s.created_utc ? `created ${s.created_utc.slice(0, 10)}` : undefined,
+    lifecycle: s.exported ? 'exported' : 'draft',
+    date: s.created_utc ? formatCreatedDate(s.created_utc) : undefined,
     group,
     trailing: trailingFor(s, group),
   };
@@ -226,6 +247,23 @@ export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
     demo_answer: item.demo_answer
       ? { value: item.demo_answer.value, label: item.demo_answer.label }
       : undefined,
+  };
+}
+
+/**
+ * P33 S4 (D9/C2) — the presentation-only summary for one /pending item in the
+ * S3 missing-fields banner. It NEVER rewrites, guesses, or parses meaning from
+ * the backend question:
+ *  - `label` is a CONCISE label read straight from the structured `kind`
+ *    (reusing KIND_LABEL). When `kind` is not a known structured kind, it falls
+ *    back to the FULL original question verbatim — never a re-cased/parsed guess.
+ *  - `locator` is the technical locator (`about`) surfaced exactly once, or null.
+ * Pure: it does not mutate the item, and the underlying question is unchanged.
+ */
+export function pendingSummary(item: ApiPendingItem): { label: string; locator: string | null } {
+  return {
+    label: KIND_LABEL[item.kind] ?? item.question,
+    locator: item.about ?? null,
   };
 }
 

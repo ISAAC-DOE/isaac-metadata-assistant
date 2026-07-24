@@ -1,65 +1,118 @@
 import './workflow.css';
 import { Link } from 'react-router-dom';
-import { Check, Pencil, Lock } from './icons';
+import { Check, Pencil, Lock, TriangleAlert, CircleDashed } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
-import type { SpineStep } from '../lib/types';
+import type { ApiWorkflow, ApiWorkflowStep } from '../lib/types';
 
 interface WorkflowSpineProps {
-  steps: SpineStep[];
-  /** The record id, so already-reached steps (done/active) can link back to their
-   * surface. Omitted where there is no record context — then no step navigates. */
+  /** The backend-derived workflow. `null` renders the loading skeleton (labels
+   * only — never a fabricated count or a guessed current step). The client
+   * renders this verbatim; it never re-derives step order or completion. */
+  workflow: ApiWorkflow | null;
+  /** The record id, so navigable steps can link back to their surface. Omitted
+   * where there is no record context — then no step navigates. */
   recordId?: string;
 }
 
-// Only these gates are standalone destinations. Validate/Audit are read-outs
-// shown within the export/record surfaces, not routes of their own, so they
-// never become links even when active.
+// The canonical step id → route. review_export_readiness and export both live on
+// the export surface. These are the ONLY destinations; there is no "skip" route.
 const STEP_ROUTE: Record<string, ((id: string) => string) | undefined> = {
-  draft: ROUTES.record,
-  complete: ROUTES.complete,
+  load_record: ROUTES.record,
+  complete_metadata: ROUTES.complete,
+  review_evidence: ROUTES.evidence,
+  review_export_readiness: ROUTES.export,
   export: ROUTES.export,
 };
 
+// Fixed canonical order + labels for the loading skeleton only. The live spine
+// always uses the backend-provided labels; this exists purely so the shape is
+// visible before the bundle arrives, with NO fabricated meta.
+const SKELETON_STEPS: { id: string; label: string }[] = [
+  { id: 'load_record', label: 'Load Record' },
+  { id: 'complete_metadata', label: 'Complete Metadata' },
+  { id: 'review_evidence', label: 'Review Evidence' },
+  { id: 'review_export_readiness', label: 'Review Export Readiness' },
+  { id: 'export', label: 'Export' },
+];
+
+// Only completed and current steps navigate. Gating is preserved by keeping
+// blocked/reopened steps non-interactive — forward motion is earned by resolving
+// the current gate, never by clicking ahead. A reopened step is a regressed
+// prerequisite; it is reached again by resolving the current step first.
+function isNavigable(state: ApiWorkflowStep['state']): boolean {
+  return state === 'completed' || state === 'current';
+}
+
+function Disc({ state }: { state: ApiWorkflowStep['state'] }) {
+  return (
+    <span className="spine-disc" aria-hidden="true">
+      {state === 'completed' && <Check size={14} strokeWidth={2.6} />}
+      {state === 'current' && <Pencil size={13} strokeWidth={2.2} />}
+      {state === 'reopened' && <TriangleAlert size={13} strokeWidth={2.2} />}
+      {state === 'blocked' && <Lock size={12} strokeWidth={2} />}
+    </span>
+  );
+}
+
 /**
- * The gated pipeline (Draft → Complete → Export → Validate → Audit) showing the
- * current blocking gate. Locked steps are not clickable — forward motion is
- * earned by resolving gates, never by dismissing them. No "skip"/"export anyway".
- * Steps already reached (done/active) link back to their surface so a reviewer is
- * never stranded; locked future steps stay non-interactive and semantically locked.
+ * The permanent canonical workflow spine (Load Record → Complete Metadata →
+ * Review Evidence → Review Export Readiness → Export). Order and per-step state
+ * are DERIVED by the backend and rendered here verbatim — the client never
+ * re-derives completion. `current` is visually distinct and carries
+ * aria-current="step"; `completed` steps stay green and link back to their
+ * surface; `reopened` (was-complete, now regressed) is distinct from a
+ * never-started `blocked` step by both style and its reason text; blocked and
+ * reopened steps are non-navigable and aria-disabled. Never color-only — every
+ * state keeps its text label (and, when unsatisfied, a reason).
  */
-export function WorkflowSpine({ steps, recordId }: WorkflowSpineProps) {
+export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
+  if (workflow === null) {
+    // Loading skeleton: labels only, muted discs, nothing navigable, no counts.
+    return (
+      <nav className="spine" aria-label="Workflow pipeline">
+        <div className="spine-eyebrow eyebrow">{LABELS.workflowEyebrow}</div>
+        <ol className="spine-steps">
+          {SKELETON_STEPS.map((step) => (
+            <li key={step.id} className="spine-step skeleton" aria-disabled>
+              <span className="spine-step-row">
+                <span className="spine-disc" aria-hidden="true">
+                  <CircleDashed size={13} strokeWidth={2} />
+                </span>
+                <span className="spine-text">
+                  <span className="spine-label">{step.label}</span>
+                </span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      </nav>
+    );
+  }
+
   return (
     <nav className="spine" aria-label="Workflow pipeline">
       <div className="spine-eyebrow eyebrow">{LABELS.workflowEyebrow}</div>
       <ol className="spine-steps">
-        {steps.map((step) => {
-          const route = STEP_ROUTE[step.key];
-          // Never link a locked (future) gate — gating is preserved by keeping
-          // forward steps non-interactive. Done/active steps with a real route
-          // become links back to that surface.
+        {workflow.ordered_steps.map((step) => {
+          const route = STEP_ROUTE[step.id];
           const href =
-            recordId && route && step.state !== 'locked' ? route(recordId) : undefined;
-          const disc = (
-            <span className="spine-disc" aria-hidden="true">
-              {step.state === 'done' && <Check size={14} strokeWidth={2.6} />}
-              {step.state === 'active' &&
-                (step.number !== undefined ? step.number : <Pencil size={13} strokeWidth={2.2} />)}
-              {step.state === 'locked' && <Lock size={12} strokeWidth={2} />}
-            </span>
-          );
+            recordId && route && isNavigable(step.state) ? route(recordId) : undefined;
+          const disc = <Disc state={step.state} />;
           const text = (
             <span className="spine-text">
               <span className="spine-label">{step.label}</span>
-              {step.meta && <span className="spine-meta">{step.meta}</span>}
+              {/* The reason is shown for unsatisfied steps only, giving a
+               * non-color signal that also distinguishes reopened from blocked. */}
+              {step.reason && <span className="spine-meta">{step.reason}</span>}
             </span>
           );
           return (
             <li
-              key={step.key}
+              key={step.id}
               className={`spine-step ${step.state}`}
-              aria-current={step.state === 'active' ? 'step' : undefined}
-              aria-disabled={step.state === 'locked' ? true : undefined}
+              aria-current={step.current ? 'step' : undefined}
+              aria-disabled={isNavigable(step.state) ? undefined : true}
             >
               {href ? (
                 <Link className="spine-step-row spine-step-link" to={href}>
@@ -78,27 +131,4 @@ export function WorkflowSpine({ steps, recordId }: WorkflowSpineProps) {
       </ol>
     </nav>
   );
-}
-
-/** The shared spine gate order, parameterized by which step is active. */
-export function buildSpine(
-  active: 'draft' | 'complete' | 'export' | 'validate' | 'audit',
-  overrides?: Partial<Record<string, Partial<SpineStep>>>,
-): SpineStep[] {
-  // Default meta is the skeleton shown before live data (or a caller override)
-  // arrives — shape only, never a fabricated count. Screens that know the real
-  // numbers pass them in via `overrides`.
-  const order: { key: string; label: string; meta: string }[] = [
-    { key: 'draft', label: LABELS.stepDraft, meta: 'reviewing fields' },
-    { key: 'complete', label: LABELS.stepComplete, meta: 'fields need you' },
-    { key: 'export', label: LABELS.stepExport, meta: 'unlocks when 0 remain' },
-    { key: 'validate', label: LABELS.stepValidate, meta: 'the hard gate' },
-    { key: 'audit', label: LABELS.stepAudit, meta: 'evidence coverage' },
-  ];
-  const activeIndex = order.findIndex((s) => s.key === active);
-  return order.map((s, i) => {
-    const state: SpineStep['state'] = i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'locked';
-    const base: SpineStep = { key: s.key, label: s.label, state, meta: state === 'done' ? undefined : s.meta };
-    return { ...base, ...overrides?.[s.key] };
-  });
 }

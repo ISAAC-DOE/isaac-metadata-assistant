@@ -4,13 +4,15 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
-import { WorkflowSpine, buildSpine } from '../components/WorkflowSpine';
+import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { VerdictCard } from '../components/VerdictCard';
 import { CoverageBadge } from '../components/CoverageBadge';
 import { AdvisoryChip } from '../components/AdvisoryChip';
 import { ArtifactCard } from '../components/ArtifactCard';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
+import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
 import { ROUTES } from '../lib/routes';
@@ -18,6 +20,7 @@ import { LABELS } from '../lib/labels';
 import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
 import { api, ApiError } from '../lib/api';
+import { useRecordSession } from '../lib/useRecordSession';
 import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
 import type {
   ApiExportResponse,
@@ -33,8 +36,10 @@ type Load =
 interface ExportedArtifacts {
   record: Record<string, unknown>;
   sidecar: Record<string, unknown>;
-  recordPath: string;
-  sidecarPath: string;
+  // P30.6 — safe basenames only (e.g. "<id>.json"), never an absolute
+  // server/mount path. Used to label the artifact cards and name downloads.
+  recordFilename: string;
+  sidecarFilename: string;
   validation: ValidationResult;
 }
 
@@ -43,6 +48,7 @@ type ExportPhase =
   | { name: 'exporting' }
   | { name: 'done'; artifacts: ExportedArtifacts }
   | { name: 'conflict'; message: string }
+  | { name: 'stale'; message: string }
   | { name: 'failed'; errors: { path: string; message: string }[] }
   | { name: 'error'; error: ApiError };
 
@@ -85,9 +91,10 @@ export function ExportReadiness() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenExport} recordId={id} />}
-        sidebar={<WorkflowSpine steps={buildSpine('export')} recordId={id} />}
+        sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="pad"
       >
+        <h1 className="sr-only">{LABELS.screenExport}</h1>
         {load.name === 'loading' ? (
           <LoadingPanel label="Loading validation, coverage and advisory from the local backend…" />
         ) : (
@@ -113,6 +120,27 @@ function LoadedExport({
   const { detail, pending, validate, audit, warnings, graph, artifacts } = data;
   const [phase, setPhase] = useState<ExportPhase>({ name: 'idle' });
   const [viewing, setViewing] = useState<null | 'record' | 'sidecar'>(null);
+  // P27.5 — the optimistic-concurrency token, sent as If-Match on export. Adopted
+  // from a successful export and re-synced whenever a silent refetch swaps in a
+  // fresh detail (LoadedExport is not remounted on refresh, so this effect keeps
+  // the held token in step with the reloaded record — e.g. after a stale refresh).
+  const [currentVersion, setCurrentVersion] = useState(detail.version);
+  useEffect(() => {
+    setCurrentVersion(detail.version);
+  }, [detail.version]);
+
+  // P29.4 — the ONE shared record-session owner. No text input on this surface,
+  // so a change signal can safely trigger a SILENT refetch (updates the readiness
+  // signals without blanking); the owner also invalidates any stale staged
+  // proposal. Export stays ETag-guarded, so a stale export still gets a 412 as
+  // the hard backstop. The poller tracks the held If-Match token (`currentVersion`,
+  // which advances on export before the refetch remounts), so we hand the owner a
+  // detail carrying it.
+  const session = useRecordSession(id, {
+    detail: { ...detail, version: currentVersion },
+    onChange: () => onRefresh(),
+  });
+  const degraded = session.syncDegraded;
 
   // --- artifact "View JSON" modal: a real, focus-trapping dialog --------------
   const modalRef = useRef<HTMLDivElement>(null);
@@ -199,16 +227,17 @@ function LoadedExport({
   const doExport = () => {
     setPhase({ name: 'exporting' });
     api
-      .exportRecord(id)
+      .exportRecord(id, currentVersion)
       .then((resp: ApiExportResponse) => {
         if (resp.ok && resp.record && resp.sidecar) {
+          setCurrentVersion(resp.version); // adopt the post-export token
           setPhase({
             name: 'done',
             artifacts: {
               record: resp.record,
               sidecar: resp.sidecar,
-              recordPath: resp.artifact_refs?.record_path ?? '',
-              sidecarPath: resp.artifact_refs?.sidecar_path ?? '',
+              recordFilename: resp.artifact_refs?.record_filename ?? '',
+              sidecarFilename: resp.artifact_refs?.sidecar_filename ?? '',
               validation: {
                 verdict: resp.official_report?.ok ? 'pass' : 'fail',
                 ok: !!resp.official_report?.ok,
@@ -224,7 +253,16 @@ function LoadedExport({
         }
       })
       .catch((e: ApiError) => {
-        if (e.status === 409) {
+        if (e.status === 412) {
+          // P27.5 stale write: a concurrent edit changed the record. Nothing was
+          // exported. We do NOT auto-refetch — the banner's Refresh reloads the
+          // current state (and adopts the fresh version) on the user's click.
+          setPhase({
+            name: 'stale',
+            message:
+              'This record changed elsewhere. Nothing was exported — no record was written. Refresh to load the current state, then export again.',
+          });
+        } else if (e.status === 409) {
           setPhase({
             name: 'conflict',
             message:
@@ -246,8 +284,8 @@ function LoadedExport({
       ? {
           record: artifacts.record,
           sidecar: artifacts.sidecar,
-          recordPath: artifacts.record_path ?? '',
-          sidecarPath: artifacts.sidecar_path ?? '',
+          recordFilename: artifacts.record_filename ?? '',
+          sidecarFilename: artifacts.sidecar_filename ?? '',
         }
       : null;
   // The artifacts to View/Download: this session's export, else the fetched files.
@@ -255,8 +293,8 @@ function LoadedExport({
     ? {
         record: inSession.record,
         sidecar: inSession.sidecar,
-        recordPath: inSession.recordPath,
-        sidecarPath: inSession.sidecarPath,
+        recordFilename: inSession.recordFilename,
+        sidecarFilename: inSession.sidecarFilename,
       }
     : freshArtifacts;
   const realValidation: ValidationResult | null = inSession
@@ -267,19 +305,24 @@ function LoadedExport({
   const coverage = audit.records.length > 0 ? toAuditResult(audit) : 'pending';
   const advisory = toAdvisoryResult(warnings);
 
-  const recordPath =
-    inSession?.recordPath || detail.artifact_refs.record_path || `records/${detail.record_id}.json`;
-  const sidecarPath =
-    inSession?.sidecarPath ||
-    detail.artifact_refs.sidecar_path ||
-    `records/${detail.record_id}.evidence.json`;
+  // P30.6 — safe basenames only (never a server path). The API returns null
+  // until exported; the fallback below is a locally-constructed filename, not
+  // a server-provided path.
+  const recordFilename =
+    inSession?.recordFilename ||
+    detail.artifact_refs.record_filename ||
+    `${detail.record_id}.json`;
+  const sidecarFilename =
+    inSession?.sidecarFilename ||
+    detail.artifact_refs.sidecar_filename ||
+    `${detail.record_id}.evidence.json`;
   // Never invent a coverage total: while audit data hasn't arrived yet, the
   // sidecar card simply omits the path-count badge (ArtifactCard renders
   // nothing when pathCount is undefined) rather than guessing a number.
   const coverageTotal = coverage === 'pending' ? undefined : coverage.total;
 
-  const download = (content: unknown, path: string) => {
-    const name = path.split('/').pop() || 'artifact.json';
+  const download = (content: unknown, filename: string) => {
+    const name = filename || 'artifact.json';
     const blob = new Blob([JSON.stringify(content, null, 2) + '\n'], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -291,20 +334,18 @@ function LoadedExport({
     URL.revokeObjectURL(url);
   };
 
-  const spine = buildSpine(exported ? 'validate' : 'export', {
-    complete: { meta: `${detail.evidenced_field_count} fields · 0 pending` },
-    export: { meta: exported ? 'record written' : pendingZero ? 'ready' : `${pendingCount} to go` },
-    validate: { meta: exported ? 'official schema' : 'the hard gate' },
-  });
-
   const rightPanel = (
-    <aside className="record-right narrow" aria-label="Assistant">
+    <AssistantDrawer railClassName="record-right narrow">
       <AssistantPanel
         {...compose({ context: 'export', bundle: data })}
+        experimentId={detail.id}
+        recordRev={detail.rev}
         availability={graph.availability}
         note={ROUTE_TO_CLI_NOTE}
+        agentContext={session.context}
+        degraded={session.degraded}
       />
-    </aside>
+    </AssistantDrawer>
   );
 
   return (
@@ -314,13 +355,13 @@ function LoadedExport({
         <TopBar
           variant="record"
           title={detail.title}
-          filename={exported ? recordPath.split('/').pop() : `draft · ${detail.id}`}
+          filename={exported ? recordFilename : `draft · ${detail.id}`}
           stateChip={exported ? 'exported' : undefined}
           recordId={id}
           surface={LABELS.screenExport}
         />
       }
-      sidebar={<WorkflowSpine steps={spine} recordId={id} />}
+      sidebar={<WorkflowSpine workflow={detail.workflow} recordId={id} />}
       rightPanel={rightPanel}
       statusBar={
         <StatusBar
@@ -337,6 +378,23 @@ function LoadedExport({
       }
       mainPad="pad"
     >
+      <h1 className="sr-only">{LABELS.screenExport}</h1>
+      <LiveSyncNote degraded={degraded} onRefresh={onRefresh} />
+
+      {/* P28.2 — the exported record changed after export (records are immutable):
+          surface an honest, non-gating advisory so a stale artifact is never
+          presented as current. Icon + text (not color-only), announced politely. */}
+      {detail.artifact.state === 'stale' && (
+        <div className="artifact-stale-note" role="status">
+          <TriangleAlert size={16} strokeWidth={2} aria-hidden="true" />
+          <span>
+            <strong>Exported artifact is out of date.</strong>{' '}
+            {detail.artifact.reason ??
+              'The record changed after export; the exported artifact no longer reflects the current record.'}
+          </span>
+        </div>
+      )}
+
       {/* Post-export: the real, reserved verdict + the two export artifacts. */}
       {exported && realValidation && (
         <>
@@ -370,17 +428,17 @@ function LoadedExport({
 
               <div className="artifact-row">
                 <ArtifactCard
-                  artifact={{ kind: 'record', path: recordPath, verdict: 'pass' }}
+                  artifact={{ kind: 'record', path: recordFilename, verdict: 'pass' }}
                   onView={viewArtifacts ? (e) => openViewer('record', e.currentTarget) : undefined}
                   onDownload={
-                    viewArtifacts ? () => download(viewArtifacts.record, recordPath) : undefined
+                    viewArtifacts ? () => download(viewArtifacts.record, recordFilename) : undefined
                   }
                 />
                 <ArtifactCard
-                  artifact={{ kind: 'sidecar', path: sidecarPath, pathCount: coverageTotal }}
+                  artifact={{ kind: 'sidecar', path: sidecarFilename, pathCount: coverageTotal }}
                   onView={viewArtifacts ? (e) => openViewer('sidecar', e.currentTarget) : undefined}
                   onDownload={
-                    viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarPath) : undefined
+                    viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarFilename) : undefined
                   }
                 />
               </div>
@@ -469,7 +527,7 @@ function LoadedExport({
 
           {pendingZero && !dryRunOk && (
             <section className="preexport-blocked card">
-              <h3>Would Not Validate Yet</h3>
+              <h2>Would Not Validate Yet</h2>
               <p className="preexport-text">
                 The in-memory dry-run does not pass the official ISAAC schema, so export stays gated.
                 Nothing was written. Resolve these in the draft, then return.
@@ -510,6 +568,24 @@ function LoadedExport({
         <div className="export-conflict" role="alert">
           <Lock size={16} strokeWidth={2} aria-hidden="true" />
           <span>{phase.message}</span>
+        </div>
+      )}
+
+      {phase.name === 'stale' && (
+        <div className="export-conflict" role="alert">
+          <TriangleAlert size={16} strokeWidth={2} aria-hidden="true" />
+          <span>{phase.message}</span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ marginLeft: 10 }}
+            onClick={() => {
+              onRefresh();
+              setPhase({ name: 'idle' });
+            }}
+          >
+            Refresh
+          </button>
         </div>
       )}
 

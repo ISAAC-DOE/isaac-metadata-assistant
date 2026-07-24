@@ -82,6 +82,7 @@ import copy
 import hashlib
 import json
 import os
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Protocol
@@ -150,6 +151,25 @@ MAX_RATIONALE_CHARS: int = 280
 CONCEPT = "concept"
 RATIONALE = "rationale"
 
+# --- P26.2 memory-search constants (see the shared ``_run_memory_search``) ----
+#: Default page size, hard result cap, and post-normalization minimum query
+#: length. Mirror the workspace search core's values so both planes behave the
+#: same; kept independent so the memory plane never imports ``search.py``.
+_MEM_DEFAULT_LIMIT = 10
+_MEM_MAX_RESULTS = 50
+_MEM_MIN_QUERY_LEN = 2
+#: Reused honest reason string for a too-short query (same value the workspace
+#: core emits) — never a verdict.
+_MEM_QUERY_TOO_SHORT = "query_too_short"
+#: Raw query is truncated to this before normalization (bounds the work).
+_MEM_MAX_INPUT_LEN = 256
+#: Snippet policy: values at/below this echo whole; longer text windows around
+#: the first token hit.
+_MEM_SNIPPET_WHOLE_MAX = 120
+_MEM_SNIPPET_WINDOW = 80
+#: Match-tier ranking (smaller sorts first): exact < prefix < token < substring.
+_MEM_TIER_RANK = {"exact": 0, "prefix": 1, "token": 2, "substring": 3}
+
 
 # --- provider seam ------------------------------------------------------------
 
@@ -164,6 +184,7 @@ class MemoryReader(Protocol):
     def file(self, path: str) -> Optional[dict]: ...
     def classify_path(self, path: str) -> str: ...
     def status(self) -> dict: ...
+    def search(self, query: str, limit: int = _MEM_DEFAULT_LIMIT, offset: int = 0) -> dict: ...
 
 
 # --- parsed state -------------------------------------------------------------
@@ -394,6 +415,208 @@ def _prefer_related(cand: tuple, prev: tuple) -> bool:
     if cand[0] != prev[0]:
         return cand[0] > prev[0]
     return (cand[1] or "", cand[2] or "") < (prev[1] or "", prev[2] or "")
+
+
+# --- P26.2 shared memory-search algorithm -------------------------------------
+#
+# One deterministic algorithm both providers delegate to. It reads ONLY the
+# reader's own governance-filtered public methods (``overview`` / ``concepts`` /
+# ``files`` / ``file`` / ``status``) — never a raw ``_GraphState`` /
+# ``_SnapshotState`` collection — so every governance filter (served allowlist,
+# secret/unsafe-path withholding, concept-anchor nulling) is inherited, and no
+# excluded/secret/unsafe path can surface even when the query "matches" its name.
+# Pure stdlib (``unicodedata`` + ``str``): no ``re``, no import of ``search.py``.
+# It reimplements the workspace core's token-AND four-tier ranking locally.
+
+
+def _mem_normalize(text: str) -> str:
+    """Deterministic query/field normalization: NFC, casefold, collapse whitespace."""
+    nfc = unicodedata.normalize("NFC", text)
+    return " ".join(nfc.casefold().split())
+
+
+def _mem_tier(field_cf: str, query_cf: str, tokens: tuple) -> Optional[str]:
+    """Best matching tier of a normalized field against the normalized query.
+
+    Token-AND at every tier: a match requires EVERY query token present. Returns
+    ``None`` when the field does not match at all."""
+    if not field_cf:
+        return None
+    if field_cf == query_cf:
+        return "exact"
+    if field_cf.startswith(query_cf):
+        return "prefix"
+    field_tokens = field_cf.split()
+    if all(t in field_tokens for t in tokens):
+        return "token"
+    if all(t in field_cf for t in tokens):
+        return "substring"
+    return None
+
+
+def _mem_snippet_and_offsets(text: str, tokens: tuple) -> tuple:
+    """A deterministic snippet of ``text`` plus token offsets within it.
+
+    Short values echo whole; long text windows (~80 chars) around the first token
+    hit. Offsets index into the returned snippet (list of ``[start, end]``) so a
+    client can highlight without any server-authored markup."""
+    cf = text.casefold()
+    first = None
+    for t in tokens:
+        i = cf.find(t)
+        if i != -1 and (first is None or i < first):
+            first = i
+    if first is None:
+        first = 0
+
+    if len(text) <= _MEM_SNIPPET_WHOLE_MAX:
+        snippet = text
+    else:
+        start = max(0, first - _MEM_SNIPPET_WINDOW // 2)
+        snippet = text[start:start + _MEM_SNIPPET_WINDOW]
+
+    scf = snippet.casefold()
+    seen = set()
+    for t in tokens:
+        idx = scf.find(t)
+        if idx != -1:
+            seen.add((idx, idx + len(t)))
+    ordered = sorted(seen)
+    if not ordered:
+        # Defensive: a matched candidate always has an in-snippet token, but never
+        # emit an empty offsets list.
+        ordered = [(0, min(len(snippet), 1))]
+    return snippet, [[s, e] for s, e in ordered]
+
+
+def _mem_best_aspect(aspects: list, query_cf: str, tokens: tuple):
+    """Choose the single best-tier aspect of a candidate.
+
+    ``aspects`` is a list of ``(text, field, reason, facet_priority)`` ordered by
+    ascending facet priority, so a tier tie deterministically favors the
+    lower-facet-priority field (like the workspace core's ``_best_aspect``).
+    Returns ``(tier, text, field, reason, facet_priority)`` or ``None``."""
+    best = None  # (tier_rank, order, tier, text, field, reason, facet)
+    for order, (text, field, reason, facet) in enumerate(aspects):
+        if not isinstance(text, str) or not text:
+            continue
+        tier = _mem_tier(_mem_normalize(text), query_cf, tokens)
+        if tier is None:
+            continue
+        rank = _MEM_TIER_RANK[tier]
+        if best is None or rank < best[0]:
+            best = (rank, order, tier, text, field, reason, facet)
+    if best is None:
+        return None
+    return best[2], best[3], best[4], best[5], best[6]
+
+
+def _run_memory_search(reader, query: str, limit: int = _MEM_DEFAULT_LIMIT,
+                       offset: int = 0) -> dict:
+    """The shared, deterministic memory-plane search both providers delegate to.
+
+    Reads only the reader's governance-filtered public surface; NEVER raises (an
+    unavailable/degraded plane returns an honest empty envelope). Ranking is a
+    fully deterministic ascending tuple ``(tier_rank, facet_priority,
+    natural_key, match.field)``; results are truncated to
+    :data:`_MEM_MAX_RESULTS` (that count is ``total``), then paginated."""
+    clamped_limit = max(0, min(limit, _MEM_MAX_RESULTS))
+    clamped_offset = max(0, offset)
+
+    def _empty(available, reason):
+        return {"available": available, "reason": reason, "total": 0,
+                "returned": 0, "limit": clamped_limit, "offset": clamped_offset,
+                "results": []}
+
+    try:
+        ov = reader.overview()
+    except Exception:
+        return _empty(False, "graph_unreadable")
+    if not ov.get("available"):
+        return _empty(False, ov.get("reason"))
+
+    normalized = _mem_normalize((query or "")[:_MEM_MAX_INPUT_LEN])
+    if len(normalized) < _MEM_MIN_QUERY_LEN:
+        return _empty(True, _MEM_QUERY_TOO_SHORT)
+
+    tokens = tuple(normalized.split())
+    try:
+        provider_kind = reader.status().get("provider_kind")
+    except Exception:
+        provider_kind = None
+    source = f"memory:{provider_kind}"
+
+    rows = []  # (sort_key, result)
+
+    def _emit(kind, *, cid, path, label, community_name, tier, field, reason,
+              text, facet, navigate_to):
+        snippet, offsets = _mem_snippet_and_offsets(text, tokens)
+        result = {
+            "kind": kind, "id": cid, "path": path, "label": label,
+            "community_name": community_name, "navigate_to": navigate_to,
+            "plane": "memory", "source": source,
+            "match": {"field": field, "snippet": snippet, "reason": reason,
+                      "tier": tier, "offsets": offsets},
+        }
+        natural_key = (cid if cid is not None else path) or ""
+        rows.append(((_MEM_TIER_RANK[tier], facet, natural_key, field), result))
+
+    for c in reader.concepts():
+        cid = c.get("id")
+        community_name = c.get("community_name")
+        aspects = [
+            (c.get("label"), "concept.label", "matched concept label", 0),
+            (cid, "concept.id", "matched concept identifier", 2),
+            (community_name, "concept.community_name", "matched concept community", 3),
+        ]
+        best = _mem_best_aspect(aspects, normalized, tokens)
+        if best is None:
+            continue
+        tier, text, field, reason, facet = best
+        _emit("concept", cid=cid, path=None, label=c.get("label"),
+              community_name=community_name, tier=tier, field=field, reason=reason,
+              text=text, facet=facet, navigate_to=f"/memory?concept={cid}")
+
+    for f in reader.files():
+        path = f.get("path")
+        community_name = f.get("community_name")
+        aspects = [
+            (path, "file.path", "matched file path", 1),
+            (community_name, "file.community_name", "matched file community", 3),
+            (f.get("file_type"), "file.file_type", "matched file type", 4),
+        ]
+        best = _mem_best_aspect(aspects, normalized, tokens)
+        if best is not None:
+            tier, text, field, reason, facet = best
+            _emit("file", cid=None, path=path, label=path,
+                  community_name=community_name, tier=tier, field=field,
+                  reason=reason, text=text, facet=facet,
+                  navigate_to=f"/memory?file={path}")
+
+        try:
+            detail = reader.file(path)
+        except Exception:
+            detail = None
+        if detail is None:
+            continue
+        for rat in detail.get("rationales") or []:
+            if not isinstance(rat, str) or not rat:
+                continue
+            tier = _mem_tier(_mem_normalize(rat), normalized, tokens)
+            if tier is None:
+                continue
+            _emit("rationale", cid=None, path=path, label=path,
+                  community_name=community_name, tier=tier, field="rationale",
+                  reason="matched rationale text", text=rat, facet=5,
+                  navigate_to=f"/memory?file={path}")
+
+    rows.sort(key=lambda r: r[0])
+    truncated = rows[:_MEM_MAX_RESULTS]
+    total = len(truncated)
+    page = [r for _, r in truncated[clamped_offset:clamped_offset + clamped_limit]]
+    return {"available": True, "reason": None, "total": total,
+            "returned": len(page), "limit": clamped_limit,
+            "offset": clamped_offset, "results": page}
 
 
 # --- reader -------------------------------------------------------------------
@@ -800,6 +1023,11 @@ class LocalGraphArtifactSource:
             "snapshot_schema_version": None,
         }
 
+    def search(self, query: str, limit: int = _MEM_DEFAULT_LIMIT, offset: int = 0) -> dict:
+        """Deterministic memory-plane search; delegates to the shared algorithm
+        (P26.2). Governance filtering is inherited via this reader's public methods."""
+        return _run_memory_search(self, query, limit, offset)
+
 
 # --- sanitized snapshot reader ------------------------------------------------
 
@@ -1026,6 +1254,12 @@ class SanitizedSnapshotSource:
             "source_graph_sha256": state.source_graph_sha256,
             "snapshot_schema_version": state.snapshot_schema_version,
         }
+
+    def search(self, query: str, limit: int = _MEM_DEFAULT_LIMIT, offset: int = 0) -> dict:
+        """Deterministic memory-plane search; delegates to the shared algorithm
+        (P26.2), byte-identical behavior to the local reader modulo the documented
+        rationale truncation. Governance filtering is inherited via public methods."""
+        return _run_memory_search(self, query, limit, offset)
 
 
 # --- P24.10 memory-input fingerprint primitives -------------------------------

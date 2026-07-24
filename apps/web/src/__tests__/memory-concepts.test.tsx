@@ -23,11 +23,17 @@ import {
  */
 
 function renderScreen() {
-  return render(
+  const view = render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ProjectMemory />
     </MemoryRouter>,
   );
+  // P33 S3 (D6): the Concept Lookup moved behind the "Concepts" internal tab.
+  // These tests exercise the SAME card through the tabbed IA — the tablist
+  // renders immediately (independent of the graph fetch), so open it here. The
+  // ?concept= deep-link test below renders its own tree and auto-selects the tab.
+  fireEvent.click(view.getByRole('tab', { name: 'Concepts' }));
+  return view;
 }
 
 /** The provenance panel <div> for a given row button (sibling inside the row's <li>). */
@@ -179,7 +185,7 @@ describe('P24.5 · Concept Lookup — unavailable', () => {
 });
 
 describe('P24.5 · Concept Lookup — keyboard accessibility', () => {
-  it('is activatable via focus + synthesized click, a raw keydown alone does not toggle, aria-expanded tracks state, and there is still no search input', async () => {
+  it('is activatable via focus + synthesized click, a raw keydown alone does not toggle, aria-expanded tracks state, and the screen has no inline/decorative search input', async () => {
     stubFetchRoutes({
       'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/files': { body: memoryFilesUnavailable },
@@ -211,9 +217,36 @@ describe('P24.5 · Concept Lookup — keyboard accessibility', () => {
     fireEvent.click(row);
     expect(row).toHaveAttribute('aria-expanded', 'false');
 
-    // still no search/filter input anywhere on the screen (Phase 26)
+    // P26: the memory SCREEN itself still has no DECORATIVE/INLINE search input.
+    // Real search is the global ⌘K command palette (SearchDialog, mounted in the
+    // TopBar and proven in search-command.test.tsx) — a separate surface, not
+    // part of <ProjectMemory>. This invariant guards against re-adding a fake
+    // inline filter box to the screen, not against search existing at all.
     expect(container.querySelector('input[type="search"]')).toBeNull();
     expect(queryByRole('searchbox')).toBeNull();
+  });
+});
+
+describe('P26.5 · Concept Lookup — search-palette deep link', () => {
+  it('auto-opens the concept named by ?concept= on mount (memory-search navigation lands here)', async () => {
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'GET /api/memory/files': { body: memoryFilesUnavailable },
+      'GET /api/memory/concepts': { body: memoryConceptsAvailable },
+      [conceptPath('concept-provenance')]: { body: memoryConceptDetailWithLeads },
+    });
+    const view = render(
+      <MemoryRouter
+        initialEntries={['/memory?concept=concept-provenance']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <ProjectMemory />
+      </MemoryRouter>,
+    );
+
+    const row = await view.findByRole('button', { name: /Provenance/ });
+    expect(row).toHaveAttribute('aria-expanded', 'true'); // auto-opened from the URL param
+    await view.findByText('src/other_mod.py'); // its provenance detail auto-fetched
   });
 });
 

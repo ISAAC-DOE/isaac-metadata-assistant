@@ -1,11 +1,13 @@
 import './screens.css';
 import '../components/assistant.css';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Network, ChevronDown, ChevronRight } from '../components/icons';
 import { LABELS } from '../lib/labels';
@@ -41,55 +43,176 @@ import type {
  * per-concept provenance detail from `GET /api/memory/concepts/{id}`. This is
  * the last UI slice for Phase 24 — nothing beyond concepts is built here.
  */
+// P33 S3 (D6) — the three internal sections of Project Memory. These are LOCAL
+// page tabs (never added to the global LeftNav): Overview carries the memory
+// health/status, Sources holds the Source Index, Concepts holds the Concept
+// Lookup. The grounded assistant lives in the right rail across ALL three.
+type MemoryTab = 'overview' | 'sources' | 'concepts';
+
+const MEMORY_TABS: { id: MemoryTab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'sources', label: 'Sources' },
+  { id: 'concepts', label: 'Concepts' },
+];
+
+const tabId = (id: MemoryTab) => `memory-tab-${id}`;
+const panelId = (id: MemoryTab) => `memory-tabpanel-${id}`;
+
 export function ProjectMemory() {
   const graph = useFetch(() => api.getGraphStatus(), []);
+
+  // P26.5: deep-link readers so the ⌘K search palette's memory results actually
+  // land somewhere. `?concept=<id>` auto-opens that concept in Concept Lookup;
+  // `?file=<path>` auto-opens that file in the Source Index. Both reuse each
+  // card's existing accordion expand/fetch mechanics — nothing new is fetched.
+  const [params] = useSearchParams();
+  const focusConceptId = params.get('concept');
+  const focusFilePath = params.get('file');
+
+  // P33 S3 (D6): a deep link selects the tab that owns the target — `?file=`
+  // lands on Sources, `?concept=` on Concepts — so the auto-opened item is
+  // visible on arrival; otherwise the page opens on Overview.
+  const [activeTab, setActiveTab] = useState<MemoryTab>(
+    focusFilePath ? 'sources' : focusConceptId ? 'concepts' : 'overview',
+  );
+
+  // A ⌘K jump to a memory item navigates /memory → /memory?file=… / ?concept=…
+  // — the SAME route, so React Router never remounts this screen and the
+  // once-per-mount initializer above cannot react to it. Sync the owning tab
+  // whenever a deep-link param becomes present, so an in-page jump still selects
+  // (and thus mounts) the target card. It ONLY forces a tab when a param exists —
+  // with neither param it leaves the user's manual tab selection alone.
+  useEffect(() => {
+    if (focusFilePath) setActiveTab('sources');
+    else if (focusConceptId) setActiveTab('concepts');
+  }, [focusFilePath, focusConceptId]);
+
+  // P25.7 / P33 S3 (D6): the grounded assistant, now in the right rail so it is
+  // visible across all three tabs. It grounds ENTIRELY in the already-fetched
+  // graph status (no new fetch) and mounts only once that status has loaded —
+  // loading → not shown; error → the Overview BackendDown carries the state.
+  const rightPanel =
+    graph.status === 'data' ? (
+      <AssistantDrawer railClassName="memory-right" label="Assistant (advisory)">
+        <div className="card placeholder-card memory-assistant-card">
+          <AssistantPanel
+            {...compose({ context: 'memory', graph: graph.data })}
+            experimentId="project-memory"
+            queryScope="memory"
+            availability={graph.data.availability}
+            showAvailabilityHead={false}
+          />
+        </div>
+      </AssistantDrawer>
+    ) : undefined;
 
   return (
     <AppShell
       variant="full"
       topBar={<TopBar variant="home" />}
       sidebar={<LeftNav active="memory" />}
+      rightPanel={rightPanel}
       mainPad="pad"
     >
       <div className="placeholder">
         <span className="eyebrow">Memory / Query Plane</span>
-        <h2>{LABELS.navMemory}</h2>
+        <h1>{LABELS.navMemory}</h1>
         <p>
           Project Memory is the assistant's memory and navigation surface — Graphify plus project
           docs. It is deliberately separate from the experiment queue and never appears inside it. It
           surfaces related files and concepts, prior documents, and "how is this connected?" answers
           as leads to verify — it never validates, completes, or supplies a value.
         </p>
-        <div className="card placeholder-card">
-          {graph.status === 'loading' && <LoadingPanel label="Checking memory status…" />}
-          {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
-          {graph.status === 'data' && <MemoryStatusDetail data={graph.data} />}
-        </div>
-        {/* P25.7: the grounded assistant, subordinate to the memory-status card
-            above (truth/status first, advisory assistant below). It grounds
-            ENTIRELY in the already-fetched graph status — no new fetch — and is
-            shown only once that status has loaded (loading → not shown; error →
-            the screen-level BackendDown above). It carries a REAL memory
-            availability claim because this screen genuinely fetched it. */}
-        {graph.status === 'data' && (
-          <div className="card placeholder-card memory-assistant-card">
-            <AssistantPanel
-              {...compose({ context: 'memory', graph: graph.data })}
-              availability={graph.data.availability}
-            />
+
+        <SectionTabs active={activeTab} onSelect={setActiveTab} />
+
+        {activeTab === 'overview' && (
+          <div id={panelId('overview')} role="tabpanel" aria-labelledby={tabId('overview')} tabIndex={0}>
+            <div className="card placeholder-card">
+              {graph.status === 'loading' && <LoadingPanel label="Checking memory status…" />}
+              {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
+              {graph.status === 'data' && <MemoryStatusDetail data={graph.data} />}
+            </div>
+            <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
+              <Network size={15} strokeWidth={2} aria-hidden="true" />
+              Browse depth is out of scope for this first build.
+            </p>
           </div>
         )}
-        {/* Skip the second/third fetch when the screen already knows the backend
-            is unreachable — one screen-level BackendDown, not three, mirroring
-            how P24.3 owns that state for the whole page. */}
-        {graph.status !== 'error' && <SourceIndexCard />}
-        {graph.status !== 'error' && <ConceptLookupCard />}
-        <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
-          <Network size={15} strokeWidth={2} aria-hidden="true" />
-          Browse depth is out of scope for this first build.
-        </p>
+
+        {activeTab === 'sources' && (
+          <div id={panelId('sources')} role="tabpanel" aria-labelledby={tabId('sources')} tabIndex={0}>
+            <SourceIndexCard focusFilePath={focusFilePath} />
+          </div>
+        )}
+
+        {activeTab === 'concepts' && (
+          <div id={panelId('concepts')} role="tabpanel" aria-labelledby={tabId('concepts')} tabIndex={0}>
+            <ConceptLookupCard focusConceptId={focusConceptId} />
+          </div>
+        )}
       </div>
     </AppShell>
+  );
+}
+
+// --- internal page tabs (P33 S3 · D6) ------------------------------------
+// A local tablist — Overview · Sources · Concepts — NOT part of the global
+// LeftNav. Roving tabindex + arrow/Home/End keyboard navigation (automatic
+// activation); native buttons carry Enter/Space activation.
+
+function SectionTabs({
+  active,
+  onSelect,
+}: {
+  active: MemoryTab;
+  onSelect: (tab: MemoryTab) => void;
+}) {
+  function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      nextIndex = (index + 1) % MEMORY_TABS.length;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      nextIndex = (index - 1 + MEMORY_TABS.length) % MEMORY_TABS.length;
+    } else if (e.key === 'Home') {
+      nextIndex = 0;
+    } else if (e.key === 'End') {
+      nextIndex = MEMORY_TABS.length - 1;
+    }
+    if (nextIndex === null) return;
+    e.preventDefault();
+    const next = MEMORY_TABS[nextIndex];
+    onSelect(next.id);
+    // Move focus to the newly selected tab (roving tabindex).
+    (document.getElementById(tabId(next.id)) as HTMLButtonElement | null)?.focus();
+  }
+
+  return (
+    <div className="section-tabs" role="tablist" aria-label="Project Memory sections">
+      {MEMORY_TABS.map((tab, i) => {
+        const selected = active === tab.id;
+        return (
+          <button
+            key={tab.id}
+            id={tabId(tab.id)}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            // Only the SELECTED tab's panel is mounted (panels render
+            // conditionally), so an inactive tab must not point aria-controls at
+            // an id that isn't in the DOM — matching the accordion convention
+            // used by the Concept Lookup / Source Index rows below.
+            aria-controls={selected ? panelId(tab.id) : undefined}
+            tabIndex={selected ? 0 : -1}
+            className={`section-tab${selected ? ' active' : ''}`}
+            onClick={() => onSelect(tab.id)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -155,7 +278,7 @@ const INTEGRITY_AXIS: Record<SnapshotIntegrity, AxisPresentation> = {
 
 const CONSISTENCY_AXIS: Record<MemoryConsistency, AxisPresentation> = {
   current: { label: 'Current', tone: 'ok' },
-  stale: { label: 'Out of date', tone: 'warn' },
+  stale: { label: 'Out of Date', tone: 'warn' },
   unknown: { label: 'Unknown', tone: 'quiet' },
 };
 
@@ -321,11 +444,11 @@ function MemoryUnavailablePanel({ integrity }: { integrity: SnapshotIntegrity })
 // NOT a file browser, NOT a content viewer. `local_reference` is inert text;
 // nothing here ever fetches or renders file bytes.
 
-function SourceIndexCard() {
+function SourceIndexCard({ focusFilePath }: { focusFilePath?: string | null }) {
   const list = useFetch(() => api.getMemoryFiles(), []);
   return (
     <div className="card placeholder-card source-index-card">
-      <h3 className="source-index-heading">Source Index</h3>
+      <h2 className="source-index-heading">Source Index</h2>
       <p className="source-index-subtitle">
         Files Graphify indexed for project memory — metadata and provenance only, never file
         contents.
@@ -333,7 +456,11 @@ function SourceIndexCard() {
       {list.status === 'loading' && <LoadingPanel label="Loading source index…" />}
       {list.status === 'error' && <BackendDown error={list.error} onRetry={list.reload} />}
       {list.status === 'data' && (
-        <SourceIndexList available={list.data.available} files={list.data.files} />
+        <SourceIndexList
+          available={list.data.available}
+          files={list.data.files}
+          focusFilePath={focusFilePath}
+        />
       )}
     </div>
   );
@@ -342,6 +469,7 @@ function SourceIndexCard() {
 interface SourceIndexListProps {
   available: boolean;
   files: ApiMemoryFileSummary[];
+  focusFilePath?: string | null;
 }
 
 /**
@@ -351,7 +479,7 @@ interface SourceIndexListProps {
  * inside an open panel can activate a different row the same way a click on
  * that row would.
  */
-function SourceIndexList({ available, files }: SourceIndexListProps) {
+function SourceIndexList({ available, files, focusFilePath }: SourceIndexListProps) {
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
 
   const toggle = useCallback((path: string) => {
@@ -360,6 +488,14 @@ function SourceIndexList({ available, files }: SourceIndexListProps) {
   const activate = useCallback((path: string) => {
     setExpandedPath(path);
   }, []);
+
+  // P26.5 deep link: `?file=<path>` from the search palette auto-opens that row
+  // (only when it is actually a served file in this list — never invented).
+  useEffect(() => {
+    if (focusFilePath && files.some((f) => f.path === focusFilePath)) {
+      setExpandedPath(focusFilePath);
+    }
+  }, [focusFilePath, files]);
 
   if (!available) {
     return (
@@ -379,10 +515,10 @@ function SourceIndexList({ available, files }: SourceIndexListProps) {
           const headingId = domId('si-group', group.key);
           return (
             <div className="source-index-group" key={group.key}>
-              <h4 id={headingId} className="source-index-group-heading">
+              <h3 id={headingId} className="source-index-group-heading">
                 {group.label}
                 <span className="source-index-group-count">{group.files.length}</span>
-              </h4>
+              </h3>
               <ul className="source-index-rows" aria-labelledby={headingId}>
                 {group.files.map((file) => (
                   <SourceIndexRow
@@ -518,7 +654,7 @@ function SourceIndexDetail({
       )}
 
       <div className="source-index-section">
-        <h5 className="source-index-section-heading">Why memory draws on this file</h5>
+        <h4 className="source-index-section-heading">Why memory draws on this file</h4>
         {rationales.length > 0 ? (
           <ul className="source-index-rationale-list">
             {rationales.map((rationale, i) => (
@@ -531,7 +667,7 @@ function SourceIndexDetail({
       </div>
 
       <div className="source-index-section">
-        <h5 className="source-index-section-heading">Related files</h5>
+        <h4 className="source-index-section-heading">Related files</h4>
         {related.files.length > 0 ? (
           <ul className="source-index-related-list">
             {related.files.map((rf) => (
@@ -553,7 +689,7 @@ function SourceIndexDetail({
       </div>
 
       <div className="source-index-section">
-        <h5 className="source-index-section-heading">Related concepts</h5>
+        <h4 className="source-index-section-heading">Related concepts</h4>
         {related.concepts.length > 0 ? (
           <ul className="source-index-related-list">
             {related.concepts.map((rc) => (
@@ -581,14 +717,14 @@ function SourceIndexDetail({
 // for every real concept; the empty-leads note below is not a bug, it is the
 // current graph's honest state.
 
-function ConceptLookupCard() {
+function ConceptLookupCard({ focusConceptId }: { focusConceptId?: string | null }) {
   const list = useFetch(() => api.getMemoryConcepts(), []);
   const headingId = 'concept-lookup-heading';
   return (
     <div className="card placeholder-card concept-lookup-card">
-      <h3 id={headingId} className="concept-lookup-heading">
+      <h2 id={headingId} className="concept-lookup-heading">
         Concept Lookup
-      </h3>
+      </h2>
       <p className="concept-lookup-subtitle">
         Concepts Graphify anchored in project docs — memory leads, not scientific conclusions.
       </p>
@@ -599,6 +735,7 @@ function ConceptLookupCard() {
           available={list.data.available}
           concepts={list.data.concepts}
           headingId={headingId}
+          focusConceptId={focusConceptId}
         />
       )}
     </div>
@@ -609,6 +746,7 @@ interface ConceptLookupListProps {
   available: boolean;
   concepts: ApiMemoryConceptSummary[];
   headingId: string;
+  focusConceptId?: string | null;
 }
 
 /**
@@ -618,7 +756,12 @@ interface ConceptLookupListProps {
  * related-concept lead inside an open panel can activate a different concept
  * the same way a click on that concept would.
  */
-function ConceptLookupList({ available, concepts, headingId }: ConceptLookupListProps) {
+function ConceptLookupList({
+  available,
+  concepts,
+  headingId,
+  focusConceptId,
+}: ConceptLookupListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggle = useCallback((id: string) => {
@@ -627,6 +770,14 @@ function ConceptLookupList({ available, concepts, headingId }: ConceptLookupList
   const activate = useCallback((id: string) => {
     setExpandedId(id);
   }, []);
+
+  // P26.5 deep link: `?concept=<id>` from the search palette auto-opens that
+  // concept (only when it is actually in the fetched list — never invented).
+  useEffect(() => {
+    if (focusConceptId && concepts.some((c) => c.id === focusConceptId)) {
+      setExpandedId(focusConceptId);
+    }
+  }, [focusConceptId, concepts]);
 
   if (!available) {
     return (
@@ -763,12 +914,12 @@ function ConceptLookupDetail({
       </dl>
 
       <div className="concept-lookup-section">
-        <h5 className="concept-lookup-section-heading">Related leads</h5>
+        <h3 className="concept-lookup-section-heading">Related leads</h3>
         {hasLeads ? (
           <>
             {related.files.length > 0 && (
               <div className="concept-lookup-subsection">
-                <h6 className="concept-lookup-subsection-heading">Files</h6>
+                <h4 className="concept-lookup-subsection-heading">Files</h4>
                 {/* Related files are inert labeled text in this slice — no
                     cross-card navigation into the Source Index card, per the
                     P24.5 scope boundary. */}
@@ -787,7 +938,7 @@ function ConceptLookupDetail({
             )}
             {related.concepts.length > 0 && (
               <div className="concept-lookup-subsection">
-                <h6 className="concept-lookup-subsection-heading">Concepts</h6>
+                <h4 className="concept-lookup-subsection-heading">Concepts</h4>
                 <ul className="concept-lookup-related-list">
                   {related.concepts.map((rc) => (
                     <li key={rc.id}>

@@ -167,6 +167,55 @@ a:hover {
   border-color: var(--text-tertiary);
 }
 
+/* Restrained destructive — the Reset Demo trigger. Fail accent on text/border
+ * only in the RESTING state, transparent fill: signals danger without shouting a
+ * solid-red primary. Interaction states (hover/active) deliberately shift with
+ * NEUTRAL tokens only — the reserved fail (red) hue never appears in a state rule
+ * (P22C: verdict hues are reserved for validation semantics). */
+.btn-danger-quiet {
+  background: transparent;
+  border-color: var(--fail-border);
+  color: var(--fail-text);
+}
+.btn-danger-quiet:hover {
+  background: var(--border-faint);
+  border-color: var(--text-quaternary);
+}
+.btn-danger-quiet:active {
+  background: var(--screen-base);
+  border-color: var(--text-tertiary);
+}
+.btn-danger-quiet:disabled {
+  background: transparent;
+  color: var(--text-quaternary);
+  border-color: var(--border-strong);
+  cursor: not-allowed;
+}
+
+/* The committed destructive confirmation inside the guarded dialog. Solid fail
+ * fill in the RESTING state (armed); hover/active darken via a token-free filter
+ * (no reserved-hue token in a state rule); a muted, non-interactive disabled
+ * state until the typed gate arms it. */
+.btn-danger {
+  background: var(--fail-solid);
+  border-color: var(--fail-solid);
+  color: #fff;
+  font-weight: 600;
+}
+.btn-danger:hover {
+  filter: brightness(0.93);
+}
+.btn-danger:active {
+  filter: brightness(0.86);
+}
+.btn-danger:disabled {
+  background: var(--fail-bg);
+  border-color: var(--fail-border);
+  color: var(--fail-border);
+  cursor: not-allowed;
+  filter: none;
+}
+
 /* Input — spacing-layout.md primitive. */
 .input {
   width: 100%;
@@ -198,6 +247,9 @@ a:hover {
 .dot-processing { background: var(--processing); animation: dot-pulse 1.6s ease-in-out infinite; }
 .dot-idle { background: var(--idle); }
 .dot-memory { background: var(--text-slate); }
+/* Memory available — green confirmation (matches the GraphStatusChip's memory-
+ * plane teal); the "memory: available" text remains the state signal. */
+.dot-memory-available { background: var(--verified-text); }
 
 @keyframes dot-pulse {
   0%, 100% { opacity: 1; }

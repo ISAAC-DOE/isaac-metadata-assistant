@@ -12,6 +12,21 @@ interface GuidedPromptProps {
   onConfirm: (value: unknown) => void;
   onDontKnow: () => void;
   submitting?: boolean;
+  /**
+   * P28.3 edit mode: prefill the free-text (hash/text) input with the current
+   * value so a correction starts from what is already confirmed. For a structured
+   * blocker `initialStaged` pre-stages the demo value (nothing scientific is ever
+   * typed by the assistant). Undefined ⇒ the normal blank propose→confirm flow.
+   */
+  initialValue?: string;
+  initialStaged?: boolean;
+  /** The confirm-button label; defaults to "Confirm" (edit mode passes "Save"). */
+  confirmLabel?: string;
+  /** The secondary-action label; defaults to the "I don't know…" copy. Edit mode
+   *  passes "Cancel" so the same control abandons the correction with no mutation. */
+  dontKnowLabel?: string;
+  /** Hide the "a blank stays blank" completion hint (irrelevant in edit mode). */
+  hideBlankHint?: boolean;
 }
 
 /**
@@ -33,9 +48,14 @@ export function GuidedPrompt({
   onConfirm,
   onDontKnow,
   submitting = false,
+  initialValue,
+  initialStaged = false,
+  confirmLabel = LABELS.actionConfirm,
+  dontKnowLabel = LABELS.actionDontKnow,
+  hideBlankHint = false,
 }: GuidedPromptProps) {
-  const [text, setText] = useState(''); // pasted value for hash/text inputs
-  const [staged, setStaged] = useState(false); // structured: demo value accepted for confirm
+  const [text, setText] = useState(initialValue ?? ''); // pasted value for hash/text inputs
+  const [staged, setStaged] = useState(initialStaged); // structured: demo value accepted for confirm
 
   const demo = blocker.demo_answer;
   const structured = blocker.inputType === 'structured';
@@ -116,7 +136,7 @@ export function GuidedPrompt({
                   onClick={handleConfirm}
                   disabled={!canConfirm || submitting}
                 >
-                  {submitting ? 'Confirming…' : LABELS.actionConfirm}
+                  {submitting ? 'Confirming…' : confirmLabel}
                 </button>
               </div>
             )}
@@ -143,7 +163,7 @@ export function GuidedPrompt({
                 onClick={handleConfirm}
                 disabled={!canConfirm || submitting}
               >
-                {submitting ? 'Confirming…' : LABELS.actionConfirm}
+                {submitting ? 'Confirming…' : confirmLabel}
               </button>
             </div>
           </>
@@ -158,9 +178,11 @@ export function GuidedPrompt({
           disabled={submitting}
         >
           <CircleHelp size={15} strokeWidth={2} aria-hidden="true" />
-          {LABELS.actionDontKnow}
+          {dontKnowLabel}
         </button>
-        <span className="guided-blank">A blank stays blank until you confirm it.</span>
+        {!hideBlankHint && (
+          <span className="guided-blank">A blank stays blank until you confirm it.</span>
+        )}
       </div>
     </section>
   );
