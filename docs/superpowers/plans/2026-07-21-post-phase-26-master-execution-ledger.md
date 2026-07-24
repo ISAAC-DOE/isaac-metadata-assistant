@@ -1161,3 +1161,31 @@ Search disambiguation (NAV-1) + free-form Q&A deferred.
 Human-only rendering QA (narrow-viewport 1280/1024/768/375 + 200% zoom; mutation journey; two-window
 live-sync; exported-artifact stale; `absent_from_record`) honestly carried, per R3. No new phase started;
 the next phase requires explicit user approval.
+
+## Phase 33 — Human-QA Correction Slice (code HEAD `4dc040d`, 2026-07-23)
+
+Krish's initial human review found real visual defects. The human gate was **reopened**; the automated
+closure above (code HEAD `2f51d84`) stands as the historical automated boundary. One scoped code commit
+`4dc040d` (+ this docs commit). All changes visual/layout/copy/state-init; truth path untouched
+(`git diff 5a41704..4dc040d --stat` = zero under `src/isaac_records/`, `schema/`, `apps/api/**/*.py`
+except `memory-snapshot.json` data).
+
+| Finding | Status | Evidence |
+|---|---|---|
+| #1 composer placeholder | ✅ | `Ask a question` (sentence case), aria-label preserved/independent, empty submit no-op, still inert; hosted-verified |
+| #2 vertical rhythm | ✅ | one 16/8 rhythm, existing tokens, all assistant surfaces |
+| #3 full-height lavender rail | ✅ | lavender on `.record-right`/`.memory-right` container; panel + memory card de-chromed; neutral `--border` edge; hosted CSSOM `rgb(236,235,251)`, full height |
+| #4 no bottom clipping | ✅ | rail single scroll container + 24px bottom pad; log nested scroll kept; no `overflow:hidden`; hosted `captionWithinRail=true` |
+| #5 groups default collapsed | ✅ | all collapsed on load, per-group toggle preserved (not accordion), survives assistant interaction, computation untouched; hosted expand verified |
+| #6 casing/dedup | ✅ | human-label-first headings; header strips `· New Draft` + drops `draft ·` (identifier + 1 badge kept); Title-Case `Memory Available`/`Unavailable` head |
+| #7 single availability state | ✅ | `showAvailabilityHead` prop suppresses redundant head on `/memory` + Evidence; `availability` still passed → classifier/caveat unchanged; hosted `/memory` single state |
+| Declined (reported) | ⏭️ | optional `sha256`→`SHA-256` recasing — no safe layer; would transform backend question text (forbidden) |
+| Tests / build / snapshot / invariant | ✅ | 635 FE / `tsc -b` / `npm run build` / snapshot no-drift + gate 17/17 / `no-vertical-rail` green |
+| Independent Opus review | ✅ | **SHIP** 0 Critical / 0 Important (1 guard-comment fixed; 2 cosmetic left) |
+| CI / Vercel / Railway | ✅ | exact-HEAD CI `4dc040d` success; Vercel serving new frontend (CSS hash == HEAD build); Railway `4dc040d` `synthetic-only` |
+| Repo clean + synced | ✅ | `main`, 0/0 at `4dc040d` |
+
+**State: automated and hosted desktop verification passed; awaiting final human visual sign-off.** The
+human gate stays OPEN. Human-only remaining: narrow-viewport rendering (1280/1024/768/375) + 200% zoom
+(esp. the full-height lavender rail + narrow drawer), a legibility glance at the demoted `.fg-sublabel`
+raw-key token, plus the pre-existing §gate human-only items. No new phase; next phase needs explicit approval.

@@ -415,3 +415,61 @@ on real widths before treating RESP-1 as visually signed-off on devices.
 
 **Phase 33 = COMPLETE.** No new phase started; the next phase requires explicit user approval.
 
+---
+
+## 11. HUMAN-QA CORRECTION SLICE (2026-07-23 — code HEAD `4dc040d`)
+
+Krish's initial human review of the shipped Phase 33 UI found real visual defects/regressions. The
+human gate was **reopened**; the prior automated closure (§10, code HEAD `2f51d84`, docs `5a41704`)
+remains the **historical automated boundary** and is unchanged. Phase 33 is **not finally
+human-signed-off** until this correction is deployed and Krish visually verifies it.
+
+**Orchestration:** Opus 4.8 fallback orchestrator (Fable 5 unavailable) planned/reviewed/verified;
+implementation delegated to 3 Opus subagents (disjoint files) + 1 independent Opus reviewer. Test-first:
+orchestrator authored the failing tests (red shown) before delegating.
+
+### Findings & disposition (all VISUAL / layout / copy / state-init — truth path untouched)
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | Composer had no placeholder | `placeholder="Ask a question"` (sentence case); `aria-label` preserved & independent; empty submit now a true no-op; still inert (no fetch/append/persist) |
+| 2 | Inconsistent assistant vertical spacing | One rhythm (16px section / 8px within) across every assistant surface, existing tokens |
+| 3 | Lavender ended mid-column (looked unfinished) | Lavender moved from the `.assistant` card onto the rail container `.record-right`/`.memory-right` (full height); panel + `.memory-assistant-card` de-chromed; **neutral** `--border` edge (no-vertical-rail rule) |
+| 4 | Content appeared cut off at the bottom | Root cause: only the card's 14px pad gave bottom room, so the caption sat flush at the scroll edge — NOT a true clip. Fix: rail is the single height-bounded scroll container with **24px** bottom padding; intentional `.assistant-log` nested scroll kept; no `overflow:hidden`. Live CSSOM: `captionWithinRail=true`, `paddingBottom=24px` |
+| 5 | Groups started expanded | All groups **collapsed** on initial workbench load (`toggles[block] ?? false`); per-group independent toggle preserved (not an accordion); expansion survives assistant interaction (state lives in the workbench, not the panel); missing-field/workflow computation untouched |
+| 6 | Casing / duplicate-state | Group headers lead with the human label (raw key demoted to mono, kept for provenance); record header strips `· New Draft` (reuses existing `stripLifecycleSuffix`) + drops the redundant `draft ·` filename token (identifier + single Draft badge kept); assistant memory head → Title-Case `Memory Available`/`Memory Unavailable` |
+| 7 | Redundant availability state | New presentation-only `showAvailabilityHead` prop (default true) suppresses the redundant head where a `GraphStatusChip` already owns it (`/memory`, Evidence Explorer). `availability` still passed everywhere → `classifyAnswer` + unavailable caveat unchanged |
+
+**Grounded pushback (reported, not silently done):** (a) #4 "cut off" was partly a mis-diagnosis — no
+height hack, no removal of the intentional log scroll; (b) **DECLINED** the optional `sha256`→`SHA-256`
+recasing — no safe presentation layer exists and it would transform backend question text, which the
+finding itself forbids.
+
+### Verification (code HEAD `4dc040d`)
+- **635 web tests** (was 621; +14 new `p33-hqa-*`, 3 existing re-expressed not weakened), `tsc -b`,
+  `npm run build`, snapshot `--check` (no drift) + **17/17** committed-snapshot gate, `no-vertical-rail`
+  invariant — all green.
+- **Independent Opus review: SHIP** — 0 Critical / 0 Important; 3 Minor (1 guard-comment fixed; dead
+  `collapsedByDefault` + `.fg-block`/`.fg-sublabel` name-vs-content cosmetic left as non-blocking).
+- **Exact-HEAD CI `4dc040d`: completed success.** Vercel serving the new frontend (CSS hash == local
+  HEAD build). Railway `4dc040d`, `synthetic-only`, healthy.
+- **Hosted desktop QA (live, 1440):** header deduped (1 Draft badge, no `· New Draft`/`draft ·`,
+  identifier kept); 4 groups collapsed, expansion works; lavender rail full-height (`rgb(236,235,251)`,
+  neutral edge), caption within rail; `Memory Available` head on workbench, single state on `/memory`
+  (`assistantHeadPresent:false`); placeholder visible; console clean.
+
+### State
+**Automated and hosted desktop verification passed; awaiting final human visual sign-off.** The human
+gate stays OPEN.
+
+### Human-only verification still outstanding (R3 — NOT fabricated)
+- Narrow-viewport **rendering** at 1280 / 1024 / 768 / 375 + **200% zoom** (automation pinned at 1440;
+  jsdom applies no CSS) — especially the full-height lavender rail with no gray beneath short content and
+  the narrow-screen drawer presentation.
+- A glance at the demoted `.fg-sublabel` raw-key token (11px, `--text-quaternary` on white) for
+  legibility (reviewer residual).
+- Pre-existing human-only items still standing from §10 (mutation journey, two-window live-sync,
+  exported-artifact stale, `absent_from_record`).
+
+**Next human action:** Krish reviews the corrected UI on real narrow widths + 200% zoom; on approval,
+Phase 33 is finally human-signed-off. No new phase begins without explicit approval.
+
