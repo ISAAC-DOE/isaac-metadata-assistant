@@ -39,7 +39,6 @@ import {
   ZoomOut,
   Maximize2,
   RotateCcw,
-  Diamond,
   type LucideIcon,
 } from 'lucide-react';
 import type { SourceType } from '../lib/types';
@@ -118,6 +117,5 @@ export {
   ZoomOut,
   Maximize2,
   RotateCcw,
-  Diamond,
 };
 export type { LucideIcon };

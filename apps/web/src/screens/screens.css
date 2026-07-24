@@ -1084,7 +1084,7 @@
 .memory-graph-node:focus-visible .memory-graph-node-shape {
   stroke: var(--action);
   stroke-width: 2.4;
-  filter: drop-shadow(0 0 0 2px var(--action));
+  filter: drop-shadow(0 0 2px var(--action));
 }
 
 /* -- detail panel -- */

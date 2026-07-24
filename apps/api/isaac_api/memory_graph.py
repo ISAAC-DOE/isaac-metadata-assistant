@@ -271,7 +271,7 @@ def build_graph_projection(reader) -> dict:
     routes use — the caller always gets HTTP 200, never a 500."""
     overview = _safe_call(reader.overview, {})
     if not isinstance(overview, dict) or not overview.get("available"):
-        reason = overview.get("reason") if isinstance(overview, dict) else "graph_unreadable"
+        reason = (overview.get("reason") if isinstance(overview, dict) else None) or "graph_unreadable"
         status = _safe_call(reader.status, {})
         if not isinstance(status, dict):
             status = {}

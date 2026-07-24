@@ -10496,7 +10496,7 @@
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "b0c11331be6885560584fe55701049edbf62a3bdd7c2ae8dedc29ed5ab1603e7"
+        "sha256": "5d6804f4a4aa859a8d761e9f53bd41ead7c2907ebcdcb3f511c75de8bb699fe1"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "0302f87e7c5f3cf2d7d41d8d2192ae4658a65157bb5ae39bc213ec28da8869f2"
+    "served_manifest_fingerprint": "871f27b103286ae37cd16d982b1f5264fec6ed61269ae84660041b5671fa16f5"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

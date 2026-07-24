@@ -443,7 +443,7 @@ function MemoryGraphAvailable({ data }: { data: ApiMemoryGraphResponse }) {
 
       <div className="memory-graph-body">
         <div className="memory-graph-list-pane">
-          <div className="memory-graph-list" role="listbox" aria-label="Graph nodes">
+          <div className="memory-graph-list" role="group" aria-label="Graph nodes">
             {visibleCount === 0 && (
               <p className="memory-graph-list-empty">No nodes match the current search or filters.</p>
             )}
