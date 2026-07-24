@@ -99,6 +99,7 @@ export function ProjectMemory() {
             {...compose({ context: 'memory', graph: graph.data })}
             experimentId="project-memory"
             availability={graph.data.availability}
+            showAvailabilityHead={false}
           />
         </div>
       </AssistantDrawer>

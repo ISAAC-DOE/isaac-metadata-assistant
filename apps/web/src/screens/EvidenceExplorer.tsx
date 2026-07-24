@@ -165,6 +165,7 @@ function LoadedEvidence({
         experimentId={detail.id}
         recordRev={detail.rev}
         availability={graph.availability}
+        showAvailabilityHead={false}
         agentContext={agentContext}
         degraded={agentDegraded}
       />

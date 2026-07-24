@@ -23,11 +23,11 @@ export function FieldGroup({
 }: FieldGroupProps) {
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
-    <section className="field-group" aria-label={`${group.block} — ${group.humanLabel}`}>
+    <section className="field-group" aria-label={`${group.humanLabel} (${group.block})`}>
       <button type="button" className="fg-header" aria-expanded={expanded} onClick={onToggle}>
         <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-        <span className="fg-block">{group.block}</span>
-        <span className="fg-sublabel">{group.humanLabel}</span>
+        <span className="fg-block">{group.humanLabel}</span>
+        <span className="fg-sublabel">{group.block}</span>
         {expanded ? (
           <span className="fg-summary">{group.summary}</span>
         ) : group.needsYouCount > 0 ? (

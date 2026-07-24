@@ -66,7 +66,7 @@ const KNOWN_TITLE_SUFFIXES = [
   ' · Exported Record',
 ] as const;
 
-function stripLifecycleSuffix(title: string): string {
+export function stripLifecycleSuffix(title: string): string {
   const hit = KNOWN_TITLE_SUFFIXES.find((suffix) => title.endsWith(suffix));
   return hit ? title.slice(0, -hit.length) : title;
 }

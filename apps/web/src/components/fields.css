@@ -26,14 +26,14 @@
 .fg-header:hover { background: var(--surface-subtle); }
 .fg-chevron { color: var(--text-quaternary); flex: none; }
 .fg-block {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-strong);
 }
 .fg-sublabel {
-  font-size: 12.5px;
-  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
 }
 .fg-summary {
   margin-left: auto;

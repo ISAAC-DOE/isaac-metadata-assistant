@@ -21,6 +21,7 @@ import type { AgentContext } from '../lib/assistantAgent';
 import {
   draftGroupsToFieldGroups,
   pendingSummary,
+  stripLifecycleSuffix,
   toAdvisoryResult,
   toAuditResult,
   toValidationResult,
@@ -134,10 +135,9 @@ function LoadedWorkbench({
     [bundle.groups, evidenceByPath],
   );
 
-  // User toggles override the group's default expandedness.
+  // Every group starts collapsed on initial load; user toggles override that.
   const [toggles, setToggles] = useState<Record<string, boolean>>({});
-  const isExpanded = (block: string, collapsedByDefault: boolean) =>
-    toggles[block] ?? !collapsedByDefault;
+  const isExpanded = (block: string) => toggles[block] ?? false;
 
   // --- the three signals, each from its own endpoint, each its own segment ---
   // Pre-export, validation is a DRY-RUN and audit has nothing to count — those
@@ -201,9 +201,9 @@ function LoadedWorkbench({
       topBar={
         <TopBar
           variant="record"
-          title={detail.title}
+          title={stripLifecycleSuffix(detail.title)}
           filename={
-            detail.exported && detail.record_id ? `${detail.record_id}.json` : `draft · ${detail.id}`
+            detail.exported && detail.record_id ? `${detail.record_id}.json` : `${detail.id}`
           }
           stateChip={detail.exported ? 'exported' : 'draft'}
         />
@@ -274,11 +274,11 @@ function LoadedWorkbench({
         <FieldGroup
           key={group.block}
           group={group}
-          expanded={isExpanded(group.block, group.collapsedByDefault)}
+          expanded={isExpanded(group.block)}
           onToggle={() =>
             setToggles((prev) => ({
               ...prev,
-              [group.block]: !isExpanded(group.block, group.collapsedByDefault),
+              [group.block]: !isExpanded(group.block),
             }))
           }
         />

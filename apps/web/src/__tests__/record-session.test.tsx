@@ -311,11 +311,14 @@ describe('P29.4 · record screen wiring', () => {
       'GET /api/experiments/demo/evidence-classification': { status: 500, body: { error: 'boom' } },
     };
     stubFetchRoutes(routes);
-    const { findByText, getByText } = renderAt('/record/demo');
+    const { findByText, getByText, container } = renderAt('/record/demo');
 
     // Manual workflow renders: the grouped draft + the needs-you gate.
     await findByText('5 Fields Need Your Confirmation');
-    expect(getByText('Technique')).toBeInTheDocument(); // a real draft field
+    // P33 HQA#5: groups start collapsed — expand the first to reveal its fields.
+    expect(getByText('System & Instrument')).toBeInTheDocument(); // the group renders
+    fireEvent.click(container.querySelector('.fg-header') as HTMLButtonElement);
+    expect(getByText('Technique')).toBeInTheDocument(); // a real draft field, now revealed
     // The assistant shows an honest degraded state (never disables the workflow).
     await findByText(/cannot verify the current record state/i);
   });

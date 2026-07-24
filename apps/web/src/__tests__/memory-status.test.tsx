@@ -273,18 +273,21 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     expect(assistant.textContent).not.toMatch(/Guided prompts only — the assistant answers/i);
   });
 
-  it('renders the memory: available head line but NO unavailable caveat (unchanged behavior)', async () => {
+  it('renders NO unavailable caveat, and does NOT duplicate the availability chip in the assistant head (P33 HQA#7)', async () => {
     stubFetchRoutes(availableRoutes);
     const { findByText, container } = renderScreen();
     await findByText('Memory Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;
     // available → the caveat slot is never rendered (dedupe guard only ever
-    // applies in the unavailable state); the head-line dot still shows.
+    // applies in the unavailable state).
     expect(assistant.querySelector('.assistant-caveat')).toBeNull();
     expect(assistant.textContent).not.toMatch(
       /Project Memory is unavailable, so no memory-based answer is available here\./,
     );
-    expect(assistant.querySelector('.assistant-memory')?.textContent).toMatch(/available/);
+    // P33 HQA#6/#7: the GraphStatusChip is the single availability indicator on
+    // this page; the assistant head no longer duplicates it (availability is
+    // still passed to the panel, so classification/caveat behavior is unchanged).
+    expect(assistant.querySelector('.assistant-memory')).toBeNull();
   });
 
   it('clicking a chip swaps in its live answer and issues NO further network request', async () => {
@@ -368,9 +371,10 @@ describe('P25.7 · Project Memory grounded assistant — unavailable & fetch sta
       'Project Memory is unavailable, so no memory-based answer is available here.',
     );
     // …and the caveat slot is suppressed precisely because it would duplicate
-    // the reply (the `memory: unavailable` head line still shows below).
+    // the reply. P33 HQA#7: the GraphStatusChip owns the single availability
+    // state on this page, so the assistant head is no longer rendered here.
     expect(assistant.querySelector('.assistant-caveat')).toBeNull();
-    expect(assistant.querySelector('.assistant-memory')?.textContent).toMatch(/unavailable/);
+    expect(assistant.querySelector('.assistant-memory')).toBeNull();
     // approved wording — NOT the retired "source files directly" string
     expect(assistant.textContent).not.toMatch(/answered from source files directly/i);
     // no verdict / error styling classes

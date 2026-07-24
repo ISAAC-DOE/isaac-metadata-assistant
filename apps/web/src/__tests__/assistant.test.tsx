@@ -75,7 +75,9 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     expect(getByText(/answered from:/)).toBeInTheDocument();
     expect(getByText('answered from: Evidence & Sources')).toBeInTheDocument();
     expect(queryByText('answered from: files')).toBeNull();
-    expect(getByText(/memory:/)).toBeInTheDocument();
+    // P33 HQA#6: the memory-head is the Title-Case state label (no "memory:" colon).
+    expect(getByText('Memory Available')).toBeInTheDocument();
+    expect(container.querySelector('.assistant-memory')).not.toBeNull();
     // indigo assistant surface, never a verdict class
     expect(container.querySelector('.assistant')).not.toBeNull();
     expect(container.querySelector('.verdict-pass')).toBeNull();

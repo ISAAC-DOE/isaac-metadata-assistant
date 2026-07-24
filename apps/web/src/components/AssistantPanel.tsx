@@ -67,6 +67,15 @@ interface AssistantPanelProps {
    * neither the `memory:` head line nor the memory caveat.
    */
   availability?: MemoryAvailability;
+  /**
+   * P33 HQA (#7) — whether to render the memory-availability label in the
+   * assistant head. Defaults to `true`. A screen that ALREADY shows a
+   * `GraphStatusChip` for the same availability axis passes `false` to suppress
+   * the redundant duplicate label (single-state). This is purely presentational:
+   * `availability` is still consumed — message classification (`classifyAnswer`)
+   * and the unavailable caveat are unchanged regardless of this flag.
+   */
+  showAvailabilityHead?: boolean;
   /** Optional subordinate note, e.g. "truth questions route to the CLI…". */
   note?: string;
   /**
@@ -175,6 +184,14 @@ const CLASS_META: Record<string, { label: string; Icon: LucideIcon }> = {
 
 const DEFAULT_SESSION_KEY = '__assistant__';
 
+// P33 HQA (#6) — the memory-availability head label, rendered in Title Case
+// (never the raw lowercase state). Keyed on the same `MemoryAvailability` axis
+// passed to the panel, so the head text stays in lockstep with the classifier.
+const MEMORY_HEAD_LABEL: Record<MemoryAvailability, string> = {
+  available: 'Memory Available',
+  unavailable: 'Memory Unavailable',
+};
+
 // The safe replacement rendered whenever a would-be verdict string reaches the
 // panel — the assistant explains and routes; it never states PASS/FAIL.
 const VERDICT_ROUTE_TEXT =
@@ -236,6 +253,7 @@ export function AssistantPanel({
   experimentId = DEFAULT_SESSION_KEY,
   recordRev,
   availability,
+  showAvailabilityHead = true,
   note,
   agentContext,
   degraded = false,
@@ -445,6 +463,10 @@ export function AssistantPanel({
   // Free-form Q&A is not wired in this build; the composer is honest about it.
   function onComposerSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    // P33 HQA (#1) — an empty (whitespace-only) submit is a true no-op: no
+    // notice, no state change. Only a non-empty submit surfaces the honest
+    // unsupported-notice and clears the transient text (still no fetch/append).
+    if (composerText.trim() === '') return;
     setComposerNotice(true);
     setComposerText('');
   }
@@ -537,13 +559,13 @@ export function AssistantPanel({
           <MessageSquare size={15} strokeWidth={2} />
         </span>
         <span className="assistant-label">{LABELS.assistant}</span>
-        {availability && (
+        {availability && showAvailabilityHead && (
           <span className="assistant-memory">
             <span
               className={`dot dot-memory${availability === 'available' ? ' dot-memory-available' : ''}`}
               aria-hidden="true"
             />
-            memory: {availability}
+            {MEMORY_HEAD_LABEL[availability]}
           </span>
         )}
       </div>
@@ -569,6 +591,7 @@ export function AssistantPanel({
           type="text"
           className="assistant-composer-input"
           aria-label="Ask the assistant a question"
+          placeholder="Ask a question"
           value={composerText}
           onChange={(e) => setComposerText(e.target.value)}
         />

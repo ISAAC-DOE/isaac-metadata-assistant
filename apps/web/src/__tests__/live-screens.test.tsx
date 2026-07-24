@@ -150,7 +150,10 @@ describe('S3 · Review Record (live bundle)', () => {
     // the removed right-rail evidence panel + hard divider must not reappear
     expect(container.querySelector('.ev-panel-card')).toBeNull();
     expect(container.querySelector('.right-divider')).toBeNull();
-    // inline per-field evidence is still present in the main column (truth stays visible)
+    // inline per-field evidence is still present in the main column (truth stays
+    // visible). P33 HQA#5: groups start collapsed, so expand one to reveal its
+    // field rows and their inline evidence.
+    fireEvent.click(container.querySelector('.fg-header') as HTMLButtonElement);
     expect(container.querySelector('.field-evidence')).not.toBeNull();
   });
 
@@ -233,8 +236,11 @@ describe('S3 · Review Record (live bundle)', () => {
       ),
     ).toBeInTheDocument();
 
-    // draft groups fed by /draft
+    // draft groups fed by /draft. P33 HQA#5: groups start collapsed, so the
+    // human-facing group label shows in the (collapsed) header; expanding it
+    // reveals the live field value.
     expect(getByText('System & Instrument')).toBeInTheDocument();
+    fireEvent.click(container.querySelector('.fg-header') as HTMLButtonElement);
     expect(getByText('HERFD-XAS')).toBeInTheDocument();
 
     // three signals: separate labeled segments, never merged; dry-run carries the
