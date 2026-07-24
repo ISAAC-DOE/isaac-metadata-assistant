@@ -351,15 +351,21 @@ Each phase should follow this loop:
 6. Commit/push only when the phase instructions allow it.
 7. Stop at the approval gate before the next phase.
 
-For this project:
+For this project, the risk-tiered orchestration policy is:
 
-- Fable 5 is the orchestrator, planner, reviewer, and verifier **when it is actually available in the
-  current account**. Until its availability is confirmed, **Opus 4.8 is the ratified standing
-  orchestrator fallback**.
-- The orchestrator does not implement production code. Delegate instruction-architecture and
-  security-sensitive work to Opus 4.8, mechanical documentation/inventory changes to Sonnet 5; browser
-  QA may run on Opus 4.8 or Sonnet 5; final independent review goes to a separate Opus 4.8 subagent.
-- Opus subagents are preferred for implementation slices unless explicitly told otherwise.
+- **Orchestrator** (orchestrator-only — plans, decomposes, inspects, reviews, verifies, judges
+  integration/release, and controls commits, branch pushes, and PR creation; does **not** write
+  production code): Fable 5 when it is actually available in the current account; otherwise Opus 4.8
+  (ratified standing fallback) under the same orchestrator-only restriction.
+- **Ordinary implementation:** Sonnet 5 by default.
+- **High-risk implementation** (instruction-architecture, security-sensitive, truth/validation/export
+  core, data-model, deployment-critical, or design-critical work): Opus 4.8.
+- **Independent review:** a separate Opus 4.8 reviewer that implemented none of the work under review.
+- **Concurrency:** one fresh, focused implementation subagent per task by default, run sequentially; no
+  fixed maximum agent count, but no large uncontrolled parallel swarm.
+- **Implementation subagents edit files only**; they do NOT commit, push, merge, deploy, tag, change
+  remotes, switch accounts, rebase, reset, alter infrastructure, or change credentials/billing/ownership.
+  Every state-changing task receives a separate Opus review before the orchestrator commits.
 - Keep slices small, reviewable, testable, and committable.
 - Do not begin the next phase without explicit user approval.
 - Do not broaden scope during a phase.
@@ -526,13 +532,14 @@ gate live in `docs/toolchain-reconnection-runbook.md` — link, do not duplicate
 
 ### Orchestrator selection
 
-Fable 5 orchestrates when available in the account; otherwise Opus 4.8 (ratified fallback). The
-orchestrator plans/reviews/verifies and does not implement production code (see §10).
+See §10 for the full risk-tiered orchestration policy (orchestrator-only Fable 5 when available, else
+orchestrator-only Opus 4.8 fallback; Sonnet 5 default implementation; Opus 4.8 for high-risk
+implementation and all independent review).
 
 ### Snapshot preflight (before any push that touches served files)
 
 The committed snapshot `apps/api/isaac_api/data/memory-snapshot.json` embeds a served-content manifest
-(currently 202 files) re-checked in CI by `apps/api/tests/test_committed_snapshot.py`. It includes
+(currently 200 files) re-checked in CI by `apps/api/tests/test_committed_snapshot.py`. It includes
 `CLAUDE.md`, `AGENTS.md`, every `docs/*.md`, and each `.claude/skills/*/SKILL.md`. Editing any
 manifest-listed file is predictable drift — regenerate in the same commit; do not wait for CI. Pre-push
 sequence: implementation → focused tests → full relevant tests → typecheck / Vite build → snapshot drift
