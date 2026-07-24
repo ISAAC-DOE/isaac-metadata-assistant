@@ -19,7 +19,6 @@ import {
 import { LABELS } from '../lib/labels';
 import {
   ASSISTANT_COMPOSER_HELPER,
-  ASSISTANT_EMPTY_STATE,
   ASSISTANT_UNAVAILABLE,
   MEMORY_UNAVAILABLE_CAVEAT,
   SOURCE_LABELS,
@@ -676,16 +675,26 @@ export function AssistantPanel({
     : [];
 
   // The live current turn's text, verdict-guarded. A query in flight → an
-  // accessible "Working…"; a resolved answer → its guarded text; otherwise the
-  // resting empty state. The auto-reply fallback (compose().reply) was REMOVED at
-  // P34.2 — the resting rail no longer announces a pending-summary card.
+  // accessible "Working…"; a resolved answer → its guarded text; otherwise
+  // EMPTY (P36.1) — no resting placeholder text. The surrounding composer,
+  // suggested prompts, and agent actions already make the panel's purpose
+  // obvious, so the rail shows nothing until there is something to say. The
+  // auto-reply fallback (compose().reply) was REMOVED at P34.2 — the resting
+  // rail never announces a pending-summary card.
   const liveText = loading
     ? WORKING_LABEL
     : liveAnswer
       ? hasVerdictLanguage(liveAnswer.text)
         ? VERDICT_ROUTE_TEXT
         : liveAnswer.text
-      : ASSISTANT_EMPTY_STATE;
+      : '';
+
+  // P36.1 — true only at rest (not loading, no live answer yet). Drives the
+  // `assistant-reply--empty` modifier that strips the visible card chrome
+  // (padding/border/background) so an empty live region reads as nothing —
+  // no bordered box, no awkward gap — while staying MOUNTED with
+  // aria-live="polite" so it still announces the next "Working…"/answer.
+  const liveReplyEmpty = !loading && !liveAnswer;
 
   // Only a screen that actually fetched graph status may make a memory claim. The
   // caveat is driven by `availability` INDEPENDENTLY of the empty/answer state;
@@ -873,11 +882,13 @@ export function AssistantPanel({
         {/* The live current turn — the newest content, rendered below history.
             The single `.assistant-reply` <p> is the ONE live region (the log above
             is aria-live="off"): while a query resolves it announces "Working…"
-            (aria-busy), then the resolved answer; at rest it shows the empty state.
-            The `answered from:` line renders only once there is a real answer. */}
+            (aria-busy), then the resolved answer; at rest (P36.1) it renders
+            EMPTY — no placeholder text, no card chrome — but stays MOUNTED so it
+            keeps announcing future turns. The `answered from:` line renders only
+            once there is a real answer. */}
         <div className="assistant-reply-block">
           <p
-            className="assistant-reply"
+            className={`assistant-reply${liveReplyEmpty ? ' assistant-reply--empty' : ''}`}
             ref={replyRef}
             tabIndex={-1}
             aria-live="polite"

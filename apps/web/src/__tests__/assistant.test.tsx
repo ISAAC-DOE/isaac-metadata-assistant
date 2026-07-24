@@ -3,7 +3,6 @@ import { render, fireEvent } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import {
   ASSISTANT_COMPOSER_HELPER,
-  ASSISTANT_EMPTY_STATE,
   GUIDED_ONLY_NOTE,
   MEMORY_UNAVAILABLE_CAVEAT,
   hasVerdictLanguage,
@@ -65,18 +64,28 @@ const reviewOut = () => compose(reviewState());
 const evidenceOut = () => compose(evidenceState());
 
 describe('AssistantPanel is subordinate and never renders a verdict', () => {
-  it('rests on the empty state, then a guided prompt surfaces a Title-Case source label + memory dot', () => {
+  it('rests with an empty live region (no placeholder text/chrome), then a guided prompt surfaces a Title-Case source label + memory dot', () => {
     const out = evidenceOut();
     const { container, getByText, queryByText } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
-    // P34.2: the resting rail shows the empty state — no auto-announced reply card.
-    expect(getByText(ASSISTANT_EMPTY_STATE)).toBeInTheDocument();
+    // P36.1: the resting rail's live region is mounted, aria-live, and EMPTY —
+    // no placeholder text, no visible card chrome — never a fully absent element.
+    expect(queryByText(/Ask a question or choose a suggested prompt\./)).toBeNull();
+    const reply = container.querySelector('.assistant-reply');
+    expect(reply).not.toBeNull();
+    expect(reply?.getAttribute('aria-live')).toBe('polite');
+    expect(reply?.textContent).toBe('');
+    expect(reply?.classList.contains('assistant-reply--empty')).toBe(true);
     // clicking a guided prompt surfaces an answer whose source renders as the
     // friendly Title-Case label, never the raw machine enum (P25.1).
     fireEvent.click(getByText('What is the evidence sidecar?'));
     expect(getByText(/answered from:/)).toBeInTheDocument();
     expect(queryByText(/answered from: files$/)).toBeNull();
+    // P36.1: the SAME live region now carries the answer text and drops the
+    // empty modifier — it was never unmounted/re-mounted.
+    expect(reply?.textContent).not.toBe('');
+    expect(reply?.classList.contains('assistant-reply--empty')).toBe(false);
     // P33 HQA#6: the memory-head is the Title-Case state label (no "memory:" colon).
     expect(getByText('Memory Available')).toBeInTheDocument();
     expect(container.querySelector('.assistant-memory')).not.toBeNull();

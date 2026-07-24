@@ -67,10 +67,6 @@ export const GUIDED_ONLY_NOTE =
 export const ASSISTANT_COMPOSER_HELPER =
   'Ask about this record, its evidence, workflow, export readiness, or project-memory leads.';
 
-// P34.2: the resting state shown in the live-answer region before any question
-// is asked (no auto-announced pending-summary card).
-export const ASSISTANT_EMPTY_STATE = 'Ask a question or choose a suggested prompt.';
-
 // P34.2: shown when the grounded resolver is unreachable or errors. The rest of
 // the workspace (record, workflow, evidence, validation) stays fully usable — the
 // assistant is advisory and never gates anything.

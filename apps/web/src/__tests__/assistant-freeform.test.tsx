@@ -4,11 +4,12 @@
  * This slice removes the redundant on-mount auto-reply, wires the composer to
  * POST /assistant/query (a non-mutating query), and adds bounded conversation +
  * Clear Conversation. These tests pin the new contract end-to-end in the panel:
- *   - the rail RESTS on the empty state (no auto "still need you" card) on mount;
+ *   - the rail RESTS with an EMPTY live region (P36.1 — no placeholder text, no
+ *     auto "still need you" card) on mount;
  *   - a free-form submit shows a loading indicator then the resolved answer;
  *   - a provider/network error renders the honest unavailable message while the
  *     surrounding controls (pills, composer) stay usable;
- *   - Clear Conversation empties the log and returns to the empty state;
+ *   - Clear Conversation empties the log and returns the live region to empty;
  *   - Suggested Questions still work via the precomposed path (no endpoint call);
  *   - Agent Actions are unchanged (a pill still runs a real intent);
  *   - the composer path is READ-ONLY — never submitAnswer / editField / confirm.
@@ -19,7 +20,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { ApiError, api } from '../lib/api';
 import * as agentModule from '../lib/assistantAgent';
-import { ASSISTANT_EMPTY_STATE, ASSISTANT_UNAVAILABLE } from '../lib/assistant';
+import { ASSISTANT_UNAVAILABLE } from '../lib/assistant';
 import { clearAllSessions } from '../lib/assistantSession';
 import type { AgentContext } from '../lib/assistantAgent';
 import type { AssistantMessage, AssistantQueryResponse, SuggestedPrompt } from '../lib/types';
@@ -89,12 +90,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('P34.2 empty state (no auto-reply)', () => {
-  it('rests on the empty state and shows NO auto pending-summary card on mount', () => {
-    const { container, getByText, queryByText } = panel();
-    expect(getByText(ASSISTANT_EMPTY_STATE)).toBeInTheDocument();
+describe('P36.1 empty live region (no placeholder, no auto-reply)', () => {
+  it('rests with an empty, chrome-suppressed live region and shows NO auto pending-summary card on mount', () => {
+    const { container, queryByText } = panel();
+    // P36.1: no resting placeholder text at all.
+    expect(queryByText(/Ask a question or choose a suggested prompt\./)).toBeNull();
     // the old auto-reply ("still need you") is NOT announced on mount
     expect(queryByText(/still need you/i)).toBeNull();
+    // the single live region stays MOUNTED, aria-live, but empty — no visible
+    // card chrome (the `--empty` modifier).
+    const reply = container.querySelector('.assistant-reply');
+    expect(reply).not.toBeNull();
+    expect(reply?.getAttribute('aria-live')).toBe('polite');
+    expect(reply?.textContent).toBe('');
+    expect(reply?.classList.contains('assistant-reply--empty')).toBe(true);
     // and there is no history + no answered-from line at rest
     expect(container.querySelectorAll('.assistant-msg').length).toBe(0);
     expect(container.querySelector('.answered-from')).toBeNull();
@@ -132,7 +141,7 @@ describe('P34.2 free-form submit', () => {
 });
 
 describe('P34.2 Clear Conversation', () => {
-  it('appears once there is history and returns the rail to the empty state', async () => {
+  it('appears once there is history and returns the live region to empty (P36.1)', async () => {
     vi.spyOn(api, 'askAssistant').mockResolvedValue(answerResponse());
     const { getByRole, getByText, queryByRole, container } = panel();
 
@@ -152,7 +161,11 @@ describe('P34.2 Clear Conversation', () => {
     const clear = getByRole('button', { name: /clear conversation/i });
     fireEvent.click(clear);
     expect(container.querySelectorAll('.assistant-msg').length).toBe(0);
-    expect(getByText(ASSISTANT_EMPTY_STATE)).toBeInTheDocument();
+    // P36.1: the SAME live region, mounted, back to empty — no placeholder text.
+    const reply = container.querySelector('.assistant-reply');
+    expect(reply).not.toBeNull();
+    expect(reply?.textContent).toBe('');
+    expect(reply?.classList.contains('assistant-reply--empty')).toBe(true);
     expect(queryByRole('button', { name: /clear conversation/i })).toBeNull();
   });
 });
