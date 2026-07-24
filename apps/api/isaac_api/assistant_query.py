@@ -439,6 +439,16 @@ _MEMORY_DISTINCTION = (
     "values."
 )
 
+#: P34.4 — the honest refusal the record-agnostic Project-Memory surface returns
+#: for ANY non-memory question. It states plainly what this surface answers and
+#: points the user at a record for record questions — never a verdict, never a
+#: guess, never a fabricated record answer with no record to ground it.
+_MEMORY_SCOPE_REFUSAL = (
+    "This is the Project Memory view — I answer project-memory questions here. "
+    "Open a record to ask about its fields, evidence, workflow, or export "
+    "readiness."
+)
+
 _STATUS_LABELS = {
     "needs_attention": "needs attention",
     "in_review": "in review",
@@ -576,7 +586,7 @@ def _compose(classified: ClassifiedIntent, ctx: AssistantContext):
         return _record(ctx, base, followups)
 
     if intent == MEMORY_LEAD:
-        return _memory(classified, ctx, followups)
+        return _memory(classified, ctx.search, followups)
 
     if intent == AMBIGUOUS:
         alt_labels = _join_capped([a.replace("_", " ") for a in classified.alternatives])
@@ -673,10 +683,10 @@ def _record(ctx, base, followups):
     return text, "answered", ["workflow"], [{"label": "Record", "navigate_to": base}], followups
 
 
-def _memory(classified, ctx, followups):
+def _memory(classified, search, followups):
     topic = classified.extracted.get("topic") or ""
     try:
-        res = ctx.search(topic) or {}
+        res = search(topic) or {}
     except Exception:
         res = {"available": False, "results": []}
     if not res.get("available"):
@@ -705,3 +715,59 @@ def _memory(classified, ctx, followups):
         f"{_MEMORY_DISTINCTION} {_MEMORY_TAIL}"
     )
     return text, "answered", ["graph"], sources, followups
+
+
+# --- Phase B (memory scope): record-agnostic Project-Memory answer -------------
+
+
+def answer_memory_scope(classified: ClassifiedIntent,
+                        search: Callable[[str], dict]) -> dict:
+    """Compose a deterministic, leak-safe answer for the RECORD-AGNOSTIC Project
+    Memory surface (P34.4).
+
+    This surface has NO record. A ``MEMORY_LEAD`` question is answered purely from
+    the memory reader (the SAME ``_memory`` logic the record endpoint uses),
+    grounded ``["graph"]`` with cited leads and the "leads to verify" advisory
+    framing — never a verdict. Any OTHER classification (a record intent,
+    unsupported, ambiguous, or empty) is an HONEST refusal that names what this
+    surface answers and points the user at a record — it never fabricates a record
+    answer with no record to ground it, and never guesses.
+
+    The response mirrors the record endpoint's shape EXCEPT it carries no record:
+    ``record_rev``/``version`` are ``null`` and ``stale`` is always ``False`` (there
+    is no revision to be stale against). The SAME verdict guard and path/secret
+    scrub run over the answer text and every source label. Follow-ups are
+    suppressed here: the intent catalog's memory follow-ups are record questions,
+    which would dead-end on this record-less surface."""
+    if classified.intent == MEMORY_LEAD:
+        try:
+            # Follow-ups suppressed ([]): the catalog's MEMORY_LEAD follow-ups are
+            # record questions that cannot be answered on this record-less surface.
+            text, result, grounding, sources, followups = _memory(classified, search, [])
+        except Exception:
+            _log.exception("assistant_query memory-scope compose failed")
+            text = f"Project memory is unavailable, so no leads can be served here. {_MEMORY_TAIL}"
+            result, grounding, sources, followups = "insufficient_context", ["graph"], [], []
+    else:
+        # Every non-memory question is refused honestly — no verdict, no guess, and
+        # no fabricated record answer (there is no record on this surface).
+        text = _MEMORY_SCOPE_REFUSAL
+        result, grounding, sources, followups = "unsupported", [], [], []
+
+    # The SAME guards as the record path: never emit a verdict or a path/secret.
+    if has_verdict_language(text):
+        text = _NEUTRAL_ROUTED
+    if _is_unsafe_string(text):
+        text = _NEUTRAL_ROUTED
+
+    return {
+        "answer": text,
+        "result": result,
+        "grounding": grounding,
+        "sources": _scrub_sources(sources),
+        # No record on this surface: no revision, no version, never stale.
+        "record_rev": None,
+        "version": None,
+        "stale": False,
+        "followups": list(followups),
+    }

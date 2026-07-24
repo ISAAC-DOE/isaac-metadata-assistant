@@ -221,8 +221,12 @@ export interface AssistantQueryResponse {
   // workflow | graph). The first entry drives the `answered from:` label.
   grounding: AssistantSource[];
   sources: AssistantQuerySource[];
-  record_rev: number;
-  version: string;
+  // The record-scope endpoint carries a numeric rev + version token; the
+  // record-agnostic Project-Memory endpoint (P34.4) has no record, so both are
+  // null there (and `stale` is always false — there is no revision to be stale
+  // against). A numeric rev is what drives the live-answer stale badge.
+  record_rev: number | null;
+  version: string | null;
   stale: boolean;
   followups: string[];
 }

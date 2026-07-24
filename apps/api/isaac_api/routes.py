@@ -1597,3 +1597,41 @@ def post_assistant_query(
     # Read-only: rev is unchanged; echo the current validator for convenience.
     response.headers["ETag"] = exp.etag()
     return result
+
+
+# --- 19b. assistant memory query (RECORD-AGNOSTIC, READ-ONLY, P34.4) -----------
+#
+# Cross-surface consistency: the Project Memory surface has NO record, so it uses
+# this record-agnostic sibling of the record endpoint instead of the per-experiment
+# path (which would 404 for a non-experiment id). A free-form question is classified
+# with the SAME pure classifier; a project-memory question is answered purely from
+# the memory reader (leads to verify, never a verdict), and ANY other question is an
+# honest refusal directing the user to open a record. It has NO experiment path
+# param, loads/creates NO record, mutates nothing, and inherits the app-wide auth.
+
+
+@router.post("/assistant/memory/query")
+def post_assistant_memory_query(req: AssistantQueryRequest = Body(...)):
+    # Same typed guards as the record endpoint: empty/whitespace or oversized
+    # questions are rejected with a stable typed error (never a 500).
+    question = req.question if isinstance(req.question, str) else ""
+    if not question.strip():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "empty_question", "message": "A non-empty question is required."},
+        )
+    if len(question) > _ASSISTANT_MAX_QUESTION:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "question_too_long",
+                "message": f"The question exceeds the {_ASSISTANT_MAX_QUESTION}-character limit.",
+            },
+        )
+    # history is presentation-only; cap it and never let it influence grounding.
+    _ = (req.history or [])[:_ASSISTANT_MAX_HISTORY]
+
+    # No record is loaded or created — the memory reader is the only grounding.
+    reader = memory.get_default_reader()
+    classified = assistant_query.classify(question)
+    return assistant_query.answer_memory_scope(classified, lambda q: reader.search(q))

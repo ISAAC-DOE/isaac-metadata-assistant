@@ -98,6 +98,7 @@ export function ProjectMemory() {
           <AssistantPanel
             {...compose({ context: 'memory', graph: graph.data })}
             experimentId="project-memory"
+            queryScope="memory"
             availability={graph.data.availability}
             showAvailabilityHead={false}
           />

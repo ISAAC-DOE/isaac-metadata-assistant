@@ -88,6 +88,18 @@ interface AssistantPanelProps {
   /** Optional subordinate note, e.g. "truth questions route to the CLI…". */
   note?: string;
   /**
+   * P34.4 — which free-form query endpoint the composer submits to. `'record'`
+   * (default) POSTs to the per-experiment resolver (`api.askAssistant`), used by
+   * the four RECORD surfaces that each pass a real `experimentId`. `'memory'`
+   * POSTs to the record-agnostic Project-Memory resolver (`api.askMemory`), used
+   * by the Project Memory surface, which has NO record: a project-memory question
+   * is answered from the memory reader; any record question is honestly refused
+   * server-side. In memory scope the answer carries no numeric `record_rev`, so no
+   * stale badge / Ask-again ever appears. Everything else — rendering, provenance
+   * chips, follow-ups, session, empty state, Clear — is identical across scopes.
+   */
+  queryScope?: 'record' | 'memory';
+  /**
    * P29.4 — the LIVE P29.3 AgentContext from the shared record-session owner
    * (`useRecordSession`), bound to the SAME authoritative version/revision the
    * manual workflow reads. Optional so memory-less / non-record mounts still
@@ -277,6 +289,7 @@ export function AssistantPanel({
   availability,
   showAvailabilityHead = true,
   note,
+  queryScope = 'record',
   agentContext,
   degraded = false,
   agentPrompts,
@@ -533,14 +546,23 @@ export function AssistantPanel({
     setComposerText('');
     setLoading(true);
     try {
-      const resp = await api.askAssistant(experimentId, { question });
+      // P34.4 — the ONE composer, TWO read-only scopes: the record surfaces query
+      // the per-experiment resolver; the record-less Project Memory surface queries
+      // the record-agnostic memory resolver. Both are non-mutating and return the
+      // SAME response shape (the memory answer simply carries a null record_rev).
+      const resp =
+        queryScope === 'memory'
+          ? await api.askMemory({ question })
+          : await api.askAssistant(experimentId, { question });
       const source = (resp.grounding[0] ?? 'workflow') as AssistantSource;
       const cls = classifyAnswer(source, availability);
       setLiveAnswer({
         role: 'assistant',
         text: resp.answer,
         answeredFrom: source,
-        recordRev: resp.record_rev,
+        // A null rev (memory scope) becomes undefined so the stale guard
+        // (`typeof recordRev === 'number'`) is never satisfied — no stale badge.
+        recordRev: resp.record_rev ?? undefined,
         resultType: cls.resultType,
         authority: cls.authority,
         actionability: cls.actionability,

@@ -326,6 +326,19 @@ export const api = {
     return postJson<AssistantQueryResponse>(`/experiments/${enc(id)}/assistant/query`, body);
   },
 
+  // P34.4 — the RECORD-AGNOSTIC grounded resolver for the Project Memory surface,
+  // which has NO record (so it has no experiment id and cannot use askAssistant —
+  // that would 404). A non-mutating POST with NO experiment path param: a
+  // project-memory question is answered from the memory reader (leads to verify,
+  // never a verdict); any record question is honestly refused server-side. Inherits
+  // the optional Bearer auth via request() and sends no If-Match (nothing is
+  // written). The response carries a null `record_rev`/`version` (no record). A
+  // non-2xx or network failure throws ApiError, rendered as unavailable — never a
+  // fabricated answer. It touches no mutation endpoint and loads/creates no record.
+  askMemory(body: { question: string }): Promise<AssistantQueryResponse> {
+    return postJson<AssistantQueryResponse>('/assistant/memory/query', body);
+  },
+
   // Memory plane (advisory only; never gates).
   getGraphStatus(): Promise<ApiGraphStatus> {
     return getJson<ApiGraphStatus>('/graph/status');

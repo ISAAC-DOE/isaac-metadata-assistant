@@ -348,3 +348,131 @@ def test_requires_auth_when_key_set(tmp_path, monkeypatch):
     r = c.post(f"/api/experiments/{ws.SEED_READY_ID}/assistant/query",
                json={"question": "what still needs me?"})
     assert r.status_code == 401
+
+
+# --- P34.4: record-agnostic memory-scope endpoint -----------------------------
+#
+# The Project Memory surface has NO record, so it uses POST /api/assistant/memory/query
+# (no experiment path param). A project-memory question is answered from the memory
+# reader (cited leads + advisory framing, never a verdict); ANY other question is an
+# honest refusal directing the user to open a record — never a fabricated record
+# answer. It loads/creates NO record: record_rev/version are null and stale is False.
+
+
+def _mem_query(client, question, **body):
+    return client.post("/api/assistant/memory/query", json={"question": question, **body})
+
+
+def test_memory_scope_answers_memory_question_with_cited_leads(tmp_path, monkeypatch):
+    art = _write_synthetic_graph(tmp_path)
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("ISAAC_MEMORY_DIR", str(art))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    from isaac_api.app import create_app
+
+    c = TestClient(create_app())
+    r = _mem_query(c, "what does project memory know about copper")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["result"] == "answered"
+    assert body["grounding"] == ["graph"]
+    # Advisory "leads to verify" framing, never a verdict.
+    assert "leads to verify" in body["answer"]
+    assert "Memory suggests" in body["answer"]
+    assert aq.has_verdict_language(body["answer"]) is False
+    assert body["sources"], "cited leads expected"
+    for src in body["sources"]:
+        _no_leak(src["label"])
+        nav = src["navigate_to"]
+        assert nav is None or nav.startswith(("/record", "/memory"))
+    # No record on this surface.
+    assert body["record_rev"] is None
+    assert body["version"] is None
+    assert body["stale"] is False
+
+
+def test_memory_scope_refuses_record_question_and_directs_to_a_record(client):
+    # A record-style question ("what still needs me") is NOT answered as a record
+    # here — it is an honest refusal pointing the user at a record.
+    body = _mem_query(client, "what still needs me?").json()
+    assert body["result"] == "unsupported"
+    assert "Project Memory view" in body["answer"]
+    assert "Open a record" in body["answer"]
+    assert body["grounding"] == []
+    assert body["sources"] == []
+    assert body["record_rev"] is None
+    assert body["version"] is None
+    assert body["stale"] is False
+    assert aq.has_verdict_language(body["answer"]) is False
+    _no_leak(body["answer"])
+
+
+@pytest.mark.parametrize("q", [
+    "why can't I export?",           # export_blockers (record intent)
+    "summarize this record",          # record_summary (record intent)
+    "where did the formula come from",  # field_provenance (record intent)
+    "what is the oxidation state of iron",  # unsupported open-world
+    "what's the current step and what's missing",  # ambiguous
+])
+def test_memory_scope_refuses_every_non_memory_intent(client, q):
+    body = _mem_query(client, q).json()
+    assert body["result"] == "unsupported"
+    assert "Open a record" in body["answer"]
+    assert aq.has_verdict_language(body["answer"]) is False
+    _no_leak(body["answer"])
+
+
+def test_memory_scope_empty_question_is_400(client):
+    r = _mem_query(client, "   ")
+    assert r.status_code == 400
+    assert r.json()["error"] == "empty_question"
+
+
+def test_memory_scope_oversized_question_is_400(client):
+    r = _mem_query(client, "x" * 501)
+    assert r.status_code == 400
+    assert r.json()["error"] == "question_too_long"
+
+
+def test_memory_scope_history_is_accepted_and_bounded(client):
+    r = _mem_query(client, "docs about xanes",
+                   history=[{"role": "user", "text": f"m {i}"} for i in range(50)])
+    assert r.status_code == 200
+
+
+def test_memory_scope_is_deterministic(client):
+    first = _mem_query(client, "what still needs me?").json()
+    second = _mem_query(client, "what still needs me?").json()
+    assert first == second
+
+
+def test_memory_scope_creates_no_experiment(client):
+    # The memory endpoint never loads/creates a record: the workspace record count
+    # is unchanged after a batch of memory-scope queries.
+    before = client.get("/api/experiments").json()["experiments"]
+    for q in ("docs about xanes", "what still needs me?", "why can't I export?"):
+        _mem_query(client, q)
+    after = client.get("/api/experiments").json()["experiments"]
+    assert [e["id"] for e in after] == [e["id"] for e in before]
+
+
+def test_memory_scope_no_leak_in_any_answer_or_label(client):
+    questions = [q for q, _ in INTENT_CASES] + OPEN_WORLD
+    for q in questions:
+        body = _mem_query(client, q).json()
+        assert aq.has_verdict_language(body["answer"]) is False, (q, body["answer"])
+        _no_leak(body["answer"])
+        for src in body["sources"]:
+            _no_leak(src["label"])
+            nav = src["navigate_to"]
+            assert nav is None or nav.startswith(("/record", "/memory")), nav
+
+
+def test_memory_scope_requires_auth_when_key_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
+    from isaac_api.app import create_app
+
+    c = TestClient(create_app())
+    r = c.post("/api/assistant/memory/query", json={"question": "docs about xanes"})
+    assert r.status_code == 401

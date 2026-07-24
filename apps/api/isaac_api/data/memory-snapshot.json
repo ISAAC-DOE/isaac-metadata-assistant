@@ -10320,7 +10320,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "8e181590cb89e3538c5c5f6ec49befe42b0928b3ba7fe55d5db02be4c7337d0b"
+        "sha256": "54a7ef1418903dfae1241d0ce7b985fad79a64203d4c09f0e0e83676e51fd0a0"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "3532e647c25975f6919c93ef9c401056070670da8d1d868bf5abae27e77cc2b0"
+        "sha256": "6c6c4dfe305ab8207dd3f015e1f2146a1e3f08da08118b126fafbcdbbabcae47"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10548,7 +10548,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "ae5f41e5ae705ce80f5627e11b8aededcf61106cc739aa455c7ddaaf0c347163"
+        "sha256": "41910e934e236e7c1c48c0df33a095445a1e5fa2c0361148fe0cc28d53891a7f"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "9efd795c00642b7dd033b9377ab3f6f42ec9bf93d486947a866835a158a2e068"
+        "sha256": "0a69f0e5a85cd3a98dab3cb39e6a2a312262d8ece49d753015edfd7e46388cdf"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10604,7 +10604,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "e64c4a5247973e497529e0786a9dbe183aa1c5ab3469a0003a133c593280d767"
+        "sha256": "dc6c823eddab997ddf7e4e8fdfb81e3894df8ac49a12892915007fc62a739e46"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "c4b5e416823a940f505c9ac13d54ac5fa412143056918144bbc94d2532883597"
+    "served_manifest_fingerprint": "23714db78d8a5b193fd3030361f7f37e3e8985c56fbbc08be9aae3c23e37e0d7"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
