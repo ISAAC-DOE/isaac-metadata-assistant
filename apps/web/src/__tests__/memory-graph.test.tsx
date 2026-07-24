@@ -216,7 +216,7 @@ describe('P36.2 · Graph tab — node selection and detail panel', () => {
     // neighbor other_mod.py — is what's actually rendered in the SVG.
     fireEvent.click(getByText('src/fake_mod.py'));
 
-    const svg = document.querySelector('.memory-graph-svg') as SVGSVGElement;
+    const svg = document.querySelector('.memory-graph-svg') as HTMLElement;
     expect(svg).not.toBeNull();
     const svgScoped = within(svg);
     const otherModNode = svgScoped.getByRole('button', { name: /src\/other_mod\.py/ });
@@ -297,7 +297,7 @@ describe('P36.2 · Graph tab — a11y', () => {
     // never the full graph at once); select one to reach the SVG's a11y tree.
     fireEvent.click(getByRole('button', { name: /src\/fake_mod\.py/ }));
 
-    const svg = document.querySelector('.memory-graph-svg') as SVGSVGElement;
+    const svg = document.querySelector('.memory-graph-svg') as HTMLElement;
     expect(svg).toHaveAttribute('role', 'group');
     expect(svg.getAttribute('aria-label')).toBeTruthy();
 
