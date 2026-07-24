@@ -366,8 +366,52 @@ unused files in S0.
 ### Human-only QA (from §6): narrow-viewport rendering, full mutation journey, two-window live-sync,
 exported-artifact stale, `absent_from_record`. Not fabricated.
 
-### Manifest note
-`docs/superpowers/plans/*.md` (this file + the ledger), `lib/labels.ts`, `lib/types.ts`, and
-`lib/status.ts` are served-content-manifest members — regenerate `memory-snapshot.json`
-deterministically in the same commit whenever touched (CLAUDE.md §17).
+### Manifest note (corrected)
+The served-content-manifest members among the files this phase touches are the frontend source
+files (`lib/labels.ts`, `lib/types.ts`, `lib/status.ts`, `lib/adapt.ts`, `components/AssistantPanel.tsx`,
+`screens/ProjectMemory.tsx`, `screens/RecordWorkbench.tsx`, `components/GraphStatusChip.tsx`, etc.) —
+regenerate `memory-snapshot.json` deterministically in the same commit whenever any of them is touched
+(CLAUDE.md §17). The plan docs themselves — **this register and the master ledger — are NOT manifest
+members** (verified: editing them produces no snapshot drift), so doc-only commits need no regeneration.
+
+---
+
+## 10. PHASE 33 CLOSURE (CLOSED 2026-07-23 — code HEAD `2f51d84`)
+
+Final independent whole-phase Opus review (`46eea62..2f51d84`): **SHIP** — all 7 completion-gate
+criteria PASS, truth path provably untouched, no-functionality boundary holds, no parallel systems,
+build + 621 FE tests + snapshot gate green, 0 Critical / 0 Important.
+
+### Slice ledger
+| Slice | Code commit | Doc commit |
+|---|---|---|
+| S0 plan lock | `7434c26` | (in S0) |
+| S1 dashboard | `3ab9a1b` | `8cd253d` |
+| S2 assistant shell | `9364f21` (+fix `a4e8f36`) | `bc750c6` |
+| S3 Project Memory | `c7b7825` | `b8b491e` |
+| S4 record editor + evidence | `5665132` | `b55f30a` |
+| S5 headings/casing/a11y | `ee7f5f6` | `cf5c29c` |
+| S6 responsive/drawer/search/cleanup | `2f51d84` | this closure commit |
+
+### Terminal disposition — decisions & findings
+- **D1–D12 all SHIPPED.** D1 dashboard title/badges · D2 right-side declutter · D3 honest composer ·
+  D4 assistant order · D5 lavender rail · D6 memory tabs + right-rail assistant · D7 single green
+  "Memory Available" · D8 evidence out of the rail · D9/C2 numbered banner formatter · D10 casing tiers ·
+  D11 responsive · D12 search context.
+- **C1–C5 all applied.** **R1–R5 honored.**
+- **Audit findings folded in & resolved:** HIER-1 (dashboard), HIER-2 (banner mid-token wrap), A11Y-1
+  (one h1/screen), RESP-1 (**measurably closed: live CSSOM 0→9 width media queries**), NAV-1 (**search
+  context — resolved, not deferred**), COMP dead-code (orphaned CSS + dead props removed). POL-2
+  (empty-right-half) incidentally resolved by the memory right-rail.
+- **Deferred (explicit):** real free-form assistant Q&A (separate approval-gated backend phase).
+- **Accepted Minors (non-blocking):** AdvisoryChip "{n} advisory" count phrase (defensible sentence case).
+
+### Human-only QA outstanding (R3 — honestly dispositioned, NOT fabricated)
+Narrow-viewport **rendering** at 1280/1024/768/375 + 200% zoom; full authenticated mutation journey;
+two-visible-window live-sync; exported-artifact stale; `absent_from_record`. The automation viewport is
+pinned at 1440 and jsdom applies no CSS/viewport, so narrow **presentation** is code/CSSOM-verified only;
+drawer **behavior** is fully unit-tested. A human should confirm the narrow layout + drawer presentation
+on real widths before treating RESP-1 as visually signed-off on devices.
+
+**Phase 33 = COMPLETE.** No new phase started; the next phase requires explicit user approval.
 

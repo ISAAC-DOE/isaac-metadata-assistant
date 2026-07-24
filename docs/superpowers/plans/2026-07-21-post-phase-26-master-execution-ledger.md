@@ -1117,3 +1117,47 @@ Search disambiguation (NAV-1) + free-form Q&A deferred.
   not aria-hidden (cosmetic), (M3) AdvisoryChip '{n} advisory' lowercase (defensible count phrase);
   plus carried from S4 — orphaned `.ev-panel-*`/`.ev-field` CSS + inert FieldGroup `selectedPath`/
   `onSelectField` props.
+
+- **S6 — Responsive + zoom + long-content + search + cleanup** (2026-07-23 @ `2f51d84`): presentation/
+  layout/a11y only; DESKTOP UNCHANGED (all media queries `max-width` 1024/640, additive; zero `min-width`
+  layout rule). Test-first for the a11y/drawer contract, Opus 4.8 implemented, independent Opus review =
+  **SHIP** (0 Critical/Important; 3 Minors all fixed in a follow-up pass). RESP-1/D11: at narrow widths
+  the fixed chrome (LeftNav/WorkflowSpine/EvidenceTrail/record-right/memory-right) stacks/goes fluid with
+  no horizontal overflow; the AssistantPanel collapses behind a labelled Assistant slide-over drawer (new
+  `AssistantDrawer`: role=dialog+aria-modal, aria-expanded, focus trap, Escape, focus restore, closes on
+  resize-to-desktop; desktop renders byte-identically to the former aside). 200%-zoom/long-content:
+  overflow-wrap containment. D12/NAV-1: search results show "in {title}" from the existing
+  `ApiWorkspaceSearchResult.title` only when it differs from the label — presentational, no
+  ranking/retrieval change (NAV-1 resolved, not deferred). Cleanup: orphaned `.ev-panel-*`/`.ev-field` +
+  dead FieldGroup/FieldRow selection plumbing + `.field-row.selectable/.selected` removed; M1
+  GuidedCompletion backend-down sr-only h1; M2 HelpPanel trigger icon aria-hidden. Verify: full FE
+  **621 passed**, `npm run build` clean, snapshot regen + gate 17/17. CI `2f51d84` success; Railway
+  `synthetic-only` serving `2f51d84`; Vercel 200. **Hosted verification:** live CSSOM shows
+  `widthMediaQueries = 9` (was 0 at audit — RESP-1 measurably closed), `max-width` only,
+  `noHorizontalOverflow=true` at desktop; desktop dashboard unchanged; console clean. **Human-only (R3):**
+  the narrow-width RENDERING (rail-collapse/pane-stacking/drawer presentation/200%-zoom reflow) is not
+  automation-observable (jsdom applies no viewport/CSS; the browser viewport is pinned at 1440) — drawer
+  BEHAVIOR is fully unit-tested; narrow PRESENTATION requires a human at 1280/1024/768/375 + 200% zoom.
+
+## Phase 33 Completion Gate (CLOSED 2026-07-23 @ code HEAD `2f51d84`)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| Dashboard declutter (D1/D2/C1) | ✅ | clean title, lifecycle+date badges, field-count/chevron-only right side, 2/1/1/1, enriched a11y name; hosted-verified |
+| Assistant shell (D3/D4/D5/C3) | ✅ | composer→suggested→answers, honest inert composer (no fetch/answer/history), lavender rail, disclaimers de-duped; app-wide; hosted-verified |
+| Project Memory (D6/D7) | ✅ | Overview/Sources/Concepts tabs, right-rail assistant, single green "Memory Available", memory-plane explanation kept; hosted-verified |
+| Record editor + evidence (D8/D9/C2, HIER-2) | ✅ | numbered banner via pure formatter, Guided Completion full question kept, right rail assistant-only, Evidence Trail → existing /evidence, inline evidence kept; hosted-verified |
+| Casing + headings + icon a11y (D10/C4/A11Y-1) | ✅ | one h1/routed screen, gap-free outline (fixed a real skip), 2 label-tier casing fixes, icon a11y; heading-outline suite green |
+| Responsive (D11/RESP-1) | ✅ | **live CSSOM 0→9 width media queries (max-width only, desktop unchanged)**; assistant drawer dialog a11y; long-content/zoom containment |
+| Search clarity (NAV-1/D12) | ✅ | "in {title}" from existing field, presentational, no ranking/retrieval change — **resolved, not deferred** |
+| No-functionality change | ✅ | validation/evidence/export/reconciliation/confirmed-write/no-guessing/computation/routing/retrieval/API/schema all unchanged |
+| Truth path untouched | ✅ | `git diff 46eea62..2f51d84 --stat` = zero changes under `src/isaac_records/`, `schema/`, `apps/api/**/*.py` (only `memory-snapshot.json` data) |
+| Full FE suite / build / snapshot gate | ✅ | 621 passed / `npm run build` clean / gate 17/17 |
+| Final independent Opus review | ✅ | **SHIP** (0 Critical / 0 Important) over the whole `46eea62..2f51d84` range |
+| CI / Vercel / Railway | ✅ | exact-HEAD CI `2f51d84` success; Vercel 200; Railway `synthetic-only` serving `2f51d84` |
+| Repo clean + synced | ✅ | `main`, 0 ahead / 0 behind at closure |
+
+**Phase 33 = COMPLETE.** Deferred: real free-form assistant Q&A (separate approval-gated phase).
+Human-only rendering QA (narrow-viewport 1280/1024/768/375 + 200% zoom; mutation journey; two-window
+live-sync; exported-artifact stale; `absent_from_record`) honestly carried, per R3. No new phase started;
+the next phase requires explicit user approval.
