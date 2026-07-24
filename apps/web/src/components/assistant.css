@@ -235,6 +235,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* P34.5 — a long plane/source label wraps inside the chip instead of pushing
+   * the narrow drawer / 200%-zoom panel into horizontal overflow. */
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 3px 8px;
   border-radius: var(--radius-token);
   background: var(--assist-tint);
@@ -361,6 +365,10 @@ button.assistant-source-chip-nav:focus-visible {
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
+/* P34.5 — the question label takes the remaining width and WRAPS (a long
+ * follow-up must not overflow the drawer at narrow width / 200% zoom); the
+ * chevron stays pinned at its natural size. */
+.assistant-followup > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .assistant-followup .chev { color: var(--text-quaternary); flex: 0 0 auto; }
 .assistant-followup:hover:not(:disabled) { background: var(--assist-tint); border-style: solid; }
 .assistant-followup:disabled { opacity: 0.55; cursor: default; }

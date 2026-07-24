@@ -222,6 +222,32 @@ const VERDICT_ROUTE_TEXT =
 // while a read-only grounded query is resolving.
 const WORKING_LABEL = 'Working…';
 
+// P34.5 — a defensive client-side ceiling so a hung read-only query can never
+// leave the composer stuck in `loading` forever. On timeout the query REJECTS,
+// which flows through the SAME catch as any network error → the composer
+// re-enables and the honest "unavailable" turn renders. This adds no
+// cancellation/streaming UI (Decision #7): it only bounds the wait.
+const QUERY_TIMEOUT_MS = 20000;
+
+// Reject `p` if it has not settled within `ms`. The timer is cleared on settle
+// so a resolved query leaves no dangling timeout; a late resolution after the
+// timeout is discarded (the race has already rejected).
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('assistant query timed out')), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 // Message-kind presentation (icon + label + palette class). Each kind is
 // distinguishable by ICON + TEXT, never color alone (project a11y rule).
 const KIND_META: Record<MessageKind, { label: string; Icon: LucideIcon; className: string }> = {
@@ -325,6 +351,10 @@ export function AssistantPanel({
 
   const logRef = useRef<HTMLDivElement | null>(null);
   const replyRef = useRef<HTMLParagraphElement | null>(null);
+  // P34.5 — the composer input, so focus can return to it after Clear (the Clear
+  // button unmounts when the log empties; focus must land somewhere sensible, not
+  // be lost to <body>).
+  const composerInputRef = useRef<HTMLInputElement | null>(null);
   const nearBottomRef = useRef(true);
   const mountedRef = useRef(false);
   const focusPendingRef = useRef(false);
@@ -550,10 +580,12 @@ export function AssistantPanel({
       // the per-experiment resolver; the record-less Project Memory surface queries
       // the record-agnostic memory resolver. Both are non-mutating and return the
       // SAME response shape (the memory answer simply carries a null record_rev).
-      const resp =
+      const resp = await withTimeout(
         queryScope === 'memory'
-          ? await api.askMemory({ question })
-          : await api.askAssistant(experimentId, { question });
+          ? api.askMemory({ question })
+          : api.askAssistant(experimentId, { question }),
+        QUERY_TIMEOUT_MS,
+      );
       const source = (resp.grounding[0] ?? 'workflow') as AssistantSource;
       const cls = classifyAnswer(source, availability);
       setLiveAnswer({
@@ -602,6 +634,9 @@ export function AssistantPanel({
     setLiveAnswer(null);
     setLiveQuestion(null);
     setActiveIndex(null);
+    // P34.5 — the Clear button unmounts with the now-empty log, so move focus to
+    // the always-present composer input rather than letting it fall to <body>.
+    composerInputRef.current?.focus();
   }
 
   const agentActive = !!agentContext && !degraded && !agentContext.degraded;
@@ -733,6 +768,7 @@ export function AssistantPanel({
           are ignored while a query is in flight. */}
       <form className="assistant-composer" onSubmit={onComposerSubmit}>
         <input
+          ref={composerInputRef}
           type="text"
           className="assistant-composer-input"
           aria-label="Ask the assistant a question"
