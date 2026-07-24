@@ -371,6 +371,13 @@ For this project:
 Current state:
 
 - The deterministic truth/export/validation/audit core and the synthetic XANES draft→export→sidecar→audit flow are in place and passing.
+- **Phase 34 (free-form deterministic Assistant Q&A) is COMPLETE**, shipped at code HEAD `d69d0ed`
+  (see `docs/superpowers/plans/2026-07-21-post-phase-26-master-execution-ledger.md` §Phase 34 and
+  `docs/superpowers/plans/2026-07-23-phase-34-assistant-freeform-closure.md`). "Free-form" means
+  flexible natural-language phrasing over a bounded, deterministic intent catalog — **no LLM was
+  added**; unsupported/ambiguous/open-world questions are refused honestly, never guessed; Q&A is
+  read-only. A real LLM provider (Tier 2) remains an unapproved, deferred decision. The Phase 33/34
+  human visual sign-off gate (narrow-viewport + 200% zoom) is still OPEN — Krish's to give.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase only after explicit user approval.
 
@@ -474,6 +481,8 @@ Current MVP scope:
 - official ISAAC schema validation
 - evidence sidecar
 - optional Graphify memory/query
+- free-form deterministic Assistant Q&A shipped (Phase 34, `d69d0ed`): bounded intent catalog only,
+  no LLM; Tier-2 LLM/generative Q&A remains out of scope unless explicitly approved
 
 Out of scope unless explicitly approved:
 

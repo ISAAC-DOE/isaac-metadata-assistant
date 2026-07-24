@@ -1189,3 +1189,89 @@ except `memory-snapshot.json` data).
 human gate stays OPEN. Human-only remaining: narrow-viewport rendering (1280/1024/768/375) + 200% zoom
 (esp. the full-height lavender rail + narrow drawer), a legibility glance at the demoted `.fg-sublabel`
 raw-key token, plus the pre-existing §gate human-only items. No new phase; next phase needs explicit approval.
+
+## Phase 34 — Free-Form Deterministic Assistant Q&A (CLOSED 2026-07-23 @ code HEAD `d69d0ed`)
+
+Goal: let the Assistant answer flexibly-phrased natural-language questions about the current record
+and (record-agnostically) about Project Memory, **without adding an LLM** — a bounded, deterministic
+intent-classify-then-answer resolver, honest refusal outside that catalog, read-only end to end.
+Closes the Phase 33 "real free-form assistant Q&A" deferral. 6 commits on `main`, all CI green.
+
+**Decision #13 (documentation language, binding for this closure and its docs):** "free-form" means
+flexible natural-language *phrasing* over a bounded, deterministic intent catalog — **not** a
+general-purpose chatbot and **not** open-world answering. No model provider, secret, AI dependency, or
+outbound model request was added. Unsupported and ambiguous questions are refused honestly; unknown
+scientific/open-world facts are never guessed. Project Memory answers are advisory and cited (leads to
+verify) — never treated as record/experiment truth or a verdict. Q&A is READ-ONLY and cannot mutate
+records/revision/workflow/evidence/validation/export/memory/files. Conversations are ephemeral
+(browser session), cleared on Reset Demo — no server-side persistence, no Project-Memory indexing of
+conversation text, no prompt/answer text in logs. A real LLM provider (Tier 2) remains an **unapproved,
+deferred future product decision** — not committed work.
+
+- **P34.1 — read-only resolver + endpoint** (`15fb8ec`): pure, stdlib-only `assistant_query.py`
+  (classify → answer) covering 8 record intents + `memory_lead`, honest refusal for
+  unsupported/ambiguous/open-world questions; two READ-ONLY routes —
+  `POST /api/experiments/{id}/assistant/query` (record-scoped) and
+  `POST /api/assistant/memory/query` (record-agnostic, Project Memory) — verdict-guard + path/secret
+  scrub on every answer, revision-stamped, typed errors, never mutates.
+- **P34.2 — composer wiring + rail declutter** (`ccd786a`): composer wired to the read-only resolver;
+  the on-mount auto-reply ("N fields still need you") **removed** — the rail rests on the honest empty
+  state; bounded ephemeral conversation (reuses the P29 session, `MAX_MESSAGES=40`, cleared on Reset
+  Demo); Clear Conversation.
+- **P34.3 — provenance, staleness, Ask Again** (`8f7c12f`): answer provenance labels + cited-lead
+  chips with client-route source navigation; compact live-answer staleness indicator + explicit Ask
+  Again (no silent auto-regeneration).
+- **P34.4 — cross-surface memory query** (`a9339f2`): record-agnostic Project-Memory query wired on
+  the memory-scoped composer, consistent with the record-scoped path — one shared answer pipeline
+  across surfaces.
+- **P34.5 — a11y, responsive, degradation** (`2481858`): single polite live region + focus management
+  + accessible names; responsive behavior (narrow width, 200% zoom, long-content wrapping); honest
+  "unavailable" degradation + defensive timeout — no silent hang, no fabricated answer.
+- **P34.5(2) — review-closure** (`d69d0ed`): independent Opus review PASSED the authority/read-only,
+  no-LLM/no-infra, no-guessing, determinism, privacy, staleness, no-regression, synthetic-only
+  contract; its two findings were fixed in this commit — **D1** verdict-guard extended to cited
+  *source labels* (not just answer text), **R2** suppress misleading provenance on refusals (a refusal
+  no longer carries a stale/verified provenance stamp).
+
+**One `AssistantPanel` across all 5 surfaces** (Record Workbench, Guided Completion,
+Evidence Explorer, Export Readiness, Project Memory — the My Experiments dashboard does not mount it);
+Suggested Questions stay precomposed and share
+the one answer pipeline; Agent Actions and the single write path (`confirmProposal`) are unchanged and
+kept fully separate from the read-only Q&A path.
+
+**Verification at close:** backend `.venv/bin/pytest -q` → **964 passed**; frontend `npm test` →
+**672 passed** (55 files); `npm run build` clean; committed-snapshot gate green. CI green on every one
+of the 6 pushes. Railway `synthetic-only` @ HEAD; Vercel deployed.
+
+**Hosted synthetic QA (live, PASS):** empty-state rail (no auto pending-summary card); free-form
+deterministic answers; an open-world scientific question refused (no guess); read-only confirmed —
+only `/assistant/query` was hit, never `/answers`/`/edit`/`/export`; provenance labels + cited-lead
+chips render; Clear Conversation works; memory-scoped composer answers on Project Memory; console
+clean; no telemetry observed.
+
+## Phase 34 Completion Gate (CLOSED 2026-07-23 @ code HEAD `d69d0ed`)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| Bounded deterministic resolver, no LLM (P34.1) | ✅ | `assistant_query.py` stdlib-only classify→answer; 8 record intents + `memory_lead`; honest refusal outside catalog |
+| Two read-only routes, verdict-guard + scrub | ✅ | `/assistant/query` (record-scoped) + `/assistant/memory/query` (record-agnostic); revision-stamped; typed errors; never mutates |
+| Auto-reply removed; honest empty state (P34.2) | ✅ | on-mount "N fields still need you" reply removed; bounded ephemeral session (`MAX_MESSAGES=40`); Clear Conversation |
+| Provenance + staleness + Ask Again (P34.3) | ✅ | source labels + cited-lead chips with route navigation; compact staleness indicator; explicit Ask Again, no silent regeneration |
+| Cross-surface consistency (P34.4) | ✅ | record-agnostic Project-Memory query on the memory-scoped composer; one shared answer pipeline |
+| A11y / responsive / degradation (P34.5) | ✅ | single polite live region + focus management; narrow-width/200%-zoom/long-content wrapping; honest unavailable + defensive timeout |
+| Independent Opus review | ✅ | PASSED the authority/read-only, no-LLM/no-infra, no-guessing, determinism, privacy, staleness, no-regression, synthetic-only contract; D1 + R2 fixed in `d69d0ed` |
+| Decision #13 language honored | ✅ | bounded-catalog framing, no open-world/generative claim, advisory+cited memory answers, read-only, ephemeral, Tier-2 LLM stays unapproved/deferred |
+| Truth path untouched | ✅ | no changes under `src/isaac_records/`, `schema/`, `apps/api/**/*.py` truth modules — only the new read-only `assistant_query.py`/routes and frontend wiring |
+| Full backend/frontend suite / build / snapshot gate | ✅ | backend 964 passed; frontend 672 passed (55 files); `npm run build` clean; snapshot gate green |
+| CI / Vercel / Railway | ✅ | CI green on all 6 pushes; Railway `synthetic-only` serving HEAD; Vercel deployed |
+
+**Phase 34 = COMPLETE at `d69d0ed`.** Open items honestly carried, not overstated as done:
+
+- **Human VISUAL sign-off (narrow-viewport 1280/1024/768/375 + 200% zoom)** remains a human decision —
+  P34 added the responsive CSS + a11y and automated/desktop QA passed, but the human visual gate is
+  Krish's to give, paralleling the still-open Phase 33 human visual gate (see the Phase 33 HQA section
+  above).
+- **Tier 2 (a real LLM provider)** remains an unapproved, deferred future product decision — not
+  scoped, not scheduled, not implied by anything shipped in Phase 34.
+
+No new phase started; the next phase requires explicit user approval.
