@@ -657,6 +657,143 @@ export const memoryConceptDetailWithheldAnchor = {
   related: { files: [], concepts: [] },
 };
 
+// --- P36.2 Graph tab fixtures (memory plane; synthetic, shape-faithful to
+// apps/api/isaac_api/memory_graph.py `build_graph_projection`) -------------
+// Deliberately reuses the SAME synthetic paths/concepts as the Source Index /
+// Concept Lookup fixtures above (src/fake_mod.py, docs/fake-note.md,
+// concept-provenance, concept-governance) so a cross-tab deep-link test can
+// select a node here and land on the SAME row in Sources/Concepts.
+
+const MEMORY_GRAPH_NOTE =
+  'Project memory returns leads to verify — never a validation verdict. ' +
+  'This is a served-file reference graph, not the full (un-embedded) source graph.';
+
+/** GET /api/memory/graph — available: 3 files, 2 concepts, 1 real edge
+ * (relation "imports"), 2 communities, honest un-embedded-source disclosure. */
+export const memoryGraphAvailable = {
+  plane: 'memory' as const,
+  note: MEMORY_GRAPH_NOTE,
+  available: true,
+  truncated: false,
+  nodes: [
+    {
+      id: 'src/fake_mod.py',
+      kind: 'file' as const,
+      label: 'src/fake_mod.py',
+      file_type: 'code',
+      community_id: '131',
+      community_name: 'Export Pipeline',
+      node_count: 42,
+      on_disk: true,
+    },
+    {
+      id: 'src/other_mod.py',
+      kind: 'file' as const,
+      label: 'src/other_mod.py',
+      file_type: 'code',
+      community_id: '55',
+      community_name: null,
+      node_count: 3,
+      on_disk: true,
+    },
+    {
+      id: 'docs/fake-note.md',
+      kind: 'file' as const,
+      label: 'docs/fake-note.md',
+      file_type: 'document',
+      community_id: null,
+      community_name: null,
+      node_count: 1,
+      on_disk: false,
+    },
+    {
+      id: 'concept-provenance',
+      kind: 'concept' as const,
+      label: 'Provenance',
+      community_id: '131',
+      community_name: 'Export Pipeline',
+      on_disk: true,
+      source_file: 'src/fake_mod.py',
+    },
+    {
+      id: 'concept-governance',
+      kind: 'concept' as const,
+      label: 'Governance allowlist',
+      community_id: '55',
+      community_name: null,
+      on_disk: false,
+      source_file: 'docs/fake-note.md',
+    },
+  ],
+  edges: [
+    { source: 'src/fake_mod.py', target: 'src/other_mod.py', relations: ['imports'] },
+  ],
+  communities: [
+    { id: '131', name: 'Export Pipeline', file_count: 1 },
+    { id: '55', name: null, file_count: 1 },
+  ],
+  meta: {
+    counts: {
+      files: 3,
+      concepts: 2,
+      reference_edges: 1,
+      files_with_references: 2,
+      isolated_files: 1,
+      communities_rendered: 2,
+    },
+    underlying_graph: {
+      embedded: false as const,
+      node_count: 2988,
+      edge_count: 4465,
+      community_count: 257,
+      note: 'full source graph not embedded; this is the served-content reference projection',
+    },
+    provenance: {
+      built_at_commit: 'caab1d0a69c1733524bda5dde495623bc4b7bad1',
+      source_graph_sha256: '0cfccb9f77893363ecfb467e129014d751bf16a76b2b37be990af9f263f4b432',
+      snapshot_schema_version: 1,
+      provider: 'sanitized-snapshot',
+      integrity: 'verified' as const,
+    },
+  },
+};
+
+/** GET /api/memory/graph — degraded (graph absent): zero fabricated nodes. */
+export const memoryGraphUnavailable = {
+  plane: 'memory' as const,
+  note: MEMORY_GRAPH_NOTE,
+  available: false,
+  reason: 'graph_absent' as const,
+  truncated: false,
+  nodes: [],
+  edges: [],
+  communities: [],
+  meta: {
+    counts: {
+      files: 0,
+      concepts: 0,
+      reference_edges: 0,
+      files_with_references: 0,
+      isolated_files: 0,
+      communities_rendered: 0,
+    },
+    underlying_graph: {
+      embedded: false as const,
+      node_count: null,
+      edge_count: null,
+      community_count: null,
+      note: 'full source graph not embedded; this is the served-content reference projection',
+    },
+    provenance: {
+      built_at_commit: null,
+      source_graph_sha256: null,
+      snapshot_schema_version: null,
+      provider: 'unavailable',
+      integrity: 'unknown' as const,
+    },
+  },
+};
+
 /** Artifacts before export: all null (200, not an error). */
 export const artifactsNull = {
   record: null,

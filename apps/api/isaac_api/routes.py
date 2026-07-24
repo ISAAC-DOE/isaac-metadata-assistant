@@ -34,6 +34,7 @@ from . import csv_ingest
 from . import dependencies
 from . import evidence_classify
 from . import memory
+from . import memory_graph
 from . import runtime_mode
 from . import runtime_records
 from . import search
@@ -1325,6 +1326,16 @@ def get_memory_file(path: str = ""):
         "related": related,
         "rationales": rationales,
     }
+
+
+@router.get("/memory/graph")
+def get_memory_graph() -> dict:
+    """P36.2 — the Project Memory "Graph" tab: a deterministic, capped,
+    served-file reference projection (nodes/edges/communities) derived purely
+    from the reader's public surface. See ``memory_graph.build_graph_projection``
+    for the full algorithm; this handler never needs a try/except — that
+    function never raises."""
+    return memory_graph.build_graph_projection(memory.get_default_reader())
 
 
 # --- 17. search (composed truth + memory planes, grouped, no verdict) ----------
