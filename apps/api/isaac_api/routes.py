@@ -1709,3 +1709,50 @@ def post_assistant_memory_query(req: AssistantQueryRequest = Body(...)):
     reader = memory.get_default_reader()
     classified = assistant_query.classify(question)
     return assistant_query.answer_memory_scope(classified, lambda q: reader.search(q))
+
+
+# --- 20. about + api docs (Settings / Help, P36.4, READ-ONLY) ------------------
+#
+# Two GET-only, mutation-free routes backing the Settings page. Both reuse
+# EXISTING authoritative sources (never a second copy of app identity or the
+# API surface) and both live on THIS `/api`-prefixed router, so they are
+# base-path-correct under {base}/api/* exactly like every other route here.
+
+
+@router.get("/about")
+def about() -> dict:
+    """Non-sensitive app/provenance metadata for the Settings "Help / About" card.
+
+    Every field is reused from an existing authoritative source — `__version__`
+    and `_build_commit()` (the SAME deploy-identity read `/health` uses),
+    `EXPECTED_VERSION` from `isaac_records.official` (the vendored official
+    schema's version, read-only import — that module is never modified here),
+    and `runtime_mode.runtime_mode()` (the SAME fail-closed resolver `/health`
+    uses). `persistence` and `data_regime` are fixed, non-configurable literals
+    describing this prototype's current scope. Deliberately excludes hostnames,
+    infrastructure internals, environment values, secrets, and absolute paths —
+    only the same non-sensitive identity `/health` already exposes, expanded
+    with schema/persistence/regime context.
+    """
+    return {
+        "app_version": __version__,
+        "build_commit": _build_commit(),
+        "record_schema_version": EXPECTED_VERSION,
+        "runtime_mode": runtime_mode.runtime_mode(),
+        "persistence": "ephemeral",
+        "data_regime": "synthetic-only",
+        "core": "isaac_records",
+    }
+
+
+@router.get("/openapi")
+def api_openapi(request: Request) -> dict:
+    """The app's generated OpenAPI schema, reachable under the base-path-prefixed
+    router (byte-identical to the root `/openapi.json` FastAPI already serves,
+    just reachable at {base}/api/openapi so the Settings "API Documentation"
+    card can fetch it correctly under a deployed base path). No hand-maintained
+    duplicate description: `request.app.openapi()` is FastAPI's own generated
+    schema, built from the SAME routes an authenticated user can already call —
+    route signatures only, never secrets or runtime state.
+    """
+    return request.app.openapi()

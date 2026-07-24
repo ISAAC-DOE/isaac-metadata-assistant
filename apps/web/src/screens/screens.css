@@ -1561,6 +1561,311 @@
   border-top: 1px solid var(--border);
 }
 
+/* ---- Settings: Help / About + API Documentation (P36.4) -------------- */
+
+.settings-card {
+  max-width: 860px;
+}
+.settings-card + .settings-card {
+  margin-top: 18px;
+}
+.settings-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.settings-card-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-slate);
+}
+.settings-card-head h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.settings-card-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  max-width: 68ch;
+}
+
+/* Help / About — figures list, provenance note, doc references. */
+.settings-figures {
+  margin: 16px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 24px;
+}
+.settings-figure {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+.settings-figure dt {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.settings-figure dd {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-heading);
+  font-weight: 500;
+  text-align: right;
+}
+.settings-commit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.settings-commit-short {
+  font-weight: 600;
+}
+.settings-commit-full {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  word-break: break-all;
+}
+.settings-commit-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  text-align: right;
+}
+
+.settings-provenance-note {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-inner, 8px);
+  border: 1px solid var(--border-hair);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-provenance-note p {
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 74ch;
+}
+.settings-provenance-note strong {
+  color: var(--text-heading);
+}
+
+.settings-docs-note {
+  margin-top: 14px;
+}
+.settings-docs-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.settings-docs-list {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  list-style: none;
+  padding: 0;
+}
+.settings-docs-list code {
+  font-size: 11.5px;
+  color: var(--text-strong);
+}
+.settings-docs-caption {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* API Documentation — search + grouped, expandable rows. */
+.settings-search {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-search-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.settings-search-input-wrap {
+  position: relative;
+  max-width: 360px;
+}
+.settings-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-quaternary);
+  pointer-events: none;
+}
+.settings-search-input {
+  width: 100%;
+  padding: 8px 12px 8px 32px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  background: var(--screen-base);
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+.settings-search-input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+  border-color: var(--action);
+}
+.settings-search-input::placeholder {
+  color: var(--text-quaternary);
+}
+
+.settings-doc-count {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.settings-doc-empty {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+.api-docs-groups {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.api-docs-group-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.api-docs-group-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.api-docs-rows {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.api-docs-row + .api-docs-row {
+  border-top: 1px solid var(--border-hair);
+}
+.api-docs-row summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 4px;
+  gap: 10px;
+  padding: 9px 4px;
+  cursor: pointer;
+  list-style: none;
+}
+.api-docs-row summary::-webkit-details-marker {
+  display: none;
+}
+.api-docs-row summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.api-docs-row-chevron {
+  flex: none;
+  color: var(--text-quaternary);
+  transition: transform 0.12s ease;
+}
+.api-docs-row details[open] .api-docs-row-chevron {
+  transform: rotate(90deg);
+}
+.api-docs-method {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: var(--radius-token);
+  border: 1px solid var(--border);
+  min-width: 46px;
+  text-align: center;
+}
+.api-docs-method-get    { color: var(--verified-text); background: var(--verified-bg); border-color: var(--verified-border); }
+.api-docs-method-post   { color: var(--action-hover);  background: var(--action-tint); border-color: var(--action-selected-border); }
+.api-docs-method-put    { color: var(--needsyou-text); background: var(--needsyou-bg); border-color: var(--needsyou-border); }
+.api-docs-method-delete { color: var(--fail-text);     background: var(--fail-bg);     border-color: var(--fail-border); }
+.api-docs-path {
+  font-size: 12px;
+  color: var(--text-heading);
+  word-break: break-all;
+}
+.api-docs-summary-text {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.api-docs-row-body {
+  padding: 0 4px 12px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.api-docs-description {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 74ch;
+}
+.api-docs-no-params {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.api-docs-params-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.api-docs-params {
+  border-collapse: collapse;
+  font-size: 11.5px;
+  max-width: 100%;
+}
+.api-docs-params th {
+  text-align: left;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  padding: 4px 12px 4px 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+.api-docs-params td {
+  padding: 4px 12px 4px 0;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-hair);
+}
+
 /* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
 /* Desktop (≥1024px) is byte-identical: every rule is inside a max-width query.
    The assistant right rail (.record-right / .memory-right) collapses into the
@@ -1602,8 +1907,25 @@
   /* Two-up grids collapse to a single column so nothing is squeezed. */
   .signal-row,
   .artifact-row,
-  .memory-figures {
+  .memory-figures,
+  .settings-figures {
     grid-template-columns: 1fr;
+  }
+
+  /* Settings (P36.4): the About figure's commit block and the API doc search
+     box go full-width on narrow screens instead of pinning to a fixed max. */
+  .settings-figure dd {
+    text-align: left;
+  }
+  .settings-commit {
+    align-items: flex-start;
+  }
+  .settings-commit-note,
+  .settings-commit-full {
+    text-align: left;
+  }
+  .settings-search-input-wrap {
+    max-width: 100%;
   }
   .source-index-panel-figures {
     grid-template-columns: 1fr 1fr;

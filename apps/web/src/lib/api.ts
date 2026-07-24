@@ -12,6 +12,7 @@
 
 import type { RuntimeRecord } from './crossRecordTriage';
 import type {
+  ApiAboutResponse,
   ApiAnswersResponse,
   ApiArtifactsResponse,
   ApiAuditResponse,
@@ -31,6 +32,7 @@ import type {
   ApiMemoryFileResponse,
   ApiMemoryFilesResponse,
   ApiMemoryGraphResponse,
+  ApiOpenApiResponse,
   ApiPendingResponse,
   ApiSearchResponse,
   ApiSearchScope,
@@ -150,6 +152,19 @@ const enc = encodeURIComponent;
 export const api = {
   health(): Promise<ApiHealth> {
     return getJson<ApiHealth>('/health');
+  },
+
+  // P36.4 — Settings "Help / About": non-sensitive app/provenance metadata.
+  getAbout(): Promise<ApiAboutResponse> {
+    return getJson<ApiAboutResponse>('/about');
+  },
+
+  // P36.4 — Settings "API Documentation": the app's own generated OpenAPI
+  // schema, fetched base-path-correctly via this router (not the root
+  // /openapi.json, which is unprefixed and would be wrong under a deployed
+  // base path).
+  getOpenApi(): Promise<ApiOpenApiResponse> {
+    return getJson<ApiOpenApiResponse>('/openapi');
   },
 
   // S1 — the experiment queue.

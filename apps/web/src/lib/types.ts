@@ -1070,3 +1070,50 @@ export interface EvidenceBundle {
   // SAME bundle so it stays coherent with `detail` across live-sync refetches.
   classification: ApiEvidenceClassification;
 }
+
+// --- P36.4 Settings: Help / About + API Documentation --------------------
+
+// GET /api/about — non-sensitive app/provenance metadata (apps/api/isaac_api/
+// routes.py `about()`). Every field is server-derived; the client renders it
+// verbatim and computes nothing. Deliberately excludes hostnames, k8s/
+// Authentik/ingress internals, env dumps, secrets, and absolute paths.
+export interface ApiAboutResponse {
+  app_version: string;
+  build_commit: string | null;
+  record_schema_version: string;
+  runtime_mode: string;
+  persistence: string;
+  data_regime: string;
+  core: string;
+}
+
+// GET /api/openapi — a MINIMAL subset of the OpenAPI 3 shape: only what the
+// API Documentation card renders (method -> summary/description/parameters
+// per path). The real response carries more (components, schemas, etc.);
+// this type intentionally does not model those, and the reader must not
+// assume any key beyond `paths` is present.
+export interface OpenApiParameter {
+  name: string;
+  in: string;
+  required?: boolean;
+  description?: string;
+}
+
+export interface OpenApiOperation {
+  summary?: string;
+  description?: string;
+  tags?: string[];
+  parameters?: OpenApiParameter[];
+}
+
+// Only the HTTP methods this prototype's API actually uses; an unlisted key
+// (e.g. a future PATCH) is simply not read by the renderer, never guessed.
+export type OpenApiMethod = 'get' | 'post' | 'put' | 'delete';
+
+export type OpenApiPathItem = Partial<Record<OpenApiMethod, OpenApiOperation>>;
+
+export interface ApiOpenApiResponse {
+  openapi: string;
+  info?: { title?: string; version?: string; summary?: string };
+  paths: Record<string, OpenApiPathItem>;
+}

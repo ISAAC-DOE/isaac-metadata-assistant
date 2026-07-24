@@ -1654,3 +1654,68 @@ export function liveDetailRoute(id: string = EXP_ID): {
   };
   return { route, bump };
 }
+
+// --- P36.4 Settings: Help / About + API Documentation fixtures --------------
+// Shapes verbatim from apps/api/isaac_api/routes.py `about()` / `api_openapi()`.
+// `aboutResponse` mirrors the real non-sensitive envelope (no hostnames, no
+// secrets, no absolute paths). `openApiFixture` is a small, hand-built SUBSET
+// of a real generated OpenAPI document — just enough shape (multiple groups,
+// one path with parameters, one without) to exercise grouping/search/expand.
+
+export const aboutResponse = {
+  app_version: '0.1.0',
+  build_commit: 'fakecommit0000settingsp364',
+  record_schema_version: '1.05',
+  runtime_mode: 'synthetic-only',
+  persistence: 'ephemeral',
+  data_regime: 'synthetic-only',
+  core: 'isaac_records',
+};
+
+/** Same shape, but no deploy identity was injected (the honest null case). */
+export const aboutResponseNoCommit = {
+  ...aboutResponse,
+  build_commit: null,
+};
+
+export const openApiFixture = {
+  openapi: '3.1.0',
+  info: {
+    title: 'ISAAC Metadata Assistant — local UI backend',
+    version: '0.1.0',
+    summary: 'Synthetic-only FastAPI wrapper over the deterministic isaac_records core.',
+  },
+  paths: {
+    '/api/health': {
+      get: {
+        summary: 'Health',
+        description: 'Liveness, runtime mode, core, version, and build commit.',
+        parameters: [],
+      },
+    },
+    '/api/about': {
+      get: {
+        summary: 'About',
+        description: 'Non-sensitive app/provenance metadata for Settings.',
+        parameters: [],
+      },
+    },
+    '/api/experiments/{id}': {
+      get: {
+        summary: 'Get Experiment',
+        description: 'Fetch one experiment detail by id.',
+        parameters: [{ name: 'id', in: 'path', required: true }],
+      },
+    },
+    '/api/experiments/{id}/answers': {
+      post: {
+        summary: 'Submit Answers',
+        description: 'Apply confirmed answers to pending blockers.',
+        parameters: [
+          { name: 'id', in: 'path', required: true },
+          { name: 'If-Match', in: 'header', required: false },
+        ],
+      },
+    },
+  },
+};
