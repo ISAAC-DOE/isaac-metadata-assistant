@@ -550,7 +550,10 @@ export function AssistantPanel({
     appendMessage(experimentId, {
       role: 'assistant',
       text: liveAnswer.text,
-      answeredFrom: liveAnswer.answeredFrom,
+      // R2 — a refusal turn (empty grounding) is archived WITHOUT an
+      // `answeredFrom`, so the archived message likewise hides the misleading
+      // `answered from:` line; every other turn keeps its real source.
+      answeredFrom: liveAnswer.hasGrounding === false ? undefined : liveAnswer.answeredFrom,
       recordRev: typeof liveAnswer.recordRev === 'number' ? liveAnswer.recordRev : recordRev,
       resultType: liveAnswer.resultType,
       authority: liveAnswer.authority,
@@ -592,6 +595,10 @@ export function AssistantPanel({
         role: 'assistant',
         text: resp.answer,
         answeredFrom: source,
+        // R2 — an honest refusal returns EMPTY grounding; track it so the
+        // misleading `answered from:` line is not rendered (there is no real
+        // source to attribute). A normally-grounded free-form answer sets `true`.
+        hasGrounding: resp.grounding.length > 0,
         // A null rev (memory scope) becomes undefined so the stale guard
         // (`typeof recordRev === 'number'`) is never satisfied — no stale badge.
         recordRev: resp.record_rev ?? undefined,
@@ -879,7 +886,11 @@ export function AssistantPanel({
           >
             {liveText}
           </p>
-          {!loading && liveAnswer && (
+          {/* R2 — the `answered from:` line is suppressed for a free-form refusal
+              turn (empty grounding). Precomposed pill answers and error turns leave
+              `hasGrounding` undefined, so they still show it; only an explicit
+              `hasGrounding === false` (a refusal) hides it. */}
+          {!loading && liveAnswer && liveAnswer.hasGrounding !== false && (
             <div className="assistant-sources">
               <span className="answered-from">
                 answered from: {SOURCE_LABELS[liveAnswer.answeredFrom as AssistantSource]}
@@ -1078,9 +1089,14 @@ function NavSourceChip({ label, to }: { label: string; to: string }) {
  * answer text already carries the "leads to verify" advisory framing.
  */
 function ProvenanceChips({ sources }: { sources: AssistantQuerySource[] }) {
+  // Defense-in-depth (D1): even though the backend already drops a source label
+  // that carries reserved verdict language, filter any that reach the client so a
+  // citation chip can never render a PASS/FAIL or "(in)valid against" phrase.
+  const safe = sources.filter((s) => !hasVerdictLanguage(s.label));
+  if (safe.length === 0) return null;
   return (
     <ul className="assistant-provenance" aria-label="Cited sources">
-      {sources.map((s, i) => (
+      {safe.map((s, i) => (
         <li key={`${s.label}-${i}`} className="assistant-provenance-item">
           {isClientRoute(s.navigate_to) ? (
             <NavSourceChip label={s.label} to={s.navigate_to} />

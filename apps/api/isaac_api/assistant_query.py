@@ -358,11 +358,19 @@ def _safe_navigate_to(value) -> Optional[str]:
 
 
 def _scrub_sources(sources: list) -> list:
-    """Drop any source whose label is unsafe; keep only safe client-route links."""
+    """Drop any source whose label is unsafe OR carries reserved verdict language;
+    keep only safe client-route links.
+
+    A cited label is neutralized like the answer text: a label that trips the
+    path/secret scrub OR the verdict-language guard is dropped entirely, so a
+    project-memory lead titled e.g. "…valid against v1.05" can never surface that
+    phrase through a citation chip and bypass the guard on the answer body."""
     out: list = []
     for src in sources:
         label = src.get("label")
         if not isinstance(label, str) or not label or _is_unsafe_string(label):
+            continue
+        if has_verdict_language(label):
             continue
         out.append({"label": label, "navigate_to": _safe_navigate_to(src.get("navigate_to"))})
     return out

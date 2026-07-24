@@ -186,6 +186,67 @@ describe('P34.3 provenance chips', () => {
   });
 });
 
+describe('D1 — a cited source label carrying verdict language is never rendered as a chip', () => {
+  it('filters out a source whose label trips the verdict guard, keeping safe leads', async () => {
+    vi.spyOn(api, 'askAssistant').mockResolvedValue(
+      answerResponse({
+        grounding: ['graph'],
+        sources: [
+          { label: 'Records valid against v1.05', navigate_to: '/memory/doc1' },
+          { label: 'QC gate marked PASS', navigate_to: '/memory/doc2' },
+          { label: 'Copper oxide note', navigate_to: '/memory/doc3' },
+        ],
+      }),
+    );
+    const { getByRole, container } = panel({ availability: 'available' });
+    await ask(container, getByRole, 'anything related?');
+
+    const region = container.querySelector('.assistant-provenance') as HTMLElement;
+    // only the one safe lead renders; the two verdict-language labels are dropped.
+    const chips = region.querySelectorAll('.assistant-provenance-item');
+    expect(chips.length).toBe(1);
+    expect(region.textContent).toContain('Copper oxide note');
+    expect(container.textContent).not.toMatch(/valid against/i);
+    expect(container.textContent).not.toMatch(/\b(PASS|FAIL)\b/);
+  });
+});
+
+describe('R2 — an honest refusal (empty grounding) hides the misleading `answered from:` line', () => {
+  it('a refusal answer renders WITHOUT an answered-from line; a grounded answer still shows it', async () => {
+    const spy = vi.spyOn(api, 'askAssistant').mockResolvedValue({
+      answer:
+        "That question isn't something I can answer from this record's grounded surfaces.",
+      result: 'unsupported',
+      grounding: [],
+      sources: [],
+      record_rev: 5,
+      version: 'gen.5',
+      stale: false,
+      followups: [],
+    });
+    const { getByRole, container } = panel();
+    const box = getByRole('textbox');
+    fireEvent.change(box, { target: { value: 'what is the oxidation state of iron' } });
+    fireEvent.submit(box.closest('form')!);
+    await waitFor(() =>
+      expect(container.querySelector('.assistant-reply')?.textContent).toContain(
+        "isn't something I can answer",
+      ),
+    );
+    // the refusal shows NO `answered from:` provenance line.
+    expect(container.textContent).not.toMatch(/answered from:/i);
+
+    // a subsequent normally-grounded answer DOES show the line again.
+    spy.mockResolvedValue(answerResponse());
+    fireEvent.change(box, { target: { value: 'what is this record?' } });
+    fireEvent.submit(box.closest('form')!);
+    await waitFor(() =>
+      expect(container.querySelector('.assistant-provenance')).toBeTruthy(),
+    );
+    expect(container.textContent).toMatch(/answered from:/i);
+  });
+});
+
 describe('P34.3 live staleness + Ask again', () => {
   it('a higher recordRev marks the live answer stale and offers Ask again; Ask again re-queries and clears stale', async () => {
     const spy = vi

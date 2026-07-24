@@ -336,6 +336,57 @@ def test_memory_lead_returns_cited_leads_with_advisory_framing(tmp_path, monkeyp
         assert nav is None or nav.startswith(("/record", "/memory"))
 
 
+# --- D1: a cited source LABEL is verdict-guarded, not only path/secret-scrubbed --
+#
+# A project-memory lead whose LABEL contains reserved verdict language (e.g. a doc
+# titled "Records valid against v1.05") must be dropped from `sources` — otherwise
+# the citation chip would surface the phrase and bypass the guard that neutralizes
+# the answer body. `_scrub_sources` now drops such a label on BOTH endpoints.
+
+
+def _verdict_search(_topic):
+    # A synthetic memory reader whose leads carry reserved verdict language in their
+    # labels (one PASS/FAIL token, one "valid against"), plus one safe label.
+    return {
+        "available": True,
+        "results": [
+            {"label": "Records valid against v1.05", "navigate_to": "/memory/doc1"},
+            {"label": "QC gate marked PASS", "navigate_to": "/memory/doc2"},
+            {"label": "Copper oxide note", "navigate_to": "/memory/doc3"},
+        ],
+    }
+
+
+def _memory_context() -> aq.AssistantContext:
+    return aq.AssistantContext(
+        record_summary={}, pending={"pending": []}, evidence_trail=[],
+        workflow={}, record_rev=1, version_token="p34.1", navigate_base="/record/x",
+        search=_verdict_search,
+    )
+
+
+def test_verdict_language_source_label_is_dropped_record_scope():
+    classified = aq.classify("what does project memory know about copper")
+    body = aq.answer(classified, _memory_context(), grounded_rev=None)
+    labels = [s["label"] for s in body["sources"]]
+    assert "Records valid against v1.05" not in labels
+    assert "QC gate marked PASS" not in labels
+    assert "Copper oxide note" in labels  # the safe lead survives
+    for label in labels:
+        assert aq.has_verdict_language(label) is False, label
+
+
+def test_verdict_language_source_label_is_dropped_memory_scope():
+    classified = aq.classify("what does project memory know about copper")
+    body = aq.answer_memory_scope(classified, _verdict_search)
+    labels = [s["label"] for s in body["sources"]]
+    assert "Records valid against v1.05" not in labels
+    assert "QC gate marked PASS" not in labels
+    assert "Copper oxide note" in labels
+    for label in labels:
+        assert aq.has_verdict_language(label) is False, label
+
+
 # --- auth ---------------------------------------------------------------------
 
 

@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "0ca6303f1e3afb7a1a5d13f2043e7a9a567c4b46220bf02019afcdbec1e2d098"
+        "sha256": "1041aa6dd2bcc7440564f181ef3193f5a86f095a7fd86a858b77b1effa8383ea"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -11064,7 +11064,7 @@
       }
     ],
     "served_file_count": 202,
-    "served_manifest_fingerprint": "78f3fbc9198691943f130f5ab5cfb66c0280c9cfe5f71de2ebbf2e185a1a1df7"
+    "served_manifest_fingerprint": "c78fe5f5609c3fe42778fb59c502014ac44539f93f2566d54f6817fff4be5e11"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
