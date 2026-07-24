@@ -940,6 +940,69 @@ def post_validate(experiment_id: str):
     return {"ok": ok, "errors": errors, "schema": SCHEMA_LABEL, "dry_run": True}
 
 
+# --- 9b. standalone validator (P36.3, Governance & Safety) ---------------------
+
+# Bounded before parse: a JSON candidate record is a small document, and this
+# keeps the whole request in memory deterministically (never spooled to disk).
+MAX_VALIDATE_RECORD_BYTES = 512 * 1024
+
+
+@router.post("/validate/record")
+async def post_validate_record(request: Request):
+    """Standalone validator: paste/upload a candidate official ISAAC record and
+    check it against the vendored schema — no experiment, no draft, no workspace.
+
+    REUSES the same authoritative ``isaac_records.official.validate_official``
+    (over the same ``REPO_ROOT``-resolved schema) that ``post_validate`` above
+    calls for exported records — verdict parity is by construction (same
+    function, same schema), not a second reimplementation.
+
+    Read-only and side-effect-free: the body is never written anywhere (no
+    workspace file, no temp file, no record mutation), and nothing about its
+    content is logged — only outcome metadata (ok/error-count), matching the
+    csv-preview route's logging discipline just above.
+    """
+    try:
+        raw = await _read_bounded_body(request, MAX_VALIDATE_RECORD_BYTES)
+    except csv_ingest.CsvIngestError as e:
+        # _read_bounded_body's overflow guard is generic (code/status/message);
+        # reused here purely for its bounded, never-spooled read loop.
+        _log.info("validate_record outcome=rejected code=%s", e.code)
+        return JSONResponse(
+            status_code=e.http_status, content={"error": e.code, "message": e.message}
+        )
+
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw.strip() else None
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        _log.info("validate_record outcome=invalid_json")
+        return JSONResponse(
+            status_code=422,
+            content={"error": "invalid_json", "message": "The body is not well-formed JSON."},
+        )
+
+    if not isinstance(body, dict):
+        _log.info("validate_record outcome=not_object")
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "not_a_json_object",
+                "message": "The body must be a JSON object (a candidate ISAAC record).",
+            },
+        )
+
+    report = validate_official(body, REPO_ROOT)
+    _log.info(
+        "validate_record outcome=ok ok=%s error_count=%d", report.ok, len(report.errors)
+    )
+    return {
+        "ok": report.ok,
+        "summary": report.render(),
+        "errors": [{"path": e.path, "message": e.message} for e in report.errors],
+        "schema_version": EXPECTED_VERSION,
+    }
+
+
 # --- 10. audit ----------------------------------------------------------------
 
 

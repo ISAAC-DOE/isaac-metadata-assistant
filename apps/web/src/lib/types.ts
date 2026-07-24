@@ -468,6 +468,24 @@ export interface ApiValidateResult {
   dry_run: boolean; // true until the record is exported
 }
 
+// P36.3 — the standalone validator (POST /api/validate/record). No experiment,
+// no draft: a pasted/uploaded candidate record checked against the same
+// official schema, via the same `validate_official`, as `ApiValidateResult`
+// above — just a different envelope shape (`summary` + `schema_version`).
+export interface ApiValidateRecordResult {
+  ok: boolean;
+  summary: string;
+  errors: { path: string; message: string }[];
+  schema_version: string; // "1.05"
+}
+
+// A clean, typed rejection from POST /api/validate/record (non-object body,
+// malformed JSON, or an oversized body) — never a stack trace.
+export interface ApiValidateRecordError {
+  error: string; // e.g. "not_a_json_object" | "invalid_json" | "request_too_large"
+  message: string;
+}
+
 export interface ApiAuditRecord {
   name: string;
   ok: boolean;

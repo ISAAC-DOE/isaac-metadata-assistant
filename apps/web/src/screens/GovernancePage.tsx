@@ -3,10 +3,12 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { GovernanceBanner } from '../components/GovernanceBanner';
+import { RecordValidator } from '../components/RecordValidator';
 import { LABELS } from '../lib/labels';
 
-/** Governance & Safety — the synthetic-only policy as a destination. Minimal
- * placeholder for this build; the banner also appears inline on Load Materials. */
+/** Governance & Safety — the synthetic-only policy, plus the P36.3 standalone
+ * schema Validator (the one functional destination this page currently offers).
+ * The banner also appears inline on Load Materials. */
 export function GovernancePage() {
   return (
     <AppShell
@@ -27,6 +29,9 @@ export function GovernancePage() {
         <div style={{ marginTop: 18 }}>
           <GovernanceBanner />
         </div>
+      </div>
+      <div style={{ marginTop: 24 }}>
+        <RecordValidator />
       </div>
     </AppShell>
   );
