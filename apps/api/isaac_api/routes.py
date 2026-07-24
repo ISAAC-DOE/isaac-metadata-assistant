@@ -29,6 +29,7 @@ from isaac_records.official import EXPECTED_VERSION, validate_official
 from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
+from . import assistant_query
 from . import csv_ingest
 from . import dependencies
 from . import evidence_classify
@@ -1491,3 +1492,108 @@ def runtime_record_projection(
     if limit is not None:
         records = records[: max(0, limit)]
     return {"records": records, "total": total}
+
+
+# --- 19. assistant query (READ-ONLY deterministic resolver, P34.1) -------------
+#
+# A free-form question is classified against a finite intent catalog and answered
+# from grounding this route assembles read-only from the loaded experiment. It is
+# subordinate/advisory: it NEVER mutates a record, revision, workflow, evidence,
+# validation, export, memory, or file; it never states a PASS/FAIL or a
+# valid/invalid conclusion; and it never guesses a scientific value. The resolver
+# module is stdlib-only and isaac_records-free (truth isolation, like memory.py) —
+# the expensive grounding (the validate dry-run, the memory search) is supplied as
+# thunks invoked only for the matched intent. Auth is the app-wide middleware.
+
+#: A question longer than this is rejected (bounds the work; never truncated-and-answered).
+_ASSISTANT_MAX_QUESTION = 500
+#: History beyond this is ignored — it is presentation-only, never truth grounding.
+_ASSISTANT_MAX_HISTORY = 20
+
+
+class AssistantQueryRequest(BaseModel):
+    """Typed assistant-query body. ``history`` is presentation-only (never truth)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    question: str
+    grounded_rev: str | None = None
+    history: list | None = None
+
+
+def _assistant_validate_dryrun(exp: Experiment) -> dict:
+    """The SAME read-only validation the ``/validate`` endpoint computes, as a
+    thunk the resolver invokes only for an export intent. Writes nothing; never
+    raises (mirrors ``post_validate``'s defensive dry-run)."""
+    if exp.exported():
+        record = json.loads(exp.record_path().read_text(encoding="utf-8"))
+        report = validate_official(record, REPO_ROOT)
+        return {
+            "ok": report.ok,
+            "errors": [{"path": e.path, "message": e.message} for e in report.errors],
+        }
+    try:
+        result = export_draft(exp.draft, REPO_ROOT)
+        if result.official_report is not None:
+            errors = [{"path": e.path, "message": e.message} for e in result.official_report.errors]
+        elif not result.draft_report.ok:
+            errors = [{"path": w, "message": m} for w, m in result.draft_report.errors]
+        else:
+            errors = []
+        return {"ok": result.ok, "errors": errors}
+    except Exception:
+        _log.exception("assistant validate dry-run failed experiment=%s", exp.id)
+        return {"ok": False, "errors": [{"path": "$", "message": "Validation could not be completed."}]}
+
+
+@router.post("/experiments/{experiment_id}/assistant/query")
+def post_assistant_query(
+    experiment_id: str,
+    response: Response,
+    req: AssistantQueryRequest = Body(...),
+):
+    # Typed input guards: an empty/whitespace or oversized question is rejected
+    # with a stable typed error (never a 500, never the question text logged).
+    question = req.question if isinstance(req.question, str) else ""
+    if not question.strip():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "empty_question", "message": "A non-empty question is required."},
+        )
+    if len(question) > _ASSISTANT_MAX_QUESTION:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "question_too_long",
+                "message": f"The question exceeds the {_ASSISTANT_MAX_QUESTION}-character limit.",
+            },
+        )
+    # history is presentation-only; cap it and never let it influence grounding.
+    _ = (req.history or [])[:_ASSISTANT_MAX_HISTORY]
+
+    exp = ws.load_experiment(experiment_id)
+    if exp is None:
+        return _not_found(experiment_id)
+
+    # Classify FIRST (pure), then assemble only the read-only grounding needed —
+    # the validate dry-run and the memory search are deferred behind thunks so an
+    # intent that does not need them never pays for them.
+    classified = assistant_query.classify(question)
+
+    reader = memory.get_default_reader()
+    ctx = assistant_query.AssistantContext(
+        record_summary=_summary(exp),
+        pending=serialize.pending_to_list(exp.draft, ws.load_demo_answers()),
+        evidence_trail=serialize.evidence_trail_from_draft(exp.draft),
+        workflow=_workflow_for(exp),
+        record_rev=exp.rev,
+        version_token=exp.version_token(),
+        navigate_base=f"/record/{exp.id}",
+        validate=lambda: _assistant_validate_dryrun(exp),
+        search=lambda q: reader.search(q),
+    )
+
+    result = assistant_query.answer(classified, ctx, req.grounded_rev)
+    # Read-only: rev is unchanged; echo the current validator for convenience.
+    response.headers["ETag"] = exp.etag()
+    return result
