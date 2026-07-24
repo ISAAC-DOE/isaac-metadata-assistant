@@ -179,6 +179,34 @@
 .assistant-jump:hover { background: var(--assist-tint); }
 .assistant-jump:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
 
+/* P34.2 — the conversation toolbar (Clear Conversation), shown only once the log
+ * has history. Restrained, right-aligned, secondary — it clears the ephemeral
+ * session, never any record/truth state. */
+.assistant-log-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+.assistant-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.assistant-clear:hover {
+  background: var(--assist-tint);
+  border-color: var(--assist-border);
+  color: var(--assist-text);
+}
+.assistant-clear:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
 .assistant-reply-block {
   display: flex;
   flex-direction: column;

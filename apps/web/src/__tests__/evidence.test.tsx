@@ -162,25 +162,28 @@ describe('S5 · grounded assistant (P25.5) — subordinate, guided-only, LLM-fre
     const send = assistant.getByRole('button', { name: /send/i });
     expect(send.className).toMatch(/btn-secondary/);
     expect(send.className).not.toMatch(/btn-primary/);
+    // P34.2: the persistent helper names the grounded scopes the resolver answers over
     expect(
-      assistant.getByText('Guided Questions Only — choose a suggested question below for an answer.'),
+      assistant.getByText(
+        'Ask about this record, its evidence, workflow, export readiness, or project-memory leads.',
+      ),
     ).toBeInTheDocument();
     expect(
       (container.querySelector('.assistant') as HTMLElement).textContent,
     ).not.toMatch(/Guided prompts only — the assistant answers/i);
   });
 
-  it('selecting a different trail entry updates the multiplicity reply to that path', async () => {
+  it('a guided multiplicity chip reflects the selected trail entry (provenance never leaks)', async () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
     const { container, findByText, getByText } = renderAt('/record/demo/evidence');
 
     await findByText('Direct Fields');
-    // default selection = first entry (system.technique, a single spreadsheet entry)
+    // P34.2: the on-mount auto-reply was removed; the multiplicity answer is
+    // surfaced by clicking its guided chip and reflects the SELECTED trail entry.
     const reply = () => container.querySelector('.assistant-reply')!.textContent!;
-    expect(reply()).toContain('system.technique has 1 evidence entry: spreadsheet.');
-
-    // select the asset (2 entries: file_listing + user_confirmation)
+    // select the asset (2 entries: file_listing + user_confirmation), then ask
     fireEvent.click(getByText('assets:processing_notebook'));
+    fireEvent.click(getByText('Why multiple evidence entries?'));
     expect(reply()).toContain('assets:processing_notebook has 2 evidence entries');
     expect(reply()).toContain('Multiple entries can provide separate support');
     // provenance must NOT leak into the assistant copy

@@ -189,6 +189,44 @@ export interface SuggestedPrompt {
   answer?: AssistantMessage;
 }
 
+// --- grounded assistant query (P34.1 endpoint / P34.2 composer) --------
+// POST /api/experiments/{id}/assistant/query — the READ-ONLY grounded resolver.
+// It never mutates the record; it resolves a free-form question against the
+// current record/evidence/workflow/memory context and returns a source-labeled
+// answer. The client parses this shape; it never computes an answer or a verdict.
+
+export interface AssistantQueryRequest {
+  question: string;
+  grounded_rev?: string | null;
+  history?: unknown[] | null;
+}
+
+// How the resolver handled the question — NOT a validity verdict.
+export type AssistantQueryResult =
+  | 'answered'
+  | 'insufficient_context'
+  | 'unsupported'
+  | 'ambiguous';
+
+// One cited source: a display label + an optional in-app navigation target.
+export interface AssistantQuerySource {
+  label: string;
+  navigate_to: string | null;
+}
+
+export interface AssistantQueryResponse {
+  answer: string;
+  result: AssistantQueryResult;
+  // The source planes the answer drew on (schema | audit | files | advisory |
+  // workflow | graph). The first entry drives the `answered from:` label.
+  grounding: AssistantSource[];
+  sources: AssistantQuerySource[];
+  record_rev: number;
+  version: string;
+  stale: boolean;
+  followups: string[];
+}
+
 // --- grounded assistant composer (P25.1) ------------------------------
 // The composer is a pure, synchronous function over the bundle a screen has
 // ALREADY fetched — zero new fetches, zero backend endpoint, zero truth-path

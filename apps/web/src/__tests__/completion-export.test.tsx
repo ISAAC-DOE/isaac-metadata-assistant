@@ -516,17 +516,20 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     stubFetchRoutes(exportReadyRoutes('demo')); // audit records:[], dry-run would pass, 1 advisory
     const { container, findByText } = renderAt('/record/demo/export');
 
-    // reply defaults to the coverage chip (lead), grounded in the LIVE audit
-    // bundle: pre-export there are no coverage figures yet.
-    await findByText('No coverage figures yet — coverage appears after export.');
+    // the three approved export chips are the guided prompts
+    await findByText('Is coverage the same as valid?');
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const panel = within(assistant);
-    expect(panel.getByText('answered from: Evidence Audit')).toBeInTheDocument();
-
-    // the three approved export chips are the guided prompts
-    expect(panel.getByText('Is coverage the same as valid?')).toBeInTheDocument();
     expect(panel.getByText("What's left before export?")).toBeInTheDocument();
     expect(panel.getByText('Explain the advisory warning')).toBeInTheDocument();
+
+    // P34.2: the coverage lead is surfaced by clicking its chip (the on-mount
+    // auto-reply was removed). Pre-export there are no coverage figures yet.
+    fireEvent.click(panel.getByText('Is coverage the same as valid?').closest('button')!);
+    expect(
+      await panel.findByText('No coverage figures yet — coverage appears after export.'),
+    ).toBeInTheDocument();
+    expect(panel.getByText('answered from: Evidence Audit')).toBeInTheDocument();
 
     // ROUTE_TO_CLI_NOTE is preserved on the panel
     expect(panel.getByText(ROUTE_TO_CLI_NOTE)).toBeInTheDocument();
@@ -552,7 +555,7 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
   it('pre-export: the advisory chip echoes the LIVE warning, flagged advisory / non-gating', async () => {
     stubFetchRoutes(exportReadyRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/export');
-    await findByText('No coverage figures yet — coverage appears after export.');
+    await findByText('Explain the advisory warning');
     const panel = within(container.querySelector('.assistant') as HTMLElement);
 
     fireEvent.click(panel.getByText('Explain the advisory warning').closest('button')!);
@@ -573,9 +576,11 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const panel = within(assistant);
 
-    // the assistant reply is the LIVE coverage figure — a count, not a verdict
+    // P34.2: the coverage figure is surfaced by clicking its chip — a count, not a
+    // verdict (the on-mount auto-reply was removed).
+    fireEvent.click(panel.getByText('Is coverage the same as valid?').closest('button')!);
     expect(
-      panel.getByText(
+      await panel.findByText(
         'Coverage is 33/33 evidenced fields. It describes how many expected fields carry ' +
           'evidence; the schema check is separate.',
       ),
@@ -619,8 +624,10 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(panel.getByText('What if I leave one missing?')).toBeInTheDocument();
     expect(assistant.querySelectorAll('.assistant-prompt').length).toBe(3);
 
-    // reply defaults to the pending-summary chip, grounded in the LIVE pending list
-    expect(panel.getByText(PENDING_SUMMARY)).toBeInTheDocument();
+    // P34.2: the pending-summary lead is surfaced by clicking its chip (the
+    // on-mount auto-reply was removed), grounded in the LIVE pending list.
+    fireEvent.click(panel.getByText('Which fields still need me?').closest('button')!);
+    expect(await panel.findByText(PENDING_SUMMARY)).toBeInTheDocument();
     expect(panel.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
 
     // honesty (P25.7): this memory-less screen never fetches graph status, so it
@@ -688,8 +695,11 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     const send = assistant.getByRole('button', { name: /send/i });
     expect(send.className).toMatch(/btn-secondary/);
     expect(send.className).not.toMatch(/btn-primary/);
+    // P34.2: the persistent helper names the grounded scopes the resolver answers over
     expect(
-      assistant.getByText('Guided Questions Only — choose a suggested question below for an answer.'),
+      assistant.getByText(
+        'Ask about this record, its evidence, workflow, export readiness, or project-memory leads.',
+      ),
     ).toBeInTheDocument();
     expect(
       container.querySelector('.assistant')!.textContent,
@@ -738,8 +748,12 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(assistant).not.toBeNull();
     const panel = within(assistant);
 
-    // pending is empty → the honest empty-state summary, still guided-only
-    expect(panel.getByText('This draft currently has no pending fields listed.')).toBeInTheDocument();
+    // pending is empty → clicking the pending chip surfaces the honest empty-state
+    // summary (P34.2: the on-mount auto-reply was removed), still guided-only.
+    fireEvent.click(panel.getByText('Which fields still need me?').closest('button')!);
+    expect(
+      await panel.findByText('This draft currently has no pending fields listed.'),
+    ).toBeInTheDocument();
     expect(assistant.querySelectorAll('.assistant-prompt').length).toBe(3);
   });
 

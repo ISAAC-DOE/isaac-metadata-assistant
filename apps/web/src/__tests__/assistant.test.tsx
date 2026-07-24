@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import {
-  COMPOSER_GUIDED_HELPER,
+  ASSISTANT_COMPOSER_HELPER,
+  ASSISTANT_EMPTY_STATE,
   GUIDED_ONLY_NOTE,
   MEMORY_UNAVAILABLE_CAVEAT,
   hasVerdictLanguage,
@@ -64,17 +65,18 @@ const reviewOut = () => compose(reviewState());
 const evidenceOut = () => compose(evidenceState());
 
 describe('AssistantPanel is subordinate and never renders a verdict', () => {
-  it('renders subordinate copy with a source label and a memory freshness dot', () => {
+  it('rests on the empty state, then a guided prompt surfaces a Title-Case source label + memory dot', () => {
     const out = evidenceOut();
     const { container, getByText, queryByText } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
-    // every reply names its source — rendered as the friendly Title-Case label,
-    // never the raw machine enum (P25.1). The evidence panel's leading chip
-    // (no field selected yet) is answeredFrom 'files'.
+    // P34.2: the resting rail shows the empty state — no auto-announced reply card.
+    expect(getByText(ASSISTANT_EMPTY_STATE)).toBeInTheDocument();
+    // clicking a guided prompt surfaces an answer whose source renders as the
+    // friendly Title-Case label, never the raw machine enum (P25.1).
+    fireEvent.click(getByText('What is the evidence sidecar?'));
     expect(getByText(/answered from:/)).toBeInTheDocument();
-    expect(getByText('answered from: Evidence & Sources')).toBeInTheDocument();
-    expect(queryByText('answered from: files')).toBeNull();
+    expect(queryByText(/answered from: files$/)).toBeNull();
     // P33 HQA#6: the memory-head is the Title-Case state label (no "memory:" colon).
     expect(getByText('Memory Available')).toBeInTheDocument();
     expect(container.querySelector('.assistant-memory')).not.toBeNull();
@@ -107,14 +109,15 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     // the panel must make no memory claim at all — neither the `memory:` head
     // line nor any caveat.
     const out = evidenceOut();
-    const { container, queryByText } = render(
+    const { container, getByText, queryByText } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} />,
     );
     expect(queryByText(/^memory:/i)).toBeNull();
     expect(container.querySelector('.assistant-memory')).toBeNull();
     expect(container.querySelector('.assistant-caveat')).toBeNull();
     expect(queryByText(MEMORY_UNAVAILABLE_CAVEAT)).toBeNull();
-    // the accurate `answered from:` provenance line is still the source claim
+    // after asking a guided question, the accurate `answered from:` provenance shows
+    fireEvent.click(getByText('What is the evidence sidecar?'));
     expect(queryByText(/answered from:/)).toBeInTheDocument();
   });
 
@@ -132,14 +135,23 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     expect(container.textContent).not.toMatch(/\bFAIL\b/);
   });
 
-  it('the verdict-language guard replaces any reply that would state a verdict', () => {
-    const { container } = render(
+  it('the verdict-language guard replaces any live answer that would state a verdict', () => {
+    // A guided prompt whose (would-be) answer states a verdict must be replaced by
+    // the routing text when it becomes the live turn — the panel never renders PASS.
+    const { container, getByText } = render(
       <AssistantPanel
-        reply={{ text: 'This record is PASS against the schema.', answeredFrom: 'schema' }}
-        prompts={[]}
+        reply={{ text: 'neutral guidance.', answeredFrom: 'schema' }}
+        prompts={[
+          {
+            text: 'Is it valid?',
+            answeredFrom: 'schema',
+            answer: { text: 'This record is PASS against the schema.', answeredFrom: 'schema' },
+          },
+        ]}
         availability="available"
       />,
     );
+    fireEvent.click(getByText('Is it valid?'));
     expect(container.textContent).not.toMatch(/\bPASS\b/);
     expect(container.textContent).toMatch(/truth question/i);
   });
@@ -183,23 +195,22 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
     ).toBeInTheDocument();
   });
 
-  it('is honestly guided-first: an inert visual-only composer (SECONDARY send) with a persistent guided-only helper; the standalone guided-note is de-duped and the subordinate caption is the single advisory footer', () => {
+  it('shows a WIRED composer (SECONDARY send) with the grounded-scope helper; the legacy guided-note stays de-duped and the subordinate caption is the single advisory footer', () => {
     const out = evidenceOut();
     const { getByRole, getByText, queryByText, getByLabelText } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
-    // P33 S2 (D3/C3): the panel now shows an HONEST visual-only composer — a real
-    // labelled text input plus a SECONDARY-styled send control (never the primary
-    // action), with the persistent guided-only helper visible before interaction.
+    // P34.2: a real labelled text input plus a SECONDARY-styled send control (never
+    // the primary action), with the persistent grounded-scope helper visible.
     const box = getByRole('textbox');
     expect(box).toBeInTheDocument();
     expect(getByLabelText(/ask the assistant/i)).toBe(box);
     const send = getByRole('button', { name: /send/i });
     expect(send.className).toMatch(/btn-secondary/);
     expect(send.className).not.toMatch(/btn-primary/); // never styled as the primary action
-    // the persistent guided-only helper states the limitation up front …
-    expect(getByText(COMPOSER_GUIDED_HELPER)).toBeInTheDocument();
-    // … and the now-redundant standalone guided-note is de-duped away.
+    // the persistent helper names the grounded scopes the resolver answers over …
+    expect(getByText(ASSISTANT_COMPOSER_HELPER)).toBeInTheDocument();
+    // … and the legacy standalone guided-note is never surfaced.
     expect(queryByText(GUIDED_ONLY_NOTE)).toBeNull();
     // subordinate-to-deterministic-validation caption remains the single footer
     expect(getByText(/advisory — it explains/i)).toBeInTheDocument();

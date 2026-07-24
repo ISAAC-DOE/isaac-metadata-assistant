@@ -17,15 +17,22 @@ import {
 } from './icons';
 import { LABELS } from '../lib/labels';
 import {
-  COMPOSER_GUIDED_HELPER,
-  COMPOSER_UNSUPPORTED_NOTICE,
+  ASSISTANT_COMPOSER_HELPER,
+  ASSISTANT_EMPTY_STATE,
+  ASSISTANT_UNAVAILABLE,
   MEMORY_UNAVAILABLE_CAVEAT,
   SOURCE_LABELS,
   SUBORDINATE_CAPTION,
   hasVerdictLanguage,
 } from '../lib/assistant';
 import { classifyAnswer, type MessageKind } from '../lib/assistantConversation';
-import { appendMessage, loadSession, scrubForDisplay, type Msg } from '../lib/assistantSession';
+import {
+  appendMessage,
+  clearSession,
+  loadSession,
+  scrubForDisplay,
+  type Msg,
+} from '../lib/assistantSession';
 import {
   DEGRADED_MESSAGE,
   INTENTS,
@@ -197,6 +204,10 @@ const MEMORY_HEAD_LABEL: Record<MemoryAvailability, string> = {
 const VERDICT_ROUTE_TEXT =
   'That is a truth question — open the Validate surface for the deterministic verdict.';
 
+// P34.2 — the accessible in-flight label announced in the single live region
+// while a read-only grounded query is resolving.
+const WORKING_LABEL = 'Working…';
+
 // Message-kind presentation (icon + label + palette class). Each kind is
 // distinguishable by ICON + TEXT, never color alone (project a11y rule).
 const KIND_META: Record<MessageKind, { label: string; Icon: LucideIcon; className: string }> = {
@@ -248,7 +259,6 @@ const NEAR_BOTTOM_PX = 64;
  * composer performs no fetch/append/persist (mutation/confirmation is P29.3).
  */
 export function AssistantPanel({
-  reply,
   prompts,
   experimentId = DEFAULT_SESSION_KEY,
   recordRev,
@@ -267,14 +277,20 @@ export function AssistantPanel({
   const [messages, setMessages] = useState<Msg[]>(() => loadSession(experimentId).messages);
   const [showJump, setShowJump] = useState(false);
 
-  // P33 S2 (D3/C3) — the honest, visual-only composer. `composerText` is LOCAL
-  // transient state that is NEVER written to the session/log/storage and never
-  // sent anywhere; `composerNotice` gates the accessible inline limitation that
-  // appears only after a free-text submit. This composer performs no fetch,
-  // appends no message, and reroutes nothing — it exists to be honest about the
-  // guided-only boundary, not to add a chat path.
+  // P34.2 — the unified "current live turn". `liveAnswer` is the single answer
+  // shown in the live region below the log; `liveQuestion` is the question that
+  // produced it (archived alongside it when the turn scrolls into history).
+  // `loading` is true while the read-only grounded query is in flight. When
+  // `liveAnswer` is null and not loading, the region shows the resting empty
+  // state (never an auto-announced pending-summary card).
+  const [liveAnswer, setLiveAnswer] = useState<Msg | null>(null);
+  const [liveQuestion, setLiveQuestion] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // P34.2 — the composer input's LOCAL transient text (never persisted itself).
+  // On submit it is sent to the READ-ONLY grounded resolver (POST /assistant/query)
+  // and cleared; it is never written to the session/storage as raw input.
   const [composerText, setComposerText] = useState('');
-  const [composerNotice, setComposerNotice] = useState(false);
 
   // P29.4b — the live staged proposal, seeded from the prop and owned locally so
   // Cancel can clear it and a stale/412 confirm can mark it. The record is never
@@ -305,6 +321,9 @@ export function AssistantPanel({
   useEffect(() => {
     setMessages(loadSession(experimentId).messages);
     setActiveIndex(null);
+    setLiveAnswer(null);
+    setLiveQuestion(null);
+    setLoading(false);
     mountedRef.current = false;
     nearBottomRef.current = true;
   }, [experimentId]);
@@ -342,15 +361,17 @@ export function AssistantPanel({
     if (nearBottomRef.current) scrollToBottom();
     else setShowJump(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, activeIndex]);
+  }, [messages.length, activeIndex, liveAnswer]);
 
-  // Move focus to the fresh reply after a submission (never during a poll).
+  // Move focus to the fresh reply after a submission (never during a poll). Fires
+  // when a pill swaps the live answer, when a free-form query resolves (liveAnswer
+  // changes / loading clears), or when the archived history advances.
   useEffect(() => {
-    if (focusPendingRef.current) {
+    if (focusPendingRef.current && !loading) {
       focusPendingRef.current = false;
       replyRef.current?.focus();
     }
-  }, [activeIndex, messages.length]);
+  }, [activeIndex, messages.length, liveAnswer, loading]);
 
   // After an agent intent run / confirmed summary, move focus into the log to the
   // newest message so keyboard + screen-reader users land on the fresh result.
@@ -456,19 +477,97 @@ export function AssistantPanel({
     replyRef.current?.focus();
   }
 
-  // P33 S2 (D3/C3) — the composer submit. Intentionally INERT: it makes NO
-  // network request, appends NO conversation message, persists nothing, and
-  // never reroutes the typed text into a suggested-question request. It only
-  // surfaces the accessible inline limitation and drops the transient text.
-  // Free-form Q&A is not wired in this build; the composer is honest about it.
+  // Archive the current live turn (its question, if any, then its answer) into the
+  // ephemeral session log — exactly as a pill swap does — so the previous answer
+  // scrolls into history when a new turn begins. A null live answer (the resting
+  // empty state) archives nothing.
+  function archiveLive() {
+    if (!liveAnswer) return;
+    if (liveQuestion) {
+      appendMessage(experimentId, {
+        role: 'user',
+        text: liveQuestion,
+        recordRev,
+        id: uid(),
+        timestamp: Date.now(),
+      });
+    }
+    appendMessage(experimentId, {
+      role: 'assistant',
+      text: liveAnswer.text,
+      answeredFrom: liveAnswer.answeredFrom,
+      recordRev: typeof liveAnswer.recordRev === 'number' ? liveAnswer.recordRev : recordRev,
+      resultType: liveAnswer.resultType,
+      authority: liveAnswer.authority,
+      actionability: liveAnswer.actionability,
+      id: uid(),
+      timestamp: Date.now(),
+    });
+    setMessages(loadSession(experimentId).messages);
+  }
+
+  // Submit a FREE-FORM question to the READ-ONLY grounded resolver. This is the
+  // ONLY network path the composer touches — a non-mutating POST /assistant/query
+  // that never writes the record and never calls submitAnswer / editField /
+  // confirmProposal / export / reset. The prior live turn is archived first; on
+  // success the answer becomes the new live turn, on an ApiError an honest
+  // "unavailable" turn does (the rest of the workspace stays fully usable).
+  async function submitQuestion(text: string) {
+    const question = text.trim();
+    if (question === '' || loading) return; // empty is a no-op; guard overlapping submits
+    archiveLive();
+    setLiveQuestion(question);
+    setActiveIndex(null);
+    setComposerText('');
+    setLoading(true);
+    try {
+      const resp = await api.askAssistant(experimentId, { question });
+      const source = (resp.grounding[0] ?? 'workflow') as AssistantSource;
+      const cls = classifyAnswer(source, availability);
+      setLiveAnswer({
+        role: 'assistant',
+        text: resp.answer,
+        answeredFrom: source,
+        recordRev: resp.record_rev,
+        resultType: cls.resultType,
+        authority: cls.authority,
+        actionability: cls.actionability,
+        // Richer presentation-safe fields stashed for P34.3 to render later. If
+        // this turn is ever archived, the session sanitizer drops anything unsafe.
+        sources: resp.sources,
+        result: resp.result,
+        followups: resp.followups,
+        version: resp.version,
+        id: uid(),
+        timestamp: Date.now(),
+      });
+    } catch {
+      setLiveAnswer({
+        role: 'assistant',
+        text: ASSISTANT_UNAVAILABLE,
+        answeredFrom: 'workflow',
+        id: uid(),
+        timestamp: Date.now(),
+      });
+    } finally {
+      setLoading(false);
+      focusPendingRef.current = true;
+    }
+  }
+
   function onComposerSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    // P33 HQA (#1) — an empty (whitespace-only) submit is a true no-op: no
-    // notice, no state change. Only a non-empty submit surfaces the honest
-    // unsupported-notice and clears the transient text (still no fetch/append).
-    if (composerText.trim() === '') return;
-    setComposerNotice(true);
-    setComposerText('');
+    void submitQuestion(composerText);
+  }
+
+  // Clear the whole ephemeral conversation for this experiment and return to the
+  // resting empty state. Session-only — it touches no record/truth state.
+  function clearConversation() {
+    clearSession(experimentId);
+    setMessages([]);
+    setLiveAnswer(null);
+    setLiveQuestion(null);
+    setActiveIndex(null);
   }
 
   const agentActive = !!agentContext && !degraded && !agentContext.degraded;
@@ -500,45 +599,42 @@ export function AssistantPanel({
     ? (agentPrompts ?? []).filter((p) => INTENTS.includes(p.intent))
     : [];
 
-  const active = activeIndex !== null ? (prompts[activeIndex]?.answer ?? reply) : reply;
+  // The live current turn's text, verdict-guarded. A query in flight → an
+  // accessible "Working…"; a resolved answer → its guarded text; otherwise the
+  // resting empty state. The auto-reply fallback (compose().reply) was REMOVED at
+  // P34.2 — the resting rail no longer announces a pending-summary card.
+  const liveText = loading
+    ? WORKING_LABEL
+    : liveAnswer
+      ? hasVerdictLanguage(liveAnswer.text)
+        ? VERDICT_ROUTE_TEXT
+        : liveAnswer.text
+      : ASSISTANT_EMPTY_STATE;
 
-  // Structural guard: the assistant must never render a verdict.
-  const safeText = hasVerdictLanguage(active.text) ? VERDICT_ROUTE_TEXT : active.text;
-
-  // Only a screen that actually fetched graph status may make a memory claim.
-  // Dedupe guard: on the Project Memory unavailable mount the composed reply is
-  // byte-identical to MEMORY_UNAVAILABLE_CAVEAT — render it once, never stacked.
+  // Only a screen that actually fetched graph status may make a memory claim. The
+  // caveat is driven by `availability` INDEPENDENTLY of the empty/answer state;
+  // it is de-duped when it would be byte-identical to the live text.
   const caveat =
-    availability === 'unavailable' && MEMORY_UNAVAILABLE_CAVEAT !== safeText
+    availability === 'unavailable' && MEMORY_UNAVAILABLE_CAVEAT !== liveText
       ? MEMORY_UNAVAILABLE_CAVEAT
       : undefined;
 
-  // Clicking a pill "asks" that question: the previously displayed turn is
-  // committed to the ephemeral conversation log, the new answer becomes the live
-  // reply, focus moves to it, and it is announced once (politely). No fetch, no
-  // mutation — presentation + P29.1 session wiring only.
+  // Clicking a pill "asks" that PRECOMPOSED question: the previous live turn is
+  // archived into the log, the pill's static answer becomes the new live turn, and
+  // focus moves to it. No fetch, no mutation — presentation + P29.1 session wiring
+  // only. (Unifying pills onto the endpoint is deferred to P34.3.)
   function ask(index: number) {
     const prompt = prompts[index];
     if (!prompt?.answer) return; // disabled pill → never activatable
     if (index === activeIndex) return; // already showing
-
-    const leaving = active; // the turn currently on screen, about to scroll into history
-    const leavingQuestion = activeIndex !== null ? prompts[activeIndex]?.text : null;
-
-    const cls = classifyAnswer(leaving.answeredFrom, availability);
-    if (leavingQuestion) {
-      appendMessage(experimentId, {
-        role: 'user',
-        text: leavingQuestion,
-        recordRev,
-        id: uid(),
-        timestamp: Date.now(),
-      });
-    }
-    appendMessage(experimentId, {
+    archiveLive();
+    const ans = prompt.answer;
+    const cls = classifyAnswer(ans.answeredFrom, availability);
+    setLiveQuestion(prompt.text);
+    setLiveAnswer({
       role: 'assistant',
-      text: leaving.text,
-      answeredFrom: leaving.answeredFrom,
+      text: ans.text,
+      answeredFrom: ans.answeredFrom,
       recordRev,
       resultType: cls.resultType,
       authority: cls.authority,
@@ -546,8 +642,6 @@ export function AssistantPanel({
       id: uid(),
       timestamp: Date.now(),
     });
-    setMessages(loadSession(experimentId).messages);
-
     setActiveIndex(index);
     focusPendingRef.current = true;
   }
@@ -580,12 +674,12 @@ export function AssistantPanel({
         </p>
       )}
 
-      {/* P33 S2 (D3/C3) — the honest, visual-only composer. A real text input +
-          a SECONDARY-styled send control, with a PERSISTENT guided-only helper
-          visible BEFORE any interaction. Submitting is INERT: `onComposerSubmit`
-          makes no fetch, appends no message, persists nothing, and reroutes no
-          text — it only surfaces the accessible inline limitation below. This is
-          honesty about the guided-only boundary, not a chat path. */}
+      {/* P34.2 — the composer, WIRED to the READ-ONLY grounded resolver. A real
+          text input + a SECONDARY-styled send control, with a persistent helper
+          naming the grounded scopes it answers over (not a general chatbot).
+          Submitting calls only POST /assistant/query — a non-mutating query that
+          never writes the record. An empty submit is a no-op; overlapping submits
+          are ignored while a query is in flight. */}
       <form className="assistant-composer" onSubmit={onComposerSubmit}>
         <input
           type="text"
@@ -599,16 +693,12 @@ export function AssistantPanel({
           type="submit"
           className="btn btn-secondary assistant-composer-send"
           aria-label="Send question"
+          disabled={loading}
         >
           <CornerDownRight size={15} strokeWidth={2} aria-hidden="true" />
         </button>
       </form>
-      <p className="assistant-composer-helper">{COMPOSER_GUIDED_HELPER}</p>
-      {composerNotice && (
-        <p className="assistant-composer-notice" role="status">
-          {COMPOSER_UNSUPPORTED_NOTICE}
-        </p>
-      )}
+      <p className="assistant-composer-helper">{ASSISTANT_COMPOSER_HELPER}</p>
 
       <div className="assistant-suggested-eyebrow eyebrow">{LABELS.suggestedQuestions}</div>
       <div className="assistant-prompts">
@@ -651,6 +741,24 @@ export function AssistantPanel({
         </>
       )}
 
+      {/* P34.2 — the conversation toolbar. Clear Conversation appears only once
+          the log has history; it wipes THIS experiment's ephemeral session and
+          returns the rail to its resting empty state. Session-only — it never
+          touches record/truth state. */}
+      {messages.length > 0 && (
+        <div className="assistant-log-toolbar">
+          <button
+            type="button"
+            className="assistant-clear"
+            aria-label="Clear conversation"
+            onClick={clearConversation}
+          >
+            <X size={13} strokeWidth={2} aria-hidden="true" />
+            Clear Conversation
+          </button>
+        </div>
+      )}
+
       {/* P33 S2 (D4) — the conversation LOG moved BELOW the prompt controls
           (newest at the bottom). role="log" carries an IMPLICIT aria-live="polite";
           we set aria-live="off" here to suppress it so archiving prior turns into
@@ -668,17 +776,28 @@ export function AssistantPanel({
           <ConversationMessage key={m.id ?? i} message={m} currentRev={recordRev} />
         ))}
 
-        {/* The live current turn — the newest message, rendered below history.
-            aria-live is the ONE live region (the log above is aria-live="off"),
-            so a new reply is announced once — politely — while record polling that
-            leaves the reply unchanged says nothing. */}
+        {/* The live current turn — the newest content, rendered below history.
+            The single `.assistant-reply` <p> is the ONE live region (the log above
+            is aria-live="off"): while a query resolves it announces "Working…"
+            (aria-busy), then the resolved answer; at rest it shows the empty state.
+            The `answered from:` line renders only once there is a real answer. */}
         <div className="assistant-reply-block">
-          <p className="assistant-reply" ref={replyRef} tabIndex={-1} aria-live="polite">
-            {safeText}
+          <p
+            className="assistant-reply"
+            ref={replyRef}
+            tabIndex={-1}
+            aria-live="polite"
+            aria-busy={loading || undefined}
+          >
+            {liveText}
           </p>
-          <div className="assistant-sources">
-            <span className="answered-from">answered from: {SOURCE_LABELS[active.answeredFrom]}</span>
-          </div>
+          {!loading && liveAnswer && (
+            <div className="assistant-sources">
+              <span className="answered-from">
+                answered from: {SOURCE_LABELS[liveAnswer.answeredFrom as AssistantSource]}
+              </span>
+            </div>
+          )}
           {caveat && <p className="assistant-caveat">{caveat}</p>}
           {note && <p className="assistant-note">{note}</p>}
         </div>

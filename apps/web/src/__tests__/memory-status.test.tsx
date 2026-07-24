@@ -241,8 +241,12 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
       'What sources are included?',
     ]);
 
-    // default reply is the provenance chip, answered from Project Memory
-    expect(panel.getByText(/Leads come from indexed project files and concepts/)).toBeInTheDocument();
+    // P34.2: the on-mount auto-reply was removed; the provenance answer is now
+    // surfaced by clicking its chip (answered from Project Memory).
+    fireEvent.click(panel.getByText('Where do these leads come from?').closest('button')!);
+    expect(
+      await panel.findByText(/Leads come from indexed project files and concepts/),
+    ).toBeInTheDocument();
     expect(panel.getByText('answered from: Project Memory')).toBeInTheDocument();
     // leads-to-verify framing, never a verdict
     expect(assistant.textContent).toMatch(/leads to verify — never a validation verdict/);
@@ -268,8 +272,9 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     const send = panel.getByRole('button', { name: /send/i });
     expect(send.className).toMatch(/btn-secondary/);
     expect(send.className).not.toMatch(/btn-primary/);
-    expect(assistant.textContent).toMatch(/Guided Questions Only/i);
-    // the redundant standalone guided-note ("Guided prompts only …") is de-duped
+    // P34.2: the persistent helper names the grounded scopes the resolver answers over
+    expect(assistant.textContent).toMatch(/Ask about this record/i);
+    // the legacy standalone guided-note ("Guided prompts only …") is never surfaced
     expect(assistant.textContent).not.toMatch(/Guided prompts only — the assistant answers/i);
   });
 
@@ -357,23 +362,23 @@ describe('P25.7 · Project Memory grounded assistant — unavailable & fetch sta
       (b) => b.textContent?.trim() ?? '',
     );
     expect(chips).toEqual(['Why is memory unavailable?']); // never four chips
-    // Dedupe regression (P25.7): the composed reply text is byte-identical to
-    // MEMORY_UNAVAILABLE_CAVEAT here, so the unavailable sentence must render
-    // EXACTLY ONCE (in `.assistant-reply`) — never stacked a second time in
-    // `.assistant-caveat`. Count occurrences, not merely ≥1 presence.
+    // P34.2: the on-mount auto-reply was removed. At rest the reply shows the
+    // empty state; the unavailable sentence is now the availability-driven caveat
+    // and must render EXACTLY ONCE (in `.assistant-caveat`), never stacked.
     const occurrences = (
       assistant.textContent?.match(
         /Project Memory is unavailable, so no memory-based answer is available here\./g,
       ) ?? []
     ).length;
     expect(occurrences).toBe(1);
-    expect(assistant.querySelector('.assistant-reply')?.textContent).toBe(
+    expect(assistant.querySelector('.assistant-caveat')?.textContent).toBe(
       'Project Memory is unavailable, so no memory-based answer is available here.',
     );
-    // …and the caveat slot is suppressed precisely because it would duplicate
-    // the reply. P33 HQA#7: the GraphStatusChip owns the single availability
-    // state on this page, so the assistant head is no longer rendered here.
-    expect(assistant.querySelector('.assistant-caveat')).toBeNull();
+    expect(assistant.querySelector('.assistant-reply')?.textContent).toMatch(
+      /Ask a question or choose a suggested prompt\./,
+    );
+    // P33 HQA#7: the GraphStatusChip owns the single availability state on this
+    // page, so the assistant head is not rendered here.
     expect(assistant.querySelector('.assistant-memory')).toBeNull();
     // approved wording — NOT the retired "source files directly" string
     expect(assistant.textContent).not.toMatch(/answered from source files directly/i);

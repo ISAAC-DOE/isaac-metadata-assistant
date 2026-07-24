@@ -54,6 +54,12 @@ type SessionState = {
 
 const STORAGE_PREFIX = 'isaac.assistant.session.';
 
+// P34.2 — bounded conversation history. The ephemeral log keeps only the LAST
+// MAX_MESSAGES messages (≈20 user/assistant turns); appending past the cap evicts
+// the oldest. This keeps the session blob small and the log readable without ever
+// touching truth state — it is purely presentation history.
+export const MAX_MESSAGES = 40;
+
 // Presentation-safe keys. Anything not in this allowlist is dropped by the
 // sanitizer before a value is ever written to sessionStorage.
 const SAFE_KEYS = new Set([
@@ -216,11 +222,15 @@ export function loadSession(experimentId: string): SessionState {
   return { messages: [...state.messages], proposal: state.proposal ? { ...state.proposal } : null };
 }
 
-/** Append a conversation message, sanitized before it is persisted. */
+/** Append a conversation message, sanitized before it is persisted. The log is
+ *  bounded to the last MAX_MESSAGES: appending past the cap evicts the oldest. */
 export function appendMessage(experimentId: string, message: Msg): void {
   const state = getState(experimentId);
   const clean = sanitize(message) as Msg;
-  const next: SessionState = { messages: [...state.messages, clean], proposal: state.proposal };
+  const appended = [...state.messages, clean];
+  const bounded =
+    appended.length > MAX_MESSAGES ? appended.slice(appended.length - MAX_MESSAGES) : appended;
+  const next: SessionState = { messages: bounded, proposal: state.proposal };
   saveState(experimentId, next);
 }
 

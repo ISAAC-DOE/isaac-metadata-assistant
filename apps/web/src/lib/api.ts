@@ -15,6 +15,7 @@ import type {
   ApiAnswersResponse,
   ApiArtifactsResponse,
   ApiAuditResponse,
+  AssistantQueryResponse,
   ApiCsvPreview,
   ApiDraftResponse,
   ApiEvidenceClassification,
@@ -309,6 +310,20 @@ export const api = {
   // the backend reads only the two files export wrote inside the workspace.
   getArtifacts(id: string): Promise<ApiArtifactsResponse> {
     return getJson<ApiArtifactsResponse>(`/experiments/${enc(id)}/artifacts`);
+  },
+
+  // P34.2 — the READ-ONLY grounded assistant resolver. A non-mutating POST (a
+  // GET-like query carrying a JSON body): it resolves a free-form question
+  // against the current record context and returns a source-labeled answer. It
+  // sends NO If-Match (nothing is written) and inherits the optional Bearer auth
+  // via request(). A non-2xx (empty/too-long question, unknown experiment) or a
+  // network failure throws ApiError, which the caller renders as unavailable —
+  // never a fabricated answer. It touches no mutation endpoint.
+  askAssistant(
+    id: string,
+    body: { question: string; grounded_rev?: string },
+  ): Promise<AssistantQueryResponse> {
+    return postJson<AssistantQueryResponse>(`/experiments/${enc(id)}/assistant/query`, body);
   },
 
   // Memory plane (advisory only; never gates).

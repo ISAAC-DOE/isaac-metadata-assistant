@@ -54,24 +54,25 @@ export const MEMORY_UNAVAILABLE_CAVEAT =
 export const SUBORDINATE_CAPTION =
   'The assistant is advisory — it explains artifacts and points to sources. It never validates; deterministic validation is the authority.';
 
-// P25.2: there is no disabled free-text input to caveat anymore — this line
-// states plainly that guided prompts are the only way to ask the assistant
-// something. P33 S2: the panel no longer renders this standalone (it is
-// redundant with COMPOSER_GUIDED_HELPER below); the export is kept for any
-// other consumer and for the dedupe assertions.
+// P25.2: legacy guided-only note. P33 S2 stopped rendering it standalone; P34.2
+// wired the composer to the grounded resolver, so it is no longer surfaced at all.
+// The export is kept for any other consumer and for the dedupe assertions.
 export const GUIDED_ONLY_NOTE =
   'Guided prompts only — the assistant answers the suggested questions above.';
 
-// P33 S2 (D3/C3): the PERSISTENT helper shown directly beneath the honest,
-// visual-only composer — visible BEFORE any interaction. It states plainly that
-// free-form questions are not answered and points the user at the suggested
-// questions. This replaces the standalone GUIDED_ONLY_NOTE in the panel.
-export const COMPOSER_GUIDED_HELPER =
-  'Guided Questions Only — choose a suggested question below for an answer.';
+// P34.2: the composer is now WIRED to the read-only grounded resolver
+// (POST /assistant/query). The PERSISTENT helper beneath the input is honest for
+// this build: the assistant is a grounded resolver over THIS record — not a
+// general chatbot — so the helper names the grounded scopes it can answer over.
+export const ASSISTANT_COMPOSER_HELPER =
+  'Ask about this record, its evidence, workflow, export readiness, or project-memory leads.';
 
-// P33 S2 (D3/C3): the accessible inline notice surfaced ONLY after a user
-// submits free text. The composer is inert — no fetch, no message, no
-// persistence — so this notice is the entire response: it says free-form is
-// unsupported and redirects to the supported suggested questions.
-export const COMPOSER_UNSUPPORTED_NOTICE =
-  'Free-form questions are not supported in this build. Choose one of the suggested questions below.';
+// P34.2: the resting state shown in the live-answer region before any question
+// is asked (no auto-announced pending-summary card).
+export const ASSISTANT_EMPTY_STATE = 'Ask a question or choose a suggested prompt.';
+
+// P34.2: shown when the grounded resolver is unreachable or errors. The rest of
+// the workspace (record, workflow, evidence, validation) stays fully usable — the
+// assistant is advisory and never gates anything.
+export const ASSISTANT_UNAVAILABLE =
+  'The assistant is unavailable right now. The record, workflow, evidence, and validation are still available.';

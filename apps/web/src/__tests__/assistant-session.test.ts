@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  MAX_MESSAGES,
   appendMessage,
   clearAllSessions,
   clearSession,
@@ -146,6 +147,20 @@ describe('P29.1 ephemeral session context', () => {
     expect(blob).not.toContain('b'.repeat(64));
     expect(blob).not.toContain('"validate"');
     expect(blob).not.toContain('"evidence"');
+  });
+
+  it('bounds the log to the last MAX_MESSAGES — appending past the cap evicts the oldest', () => {
+    // append well past the cap; each message is uniquely identifiable by index.
+    const total = MAX_MESSAGES + 15;
+    for (let i = 0; i < total; i += 1) {
+      appendMessage(EXP_A, msg(`m${i}`));
+    }
+    const kept = loadSession(EXP_A).messages;
+    // exactly MAX_MESSAGES retained …
+    expect(kept.length).toBe(MAX_MESSAGES);
+    // … and they are the LAST MAX_MESSAGES (oldest evicted, newest kept in order).
+    expect(kept[0].text).toBe(`m${total - MAX_MESSAGES}`);
+    expect(kept[kept.length - 1].text).toBe(`m${total - 1}`);
   });
 
   it('does not persist confirmed-record / verdict fields into the session blob', () => {
