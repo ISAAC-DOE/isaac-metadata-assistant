@@ -778,6 +778,100 @@ export interface ApiMemoryConceptResponse {
   related: ApiMemoryRelated;
 }
 
+// GET /api/memory/graph — P36.2 Project Memory "Graph" tab: a deterministic,
+// capped, served-file REFERENCE projection (apps/api/isaac_api/memory_graph.py
+// `build_graph_projection`). This is NOT the full source graph — the snapshot
+// embeds no edge list; `meta.underlying_graph` is the honest disclosure that a
+// LARGER, un-embedded source graph exists. Edges come ONLY from each file's
+// own `related.files[]`; a concept is always an isolated node here (real data
+// carries zero concept edges). `relations` preserves the real backend values
+// verbatim (references / imports / calls / imports_from / shares_data_with,
+// or any future value) — the client never collapses or invents a label.
+export type ApiMemoryGraphNodeKind = 'file' | 'concept';
+
+export interface ApiMemoryGraphFileNode {
+  id: string; // the file's repo-relative path
+  kind: 'file';
+  label: string;
+  file_type: string | null;
+  community_id: string | null;
+  community_name: string | null;
+  node_count: number;
+  on_disk: boolean;
+}
+
+export interface ApiMemoryGraphConceptNode {
+  id: string;
+  kind: 'concept';
+  label: string | null;
+  community_id: string | null;
+  community_name: string | null;
+  on_disk: boolean;
+  // The concept's anchor source file, when governance-served (mirrors
+  // ApiMemoryConceptSummary.source_file — null when withheld).
+  source_file: string | null;
+}
+
+export type ApiMemoryGraphNode = ApiMemoryGraphFileNode | ApiMemoryGraphConceptNode;
+
+export interface ApiMemoryGraphEdge {
+  source: string; // node id (always a file path — edges never touch a concept)
+  target: string; // node id
+  // Every real relation value seen for this pair, sorted + de-duplicated —
+  // NEVER a single hardcoded label. May be empty if the backend ever emits a
+  // null/absent relation, but never fabricated.
+  relations: string[];
+}
+
+export interface ApiMemoryGraphCommunity {
+  id: string;
+  name: string | null;
+  file_count: number;
+}
+
+export interface ApiMemoryGraphCounts {
+  files: number;
+  concepts: number;
+  reference_edges: number;
+  files_with_references: number;
+  isolated_files: number;
+  communities_rendered: number;
+}
+
+export interface ApiMemoryGraphUnderlying {
+  embedded: false;
+  node_count: number | null;
+  edge_count: number | null;
+  community_count: number | null;
+  note: string;
+}
+
+export interface ApiMemoryGraphProvenance {
+  built_at_commit: string | null;
+  source_graph_sha256: string | null;
+  snapshot_schema_version: number | null;
+  provider: string; // provider_kind when available, else 'unavailable'
+  integrity: SnapshotIntegrity;
+}
+
+export interface ApiMemoryGraphMeta {
+  counts: ApiMemoryGraphCounts;
+  underlying_graph: ApiMemoryGraphUnderlying;
+  provenance: ApiMemoryGraphProvenance;
+}
+
+export interface ApiMemoryGraphResponse {
+  plane: 'memory';
+  note: string;
+  available: boolean;
+  reason?: ApiMemoryUnavailableReason;
+  truncated: boolean;
+  nodes: ApiMemoryGraphNode[];
+  edges: ApiMemoryGraphEdge[];
+  communities: ApiMemoryGraphCommunity[];
+  meta: ApiMemoryGraphMeta;
+}
+
 // GET /api/search — grouped truth+memory search (P26.3 backend envelope).
 // One query fans out to two independently-honest groups: `workspace` (truth
 // plane, the experiment/record store) and `memory` (advisory leads from the

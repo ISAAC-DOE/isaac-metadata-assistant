@@ -9,6 +9,7 @@ import { GraphStatusChip } from '../components/GraphStatusChip';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
+import { MemoryGraphCard } from './MemoryGraphCard';
 import { Network, ChevronDown, ChevronRight } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
@@ -43,16 +44,19 @@ import type {
  * per-concept provenance detail from `GET /api/memory/concepts/{id}`. This is
  * the last UI slice for Phase 24 — nothing beyond concepts is built here.
  */
-// P33 S3 (D6) — the three internal sections of Project Memory. These are LOCAL
-// page tabs (never added to the global LeftNav): Overview carries the memory
+// P33 S3 (D6) — the internal sections of Project Memory. These are LOCAL page
+// tabs (never added to the global LeftNav): Overview carries the memory
 // health/status, Sources holds the Source Index, Concepts holds the Concept
-// Lookup. The grounded assistant lives in the right rail across ALL three.
-type MemoryTab = 'overview' | 'sources' | 'concepts';
+// Lookup. P36.2 adds a fourth tab, Graph — a deterministic, capped, served-
+// file reference projection (not the full source graph). The grounded
+// assistant lives in the right rail across ALL four.
+type MemoryTab = 'overview' | 'sources' | 'concepts' | 'graph';
 
 const MEMORY_TABS: { id: MemoryTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'sources', label: 'Sources' },
   { id: 'concepts', label: 'Concepts' },
+  { id: 'graph', label: 'Graph' },
 ];
 
 const tabId = (id: MemoryTab) => `memory-tab-${id}`;
@@ -149,6 +153,12 @@ export function ProjectMemory() {
         {activeTab === 'concepts' && (
           <div id={panelId('concepts')} role="tabpanel" aria-labelledby={tabId('concepts')} tabIndex={0}>
             <ConceptLookupCard focusConceptId={focusConceptId} />
+          </div>
+        )}
+
+        {activeTab === 'graph' && (
+          <div id={panelId('graph')} role="tabpanel" aria-labelledby={tabId('graph')} tabIndex={0}>
+            <MemoryGraphCard />
           </div>
         )}
       </div>
@@ -970,8 +980,9 @@ function ConceptLookupDetail({
 
 // --- pure helpers (derived only from the live response; no invented values) --
 
-/** First 7 characters, the conventional "short sha" length — never truncates a shorter string. */
-function shortSha(commit: string): string {
+/** First 7 characters, the conventional "short sha" length — never truncates a shorter string.
+ *  Exported for reuse by MemoryGraphCard (P36.2) — the Graph tab's provenance line. */
+export function shortSha(commit: string): string {
   return commit.length > 7 ? commit.slice(0, 7) : commit;
 }
 
@@ -1000,8 +1011,10 @@ interface SourceIndexGroup {
  * (real data has 214 communities, far too many groups for a plain list;
  * community renders as per-row context instead). Within a group, rows sort
  * by `path`; groups sort alphabetically by their humanized label.
+ * Exported for reuse by MemoryGraphCard (P36.2) — the Graph tab's textual
+ * file list groups the same way the Source Index does.
  */
-function groupFilesByType(files: ApiMemoryFileSummary[]): SourceIndexGroup[] {
+export function groupFilesByType(files: ApiMemoryFileSummary[]): SourceIndexGroup[] {
   const byType = new Map<string, ApiMemoryFileSummary[]>();
   for (const file of files) {
     const key = file.file_type ?? '__none__';
@@ -1023,7 +1036,7 @@ function groupFilesByType(files: ApiMemoryFileSummary[]): SourceIndexGroup[] {
  * file with no graph nodes of its own kind) becomes the honest "Other" —
  * never a fabricated specific type.
  */
-function humanizeFileType(fileType: string | null): string {
+export function humanizeFileType(fileType: string | null): string {
   if (fileType === null) return 'Other';
   if (fileType === 'code') return 'Code';
   if (fileType === 'document') return 'Documents';
@@ -1034,7 +1047,7 @@ function humanizeFileType(fileType: string | null): string {
  * `community_name` when present; else the honest fallback "community <id>"
  * when only `community_id` is known; else `null` (never an invented name).
  */
-function communityLabel(file: {
+export function communityLabel(file: {
   community_id: string | null;
   community_name: string | null;
 }): string | null {
@@ -1048,6 +1061,6 @@ function nodeCountLabel(nodeCount: number): string {
 }
 
 /** A DOM-id-safe token derived from a repo-relative path (for aria-controls / aria-labelledby). */
-function domId(prefix: string, raw: string): string {
+export function domId(prefix: string, raw: string): string {
   return `${prefix}-${raw.replace(/[^a-zA-Z0-9]+/g, '-')}`;
 }

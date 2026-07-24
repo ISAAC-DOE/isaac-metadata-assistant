@@ -30,6 +30,7 @@ import type {
   ApiMemoryConceptsResponse,
   ApiMemoryFileResponse,
   ApiMemoryFilesResponse,
+  ApiMemoryGraphResponse,
   ApiPendingResponse,
   ApiSearchResponse,
   ApiSearchScope,
@@ -362,6 +363,14 @@ export const api = {
 
   getMemoryConcept(id: string): Promise<ApiMemoryConceptResponse> {
     return getJson<ApiMemoryConceptResponse>(`/memory/concepts/${enc(id)}`);
+  },
+
+  // P36.2 — the Project Memory "Graph" tab: a deterministic, capped,
+  // served-file reference projection (nodes/edges/communities). Metadata/
+  // provenance only — never file content, never the full un-embedded source
+  // graph. One fetch; the screen does all search/filter/select client-side.
+  getMemoryGraph(): Promise<ApiMemoryGraphResponse> {
+    return getJson<ApiMemoryGraphResponse>('/memory/graph');
   },
 
   // P26.4 — grouped truth+memory search. One query fans out to the workspace

@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "54a7ef1418903dfae1241d0ce7b985fad79a64203d4c09f0e0e83676e51fd0a0"
+        "sha256": "6bf3f656d6a73450878611460cf838a6e6994cf4b9f39f53f6f3c49b0c556938"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10496,7 +10496,7 @@
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "f86933b47ca309123ad2363dd42310c908ebe01c434783caedb44bfacfb863fd"
+        "sha256": "5d6804f4a4aa859a8d761e9f53bd41ead7c2907ebcdcb3f511c75de8bb699fe1"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "41910e934e236e7c1c48c0df33a095445a1e5fa2c0361148fe0cc28d53891a7f"
+        "sha256": "54ffb21ddaf38cc490d4f92413184dd963b0f72afc7fcb93153c1ed75ef17129"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "0a69f0e5a85cd3a98dab3cb39e6a2a312262d8ece49d753015edfd7e46388cdf"
+        "sha256": "dc657fb81b294c3473b181c386c6c420fbdb1aac69cd80cc68d523615ae182f4"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10560,7 +10560,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "dc6c823eddab997ddf7e4e8fdfb81e3894df8ac49a12892915007fc62a739e46"
+        "sha256": "b289f02332171a67b0f80dba1dc17fdb3d9832ed91b16e4f8a86685dcfbb1e89"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "db44ae210bfdcfe23ed98f8f4100bfaae0e1177ebd4ef8f020f15e1630569b9c"
+        "sha256": "b4f8f799517ae2144589c1d16983957beb8ddb65a2820dc09c8fdaf9a6a2e53a"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "33c6200b301bc73fc55e25af16bb090ba61413f732d0519c045ddd97f50828e7"
+    "served_manifest_fingerprint": "871f27b103286ae37cd16d982b1f5264fec6ed61269ae84660041b5671fa16f5"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

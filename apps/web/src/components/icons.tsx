@@ -35,6 +35,10 @@ import {
   LayoutList,
   Search,
   X,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  RotateCcw,
   type LucideIcon,
 } from 'lucide-react';
 import type { SourceType } from '../lib/types';
@@ -109,5 +113,9 @@ export {
   LayoutList,
   Search,
   X,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  RotateCcw,
 };
 export type { LucideIcon };
