@@ -38,6 +38,8 @@ import type {
   ApiDemoRunResponse,
   ApiDemoResetResult,
   ApiUploadsBlocked,
+  ApiValidateRecordError,
+  ApiValidateRecordResult,
   ApiValidateResult,
   ApiWarningsResponse,
   EvidenceBundle,
@@ -277,6 +279,28 @@ export const api = {
   // The three signals — each fetched from its own endpoint, never merged here.
   validate(id: string): Promise<ApiValidateResult> {
     return postJson<ApiValidateResult>(`/experiments/${enc(id)}/validate`);
+  },
+
+  // P36.3 — the standalone Governance & Safety validator. No experiment id:
+  // a candidate record (already parsed client-side) is POSTed as-is and
+  // checked against the official schema server-side. Unlike `postJson`, a
+  // non-OK response's typed body (`{error, message}` — non-object / invalid
+  // JSON / oversized) is parsed and attached to the thrown ApiError so the
+  // screen can show the server's exact reason instead of a generic status.
+  async validateRecord(json: unknown): Promise<ApiValidateRecordResult> {
+    const res = await request('/validate/record', {
+      method: 'POST',
+      body: JSON.stringify(json),
+    });
+    const body = await res.json().catch(() => undefined);
+    if (!res.ok) {
+      const typed = body as ApiValidateRecordError | undefined;
+      throw new ApiError(typed?.message ?? `Request failed (${res.status}).`, {
+        status: res.status,
+        body: typed,
+      });
+    }
+    return body as ApiValidateRecordResult;
   },
 
   audit(id: string): Promise<ApiAuditResponse> {

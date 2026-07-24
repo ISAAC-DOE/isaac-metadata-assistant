@@ -278,6 +278,36 @@ export const validateDryRun = {
   dry_run: true,
 };
 
+// --- P36.3 standalone validator fixtures (POST /api/validate/record) --------
+// Shapes verbatim from apps/api/isaac_api/routes.py `post_validate_record` —
+// a DIFFERENT envelope from `validateDryRun` above (`summary` + `schema_version`
+// instead of `schema` + `dry_run`), since it has no experiment/draft context.
+
+export const validateRecordPass = {
+  ok: true,
+  summary: 'PASS — valid against official ISAAC schema v1.05',
+  errors: [],
+  schema_version: '1.05',
+};
+
+export const validateRecordFail = {
+  ok: false,
+  summary:
+    "✗ system.technique — 'telepathy' is not one of ['XAS', 'XRD', 'HERFD-XAS']\nFAIL (1 schema errors)",
+  errors: [
+    { path: 'system.technique', message: "'telepathy' is not one of ['XAS', 'XRD', 'HERFD-XAS']" },
+  ],
+  schema_version: '1.05',
+};
+
+/** A minimal, unmistakably-synthetic candidate record for the standalone validator UI tests. */
+export const syntheticCandidateRecord = {
+  isaac_record_version: '1.05',
+  record_id: '01SYNTHSTANDALONEVALID0001',
+  record_type: 'evidence',
+  system: { technique: 'XAS' },
+};
+
 export const auditNotExported = {
   records: [],
   text: 'No records found.',
