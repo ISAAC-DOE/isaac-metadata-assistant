@@ -1275,3 +1275,49 @@ clean; no telemetry observed.
   scoped, not scheduled, not implied by anything shipped in Phase 34.
 
 No new phase started; the next phase requires explicit user approval.
+
+---
+
+## Phase 35 — Org-Repo Convergence + S3DF Deployment (CLOSED 2026-07-24 @ org HEAD `8a10ed5`)
+
+Program A of the 2026-07-24 approved convergence plan. Moved the exact Phase 31–34 light app into the
+canonical org repo `ISAAC-DOE/isaac-metadata-assistant`, preserving both histories and Dean's
+single-image `/krish` deploy layer; deployed synthetic-only; made the org repo canonical. **No
+truth-path change; no real data; no LLM; no Postgres.** Full detail:
+`docs/superpowers/plans/2026-07-24-phase-35-org-convergence-closure.md`.
+
+- **P35.0–P35.4** — read-only recontextualization; two-repo forensic audit; local history-preserving
+  integration (`e83a0ce`, two-parent merge of `010f3c7` org + `b3b76cd` personal — no squash/rebase/
+  force); `/krish` functional simulation; ephemeral-contract docs + risk-tiered orchestration policy
+  (CLAUDE.md §10/§17) + deterministic snapshot regeneration.
+- **P35.5** — full release battery: backend 975/1-skip, frontend 672, tsc + Vite build, base-path 12,
+  official validate + `isaac audit` 33/33, committed-snapshot gate 17 + `--check` clean, secret/path
+  scans clean. Independent Opus reviews SHIP.
+- **P35.6 (+ hardening addendum)** — pushed `integration/current-app-s3df`; opened **PR #1**
+  (review-only, no-merge); corrected the API-key contract (Authentik edge; server key stays unset);
+  added non-publishing `pr-docker-smoke.yml` (builds the real production image + smoke — GREEN);
+  specified Create-a-merge-commit; 9 Dean questions. All checks green.
+- **P35.7** — merged PR #1 via **Create a merge commit** → **`8a10ed5`** (parents `[010f3c7,
+  f5c519e]`); build run `30114677296` success; image digest `sha256:643716b5…`, immutable tag
+  **`v0.0.3`**; Opus review **SHIP** (0C / 1I `:latest` / 3M). Krish-authenticated hosted verification:
+  `/krish/api/health` `commit: 8a10ed5`, `mode: synthetic-only`, light shell + Assistant rail visible,
+  no dark portal shell. Status: `COMPLETE — DEPLOYED AND RUNNING SHA VERIFIED; HUMAN RESPONSIVE GATE
+  PARTIALLY OPEN`.
+- **P35.8** — canonical cutover (git-local): `origin`→org, `personal`→Krish; local `main` ff to
+  `8a10ed5` (0/0, clean); integration worktree + local/remote merged branch removed (`f5c519e`
+  preserved as parent-2 of the merge); stale draft removed. No force-push, no personal push.
+  **Personal-deploy retirement (Vercel `isaac-demo-web` + Railway service) PENDING Krish's dashboard
+  disable-not-delete action.**
+
+Open items (honestly carried): human responsive / 200%-zoom visual sign-off (Krish); personal-deploy
+retirement (Krish dashboard); `:latest` publication by Dean's `build-push.yaml`, unpinned Actions, and
+the `ApiKeyAuthMiddleware` decision → Phase 36 hardening.
+
+## Phase 36 — Repository-local native enhancements (OPENED 2026-07-24)
+
+Authorized under the 2026-07-24 execution authorization. Synthetic-only, deterministic, no LLM, no
+portal dependency, no real data, no Postgres, no new secret. Sequenced in
+`docs/superpowers/plans/2026-07-24-phase-36-native-enhancements-plan.md`. Each slice: focused
+implementer → independent Opus review → PR into org `main` (Create-a-merge-commit → GHCR + Flux) →
+image/tag verify → hosted QA Krish-gated (Authentik edge, not self-verifiable here). Phase 37 (portal /
+Postgres / real data / API keys / roles / external LLM) remains **NOT authorized**.
