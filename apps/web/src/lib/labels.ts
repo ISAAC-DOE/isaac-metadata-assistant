@@ -142,6 +142,20 @@ export const LABELS = {
   chipDraft: 'Draft',
   modeSynthetic: 'Synthetic',
 
+  // Evidence-support classes (P28.5) — a separate axis from the status chips above.
+  chipEvSupported: 'Supported',
+  chipEvCandidate: 'Inferred Candidate',
+  chipEvInsufficient: 'Insufficient Evidence',
+  chipEvConflicting: 'Conflicting Evidence',
+  chipEvUnknown: 'Unknown',
+
+  // CSV reconciliation states (P31.3) — a separate axis again. These never mean
+  // valid / complete / exportable; they only compare a proposed CSV value to the
+  // current record, and the value is always read-only evidence.
+  chipReconMatch: 'Matches Record',
+  chipReconConflict: 'Conflicts',
+  chipReconAbsent: 'Absent From Record',
+
   // Signals
   signalValidation: 'Validation',
   signalCoverage: 'Coverage',
@@ -152,8 +166,21 @@ export const LABELS = {
   actionRunDemo: 'Run Synthetic Demo',
   actionRunDemoShort: 'Run Demo',
   actionNewRecord: 'New Record',
+  actionResetDemo: 'Reset Demo',
+  actionCancel: 'Cancel',
+
+  // Guarded synthetic-demo reset (P26.0b)
+  resetDialogTitle: 'Reset Shared Synthetic Demo',
+  resetConfirmAction: 'Reset Shared Demo',
+  resetCountCurrent: 'Current Experiments',
+  resetCountCanonical: 'Canonical Scenarios Preserved',
+  resetCountLegacy: 'Legacy Demo Records Removed',
+  resetCountAmbiguous: 'Ambiguous Records',
+  resetCountFinal: 'Final Experiments',
   actionReviewAnswer: 'Review & Answer',
   actionConfirm: 'Confirm',
+  actionEdit: 'Edit',
+  actionSave: 'Save',
   actionRevalidate: 'Re-Validate',
   actionDownload: 'Download',
   actionViewJson: 'View JSON',
@@ -179,6 +206,7 @@ export const LABELS = {
   assistant: 'Assistant',
   assistantSuggestion: 'Assistant Suggestion',
   suggestedQuestions: 'Suggested Questions',
+  actionStageAnswer: 'Stage Answer',
 
   // Export artifacts
   officialRecord: 'Official Record',
@@ -187,3 +215,46 @@ export const LABELS = {
 } as const;
 
 export type LabelKey = keyof typeof LABELS;
+
+// --- date formatting (P33 S1) ------------------------------------------
+// Fixed month-name arrays (never `Date`/`Intl` locale formatting) so the
+// dashboard card's date badge is deterministic across environments.
+const SHORT_MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+const FULL_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+export interface FormattedDate {
+  iso: string; // "2026-07-12" — machine-readable, for <time dateTime>
+  display: string; // "Jul 12, 2026"
+  accessible: string; // "Created July 12, 2026"
+}
+
+/**
+ * Parse the `YYYY-MM-DD` prefix of an ISO date/datetime string into a
+ * deterministic machine + display + accessible triple. Never uses `Date`
+ * parsing/locale — a fixed month-name lookup keeps rendering identical in every
+ * environment. `iso` is the exact date prefix so a `<time dateTime>` carries a
+ * valid machine value.
+ */
+export function formatCreatedDate(isoDate: string): FormattedDate | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate);
+  if (!m) return undefined;
+  const [, year, monthStr, dayStr] = m;
+  const monthIndex = Number(monthStr) - 1;
+  const day = Number(dayStr);
+  if (monthIndex < 0 || monthIndex > 11 || Number.isNaN(day) || day < 1 || day > 31) {
+    return undefined;
+  }
+  const shortMonth = SHORT_MONTHS[monthIndex];
+  const fullMonth = FULL_MONTHS[monthIndex];
+  return {
+    iso: `${year}-${monthStr}-${dayStr}`,
+    display: `${shortMonth} ${day}, ${year}`,
+    accessible: `Created ${fullMonth} ${day}, ${year}`,
+  };
+}

@@ -6,14 +6,36 @@
  */
 
 /* ---- AssistantPanel ------------------------------------------------- */
+/* P33 S2 (D5) — the "lavender rail": the whole region reads as the Assistant via
+ * a light indigo tint + a subtle indigo border, built only from existing
+ * --assist* tokens. Inner content cards (messages, reply, proposal, stage) stay
+ * white / near-white and lift off this rail. The tint is restrained — never
+ * louder than the main task, and dark body/interactive text keeps AA contrast. */
 .assistant {
   padding: 14px 16px;
+  background: var(--assist-tint);
+  border: 1px solid var(--assist-border);
+  border-radius: var(--radius-card);
+}
+/* P33 HQA #3 — inside the Assistant rail the whole COLUMN (.record-right /
+ * .memory-right) carries the lavender tint (and a NEUTRAL --border edge — never a
+ * colored accent edge; see the permanent no-vertical-rail rule) and owns the
+ * padding, so the panel itself drops its card chrome and the rail reads as one continuous
+ * region for its full height. Inner content cards below (.assistant-reply,
+ * .assistant-msg, .assistant-composer-input, .agent-proposal, .agent-stage, the
+ * composer notice) keep their own white / near-white surfaces and lift off it. */
+.record-right .assistant,
+.memory-right .assistant {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 .assistant-head {
   display: flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 .assistant-icon {
   width: 26px;
@@ -39,6 +61,157 @@
   font-size: 11px;
   color: var(--text-slate);
 }
+/* ---- Conversation log (P29.2) --------------------------------------- */
+/* Scrollable message list: older → newest, newest near the bottom. Never
+ * inverted. The live reply block is the last (newest) child. */
+.assistant-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* P29.2 design: the conversation log is its own bounded, auto-scrolling region
+   * (the auto-scroll JS operates on this element) — kept intentionally. */
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  /* P33 HQA #2 — one section rhythm: separate the log from the prompt controls
+   * above with the same 16px gap used between every other section. */
+  margin-top: 16px;
+}
+.assistant-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  /* long field values / explanations wrap instead of overflowing */
+  overflow-wrap: anywhere;
+}
+/* User turns sit to the right, tinted; assistant turns to the left, on the
+ * assistant panel surface. Distinction never relies on color alone — each
+ * carries an icon + a text role label in .assistant-msg-role. */
+.assistant-msg-user {
+  align-self: flex-end;
+  max-width: 88%;
+  background: var(--cover-bg);
+  border-color: var(--cover-border);
+}
+.assistant-msg-assistant {
+  align-self: stretch;
+  background: var(--assist-panel-bg);
+  border-color: var(--assist-border);
+}
+.assistant-msg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.assistant-msg-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+}
+.assistant-msg-user .assistant-msg-role { color: var(--text-slate); }
+.assistant-msg-assistant .assistant-msg-role { color: var(--assist-text); }
+.assistant-msg-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--radius-token);
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+  background: var(--surface);
+}
+/* Kind badges — icon + label already distinguish them; the tints are a
+ * secondary reinforcement, never the sole signal. */
+.kind-badge-deterministic { color: var(--assist-text); border-color: var(--assist-border); background: var(--assist-tint); }
+.kind-badge-advisory { color: var(--text-slate); }
+.kind-badge-inferred { color: var(--advisory-text); border-color: var(--advisory-border); background: var(--advisory-bg); }
+.kind-badge-confirm { color: var(--advisory-text); border-color: var(--advisory-border); background: var(--advisory-bg); }
+.kind-badge-degraded { color: var(--text-quaternary); }
+/* Stale — an assistant message grounded in an older record revision. Icon +
+ * text ("Based on an earlier version"), plus a dashed, dimmed treatment. */
+.assistant-msg.is-stale {
+  border-style: dashed;
+  opacity: 0.82;
+}
+.assistant-msg-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--advisory-text);
+}
+.assistant-msg-text {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* Jump to Latest — appears only when new content arrives while scrolled up. */
+.assistant-jump {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 5px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--assist-border);
+  background: var(--assist-panel-bg);
+  color: var(--assist-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.assistant-jump:hover { background: var(--assist-tint); }
+.assistant-jump:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
+/* P34.2 — the conversation toolbar (Clear Conversation), shown only once the log
+ * has history. Restrained, right-aligned, secondary — it clears the ephemeral
+ * session, never any record/truth state. */
+.assistant-log-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+.assistant-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.assistant-clear:hover {
+  background: var(--assist-tint);
+  border-color: var(--assist-border);
+  color: var(--assist-text);
+}
+.assistant-clear:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
+.assistant-reply-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .assistant-reply {
   padding: 12px 13px;
   background: var(--assist-panel-bg);
@@ -47,7 +220,10 @@
   font-size: 12.5px;
   color: var(--text-secondary);
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
+.assistant-reply:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+.assistant-reply-block .assistant-sources { margin-top: 0; }
 .assistant-sources {
   margin-top: 10px;
   display: flex;
@@ -59,6 +235,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* P34.5 — a long plane/source label wraps inside the chip instead of pushing
+   * the narrow drawer / 200%-zoom panel into horizontal overflow. */
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 3px 8px;
   border-radius: var(--radius-token);
   background: var(--assist-tint);
@@ -67,17 +247,145 @@
   font-size: 10.5px;
   color: var(--assist-text);
 }
+/* caveat + note live inside .assistant-reply-block (flex, gap:10) — rely on the
+ * block's own gap for even spacing rather than adding to it (P33 HQA #2). */
 .assistant-caveat {
-  margin-top: 10px;
+  margin-top: 0;
   font-size: 11px;
   color: var(--text-tertiary);
   line-height: 1.5;
 }
 .assistant-note {
-  margin-top: 12px;
+  margin-top: 0;
   font-size: 11.5px;
   color: var(--text-tertiary);
   line-height: 1.5;
+}
+
+/* P34.3 — cited-source provenance chips: the citation detail beneath the
+ * `answered from:` plane label. Restrained and secondary; a nav chip and a
+ * plain-label chip share the base treatment (the chevron + hover is the only
+ * added affordance on a navigable one — never color alone). For a Project-Memory
+ * answer these are the leads the reader can open and verify. */
+.assistant-provenance {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.assistant-provenance-item {
+  display: inline-flex;
+}
+.assistant-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: var(--radius-token);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+button.assistant-source-chip-nav {
+  cursor: pointer;
+  color: var(--assist-text);
+  border-color: var(--assist-border);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+button.assistant-source-chip-nav .chev {
+  color: var(--text-quaternary);
+  flex: 0 0 auto;
+}
+button.assistant-source-chip-nav:hover {
+  background: var(--assist-tint);
+  border-color: var(--assist-border);
+}
+button.assistant-source-chip-nav:focus-visible {
+  outline: 2px solid var(--assist);
+  outline-offset: 2px;
+}
+
+/* P34.3 — the compact live-answer staleness row: the same stale badge visual an
+ * archived message wears (.assistant-msg-stale — CircleDashed + text), alongside
+ * an explicit "Ask again". No large standalone card; a record change never
+ * auto-refetches. */
+.assistant-live-stale-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.assistant-ask-again {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--assist-border);
+  background: var(--assist-panel-bg);
+  color: var(--assist-text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.assistant-ask-again:hover:not(:disabled) { background: var(--assist-tint); }
+.assistant-ask-again:disabled { opacity: 0.55; cursor: default; }
+.assistant-ask-again:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
+/* P34.3 — suggested next-question chips for a CURRENT answer. Visually distinct
+ * from the provenance chips (bordered, chevron-led, question text) and routed
+ * through the same read-only submit path. */
+.assistant-followups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.assistant-followup {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  border: 1px dashed var(--assist-border);
+  background: transparent;
+  color: var(--assist-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+/* P34.5 — the question label takes the remaining width and WRAPS (a long
+ * follow-up must not overflow the drawer at narrow width / 200% zoom); the
+ * chevron stays pinned at its natural size. */
+.assistant-followup > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.assistant-followup .chev { color: var(--text-quaternary); flex: 0 0 auto; }
+.assistant-followup:hover:not(:disabled) { background: var(--assist-tint); border-style: solid; }
+.assistant-followup:disabled { opacity: 0.55; cursor: default; }
+.assistant-followup:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
+/* P29.4 — honest, manual-first degraded state. Subordinate tint (never a verdict
+   color); it only tells the reader the assistant cannot verify the record right
+   now, and never disables the surrounding manual workflow. */
+.assistant-degraded {
+  margin: 0 0 16px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
 }
 .assistant-suggested-eyebrow {
   margin: 16px 0 8px;
@@ -111,19 +419,209 @@
 }
 .assistant-prompt:disabled { opacity: 0.6; cursor: default; }
 .assistant-prompt .chev { margin-left: auto; color: var(--text-disabled); flex: none; }
-/* P25.2: honest guided-only line, replacing the removed disabled free-text input. */
-.assistant-guided-note {
-  margin-top: 14px;
-  font-size: 10.5px;
-  color: var(--text-quaternary);
+
+/* P29.4b — the INTENT pills. Same footprint as the guided prompts but tinted so
+   a "runs the agent" action reads distinctly from a "shows a composed answer". */
+.assistant-agent-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.assistant-agent-prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--assist-border);
+  background: var(--assist-panel-bg);
+  color: var(--assist-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.assistant-agent-prompt:hover:not(:disabled) { background: var(--assist-tint); }
+.assistant-agent-prompt:active:not(:disabled) { background: var(--assist-tint); }
+.assistant-agent-prompt:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+.assistant-agent-prompt:disabled { opacity: 0.55; cursor: not-allowed; }
+.assistant-agent-prompt .chev { margin-left: auto; color: var(--assist-text); flex: none; }
+
+/* P29.4b — the UNCONFIRMED staged-proposal card. Advisory-tinted, never a
+   verdict color; a candidate/unknown/conflicting variant is icon+text distinct. */
+.agent-proposal {
+  margin: 16px 0 0;
+  padding: 12px;
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+}
+.agent-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--advisory-text);
+  margin-bottom: 8px;
+}
+.agent-proposal-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 12px;
+  margin: 0 0 8px;
+  font-size: 12.5px;
+}
+.agent-proposal-fields dt { color: var(--text-tertiary); font-size: 11px; }
+.agent-proposal-fields dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.agent-proposal-fields dd.mono { font-family: var(--font-mono); font-size: 11.5px; }
+.agent-proposal-value { font-weight: 600; }
+.agent-proposal-class { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.agent-proposal-honesty {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--advisory-text);
+}
+.agent-proposal-note {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+.agent-proposal-stale {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+.agent-proposal-reeval {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius-control);
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.agent-proposal-actions { display: flex; gap: 8px; }
+.agent-proposal-actions .btn { flex: 1; justify-content: center; }
+/* A candidate / unknown must never read as a confirmed fact. The distinction is
+   carried by the classification icon + label + honesty copy (never color alone);
+   the class also lifts the whole-card border weight so it never looks settled. */
+.agent-proposal-inferred,
+.agent-proposal-conflicting { border-color: var(--advisory-icon); }
+.agent-proposal-unknown { border-style: dashed; }
+.agent-proposal.is-stale { opacity: 0.92; }
+
+/* P29.6 — the narrow "Stage Answer" affordance for the current pending field. One
+   focused value entry (NOT a freeform composer); staging just fills the
+   unconfirmed proposal card below, and nothing is written until Confirm. */
+.agent-stage {
+  margin: 16px 0 0;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+}
+.agent-stage-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.agent-stage-head .mono { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; }
+.agent-stage-note {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+.agent-stage-value {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--surface-sunken, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  overflow-wrap: anywhere;
+}
+.agent-stage-row { display: flex; gap: 8px; }
+.agent-stage-submit { white-space: nowrap; }
+
+/* P33 S2 (D3/C3) — the honest, visual-only composer. A real input + a SECONDARY
+ * send control (never the primary action). The persistent helper states the
+ * guided-only boundary before any interaction; the notice appears only after an
+ * unsupported free-text submit. Inner controls sit on white, lifting off the
+ * lavender rail. */
+.assistant-composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.assistant-composer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 11px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--assist-border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+.assistant-composer-input::placeholder { color: var(--text-quaternary); }
+.assistant-composer-input:focus-visible {
+  outline: 2px solid var(--assist);
+  outline-offset: 1px;
+  border-color: var(--assist-border);
+}
+/* The send control is deliberately SECONDARY (btn btn-secondary) — restrained,
+ * icon-only with an accessible name, never styled as the primary task action. */
+.assistant-composer-send {
+  flex: none;
+  padding: 8px 11px;
+}
+.assistant-composer-helper {
+  margin: 0;
+  font-size: 11px;
+  /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
+  color: var(--text-secondary);
   line-height: 1.5;
 }
+.assistant-composer-notice {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--assist-text);
+  background: var(--surface);
+  border: 1px solid var(--assist-border);
+  border-radius: var(--radius-inner);
+}
 .assistant-caption {
-  margin-top: 14px;
+  margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border-hair);
   font-size: 11px;
-  color: var(--text-tertiary);
+  /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 
@@ -315,7 +813,38 @@
 .answered-label { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
 .answered-stored { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
 .answered-trailing { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; }
-.answered-edit { background: none; border: 0; color: var(--action); font-size: 12px; font-weight: 500; }
+.answered-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  padding: 4px 10px;
+  color: var(--action);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.answered-edit:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface); }
+.answered-edit:disabled { opacity: 0.4; cursor: not-allowed; }
+.answered-editing { margin-top: 10px; }
+.answered-row + .answered-editing, .answered-editing + .answered-row { margin-top: 10px; }
+
+/* P28.3 — honest downstream-impact of a successful edit (role="status"). */
+.edit-impact {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: var(--cover-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  color: var(--pass-solid);
+}
+.edit-impact-reason { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.edit-impact-note { margin: 4px 0 0; font-size: 12.5px; color: var(--text-muted); }
 .upcoming-row {
   display: flex;
   align-items: center;

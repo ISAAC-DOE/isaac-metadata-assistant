@@ -4,6 +4,11 @@ A one-page map of how the ISAAC Metadata Assistant turns experiment metadata int
 evidence-grounded ISAAC v1.05 record. It is kept accurate to the code in this repo;
 where something is designed but not yet built, it says so.
 
+> **Scope note:** this document covers the deterministic CLI / truth pipeline only (extract →
+> draft → validate → export → audit). It does not describe the web UI, API, memory/query plane,
+> or CSV ingestion surfaces — see [`README.md`](../README.md) and
+> [`docs/project-memory-map.md`](project-memory-map.md) for those.
+
 ## The pipeline
 
 ```

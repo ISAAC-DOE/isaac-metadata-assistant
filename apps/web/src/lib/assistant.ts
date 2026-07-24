@@ -54,8 +54,25 @@ export const MEMORY_UNAVAILABLE_CAVEAT =
 export const SUBORDINATE_CAPTION =
   'The assistant is advisory — it explains artifacts and points to sources. It never validates; deterministic validation is the authority.';
 
-// P25.2: there is no disabled free-text input to caveat anymore — this line
-// states plainly that guided prompts are the only way to ask the assistant
-// something.
+// P25.2: legacy guided-only note. P33 S2 stopped rendering it standalone; P34.2
+// wired the composer to the grounded resolver, so it is no longer surfaced at all.
+// The export is kept for any other consumer and for the dedupe assertions.
 export const GUIDED_ONLY_NOTE =
   'Guided prompts only — the assistant answers the suggested questions above.';
+
+// P34.2: the composer is now WIRED to the read-only grounded resolver
+// (POST /assistant/query). The PERSISTENT helper beneath the input is honest for
+// this build: the assistant is a grounded resolver over THIS record — not a
+// general chatbot — so the helper names the grounded scopes it can answer over.
+export const ASSISTANT_COMPOSER_HELPER =
+  'Ask about this record, its evidence, workflow, export readiness, or project-memory leads.';
+
+// P34.2: the resting state shown in the live-answer region before any question
+// is asked (no auto-announced pending-summary card).
+export const ASSISTANT_EMPTY_STATE = 'Ask a question or choose a suggested prompt.';
+
+// P34.2: shown when the grounded resolver is unreachable or errors. The rest of
+// the workspace (record, workflow, evidence, validation) stays fully usable — the
+// assistant is advisory and never gates anything.
+export const ASSISTANT_UNAVAILABLE =
+  'The assistant is unavailable right now. The record, workflow, evidence, and validation are still available.';

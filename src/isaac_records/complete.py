@@ -179,4 +179,121 @@ def apply_answers(draft: dict, answers: dict) -> dict:
     return draft
 
 
-__all__ = ["apply_answers"]
+def apply_corrections(draft: dict, answers: dict) -> dict:
+    """Return a NEW draft with ``answers`` OVERWRITING already-confirmed values.
+
+    The edit / re-confirm counterpart to :func:`apply_answers`. Where
+    ``apply_answers`` only FILLS open ``pending[]`` blockers, this overwrites the
+    CURRENT value of a field that was already answered (even when ``pending`` is
+    empty), recording a FRESH ``user_confirmation`` evidence entry for each
+    corrected field. It NEVER touches ``pending`` (blocker resolution stays with
+    ``apply_answers``) — it only mutates values that already exist / are supplied.
+
+    Same NO-GUESSING contract as ``apply_answers``: it applies ONLY values that are
+    literally present in ``answers``. A malformed sha256 or an off-enum qc verdict
+    is rejected (the current value is left untouched — never overwritten with a bad
+    value, never invented). An unrecognized key writes nothing. Pure and
+    non-mutating (deep-copies ``draft``); imports nothing but stdlib.
+
+    Accepts the SAME ``apply_answers`` input shape (produced by the route's
+    ``_answers_to_apply_shape``): ``asset_sha256`` (``{uri: sha}``), ``series``,
+    ``descriptor`` / ``descriptor_label``, ``edge``, ``qc``.
+    """
+    draft = copy.deepcopy(draft)
+    answers = answers or {}
+    timestamp = answers.get("timestamp")
+
+    # Each branch guards on an EQUALITY check first: an identical re-confirm changes
+    # NOTHING (no overwrite, no fresh evidence, no wrapper-timestamp churn), so the
+    # authoritative draft signature stays byte-stable and save_versioned reports a
+    # no-op. A correction is applied only when the submitted value actually differs.
+
+    # -- asset sha256: overwrite the matching EXISTING asset's hash --
+    asset_sha256 = answers.get("asset_sha256") or {}
+    for asset in draft.get("assets") or []:
+        uri = asset.get("uri")
+        sha256 = asset_sha256.get(uri)
+        if sha256 is None or not _SHA256_RE.match(str(sha256)):
+            # No answer for this uri, or a malformed sha256 -> not applied; the
+            # current value stays untouched (never overwritten with a bad value).
+            continue
+        if sha256 == asset.get("sha256"):
+            continue  # identical -> byte-stable no-op
+        asset["sha256"] = sha256
+        asset.setdefault("evidence", [])
+        asset["evidence"].append(
+            _user_confirmation(f"Correct the sha256 of {uri}?", sha256, timestamp)
+        )
+
+    # -- series: overwrite the whole series block + refresh its block_evidence --
+    series = answers.get("series")
+    if series is not None and series != draft.get("series"):
+        draft["series"] = copy.deepcopy(series)
+        block_evidence = draft.setdefault("block_evidence", {})
+        for s in draft["series"]:
+            series_id = s.get("series_id")
+            if series_id is None:
+                continue
+            block_evidence[f"series:{series_id}"] = [
+                _user_confirmation("Correct the reduced series?", series_id, timestamp)
+            ]
+
+    # -- descriptor: overwrite the descriptor output block --
+    descriptor = answers.get("descriptor")
+    if descriptor is not None:
+        outputs = draft.get("descriptors_outputs") or []
+        current_core = None
+        if outputs and (outputs[0].get("descriptors") or []):
+            current_core = {
+                k: v for k, v in outputs[0]["descriptors"][0].items() if k != "evidence"
+            }
+        if descriptor != current_core:  # only rebuild on a real content change
+            desc = copy.deepcopy(descriptor)
+            desc["evidence"] = [
+                _user_confirmation(
+                    "Correct the descriptor value + uncertainty?",
+                    str(desc.get("value")),
+                    timestamp,
+                )
+            ]
+            draft["descriptors_outputs"] = [
+                {
+                    "label": answers.get("descriptor_label", "completion_demo"),
+                    "generated_utc": timestamp,
+                    "generated_by": {"agent": "isaac-complete-demo", "version": "0.1"},
+                    "descriptors": [desc],
+                }
+            ]
+
+    # -- qc: overwrite the qc status (rejecting an off-enum verdict) --
+    qc_answer = answers.get("qc")
+    if isinstance(qc_answer, dict):
+        status = qc_answer.get("status")
+        if status in _QC_STATUSES and status != (draft.get("qc") or {}).get("status"):
+            qc = draft.setdefault("qc", {})
+            qc["status"] = status
+            evidence_note = qc_answer.get("evidence")
+            if evidence_note:
+                qc["evidence"] = evidence_note
+            block_evidence = draft.setdefault("block_evidence", {})
+            block_evidence.setdefault("qc:status", []).append(
+                _user_confirmation("Correct the QC status?", status, timestamp)
+            )
+
+    # -- edge: overwrite the implicit edge value + append confirmation --
+    edge = answers.get("edge")
+    if edge is not None:
+        for imp in draft.get("implicit") or []:
+            if imp.get("about") == "edge" and imp.get("value") != edge:
+                imp["value"] = edge
+                imp.setdefault("evidence", [])
+                imp["evidence"].append(
+                    _user_confirmation(
+                        "Correct the absorption edge (e.g. K, L3)?", edge, timestamp
+                    )
+                )
+
+    return draft
+
+
+__all__ = ["apply_answers", "apply_corrections"]

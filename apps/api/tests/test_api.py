@@ -25,6 +25,12 @@ def client(tmp_path, monkeypatch):
 # --- helpers ------------------------------------------------------------------
 
 
+def _if_match(client, exp_id: str) -> dict:
+    """The current authoritative ETag as an If-Match header (strict preconditions)."""
+    v = client.get(f"/api/experiments/{exp_id}").json()["version"]
+    return {"If-Match": f'"{v}"'}
+
+
 def _seed_id(client) -> str:
     """The canonical New Draft scenario id (raw, 5-pending) among the five seeds.
 
@@ -49,6 +55,7 @@ def _complete_seed(client, exp_id: str) -> dict:
     resp = client.post(
         f"/api/experiments/{exp_id}/answers",
         json={"answers": answers, "confirmed_by_user": True},
+        headers=_if_match(client, exp_id),
     )
     assert resp.status_code == 200
     return resp.json()
@@ -125,7 +132,8 @@ def test_detail_shape(client):
     exp_id = _seed_id(client)
     detail = client.get(f"/api/experiments/{exp_id}").json()
     assert detail["draft_ok"] is True
-    assert detail["artifact_refs"] == {"record_path": None, "sidecar_path": None}
+    # P30.6 — safe basenames only, never an absolute server/mount path.
+    assert detail["artifact_refs"] == {"record_filename": None, "sidecar_filename": None}
     assert set(detail["source_files"]) == {"mock_campaign.csv", "raw_scan_listing.txt"}
 
 
@@ -191,6 +199,7 @@ def test_blank_answers_not_applied(client):
     resp = client.post(
         f"/api/experiments/{exp_id}/answers",
         json={"answers": {"series": "", "descriptor": None}, "confirmed_by_user": True},
+        headers=_if_match(client, exp_id),
     )
     assert resp.status_code == 200
     # Nothing was answerable -> all 5 blockers remain.
@@ -200,19 +209,23 @@ def test_blank_answers_not_applied(client):
 # --- 8. export ----------------------------------------------------------------
 
 
-def test_export_success_writes_record_and_sidecar(client):
+def test_export_success_writes_record_and_sidecar(client, tmp_path):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    resp = client.post(f"/api/experiments/{exp_id}/export")
+    resp = client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
-    record_path = body["artifact_refs"]["record_path"]
-    sidecar_path = body["artifact_refs"]["sidecar_path"]
-    assert record_path != sidecar_path
-    with open(record_path, encoding="utf-8") as fh:
+    # P30.6 — the response carries safe basenames only, never an absolute path;
+    # the file location is derived from the known workspace layout for this test.
+    record_filename = body["artifact_refs"]["record_filename"]
+    sidecar_filename = body["artifact_refs"]["sidecar_filename"]
+    assert record_filename != sidecar_filename
+    assert "/" not in record_filename and "/" not in sidecar_filename
+    records_dir = tmp_path / "ws" / exp_id / "records"
+    with open(records_dir / record_filename, encoding="utf-8") as fh:
         record = json.load(fh)
-    with open(sidecar_path, encoding="utf-8") as fh:
+    with open(records_dir / sidecar_filename, encoding="utf-8") as fh:
         sidecar = json.load(fh)
     assert record["record_id"] == exp_id
     assert sidecar["record_id"] == exp_id
@@ -221,14 +234,18 @@ def test_export_success_writes_record_and_sidecar(client):
 def test_export_second_time_is_409(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    assert client.post(f"/api/experiments/{exp_id}/export").json()["ok"] is True
-    resp = client.post(f"/api/experiments/{exp_id}/export")
+    assert (
+        client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
+        .json()["ok"]
+        is True
+    )
+    resp = client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     assert resp.status_code == 409
 
 
 def test_export_refused_when_incomplete(client):
     exp_id = _seed_id(client)  # seed still has 5 open blockers
-    resp = client.post(f"/api/experiments/{exp_id}/export")
+    resp = client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is False
@@ -258,7 +275,7 @@ def test_validate_dry_run_fail_then_pass(client):
 def test_validate_on_exported_record(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    client.post(f"/api/experiments/{exp_id}/export")
+    client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     body = client.post(f"/api/experiments/{exp_id}/validate").json()
     assert body["dry_run"] is False
     assert body["ok"] is True
@@ -278,13 +295,51 @@ def test_validate_corrupt_draft_returns_errors_not_exception(client, tmp_path):
     assert body["errors"]
 
 
+def test_validate_unexpected_exception_is_fixed_message_and_logged(
+    client, monkeypatch, caplog
+):
+    """BK-1: the defensive ``except`` in ``post_validate`` must NOT interpolate the
+    exception into the client response (no path/stack/secret leak), and must log the
+    real detail server-side instead. Forces the ``except`` by making the dry-run
+    ``export_draft`` raise (synthetic data does not otherwise trigger it)."""
+    import logging as _logging
+
+    import isaac_api.routes as routes
+
+    exp_id = _seed_id(client)  # non-exported -> takes the dry-run try/except branch
+
+    # A distinctive message carrying tokens that MUST NOT reach the client.
+    secret = "boom /Users/someone/isaac-workspace/private detail Traceback-marker"
+
+    def _raise(*_a, **_k):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(routes, "export_draft", _raise)
+
+    with caplog.at_level(_logging.ERROR):
+        resp = client.post(f"/api/experiments/{exp_id}/validate")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Same response shape and dry-run/schema fields, ok=False.
+    assert body["ok"] is False
+    assert body["dry_run"] is True
+    assert body["schema"] == "ISAAC v1.05"
+    # (a/b) fixed, path-free message; the exception text is NOT interpolated.
+    assert body["errors"][0]["message"] == "Validation could not be completed."
+    for leaked in (secret, "boom", "Traceback", "isaac-workspace", "/Users/"):
+        assert leaked not in resp.text, f"client response leaked {leaked!r}"
+    # (c) the real exception detail WAS captured server-side (via logger + exc_info).
+    assert secret in caplog.text, "exception detail was not logged server-side"
+
+
 # --- 10. audit ----------------------------------------------------------------
 
 
 def test_audit_full_coverage_after_export(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    client.post(f"/api/experiments/{exp_id}/export")
+    client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     body = client.post(f"/api/experiments/{exp_id}/audit").json()
     assert len(body["records"]) == 1
     rec = body["records"][0]
@@ -310,7 +365,7 @@ def test_audit_empty_before_export(client):
 def test_warnings_advisory_non_gating_with_no_links(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    client.post(f"/api/experiments/{exp_id}/export")
+    client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     body = client.get(f"/api/experiments/{exp_id}/warnings").json()
     assert body["advisory"] is True
     assert body["gating"] is False
@@ -335,7 +390,7 @@ def test_evidence_pre_and_post_export(client):
     assert all({"path", "value", "status", "evidence"} <= set(e) for e in pre)
 
     _complete_seed(client, exp_id)
-    client.post(f"/api/experiments/{exp_id}/export")
+    client.post(f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id))
     post = client.get(f"/api/experiments/{exp_id}/evidence").json()["evidence"]
     assert post
     blob = json.dumps(post)
@@ -389,15 +444,17 @@ def test_artifacts_before_export_are_null(client):
     assert body == {
         "record": None,
         "sidecar": None,
-        "record_path": None,
-        "sidecar_path": None,
+        "record_filename": None,
+        "sidecar_filename": None,
     }
 
 
 def test_artifacts_after_export_returns_record_and_sidecar(client):
     exp_id = _seed_id(client)
     _complete_seed(client, exp_id)
-    export = client.post(f"/api/experiments/{exp_id}/export").json()
+    export = client.post(
+        f"/api/experiments/{exp_id}/export", headers=_if_match(client, exp_id)
+    ).json()
     body = client.get(f"/api/experiments/{exp_id}/artifacts").json()
     # Both payloads present and distinct.
     assert body["record"] is not None and body["sidecar"] is not None
@@ -407,10 +464,11 @@ def test_artifacts_after_export_returns_record_and_sidecar(client):
     # Read from disk matches exactly what export returned/wrote.
     assert body["record"] == export["record"]
     assert body["sidecar"] == export["sidecar"]
-    # The two artifacts live at distinct paths.
-    assert body["record_path"] != body["sidecar_path"]
-    assert body["record_path"].endswith(f"{exp_id}.json")
-    assert body["sidecar_path"].endswith(f"{exp_id}.evidence.json")
+    # The two artifacts have distinct safe basenames (never an absolute path).
+    assert body["record_filename"] != body["sidecar_filename"]
+    assert body["record_filename"] == f"{exp_id}.json"
+    assert body["sidecar_filename"] == f"{exp_id}.evidence.json"
+    assert "/" not in body["record_filename"] and "/" not in body["sidecar_filename"]
 
 
 def test_artifacts_unknown_id_404(client):
@@ -447,3 +505,6 @@ def test_uploads_always_blocked(client):
     body = resp.json()
     assert body["blocked"] is True
     assert "approval-gated" in body["reason"]
+    # Refusal is tied to the authoritative runtime-mode source (P27.1): the
+    # payload echoes the same synthetic-only posture published on /api/health.
+    assert body["synthetic_only"] is True

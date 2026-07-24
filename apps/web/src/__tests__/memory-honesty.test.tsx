@@ -40,7 +40,7 @@ describe('P24.8 · Project Memory intro copy — no "related records" claim', ()
     });
     const { findByText, container } = renderScreen();
 
-    await findByText('Memory: Unavailable');
+    await findByText('Memory Unavailable');
 
     expect(container.textContent).not.toMatch(/related records/i);
     expect(container.textContent).toMatch(/related files/i);

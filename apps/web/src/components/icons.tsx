@@ -33,6 +33,7 @@ import {
   Circle,
   Download,
   LayoutList,
+  Search,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -51,6 +52,18 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   exported: Check,
   mentorReview: MessageSquare,
   draft: Pencil,
+  // Evidence-support axis (P28.5) — distinct glyphs so the class is never
+  // signalled by color alone, and a candidate never wears the confirmed check.
+  evSupported: ShieldCheck,
+  evCandidate: CornerDownRight,
+  evInsufficient: CircleAlert,
+  evConflicting: TriangleAlert,
+  evUnknown: CircleHelp,
+  // Reconciliation axis (P31.3) — distinct glyphs so the state is never signalled
+  // by color alone, and an absent value never wears the confirmed check.
+  reconMatch: Check,
+  reconConflict: TriangleAlert,
+  reconAbsent: CircleDashed,
 };
 
 // Evidence source-type glyphs (icons-and-symbols.md).
@@ -94,6 +107,7 @@ export {
   Circle,
   Download,
   LayoutList,
+  Search,
   X,
 };
 export type { LucideIcon };

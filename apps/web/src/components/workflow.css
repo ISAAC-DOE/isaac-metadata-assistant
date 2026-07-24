@@ -23,8 +23,14 @@
   position: relative;
   border-radius: var(--radius-inner);
 }
-.spine-step.active {
+.spine-step.current {
   background: var(--action-tint);
+}
+/* A reopened step (was complete, upstream data regressed) reads as
+ * "needs attention" — a soft advisory tint, clearly not the never-started
+ * blocked style and not the neutral completed style. */
+.spine-step.reopened {
+  background: var(--advisory-bg);
 }
 /* The disc + text flex row. Rendered as either a <span> (locked/unreached
  * steps) or the <a> itself (reached steps) — same box, same layout, either
@@ -47,12 +53,12 @@
   cursor: pointer;
   transition: background 0.12s ease, box-shadow 0.12s ease;
 }
-.spine-step:not(.active) .spine-step-link:hover {
+.spine-step:not(.current) .spine-step-link:hover {
   background: var(--border-faint);
 }
-/* The active step is already tinted — hover adds a ring instead of a flat
- * background swap so the active/hover states stay visually distinct. */
-.spine-step.active .spine-step-link:hover {
+/* The current step is already tinted — hover adds a ring instead of a flat
+ * background swap so the current/hover states stay visually distinct. */
+.spine-step.current .spine-step-link:hover {
   box-shadow: inset 0 0 0 1px var(--action-selected-border);
 }
 .spine-step-link:active {
@@ -83,19 +89,25 @@
   justify-content: center;
   border: 1px solid transparent;
 }
-.spine-step.done .spine-disc {
+.spine-step.completed .spine-disc {
   background: var(--cover-bg);
   border-color: var(--border-strong);
   color: var(--text-secondary);
 }
-.spine-step.active .spine-disc {
+.spine-step.current .spine-disc {
   background: var(--action);
   color: #fff;
   box-shadow: var(--ring-active);
   font-size: 12px;
   font-weight: 600;
 }
-.spine-step.locked .spine-disc {
+.spine-step.reopened .spine-disc {
+  background: var(--advisory-bg);
+  border-color: var(--advisory-border);
+  color: var(--advisory-icon);
+}
+.spine-step.blocked .spine-disc,
+.spine-step.skeleton .spine-disc {
   background: var(--screen-base);
   border-color: var(--border-input);
   color: var(--text-faint);
@@ -110,11 +122,19 @@
   font-weight: 500;
   color: var(--text-secondary);
 }
-.spine-step.active .spine-label {
+.spine-step.current .spine-label {
   color: var(--action-hover);
   font-weight: 600;
 }
-.spine-step.locked .spine-label {
+.spine-step.reopened .spine-label {
+  color: var(--advisory-text);
+  font-weight: 600;
+}
+.spine-step.reopened .spine-meta {
+  color: var(--advisory-text);
+}
+.spine-step.blocked .spine-label,
+.spine-step.skeleton .spine-label {
   color: var(--text-quaternary);
 }
 .spine-meta {
@@ -123,4 +143,15 @@
   font-size: 11px;
   color: var(--text-tertiary);
   line-height: 1.4;
+}
+
+/* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
+/* The 212px spine becomes a full-width block above the main content; the
+   vertical connector line + row layout are unchanged. Desktop untouched. */
+@media (max-width: 1024px) {
+  .spine {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }

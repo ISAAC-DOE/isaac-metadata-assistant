@@ -2,14 +2,12 @@ import './fields.css';
 import { ChevronDown, ChevronRight } from './icons';
 import { StatusChip } from './StatusChip';
 import { FieldRow } from './FieldRow';
-import type { DraftField, FieldGroupData } from '../lib/types';
+import type { FieldGroupData } from '../lib/types';
 
 interface FieldGroupProps {
   group: FieldGroupData;
   expanded: boolean;
   onToggle: () => void;
-  selectedPath?: string;
-  onSelectField?: (field: DraftField) => void;
 }
 
 /**
@@ -22,16 +20,14 @@ export function FieldGroup({
   group,
   expanded,
   onToggle,
-  selectedPath,
-  onSelectField,
 }: FieldGroupProps) {
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
-    <section className="field-group" aria-label={`${group.block} — ${group.humanLabel}`}>
+    <section className="field-group" aria-label={`${group.humanLabel} (${group.block})`}>
       <button type="button" className="fg-header" aria-expanded={expanded} onClick={onToggle}>
         <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-        <span className="fg-block">{group.block}</span>
-        <span className="fg-sublabel">{group.humanLabel}</span>
+        <span className="fg-block">{group.humanLabel}</span>
+        <span className="fg-sublabel">{group.block}</span>
         {expanded ? (
           <span className="fg-summary">{group.summary}</span>
         ) : group.needsYouCount > 0 ? (
@@ -46,12 +42,7 @@ export function FieldGroup({
       {expanded && (
         <div className="fg-body">
           {group.fields.map((field) => (
-            <FieldRow
-              key={field.path}
-              field={field}
-              selected={field.path === selectedPath}
-              onSelect={onSelectField}
-            />
+            <FieldRow key={field.path} field={field} />
           ))}
         </div>
       )}

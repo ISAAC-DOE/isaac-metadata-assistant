@@ -46,7 +46,7 @@ describe('P24.10 · status card — available, fully current', () => {
     });
     const { findByText, getByText, container } = renderScreen();
 
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
 
     // counts come only from the API overview
     expect(getByText('2296')).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe('P24.10 · status card — available, fully current', () => {
       'GET /api/memory/files': { body: memoryFilesAvailable },
     });
     const { findByText, getByText } = renderScreen();
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
     expect(getByText('built 3 hours ago')).toBeInTheDocument();
   });
 });
@@ -107,7 +107,7 @@ describe('P24.10 · status card — pre-regen snapshot (available, currency not 
     });
     const { findByText, getByText, queryByText, container } = renderScreen();
 
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
 
     // available → real counts render (Indexed files comes from file_count = 9)
     expect(getByText('42')).toBeInTheDocument();
@@ -147,7 +147,7 @@ describe('P24.10 · status card — malformed snapshot (unavailable + integrity 
     });
     const { findByText, getByText, container } = renderScreen();
 
-    await findByText('Memory: Unavailable');
+    await findByText('Memory Unavailable');
 
     // the malformed integrity axis is surfaced, honestly explained
     expect(getByText('Snapshot Integrity')).toBeInTheDocument();
@@ -171,7 +171,7 @@ describe('P24.10 · status card — unavailable (no artifact present)', () => {
     });
     const { findByText, container } = renderScreen();
 
-    await findByText('Memory: Unavailable');
+    await findByText('Memory Unavailable');
     expect(
       await findByText(/memory graph artifacts are not present/i),
     ).toBeInTheDocument();
@@ -203,7 +203,7 @@ describe('P24.10 · no fake search input on Project Memory', () => {
       'GET /api/memory/files': { body: memoryFilesUnavailable },
     });
     const { container, queryByRole, findByText } = renderScreen();
-    await findByText('Memory: Unavailable');
+    await findByText('Memory Unavailable');
     expect(container.querySelector('input[type="search"]')).toBeNull();
     expect(queryByRole('searchbox')).toBeNull();
   });
@@ -226,7 +226,7 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
   it('renders exactly the three approved chips in order, subordinate to the status card', async () => {
     stubFetchRoutes(availableRoutes);
     const { findByText, container } = renderScreen();
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
 
     const assistant = container.querySelector('.assistant') as HTMLElement;
     expect(assistant).not.toBeNull();
@@ -241,8 +241,12 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
       'What sources are included?',
     ]);
 
-    // default reply is the provenance chip, answered from Project Memory
-    expect(panel.getByText(/Leads come from indexed project files and concepts/)).toBeInTheDocument();
+    // P34.2: the on-mount auto-reply was removed; the provenance answer is now
+    // surfaced by clicking its chip (answered from Project Memory).
+    fireEvent.click(panel.getByText('Where do these leads come from?').closest('button')!);
+    expect(
+      await panel.findByText(/Leads come from indexed project files and concepts/),
+    ).toBeInTheDocument();
     expect(panel.getByText('answered from: Project Memory')).toBeInTheDocument();
     // leads-to-verify framing, never a verdict
     expect(assistant.textContent).toMatch(/leads to verify — never a validation verdict/);
@@ -255,41 +259,55 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     expect(statusChip.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('is guided-prompts-only — no textbox, no send button', async () => {
-    stubFetchRoutes(availableRoutes);
-    const { findByText, container, queryByRole } = renderScreen();
-    await findByText('Memory: Available');
-    const assistant = container.querySelector('.assistant') as HTMLElement;
-    expect(within(assistant).queryByRole('textbox')).toBeNull();
-    expect(queryByRole('button', { name: /^send$/i })).toBeNull();
-    expect(assistant.textContent).toMatch(/Guided prompts only/i);
-  });
-
-  it('renders the memory: available head line but NO unavailable caveat (unchanged behavior)', async () => {
+  it('surfaces an honest visual-only composer — a guided-only helper + a SECONDARY send, replacing the standalone guided-note', async () => {
     stubFetchRoutes(availableRoutes);
     const { findByText, container } = renderScreen();
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+    // P33 S2 (D3/C3): the textbox now exists but free-form Q&A is not wired; the
+    // persistent guided-only helper states the limitation before any interaction,
+    // and the send control is SECONDARY (never the primary action).
+    expect(panel.getByRole('textbox')).toBeInTheDocument();
+    const send = panel.getByRole('button', { name: /send/i });
+    expect(send.className).toMatch(/btn-secondary/);
+    expect(send.className).not.toMatch(/btn-primary/);
+    // P34.2: the persistent helper names the grounded scopes the resolver answers over
+    expect(assistant.textContent).toMatch(/Ask about this record/i);
+    // the legacy standalone guided-note ("Guided prompts only …") is never surfaced
+    expect(assistant.textContent).not.toMatch(/Guided prompts only — the assistant answers/i);
+  });
+
+  it('renders NO unavailable caveat, and does NOT duplicate the availability chip in the assistant head (P33 HQA#7)', async () => {
+    stubFetchRoutes(availableRoutes);
+    const { findByText, container } = renderScreen();
+    await findByText('Memory Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;
     // available → the caveat slot is never rendered (dedupe guard only ever
-    // applies in the unavailable state); the head-line dot still shows.
+    // applies in the unavailable state).
     expect(assistant.querySelector('.assistant-caveat')).toBeNull();
     expect(assistant.textContent).not.toMatch(
       /Project Memory is unavailable, so no memory-based answer is available here\./,
     );
-    expect(assistant.querySelector('.assistant-memory')?.textContent).toMatch(/available/);
+    // P33 HQA#6/#7: the GraphStatusChip is the single availability indicator on
+    // this page; the assistant head no longer duplicates it (availability is
+    // still passed to the panel, so classification/caveat behavior is unchanged).
+    expect(assistant.querySelector('.assistant-memory')).toBeNull();
   });
 
   it('clicking a chip swaps in its live answer and issues NO further network request', async () => {
     stubFetchRoutes(availableRoutes);
     const { findByText, container } = renderScreen();
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const panel = within(assistant);
 
     const before = (globalThis.fetch as Mock).mock.calls.length;
     fireEvent.click(panel.getByText('What sources are included?').closest('button')!);
-    // the scope chip echoes file_count (190), grounded, deterministic
-    expect(panel.getByText(/This snapshot indexes 190 project files/)).toBeInTheDocument();
+    // the scope chip echoes file_count (190), grounded, deterministic.
+    // findByText (retry-until-present) — the answer swaps in on a later tick, so a
+    // synchronous getByText is a CI race (B1 in the Phase 32 issue register).
+    expect(await panel.findByText(/This snapshot indexes 190 project files/)).toBeInTheDocument();
     const after = (globalThis.fetch as Mock).mock.calls.length;
     expect(after).toBe(before); // clicking a guided chip is pure — never fetches
   });
@@ -297,7 +315,7 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
   it('chips are keyboard-activatable native buttons', async () => {
     stubFetchRoutes(availableRoutes);
     const { findByText, container } = renderScreen();
-    await findByText('Memory: Available');
+    await findByText('Memory Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const chips = Array.from(assistant.querySelectorAll('.assistant-prompt'));
     expect(chips.length).toBe(3);
@@ -308,12 +326,23 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     }
   });
 
-  it('the existing Source Index and Concept Lookup cards still render alongside the assistant', async () => {
+  it('the existing Source Index and Concept Lookup cards still render (behind tabs) alongside the assistant', async () => {
+    // P33 S3 (D6): the cards moved behind the Sources / Concepts tabs; the
+    // assistant moved to the right rail and stays present across every tab. This
+    // is the tabbed re-expression of "both cards still render alongside the
+    // assistant" — no coverage dropped, just routed through the new IA.
     stubFetchRoutes(availableRoutes);
-    const { findByText, getByText } = renderScreen();
-    await findByText('Memory: Available');
-    expect(getByText('Source Index')).toBeInTheDocument();
-    expect(getByText('Concept Lookup')).toBeInTheDocument();
+    const { findByText, getByRole, container } = renderScreen();
+    await findByText('Memory Available');
+    expect(container.querySelector('.assistant')).not.toBeNull();
+
+    fireEvent.click(getByRole('tab', { name: 'Sources' }));
+    expect(await findByText('Source Index')).toBeInTheDocument();
+    expect(container.querySelector('.assistant')).not.toBeNull();
+
+    fireEvent.click(getByRole('tab', { name: 'Concepts' }));
+    expect(await findByText('Concept Lookup')).toBeInTheDocument();
+    expect(container.querySelector('.assistant')).not.toBeNull();
   });
 });
 
@@ -325,7 +354,7 @@ describe('P25.7 · Project Memory grounded assistant — unavailable & fetch sta
       'GET /api/memory/files': { body: memoryFilesUnavailable },
     });
     const { findByText, container } = renderScreen();
-    await findByText('Memory: Unavailable');
+    await findByText('Memory Unavailable');
 
     const assistant = container.querySelector('.assistant') as HTMLElement;
     expect(assistant).not.toBeNull();
@@ -333,23 +362,24 @@ describe('P25.7 · Project Memory grounded assistant — unavailable & fetch sta
       (b) => b.textContent?.trim() ?? '',
     );
     expect(chips).toEqual(['Why is memory unavailable?']); // never four chips
-    // Dedupe regression (P25.7): the composed reply text is byte-identical to
-    // MEMORY_UNAVAILABLE_CAVEAT here, so the unavailable sentence must render
-    // EXACTLY ONCE (in `.assistant-reply`) — never stacked a second time in
-    // `.assistant-caveat`. Count occurrences, not merely ≥1 presence.
+    // P34.2: the on-mount auto-reply was removed. At rest the reply shows the
+    // empty state; the unavailable sentence is now the availability-driven caveat
+    // and must render EXACTLY ONCE (in `.assistant-caveat`), never stacked.
     const occurrences = (
       assistant.textContent?.match(
         /Project Memory is unavailable, so no memory-based answer is available here\./g,
       ) ?? []
     ).length;
     expect(occurrences).toBe(1);
-    expect(assistant.querySelector('.assistant-reply')?.textContent).toBe(
+    expect(assistant.querySelector('.assistant-caveat')?.textContent).toBe(
       'Project Memory is unavailable, so no memory-based answer is available here.',
     );
-    // …and the caveat slot is suppressed precisely because it would duplicate
-    // the reply (the `memory: unavailable` head line still shows below).
-    expect(assistant.querySelector('.assistant-caveat')).toBeNull();
-    expect(assistant.querySelector('.assistant-memory')?.textContent).toMatch(/unavailable/);
+    expect(assistant.querySelector('.assistant-reply')?.textContent).toMatch(
+      /Ask a question or choose a suggested prompt\./,
+    );
+    // P33 HQA#7: the GraphStatusChip owns the single availability state on this
+    // page, so the assistant head is not rendered here.
+    expect(assistant.querySelector('.assistant-memory')).toBeNull();
     // approved wording — NOT the retired "source files directly" string
     expect(assistant.textContent).not.toMatch(/answered from source files directly/i);
     // no verdict / error styling classes

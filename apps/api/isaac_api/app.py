@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
+from . import runtime_mode
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
 from .routes import router
@@ -40,6 +41,13 @@ def _cors_origins() -> list[str]:
 
 
 def create_app() -> FastAPI:
+    # Fail-closed at boot, BEFORE reading config or constructing the app: refuse
+    # to construct when the runtime mode is misconfigured (invalid value, or
+    # 'real' whose guardrails are not built), so a misconfigured container cannot
+    # silently boot in a permissive state.
+    runtime_mode.validate_runtime_mode_or_raise()
+    # Deploy base path (ISAAC_BASE_PATH); "" locally. Resolved once and applied
+    # to the router prefix and the SPA mount below.
     base = base_path()
     app = FastAPI(
         title="ISAAC Metadata Assistant — local UI backend",
@@ -56,6 +64,7 @@ def create_app() -> FastAPI:
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
+        expose_headers=["ETag"],
     )
     # ISAAC_BASE_PATH prefixes every route (the router keeps its own /api
     # prefix, so routes land at {base}/api/*). Unset, prefix="" is byte-identical

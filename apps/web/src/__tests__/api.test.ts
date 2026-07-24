@@ -2,10 +2,14 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { api, ApiError, API_BASE, RUN_COMMAND } from '../lib/api';
 import {
   EXP_ID,
+  answersAfterNotebook,
+  answersStaleWrite,
   bundleRoutes,
   demoRunDraftOnly,
   draftResponse,
   experimentSummary,
+  exportStaleWrite,
+  exportSuccess,
   pendingResponse,
   stubFetchDown,
   stubFetchRoutes,
@@ -164,5 +168,233 @@ describe('bearer auth header', () => {
     await api.health();
     const headers = seen[0].headers as Record<string, string>;
     expect(headers.Authorization).toBeUndefined();
+  });
+});
+
+// --- P27.5: optimistic-concurrency If-Match on the two mutations -------------
+//
+// submitAnswer / exportRecord take an optional `version` token. When threaded it
+// is sent as `If-Match: "<version>"` (byte-identical to the ETag); when omitted
+// no If-Match is sent. A 412 stale_write (and 400 malformed) is thrown as an
+// ApiError carrying the parsed body so the screen can read `current_version`.
+
+describe('P27.5 · If-Match send + 412 body handling', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function captureFetch(response: { ok?: boolean; status?: number; body?: unknown }): RequestInit[] {
+    const seen: RequestInit[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(init ?? {});
+        return {
+          ok: response.ok ?? true,
+          status: response.status ?? 200,
+          json: async () => response.body ?? {},
+        } as Response;
+      }),
+    );
+    return seen;
+  }
+
+  it('submitAnswer sends If-Match: "<version>" when a version is threaded', async () => {
+    const seen = captureFetch({ body: answersAfterNotebook });
+    await api.submitAnswer(EXP_ID, { 'asset://x': 'deadbeef' }, '1.0');
+    const headers = seen[0].headers as Record<string, string>;
+    expect(headers['If-Match']).toBe('"1.0"');
+  });
+
+  it('submitAnswer omits If-Match when no version is threaded (compat grace)', async () => {
+    const seen = captureFetch({ body: answersAfterNotebook });
+    await api.submitAnswer(EXP_ID, { 'asset://x': 'deadbeef' });
+    const headers = (seen[0].headers ?? {}) as Record<string, string>;
+    expect(headers['If-Match']).toBeUndefined();
+  });
+
+  it('exportRecord sends If-Match: "<version>" when a version is threaded', async () => {
+    const seen = captureFetch({ body: exportSuccess });
+    await api.exportRecord(EXP_ID, '2.0');
+    const headers = seen[0].headers as Record<string, string>;
+    expect(headers['If-Match']).toBe('"2.0"');
+  });
+
+  it('a 412 stale_write on submitAnswer throws ApiError{status:412} carrying current_version', async () => {
+    captureFetch({ ok: false, status: 412, body: answersStaleWrite });
+    await expect(api.submitAnswer(EXP_ID, { 'asset://x': 'v' }, '1.0')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 412,
+      body: { error: 'stale_write', current_version: '2.0', current_rev: 7 },
+    });
+  });
+
+  it('a 412 stale_write on exportRecord likewise carries the parsed body', async () => {
+    captureFetch({ ok: false, status: 412, body: exportStaleWrite });
+    await expect(api.exportRecord(EXP_ID, '1.0')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 412,
+      body: { current_version: '2.0' },
+    });
+  });
+
+  it('a 400 malformed If-Match also carries the parsed body', async () => {
+    captureFetch({ ok: false, status: 400, body: { error: 'malformed_if_match' } });
+    await expect(api.submitAnswer(EXP_ID, { x: 1 }, 'bad')).rejects.toMatchObject({
+      status: 400,
+      body: { error: 'malformed_if_match' },
+    });
+  });
+
+  it('keeps the existing 409 export behavior — status only, no body plumbing', async () => {
+    captureFetch({ ok: false, status: 409, body: { error: 'record_exists' } });
+    await expect(api.exportRecord(EXP_ID, '1.0')).rejects.toMatchObject({
+      status: 409,
+      body: undefined,
+    });
+  });
+});
+
+// --- P26.4: api.search — grouped truth+memory search envelope ----------------
+//
+// The client is thin: it forwards q + optional scope/limit/offset and parses the
+// GET /api/search envelope verbatim (two self-labeled plane groups). It computes
+// nothing and must faithfully surface a degraded memory plane. Inline fixtures keep
+// this contract self-contained (independent of any shared apiFixtures entry).
+
+describe('api.search — grouped truth+memory search client (P26.4)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const envelope = {
+    query: 'cu k-edge',
+    normalized_query: 'cu k-edge',
+    scope: 'all',
+    workspace: {
+      plane: 'truth',
+      provider: 'workspace-store',
+      available: true,
+      reason: null,
+      total: 1,
+      returned: 1,
+      limit: 10,
+      offset: 0,
+      results: [
+        {
+          kind: 'experiment',
+          experiment_id: '01SYNTHXANESSEED0000000001',
+          record_id: null,
+          title: 'Synthetic XANES — New Draft',
+          label: 'Synthetic XANES — New Draft',
+          status: 'needs_attention',
+          match: {
+            field: 'title',
+            snippet: 'Synthetic XANES — New Draft',
+            reason: 'matched experiment title',
+            tier: 'substring',
+            offsets: [[10, 15]],
+          },
+          navigate_to: '/record/01SYNTHXANESSEED0000000001',
+          plane: 'truth',
+          source: 'workspace-store',
+        },
+      ],
+    },
+    memory: {
+      plane: 'memory',
+      provider: 'memory:sanitized-snapshot',
+      note: 'Project memory returns leads to verify — never a validation verdict.',
+      available: true,
+      reason: null,
+      total: 1,
+      returned: 1,
+      limit: 10,
+      offset: 0,
+      results: [
+        {
+          kind: 'concept',
+          id: 'concept_alpha',
+          path: null,
+          label: 'Alpha concept',
+          community_name: 'Alpha community',
+          match: {
+            field: 'concept.label',
+            snippet: 'Alpha concept',
+            reason: 'matched concept label',
+            tier: 'token',
+            offsets: [[0, 5]],
+          },
+          navigate_to: '/memory?concept=concept_alpha',
+          plane: 'memory',
+          source: 'memory:sanitized-snapshot',
+        },
+      ],
+    },
+  };
+
+  it('encodes q + scope + limit + offset into the query string (stable order)', async () => {
+    const calls = stubFetchRoutes({
+      'GET /api/search?q=cu%20k-edge&scope=workspace&limit=5&offset=10': { body: envelope },
+    });
+    await api.search('cu k-edge', { scope: 'workspace', limit: 5, offset: 10 });
+    expect(calls).toContain('GET /api/search?q=cu%20k-edge&scope=workspace&limit=5&offset=10');
+  });
+
+  it('sends only q when no options are given', async () => {
+    const calls = stubFetchRoutes({ 'GET /api/search?q=xanes': { body: envelope } });
+    await api.search('xanes');
+    expect(calls).toContain('GET /api/search?q=xanes');
+  });
+
+  it('parses both plane groups from the envelope', async () => {
+    stubFetchRoutes({ 'GET /api/search?q=cu%20k-edge': { body: envelope } });
+    const res = await api.search('cu k-edge');
+    expect(res.scope).toBe('all');
+    expect(res.normalized_query).toBe('cu k-edge');
+    expect(res.workspace.plane).toBe('truth');
+    expect(res.workspace.provider).toBe('workspace-store');
+    expect(res.workspace.results[0].kind).toBe('experiment');
+    expect(res.workspace.results[0].navigate_to).toBe('/record/01SYNTHXANESSEED0000000001');
+    expect(res.workspace.results[0].match.reason).toBe('matched experiment title');
+    expect(res.memory.plane).toBe('memory');
+    expect(res.memory.note).toBeTruthy();
+    expect(res.memory.results[0].kind).toBe('concept');
+    expect(res.memory.results[0].navigate_to).toBe('/memory?concept=concept_alpha');
+  });
+
+  it('surfaces a degraded memory group honestly (workspace still available)', async () => {
+    const down = {
+      ...envelope,
+      memory: {
+        ...envelope.memory,
+        available: false,
+        reason: 'graph_absent',
+        total: 0,
+        returned: 0,
+        results: [],
+      },
+    };
+    stubFetchRoutes({ 'GET /api/search?q=cu%20k-edge': { body: down } });
+    const res = await api.search('cu k-edge');
+    expect(res.memory.available).toBe(false);
+    expect(res.memory.reason).toBe('graph_absent');
+    expect(res.memory.results).toEqual([]);
+    expect(res.workspace.available).toBe(true);
+    expect(res.workspace.results).toHaveLength(1);
+  });
+
+  it('propagates a query_too_short envelope (both groups)', async () => {
+    const short = {
+      query: 'a',
+      normalized_query: 'a',
+      scope: 'all',
+      workspace: { ...envelope.workspace, reason: 'query_too_short', total: 0, returned: 0, results: [] },
+      memory: { ...envelope.memory, reason: 'query_too_short', total: 0, returned: 0, results: [] },
+    };
+    stubFetchRoutes({ 'GET /api/search?q=a': { body: short } });
+    const res = await api.search('a');
+    expect(res.workspace.reason).toBe('query_too_short');
+    expect(res.memory.reason).toBe('query_too_short');
   });
 });

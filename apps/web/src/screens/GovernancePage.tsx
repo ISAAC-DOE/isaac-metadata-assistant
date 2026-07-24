@@ -17,7 +17,7 @@ export function GovernancePage() {
     >
       <div className="placeholder">
         <span className="eyebrow">Data Governance</span>
-        <h2>{LABELS.navGovernance}</h2>
+        <h1>{LABELS.navGovernance}</h1>
         <p>
           This prototype is synthetic-only by default. Real SLAC/SSRL or private artifacts require
           written data-governance approval before they can be read, indexed, or sent to any model.

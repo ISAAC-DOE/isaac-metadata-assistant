@@ -1,18 +1,25 @@
 import './screens.css';
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
+import { EvidenceClassificationPanel } from '../components/EvidenceClassificationPanel';
+import { CsvReconcilePanel } from '../components/CsvReconcilePanel';
 import { SourcePreview } from '../components/SourcePreview';
 import { AssistantPanel } from '../components/AssistantPanel';
+import { AssistantDrawer } from '../components/AssistantDrawer';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { StatusBar } from '../components/StatusBar';
+import { LiveSyncNote } from '../components/LiveSyncNote';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
+import { useRecordSession } from '../lib/useRecordSession';
+import { ROUTES } from '../lib/routes';
+import type { AgentContext } from '../lib/assistantAgent';
 import {
   citedLinesForEntry,
   evidenceEntriesToTrail,
@@ -33,6 +40,16 @@ export function EvidenceExplorer() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getEvidenceBundle(id), [id]);
 
+  // P29.4 — the ONE shared record-session owner (single poller + authoritative
+  // version + live AgentContext). Read-only surface: silently refetch on a change
+  // signal (never blanks); the owner also invalidates any stale staged proposal.
+  const detail = bundle.status === 'data' ? bundle.data.detail : undefined;
+  const session = useRecordSession(id, {
+    detail,
+    onChange: () => bundle.reloadSilent(),
+  });
+  const degraded = session.syncDegraded;
+
   if (bundle.status !== 'data') {
     return (
       <AppShell
@@ -40,6 +57,7 @@ export function EvidenceExplorer() {
         topBar={<TopBar variant="record" title={LABELS.screenEvidence} recordId={id} />}
         mainPad="pad"
       >
+        <h1 className="sr-only">{LABELS.screenEvidence}</h1>
         {bundle.status === 'loading' ? (
           <LoadingPanel label="Loading the evidence trail from the local backend…" />
         ) : (
@@ -49,11 +67,44 @@ export function EvidenceExplorer() {
     );
   }
 
-  return <LoadedEvidence id={id} data={bundle.data} />;
+  return (
+    <LoadedEvidence
+      id={id}
+      data={bundle.data}
+      degraded={degraded}
+      agentContext={session.context}
+      agentDegraded={session.degraded}
+      onManualRefresh={bundle.reload}
+    />
+  );
 }
 
-function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
-  const { detail, evidence, artifacts, graph, sourcePreviews } = data;
+function LoadedEvidence({
+  id,
+  data,
+  degraded,
+  agentContext,
+  agentDegraded,
+  onManualRefresh,
+}: {
+  id: string;
+  data: EvidenceBundle;
+  degraded: boolean;
+  agentContext: AgentContext | undefined;
+  agentDegraded: boolean;
+  onManualRefresh: () => void;
+}) {
+  const { detail, evidence, artifacts, graph, sourcePreviews, classification } = data;
+  const navigate = useNavigate();
+
+  // P28.5 — the evidence-support view is bound to `record_rev`. Compare it to the
+  // rev encoded in the loaded detail's version token (`generation.rev`, so the
+  // last segment is the rev — the exact value the backend reports as record_rev).
+  // If they disagree the view may be behind the record; we surface a subtle
+  // refresh affordance rather than silently flipping the classification.
+  const detailRev = Number(detail.version.split('.').pop());
+  const classificationStale =
+    Number.isFinite(detailRev) && detailRev !== classification.record_rev;
 
   const entries = useMemo(() => evidenceEntriesToTrail(evidence), [evidence]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -87,6 +138,7 @@ function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
         }
         mainPad="pad"
       >
+        <h1 className="sr-only">{LABELS.screenEvidence}</h1>
         <p className="preview-empty" role="note">
           No evidence has been recorded for this experiment yet.
         </p>
@@ -107,12 +159,17 @@ function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
   // mounts ONLY on this loaded path — never in loading / backend-down / the
   // zero-evidence empty state, where there is no record data to be subordinate to.
   const rightPanel = (
-    <aside className="record-right narrow" aria-label="Assistant">
+    <AssistantDrawer railClassName="record-right narrow">
       <AssistantPanel
         {...compose({ context: 'evidence', bundle: data, selectedPath: selected.key })}
+        experimentId={detail.id}
+        recordRev={detail.rev}
         availability={graph.availability}
+        showAvailabilityHead={false}
+        agentContext={agentContext}
+        degraded={agentDegraded}
       />
-    </aside>
+    </AssistantDrawer>
   );
 
   return (
@@ -152,6 +209,18 @@ function LoadedEvidence({ id, data }: { id: string; data: EvidenceBundle }) {
       }
       mainPad="none"
     >
+      <h1 className="sr-only">{LABELS.screenEvidence}</h1>
+      <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
+      <EvidenceClassificationPanel
+        classification={classification}
+        stale={classificationStale}
+        onRefresh={onManualRefresh}
+      />
+      <CsvReconcilePanel
+        experimentId={id}
+        version={detail.version}
+        onOpenRecord={() => navigate(ROUTES.complete(id))}
+      />
       <SourcePreview
         entry={selected}
         provenance={provenance}

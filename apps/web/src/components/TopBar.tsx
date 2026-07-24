@@ -5,13 +5,32 @@ import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { StatusChip } from './StatusChip';
 import { HelpPanel } from './HelpPanel';
+import { SearchDialog } from './SearchDialog';
+import { useHealth } from '../lib/useHealth';
 import type { ChipKind } from '../lib/status';
 
+/** Map the backend health.mode to the chip label. "synthetic-only" is the only
+ * expected mode → the friendly "Synthetic" label. A missing/failed health check
+ * degrades to "Synthetic" too — this is a synthetic-only app, so an ABSENT signal
+ * must never vanish or imply non-synthetic. But an UNEXPECTED non-empty mode (a
+ * real value we did not anticipate) is surfaced honestly as a visibly distinct
+ * label, never masked as "Synthetic". */
+function modeLabel(mode: string | undefined): string {
+  if (mode === 'synthetic-only' || !mode) return LABELS.modeSynthetic;
+  // Anomalous mode: show it truthfully (capitalize the raw value, safe on any
+  // string) rather than hide it behind the synthetic label.
+  return mode.charAt(0).toUpperCase() + mode.slice(1);
+}
+
+// Driven by the backend health.mode (via the shared, cached useHealth) rather
+// than a hardcoded label. On backend-down the chip still shows the synthetic
+// indicator — it never vanishes and never implies non-synthetic.
 function SyntheticChip() {
+  const health = useHealth();
   return (
     <span className="mode-chip" aria-label="Synthetic mode — demo data only">
       <Shield size={13} strokeWidth={2} aria-hidden="true" />
-      {LABELS.modeSynthetic}
+      {modeLabel(health?.mode)}
     </span>
   );
 }
@@ -43,9 +62,10 @@ interface TopBarProps {
   surface?: string;
 }
 
-/** Identity, context/breadcrumb, the persistent Synthetic mode chip, and Help.
- * The mode chip is always mounted — it is load-bearing. There is no search:
- * this prototype doesn't have one, so the chrome doesn't pretend to. */
+/** Identity, context/breadcrumb, the persistent Synthetic mode chip, Help, and
+ * the ⌘K search command palette. The mode chip is always mounted — it is
+ * load-bearing. Search is real (P26): the SearchDialog affordance is mounted on
+ * every variant so ⌘K opens the API-backed palette from any surface. */
 export function TopBar({ variant, breadcrumb, title, filename, stateChip, recordId, surface }: TopBarProps) {
   return (
     <header className="topbar">
@@ -55,6 +75,7 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
         <>
           <div className="topbar-spacer" />
           <div className="topbar-right">
+            <SearchDialog />
             <SyntheticChip />
             <HelpPanel />
           </div>
@@ -69,6 +90,7 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
           </span>
           <div className="topbar-spacer" />
           <div className="topbar-right">
+            <SearchDialog />
             <SyntheticChip />
           </div>
         </>
@@ -108,6 +130,7 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
           </div>
           <div className="topbar-spacer" />
           <div className="topbar-right">
+            <SearchDialog />
             <SyntheticChip />
           </div>
         </>

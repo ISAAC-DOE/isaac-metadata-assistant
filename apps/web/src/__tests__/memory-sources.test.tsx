@@ -20,11 +20,16 @@ import {
  */
 
 function renderScreen() {
-  return render(
+  const view = render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ProjectMemory />
     </MemoryRouter>,
   );
+  // P33 S3 (D6): the Source Index moved behind the "Sources" internal tab. These
+  // tests exercise the SAME card, now reached through the tabbed IA — the tablist
+  // renders immediately (independent of the graph fetch), so open it here.
+  fireEvent.click(view.getByRole('tab', { name: 'Sources' }));
+  return view;
 }
 
 /** The provenance panel <div> for a given row button (sibling inside the row's <li>). */
