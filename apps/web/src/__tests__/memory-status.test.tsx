@@ -362,9 +362,10 @@ describe('P25.7 · Project Memory grounded assistant — unavailable & fetch sta
       (b) => b.textContent?.trim() ?? '',
     );
     expect(chips).toEqual(['Why is memory unavailable?']); // never four chips
-    // P34.2: the on-mount auto-reply was removed. At rest the reply shows the
-    // empty state; the unavailable sentence is now the availability-driven caveat
-    // and must render EXACTLY ONCE (in `.assistant-caveat`), never stacked.
+    // P34.2: the on-mount auto-reply was removed. At rest the reply is EMPTY
+    // (P36.1 — no resting placeholder); the unavailable sentence is now the
+    // availability-driven caveat and must render EXACTLY ONCE (in
+    // `.assistant-caveat`), never stacked.
     const occurrences = (
       assistant.textContent?.match(
         /Project Memory is unavailable, so no memory-based answer is available here\./g,
@@ -374,9 +375,12 @@ describe('P25.7 · Project Memory grounded assistant — unavailable & fetch sta
     expect(assistant.querySelector('.assistant-caveat')?.textContent).toBe(
       'Project Memory is unavailable, so no memory-based answer is available here.',
     );
-    expect(assistant.querySelector('.assistant-reply')?.textContent).toMatch(
-      /Ask a question or choose a suggested prompt\./,
-    );
+    // P36.1: the resting live region carries no placeholder text and no visible
+    // card chrome — it stays mounted (aria-live) but empty.
+    const reply = assistant.querySelector('.assistant-reply');
+    expect(reply?.textContent).toBe('');
+    expect(reply?.classList.contains('assistant-reply--empty')).toBe(true);
+    expect(reply?.getAttribute('aria-live')).toBe('polite');
     // P33 HQA#7: the GraphStatusChip owns the single availability state on this
     // page, so the assistant head is not rendered here.
     expect(assistant.querySelector('.assistant-memory')).toBeNull();

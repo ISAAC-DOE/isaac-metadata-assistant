@@ -223,6 +223,19 @@
   overflow-wrap: anywhere;
 }
 .assistant-reply:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+/* P36.1 — the RESTING state (no loading, no live answer) renders this live
+ * region with no text. It stays MOUNTED (never unmounted) so it keeps
+ * announcing the next "Working…"/answer, but its visible card chrome is
+ * suppressed so an empty reply reads as nothing at all — no bordered box,
+ * no awkward gap — rather than an empty placeholder card. */
+.assistant-reply--empty {
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  min-height: 0;
+  line-height: 0;
+}
 .assistant-reply-block .assistant-sources { margin-top: 0; }
 .assistant-sources {
   margin-top: 10px;

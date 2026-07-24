@@ -22,7 +22,7 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => navigateSpy }));
 import { AssistantPanel } from '../components/AssistantPanel';
 import { ApiError, api } from '../lib/api';
 import * as agentModule from '../lib/assistantAgent';
-import { ASSISTANT_EMPTY_STATE, ASSISTANT_UNAVAILABLE } from '../lib/assistant';
+import { ASSISTANT_UNAVAILABLE } from '../lib/assistant';
 import { clearAllSessions } from '../lib/assistantSession';
 import type { AssistantMessage, AssistantQueryResponse, SuggestedPrompt } from '../lib/types';
 
@@ -212,8 +212,12 @@ describe('P34.5 focus management', () => {
     fireEvent.click(getByRole('button', { name: /clear conversation/i }));
     const box = getByRole('textbox');
     expect(document.activeElement).toBe(box);
-    // and the rail is back at rest
-    expect(getByText(ASSISTANT_EMPTY_STATE)).toBeInTheDocument();
+    // and the rail is back at rest: the SAME live region, mounted, now empty
+    // (P36.1 — no placeholder text, no card chrome).
+    const reply = container.querySelector('.assistant-reply');
+    expect(reply).not.toBeNull();
+    expect(reply?.textContent).toBe('');
+    expect(reply?.classList.contains('assistant-reply--empty')).toBe(true);
   });
 });
 
