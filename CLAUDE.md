@@ -384,8 +384,24 @@ Current state:
   added**; unsupported/ambiguous/open-world questions are refused honestly, never guessed; Q&A is
   read-only. A real LLM provider (Tier 2) remains an unapproved, deferred decision. The Phase 33/34
   human visual sign-off gate (narrow-viewport + 200% zoom) is still OPEN — Krish's to give.
+- **Phase 35 (org-repo convergence + S3DF deployment) is COMPLETE** — org canonical HEAD `8a10ed5`
+  (two-parent merge #1, both histories preserved), deployed image `v0.0.3`, hosted `/krish` running
+  commit verified `8a10ed5`, `mode: synthetic-only` (see
+  `docs/superpowers/plans/2026-07-24-phase-35-org-convergence-closure.md`). The canonical repo is now
+  `ISAAC-DOE/isaac-metadata-assistant` (local remote `origin`); the personal repo is remote `personal`
+  (preserved historical mirror). The integration did NOT change the truth path. **Personal-deploy
+  retirement (Vercel `isaac-demo-web` + Railway service) is pending Krish's dashboard disable-not-delete
+  action**; the human responsive / 200%-zoom visual sign-off gate remains OPEN.
+- **Phase 36 (repository-local native enhancements) is AUTHORIZED and underway** under the 2026-07-24
+  execution authorization — synthetic-only, deterministic, no LLM, no portal dependency, no real data,
+  no Postgres, no new secret (see
+  `docs/superpowers/plans/2026-07-24-phase-36-native-enhancements-plan.md`). Each slice runs: focused
+  implementer → independent Opus review → PR into org `main` via **Create a merge commit** (which
+  auto-deploys via GHCR + Flux) → image/tag verify → **hosted QA is Krish-gated** (Authentik edge; not
+  self-verifiable from this environment). **Phase 37 (portal integration / Postgres / real data /
+  portal API key / roles / external LLM) remains NOT authorized.**
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
-- Start any further phase only after explicit user approval.
+- Start any further phase (beyond the authorized Phase 36 native-enhancement slices) only after explicit user approval.
 
 Do not treat this note as a work authorization — confirm the actual head, branch, and status with the commands below before continuing.
 
@@ -418,6 +434,16 @@ Each report must include:
 - push status
 - blockers or deferred items
 - recommendation for the next slice/phase
+
+For each Phase 36 (and later) deployed slice, the report must additionally include:
+
+- implementer model and reviewer model
+- accessibility checks (result)
+- PR URL and CI result
+- merge commit SHA and image version / semver tag
+- hosted health commit and hosted QA result — or `HOSTED QA PENDING (Krish)` with an exact checklist
+  when the hosted app is not self-verifiable from this environment (Authentik edge). Never claim an
+  unobserved rollout as verified.
 
 This applies to all future phases.
 
@@ -489,6 +515,14 @@ Current MVP scope:
 - optional Graphify memory/query
 - free-form deterministic Assistant Q&A shipped (Phase 34, `d69d0ed`): bounded intent catalog only,
   no LLM; Tier-2 LLM/generative Q&A remains out of scope unless explicitly approved
+- org-canonical single-image `/krish` deployment on SLAC S3DF Kubernetes (Phase 35, `8a10ed5`):
+  synthetic-only, ephemeral (`emptyDir`), Authentik-edge-authenticated; deploy via push to org `main`
+  → GHCR image + Flux
+- Phase 36 repository-local native enhancements (authorized 2026-07-24) — built only on our own
+  schema/contracts, synthetic-only, deterministic, no LLM, no portal dependency, no real data:
+  Assistant empty-state cleanup, Project Memory Graph (read-only view of the committed snapshot),
+  standalone Validator, API-docs + Help/About, New-Record coverage improvements, schema/vocabulary
+  browser
 
 Out of scope unless explicitly approved:
 
@@ -499,6 +533,10 @@ Out of scope unless explicitly approved:
 - new slash commands
 - Graphify as truth layer
 - advisory AI review implementation beyond isolated placeholder
+- Phase 37 and its dependencies (NOT authorized): portal module integration, in-cluster Postgres /
+  durable persistence, portal or personal API keys, external model provider / LLM, identity/role
+  enforcement, retiring the blue portal, deleting/archiving the personal repo or the Vercel/Railway
+  projects, and any `isaac-k8` change
 
 ---
 

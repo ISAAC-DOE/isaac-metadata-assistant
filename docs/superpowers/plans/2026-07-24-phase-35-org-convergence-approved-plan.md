@@ -1,8 +1,13 @@
 # ISAAC — Org-Repo Convergence + Capability Integration (APPROVED PLAN)
 
-**Status:** APPROVED 2026-07-24 — Program A P35.0–P35.6 authorized and executing autonomously to the
-pull-request-ready boundary; P35.7 (main-merge/deploy), P35.8 (cutover), Program B, Phase 36, Phase 37
-remain hard-gated and NOT authorized.
+**Status:** APPROVED 2026-07-24. **Program A COMPLETE** — P35.0–P35.6 executed to the PR boundary, then
+**P35.7 (main-merge/deploy) and P35.8 (canonical cutover) were executed under a separate explicit Krish
+authorization** (Dean-approved); org canonical HEAD `8a10ed5`, deployed `v0.0.3`, hosted running commit
+verified `8a10ed5`. See the closure doc
+`docs/superpowers/plans/2026-07-24-phase-35-org-convergence-closure.md` for the executed outcome. The
+**Program B native enhancements are now authorized as Phase 36** (repository-local, synthetic-only);
+**portal integrations and Phase 37 remain hard-gated and NOT authorized.** The P35.5–P35.8 subsections
+below are the original plan; the closure doc is authoritative for what actually shipped.
 **Date:** 2026-07-23 (drafted) / 2026-07-24 (approved)
 **Vessel:** `Krish-Verma/isaac-metadata-assistant` (local/personal, remote `origin`) →
 `ISAAC-DOE/isaac-metadata-assistant` (canonical, remote `org`).
@@ -202,7 +207,12 @@ branch push does **not** build/tag/deploy. **Checkpoint for Krish approval befor
 push.** After approval: push the integration branch, open a PR, **do not merge**, request Dean review
 (Docker, FastAPI SPA hosting, `/krish`, Actions, GHCR tags, Flux, resources, health, infra ownership).
 
-### P35.7 — Main-merge + deployment gate *(HARD gate — main auto-deploys — NOT AUTHORIZED)*
+### P35.7 — Main-merge + deployment gate *(EXECUTED 2026-07-24 — see closure doc §2)*
+
+> **Executed:** merged via Create-a-merge-commit → `8a10ed5` (parents `[010f3c7, f5c519e]`); build run
+> `30114677296` success; image digest `sha256:643716b5…`, tag `v0.0.3`; Opus review SHIP; hosted
+> `/krish/api/health` `commit: 8a10ed5`, `synthetic-only` (Krish-verified). Status: `COMPLETE —
+> DEPLOYED AND RUNNING SHA VERIFIED; HUMAN RESPONSIVE GATE PARTIALLY OPEN`. Original plan text follows.
 
 Report exact approved head, CI status, Dean review status, expected image/tag, rollback commit,
 expected deployment impact. **Stop for explicit Krish approval — merge to `main` triggers GHCR build +
@@ -212,7 +222,12 @@ Experiments, record editor, Guided Completion, Evidence, Project Memory, Search,
 Settings, deterministic Assistant, deep-link refresh, assets, same-origin API, console/network,
 synthetic mode); confirm exact running commit.
 
-### P35.8 — Canonical cutover gate *(HARD gate — D7 — NOT AUTHORIZED)*
+### P35.8 — Canonical cutover gate *(EXECUTED 2026-07-24 — git-local complete; retirement pending — see closure doc §2)*
+
+> **Executed:** remotes remapped (`origin`→org, `personal`→Krish); local `main` ff to `8a10ed5`
+> tracking `origin/main`; integration worktree + local/remote merged branch removed; stale draft
+> removed. No force-push, no personal-repo push. **Personal-deploy retirement (Vercel `isaac-demo-web`
+> + Railway service) is PENDING Krish's dashboard disable-not-delete action.** Original plan follows.
 
 After hosted verification, **stop again before** changing local `origin`, archiving/freezing the
 personal repo, or disabling Vercel/Railway/ownership. Present exact cutover actions for approval. Final
@@ -221,7 +236,12 @@ deploy hooks disabled **only after S3DF is stable**; no parallel production work
 
 ---
 
-## PROGRAM B — Capability Integration *(hard-gated; mostly blocked on portal access; NOT AUTHORIZED)*
+## PROGRAM B — Capability Integration *(native enhancements AUTHORIZED as Phase 36 on 2026-07-24; portal integrations + real-data + Phase 37 still hard-gated / NOT AUTHORIZED)*
+
+> **Phase 36 (native enhancements) is authorized and sequenced in a dedicated plan** —
+> `docs/superpowers/plans/2026-07-24-phase-36-native-enhancements-plan.md` (capability matrix + slice
+> order). The **portal integrations** below (Discovery, Ontology Editor, System Overview, API Keys,
+> record consolidation, roles, persistence) remain **blocked on portal access and NOT authorized**.
 
 ### Native enhancements (buildable from our own contracts — NOT "portal parity")
 
