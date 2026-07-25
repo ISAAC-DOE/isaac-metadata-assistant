@@ -13,6 +13,7 @@ import { ArtifactCard } from '../components/ArtifactCard';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
+import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
 import { ROUTES } from '../lib/routes';
@@ -380,6 +381,11 @@ function LoadedExport({
     >
       <h1 className="sr-only">{LABELS.screenExport}</h1>
       <LiveSyncNote degraded={degraded} onRefresh={onRefresh} />
+      <WorkflowProgressBanner
+        workflow={detail.workflow}
+        recordId={id}
+        pendingCount={pendingCount}
+      />
 
       {/* P28.2 — the exported record changed after export (records are immutable):
           surface an honest, non-gating advisory so a stale artifact is never

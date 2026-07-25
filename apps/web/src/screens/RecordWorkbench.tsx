@@ -10,6 +10,7 @@ import { FieldGroup } from '../components/FieldGroup';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
+import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleAlert, ExternalLink } from '../components/icons';
 import { LABELS } from '../lib/labels';
@@ -225,6 +226,12 @@ function LoadedWorkbench({
     >
       <h1 className="sr-only">{LABELS.screenReview}</h1>
       <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
+      <WorkflowProgressBanner
+        workflow={detail.workflow}
+        recordId={id}
+        pendingCount={detail.pending_count}
+        excludeSteps={['complete_metadata']}
+      />
 
       {pending.length > 0 && (
         <div className="needsyou-banner" role="note">

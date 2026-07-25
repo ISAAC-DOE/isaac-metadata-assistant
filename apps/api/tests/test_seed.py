@@ -159,6 +159,21 @@ def test_demo_run_preserves_canonical_identities(client):
     assert after == before
 
 
+def test_repeated_mixed_demo_runs_only_ever_canonical_ids(client):
+    """Interleaved draft_only/full demo runs never create a non-canonical or
+    duplicate id and never drop one: the id set stays exactly the canonical five.
+    Guards the fixed-id upsert invariant against any future regression toward
+    freshly-generated ids."""
+    assert {e["id"] for e in _experiments(client)} == set(ws.CANONICAL_IDS)
+    for _ in range(4):
+        for mode in ("draft_only", "full"):
+            resp = client.post("/api/demo/run", json={"mode": mode})
+            assert resp.status_code == 200
+            exps = _experiments(client)
+            assert len(exps) == 5
+            assert {e["id"] for e in exps} == set(ws.CANONICAL_IDS)
+
+
 def test_seed_ids_are_stable_across_fresh_workspaces(tmp_path, monkeypatch):
     """Two independent fresh workspaces produce the identical set of ids."""
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "a"))

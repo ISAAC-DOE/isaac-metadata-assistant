@@ -12,6 +12,7 @@ import { AssistantDrawer } from '../components/AssistantDrawer';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { StatusBar } from '../components/StatusBar';
 import { LiveSyncNote } from '../components/LiveSyncNote';
+import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
@@ -211,6 +212,13 @@ function LoadedEvidence({
     >
       <h1 className="sr-only">{LABELS.screenEvidence}</h1>
       <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
+      <div className="wf-progress-banner-inset">
+        <WorkflowProgressBanner
+          workflow={detail.workflow}
+          recordId={id}
+          pendingCount={detail.pending_count}
+        />
+      </div>
       <EvidenceClassificationPanel
         classification={classification}
         stale={classificationStale}

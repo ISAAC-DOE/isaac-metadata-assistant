@@ -10404,7 +10404,7 @@
       },
       {
         "path": "apps/web/src/components/AppShell.tsx",
-        "sha256": "25c71fcf66220518633d8f13c4025a9c01d42aa34266333581e47134d1c6cf05"
+        "sha256": "bc9454855ad84870f8d58abbf6b644a95931641fbadb7eaf74712ee4a13cb43a"
       },
       {
         "path": "apps/web/src/components/ArtifactCard.tsx",
@@ -10536,7 +10536,7 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "9b4b4088a7c51e675ca4832097e5876745540d6195296d1991922342a5728a17"
+        "sha256": "13c12b22cfbf33bfefbf17a8108162a88cd4fb06f0f459fc64bbf1b855442b70"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "18930fcc6629dc9c010e8fb193bed9ffa73044bef0b0c7d732555f3fa59f8ddb"
+        "sha256": "59f22e8c209ce701d9446dcaf459e6be58c1865af7b74918ee81ade33d32a43e"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "1b84dffdfeb42da97cc825e160bbbfe37e19b94fa17a106c8bcf28da4af61458"
+        "sha256": "f009ff5a867d04882df50850dd93e3a5589cc84d98a1c6d233861f8ebeaf6bb2"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "7a5e36eb8a9abf852f21a54b2f06358d5f2d1a6094d50bc2b92a54889c60ff1f"
+        "sha256": "bad86eb110d1876db66865c4c8dcdb1aa56e2ce4b59d8fb504a35f75a2fbb878"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "59e62bc5b0face0a61c484651742a28cb62f45f00c6894b4a0e5f99bba5e7ac4"
+    "served_manifest_fingerprint": "2bc768ca3206b8972e816f51ba4ed2ebce74f5fde531dce802760701e1443fe3"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
