@@ -392,14 +392,21 @@ Current state:
   (preserved historical mirror). The integration did NOT change the truth path. **Personal-deploy
   retirement (Vercel `isaac-demo-web` + Railway service) is pending Krish's dashboard disable-not-delete
   action**; the human responsive / 200%-zoom visual sign-off gate remains OPEN.
-- **Phase 36 (repository-local native enhancements) is AUTHORIZED and underway** under the 2026-07-24
-  execution authorization — synthetic-only, deterministic, no LLM, no portal dependency, no real data,
-  no Postgres, no new secret (see
-  `docs/superpowers/plans/2026-07-24-phase-36-native-enhancements-plan.md`). Each slice runs: focused
-  implementer → independent Opus review → PR into org `main` via **Create a merge commit** (which
-  auto-deploys via GHCR + Flux) → image/tag verify → **hosted QA is Krish-gated** (Authentik edge; not
-  self-verifiable from this environment). **Phase 37 (portal integration / Postgres / real data /
-  portal API key / roles / external LLM) remains NOT authorized.**
+- **Phase 36 (repository-local native enhancements) — feature slices COMPLETE** at org HEAD `5d99fcb`
+  (image `v0.0.9`); synthetic-only, deterministic, no LLM/portal/real-data, truth core untouched (see
+  `docs/superpowers/plans/2026-07-24-phase-36-native-enhancements-plan.md` and the closure
+  `docs/superpowers/plans/2026-07-24-phase-36-closure.md`). Shipped: **P36.1** Assistant empty-state
+  cleanup (`v0.0.5`), **P36.2** Project Memory Graph tab (`v0.0.6`), **P36.3** Standalone Validator
+  (`v0.0.7`), **P36.4** API Docs + Help/About (`v0.0.8`), **P36.6** Schema & Vocabulary browser
+  (`v0.0.9`) — each via Sonnet implement → independent Opus review → full suites + `tsc -b` + snapshot
+  regen + gate → PR → merge-commit → GHCR + Flux. **P36.5** (New Record audit) and **P36.7** (Workspace
+  Overview) were **skipped with documented rationale**. Hardening: **H3** `ApiKeyAuthMiddleware` →
+  retain + defer (decided); **H1** `:latest` removal + **H2** Action-SHA pinning → specified, staged as
+  Dean-in-the-loop PRs (both edit `build-push.yaml`, not PR-CI-verified; H1 unprovable without
+  `isaac-k8`). **Hosted QA of every image is Krish-gated** (Authentik edge, not self-verifiable here);
+  responsive/200%-zoom sign-off + personal-deploy retirement remain OPEN. **Phase 37 (portal / Postgres
+  / real data / API keys / roles / external LLM) remains NOT authorized** — readiness plan only:
+  `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md`.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the authorized Phase 36 native-enhancement slices) only after explicit user approval.
 

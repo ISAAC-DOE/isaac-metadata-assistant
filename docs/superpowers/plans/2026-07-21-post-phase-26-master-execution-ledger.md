@@ -1321,3 +1321,36 @@ portal dependency, no real data, no Postgres, no new secret. Sequenced in
 implementer → independent Opus review → PR into org `main` (Create-a-merge-commit → GHCR + Flux) →
 image/tag verify → hosted QA Krish-gated (Authentik edge, not self-verifiable here). Phase 37 (portal /
 Postgres / real data / API keys / roles / external LLM) remains **NOT authorized**.
+
+### Phase 36 closure (CLOSED 2026-07-24 @ org HEAD `5d99fcb`, image `v0.0.9`)
+
+Full detail: `docs/superpowers/plans/2026-07-24-phase-36-closure.md`. All slices synthetic-only,
+deterministic, no LLM/portal/real-data, truth core untouched; each shipped via Sonnet implement →
+independent Opus review → full suites + `tsc -b` + snapshot regen + committed-snapshot gate → PR →
+merge-commit → GHCR image + Flux. Hosted QA of every image is Krish-gated.
+
+- **P36.1** Assistant empty-state cleanup — `v0.0.5` / `05a051e` (Opus SHIP).
+- **P36.2** Project Memory Graph tab (served-file reference projection; `GET /api/memory/graph`;
+  stdlib-only `memory_graph.py`; bounded SVG + textual-list a11y; not an ontology) — `v0.0.6` /
+  `5e8edfc` (Opus SHIP).
+- **P36.3** Standalone Validator (reuses `validate_official`; `POST /api/validate/record`;
+  bounded/no-log/no-persist) — `v0.0.7` / `b9f1288` (Opus SHIP).
+- **P36.4** API Docs + Help/About (`GET /api/about` non-sensitive + `GET /api/openapi` base-path-correct;
+  self-contained docs, no CDN) — `v0.0.8` / `e8a576d` (independent-review subagent preempted by a
+  session limit → orchestrator ran the deterministic review battery; leak-scan clean).
+- **P36.6** Schema & Vocabulary browser (`GET /api/schema` byte-faithful; Governance reorg into
+  Policy/Validator/Schema tabs; relationships verbatim; not the portal Ontology system) — `v0.0.9` /
+  `5d99fcb` (Opus SHIP-w-nits, fixed).
+- **P36.5** New Record coverage audit — **SKIP** (Opus audit: no material gaps; export schema-valid,
+  validation parity holds; two optional non-gap tidies deferred).
+- **P36.7** Workspace Overview — **SKIP** (redundant with My Experiments + Help/About; real System
+  Overview is portal/real-data → Phase 37).
+- **Hardening:** H3 `ApiKeyAuthMiddleware` → **RETAIN + defer** (no-op in prod, useful for dev; a
+  backend asymmetric-config warning can't see `VITE_API_KEY`; documented). H1 `:latest` removal + H2
+  Action-SHA-pinning → **specified with exact diffs + residual risks, staged as Dean-in-the-loop PRs,
+  NOT auto-merged** (both edit `build-push.yaml`, which runs only post-merge — not PR-CI-verified — and
+  H1 can't be proven safe without `isaac-k8` visibility).
+
+Open (Krish/Dean): hosted QA of `v0.0.4`–`v0.0.9`; responsive/200%-zoom visual sign-off; personal-deploy
+retirement (Vercel/Railway disable-not-delete); H1/H2 hardening PRs. Phase 37 readiness plan:
+`docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md`. **No Phase 37 work started.**
