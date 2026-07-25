@@ -10560,7 +10560,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "9bffef28c112bbca44a2aaea1bc68072abee6db9219923ec99861ee96487acfc"
+        "sha256": "64c2788e15b879c50516389f81448800fe3a907f1c2b37d0c88d4c85224b07fd"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "89adfa53989258eaab08e59cb55548b99226371c32fcf36103572818e0f8ea1a"
+    "served_manifest_fingerprint": "33a502d9b612ca6aed9a267687dafba12545aff66f980cf581823eb4a6ef710c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

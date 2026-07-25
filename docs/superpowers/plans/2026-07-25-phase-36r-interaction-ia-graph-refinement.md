@@ -115,6 +115,46 @@ populated **Vocabulary** subview. The "compact honest empty state" is implemente
 as the *fallback branch* (it renders when `vocabularies` is empty) but will not be
 the observed state — claiming otherwise would be false.
 
+### R8 — The Explore default renders the whole projection, not a search-first empty canvas. *(Slice 3)*
+
+§Slice 3 below originally specified: *"never mount the full 220-node graph unfiltered as
+the default — the default view is search-first plus a bounded overview."* That criterion
+was written **before** the surface existed and before anything was measured. It is hereby
+superseded, deliberately and on the record — not silently.
+
+Measured on the built implementation (Chromium, 1440×900, live 220-node payload):
+
+| Measurement | Value |
+|---|---|
+| Deterministic layout (220 nodes / 508 edges) | **5–14 ms** |
+| Graph tab click → 220 nodes painted | **135–153 ms** |
+| Search filter re-render | **18–77 ms** |
+| Node-type / cluster filter | **24–74 ms** |
+| 2-hop expansion · path search | **84 ms** · **78 ms** |
+| Console errors | none |
+
+The original bound existed to prevent a frozen browser. Nothing freezes. Meanwhile the
+authorizing prompt's stated goal for this surface is an *immersive* one — "large zoomable
+canvas", "strong sense of exploration" — which a canvas that is empty until you type does
+not deliver. Search-first navigation, neighbourhood expansion, community filtering and the
+deterministic render cap all still exist as **capabilities**; they are simply no longer the
+resting state.
+
+Conditions attached to this reconciliation:
+
+1. `MAX_RENDER_NODES` remains enforced as a deterministic sorted prefix, and truncation is
+   reported honestly in the UI when it binds (it does not at 220 nodes).
+2. The two deleted test assertions that encoded the old bound are **replaced**, not merely
+   removed, by guards encoding the new contract: the default view renders every node up to
+   the cap; the cap is a stable sorted prefix; an over-cap payload both shows the truncation
+   notice and keeps capped nodes reachable in Browse.
+3. The default view must be **legible** — a canvas painting 220 nodes with zero text labels
+   was measured and rejected as an exploration surface; the highest-degree nodes are labelled
+   at rest.
+
+Recorded because an authorized acceptance criterion may be changed by evidence, but never
+dropped in silence.
+
 ---
 
 ## 1. Permanent boundaries re-affirmed for this phase

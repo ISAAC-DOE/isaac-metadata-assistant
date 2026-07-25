@@ -1,0 +1,1080 @@
+/*
+ * Project Memory → Graph (P36R S3/S6).
+ *
+ * Two permanent, co-equal modes over ONE payload and ONE state model
+ * (lib/graphModel.ts):
+ *   - Explore: a bounded DARK canvas — the app's only intentionally dark
+ *     surface — with its own contrast-checked token set (below). The rest of
+ *     the ISAAC shell stays light; nothing here leaks outside `.graph-canvas`.
+ *   - Browse: the textual, keyboard-first experience. Permanent, never a
+ *     fallback to be removed.
+ *
+ * No-Vertical-Rail rule (no-vertical-rail.test.ts): every border in this file
+ * is a full `border:` shorthand. There is no `border-left`/`border-right`
+ * anywhere, coloured or otherwise.
+ */
+
+/* ---- card shell ------------------------------------------------------ */
+.memory-graph-card {
+  margin-top: 18px;
+}
+.memory-graph-titlerow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.memory-graph-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.memory-graph-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  color: var(--action);
+  background: none;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+}
+.memory-graph-help-trigger:hover {
+  color: var(--action-hover);
+  background: var(--action-tint);
+}
+.memory-graph-subtitle {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.memory-graph-unavailable-title {
+  margin-top: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  line-height: 1.5;
+}
+.memory-graph-unavailable-text {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.memory-graph-empty-note {
+  margin-top: 14px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+
+/* visually-hidden utility (this surface only) */
+.memory-graph-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- header: counts, layered disclosure, provenance ------------------ */
+.memory-graph-header {
+  margin-top: 12px;
+}
+.memory-graph-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.memory-graph-counts {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-heading);
+}
+.memory-graph-disclosure {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+.memory-graph-layers-details {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.memory-graph-layers-details summary {
+  cursor: pointer;
+  color: var(--action);
+}
+.memory-graph-layers {
+  margin: 6px 0 0;
+  padding: 0 0 0 16px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+}
+.memory-graph-layers li + li {
+  margin-top: 2px;
+}
+.memory-graph-truncated-note {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  color: var(--advisory-text);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.memory-graph-provenance {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
+}
+
+/* ---- mode switch ----------------------------------------------------- */
+.memory-graph-modeswitch {
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+}
+.memory-graph-modebtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 13px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+}
+.memory-graph-modebtn:hover {
+  color: var(--text-heading);
+}
+.memory-graph-modebtn[aria-checked='true'] {
+  background: var(--surface);
+  border: 1px solid var(--action-selected-border);
+  color: var(--action-hover);
+}
+.memory-graph-modenote {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ---- shared controls ------------------------------------------------- */
+.memory-graph-controls {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.memory-graph-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 220px;
+  min-width: 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  background: var(--screen-base);
+}
+.memory-graph-search-wrap:focus-within {
+  border: 1px solid var(--action);
+}
+.memory-graph-search-icon {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.memory-graph-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--text-heading);
+}
+.memory-graph-search-input::placeholder {
+  color: var(--text-quaternary);
+}
+.memory-graph-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.memory-graph-filter select,
+.memory-graph-filter input[type='text'] {
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.memory-graph-filter select {
+  max-width: 260px;
+}
+
+/* relationship-type filter (a fieldset of checkboxes, never colour-only) */
+.memory-graph-relations {
+  margin: 8px 0 0;
+  padding: 6px 10px 7px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+.memory-graph-relations legend {
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.memory-graph-relations-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+}
+.memory-graph-relation-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+/* The only native checkbox in the app. Left at the default `accent-color: auto`
+   it paints itself in the VIEWER'S OS accent — crimson in a default Chromium —
+   and tokens.css reserves saturated red for the validation verdict. A red box
+   on an advisory memory filter reads as a failure marker, and the colour would
+   differ per machine. Scoped to this control on purpose: a global `input` rule
+   is outside this slice. Guarded by native-control-accent.test.ts. */
+.memory-graph-relation-check input[type='checkbox'] {
+  accent-color: var(--action);
+}
+.memory-graph-community-note {
+  margin-top: 6px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+.memory-graph-relations-note {
+  font-size: 10.5px;
+  font-style: italic;
+  color: var(--text-quaternary);
+  line-height: 1.5;
+}
+
+/* path finder */
+.memory-graph-pathform {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.memory-graph-pathfield {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 200px;
+  min-width: 150px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.memory-graph-pathfield input {
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.memory-graph-pathfield input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+/* ---- status line + notices ------------------------------------------- */
+.memory-graph-status {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.memory-graph-list-summary {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+/* The surface's ONE polite live region. Always mounted, empty most of the time;
+   it carries results (notices), never the per-keystroke count line. */
+.memory-graph-live:not(:empty) {
+  margin-top: 8px;
+}
+.memory-graph-live .memory-graph-notice {
+  margin-top: 0;
+}
+.memory-graph-notice {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--border-faint);
+  background: var(--surface-subtle);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.memory-graph-notice.advisory {
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  color: var(--advisory-text);
+}
+.memory-graph-notice-candidates {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.memory-graph-candidate-btn {
+  padding: 3px 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--action);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+  overflow-wrap: anywhere;
+}
+.memory-graph-candidate-btn:hover {
+  color: var(--action-hover);
+  background: var(--action-tint);
+}
+.memory-graph-focuschip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 11px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: var(--action-tint);
+  border: 1px solid var(--action-selected-border);
+  border-radius: var(--radius-pill);
+  overflow-wrap: anywhere;
+}
+.memory-graph-focuschip button {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--action-hover);
+  background: var(--surface);
+  border: 1px solid var(--action-selected-border);
+  border-radius: var(--radius-pill);
+}
+
+/* ---- body layout (shared by both modes) ------------------------------ */
+/* Wrap-based, not breakpoint-based. The Assistant rail (342px) and the LeftNav
+   already take ~580px, so a viewport-width media query is the wrong instrument:
+   at 1440 the body itself is only ~750px and a side-by-side detail panel would
+   squeeze the canvas to ~400px. Letting the two columns WRAP on their own
+   flex-basis puts the detail beneath the canvas exactly when the canvas would
+   otherwise be starved, at any viewport, with no magic number. */
+.memory-graph-body {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.memory-graph-primary {
+  flex: 3 1 620px;
+  min-width: 0;
+}
+.memory-graph-side {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+
+/* ---- Browse mode ----------------------------------------------------- */
+.memory-graph-list {
+  max-height: 520px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+.memory-graph-list-empty {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+.memory-graph-list-group + .memory-graph-list-group {
+  margin-top: 14px;
+}
+.memory-graph-list-group-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.memory-graph-list-group-count {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-quaternary);
+}
+.memory-graph-list-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.memory-graph-list-row + .memory-graph-list-row {
+  border-top: 1px solid var(--border-hair);
+}
+.memory-graph-list-row-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-inner);
+  text-align: left;
+  color: inherit;
+}
+.memory-graph-list-row-btn:hover {
+  background: var(--surface-subtle);
+}
+.memory-graph-list-row-btn.selected {
+  background: var(--selected-row-bg);
+  border: 1px solid var(--action-selected-border);
+  padding: 6px 5px;
+}
+.memory-graph-list-shape {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--text-quaternary);
+  background: var(--surface-subtle);
+}
+.memory-graph-list-shape-file {
+  border-radius: 50%;
+}
+.memory-graph-list-shape-concept {
+  transform: rotate(45deg);
+}
+.memory-graph-list-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.memory-graph-list-community {
+  flex: none;
+  max-width: 42%;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.memory-graph-browse-note {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* ---- Explore mode: toolbar ------------------------------------------- */
+.graph-explore-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.graph-explore-toolbar .btn {
+  padding: 6px 9px;
+}
+.graph-explore-toolbar-sep {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  background: var(--border-input);
+}
+
+/* ---- Explore mode: the ONE dark surface ------------------------------ */
+/* Local, contrast-checked tokens. Scoped to `.graph-canvas` so the light
+   design system outside it is untouched. Text on the canvas uses
+   --gc-text (≈15:1) or --gc-text-dim (≈8:1) against --gc-bg. */
+.graph-canvas {
+  --gc-bg: #0f151d;
+  --gc-grid: #1b2531;
+  --gc-panel: #17202b;
+  --gc-line: #2b3745;
+  --gc-text: #e8eef5;
+  --gc-text-dim: #a7b6c6;
+  --gc-edge: #3d4b5c;
+  --gc-edge-lit: #9fb6cf;
+  --gc-neutral: #8895a5;
+  --gc-focus: #8fc0ff;
+  --gc-select: #ffffff;
+  --gc-c0: #6fa8ff;
+  --gc-c1: #5ed3b0;
+  --gc-c2: #f2a65a;
+  --gc-c3: #c79bf0;
+  --gc-c4: #8fd06a;
+  --gc-c5: #f28fa6;
+  --gc-c6: #5fc9dd;
+  --gc-c7: #e0c766;
+
+  position: relative;
+  height: clamp(320px, 56vh, 620px);
+  border: 1px solid var(--gc-line);
+  border-radius: var(--radius-inner);
+  background: var(--gc-bg);
+  background-image: radial-gradient(var(--gc-grid) 1px, transparent 1px);
+  background-size: 26px 26px;
+  overflow: hidden;
+}
+.memory-graph-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+.memory-graph-svg:active {
+  cursor: grabbing;
+}
+.memory-graph-svg:focus-visible {
+  outline: 2px solid var(--gc-focus);
+  outline-offset: -2px;
+}
+.memory-graph-edge {
+  stroke: var(--gc-edge);
+  stroke-width: 1.1;
+}
+.memory-graph-edge.lit {
+  stroke: var(--gc-edge-lit);
+  stroke-width: 2;
+}
+.memory-graph-node-shape {
+  fill: var(--gc-neutral);
+  stroke: var(--gc-bg);
+  stroke-width: 1.5;
+}
+.memory-graph-node-c0 .memory-graph-node-shape { fill: var(--gc-c0); }
+.memory-graph-node-c1 .memory-graph-node-shape { fill: var(--gc-c1); }
+.memory-graph-node-c2 .memory-graph-node-shape { fill: var(--gc-c2); }
+.memory-graph-node-c3 .memory-graph-node-shape { fill: var(--gc-c3); }
+.memory-graph-node-c4 .memory-graph-node-shape { fill: var(--gc-c4); }
+.memory-graph-node-c5 .memory-graph-node-shape { fill: var(--gc-c5); }
+.memory-graph-node-c6 .memory-graph-node-shape { fill: var(--gc-c6); }
+.memory-graph-node-c7 .memory-graph-node-shape { fill: var(--gc-c7); }
+.memory-graph-node {
+  cursor: pointer;
+}
+.memory-graph-node-label {
+  font-size: 11px;
+  fill: var(--gc-text-dim);
+  font-family: var(--font-ui);
+  pointer-events: none;
+  /* A background-coloured halo painted behind the glyphs, so labels in a dense
+     cluster stay legible where they overlap each other and the edges. */
+  paint-order: stroke;
+  stroke: var(--gc-bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.memory-graph-node.dim .memory-graph-node-shape {
+  opacity: 0.22;
+}
+.memory-graph-node.selected .memory-graph-node-shape {
+  stroke: var(--gc-select);
+  stroke-width: 3;
+}
+.memory-graph-node.selected .memory-graph-node-label {
+  fill: var(--gc-text);
+  font-weight: 600;
+}
+.memory-graph-node.connected .memory-graph-node-shape {
+  stroke: var(--gc-edge-lit);
+  stroke-width: 2.4;
+}
+.memory-graph-node:hover .memory-graph-node-shape {
+  stroke: var(--gc-focus);
+  stroke-width: 2.4;
+}
+.memory-graph-node:focus-visible {
+  outline: none;
+}
+.memory-graph-node:focus-visible .memory-graph-node-shape {
+  stroke: var(--gc-focus);
+  stroke-width: 3.4;
+}
+
+/* canvas overlays: hover/focus summary + legend + render-bound note */
+.graph-canvas-overlay {
+  position: absolute;
+  max-width: calc(100% - 24px);
+  padding: 7px 10px;
+  border: 1px solid var(--gc-line);
+  border-radius: var(--radius-token);
+  background: var(--gc-panel);
+  color: var(--gc-text);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.graph-canvas-hover {
+  top: 10px;
+  left: 10px;
+  pointer-events: none;
+}
+.graph-canvas-hover .graph-canvas-hover-meta {
+  color: var(--gc-text-dim);
+  font-size: 11px;
+}
+/* The legend sits BELOW the canvas in normal document flow (not as an overlay):
+   real text, never covering nodes, and it reflows instead of needing a
+   position hack at narrow widths. The swatch colours are the same fills used
+   on the dark canvas; each is paired with its name, so colour is never the
+   only carrier of meaning. */
+.graph-legend {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.graph-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.graph-legend-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: #8895a5;
+}
+.graph-legend-swatch.shape-concept {
+  border-radius: 0;
+  /* The rotation grows the PAINTED box to ~14px while the layout box stays
+     10px; the inline margin keeps the diamond inside its own item. */
+  margin: 0 2px;
+  transform: rotate(45deg);
+}
+.graph-legend-swatch.shape-file-outline {
+  background: var(--surface);
+}
+.graph-legend-swatch.c0 { background: #6fa8ff; }
+.graph-legend-swatch.c1 { background: #5ed3b0; }
+.graph-legend-swatch.c2 { background: #f2a65a; }
+.graph-legend-swatch.c3 { background: #c79bf0; }
+.graph-legend-swatch.c4 { background: #8fd06a; }
+.graph-legend-swatch.c5 { background: #f28fa6; }
+.graph-legend-swatch.c6 { background: #5fc9dd; }
+.graph-legend-swatch.c7 { background: #e0c766; }
+.graph-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--gc-text-dim);
+}
+.graph-canvas-caption {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* ---- shared detail panel --------------------------------------------- */
+.memory-graph-detail {
+  padding: 12px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+}
+.memory-graph-detail-empty {
+  padding: 16px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-inner);
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+}
+.memory-graph-detail-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+  word-break: break-all;
+}
+.memory-graph-detail-figures {
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+}
+.memory-graph-detail-figures dt {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.memory-graph-detail-figures dd {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.memory-graph-detail-ondisk,
+.memory-graph-detail-ondisk-missing {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+.memory-graph-detail-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.memory-graph-detail-actions .btn {
+  padding: 5px 10px;
+  font-size: 11.5px;
+}
+.memory-graph-detail-section {
+  margin-top: 12px;
+}
+.memory-graph-detail-section-heading {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.memory-graph-detail-empty-note {
+  margin: 0;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+.memory-graph-detail-connected-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.memory-graph-detail-connected-link {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  min-width: 0;
+  max-width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--action);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.memory-graph-detail-connected-link:hover {
+  color: var(--action-hover);
+  text-decoration: underline;
+}
+.memory-graph-detail-relation {
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+.memory-graph-detail-raw {
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.memory-graph-detail-raw summary {
+  cursor: pointer;
+  color: var(--action);
+}
+.memory-graph-detail-raw pre {
+  margin-top: 8px;
+  padding: 10px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.memory-graph-path-list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.memory-graph-path-caveat {
+  margin-top: 6px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* ---- help drawer (S6) ------------------------------------------------ */
+.graph-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  background: rgba(17, 26, 36, 0.42);
+  overflow-y: auto;
+}
+.graph-help-panel {
+  width: 100%;
+  max-width: 620px;
+  padding: 20px 22px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-screen);
+}
+.graph-help-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.graph-help-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.graph-help-close {
+  flex: none;
+  padding: 4px;
+  color: var(--text-tertiary);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-token);
+}
+.graph-help-close:hover {
+  color: var(--text-heading);
+  background: var(--surface-subtle);
+}
+.graph-help-lead {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.graph-help-section {
+  margin-top: 16px;
+}
+.graph-help-section h4 {
+  margin: 0 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.graph-help-section p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.graph-help-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.graph-help-list li {
+  overflow-wrap: anywhere;
+}
+.graph-help-term {
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.graph-help-kbd {
+  display: inline-block;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-strong);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-token);
+}
+.graph-help-example {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.graph-help-note {
+  margin-top: 16px;
+  padding: 9px 11px;
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.graph-help-placeholder {
+  margin-top: 16px;
+  padding: 9px 11px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-inner);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+
+/* ---- reduced motion --------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .memory-graph-svg,
+  .memory-graph-node,
+  .memory-graph-edge,
+  .graph-explore-toolbar .btn,
+  .graph-help-panel {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---- narrow widths ---------------------------------------------------- */
+@media (max-width: 1024px) {
+  /* The two columns already wrap by basis (see .memory-graph-body); all that is
+     left at narrow widths is a shorter canvas so the controls above and the
+     detail below stay reachable without a long scroll. */
+  .graph-canvas {
+    height: clamp(280px, 46vh, 460px);
+  }
+}
+
+@media (max-width: 640px) {
+  .memory-graph-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  /* In a COLUMN container flex-basis is a height: the row layout's
+     `flex: 1 1 220px` would otherwise make the search box 220px TALL. */
+  .memory-graph-search-wrap {
+    flex: none;
+  }
+  /* Each control becomes one full-width row: the label text keeps its intrinsic
+     size and the field takes the rest.
+
+     `width: 0` + `flex: 1 1 auto` is deliberate, not a hack for its own sake.
+     In a stretched column the flex line's cross size is driven by the widest
+     item's max-content, and a <select> carrying 112 cluster options has a
+     max-content width of ~600px — which stretched EVERY control to 605px inside
+     a 255px column and made <main> scroll horizontally at 375px. Zeroing the
+     field's preferred width removes that contribution; flex-grow then fills the
+     row. A percentage max-width does NOT fix it: it resolves against a
+     containing block that is itself being sized by this content. */
+  .memory-graph-filter {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    max-width: 100%;
+  }
+  .memory-graph-filter > span {
+    flex: none;
+  }
+  .memory-graph-filter select,
+  .memory-graph-filter input[type='text'] {
+    flex: 1 1 auto;
+    width: 0;
+    min-width: 0;
+    max-width: none;
+  }
+  .memory-graph-detail-figures {
+    grid-template-columns: 1fr;
+  }
+  .graph-help-backdrop {
+    padding: 16px 12px;
+  }
+  .graph-help-panel {
+    padding: 16px 14px 20px;
+  }
+}

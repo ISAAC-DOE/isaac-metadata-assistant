@@ -117,7 +117,12 @@ export function ProjectMemory() {
       sidebar={<LeftNav active="memory" />}
       rightPanel={rightPanel}
       mainPad="pad"
-      width="wide"
+      /* P36R S3: the Graph tab's canvas is the one surface specified to run
+         edge-to-edge, so it takes `full` (--content-max: none) while every
+         other tab keeps the page's `wide` measure. The mode is a property of
+         the ACTIVE tab, not of the screen — Overview/Sources/Concepts are prose
+         and lists and stay measured. */
+      width={activeTab === 'graph' ? 'full' : 'wide'}
     >
       <div className="placeholder">
         <span className="eyebrow">Memory / Query Plane</span>
