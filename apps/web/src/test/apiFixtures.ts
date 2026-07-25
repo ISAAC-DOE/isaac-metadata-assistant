@@ -1678,6 +1678,89 @@ export const aboutResponseNoCommit = {
   build_commit: null,
 };
 
+// --- P36.6 Schema & Vocabulary browser fixture (GET /api/schema) ------------
+// A small, hand-built SUBSET of the real vendored schema (schema/isaac_
+// record_v1.json) — just enough shape (required + optional top-level fields, a
+// const-typed field, an enum with a description, a multi-level nested object
+// with its OWN nested `required`, an array-of-string field, and the SAME
+// `record_type=evidence -> descriptors required` allOf conditional the real
+// schema encodes) to exercise required/optional derivation, enum rendering,
+// nested expand, array typing, and relationship rendering — without needing
+// the full ~1700-line document. Shape mirrors apps/api/isaac_api/routes.py
+// `get_schema()`: {schema_title, schema_version, schema, vocabularies}.
+
+export const schemaBrowserFixture = {
+  schema_title: 'ISAAC AI-Ready Scientific Record v1.05 (fixture)',
+  schema_version: '1.05',
+  schema: {
+    title: 'ISAAC AI-Ready Scientific Record v1.05 (fixture)',
+    type: 'object',
+    required: ['isaac_record_version', 'record_id', 'record_type'],
+    allOf: [
+      {
+        if: { properties: { record_type: { const: 'evidence' } } },
+        then: { required: ['descriptors'] },
+      },
+    ],
+    properties: {
+      isaac_record_version: { type: 'string', const: '1.05' },
+      record_id: {
+        type: 'string',
+        pattern: '^[0-9A-Z]{26}$',
+        description: 'ULID identifier for the record.',
+      },
+      record_type: {
+        type: 'string',
+        enum: ['evidence', 'intent', 'synthesis'],
+        description: 'Fundamental nature of the record.',
+      },
+      descriptors: {
+        type: 'object',
+        description: 'Extracted scientific descriptors — required for an evidence record.',
+        required: ['outputs'],
+        properties: {
+          outputs: {
+            type: 'array',
+            items: { type: 'object', properties: {} },
+            description: 'One or more descriptor output batches.',
+          },
+        },
+      },
+      sample: {
+        type: 'object',
+        description: 'The physical sample under study.',
+        required: ['sample_form'],
+        properties: {
+          sample_form: { type: 'string', description: 'Physical form of the sample.' },
+          material: {
+            type: 'object',
+            description: 'Chemical/material identity of the sample.',
+            properties: {
+              formula: { type: 'string', description: 'Chemical formula, e.g. CuO2.' },
+            },
+          },
+        },
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Free-form, user-assigned grouping labels.',
+      },
+    },
+  },
+  vocabularies: {
+    descriptor_class: {
+      field: 'descriptor_class',
+      note: 'Fixture vocabulary note (synthetic, for tests).',
+      source: 'https://example.invalid/fixture-controlled-vocabulary',
+      classes: {
+        spectroscopy: ['white_line_energy', 'edge_shift'],
+      },
+      products: ['H2', 'CO'],
+    },
+  },
+};
+
 export const openApiFixture = {
   openapi: '3.1.0',
   info: {
