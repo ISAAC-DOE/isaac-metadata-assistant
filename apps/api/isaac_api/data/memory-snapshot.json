@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "6fce15b1aec22e794edd940356c2cb2558f0b1797bfd3b4a0fe72c7b1b1fcf52"
+        "sha256": "abfc7f4518aa718bedb1dfaf78deb963f93c7e672fed4ab2ac36bc3684336fd9"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "e0d4c24cb83797a6aabc71a67890e0a0eaa3bafcbe28e8d90b03115d264bf912"
+        "sha256": "4dcabcdaa87a4df7054c8be4492c26d4f826adaf1471df127f2a295556f44792"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "dc0eadc9b1de97f4182caa67a05109a0594e236474bb6880d88b41b69e43644c"
+        "sha256": "ad7e32a427596d6bc06d1b9cf109097879efea6db813cd4e78f8e91c5f06ab45"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10548,7 +10548,7 @@
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
-        "sha256": "6e5dec1d9c342f1e8753cdde0bf759f3f61194a150572d8239d4d66da2114c89"
+        "sha256": "10fc93bbeb673a38913a878f3ae0c926a3ff6dc470bf6b0df1494e5cade9b3b4"
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "84ef47850f50421d9d4e3ac557bd02c82c1e2a7c5aecce06a23914312a2fe1b8"
+        "sha256": "4d76ed1500300ed6c91b93614d7d79879edd171267ae6c7cff3bbfed6fbec07d"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "d82af1bb13bcde6d02f5d7e66bbd7bccda42458e02697eb9f5d7a50315fcbe1d"
+    "served_manifest_fingerprint": "fef254d1570fd16db8e40f96e325f6deced3e1fc91eda00e4a752010ef4d58f7"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

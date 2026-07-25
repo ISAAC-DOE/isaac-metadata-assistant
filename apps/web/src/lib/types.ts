@@ -1117,3 +1117,41 @@ export interface ApiOpenApiResponse {
   info?: { title?: string; version?: string; summary?: string };
   paths: Record<string, OpenApiPathItem>;
 }
+
+// GET /api/schema — P36.6 read-only Schema & Vocabulary browser. Serves the
+// vendored official schema (loaded via `isaac_records.official.schema_path`,
+// never re-derived) plus every `vocabulary/*.json`, verbatim. This is the
+// reference plane (schema/vocabulary), NOT the portal Ontology system — no
+// propose/review/approve/edit affordance exists anywhere in this app for it.
+// `schema` is a JSON-Schema (draft 2020-12) document; only the shape the
+// browser actually reads is modeled below — an index signature keeps the type
+// permissive so it never claims more structure than the vendored file has.
+export interface JsonSchemaConditional {
+  if?: JsonSchemaNode;
+  then?: JsonSchemaNode;
+}
+
+export interface JsonSchemaNode {
+  type?: string | string[];
+  title?: string;
+  description?: string;
+  enum?: unknown[];
+  const?: unknown;
+  required?: string[];
+  properties?: Record<string, JsonSchemaNode>;
+  items?: JsonSchemaNode;
+  oneOf?: JsonSchemaNode[];
+  allOf?: JsonSchemaConditional[];
+  additionalProperties?: boolean;
+  [key: string]: unknown;
+}
+
+export interface ApiSchemaResponse {
+  schema_title: string | null;
+  schema_version: string;
+  schema: JsonSchemaNode;
+  // Keyed by vocabulary filename stem (e.g. "descriptor_class"); each value is
+  // the parsed vocabulary/*.json content verbatim — shape is per-file, so this
+  // stays a permissive `unknown`.
+  vocabularies: Record<string, unknown>;
+}

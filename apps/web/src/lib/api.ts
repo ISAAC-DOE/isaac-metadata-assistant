@@ -34,6 +34,7 @@ import type {
   ApiMemoryGraphResponse,
   ApiOpenApiResponse,
   ApiPendingResponse,
+  ApiSchemaResponse,
   ApiSearchResponse,
   ApiSearchScope,
   ApiSourcePreview,
@@ -316,6 +317,14 @@ export const api = {
       });
     }
     return body as ApiValidateRecordResult;
+  },
+
+  // P36.6 — the read-only Schema & Vocabulary browser. Serves the vendored
+  // official schema + vocabulary/*.json verbatim (reference plane, never truth
+  // enforcement) — this client only parses the envelope, it never re-derives
+  // or projects any part of it.
+  getSchema(): Promise<ApiSchemaResponse> {
+    return getJson<ApiSchemaResponse>('/schema');
   },
 
   audit(id: string): Promise<ApiAuditResponse> {

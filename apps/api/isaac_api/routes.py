@@ -25,7 +25,7 @@ from isaac_records.complete import apply_answers, apply_corrections
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
-from isaac_records.official import EXPECTED_VERSION, validate_official
+from isaac_records.official import EXPECTED_VERSION, schema_path, validate_official
 from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
@@ -1756,3 +1756,34 @@ def api_openapi(request: Request) -> dict:
     route signatures only, never secrets or runtime state.
     """
     return request.app.openapi()
+
+
+# --- 21. schema & vocabulary browser (P36.6, READ-ONLY reference plane) --------
+#
+# A read-only browser over the CANONICAL official schema + vocabulary — NOT the
+# portal Ontology system (no propose/review/approve/edit/role/persistence
+# affordance exists anywhere for it). Every field, type, required flag, enum,
+# description, and allOf relationship the frontend renders comes verbatim from
+# these two sources: the vendored schema (loaded through
+# ``official.schema_path(REPO_ROOT)`` — the SAME path resolver
+# ``load_official_validator`` uses, never hardcoded here) and ``vocabulary/*.json``.
+# Deterministic and side-effect-free: nothing is mutated, nothing is written.
+# This route's body legitimately carries keys like ``schema``/``required`` — it
+# is the reference/truth plane (the vendored PUBLIC schema), not the memory
+# plane, so the memory-plane forbidden-key rule does not apply here.
+
+
+@router.get("/schema")
+def get_schema() -> dict:
+    schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
+    vocab_dir = REPO_ROOT / "vocabulary"
+    vocabularies = {
+        p.stem: json.loads(p.read_text(encoding="utf-8"))
+        for p in sorted(vocab_dir.glob("*.json"))
+    } if vocab_dir.is_dir() else {}
+    return {
+        "schema_title": schema.get("title"),
+        "schema_version": EXPECTED_VERSION,
+        "schema": schema,
+        "vocabularies": vocabularies,
+    }
