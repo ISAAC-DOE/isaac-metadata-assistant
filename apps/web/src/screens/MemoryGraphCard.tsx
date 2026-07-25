@@ -1,74 +1,91 @@
 /*
- * P36.2 — Project Memory "Graph" tab. Renders the deterministic, capped,
- * served-file REFERENCE projection from `GET /api/memory/graph`
- * (apps/api/isaac_api/memory_graph.py). This is memory-plane advisory
- * material — leads to verify, never a validation verdict — and it is
- * explicitly NOT the full source graph: the underlying source graph
- * (node_count/edge_count/community_count on `meta.underlying_graph`) is not
- * embedded; this tab only ever renders the smaller served-file projection the
- * backend actually returns.
+ * Project Memory → Graph (P36.2, redesigned in P36R Slice 3 + 6).
  *
- * ONE fetch (`api.getMemoryGraph()`); every search/filter/select interaction
- * below is pure client-side state over the single fetched payload — no
- * further network calls.
+ * ONE fetch (`api.getMemoryGraph()`), ONE index (`buildGraphIndex`), ONE state
+ * model (`lib/graphModel.ts`). Every search, filter, selection, neighbourhood,
+ * path and viewport change is a `GraphAction` applied by `applyGraphAction` —
+ * no second code path exists, which is what lets the Slice-4 command bar and
+ * the Slice-5 Assistant intents drive this surface without reimplementing it.
  *
- * Two coordinated views of the SAME node set:
- *  - A textual node list (search + file-type/community filters + rows) — the
- *    PRIMARY affordance. It alone makes every node reachable and selectable
- *    with no pointer and with the SVG entirely hidden (narrow screens).
- *  - A bounded SVG (secondary) showing ONLY the selected node's capped 1-hop
- *    neighborhood, or one community's nodes — never the full rendered graph
- *    at once. Node positions are deterministically precomputed (no physics,
- *    no randomness): the focal node (or nothing, in community mode) at the
- *    center, the rest on a sorted-by-id ring.
+ * Two permanent modes over the same data:
+ *   Explore — a bounded dark canvas (the app's only dark surface).
+ *   Browse  — the textual, keyboard-first list. Not a fallback.
+ *
+ * What this surface is: a served-file REFERENCE projection. What it is not:
+ * the full source graph (`meta.underlying_graph` discloses the real, larger,
+ * un-embedded figures), a scientific relationship map, or a validation verdict.
  */
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-} from 'react';
+import './graph/graph.css';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { Search, ZoomIn, ZoomOut, Maximize2, RotateCcw } from '../components/icons';
+import { CircleHelp, LayoutList, Network, Search } from '../components/icons';
 import { api, type ApiError } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
-import type {
-  ApiMemoryFileSummary,
-  ApiMemoryGraphConceptNode,
-  ApiMemoryGraphEdge,
-  ApiMemoryGraphFileNode,
-  ApiMemoryGraphNode,
-  ApiMemoryGraphResponse,
-} from '../lib/types';
-import { communityLabel, domId, groupFilesByType, shortSha } from './ProjectMemory';
+import {
+  PALETTE_SLOTS,
+  applyGraphAction,
+  buildGraphIndex,
+  communityColorIndex,
+  communityLabelAmong,
+  communityOptionLabel,
+  connectedNodes,
+  filteredNodeIds,
+  initialGraphViewState,
+  visibleEdges,
+  visibleNodeIds,
+  type GraphAction,
+  type GraphCommunityEntry,
+  type GraphIndex,
+  type GraphMode,
+  type GraphTypeFilter,
+  type GraphViewState,
+} from '../lib/graphModel';
+import type { ApiMemoryGraphResponse } from '../lib/types';
+import { shortSha } from './ProjectMemory';
+import { GraphBrowse, type BrowseGrouping } from './graph/GraphBrowse';
+import { GraphCanvas } from './graph/GraphCanvas';
+import { GraphDetail, GraphPathResult } from './graph/GraphDetail';
+import { GraphHelp } from './graph/GraphHelp';
 
-// -- deterministic layout constants (no physics, no Math.random) -----------
-const MAX_RING_NODES = 25; // mirrors the backend's own per-file MAX_RELATED cap
-const MAX_COMMUNITY_NODES = 26; // center + ring parity for the community view
-const RING_RADIUS = 130;
-const VIEWPORT = 340; // base square viewBox extent at scale=1
-const MIN_SCALE = 0.4;
-const MAX_SCALE = 4;
-const PAN_STEP = 26;
-const NODE_PADDING = 46;
-
-type NodeTypeFilter = 'all' | 'file' | 'concept';
-
-const isFileNode = (n: ApiMemoryGraphNode): n is ApiMemoryGraphFileNode => n.kind === 'file';
-const isConceptNode = (n: ApiMemoryGraphNode): n is ApiMemoryGraphConceptNode => n.kind === 'concept';
+/** Narrow viewports open in Browse: a 220-node canvas is not a phone surface.
+ *  Guarded for environments without matchMedia (jsdom) — they get Explore. */
+function defaultMode(): GraphMode {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'explore';
+  return window.matchMedia('(max-width: 860px)').matches ? 'browse' : 'explore';
+}
 
 // --- top-level card ---------------------------------------------------------
 
 export function MemoryGraphCard() {
   const graph = useFetch(() => api.getMemoryGraph(), []);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const closeHelp = useCallback(() => {
+    setHelpOpen(false);
+    helpTriggerRef.current?.focus();
+  }, []);
+
+  const helpAvailable = graph.status === 'data' && graph.data.available && graph.data.nodes.length > 0;
+
   return (
     <div className="card placeholder-card memory-graph-card">
-      <h2 className="memory-graph-heading">Graph</h2>
+      <div className="memory-graph-titlerow">
+        <h2 className="memory-graph-heading">Graph</h2>
+        {helpAvailable && (
+          <button
+            ref={helpTriggerRef}
+            type="button"
+            className="memory-graph-help-trigger"
+            aria-haspopup="dialog"
+            aria-expanded={helpOpen}
+            onClick={() => setHelpOpen(true)}
+          >
+            <CircleHelp size={13} strokeWidth={2} aria-hidden="true" />
+            About this graph
+          </button>
+        )}
+      </div>
       <p className="memory-graph-subtitle">
         A served-file reference graph derived from Project Memory — leads to verify, never a
         validation verdict.
@@ -76,6 +93,16 @@ export function MemoryGraphCard() {
       {graph.status === 'loading' && <LoadingPanel label="Loading graph…" />}
       {graph.status === 'error' && <MemoryGraphError error={graph.error} onRetry={graph.reload} />}
       {graph.status === 'data' && <MemoryGraphBody data={graph.data} />}
+      {helpOpen && graph.status === 'data' && graph.data.available && (
+        <GraphHelp
+          meta={graph.data.meta}
+          relationTypes={[...new Set(graph.data.edges.flatMap((e) => e.relations))].sort()}
+          paletteSlots={PALETTE_SLOTS}
+          communityCount={graph.data.communities.length}
+          singletonCount={graph.data.communities.filter((c) => c.file_count <= 1).length}
+          onClose={closeHelp}
+        />
+      )}
     </div>
   );
 }
@@ -111,255 +138,47 @@ function MemoryGraphBody({ data }: { data: ApiMemoryGraphResponse }) {
 
 // --- available state ---------------------------------------------------------
 
-interface Positioned {
-  x: number;
-  y: number;
-}
-
-function buildIndex(nodes: ApiMemoryGraphNode[], edges: ApiMemoryGraphEdge[]) {
-  const byId = new Map<string, ApiMemoryGraphNode>(nodes.map((n) => [n.id, n]));
-  const adjacency = new Map<string, { id: string; relations: string[] }[]>();
-  for (const e of edges) {
-    if (!adjacency.has(e.source)) adjacency.set(e.source, []);
-    if (!adjacency.has(e.target)) adjacency.set(e.target, []);
-    adjacency.get(e.source)!.push({ id: e.target, relations: e.relations });
-    adjacency.get(e.target)!.push({ id: e.source, relations: e.relations });
-  }
-  for (const list of adjacency.values()) list.sort((a, b) => a.id.localeCompare(b.id));
-  return { byId, adjacency };
-}
-
-/** A basename for a file path, or the raw label for a concept — kept short for
- *  the SVG's inline text so long repo paths never overflow the canvas. */
-function shortNodeLabel(node: ApiMemoryGraphNode): string {
-  const raw = node.label ?? node.id;
-  const base = node.kind === 'file' ? (raw.split('/').pop() ?? raw) : raw;
-  return base.length > 22 ? `${base.slice(0, 21)}…` : base;
-}
-
 function MemoryGraphAvailable({ data }: { data: ApiMemoryGraphResponse }) {
   const navigate = useNavigate();
-  const { byId, adjacency } = useMemo(() => buildIndex(data.nodes, data.edges), [data.nodes, data.edges]);
+  const index = useMemo<GraphIndex>(() => buildGraphIndex(data), [data]);
 
-  const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<NodeTypeFilter>('all');
-  const [communityFilter, setCommunityFilter] = useState<string>('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const selectedNode = selectedId ? (byId.get(selectedId) ?? null) : null;
-
-  const selectNode = useCallback((id: string) => {
-    setSelectedId(id);
-  }, []);
-
-  const onCommunityFilterChange = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    setCommunityFilter(value);
-    // Choosing a specific community switches the canvas to that community's
-    // view; an active node selection would otherwise keep the canvas pinned
-    // to the node's own neighborhood, hiding the very community just picked.
-    if (value !== 'all') setSelectedId(null);
-  }, []);
-
-  // ---- textual list: search + type + community, all client-side ----------
-  const normalizedSearch = search.trim().toLowerCase();
-  const passesFilters = useCallback(
-    (n: ApiMemoryGraphNode) => {
-      if (typeFilter !== 'all' && n.kind !== typeFilter) return false;
-      if (communityFilter !== 'all' && (n.community_id ?? '') !== communityFilter) return false;
-      if (normalizedSearch) {
-        const haystack = `${n.label ?? ''} ${n.id}`.toLowerCase();
-        if (!haystack.includes(normalizedSearch)) return false;
-      }
-      return true;
-    },
-    [typeFilter, communityFilter, normalizedSearch],
+  const [state, setState] = useState<GraphViewState>(() => initialGraphViewState(defaultMode()));
+  const dispatch = useCallback(
+    (action: GraphAction) => setState((s) => applyGraphAction(s, action, index)),
+    [index],
   );
 
-  const filteredFileNodes = useMemo(
-    () => data.nodes.filter(isFileNode).filter(passesFilters),
-    [data.nodes, passesFilters],
-  );
-  const filteredConceptNodes = useMemo(
-    () => data.nodes.filter(isConceptNode).filter(passesFilters),
-    [data.nodes, passesFilters],
-  );
-  const visibleCount = filteredFileNodes.length + filteredConceptNodes.length;
+  const [communityQuery, setCommunityQuery] = useState('');
+  const [grouping, setGrouping] = useState<BrowseGrouping>('type');
+  const [pathFrom, setPathFrom] = useState('');
+  const [pathTo, setPathTo] = useState('');
 
-  // Reuse groupFilesByType (Source Index): the graph's file-node shape is
-  // field-identical to ApiMemoryFileSummary except `id` where Source Index
-  // uses `path` — a trivial rename lets the SAME grouping function drive both.
-  const fileGroups = useMemo(() => {
-    const asSummaries: ApiMemoryFileSummary[] = filteredFileNodes.map((n) => ({
-      path: n.id,
-      file_type: n.file_type,
-      community_id: n.community_id,
-      community_name: n.community_name,
-      node_count: n.node_count,
-      on_disk: n.on_disk,
-    }));
-    return groupFilesByType(asSummaries);
-  }, [filteredFileNodes]);
-
-  // ---- the selected node's capped neighbor set (used by BOTH the SVG ring
-  // and the detail panel's textual connected-node list — one source) -------
-  const neighborEntries = useMemo(() => {
-    if (!selectedNode) return [];
-    const raw = (adjacency.get(selectedNode.id) ?? []).slice(0, MAX_RING_NODES);
-    const withNodes: { node: ApiMemoryGraphNode; relations: string[] }[] = [];
-    for (const entry of raw) {
-      const n = byId.get(entry.id);
-      if (n) withNodes.push({ node: n, relations: entry.relations });
-    }
-    return withNodes;
-  }, [selectedNode, adjacency, byId]);
-
-  // ---- bounded SVG mode: selected node's ego network, OR one community ----
-  const svgMode: 'node' | 'community' | 'none' = selectedNode
-    ? 'node'
-    : communityFilter !== 'all'
-      ? 'community'
-      : 'none';
-
-  const svgOrder = useMemo<string[]>(() => {
-    if (svgMode === 'node' && selectedNode) {
-      return [selectedNode.id, ...neighborEntries.map((e) => e.node.id)];
-    }
-    if (svgMode === 'community') {
-      return data.nodes
-        .filter((n) => (n.community_id ?? '') === communityFilter)
-        .map((n) => n.id)
-        .sort((a, b) => a.localeCompare(b))
-        .slice(0, MAX_COMMUNITY_NODES);
-    }
-    return [];
-  }, [svgMode, selectedNode, neighborEntries, data.nodes, communityFilter]);
-
-  const positions = useMemo<Map<string, Positioned>>(() => {
-    const map = new Map<string, Positioned>();
-    if (svgOrder.length === 0) return map;
-    if (svgMode === 'node') {
-      const [centerId, ...ring] = svgOrder;
-      map.set(centerId, { x: 0, y: 0 });
-      const k = ring.length;
-      ring.forEach((id, i) => {
-        const angle = ((-90 + (360 / Math.max(k, 1)) * i) * Math.PI) / 180;
-        map.set(id, { x: RING_RADIUS * Math.cos(angle), y: RING_RADIUS * Math.sin(angle) });
-      });
-    } else {
-      const k = svgOrder.length;
-      if (k === 1) {
-        map.set(svgOrder[0], { x: 0, y: 0 });
-      } else {
-        svgOrder.forEach((id, i) => {
-          const angle = ((-90 + (360 / Math.max(k, 1)) * i) * Math.PI) / 180;
-          map.set(id, { x: RING_RADIUS * Math.cos(angle), y: RING_RADIUS * Math.sin(angle) });
-        });
-      }
-    }
-    return map;
-  }, [svgMode, svgOrder]);
-
-  const svgEdges = useMemo(() => {
-    if (positions.size === 0) return [];
-    return data.edges.filter((e) => positions.has(e.source) && positions.has(e.target));
-  }, [positions, data.edges]);
-
-  // ---- roving tabindex among SVG nodes (mirrors SectionTabs) --------------
-  const [rovingId, setRovingId] = useState<string | null>(svgOrder[0] ?? null);
-  useEffect(() => {
-    setRovingId(svgOrder[0] ?? null);
-  }, [svgOrder]);
-
-  function onNodeKeyDown(e: ReactKeyboardEvent<SVGGElement>, id: string) {
-    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-      e.preventDefault();
-      e.stopPropagation();
-      selectNode(id);
-      return;
-    }
-    const navKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
-    if (!navKeys.includes(e.key) || svgOrder.length === 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const idx = svgOrder.indexOf(id);
-    let nextIndex = idx;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIndex = (idx + 1) % svgOrder.length;
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      nextIndex = (idx - 1 + svgOrder.length) % svgOrder.length;
-    } else if (e.key === 'Home') nextIndex = 0;
-    else if (e.key === 'End') nextIndex = svgOrder.length - 1;
-    const nextId = svgOrder[nextIndex];
-    setRovingId(nextId);
-    (document.getElementById(domId('graph-node', nextId)) as SVGGElement | null)?.focus();
-  }
-
-  // ---- pan/zoom: pure viewBox math over the fixed, precomputed positions --
-  const [view, setView] = useState({ cx: 0, cy: 0, scale: 1 });
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const dragRef = useRef<{ startX: number; startY: number; cx: number; cy: number; unitsPerPx: number } | null>(
-    null,
+  const listIds = useMemo(() => filteredNodeIds(state, index), [state, index]);
+  const canvasIds = useMemo(() => visibleNodeIds(state, index), [state, index]);
+  const canvasEdges = useMemo(
+    () => visibleEdges(state, index, new Set(canvasIds)),
+    [state, index, canvasIds],
   );
 
-  useEffect(() => {
-    setView({ cx: 0, cy: 0, scale: 1 });
-  }, [svgMode, selectedNode?.id, communityFilter]);
+  const selectedNode = state.selectedId ? (index.byId.get(state.selectedId) ?? null) : null;
+  const selectedConnected = useMemo(
+    () => (state.selectedId ? connectedNodes(state.selectedId, state, index) : []),
+    [state, index],
+  );
 
-  const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
-  const zoomIn = useCallback(() => setView((v) => ({ ...v, scale: clampScale(v.scale * 1.25) })), []);
-  const zoomOut = useCallback(() => setView((v) => ({ ...v, scale: clampScale(v.scale / 1.25) })), []);
-  const resetView = useCallback(() => setView({ cx: 0, cy: 0, scale: 1 }), []);
-  const fitView = useCallback(() => {
-    const pts = Array.from(positions.values());
-    if (pts.length === 0) {
-      resetView();
-      return;
-    }
-    const minX = Math.min(...pts.map((p) => p.x)) - NODE_PADDING;
-    const maxX = Math.max(...pts.map((p) => p.x)) + NODE_PADDING;
-    const minY = Math.min(...pts.map((p) => p.y)) - NODE_PADDING;
-    const maxY = Math.max(...pts.map((p) => p.y)) + NODE_PADDING;
-    const w = Math.max(maxX - minX, 60);
-    const h = Math.max(maxY - minY, 60);
-    setView({ cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, scale: clampScale(VIEWPORT / Math.max(w, h)) });
-  }, [positions, resetView]);
+  const shownCount = state.mode === 'explore' ? canvasIds.length : listIds.length;
 
-  const onSvgPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if (e.button !== 0) return;
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect || rect.width === 0) return;
-    const unitsPerPx = VIEWPORT / view.scale / rect.width;
-    dragRef.current = { startX: e.clientX, startY: e.clientY, cx: view.cx, cy: view.cy, unitsPerPx };
-  };
-  const onSvgPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
-    const d = dragRef.current;
-    if (!d) return;
-    const dx = (e.clientX - d.startX) * d.unitsPerPx;
-    const dy = (e.clientY - d.startY) * d.unitsPerPx;
-    setView((v) => ({ ...v, cx: d.cx - dx, cy: d.cy - dy }));
-  };
-  const onSvgPointerUp = () => {
-    dragRef.current = null;
-  };
-  const onSvgKeyDown = (e: ReactKeyboardEvent<SVGSVGElement>) => {
-    if (e.target !== e.currentTarget) return; // node-level handlers own their own keys
-    const step = PAN_STEP / view.scale;
-    if (e.key === 'ArrowLeft') setView((v) => ({ ...v, cx: v.cx - step }));
-    else if (e.key === 'ArrowRight') setView((v) => ({ ...v, cx: v.cx + step }));
-    else if (e.key === 'ArrowUp') setView((v) => ({ ...v, cy: v.cy - step }));
-    else if (e.key === 'ArrowDown') setView((v) => ({ ...v, cy: v.cy + step }));
-    else return;
-    e.preventDefault();
-  };
-
-  const vbExtent = VIEWPORT / view.scale;
-  const viewBox = `${view.cx - vbExtent / 2} ${view.cy - vbExtent / 2} ${vbExtent} ${vbExtent}`;
-
-  const meta = data.meta;
-  const underlyingKnown =
-    meta.underlying_graph.node_count != null &&
-    meta.underlying_graph.edge_count != null &&
-    meta.underlying_graph.community_count != null;
+  const communityOptions = useMemo(() => {
+    const needle = communityQuery.trim().toLowerCase();
+    const match = (c: (typeof index.communitiesBySize)[number]) =>
+      needle === '' ||
+      (c.name ?? '').toLowerCase().includes(needle) ||
+      c.id.toLowerCase().includes(needle);
+    return {
+      multi: index.communitiesBySize.filter((c) => !c.isSingleton && match(c)),
+      single: index.communitiesBySize.filter((c) => c.isSingleton && match(c)),
+    };
+  }, [index.communitiesBySize, communityQuery]);
 
   const navigateToFile = useCallback(
     (path: string) => navigate(`/memory?file=${encodeURIComponent(path)}`),
@@ -370,42 +189,95 @@ function MemoryGraphAvailable({ data }: { data: ApiMemoryGraphResponse }) {
     [navigate],
   );
 
-  const svgAriaLabel =
-    svgMode === 'node' && selectedNode
-      ? `Neighborhood of ${selectedNode.label ?? selectedNode.id}, ${svgOrder.length} node${svgOrder.length === 1 ? '' : 's'} shown`
-      : svgMode === 'community'
-        ? `Community ${communityFilter}, ${svgOrder.length} node${svgOrder.length === 1 ? '' : 's'} shown`
-        : 'Graph canvas — select a node to see its neighborhood';
+  const meta = data.meta;
+  const u = meta.underlying_graph;
+  const underlyingKnown = u.node_count != null && u.edge_count != null && u.community_count != null;
 
   return (
     <div className="memory-graph-available">
       <div className="memory-graph-header">
-        <p className="memory-graph-counts">
-          {meta.counts.files} files · {meta.counts.concepts} concepts · {meta.counts.reference_edges}{' '}
-          reference{meta.counts.reference_edges === 1 ? '' : 's'} · {meta.counts.communities_rendered}{' '}
-          communit{meta.counts.communities_rendered === 1 ? 'y' : 'ies'} shown
-        </p>
+        <div className="memory-graph-headline">
+          <p className="memory-graph-counts">
+            {meta.counts.files} files · {meta.counts.concepts} concepts ·{' '}
+            {meta.counts.reference_edges} reference{meta.counts.reference_edges === 1 ? '' : 's'} ·{' '}
+            {meta.counts.communities_rendered} communit
+            {meta.counts.communities_rendered === 1 ? 'y' : 'ies'} shown
+          </p>
+          <p className="memory-graph-provenance mono">
+            {meta.provenance.built_at_commit ? shortSha(meta.provenance.built_at_commit) : '—'} ·
+            source{' '}
+            {meta.provenance.source_graph_sha256 ? shortSha(meta.provenance.source_graph_sha256) : '—'}{' '}
+            · v{meta.provenance.snapshot_schema_version ?? '—'} · {meta.provenance.provider}
+          </p>
+        </div>
+        {/* The `{' '}` is load-bearing: JSX drops the newline between the
+            expression and the em dash, which rendered "…here— this Graph tab". */}
         <p className="memory-graph-disclosure">
           {underlyingKnown
-            ? `The underlying source graph (${meta.underlying_graph.node_count} nodes / ${meta.underlying_graph.edge_count} edges / ${meta.underlying_graph.community_count} communities) is not embedded here`
-            : 'The underlying source graph is not embedded here'}
+            ? `The underlying source graph (${u.node_count} nodes / ${u.edge_count} edges / ${u.community_count} communities) is not embedded here`
+            : 'The underlying source graph is not embedded here'}{' '}
           — this Graph tab is a served-file reference projection only, never the full source graph.
         </p>
+        {/* The full layer chain stays on the page (not buried in help), but
+            collapsed: the one-line disclosure above is the honest headline and
+            this is the detail behind it. */}
+        <details className="memory-graph-layers-details">
+          <summary>How this projection is built</summary>
+          <ol className="memory-graph-layers">
+            <li>
+              Full Graphify source graph
+              {underlyingKnown
+                ? ` — ${u.node_count} nodes / ${u.edge_count} edges / ${u.community_count} clusters`
+                : ''}
+              , not embedded in this deployment.
+            </li>
+            <li>
+              Served-file projection — {meta.counts.files} files and {meta.counts.reference_edges}{' '}
+              references, the only part governance allows this deployment to serve.
+            </li>
+            <li>
+              Concepts — {meta.counts.concepts} doc-anchored concepts, carrying no edges in this
+              projection.
+            </li>
+            <li>
+              Clusters — {meta.counts.communities_rendered} automatically-derived groupings, advisory
+              only.
+            </li>
+          </ol>
+        </details>
         {data.truncated && (
           <p className="memory-graph-truncated-note">
             Showing a capped subset of the served-file graph — the node or reference count reached
             its display limit, so not everything indexed is listed here.
           </p>
         )}
-        <MemoryGraphLegend />
-        <p className="memory-graph-provenance mono">
-          {meta.provenance.built_at_commit ? shortSha(meta.provenance.built_at_commit) : '—'} · source{' '}
-          {meta.provenance.source_graph_sha256 ? shortSha(meta.provenance.source_graph_sha256) : '—'} · v
-          {meta.provenance.snapshot_schema_version ?? '—'} · {meta.provenance.provider}
-        </p>
       </div>
 
+      {/* mode switch + shared controls — the controls are identical in both
+          modes, so they live on one wrapping row with the switch. */}
       <div className="memory-graph-controls">
+        <div className="memory-graph-modeswitch" role="radiogroup" aria-label="Graph view mode">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={state.mode === 'explore'}
+            className="memory-graph-modebtn"
+            onClick={() => dispatch({ kind: 'setMode', mode: 'explore' })}
+          >
+            <Network size={13} strokeWidth={2} aria-hidden="true" />
+            Explore
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={state.mode === 'browse'}
+            className="memory-graph-modebtn"
+            onClick={() => dispatch({ kind: 'setMode', mode: 'browse' })}
+          >
+            <LayoutList size={13} strokeWidth={2} aria-hidden="true" />
+            Browse
+          </button>
+        </div>
         <label className="memory-graph-search-wrap">
           <Search size={14} strokeWidth={2} aria-hidden="true" className="memory-graph-search-icon" />
           <span className="memory-graph-visually-hidden">Search graph nodes</span>
@@ -413,360 +285,388 @@ function MemoryGraphAvailable({ data }: { data: ApiMemoryGraphResponse }) {
             type="search"
             className="memory-graph-search-input"
             placeholder="Search files and concepts…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={state.search}
+            onChange={(e) => dispatch({ kind: 'search', query: e.target.value })}
           />
         </label>
         <label className="memory-graph-filter">
           <span>Show</span>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as NodeTypeFilter)}>
+          <select
+            value={state.typeFilter}
+            onChange={(e) => dispatch({ kind: 'filterType', value: e.target.value as GraphTypeFilter })}
+          >
             <option value="all">Files &amp; concepts</option>
             <option value="file">Files only</option>
             <option value="concept">Concepts only</option>
           </select>
         </label>
         <label className="memory-graph-filter">
+          <span>Find a cluster</span>
+          <input
+            type="text"
+            value={communityQuery}
+            placeholder="narrow the list…"
+            onChange={(e) => setCommunityQuery(e.target.value)}
+          />
+        </label>
+        <label className="memory-graph-filter">
           <span>Community</span>
-          <select value={communityFilter} onChange={onCommunityFilterChange}>
-            <option value="all">All communities</option>
-            {data.communities.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name ?? `Community ${c.id}`} ({c.file_count})
-              </option>
-            ))}
+          <select
+            value={state.communityFilter}
+            onChange={(e) => dispatch({ kind: 'filterCommunity', id: e.target.value })}
+          >
+            <option value="all">All clusters</option>
+            {communityOptions.multi.length > 0 && (
+              <optgroup label="Multi-file clusters">
+                {communityOptions.multi.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {communityOptionLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {communityOptions.single.length > 0 && (
+              <optgroup label="Single-file clusters (label is one file's name)">
+                {communityOptions.single.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {communityOptionLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </label>
+        {state.mode === 'browse' && (
+          <label className="memory-graph-filter">
+            <span>Group by</span>
+            <select value={grouping} onChange={(e) => setGrouping(e.target.value as BrowseGrouping)}>
+              <option value="type">File type</option>
+              <option value="community">Cluster</option>
+            </select>
+          </label>
+        )}
       </div>
-      <p className="memory-graph-list-summary" aria-live="polite">
-        {visibleCount} of {data.nodes.length} nodes shown
+      <p className="memory-graph-community-note">
+        Clusters are derived automatically by the upstream graph builder and named after one
+        representative node — {index.counts.singletonCommunities} of {index.counts.communities} hold
+        a single file. Advisory groupings, not as categories the schema recognises.
       </p>
 
-      <div className="memory-graph-body">
-        <div className="memory-graph-list-pane">
-          <div className="memory-graph-list" role="group" aria-label="Graph nodes">
-            {visibleCount === 0 && (
-              <p className="memory-graph-list-empty">No nodes match the current search or filters.</p>
-            )}
-            {typeFilter !== 'concept' &&
-              fileGroups.map((group) => (
-                <div className="memory-graph-list-group" key={group.key}>
-                  <h3 className="memory-graph-list-group-heading">
-                    {group.label}
-                    <span className="memory-graph-list-group-count">{group.files.length}</span>
-                  </h3>
-                  <ul className="memory-graph-list-rows">
-                    {group.files.map((f) => (
-                      <MemoryGraphListRow
-                        key={f.path}
-                        label={f.path}
-                        kind="file"
-                        community={communityLabel(f)}
-                        selected={selectedId === f.path}
-                        onSelect={() => selectNode(f.path)}
-                      />
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            {typeFilter !== 'file' && filteredConceptNodes.length > 0 && (
-              <div className="memory-graph-list-group">
-                <h3 className="memory-graph-list-group-heading">
-                  Concepts
-                  <span className="memory-graph-list-group-count">{filteredConceptNodes.length}</span>
-                </h3>
-                <ul className="memory-graph-list-rows">
-                  {filteredConceptNodes.map((c) => (
-                    <MemoryGraphListRow
-                      key={c.id}
-                      label={c.label ?? c.id}
-                      kind="concept"
-                      community={communityLabel(c)}
-                      selected={selectedId === c.id}
-                      onSelect={() => selectNode(c.id)}
-                    />
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
+      <fieldset className="memory-graph-relations">
+        <legend>Relationships</legend>
+        <div className="memory-graph-relations-row">
+          {index.relationTypes.map((rel) => {
+            const checked = state.relationFilter === null || state.relationFilter.includes(rel);
+            return (
+              <label className="memory-graph-relation-check" key={rel}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => {
+                    const current = state.relationFilter ?? [...index.relationTypes];
+                    const next = current.includes(rel)
+                      ? current.filter((r) => r !== rel)
+                      : [...current, rel];
+                    // Everything ticked is "no filter" (null); anything less is
+                    // the exact set — including none, which honestly draws none.
+                    dispatch({
+                      kind: 'filterRelation',
+                      relations: next.length === index.relationTypes.length ? null : next,
+                    });
+                  }}
+                />
+                <span className="mono">{rel}</span>
+              </label>
+            );
+          })}
+          {index.relationTypes.length === 0 && (
+            <span className="memory-graph-relations-note">
+              No relationship values are present in this projection.
+            </span>
+          )}
+          <span className="memory-graph-relations-note">
+            the backend's own values · unticking one also stops paths travelling through it
+          </span>
         </div>
+      </fieldset>
 
-        <div className="memory-graph-canvas-pane">
-          <div className="memory-graph-canvas-controls">
-            <button type="button" className="btn btn-secondary" onClick={fitView} aria-label="Fit graph to view">
-              <Maximize2 size={14} strokeWidth={2} aria-hidden="true" />
+      <form
+        className="memory-graph-pathform"
+        onSubmit={(e) => {
+          e.preventDefault();
+          dispatch({ kind: 'path', from: pathFrom, to: pathTo });
+        }}
+      >
+        <label className="memory-graph-pathfield">
+          <span>Path from</span>
+          <input
+            type="text"
+            value={pathFrom}
+            placeholder="file path or concept"
+            onChange={(e) => setPathFrom(e.target.value)}
+          />
+        </label>
+        <label className="memory-graph-pathfield">
+          <span>Path to</span>
+          <input
+            type="text"
+            value={pathTo}
+            placeholder="file path or concept"
+            onChange={(e) => setPathTo(e.target.value)}
+          />
+        </label>
+        <button type="submit" className="btn btn-secondary">
+          Find path
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => {
+            setPathFrom('');
+            setPathTo('');
+            setCommunityQuery('');
+            dispatch({ kind: 'clearFilters' });
+          }}
+        >
+          Clear filters
+        </button>
+      </form>
+
+      {/* The count line is deliberately NOT in the live region: it changes on
+          every search keystroke, which announced "3 of 5 … 2 of 5 … 1 of 5"
+          six times while typing one word. It stays a visible, readable status
+          line; the live region carries the RESULTS — notices, path outcomes,
+          neighbourhood outcomes, refusals. */}
+      <div className="memory-graph-status">
+        <p className="memory-graph-list-summary">
+          {shownCount} of {index.counts.total} nodes shown
+          {state.mode === 'explore' && listIds.length !== canvasIds.length
+            ? ` on the canvas · ${listIds.length} match in Browse`
+            : ''}
+        </p>
+        {state.focus && (
+          <span className="memory-graph-focuschip">
+            {state.focus.kind === 'neighbors'
+              ? `${state.focus.depth}-hop neighbourhood of ${state.focus.nodeId}`
+              : `path ${state.focus.from} → ${state.focus.to}`}
+            <button type="button" onClick={() => dispatch({ kind: 'clearFocus' })}>
+              Clear
             </button>
-            <button type="button" className="btn btn-secondary" onClick={zoomIn} aria-label="Zoom in">
-              <ZoomIn size={14} strokeWidth={2} aria-hidden="true" />
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={zoomOut} aria-label="Zoom out">
-              <ZoomOut size={14} strokeWidth={2} aria-hidden="true" />
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={resetView} aria-label="Reset view">
-              <RotateCcw size={14} strokeWidth={2} aria-hidden="true" />
-            </button>
-          </div>
-          <div className="memory-graph-canvas-scroll">
-            {svgMode === 'none' ? (
-              <p className="memory-graph-canvas-empty">
-                Select a file or concept from the list, or pick a community above, to see its
-                bounded neighborhood here.
-              </p>
-            ) : (
-              <svg
-                ref={svgRef}
-                className="memory-graph-svg"
-                viewBox={viewBox}
-                role="group"
-                aria-label={svgAriaLabel}
-                tabIndex={0}
-                onKeyDown={onSvgKeyDown}
-                onPointerDown={onSvgPointerDown}
-                onPointerMove={onSvgPointerMove}
-                onPointerUp={onSvgPointerUp}
-                onPointerLeave={onSvgPointerUp}
-              >
-                <g className="memory-graph-edges">
-                  {svgEdges.map((e) => {
-                    const p1 = positions.get(e.source);
-                    const p2 = positions.get(e.target);
-                    if (!p1 || !p2) return null;
-                    return (
-                      <line
-                        key={`${e.source}|${e.target}`}
-                        className="memory-graph-edge"
-                        x1={p1.x}
-                        y1={p1.y}
-                        x2={p2.x}
-                        y2={p2.y}
-                      />
-                    );
-                  })}
-                </g>
-                <g className="memory-graph-nodes">
-                  {svgOrder.map((id) => {
-                    const node = byId.get(id);
-                    const pos = positions.get(id);
-                    if (!node || !pos) return null;
-                    return (
-                      <GraphNodeShape
-                        key={id}
-                        node={node}
-                        x={pos.x}
-                        y={pos.y}
-                        isRoving={rovingId === id}
-                        isSelected={selectedId === id}
-                        onSelect={() => selectNode(id)}
-                        onKeyDown={(e) => onNodeKeyDown(e, id)}
-                      />
-                    );
-                  })}
-                </g>
-              </svg>
-            )}
-          </div>
-        </div>
+          </span>
+        )}
+      </div>
+      {/* Exactly ONE polite live region on this surface. Always mounted (an
+          empty container announces reliably; one created on demand does not). */}
+      <div className="memory-graph-live" aria-live="polite">
+        {state.notice && <GraphNoticeView notice={state.notice} dispatch={dispatch} />}
       </div>
 
-      {selectedNode && (
-        <MemoryGraphDetailPanel
-          node={selectedNode}
-          neighborEntries={neighborEntries}
-          onSelect={selectNode}
-          onNavigateFile={navigateToFile}
-          onNavigateConcept={navigateToConcept}
-        />
-      )}
+      <div className="memory-graph-body">
+        <div className="memory-graph-primary">
+          {state.mode === 'explore' ? (
+            <GraphCanvas
+              index={index}
+              state={state}
+              dispatch={dispatch}
+              visibleIds={canvasIds}
+              edges={canvasEdges}
+            />
+          ) : (
+            <GraphBrowse
+              index={index}
+              state={state}
+              dispatch={dispatch}
+              ids={listIds}
+              grouping={grouping}
+            />
+          )}
+          {/* Explore only: the legend explains CANVAS marks (shape, colour,
+              lines). Browse has no marks — it names every cluster in the rows
+              themselves — so showing it there would explain nothing. */}
+          {state.mode === 'explore' && <GraphLegend index={index} />}
+        </div>
+
+        <div className="memory-graph-side">
+          {state.focus?.kind === 'path' && (
+            <GraphPathResult
+              focus={state.focus}
+              index={index}
+              onSelect={(id) => dispatch({ kind: 'select', nodeId: id })}
+              onClear={() => dispatch({ kind: 'clearFocus' })}
+            />
+          )}
+          <GraphDetail
+            node={selectedNode}
+            index={index}
+            connected={selectedConnected}
+            relationFiltered={state.relationFilter !== null}
+            onSelect={(id) => dispatch({ kind: 'select', nodeId: id })}
+            onNeighbors={(id, depth) => dispatch({ kind: 'neighbors', nodeId: id, depth })}
+            onPathFrom={(id) => setPathFrom(id)}
+            onNavigateFile={navigateToFile}
+            onNavigateConcept={navigateToConcept}
+          />
+        </div>
+      </div>
     </div>
   );
 }
 
-// --- legend -----------------------------------------------------------------
+// --- notices -----------------------------------------------------------------
 
-function MemoryGraphLegend() {
+function GraphNoticeView({
+  notice,
+  dispatch,
+}: {
+  notice: NonNullable<GraphViewState['notice']>;
+  dispatch: (action: GraphAction) => void;
+}) {
+  if (notice.kind === 'not_found') {
+    return (
+      <p className="memory-graph-notice advisory">
+        No node in this projection matches <span className="mono">{notice.token}</span>. Nothing was
+        selected — an approximate match is never substituted for the one you asked for.
+      </p>
+    );
+  }
+  if (notice.kind === 'ambiguous') {
+    return (
+      <div className="memory-graph-notice advisory">
+        <span className="mono">{notice.token}</span> matches {notice.candidates.length} nodes, so no
+        identity was assumed. Pick one:
+        <ul className="memory-graph-notice-candidates">
+          {notice.candidates.map((id) => (
+            <li key={id}>
+              <button
+                type="button"
+                className="memory-graph-candidate-btn"
+                onClick={() => dispatch({ kind: 'select', nodeId: id })}
+              >
+                {id}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  if (notice.kind === 'community_not_found') {
+    return (
+      <p className="memory-graph-notice advisory">
+        No cluster in this projection matches <span className="mono">{notice.token}</span>. The
+        cluster filter was left as it was — an approximate cluster is never substituted.
+      </p>
+    );
+  }
+  if (notice.kind === 'community_ambiguous') {
+    return (
+      <div className="memory-graph-notice advisory">
+        <span className="mono">{notice.token}</span> matches {notice.candidates.length} clusters, so
+        none was assumed. Pick one:
+        <ul className="memory-graph-notice-candidates">
+          {notice.candidates.map((id) => (
+            <li key={id}>
+              <button
+                type="button"
+                className="memory-graph-candidate-btn"
+                onClick={() => dispatch({ kind: 'filterCommunity', id })}
+              >
+                {id}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  if (notice.kind === 'relation_unknown') {
+    return (
+      <p className="memory-graph-notice advisory">
+        {notice.tokens.length === 1 ? 'Relationship type' : 'Relationship types'}{' '}
+        <span className="mono">{notice.tokens.join(', ')}</span>{' '}
+        {notice.tokens.length === 1 ? 'is' : 'are'} not present in this projection, so{' '}
+        {notice.tokens.length === 1 ? 'it was' : 'they were'} not applied — the filter can only name
+        values the payload actually contains.
+      </p>
+    );
+  }
+  if (notice.kind === 'no_path') {
+    return (
+      <p className="memory-graph-notice advisory">
+        No path connects <span className="mono">{notice.from}</span> and{' '}
+        <span className="mono">{notice.to}</span> in this projection — under the current relationship
+        filter they are in separate components. That is the honest answer, not a rendering limit.
+      </p>
+    );
+  }
+  if (notice.kind === 'path_found') {
+    return (
+      <p className="memory-graph-notice">
+        Found a {notice.hops}-step route from <span className="mono">{notice.from}</span> to{' '}
+        <span className="mono">{notice.to}</span>. A route means these files reference one another
+        in the project source — it is a navigational lead, not a scientific relationship.
+      </p>
+    );
+  }
   return (
-    <p className="memory-graph-legend">
-      <span className="memory-graph-legend-item">
-        <span className="memory-graph-legend-shape memory-graph-legend-circle" aria-hidden="true" />
-        file
-      </span>
-      <span className="memory-graph-legend-item">
-        <span className="memory-graph-legend-shape memory-graph-legend-diamond" aria-hidden="true" />
-        concept
-      </span>
-      <span className="memory-graph-legend-item">
-        reference-type edges: imports, calls, references, imports_from, shares_data_with
-      </span>
+    <p className="memory-graph-notice">
+      Showing the {notice.depth}-hop neighbourhood of <span className="mono">{notice.nodeId}</span> —{' '}
+      {notice.count} node{notice.count === 1 ? '' : 's'}.
+      {notice.truncated
+        ? ' The neighbourhood hit its display bound, so some connected nodes are not shown here.'
+        : ''}
     </p>
   );
 }
 
-// --- textual list row ---------------------------------------------------------
+// --- legend -------------------------------------------------------------------
 
-function MemoryGraphListRow({
-  label,
-  kind,
-  community,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  kind: 'file' | 'concept';
-  community: string | null;
-  selected: boolean;
-  onSelect: () => void;
-}) {
+function GraphLegend({ index }: { index: GraphIndex }) {
+  // ONE source of truth for "which clusters are coloured": the same function
+  // the canvas paints with. Re-deriving it here (by rank, or by dropping
+  // singletons) is exactly how a coloured node ends up with no legend entry
+  // while the neutral swatch silently claims it.
+  const coloured = index.communitiesBySize
+    .map((entry) => ({ entry, slot: communityColorIndex(entry.id, index) }))
+    .filter((c): c is { entry: GraphCommunityEntry; slot: number } => c.slot !== null);
+  const colouredEntries = coloured.map((c) => c.entry);
+  const neutralExists =
+    coloured.length < index.communitiesBySize.length ||
+    index.nodes.some((n) => !n.community_id);
   return (
-    <li className="memory-graph-list-row">
-      <button
-        type="button"
-        className={`memory-graph-list-row-btn${selected ? ' selected' : ''}`}
-        aria-pressed={selected}
-        onClick={onSelect}
-      >
-        <span
-          className={`memory-graph-list-shape memory-graph-list-shape-${kind}`}
-          aria-hidden="true"
-        />
-        <span className="memory-graph-list-label mono">{label}</span>
-        {community && <span className="memory-graph-list-community">{community}</span>}
-      </button>
-    </li>
-  );
-}
-
-// --- SVG node shape -----------------------------------------------------------
-
-function GraphNodeShape({
-  node,
-  x,
-  y,
-  isRoving,
-  isSelected,
-  onSelect,
-  onKeyDown,
-}: {
-  node: ApiMemoryGraphNode;
-  x: number;
-  y: number;
-  isRoving: boolean;
-  isSelected: boolean;
-  onSelect: () => void;
-  onKeyDown: (e: ReactKeyboardEvent<SVGGElement>) => void;
-}) {
-  const label = node.label ?? node.id;
-  const community = communityLabel(node);
-  const ariaLabel = `${label}, ${node.kind}${community ? `, ${community}` : ''}${isSelected ? ', selected' : ''}`;
-  return (
-    <g
-      id={domId('graph-node', node.id)}
-      role="button"
-      tabIndex={isRoving ? 0 : -1}
-      aria-label={ariaLabel}
-      aria-pressed={isSelected}
-      className={`memory-graph-node memory-graph-node-${node.kind}${isSelected ? ' selected' : ''}`}
-      transform={`translate(${x} ${y})`}
-      onClick={onSelect}
-      onKeyDown={onKeyDown}
-    >
-      {node.kind === 'file' ? (
-        <circle className="memory-graph-node-shape" r={14} />
-      ) : (
-        <polygon className="memory-graph-node-shape" points="0,-16 16,0 0,16 -16,0" />
+    <div className="graph-legend">
+      <p className="graph-legend-row">
+        <span className="graph-legend-item">
+          <span className="graph-legend-swatch shape-file-outline" aria-hidden="true" />
+          circle = file
+        </span>
+        <span className="graph-legend-item">
+          <span className="graph-legend-swatch shape-concept shape-file-outline" aria-hidden="true" />
+          diamond = concept
+        </span>
+        <span className="graph-legend-item">
+          lines = references recorded in the projection ({index.relationTypes.join(', ') || 'none'})
+        </span>
+      </p>
+      {coloured.length > 0 && (
+        <p className="graph-legend-row">
+          {coloured.map(({ entry, slot }) => (
+            <span className="graph-legend-item" key={entry.id}>
+              <span className={`graph-legend-swatch c${slot}`} aria-hidden="true" />
+              {/* `name · N files`, never `name (28) (13)`: upstream names carry
+                  their own parenthetical, so a second one reads as the same
+                  kind of number. Identical names get their cluster id too. */}
+              {communityLabelAmong(entry, colouredEntries)}
+            </span>
+          ))}
+          {neutralExists && (
+            <span className="graph-legend-item">
+              <span className="graph-legend-swatch" aria-hidden="true" />
+              every other cluster, and nodes in no cluster
+            </span>
+          )}
+        </p>
       )}
-      <text className="memory-graph-node-label" y={30} textAnchor="middle">
-        {shortNodeLabel(node)}
-      </text>
-    </g>
-  );
-}
-
-// --- detail panel ---------------------------------------------------------
-
-function MemoryGraphDetailPanel({
-  node,
-  neighborEntries,
-  onSelect,
-  onNavigateFile,
-  onNavigateConcept,
-}: {
-  node: ApiMemoryGraphNode;
-  neighborEntries: { node: ApiMemoryGraphNode; relations: string[] }[];
-  onSelect: (id: string) => void;
-  onNavigateFile: (path: string) => void;
-  onNavigateConcept: (id: string) => void;
-}) {
-  const community = communityLabel(node);
-  return (
-    <div className="memory-graph-detail" aria-live="polite">
-      <h3 className="memory-graph-detail-title mono">{node.label ?? node.id}</h3>
-      <dl className="memory-graph-detail-figures">
-        <div className="memory-graph-detail-figure">
-          <dt>Kind</dt>
-          <dd>{node.kind === 'file' ? 'File' : 'Concept'}</dd>
-        </div>
-        <div className="memory-graph-detail-figure">
-          <dt>Community</dt>
-          <dd>{community ?? '—'}</dd>
-        </div>
-        <div className="memory-graph-detail-figure">
-          <dt>Community ID</dt>
-          <dd className="mono">{node.community_id ?? '—'}</dd>
-        </div>
-        {node.kind === 'file' && (
-          <div className="memory-graph-detail-figure">
-            <dt>Nodes</dt>
-            <dd className="mono">{node.node_count}</dd>
-          </div>
-        )}
-      </dl>
-
-      {node.on_disk ? (
-        <p className="memory-graph-detail-ondisk">present locally on this backend (not opened here)</p>
-      ) : (
-        <p className="memory-graph-detail-ondisk-missing">not present on this backend — cannot open</p>
-      )}
-
-      {node.kind === 'file' ? (
-        <button type="button" className="btn btn-secondary" onClick={() => onNavigateFile(node.id)}>
-          View in Sources
-        </button>
-      ) : (
-        <button type="button" className="btn btn-secondary" onClick={() => onNavigateConcept(node.id)}>
-          View in Concepts
-        </button>
-      )}
-
-      <div className="memory-graph-detail-section">
-        <h4 className="memory-graph-detail-section-heading">Connected nodes</h4>
-        {neighborEntries.length > 0 ? (
-          <ul className="memory-graph-detail-connected-list">
-            {neighborEntries.map(({ node: n, relations }) => (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  className="memory-graph-detail-connected-link"
-                  onClick={() => onSelect(n.id)}
-                >
-                  <span className="mono">{n.label ?? n.id}</span>
-                  {relations.length > 0 && (
-                    <span className="memory-graph-detail-relation">{relations.join(', ')}</span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="memory-graph-detail-empty-note">
-            no recorded connections for this node in the rendered graph
-          </p>
-        )}
-      </div>
-
-      <details className="memory-graph-detail-raw">
-        <summary>Raw node data</summary>
-        <pre className="mono">{JSON.stringify(node, null, 2)}</pre>
-      </details>
     </div>
   );
 }

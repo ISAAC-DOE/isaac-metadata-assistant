@@ -13,6 +13,11 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
+# node — dependencies and tool caches, at any depth. The frontend lives in
+# apps/web, but a vitest/vite run from the REPO ROOT drops a cache at
+# ./node_modules, which was previously unignored and stageable by `git add -A`.
+node_modules/
+
 # os
 .DS_Store
 
