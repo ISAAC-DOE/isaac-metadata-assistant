@@ -321,6 +321,187 @@
   outline-offset: 1px;
 }
 
+/* ---- command bar (P36R S4) -------------------------------------------- */
+/* A bounded, keyboard-first grammar over the SAME actions the controls above
+   dispatch. Deliberately NOT styled as a terminal or a chat: one input row, a
+   compact completion list, and a short ephemeral results log. Every border here
+   is a full `border:` shorthand (no-vertical-rail.test.ts). */
+.graph-cmd {
+  position: relative;
+  margin-top: 12px;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+.graph-cmd-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.graph-cmd-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 260px;
+  min-width: 160px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.graph-cmd-field:focus-within {
+  border: 1px solid var(--action);
+}
+.graph-cmd-prompt {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-quaternary);
+}
+.graph-cmd-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--text-heading);
+}
+.graph-cmd-input::placeholder {
+  color: var(--text-quaternary);
+}
+.graph-cmd-run {
+  flex: none;
+}
+.graph-cmd-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: var(--action);
+  background: none;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+}
+.graph-cmd-help:hover {
+  color: var(--action-hover);
+  background: var(--action-tint);
+}
+.graph-cmd-hint {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.graph-cmd-suggestions {
+  position: absolute;
+  z-index: 4;
+  left: 11px;
+  right: 11px;
+  margin-top: 4px;
+  padding: 4px;
+  list-style: none;
+  max-height: 210px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+  box-shadow: var(--shadow-screen);
+}
+.graph-cmd-suggestion {
+  border-radius: var(--radius-inner);
+}
+.graph-cmd-suggestion.active,
+.graph-cmd-suggestion:hover {
+  background: var(--action-tint);
+}
+.graph-cmd-suggestion-btn {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 5px 8px;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.graph-cmd-suggestion-hint {
+  flex: none;
+  max-width: 55%;
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
+}
+.graph-cmd-history {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-faint);
+}
+.graph-cmd-history-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.graph-cmd-history-title {
+  font-size: 10.5px;
+  font-style: italic;
+  color: var(--text-quaternary);
+}
+.graph-cmd-history-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  background: none;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+}
+.graph-cmd-history-clear:hover {
+  color: var(--action-hover);
+  background: var(--action-tint);
+}
+.graph-cmd-history-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.graph-cmd-history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.graph-cmd-history-cmd {
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.graph-cmd-history-item.is-error .graph-cmd-history-cmd {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+.graph-cmd-history-out {
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
 /* ---- status line + notices ------------------------------------------- */
 .memory-graph-status {
   margin-top: 10px;
@@ -999,14 +1180,13 @@
   font-size: 11.5px;
   line-height: 1.6;
 }
-.graph-help-placeholder {
-  margin-top: 16px;
-  padding: 9px 11px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-inner);
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--text-tertiary);
+/* The generated command list: each row is `<syntax> — summary`, so the mono
+   syntax token needs a little breathing room from the prose that follows it. */
+.graph-help-commands li {
+  line-height: 1.9;
+}
+.graph-help-commands .graph-help-kbd {
+  margin-right: 4px;
 }
 
 /* ---- reduced motion --------------------------------------------------- */
@@ -1070,6 +1250,19 @@
   }
   .memory-graph-detail-figures {
     grid-template-columns: 1fr;
+  }
+  /* The command row stacks; the input keeps its intrinsic height (in a COLUMN
+     container `flex-basis` is a HEIGHT, so the row layout's `flex: 1 1 260px`
+     would make the field 260px tall). */
+  .graph-cmd-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .graph-cmd-field {
+    flex: none;
+  }
+  .graph-cmd-suggestion-hint {
+    display: none;
   }
   .graph-help-backdrop {
     padding: 16px 12px;

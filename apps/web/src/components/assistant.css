@@ -660,6 +660,100 @@ button.assistant-source-chip-nav:focus-visible {
   margin-top: 8px;
 }
 
+/* ---- Graph-navigation proposal (P36R S5) ---------------------------- */
+/* Rendered only on the one mount that opted in (Project Memory · Graph tab).
+ * Same discipline as the proposed-action region: its own labelled block above
+ * the composer, an explicit "not applied" eyebrow, and no verdict colour. Every
+ * border is a full `border:` shorthand — no accent edge (no-vertical-rail). */
+.assistant-graph {
+  flex: none;
+  min-width: 0;
+  margin-top: 12px;
+  padding: 10px 11px 11px;
+  border: 1px solid var(--assist-border);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+}
+.assistant-graph-eyebrow {
+  margin: 0;
+  color: var(--assist);
+}
+.assistant-graph-title {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.assistant-graph-command {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.assistant-graph-command span {
+  color: var(--text-secondary);
+}
+.assistant-graph-choices {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.assistant-graph-choice {
+  max-width: 100%;
+  padding: 3px 9px;
+  font-size: 11px;
+  color: var(--assist);
+  background: var(--surface);
+  border: 1px solid var(--assist-border);
+  border-radius: var(--radius-pill);
+  overflow-wrap: anywhere;
+}
+.assistant-graph-choice:hover {
+  background: var(--assist-tint);
+}
+.assistant-graph-prov {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-quaternary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.assistant-graph-actions {
+  margin-top: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.assistant-graph-dismiss {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: none;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+}
+.assistant-graph-dismiss:hover {
+  color: var(--assist);
+  background: var(--assist-tint);
+}
+.assistant-graph-note {
+  margin-top: 8px;
+  font-size: 10.5px;
+  font-style: italic;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
 /* ---- Composer dock + footer (P36R S2) ------------------------------- */
 /* The composer is PINNED at the bottom of the panel two ways, so asking another
  * question never requires scrolling: it is the last `flex: none` child of the

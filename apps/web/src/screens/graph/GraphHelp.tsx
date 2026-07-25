@@ -10,6 +10,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { X } from '../../components/icons';
 import type { ApiMemoryGraphMeta } from '../../lib/types';
+import { GRAPH_COMMANDS } from '../../lib/graphCommands';
 import {
   HUB_LABEL_COUNT,
   LABEL_LIMIT,
@@ -281,10 +282,55 @@ export function GraphHelp({
           validators, never to this graph.
         </p>
 
-        <p className="graph-help-placeholder">
-          Command syntax — reserved. A deterministic command bar is planned for a later slice; its
-          grammar and examples will be documented in this section.
-        </p>
+        {/* P36R S4 — the command grammar, generated from the SAME catalog the
+            parser and the completion list read (`GRAPH_COMMANDS`), so the help
+            can never document a command that does not exist, or miss one. */}
+        <div className="graph-help-section">
+          <h4>Command syntax</h4>
+          <p>
+            The command bar below the filters accepts this fixed list and nothing else. Each command
+            does exactly what a control on this page does — it runs no code, reads no files, and
+            changes no record.
+          </p>
+          <ul className="graph-help-list graph-help-commands">
+            {GRAPH_COMMANDS.map((c) => (
+              <li key={c.verb}>
+                <span className="graph-help-kbd mono">{c.syntax}</span> {c.summary}
+              </li>
+            ))}
+          </ul>
+          <p className="graph-help-example">
+            examples · <span className="mono">find export</span> ·{' '}
+            <span className="mono">neighbors src/isaac_records/export.py depth 2</span> ·{' '}
+            <span className="mono">path src/isaac_records/export.py -&gt; src/isaac_records/audit.py</span>{' '}
+            · <span className="mono">relation imports</span> ·{' '}
+            <span className="mono">clear filters</span>
+          </p>
+          <p className="graph-help-example">
+            An unknown node lists nothing rather than guessing; an ambiguous one lists the candidates
+            and stops. The command history is kept in this browser tab for this visit only — it is
+            never saved and never sent anywhere.
+          </p>
+          <p className="graph-help-example">
+            Sharing a link: the address bar is updated by commands and by applied Assistant
+            proposals, not by every control. Typing in the search box or changing a filter above
+            leaves the URL where the last command left it — run the equivalent command (or re-run{' '}
+            <span className="mono">fit</span>) before copying the link if you want the view you are
+            looking at.
+          </p>
+        </div>
+
+        <div className="graph-help-section">
+          <h4>Asking the Assistant</h4>
+          <p>
+            On this tab the Assistant also recognises a bounded set of graph questions — neighbours,
+            routes, clusters, relationship filters, and resets. It resolves them against this same
+            projection, explains what it found, and offers an explicit{' '}
+            <span className="graph-help-term">Apply to Graph</span>. It never changes the graph
+            before you apply it, never guesses an ambiguous name, and refuses anything outside that
+            list rather than improvising.
+          </p>
+        </div>
       </div>
     </div>
   );
