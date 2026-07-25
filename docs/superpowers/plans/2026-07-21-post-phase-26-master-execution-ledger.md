@@ -1351,6 +1351,20 @@ merge-commit → GHCR image + Flux. Hosted QA of every image is Krish-gated.
   NOT auto-merged** (both edit `build-push.yaml`, which runs only post-merge — not PR-CI-verified — and
   H1 can't be proven safe without `isaac-k8` visibility).
 
-Open (Krish/Dean): hosted QA of `v0.0.4`–`v0.0.9`; responsive/200%-zoom visual sign-off; personal-deploy
-retirement (Vercel/Railway disable-not-delete); H1/H2 hardening PRs. Phase 37 readiness plan:
+- **P36.8** Workflow-progression banner + demo-idempotence guard — `v0.0.11` / merge `5bb25a8` / PR #9
+  (Sonnet implement → independent Opus review **SHIP**, 0 critical/0 important). Frontend-only,
+  truth/validation/export/`workflow.py` byte-untouched. **Task 2 root cause:** export-readiness is
+  **fully derived** (`workflow.py::derive_workflow`) — no human review step, no state-transition bug; the
+  "populated but Export-gated" screenshot is UX ambiguity. A compact state-driven banner on the four
+  record screens surfaces the single next action, truthful to the derivation (`review_export_readiness`
+  is `current_step` only when the official dry-run is failing → "Not ready to export yet", never
+  "complete"), suppressed on a step's own surface / where a resident CTA exists, navigates without
+  mutating or bypassing a gate, moves focus to `<main>`. **Task 4:** repeated Run-Synthetic-Demo already
+  idempotent by fixed-`CANONICAL_IDS` upsert (five records are intentional distinct examples) → no fix,
+  one regression guard added; no Reset button. Verified: frontend 751 / backend 1029 / `tsc -b` + vite
+  build / snapshot regen (no drift) + gate 17 / leak scans clean.
+
+Open (Krish/Dean): hosted QA of `v0.0.4`–`v0.0.11` (`/krish/api/health` `commit` should read `5bb25a8`
+once Flux rolls `v0.0.11`); responsive/200%-zoom visual sign-off; personal-deploy retirement
+(Vercel/Railway disable-not-delete); H1/H2 hardening PRs. Phase 37 readiness plan:
 `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md`. **No Phase 37 work started.**

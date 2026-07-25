@@ -392,21 +392,28 @@ Current state:
   (preserved historical mirror). The integration did NOT change the truth path. **Personal-deploy
   retirement (Vercel `isaac-demo-web` + Railway service) is pending Krish's dashboard disable-not-delete
   action**; the human responsive / 200%-zoom visual sign-off gate remains OPEN.
-- **Phase 36 (repository-local native enhancements) — feature slices COMPLETE** at org HEAD `5d99fcb`
-  (image `v0.0.9`); synthetic-only, deterministic, no LLM/portal/real-data, truth core untouched (see
-  `docs/superpowers/plans/2026-07-24-phase-36-native-enhancements-plan.md` and the closure
-  `docs/superpowers/plans/2026-07-24-phase-36-closure.md`). Shipped: **P36.1** Assistant empty-state
-  cleanup (`v0.0.5`), **P36.2** Project Memory Graph tab (`v0.0.6`), **P36.3** Standalone Validator
-  (`v0.0.7`), **P36.4** API Docs + Help/About (`v0.0.8`), **P36.6** Schema & Vocabulary browser
-  (`v0.0.9`) — each via Sonnet implement → independent Opus review → full suites + `tsc -b` + snapshot
-  regen + gate → PR → merge-commit → GHCR + Flux. **P36.5** (New Record audit) and **P36.7** (Workspace
-  Overview) were **skipped with documented rationale**. Hardening: **H3** `ApiKeyAuthMiddleware` →
-  retain + defer (decided); **H1** `:latest` removal + **H2** Action-SHA pinning → specified, staged as
-  Dean-in-the-loop PRs (both edit `build-push.yaml`, not PR-CI-verified; H1 unprovable without
-  `isaac-k8`). **Hosted QA of every image is Krish-gated** (Authentik edge, not self-verifiable here);
-  responsive/200%-zoom sign-off + personal-deploy retirement remain OPEN. **Phase 37 (portal / Postgres
-  / real data / API keys / roles / external LLM) remains NOT authorized** — readiness plan only:
-  `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md`.
+- **Phase 36 (repository-local native enhancements) — COMPLETE incl. workflow-progression closure
+  slice** at org HEAD `5bb25a8` (image `v0.0.11`); synthetic-only, deterministic, no LLM/portal/real-data,
+  truth core untouched (see `docs/superpowers/plans/2026-07-24-phase-36-native-enhancements-plan.md` and
+  the closure `docs/superpowers/plans/2026-07-24-phase-36-closure.md`). Feature slices: **P36.1**
+  Assistant empty-state cleanup (`v0.0.5`), **P36.2** Project Memory Graph tab (`v0.0.6`), **P36.3**
+  Standalone Validator (`v0.0.7`), **P36.4** API Docs + Help/About (`v0.0.8`), **P36.6** Schema &
+  Vocabulary browser (`v0.0.9`). Closure slice **P36.8** (`v0.0.11`, merge `5bb25a8`, PR #9): a
+  state-driven **workflow progression banner** on the four record screens surfacing the single next
+  action — export-readiness confirmed **fully derived** (`workflow.py::derive_workflow`; no human review
+  step, no state-transition bug), so the banner is frontend-only, truthful to the derivation (never claims
+  "ready" when the official dry-run is failing), never mutates or bypasses a gate; **plus** a
+  synthetic-demo idempotence **regression guard** (audit found repeated Run-Synthetic-Demo already
+  idempotent by fixed `CANONICAL_IDS` upsert — no fix needed, test-strengthening only). Each slice: Sonnet
+  implement → independent Opus review → full suites + `tsc -b` + snapshot regen + gate → PR → merge-commit
+  → GHCR + Flux. **P36.5** (New Record audit) and **P36.7** (Workspace Overview) were **skipped with
+  documented rationale**. Hardening: **H3** `ApiKeyAuthMiddleware` → retain + defer (decided); **H1**
+  `:latest` removal + **H2** Action-SHA pinning → specified, staged as Dean-in-the-loop PRs (both edit
+  `build-push.yaml`, not PR-CI-verified; H1 unprovable without `isaac-k8`). **Hosted QA of every image is
+  Krish-gated** (Authentik edge, not self-verifiable here — hosted `/krish/api/health` `commit` should
+  read `5bb25a8` once Flux rolls `v0.0.11`); responsive/200%-zoom sign-off + personal-deploy retirement
+  remain OPEN. **Phase 37 (portal / Postgres / real data / API keys / roles / external LLM) remains NOT
+  authorized** — readiness plan only: `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md`.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the authorized Phase 36 native-enhancement slices) only after explicit user approval.
 

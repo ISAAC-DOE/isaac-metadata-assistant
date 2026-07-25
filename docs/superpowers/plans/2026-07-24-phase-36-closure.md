@@ -1,7 +1,8 @@
 # Phase 36 — Repository-Local Native Enhancements · Closure
 
-**Status:** Feature slices CLOSED 2026-07-24 at org `main` `5d99fcb` (image `v0.0.9`). Hardening H3
-decided; H1/H2 specified and staged for Dean-in-the-loop PRs (not auto-merged — see §3).
+**Status:** CLOSED 2026-07-24 at org `main` `5bb25a8` (image `v0.0.11`) — feature slices P36.1–P36.6
+plus the **P36.8 workflow-progression + demo-idempotence closure slice** (see §4). Hardening H3 decided;
+H1/H2 specified and staged for Dean-in-the-loop PRs (not auto-merged — see §3).
 **Owner:** orchestrator (Opus 4.8, ratified fallback for Fable 5).
 **Plan of record:** `docs/superpowers/plans/2026-07-24-phase-36-native-enhancements-plan.md`.
 
@@ -107,11 +108,49 @@ Dean-in-the-loop PRs rather than autonomously merged deploy-workflow changes.
 
 ---
 
-## 4. Open items carried forward (Krish / Dean)
+## 4. P36.8 — Workflow-progression + demo-idempotence closure slice
 
-- **Hosted QA** of `v0.0.4`–`v0.0.9` at `/krish` (Authentik-gated): `/krish/api/health` `commit` should
-  read `5d99fcb`; smoke the Assistant (no resting card), the Graph tab, the Validator, Help/About + API
-  Docs (Settings), and the Schema & Vocabulary browser (Governance & Safety tabs).
+**Shipped `v0.0.11`, merge `5bb25a8`, PR #9. Sonnet implement → independent Opus review (SHIP; 0
+critical, 0 important) → frontend 751 / backend 1029 / `tsc -b` + vite build / snapshot regen (no drift)
++ gate 17 → Create-a-merge-commit → GHCR `v0.0.11` + Flux.** Frontend-only; truth/validation/export/
+workflow-derivation path (`schema/`, `src/isaac_records/`, `official.py`, `workflow.py`) byte-untouched;
+no new backend endpoint; runtime mode / persistence / auth unchanged.
+
+- **Root cause (Task 2):** export-readiness is **fully derived** by `workflow.py::derive_workflow`
+  (`current_step` = first unsatisfied step; export unlocks automatically when `pending_count == 0` and the
+  official-schema export dry-run passes). There is **no** human "review readiness" step (no button/flag/
+  route; `review.py` is inert) — so the "populated but Export-gated" screenshot is **UX ambiguity, not a
+  state-transition bug**. Key invariant the copy relies on: `current_step == 'review_export_readiness'`
+  can occur **only** when `pending==0 && draft_ok` and the official dry-run is **failing** (else
+  `current_step` would already be `export`).
+- **The banner** (`apps/web/src/components/WorkflowProgressBanner.tsx`, mounted on the four record
+  screens via `AppShell`): compact, state-driven, driven purely by `workflow.current_step` +
+  `pending_count`. States — `complete_metadata` → "N items need your attention"; `review_evidence` →
+  "Evidence review needed"; `review_export_readiness` (dry-run failing) → **"Not ready to export yet"**
+  (never a serene "complete"); `export` (dry-run passing) → "Ready to export"; done → no banner.
+  Suppressed on the step's own surface (no duplicate CTA) and where a screen already owns the CTA
+  (`RecordWorkbench` `excludeSteps=['complete_metadata']`, deferring to its resident `.needsyou-banner`).
+  react-router navigation preserves record context / `/krish` base-path / back-forward; never mutates a
+  value or bypasses a gate; moves focus to `<main>` on the destination (AppShell one-shot `focusMain`
+  effect + `tabIndex=-1`).
+- **Synthetic-demo idempotence (Task 4):** audit found repeated **Run Synthetic Demo** already
+  **idempotent by construction** — fixed `CANONICAL_IDS`, upsert-in-place, count pinned at 5, no random
+  ULID on that path, real data untouchable (synthetic-only fail-closed, committed fixtures, uploads
+  403). The five XANES records are **intentional distinct workflow-state examples**, not repeated-run
+  artifacts. **No code/UI change; no Reset button added** (a guarded `demo_reset` already exists,
+  correctly separated). Added one **regression guard** (`test_repeated_mixed_demo_runs_only_ever_canonical_ids`)
+  asserting the id set stays exactly `CANONICAL_IDS` across 8 interleaved `draft_only`/`full` runs.
+- **Accessibility:** `role="note"`, named `<button>`, keyboard-operable, `aria-hidden` icon, meaning by
+  icon+heading+text (not color alone), focus-to-`<main>`; CSS token-only, no fixed heights, 640px stack
+  → structurally 200%/narrow-safe. The **human responsive / 200%-zoom render sign-off remains Krish's**.
+
+## 5. Open items carried forward (Krish / Dean)
+
+- **Hosted QA** of `v0.0.4`–`v0.0.11` at `/krish` (Authentik-gated): `/krish/api/health` `commit` should
+  read `5bb25a8` once Flux rolls `v0.0.11`; smoke the Assistant (no resting card), the Graph tab, the
+  Validator, Help/About + API Docs (Settings), the Schema & Vocabulary browser (Governance & Safety
+  tabs), and the **new progression banner** across the record screens (correct next-action per state; no
+  duplicate CTA on a step's own surface; keyboard + focus move).
 - **Responsive / 200%-zoom human visual sign-off** (standing gate) across the new surfaces.
 - **Personal-deploy retirement** (Vercel `isaac-demo-web` + Railway — dashboard disable-not-delete).
 - **H1 + H2 hardening PRs** (Dean in the loop); **H3** documented decision (retain + defer).
