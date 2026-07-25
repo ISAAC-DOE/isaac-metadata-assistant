@@ -1,0 +1,83 @@
+/*
+ * WorkflowProgressBanner — a compact "next step" CTA shared by the four
+ * record-scoped screens. Two tones only, both full-border + tint (no colored
+ * vertical rail, per the no-vertical-rail rule):
+ *  - attention: the same amber advisory tokens as .needsyou-banner — still
+ *    blocked on something.
+ *  - ready: the same action-blue "tint + text-on-tint" combination already
+ *    used by .nav-item.active / .chip-mentor — calm, not celebratory. Never
+ *    the reserved pass/fail verdict hues (--pass-solid, --fail-solid, etc.),
+ *    which are reserved for validation verdicts (P22C).
+ */
+.wf-progress-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-card);
+  border: 1px solid transparent;
+}
+.wf-progress-banner--attention {
+  background: var(--advisory-bg);
+  border-color: var(--advisory-border);
+}
+.wf-progress-banner--ready {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+
+/* Icon + heading/body cluster. flex:1 so it fills the row and pushes the
+ * action button to the far right on wide screens. */
+.wf-progress-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.wf-progress-icon { flex: none; }
+.wf-progress-banner--attention .wf-progress-icon { color: var(--advisory-icon); }
+.wf-progress-banner--ready .wf-progress-icon { color: var(--action); }
+
+.wf-progress-body { flex: 1 1 auto; min-width: 0; }
+.wf-progress-heading {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.wf-progress-banner--attention .wf-progress-heading { color: var(--advisory-text); }
+.wf-progress-banner--ready .wf-progress-heading { color: var(--action-hover); }
+
+.wf-progress-text {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.wf-progress-action { flex: none; }
+
+/* EvidenceExplorer mounts on a mainPad="none" screen (no ambient <main>
+ * padding) — wrap the banner in this class there so its edges line up with
+ * the padded panels below it (.evclass uses 20px 24px; other record screens'
+ * mainPad="pad"/"centered" containers already provide this inset, so they
+ * don't use it). */
+.wf-progress-banner-inset {
+  margin: 0 24px;
+}
+
+/* Narrow viewports: stack the text cluster above the action, full width —
+ * matches the app's other max-width:640px collapse rules (screens.css). No
+ * fixed heights anywhere above, so nothing clips at 200% zoom either. */
+@media (max-width: 640px) {
+  .wf-progress-banner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .wf-progress-action {
+    width: 100%;
+    justify-content: center;
+  }
+}

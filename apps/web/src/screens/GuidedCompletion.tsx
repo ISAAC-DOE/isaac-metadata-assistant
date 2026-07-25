@@ -12,6 +12,7 @@ import { StatusChip } from '../components/StatusChip';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
+import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Check, CircleHelp, Pencil } from '../components/icons';
 import { LABELS } from '../lib/labels';
@@ -338,6 +339,11 @@ function LoadedCompletion({
         </div>
       )}
       <LiveSyncNote degraded={degraded} onRefresh={reload} />
+      <WorkflowProgressBanner
+        workflow={detail.workflow}
+        recordId={id}
+        pendingCount={detail.pending_count}
+      />
     </>
   );
 
