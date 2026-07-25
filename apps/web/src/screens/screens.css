@@ -596,9 +596,17 @@
   color: var(--text-secondary);
 }
 
-/* ---- Concept Lookup card (P24.5) — curated-concept browsing with anchor
-   provenance. Mirrors the Source Index card's accordion pattern above; no new
-   interaction language. */
+/* ---- Concept Lookup card (P24.5, redesigned P36R Slice 7) -------------
+   A MASTER-DETAIL browser: search + two honest category filters, a compact
+   keyboard-navigable list, and one detail region that is the only thing that
+   changes when the selection does. It replaces the P24.5 accordion, whose
+   inline panel pushed the rest of the page down on every open.
+
+   No-Vertical-Rail rule (no-vertical-rail.test.ts): every border below is a
+   full `border:` shorthand — there is no border-left/border-right anywhere in
+   this block, coloured or otherwise. The selected row is marked by an INSET
+   box-shadow ring plus a heavier label weight, so selection is never carried
+   by colour alone. */
 .concept-lookup-card {
   margin-top: 18px;
 }
@@ -620,12 +628,131 @@
   color: var(--text-secondary);
   line-height: 1.55;
 }
+
+/* ---- toolbar: search + category filters ------------------------------
+   A grid with a FIXED track minimum, not an auto-sized flex row. A <select>
+   carrying real anchor-document / cluster labels has a max-content width of
+   several hundred pixels; in an auto-sized track that contribution stretches
+   the whole toolbar and makes <main> scroll horizontally at 375px (the same
+   defect the graph controls hit — see graph.css @media 640). `minmax(190px,
+   1fr)` pins the track min, and `min-width: 0` on every item and field stops
+   intrinsic width leaking back out. */
+.concept-lookup-toolbar {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 12px;
+  align-items: end;
+}
+.concept-lookup-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.concept-lookup-search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-quaternary);
+  pointer-events: none;
+}
+.concept-lookup-search-input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px 7px 30px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+}
+.concept-lookup-search-input::placeholder {
+  color: var(--text-quaternary);
+}
+.concept-lookup-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.concept-lookup-filter > span {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.concept-lookup-filter select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+}
+.concept-lookup-filter-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* ---- master / detail split -------------------------------------------
+   Wrap-based, not breakpoint-based (the same instrument .memory-graph-body
+   uses): the LeftNav and the Assistant rail already consume ~580px, so a
+   viewport media query is the wrong measure. The two columns wrap on their own
+   flex-basis, which puts the detail beneath the list exactly when the list
+   would otherwise be starved — at any viewport, with no magic number. */
+.concept-lookup-split {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.concept-lookup-master {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.concept-lookup-detailpane {
+  flex: 2 1 360px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+}
+.concept-lookup-pane-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.concept-lookup-pane-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-quaternary);
+}
+
+/* ---- master list ------------------------------------------------------ */
 .concept-lookup-rows {
-  margin: 14px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
-  max-height: 440px;
+  max-height: 420px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 .concept-lookup-row + .concept-lookup-row {
   border-top: 1px solid var(--border-hair);
@@ -635,46 +762,115 @@
   align-items: flex-start;
   gap: 8px;
   width: 100%;
-  padding: 8px 6px;
+  min-width: 0;
+  padding: 8px;
   background: none;
   border: none;
   border-radius: var(--radius-inner);
   text-align: left;
   color: inherit;
+  transition: background 0.12s ease;
 }
 .concept-lookup-row-btn:hover {
   background: var(--surface-subtle);
+}
+/* Selection carries THREE cues, only one of which is colour: an inset ring, a
+   heavier label, and aria-current for assistive technology. */
+.concept-lookup-row-btn.selected {
+  background: var(--action-tint);
+  box-shadow: inset 0 0 0 1px var(--action-selected-border);
+}
+.concept-lookup-row-btn.selected .concept-lookup-label {
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.concept-lookup-row-btn.selected .concept-lookup-chevron {
+  color: var(--action);
 }
 .concept-lookup-chevron {
   flex: none;
   margin-top: 2px;
   color: var(--text-disabled);
 }
-.concept-lookup-label {
+.concept-lookup-rowbody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
   flex: 1;
+}
+.concept-lookup-label {
   min-width: 0;
   font-size: 12.5px;
+  line-height: 1.4;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.concept-lookup-rowmeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .concept-lookup-community {
-  flex: none;
   font-size: 11px;
   color: var(--text-tertiary);
-  padding-top: 1px;
+  overflow-wrap: anywhere;
 }
-.concept-lookup-panel {
-  margin: 0 0 10px 22px;
-  padding: 10px 14px;
-  background: var(--surface-subtle);
+.concept-lookup-badge {
+  flex: none;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+  background: var(--surface);
   border: 1px solid var(--border-faint);
-  border-radius: var(--radius-inner);
+  border-radius: var(--radius-pill);
 }
-/* `source_file` is inert text — no link, no download, no viewer. */
+
+/* ---- detail pane ------------------------------------------------------ */
+.concept-lookup-detail-empty-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-heading);
+}
+.concept-lookup-detail-empty-text {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+}
+.concept-lookup-detail-heading {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.concept-lookup-description {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.concept-lookup-boundary {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+/* `source_file` opens the SOURCE INDEX row for that file — provenance
+   navigation only. Nothing here fetches, downloads or renders file bytes. */
 .concept-lookup-anchor {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 4px 8px;
+  margin-top: 12px;
+  min-width: 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
@@ -684,17 +880,44 @@
   text-transform: uppercase;
   color: var(--text-tertiary);
 }
+.concept-lookup-anchor-link {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--action);
+  overflow-wrap: anywhere;
+}
+.concept-lookup-anchor-link:hover {
+  color: var(--action-hover);
+  text-decoration: underline;
+}
+.concept-lookup-anchor-action {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  text-transform: lowercase;
+}
 .concept-lookup-anchor-missing {
-  margin-top: 2px;
+  margin-top: 4px;
   font-size: 11px;
   font-style: italic;
   color: var(--text-tertiary);
+  line-height: 1.5;
 }
 .concept-lookup-panel-figures {
   margin: 10px 0 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 16px;
+}
+.concept-lookup-panel-figure {
+  min-width: 0;
 }
 .concept-lookup-panel-figures dt {
   font-size: 10.5px;
@@ -705,9 +928,22 @@
   font-size: 12px;
   font-weight: 500;
   color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.concept-lookup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.concept-lookup-action-note {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
 }
 .concept-lookup-section {
-  margin-top: 12px;
+  margin-top: 14px;
 }
 .concept-lookup-section-heading {
   margin: 0 0 4px;
@@ -738,18 +974,23 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
 .concept-lookup-related-link {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  max-width: 100%;
   padding: 2px 0;
   background: none;
   border: none;
   text-align: left;
   color: var(--action);
+  overflow-wrap: anywhere;
 }
 .concept-lookup-related-link:hover {
   color: var(--action-hover);
@@ -764,6 +1005,7 @@
   font-size: 11.5px;
   font-style: italic;
   color: var(--text-tertiary);
+  line-height: 1.5;
 }
 .concept-lookup-caption {
   margin-top: 14px;
@@ -772,10 +1014,25 @@
 }
 .concept-lookup-panel-error {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+.concept-lookup-panel-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+/* Once the two panes have stacked there is a full-width column beneath the
+   list, so a 420px list becomes a long scroll before the detail is reachable. */
+@media (max-width: 640px) {
+  .concept-lookup-rows {
+    max-height: 300px;
+  }
 }
 
 /* ---- Graph tab ------------------------------------------------------ */
