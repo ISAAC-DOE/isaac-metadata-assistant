@@ -117,6 +117,7 @@ export function ProjectMemory() {
       sidebar={<LeftNav active="memory" />}
       rightPanel={rightPanel}
       mainPad="pad"
+      width="wide"
     >
       <div className="placeholder">
         <span className="eyebrow">Memory / Query Plane</span>

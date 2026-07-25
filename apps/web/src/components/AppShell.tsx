@@ -5,6 +5,31 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 type ShellVariant = 'full' | 'record' | 'evidence';
 
+/**
+ * Opt-in content-width mode (P36R S1). The mode publishes a `--content-max`
+ * custom property on <main> (chrome.css); every wrapper that owns a measure —
+ * `.placeholder`, `.centered-col`, `.governance-panel` (screens.css) and the
+ * component-level caps `.rec-val`, `.schema-browser`, `.settings-card` —
+ * consumes it via `var(--content-max, <their historic value>)`.
+ *
+ *   readable → 760px   wide → 1200px   full → none (uncapped)
+ *
+ * Scope of the change, stated precisely: a screen that does NOT pass a width
+ * keeps its historic MEASURE (max-width) exactly — no `--content-max` is
+ * published, so every consumer resolves to its literal fallback. Its outer
+ * GUTTER did change: `.screen-main.pad` was standardised from `22px 26px` to
+ * `22px var(--main-gutter)` = 28px on BOTH sides for every `mainPad="pad"`
+ * mount, opted in or not (consistent outer gutters are the point of the
+ * slice). That is a 2px inset per side; `box-sizing: border-box` is global, so
+ * it changes no element's border-box width.
+ *
+ * `full` is not a no-op: it publishes `--content-max: none`, which every
+ * DESCENDANT consumer inherits. Any measured wrapper or card dropped inside a
+ * `full` <main> therefore loses its own cap. Use it only for surfaces that
+ * genuinely must run edge-to-edge, and never as a decorative default.
+ */
+export type ContentWidth = 'readable' | 'wide' | 'full';
+
 interface AppShellProps {
   variant: ShellVariant;
   topBar: ReactNode;
@@ -16,6 +41,8 @@ interface AppShellProps {
   statusBar?: ReactNode;
   /** Padding preset for <main>. */
   mainPad?: 'pad' | 'centered' | 'none';
+  /** Content-measure preset for <main>. Omit to keep the screen's historic width. */
+  width?: ContentWidth;
   children: ReactNode;
 }
 
@@ -31,6 +58,7 @@ export function AppShell({
   rightPanel,
   statusBar,
   mainPad = 'none',
+  width,
   children,
 }: AppShellProps) {
   const mainClass =
@@ -64,7 +92,10 @@ export function AppShell({
         {topBar}
         <div className={`screen-body ${variant}`}>
           {sidebar}
-          <main id="main" ref={mainRef} tabIndex={-1} className={mainClass}>
+          {/* `width` is optional: React omits the attribute entirely when it is
+              undefined, so a screen that opts out never publishes --content-max
+              and its wrappers fall back to their historic max-widths. */}
+          <main id="main" ref={mainRef} tabIndex={-1} className={mainClass} data-width={width}>
             {children}
           </main>
           {rightPanel}

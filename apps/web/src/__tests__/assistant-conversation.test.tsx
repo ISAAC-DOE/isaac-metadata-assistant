@@ -11,8 +11,15 @@ import type { AssistantMessage, SuggestedPrompt } from '../lib/types';
  * The panel keeps the deterministic SAFETY BOUNDARY (explains + points to
  * sources, never a verdict) while presenting the P29.1 ephemeral session as a
  * conversation: a scrollable message list (older → newest, newest at the
- * BOTTOM), then the guided prompt pills, then the subordinate caption. No
- * free-text chatbot, no external LLM, no record mutation is added here.
+ * BOTTOM), the guided prompt pills, and the subordinate caption. No external
+ * LLM and no record mutation is added here.
+ *
+ * P36R S2 re-laid the panel out — header (with Clear) → body (empty state OR the
+ * bounded conversation region + a collapsed prompt-controls disclosure) →
+ * proposed-action region → sticky composer → caption. The structural facts this
+ * file pins (chronological order, live reply last, pill behaviour, role/kind/
+ * staleness distinction, the verdict guard, respectful auto-scroll) are all
+ * unchanged; the layout contract itself lives in assistant-layout.test.tsx.
  */
 
 const EXP = 'exp-conv';
@@ -83,15 +90,29 @@ describe('P29.2 conversation layout — chronological, not inverted', () => {
     expect(last.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('places the prompt pills ABOVE the message log (P33 S2 · D4 reorder — controls lead, log trails)', () => {
-    // P33 S2 (D4) reordered the panel: the composer + Suggested Questions +
-    // Agent Actions controls now lead, and the conversation LOG (history + the
-    // live reply at the bottom) trails below them. The live reply block stays the
-    // newest element at the bottom of the log (asserted in the test above).
-    const { container } = panel();
+  it('EMPTY state places the prompt pills above the (chrome-less) log; once a conversation exists they collapse BELOW the region', () => {
+    // P36R S2 re-laid out the panel. At REST the empty state leads with its
+    // guidance + Suggested Questions + Agent Actions, and the log — which holds
+    // only the empty live region — trails below them, exactly as the P33 S2 · D4
+    // ordering did. Once a conversation EXISTS the log becomes the bounded
+    // conversation region that takes the available height, and the prompt
+    // controls collapse into a disclosure BELOW it (never removed; the composer
+    // stays visible at all times). The live reply block remains the newest
+    // element at the bottom of the region (asserted in the test above).
+    const { container, getByText } = panel();
     const log = container.querySelector('.assistant-log')!;
     const prompts = container.querySelector('.assistant-prompts')!;
     expect(prompts.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector('.assistant-conversation')).toBeNull();
+
+    // start a turn → the region appears and the controls move into the disclosure
+    fireEvent.click(getByText('What still needs me?'));
+    const region = container.querySelector('.assistant-conversation')!;
+    expect(region).toBe(log); // the SAME element — the live region is never re-mounted
+    const collapsed = container.querySelector('details.assistant-more')!;
+    expect(collapsed).not.toBeNull();
+    expect(collapsed.querySelector('.assistant-prompts')).not.toBeNull();
+    expect(region.compareDocumentPosition(collapsed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

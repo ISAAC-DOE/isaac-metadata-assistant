@@ -4,9 +4,15 @@
  * read-only reference view — no propose/review/approve/edit chrome anywhere.
  */
 
+/* P36R S1 — the measure is the SHARED content-width token published by
+   <AppShell width="…"> (chrome.css `.screen-main[data-width]`), not a local
+   literal, so this card tracks its page wrapper instead of stair-stepping
+   280px narrower than it inside a `wide` page. The 920px literal survives as
+   the FALLBACK: mounted on a screen that does not opt into a width mode, this
+   card renders exactly as before. */
 .schema-browser {
   padding: 20px 24px;
-  max-width: 920px;
+  max-width: var(--content-max, 920px);
 }
 
 .schema-browser-head {

@@ -6,9 +6,15 @@
  * meta lines around the reused verdict.
  */
 
+/* P36R S1 — the measure is the SHARED content-width token published by
+   <AppShell width="…"> (chrome.css `.screen-main[data-width]`), not a local
+   literal, so this card tracks its page wrapper instead of stair-stepping
+   440px narrower than it inside a `wide` page. The 760px literal survives as
+   the FALLBACK: mounted on a screen that does not opt into a width mode, this
+   card renders exactly as before. */
 .rec-val {
   padding: 20px 24px;
-  max-width: 760px;
+  max-width: var(--content-max, 760px);
 }
 
 .rec-val-head {

@@ -16,6 +16,16 @@
   background: var(--assist-tint);
   border: 1px solid var(--assist-border);
   border-radius: var(--radius-card);
+  /* P36R S2 — the panel is a COLUMN: head / degraded / body (flex:1) / proposed
+   * action / sticky composer dock. `min-height: 0` lets the body actually shrink
+   * so the conversation region scrolls INSIDE the rail instead of being clipped
+   * by a fixed height. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* a long path / hash / URL anywhere in the panel wraps rather than pushing the
+   * rail (or the narrow drawer) into horizontal overflow */
+  min-width: 0;
 }
 /* P33 HQA #3 — inside the Assistant rail the whole COLUMN (.record-right /
  * .memory-right) carries the lavender tint (and a NEUTRAL --border edge — never a
@@ -30,13 +40,47 @@
   background: transparent;
   border: 0;
   border-radius: 0;
+  /* P36R S2 — the panel is CONTENT-sized (never stretched to the rail), and
+   * BOUNDED to the viewport so its composer is always reachable.
+   *
+   * Why a viewport cap rather than "fill the rail": the rail (.record-right /
+   * .memory-right) is a flex item of `.screen-body`, so its height is the MAIN
+   * column's height — 1407px on a populated record at a 1000px viewport — and
+   * `.screen-card` (overflow:hidden) is the nearest scrollport, so neither the
+   * rail nor a sticky child can be pinned to the viewport from inside the panel.
+   * Stretching the panel to that rail put the composer at y≈1213, i.e. off
+   * screen. Capping it to the viewport keeps the whole panel — transcript,
+   * proposed action, composer, caption — inside the fold, and the conversation
+   * region below absorbs the squeeze (it is the ONLY scrolling part).
+   *
+   * The reserve covers the rail's top offset under the top bar (~77px) plus
+   * bottom breathing room; it is viewport-relative, so it scales with zoom. */
+  flex: 0 0 auto;
+  max-height: calc(100vh - 110px);
+  min-height: 0;
 }
 .assistant-head {
+  flex: none;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 9px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
+  min-width: 0;
 }
+/* P36R S2 — the header's trailing group: memory status + Clear Conversation.
+ * Grouping them means ONE `margin-left:auto` (never two competing autos) and a
+ * graceful wrap at 308px / 200% zoom instead of horizontal overflow. */
+.assistant-head-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.assistant-head-right:empty { display: none; }
 .assistant-icon {
   width: 26px;
   height: 26px;
@@ -54,60 +98,122 @@
   color: var(--assist-text);
 }
 .assistant-memory {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 11px;
   color: var(--text-slate);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
-/* ---- Conversation log (P29.2) --------------------------------------- */
+
+/* ---- Body (P36R S2) -------------------------------------------------- */
+/* The height-absorbing middle of the panel. Everything that can grow lives
+ * here; the composer dock below never moves. */
+.assistant-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- Empty state (P36R S2) ------------------------------------------ */
+/* No conversation yet: concise guidance, then the prompt controls at full
+ * prominence. There is no conversation region to draw, so nothing is bordered. */
+.assistant-empty {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.assistant-empty-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.assistant-empty .assistant-suggested-eyebrow:first-of-type { margin-top: 14px; }
+
+/* ---- Conversation region (P29.2 · re-laid-out P36R S2) --------------- */
 /* Scrollable message list: older → newest, newest near the bottom. Never
- * inverted. The live reply block is the last (newest) child. */
+ * inverted. The live reply block is the last (newest) child. The element is
+ * always mounted (it holds the single live region); the elevated surface + the
+ * ONE restrained border are added only once a conversation exists. */
 .assistant-log {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* P29.2 design: the conversation log is its own bounded, auto-scrolling region
-   * (the auto-scroll JS operates on this element) — kept intentionally. */
-  max-height: 340px;
-  overflow-y: auto;
+  min-width: 0;
   overscroll-behavior: contain;
-  padding-right: 2px;
-  /* P33 HQA #2 — one section rhythm: separate the log from the prompt controls
-   * above with the same 16px gap used between every other section. */
-  margin-top: 16px;
+}
+/* At rest the region is invisible chrome-wise: no border, no surface, no height
+ * of its own — the empty live region above it already renders as nothing. */
+.assistant-log--resting {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+/* The conversation region proper: ONE full four-sided border (never a colored
+ * edge — see the permanent no-vertical-rail rule), an elevated white surface
+ * that lifts off the lavender rail, and a BOUNDED scroll that flexes to the
+ * available rail height instead of a fixed max-height that clipped content. */
+.assistant-conversation {
+  /* The ONLY scrolling part of the panel: it takes the height left over inside
+   * the viewport-capped column and scrolls internally, so the transcript can
+   * never push the composer out of the fold (and the page never grows). The
+   * floor keeps it from collapsing to nothing when a proposed action or a
+   * degraded notice is also on screen. */
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px;
+  border: 1px solid var(--assist-border);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
 }
 .assistant-msg {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
   border-radius: var(--radius-inner);
-  border: 1px solid var(--border);
+  /* No per-message border: the conversation REGION carries the only border, so
+   * the transcript reads as one surface rather than a stack of outlined boxes. */
+  border: 1px solid transparent;
   background: var(--surface);
   /* long field values / explanations wrap instead of overflowing */
   overflow-wrap: anywhere;
 }
-/* User turns sit to the right, tinted; assistant turns to the left, on the
- * assistant panel surface. Distinction never relies on color alone — each
- * carries an icon + a text role label in .assistant-msg-role. */
+.assistant-msg:focus-visible { outline: 2px solid var(--assist); outline-offset: 1px; }
+/* User turns sit to the RIGHT on a muted surface; assistant turns run full width
+ * on the white region surface with the restrained indigo role label. The
+ * distinction never relies on color alone — each carries an icon + a text role
+ * label in .assistant-msg-role, and each exposes data-role. */
 .assistant-msg-user {
   align-self: flex-end;
-  max-width: 88%;
-  background: var(--cover-bg);
-  border-color: var(--cover-border);
+  max-width: 85%;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
 }
 .assistant-msg-assistant {
   align-self: stretch;
-  background: var(--assist-panel-bg);
-  border-color: var(--assist-border);
+  background: var(--surface);
+  padding-left: 0;
+  padding-right: 0;
 }
 .assistant-msg-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 .assistant-msg-role {
   display: inline-flex;
@@ -124,6 +230,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  max-width: 100%;
   padding: 2px 7px;
   border-radius: var(--radius-token);
   font-size: 10px;
@@ -131,6 +238,7 @@
   border: 1px solid var(--border);
   color: var(--text-tertiary);
   background: var(--surface);
+  overflow-wrap: anywhere;
 }
 /* Kind badges — icon + label already distinguish them; the tints are a
  * secondary reinforcement, never the sole signal. */
@@ -140,18 +248,22 @@
 .kind-badge-confirm { color: var(--advisory-text); border-color: var(--advisory-border); background: var(--advisory-bg); }
 .kind-badge-degraded { color: var(--text-quaternary); }
 /* Stale — an assistant message grounded in an older record revision. Icon +
- * text ("Based on an earlier version"), plus a dashed, dimmed treatment. */
+ * text ("Based on an earlier version"), plus a dashed, dimmed treatment. The
+ * dashed edge is a STATE marker (neutral token, full shorthand), not decoration. */
 .assistant-msg.is-stale {
-  border-style: dashed;
+  border: 1px dashed var(--border-strong);
   opacity: 0.82;
 }
+.assistant-msg-assistant.is-stale { padding-left: 10px; padding-right: 10px; }
 .assistant-msg-stale {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  max-width: 100%;
   font-size: 10px;
   font-weight: 600;
   color: var(--advisory-text);
+  overflow-wrap: anywhere;
 }
 .assistant-msg-text {
   font-size: 12.5px;
@@ -179,18 +291,17 @@
 .assistant-jump:hover { background: var(--assist-tint); }
 .assistant-jump:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
 
-/* P34.2 — the conversation toolbar (Clear Conversation), shown only once the log
- * has history. Restrained, right-aligned, secondary — it clears the ephemeral
- * session, never any record/truth state. */
-.assistant-log-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 6px;
-}
+/* P36R S2 — Clear Conversation, now in the HEADER (it used to sit between the
+ * Agent Actions and the message log, exactly where a destructive-looking control
+ * must not be). Shown only once there is a conversation to clear. Restrained and
+ * secondary — it clears the ephemeral session, never any record/truth state, so
+ * it needs no confirmation. Its accessible name is the full "Clear conversation"
+ * (aria-label); the visible "Clear" keeps the header on one line at 308px. */
 .assistant-clear {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex: none;
   padding: 3px 8px;
   border-radius: var(--radius-control);
   border: 1px solid transparent;
@@ -198,6 +309,7 @@
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 600;
+  white-space: nowrap;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .assistant-clear:hover {
@@ -211,15 +323,22 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
+/* The live (current) answer. It reads as the newest ASSISTANT turn in the same
+ * transcript: white region surface, no border of its own — the conversation
+ * region carries the only border (P36R S2). */
 .assistant-reply {
-  padding: 12px 13px;
-  background: var(--assist-panel-bg);
-  border: 1px solid var(--assist-border);
+  padding: 2px 0 0;
+  background: transparent;
+  border: 0;
   border-radius: var(--radius-inner);
   font-size: 12.5px;
   color: var(--text-secondary);
   line-height: 1.55;
+  min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
 }
 .assistant-reply:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
@@ -237,12 +356,16 @@
   line-height: 0;
 }
 .assistant-reply-block .assistant-sources { margin-top: 0; }
+/* Provenance attaches directly BENEATH the response it supports, inside that
+ * response's block (the live reply block, or the message bubble itself). */
 .assistant-sources {
-  margin-top: 10px;
+  margin-top: 8px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 .answered-from {
   display: inline-flex;
@@ -267,12 +390,14 @@
   font-size: 11px;
   color: var(--text-tertiary);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .assistant-note {
   margin-top: 0;
   font-size: 11.5px;
   color: var(--text-tertiary);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 /* P34.3 — cited-source provenance chips: the citation detail beneath the
@@ -287,15 +412,20 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .assistant-provenance-item {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
 }
 .assistant-source-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   max-width: 100%;
+  min-width: 0;
   padding: 3px 8px;
   border-radius: var(--radius-token);
   border: 1px solid var(--border);
@@ -334,6 +464,8 @@ button.assistant-source-chip-nav:focus-visible {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
 .assistant-ask-again {
   display: inline-flex;
@@ -360,6 +492,8 @@ button.assistant-source-chip-nav:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .assistant-followup {
   display: inline-flex;
@@ -391,7 +525,8 @@ button.assistant-source-chip-nav:focus-visible {
    color); it only tells the reader the assistant cannot verify the record right
    now, and never disables the surrounding manual workflow. */
 .assistant-degraded {
-  margin: 0 0 16px;
+  flex: 0 0 auto;
+  margin: 0 0 12px;
   padding: 8px 10px;
   font-size: 11.5px;
   line-height: 1.5;
@@ -399,6 +534,7 @@ button.assistant-source-chip-nav:focus-visible {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-inner);
+  overflow-wrap: anywhere;
 }
 .assistant-suggested-eyebrow {
   margin: 16px 0 8px;
@@ -407,12 +543,16 @@ button.assistant-source-chip-nav:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 .assistant-prompt {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 9px 12px;
   border-radius: var(--radius-control);
   border: 1px solid var(--border);
@@ -431,7 +571,9 @@ button.assistant-source-chip-nav:focus-visible {
   font-weight: 600;
 }
 .assistant-prompt:disabled { opacity: 0.6; cursor: default; }
+.assistant-prompt > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .assistant-prompt .chev { margin-left: auto; color: var(--text-disabled); flex: none; }
+.assistant-prompt:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
 
 /* P29.4b — the INTENT pills. Same footprint as the guided prompts but tinted so
    a "runs the agent" action reads distinctly from a "shows a composed answer". */
@@ -439,12 +581,16 @@ button.assistant-source-chip-nav:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 .assistant-agent-prompt {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 9px 12px;
   border-radius: var(--radius-control);
   border: 1px solid var(--assist-border);
@@ -459,7 +605,78 @@ button.assistant-source-chip-nav:focus-visible {
 .assistant-agent-prompt:active:not(:disabled) { background: var(--assist-tint); }
 .assistant-agent-prompt:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
 .assistant-agent-prompt:disabled { opacity: 0.55; cursor: not-allowed; }
+.assistant-agent-prompt > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .assistant-agent-prompt .chev { margin-left: auto; color: var(--assist-text); flex: none; }
+
+/* ---- Collapsed prompt controls (P36R S2) ---------------------------- */
+/* Once a conversation exists, Suggested Questions + Agent Actions collapse into
+ * a native <details> disclosure (the repo idiom — see SchemaBrowser). They are
+ * never removed, and the composer below stays visible, so asking again is never
+ * hidden behind this control. */
+.assistant-more {
+  flex: none;
+  min-width: 0;
+}
+.assistant-more > summary { list-style: none; }
+.assistant-more summary::-webkit-details-marker { display: none; }
+.assistant-more-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--assist-border);
+  background: var(--assist-panel-bg);
+  color: var(--assist-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.assistant-more-summary > span { min-width: 0; overflow-wrap: anywhere; }
+.assistant-more-summary .chev { flex: none; transition: transform 0.12s ease; }
+.assistant-more[open] > .assistant-more-summary .chev { transform: rotate(90deg); }
+.assistant-more-summary:hover { background: var(--assist-tint); }
+.assistant-more-summary:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+.assistant-more-body { min-width: 0; }
+.assistant-more-body .assistant-suggested-eyebrow:first-of-type { margin-top: 12px; }
+
+/* ---- Proposed-action region (P36R S2) ------------------------------- */
+/* A staged answer and an unconfirmed proposal are NOT chat messages: they live
+ * in their own labelled region above the composer, where they cannot scroll away
+ * and cannot be mistaken for something that already happened. */
+.assistant-proposed {
+  flex: none;
+  min-width: 0;
+  margin-top: 12px;
+}
+.assistant-proposed-eyebrow {
+  margin: 0;
+  color: var(--advisory-text);
+}
+.assistant-proposed .agent-stage,
+.assistant-proposed .agent-proposal {
+  margin-top: 8px;
+}
+
+/* ---- Composer dock + footer (P36R S2) ------------------------------- */
+/* The composer is PINNED at the bottom of the panel two ways, so asking another
+ * question never requires scrolling: it is the last `flex: none` child of the
+ * viewport-bounded column (the conversation region above absorbs all squeeze),
+ * AND it is `position: sticky; bottom: 0` with an opaque tint matching the
+ * lavender rail, so it stays put in any mount where an ancestor DOES scroll
+ * (the narrow slide-over drawer, and the memory rail). */
+.assistant-foot {
+  flex: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  min-width: 0;
+  margin-top: 12px;
+  padding-top: 10px;
+  background: var(--assist-tint);
+}
 
 /* P29.4b — the UNCONFIRMED staged-proposal card. Advisory-tinted, never a
    verdict color; a candidate/unknown/conflicting variant is icon+text distinct. */
@@ -481,13 +698,15 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .agent-proposal-fields {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  /* minmax(0, …) so a long field path / value can never widen the grid past the
+   * 308px rail — it wraps inside its own cell instead. */
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
   gap: 3px 12px;
   margin: 0 0 8px;
   font-size: 12.5px;
 }
-.agent-proposal-fields dt { color: var(--text-tertiary); font-size: 11px; }
-.agent-proposal-fields dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.agent-proposal-fields dt { color: var(--text-tertiary); font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
+.agent-proposal-fields dd { margin: 0; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .agent-proposal-fields dd.mono { font-family: var(--font-mono); font-size: 11.5px; }
 .agent-proposal-value { font-weight: 600; }
 .agent-proposal-class { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
@@ -527,8 +746,8 @@ button.assistant-source-chip-nav:focus-visible {
   color: var(--text-secondary);
   cursor: pointer;
 }
-.agent-proposal-actions { display: flex; gap: 8px; }
-.agent-proposal-actions .btn { flex: 1; justify-content: center; }
+.agent-proposal-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.agent-proposal-actions .btn { flex: 1 1 auto; min-width: 0; justify-content: center; }
 /* A candidate / unknown must never read as a confirmed fact. The distinction is
    carried by the classification icon + label + honesty copy (never color alone);
    the class also lifts the whole-card border weight so it never looks settled. */
@@ -550,13 +769,22 @@ button.assistant-source-chip-nav:focus-visible {
 .agent-stage-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 6px;
+  overflow-wrap: anywhere;
 }
-.agent-stage-head .mono { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; }
+.agent-stage-head .mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .agent-stage-note {
   margin: 0 0 8px;
   font-size: 11.5px;
@@ -575,8 +803,11 @@ button.assistant-source-chip-nav:focus-visible {
   border-radius: var(--radius-inner);
   overflow-wrap: anywhere;
 }
-.agent-stage-row { display: flex; gap: 8px; }
+.agent-stage-row { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .agent-stage-submit { white-space: nowrap; }
+.agent-stage, .agent-proposal { min-width: 0; max-width: 100%; }
+.agent-proposal-stale { min-width: 0; overflow-wrap: anywhere; }
+.agent-proposal-honesty, .agent-proposal-note { overflow-wrap: anywhere; }
 
 /* P33 S2 (D3/C3) — the honest, visual-only composer. A real input + a SECONDARY
  * send control (never the primary action). The persistent helper states the
@@ -587,6 +818,7 @@ button.assistant-source-chip-nav:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   margin-bottom: 8px;
 }
 .assistant-composer-input {
@@ -629,13 +861,14 @@ button.assistant-source-chip-nav:focus-visible {
   border-radius: var(--radius-inner);
 }
 .assistant-caption {
-  margin-top: 16px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 9px;
   border-top: 1px solid var(--border-hair);
   font-size: 11px;
   /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
   color: var(--text-secondary);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 /* ---- GuidedPrompt (S4) --------------------------------------------- */
