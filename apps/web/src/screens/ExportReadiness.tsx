@@ -377,6 +377,15 @@ function LoadedExport({
           coveragePendingNote="runs after export"
         />
       }
+      /* No `width` mode on purpose. Export Readiness is the complex workbench
+         (verdict + coverage/advisory grid + artifact cards) and its content
+         sits DIRECTLY in <main> with no measure wrapper, so it is already
+         uncapped — `width="full"` would change nothing it renders today.
+         It is not merely redundant but a trap: `full` publishes
+         `--content-max: none`, which every descendant inherits, so a future
+         card with its own cap (`.rec-val`, `.schema-browser`, `.settings-card`
+         all consume the token) would silently render uncapped here. Opting out
+         is the honest state for a screen with nothing to opt in. */
       mainPad="pad"
     >
       <h1 className="sr-only">{LABELS.screenExport}</h1>

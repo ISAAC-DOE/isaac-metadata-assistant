@@ -37,6 +37,7 @@ export function GovernancePage() {
       topBar={<TopBar variant="home" />}
       sidebar={<LeftNav active="governance" />}
       mainPad="pad"
+      width="wide"
     >
       <div className="placeholder">
         <span className="eyebrow">Data Governance</span>
@@ -67,7 +68,7 @@ export function GovernancePage() {
 
       {activeTab === 'validator' && (
         <div
-          style={{ marginTop: 24 }}
+          className="governance-panel"
           id={panelId('validator')}
           role="tabpanel"
           aria-labelledby={tabId('validator')}
@@ -79,7 +80,7 @@ export function GovernancePage() {
 
       {activeTab === 'schema' && (
         <div
-          style={{ marginTop: 24 }}
+          className="governance-panel"
           id={panelId('schema')}
           role="tabpanel"
           aria-labelledby={tabId('schema')}

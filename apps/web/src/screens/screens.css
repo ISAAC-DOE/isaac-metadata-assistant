@@ -168,8 +168,15 @@
 }
 
 /* ---- placeholder pages (Project Memory / Governance / Settings) ---- */
+/* P36R S1: the measure is now the shared content-width token published by
+   <AppShell width="…"> (chrome.css `.screen-main[data-width]`). The 640px
+   literal survives only as the FALLBACK, so any screen that does not opt into a
+   width mode keeps its historic MEASURE unchanged. (Its outer gutter did move:
+   `.screen-main.pad` was standardised 26px → 28px per side for every padded
+   main — see the AppShell doc comment. Measure, not gutter, is what this
+   declaration controls.) */
 .placeholder {
-  max-width: 640px;
+  max-width: var(--content-max, 640px);
 }
 .placeholder > h1 {
   font-size: 22px;
@@ -186,6 +193,29 @@
 .placeholder .eyebrow {
   margin-bottom: 8px;
   display: block;
+}
+/* P36R S1 — prose measure inside the widened modes. Deliberately NARROW in
+   scope: only a DIRECT child paragraph of the page wrapper (the page intro /
+   policy prose). Paragraphs nested inside cards, grids, tab panels and detail
+   panels already sit in bounded containers and must not be re-capped, so this
+   is a `>` rule, never a global `p { max-width }`. */
+.screen-main[data-width='wide'] .placeholder > p,
+.screen-main[data-width='full'] .placeholder > p {
+  max-width: 68ch;
+}
+/* P36R S1 — the Governance tab panels that host a whole COMPONENT (Validator,
+   Schema & Vocabulary) rather than page prose. They take the same shared
+   measure as the `.placeholder` header/Policy regions above them, so all four
+   regions of that page align on one token, and they carry the panel offset as
+   a class instead of an inline style.
+   Deliberately NOT `.placeholder`: `.placeholder p` (specificity 0-1-1)
+   would beat `.rec-val-sub` / `.schema-browser-sub` / `.schema-field-desc` /
+   `.schema-vocab-note` (all 0-1-0) and silently restyle every paragraph inside
+   those two components (12px/tertiary → 13px/secondary). Same measure, no
+   typography leak. */
+.governance-panel {
+  max-width: var(--content-max, 640px);
+  margin-top: 24px;
 }
 .placeholder-card {
   margin-top: 18px;
@@ -1563,8 +1593,13 @@
 
 /* ---- Settings: Help / About + API Documentation (P36.4) -------------- */
 
+/* P36R S1 — the measure is the SHARED content-width token (chrome.css
+   `.screen-main[data-width]`), not a local literal, so these cards track the
+   `.placeholder` wrapper they sit in instead of stair-stepping 340px narrower
+   than the version card above them. The 860px literal survives as the
+   FALLBACK, so a settings card outside a width mode is unchanged. */
 .settings-card {
-  max-width: 860px;
+  max-width: var(--content-max, 860px);
 }
 .settings-card + .settings-card {
   margin-top: 18px;

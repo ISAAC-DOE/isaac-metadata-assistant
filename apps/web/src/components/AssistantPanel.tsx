@@ -221,6 +221,17 @@ const VERDICT_ROUTE_TEXT =
 // while a read-only grounded query is resolving.
 const WORKING_LABEL = 'Working…';
 
+// P36R S2 — the resting-state guidance, shown ONLY in the empty state (there is
+// no conversation yet). It is deliberately distinct copy from the composer's
+// persistent helper (ASSISTANT_COMPOSER_HELPER) so the same sentence is never
+// rendered twice, and it claims nothing the panel cannot do.
+const EMPTY_STATE_GUIDANCE = 'Pick a suggestion below, or ask your own question in the box at the bottom.';
+
+// P36R S2 — the disclosure label for the Suggested Questions + Agent Actions
+// controls once a conversation exists. They collapse (never disappear); the
+// composer stays visible at all times, so asking again is never hidden.
+const MORE_DISCLOSURE_LABEL = 'Suggested Questions & Agent Actions';
+
 // P34.5 — a defensive client-side ceiling so a hung read-only query can never
 // leave the composer stuck in `loading` forever. On timeout the query REJECTS,
 // which flows through the SAME catch as any network error → the composer
@@ -296,16 +307,29 @@ function prefersReducedMotion(): boolean {
 const NEAR_BOTTOM_PX = 64;
 
 /**
- * Conversation-style assistant (P29.2, reordered P33 S2 · D4). Layout top→bottom:
- * header → honest visual-only composer (P33 S2 · D3/C3) → Suggested Questions
- * pills → Agent Actions → the scrollable message log (older → newest, newest at
- * the BOTTOM) → StageAnswer/ProposalCard → the single subordinate caption. The
- * panel presents the P29.1 ephemeral session as a conversation and preserves
- * every honesty guard: `answered from:` on each reply, the composer's persistent
- * guided-only helper, the memory-availability caveat, and the verdict-language
- * guard over ALL rendered assistant text. It explains and points to sources — it
- * never renders a verdict, never mutates a record from the composer, and the
- * composer performs no fetch/append/persist (mutation/confirmation is P29.3).
+ * Conversation-style assistant (P29.2; re-laid-out P36R S2). Layout top→bottom:
+ *
+ *   HEADER        icon + "Assistant" + memory status + Clear Conversation
+ *                 (Clear only once there IS a conversation to clear)
+ *   DEGRADED      the honest, manual-first degraded notice
+ *   BODY          flex:1 / min-height:0 — the region that absorbs the rail height
+ *                   · EMPTY STATE (no conversation): concise guidance +
+ *                     Suggested Questions + Agent Actions
+ *                   · CONVERSATION (a conversation exists): the bounded,
+ *                     scrollable conversation region (older → newest, newest at
+ *                     the BOTTOM, live turn last) + the Suggested Questions /
+ *                     Agent Actions collapsed into a disclosure
+ *   PROPOSED      StageAnswer / ProposalCard — a distinct proposed-ACTION region,
+ *                 never a chat message, directly above the composer
+ *   COMPOSER      sticky at the bottom of the panel, always reachable
+ *   FOOTER        the single subordinate caption
+ *
+ * The panel presents the P29.1 ephemeral session as a conversation and preserves
+ * every honesty guard: `answered from:` beneath the response it supports, the
+ * composer's persistent grounded-scope helper, the memory-availability caveat,
+ * and the verdict-language guard over ALL rendered assistant text. It explains
+ * and points to sources — it never renders a verdict, never mutates a record
+ * from the composer, and `confirmProposal` remains the ONLY write path.
  */
 export function AssistantPanel({
   prompts,
@@ -434,7 +458,10 @@ export function AssistantPanel({
     focusNewestRef.current = false;
     const log = logRef.current;
     if (!log) return;
-    const msgs = log.querySelectorAll('.assistant-msg');
+    // The CURRENT turn's question bubble (`.assistant-msg-live`) is excluded: the
+    // fresh result to land on is the newest ARCHIVED message, not the echo of the
+    // question the reader already asked.
+    const msgs = log.querySelectorAll('.assistant-msg:not(.assistant-msg-live)');
     (msgs[msgs.length - 1] as HTMLElement | undefined)?.focus();
   }, [messages.length]);
 
@@ -748,61 +775,25 @@ export function AssistantPanel({
     focusPendingRef.current = true;
   }
 
-  return (
-    <section className="assistant" aria-label="Assistant (advisory)">
-      <div className="assistant-head">
-        <span className="assistant-icon" aria-hidden="true">
-          <MessageSquare size={15} strokeWidth={2} />
-        </span>
-        <span className="assistant-label">{LABELS.assistant}</span>
-        {availability && showAvailabilityHead && (
-          <span className="assistant-memory">
-            <span
-              className={`dot dot-memory${availability === 'available' ? ' dot-memory-available' : ''}`}
-              aria-hidden="true"
-            />
-            {MEMORY_HEAD_LABEL[availability]}
-          </span>
-        )}
-      </div>
+  // P36R S2 — a conversation EXISTS once there is archived history, a resolved
+  // live turn, or a query in flight. It drives the BODY: at rest the panel shows
+  // its empty state (guidance + Suggested Questions + Agent Actions); once a
+  // conversation exists those controls collapse into a disclosure and the bounded
+  // conversation region takes the available height. `loading` is included so the
+  // layout does not flip back for the duration of an in-flight first question.
+  const hasConversation = messages.length > 0 || !!liveAnswer || loading;
 
-      {/* P29.4 — honest, manual-first degraded state: when the live AgentContext
-          cannot be verified the assistant says so plainly and answers no
-          dataset-specific question. It NEVER disables the surrounding manual
-          workflow — that is driven by the screen's own bundle, not this panel. */}
-      {degraded && (
-        <p className="assistant-degraded" role="status">
-          {DEGRADED_MESSAGE}
-        </p>
-      )}
+  // Clear is offered only when there IS something to clear. It clears the
+  // ephemeral chat only — never any record/truth state — so it needs no
+  // confirmation, and it lives in the header (keyboard-reachable, never between
+  // the controls and the transcript).
+  const canClear = messages.length > 0 || !!liveAnswer;
 
-      {/* P34.2 — the composer, WIRED to the READ-ONLY grounded resolver. A real
-          text input + a SECONDARY-styled send control, with a persistent helper
-          naming the grounded scopes it answers over (not a general chatbot).
-          Submitting calls only POST /assistant/query — a non-mutating query that
-          never writes the record. An empty submit is a no-op; overlapping submits
-          are ignored while a query is in flight. */}
-      <form className="assistant-composer" onSubmit={onComposerSubmit}>
-        <input
-          ref={composerInputRef}
-          type="text"
-          className="assistant-composer-input"
-          aria-label="Ask the assistant a question"
-          placeholder="Ask a question"
-          value={composerText}
-          onChange={(e) => setComposerText(e.target.value)}
-        />
-        <button
-          type="submit"
-          className="btn btn-secondary assistant-composer-send"
-          aria-label="Send question"
-          disabled={loading}
-        >
-          <CornerDownRight size={15} strokeWidth={2} aria-hidden="true" />
-        </button>
-      </form>
-      <p className="assistant-composer-helper">{ASSISTANT_COMPOSER_HELPER}</p>
-
+  // The Suggested Questions + Agent Actions controls. Rendered PROMINENTLY in the
+  // empty state and COLLAPSED into a disclosure once a conversation exists — the
+  // ability to ask is never hidden (the composer is always visible below).
+  const promptControls = (
+    <>
       <div className="assistant-suggested-eyebrow eyebrow">{LABELS.suggestedQuestions}</div>
       <div className="assistant-prompts">
         {prompts.map((p, i) => (
@@ -821,8 +812,8 @@ export function AssistantPanel({
       </div>
 
       {/* P29.4b — the INTENT pills. Each RUNS a real agent intent against the live
-          context; the result is appended to the conversation below. Disabled while
-          the context is degraded/absent (manual-first: composed prompts stay live). */}
+          context; the result is appended to the conversation. Disabled while the
+          context is degraded/absent (manual-first: composed prompts stay live). */}
       {shownAgentPrompts.length > 0 && (
         <>
           <div className="assistant-suggested-eyebrow eyebrow">Agent Actions</div>
@@ -843,174 +834,297 @@ export function AssistantPanel({
           </div>
         </>
       )}
+    </>
+  );
 
-      {/* P34.2 — the conversation toolbar. Clear Conversation appears only once
-          the log has history; it wipes THIS experiment's ephemeral session and
-          returns the rail to its resting empty state. Session-only — it never
-          touches record/truth state. */}
-      {messages.length > 0 && (
-        <div className="assistant-log-toolbar">
-          <button
-            type="button"
-            className="assistant-clear"
-            aria-label="Clear conversation"
-            onClick={clearConversation}
-          >
-            <X size={13} strokeWidth={2} aria-hidden="true" />
-            Clear Conversation
-          </button>
-        </div>
-      )}
-
-      {/* P33 S2 (D4) — the conversation LOG moved BELOW the prompt controls
-          (newest at the bottom). role="log" carries an IMPLICIT aria-live="polite";
-          we set aria-live="off" here to suppress it so archiving prior turns into
-          the log does NOT announce them. The single live region is the current
-          reply below — announced once, politely. */}
-      <div
-        className="assistant-log"
-        ref={logRef}
-        role="log"
-        aria-live="off"
-        aria-label="Assistant conversation"
-        onScroll={onScroll}
-      >
-        {messages.map((m, i) => (
-          <ConversationMessage key={m.id ?? i} message={m} currentRev={recordRev} />
-        ))}
-
-        {/* The live current turn — the newest content, rendered below history.
-            The single `.assistant-reply` <p> is the ONE live region (the log above
-            is aria-live="off"): while a query resolves it announces "Working…"
-            (aria-busy), then the resolved answer; at rest (P36.1) it renders
-            EMPTY — no placeholder text, no card chrome — but stays MOUNTED so it
-            keeps announcing future turns. The `answered from:` line renders only
-            once there is a real answer. */}
-        <div className="assistant-reply-block">
-          <p
-            className={`assistant-reply${liveReplyEmpty ? ' assistant-reply--empty' : ''}`}
-            ref={replyRef}
-            tabIndex={-1}
-            aria-live="polite"
-            aria-busy={loading || undefined}
-            aria-describedby={staleDescId}
-          >
-            {liveText}
-          </p>
-          {/* R2 — the `answered from:` line is suppressed for a free-form refusal
-              turn (empty grounding). Precomposed pill answers and error turns leave
-              `hasGrounding` undefined, so they still show it; only an explicit
-              `hasGrounding === false` (a refusal) hides it. */}
-          {!loading && liveAnswer && liveAnswer.hasGrounding !== false && (
-            <div className="assistant-sources">
-              <span className="answered-from">
-                answered from: {SOURCE_LABELS[liveAnswer.answeredFrom as AssistantSource]}
-              </span>
-            </div>
+  return (
+    <section className="assistant" aria-label="Assistant (advisory)">
+      <div className="assistant-head">
+        <span className="assistant-icon" aria-hidden="true">
+          <MessageSquare size={15} strokeWidth={2} />
+        </span>
+        <span className="assistant-label">{LABELS.assistant}</span>
+        <div className="assistant-head-right">
+          {availability && showAvailabilityHead && (
+            <span className="assistant-memory">
+              <span
+                className={`dot dot-memory${availability === 'available' ? ' dot-memory-available' : ''}`}
+                aria-hidden="true"
+              />
+              {MEMORY_HEAD_LABEL[availability]}
+            </span>
           )}
-          {/* P34.3 — the cited-source chips: the citation detail beneath the plane
-              label. For a Project-Memory answer these are the leads to verify. */}
-          {!loading && liveAnswer && liveSources.length > 0 && (
-            <ProvenanceChips sources={liveSources} />
+          {/* P36R S2 — Clear Conversation lives in the HEADER (never between the
+              controls and the transcript). It wipes THIS experiment's ephemeral
+              session and returns the rail to its resting empty state; it touches
+              no record/truth state, so it needs no confirmation. */}
+          {canClear && (
+            <button
+              type="button"
+              className="assistant-clear"
+              aria-label="Clear conversation"
+              title="Clear conversation"
+              onClick={clearConversation}
+            >
+              <X size={13} strokeWidth={2} aria-hidden="true" />
+              Clear
+            </button>
           )}
-          {/* P34.3 — the COMPACT live-answer staleness indicator (same visual as an
-              archived message's stale badge) + an explicit "Ask again". A record
-              change never auto-refetches; only this re-queries, at the current rev.
-              The indicator is associated with the answer via aria-describedby above
-              — no second live region is created. */}
-          {!loading && liveStale && (
-            <div className="assistant-live-stale-row">
-              <span id={staleDescId} className="assistant-msg-stale">
-                <CircleDashed size={12} strokeWidth={2} aria-hidden="true" />
-                Based on an earlier version
-              </span>
-              {liveQuestion && (
-                <button
-                  type="button"
-                  className="assistant-ask-again"
-                  aria-label="Ask again with the current record"
-                  disabled={loading}
-                  onClick={() => {
-                    if (liveQuestion) void submitQuestion(liveQuestion);
-                  }}
-                >
-                  <CornerDownRight size={13} strokeWidth={2} aria-hidden="true" />
-                  Ask again
-                </button>
-              )}
-            </div>
-          )}
-          {/* P34.3 — suggested next questions. Shown only for a CURRENT (not stale,
-              not loading) answer; each re-queries through the SAME read-only
-              submitQuestion path — never a mutation. Capped at two, visually
-              distinct from the provenance chips and the Suggested Questions. */}
-          {!loading && liveAnswer && !liveStale && liveFollowups.length > 0 && (
-            <div className="assistant-followups" aria-label="Suggested next questions">
-              {liveFollowups.slice(0, 2).map((f) => (
-                <button
-                  type="button"
-                  className="assistant-followup"
-                  key={f}
-                  disabled={loading}
-                  onClick={() => void submitQuestion(f)}
-                >
-                  <span>{f}</span>
-                  <ChevronRight className="chev" size={13} strokeWidth={2} aria-hidden="true" />
-                </button>
-              ))}
-            </div>
-          )}
-          {caveat && <p className="assistant-caveat">{caveat}</p>}
-          {note && <p className="assistant-note">{note}</p>}
         </div>
       </div>
 
-      {showJump && (
-        <button type="button" className="assistant-jump" onClick={scrollToBottom}>
-          <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-          Jump to Latest
-        </button>
+      {/* P29.4 — honest, manual-first degraded state: when the live AgentContext
+          cannot be verified the assistant says so plainly and answers no
+          dataset-specific question. It NEVER disables the surrounding manual
+          workflow — that is driven by the screen's own bundle, not this panel. */}
+      {degraded && (
+        <p className="assistant-degraded" role="status">
+          {DEGRADED_MESSAGE}
+        </p>
       )}
 
-      {/* P29.6 — the narrow STAGING trigger. For the CURRENT pending field only,
-          the user SELECTS the labeled synthetic suggestion; it is routed through
-          the guarded `proposeForField` (source:'user') to create the same
-          UNCONFIRMED ProposalCard below. Nothing here mutates — staging just fills
-          the card. Hidden once a proposal is staged (one at a time), when degraded,
-          or when the screen passes no current pending field / no suggested value. */}
-      {canStage && stageField && (
-        <StageAnswer field={stageField} onStage={onStageUserAnswer} />
-      )}
+      {/* P36R S2 — the BODY absorbs the rail height (flex:1 / min-height:0) so the
+          conversation region can flex instead of being clipped by a fixed height. */}
+      <div className="assistant-body">
+        {/* EMPTY STATE — no conversation yet: concise guidance, then the prompt
+            controls at full prominence. */}
+        {!hasConversation && (
+          <div className="assistant-empty">
+            <p className="assistant-empty-note">{EMPTY_STATE_GUIDANCE}</p>
+            {promptControls}
+          </div>
+        )}
 
-      {/* P29.4b — the UNCONFIRMED staged proposal. It states plainly that it has
-          NOT changed the official record; nothing here mutates. Only the explicit
-          Confirm writes (through confirmProposal). A candidate/unknown/conflicting
-          value is visually + textually distinct and never styled as fact. */}
-      {proposal && (
-        <ProposalCard
-          proposal={proposal}
-          stale={proposalStale}
-          confirming={confirming}
-          onConfirm={onConfirm}
-          onCancel={onCancelProposal}
-          onReevaluate={onRefresh}
-        />
-      )}
+        {/* The conversation region (older → newest, newest at the BOTTOM, the live
+            turn last). role="log" carries an IMPLICIT aria-live="polite"; we set
+            aria-live="off" here to suppress it so archiving prior turns into the
+            log does NOT announce them. The single live region is the current reply
+            inside it — announced once, politely. It is the SAME element in both
+            states (so the live region is never unmounted); only the
+            `assistant-conversation` chrome — one restrained full border, an
+            elevated white surface, and the bounded scroll — is added once there is
+            a conversation to hold. */}
+        <div
+          className={`assistant-log${hasConversation ? ' assistant-conversation' : ' assistant-log--resting'}`}
+          ref={logRef}
+          role="log"
+          aria-live="off"
+          aria-label="Assistant conversation"
+          onScroll={onScroll}
+        >
+          {messages.map((m, i) => (
+            <ConversationMessage key={m.id ?? i} message={m} currentRev={recordRev} />
+          ))}
 
-      {/* P33 S2 (D4) — the SINGLE advisory footer. The standalone guided-only note
-          was removed here as redundant with the composer helper above. */}
-      <p className="assistant-caption">{SUBORDINATE_CAPTION}</p>
+          {/* P36R S2 — the CURRENT turn's question, shown as a user bubble above
+              the answer it produced. Before this the live question was rendered
+              nowhere until it archived, so the newest (and usually only visible)
+              turn showed an answer with no visible question. It is display-only:
+              the persisted copy still goes through `appendMessage`'s sanitizer on
+              archive, and nothing here re-sends or re-stores the text. */}
+          {liveQuestion && (loading || liveAnswer) && (
+            <ConversationMessage
+              live
+              message={{ role: 'user', text: liveQuestion, id: 'assistant-live-question' }}
+            />
+          )}
+
+          {/* The live current turn — the newest content, rendered below history.
+              The single `.assistant-reply` <p> is the ONE live region (the log
+              above is aria-live="off"): while a query resolves it announces
+              "Working…" (aria-busy), then the resolved answer; at rest (P36.1) it
+              renders EMPTY — no placeholder text, no card chrome — but stays
+              MOUNTED so it keeps announcing future turns. Its provenance,
+              staleness, and follow-ups all attach BENEATH it, inside this block —
+              each attached to the response it supports. */}
+          <div className="assistant-reply-block">
+            <p
+              className={`assistant-reply${liveReplyEmpty ? ' assistant-reply--empty' : ''}`}
+              ref={replyRef}
+              tabIndex={-1}
+              aria-live="polite"
+              aria-busy={loading || undefined}
+              aria-describedby={staleDescId}
+            >
+              {liveText}
+            </p>
+            {/* R2 — the `answered from:` line is suppressed for a free-form refusal
+                turn (empty grounding). Precomposed pill answers and error turns
+                leave `hasGrounding` undefined, so they still show it; only an
+                explicit `hasGrounding === false` (a refusal) hides it. */}
+            {!loading && liveAnswer && liveAnswer.hasGrounding !== false && (
+              <div className="assistant-sources">
+                <span className="answered-from">
+                  answered from: {SOURCE_LABELS[liveAnswer.answeredFrom as AssistantSource]}
+                </span>
+              </div>
+            )}
+            {/* P34.3 — the cited-source chips: the citation detail beneath the plane
+                label. For a Project-Memory answer these are the leads to verify. */}
+            {!loading && liveAnswer && liveSources.length > 0 && (
+              <ProvenanceChips sources={liveSources} />
+            )}
+            {/* P34.3 — the COMPACT live-answer staleness indicator (same visual as
+                an archived message's stale badge) + an explicit "Ask again". A
+                record change never auto-refetches; only this re-queries, at the
+                current rev. The indicator is associated with the answer via
+                aria-describedby above — no second live region is created. */}
+            {!loading && liveStale && (
+              <div className="assistant-live-stale-row">
+                <span id={staleDescId} className="assistant-msg-stale">
+                  <CircleDashed size={12} strokeWidth={2} aria-hidden="true" />
+                  Based on an earlier version
+                </span>
+                {liveQuestion && (
+                  <button
+                    type="button"
+                    className="assistant-ask-again"
+                    aria-label="Ask again with the current record"
+                    disabled={loading}
+                    onClick={() => {
+                      if (liveQuestion) void submitQuestion(liveQuestion);
+                    }}
+                  >
+                    <CornerDownRight size={13} strokeWidth={2} aria-hidden="true" />
+                    Ask again
+                  </button>
+                )}
+              </div>
+            )}
+            {/* P34.3 — suggested next questions. Shown only for a CURRENT (not
+                stale, not loading) answer; each re-queries through the SAME
+                read-only submitQuestion path — never a mutation. Capped at two,
+                visually distinct from the provenance chips and Suggested
+                Questions, and attached to the response they follow. */}
+            {!loading && liveAnswer && !liveStale && liveFollowups.length > 0 && (
+              <div className="assistant-followups" aria-label="Suggested next questions">
+                {liveFollowups.slice(0, 2).map((f) => (
+                  <button
+                    type="button"
+                    className="assistant-followup"
+                    key={f}
+                    disabled={loading}
+                    onClick={() => void submitQuestion(f)}
+                  >
+                    <span>{f}</span>
+                    <ChevronRight className="chev" size={13} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            )}
+            {caveat && <p className="assistant-caveat">{caveat}</p>}
+            {note && <p className="assistant-note">{note}</p>}
+          </div>
+        </div>
+
+        {showJump && (
+          <button type="button" className="assistant-jump" onClick={scrollToBottom}>
+            <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+            Jump to Latest
+          </button>
+        )}
+
+        {/* P36R S2 — once a conversation exists the prompt controls collapse into a
+            native disclosure. They are never REMOVED (and the composer below is
+            always visible), so asking another question is never hidden. */}
+        {hasConversation && (
+          <details className="assistant-more">
+            <summary className="assistant-more-summary">
+              <ChevronRight className="chev" size={14} strokeWidth={2} aria-hidden="true" />
+              <span>{MORE_DISCLOSURE_LABEL}</span>
+            </summary>
+            <div className="assistant-more-body">{promptControls}</div>
+          </details>
+        )}
+      </div>
+
+      {/* P36R S2 — the PROPOSED-ACTION region. A staged answer and an unconfirmed
+          proposal are NOT chat messages: they are held in their own labelled
+          region directly above the composer, where they cannot scroll away and
+          cannot be mistaken for something that already happened. Nothing here
+          mutates on render; `confirmProposal` (behind an explicit Confirm) remains
+          the ONLY write path, and Cancel writes nothing. */}
+      {(canStage && stageField) || proposal ? (
+        <section className="assistant-proposed" aria-label="Proposed action — needs your confirmation">
+          <div className="assistant-proposed-eyebrow eyebrow">Proposed Action — Not Applied</div>
+          {/* P29.6 — the narrow STAGING trigger. For the CURRENT pending field
+              only, the user SELECTS the labeled synthetic suggestion; it is routed
+              through the guarded `proposeForField` (source:'user') to create the
+              same UNCONFIRMED ProposalCard below. Nothing here mutates — staging
+              just fills the card. Hidden once a proposal is staged (one at a
+              time), when degraded, or when the screen passes no current pending
+              field / no suggested value. */}
+          {canStage && stageField && <StageAnswer field={stageField} onStage={onStageUserAnswer} />}
+
+          {/* P29.4b — the UNCONFIRMED staged proposal. It states plainly that it
+              has NOT changed the official record. Only the explicit Confirm writes
+              (through confirmProposal). A candidate/unknown/conflicting value is
+              visually + textually distinct and never styled as fact. */}
+          {proposal && (
+            <ProposalCard
+              proposal={proposal}
+              stale={proposalStale}
+              confirming={confirming}
+              onConfirm={onConfirm}
+              onCancel={onCancelProposal}
+              onReevaluate={onRefresh}
+            />
+          )}
+        </section>
+      ) : null}
+
+      {/* P36R S2 — the composer DOCK: sticky at the bottom of the panel so asking
+          another question never requires scrolling. P34.2 — the composer is WIRED
+          to the READ-ONLY grounded resolver: a real text input + a SECONDARY-styled
+          send control, with a persistent helper naming the grounded scopes it
+          answers over (not a general chatbot). Submitting calls only
+          POST /assistant/query — a non-mutating query that never writes the
+          record. An empty submit is a no-op; overlapping submits are ignored while
+          a query is in flight. The single subordinate caption is the footer. */}
+      <div className="assistant-foot">
+        <form className="assistant-composer" onSubmit={onComposerSubmit}>
+          <input
+            ref={composerInputRef}
+            type="text"
+            className="assistant-composer-input"
+            aria-label="Ask the assistant a question"
+            placeholder="Ask a question"
+            value={composerText}
+            onChange={(e) => setComposerText(e.target.value)}
+          />
+          <button
+            type="submit"
+            className="btn btn-secondary assistant-composer-send"
+            aria-label="Send question"
+            disabled={loading}
+          >
+            <CornerDownRight size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </form>
+        <p className="assistant-composer-helper">{ASSISTANT_COMPOSER_HELPER}</p>
+        <p className="assistant-caption">{SUBORDINATE_CAPTION}</p>
+      </div>
     </section>
   );
 }
 
 /**
- * One conversation bubble. User vs. assistant is signalled by role class + an
- * icon + a text label (never color alone). An assistant message grounded in an
- * older revision than the current record is marked stale, and its text is run
- * through the verdict-language guard like every rendered assistant string.
+ * One conversation bubble. User vs. assistant is signalled by `data-role` + a
+ * role class + an icon + a text label (never color alone). An assistant message
+ * grounded in an older revision than the current record is marked stale, and its
+ * text is run through the verdict-language guard like every rendered assistant
+ * string. `live` marks the CURRENT turn's question echo — presentation only, and
+ * excluded from the "focus the newest result" query.
  */
-function ConversationMessage({ message, currentRev }: { message: Msg; currentRev?: number }) {
+function ConversationMessage({
+  message,
+  currentRev,
+  live = false,
+}: {
+  message: Msg;
+  currentRev?: number;
+  live?: boolean;
+}) {
   const isAssistant = message.role === 'assistant';
   const text = isAssistant && hasVerdictLanguage(message.text) ? VERDICT_ROUTE_TEXT : message.text;
   const stale =
@@ -1026,6 +1140,7 @@ function ConversationMessage({ message, currentRev }: { message: Msg; currentRev
     isAssistant ? 'assistant-msg-assistant' : 'assistant-msg-user',
     kind ? `kind-${kind}` : '',
     stale ? 'is-stale' : '',
+    live ? 'assistant-msg-live' : '',
   ]
     .filter(Boolean)
     .join(' ');

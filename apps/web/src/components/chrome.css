@@ -29,21 +29,73 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+
+  /* The single named main→rail gutter (P36R S1). <main> is `flex: 1; min-width: 0`
+     and the Assistant rail (.record-right / .memory-right) is a `flex: none`
+     sibling, so the rail can never be overlapped — main absorbs the slack. This
+     token makes the one horizontal inset explicit instead of repeating a
+     literal in two places, and standardises it: `.screen-main.pad` was
+     `22px 26px`, so this is a real +2px per side on BOTH edges of EVERY padded
+     main — including the screens that opt into no width mode. That is
+     intentional (one consistent outer gutter across the app) and inert to
+     layout: `box-sizing: border-box` is global. Vertical padding is unchanged. */
+  --main-gutter: 28px;
 }
 .screen-main.pad {
-  padding: 22px 26px;
+  padding: 22px var(--main-gutter);
 }
 .screen-main.centered {
   display: flex;
   justify-content: center;
 }
+
+/* ---- Shared content-width system (P36R S1) --------------------------- */
+/* An OPT-IN measure published by <AppShell width="…"> as `data-width` on
+   <main>. It sets a custom property only — everything that actually owns a
+   measure consumes it as `var(--content-max, <historic value>)`, so every
+   screen that does NOT opt in is unchanged. That set is BOTH the page wrappers
+   (.centered-col here; .placeholder and .governance-panel in screens.css) AND
+   the component-level caps (.rec-val, .schema-browser, .settings-card) — a
+   component cap left as a literal would stair-step inside a widened wrapper
+   instead of tracking it. `max-width` can never make a block wider than its containing
+   block, so a mode can never introduce horizontal page overflow — including
+   inside the ≤1024px stacked column.
+
+   `full` uses the literal `none`: var() substitutes at computed-value time and
+   `none` is a valid `max-width`, so the declaration resolves to `max-width:
+   none`. (Even in the pathological case where substitution were rejected,
+   max-width's initial value is also `none` — so the result is correct either
+   way, which is why no extra per-selector override is needed.)
+
+   `full` is therefore NOT a decorative marker: `--content-max: none` is
+   inherited by every descendant, so it switches OFF the cap of any measured
+   wrapper or card placed inside that <main>. It is defined here as the third
+   mode of the specified system and is reserved for a surface that genuinely
+   runs edge-to-edge (the bounded graph canvas); no screen opts into it today.
+   A screen that is already uncapped should pass no `width` at all rather than
+   `full` — see the comment in ExportReadiness.tsx. */
+.screen-main[data-width='readable'] {
+  --content-max: 760px;
+}
+.screen-main[data-width='wide'] {
+  --content-max: 1200px;
+}
+.screen-main[data-width='full'] {
+  --content-max: none;
+}
+
+/* No fallback on --main-gutter: `.centered-col` is only ever mounted inside
+   <main class="screen-main"> (LoadMaterials, GuidedCompletion), which always
+   declares the token, so a fallback here would be unreachable code pretending
+   to be a safety net. --content-max DOES keep its fallback: that one is
+   genuinely absent whenever the screen opts into no width mode. */
 .centered-col {
   width: 100%;
-  max-width: 1040px;
-  padding: 24px 26px;
+  max-width: var(--content-max, 1040px);
+  padding: 24px var(--main-gutter);
 }
 .centered-col.narrow {
-  max-width: 720px;
+  max-width: var(--content-max, 720px);
 }
 
 /* ---- TopBar (60px) -------------------------------------------------- */

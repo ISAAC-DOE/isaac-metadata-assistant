@@ -55,6 +55,7 @@ export function GuidedCompletion() {
         topBar={<TopBar variant="record" title={LABELS.screenComplete} recordId={id} />}
         sidebar={<WorkflowSpine workflow={null} recordId={id} />}
         mainPad="centered"
+        width="readable"
       >
         {/* M1 (P33 S6) — the non-data branch renders FetchStates' <h2> with no
             <h1>; give the surface a screen-level heading so its document outline
@@ -316,6 +317,11 @@ function LoadedCompletion({
       rightPanel={rightPanel}
       statusBar={statusBar}
       mainPad="centered"
+      /* One question at a time — a reading/answering surface, not a workbench.
+         `readable` (760px) is the shared token for that measure; it supersedes
+         the local 720px `.centered-col.narrow` literal, which stays as the
+         fallback for screens that do not opt in. */
+      width="readable"
     >
       <div className="centered-col narrow">{children}</div>
     </AppShell>

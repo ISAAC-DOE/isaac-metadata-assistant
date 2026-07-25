@@ -10404,7 +10404,7 @@
       },
       {
         "path": "apps/web/src/components/AppShell.tsx",
-        "sha256": "bc9454855ad84870f8d58abbf6b644a95931641fbadb7eaf74712ee4a13cb43a"
+        "sha256": "ffec1841032ec6178e80aff18dd4a5437f429c4540a47fb16721ac0e225d71e9"
       },
       {
         "path": "apps/web/src/components/ArtifactCard.tsx",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "5a3022b5f47b90037a0f4c6a3791677c4c9a484854e34c1cbfdebfdaff79ce43"
+        "sha256": "80ec5b069b4508d27e3255f5e325fa30da42f570f781dba8539f4ff3a38ab07a"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10544,15 +10544,15 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "59f22e8c209ce701d9446dcaf459e6be58c1865af7b74918ee81ade33d32a43e"
+        "sha256": "2ea4622bdaeddd73b43f3a418417ae6344c05b41e7b4a8d5feed20d0e0e4faa1"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
-        "sha256": "10fc93bbeb673a38913a878f3ae0c926a3ff6dc470bf6b0df1494e5cade9b3b4"
+        "sha256": "536d81fa6991ef475934226ba93dbac91d8323f3ace4a3897a78412ffd87451c"
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "f009ff5a867d04882df50850dd93e3a5589cc84d98a1c6d233861f8ebeaf6bb2"
+        "sha256": "bd0a5e403ca3e08eaf1c0c754295d54f340ad7e4e87ff302768d2ab1b5d65fb4"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10560,7 +10560,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "b289f02332171a67b0f80dba1dc17fdb3d9832ed91b16e4f8a86685dcfbb1e89"
+        "sha256": "9bffef28c112bbca44a2aaea1bc68072abee6db9219923ec99861ee96487acfc"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "303d007fd1105d085d813be8d6fa2b252c5cd9cf64e1d7c95140c8384d2ddb5b"
+        "sha256": "0b32c97cd9af7e6fce6dc498ad6c97cca3d1bf5aada98775f57f8ac92bbc5c57"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "c68332a605ba1409188c8b771ec8926d065887e71934a0985422fadbef70f48e"
+    "served_manifest_fingerprint": "89adfa53989258eaab08e59cb55548b99226371c32fcf36103572818e0f8ea1a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
