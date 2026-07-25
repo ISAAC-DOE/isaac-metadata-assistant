@@ -46,6 +46,11 @@ import {
 } from '../lib/assistantAgent';
 import { api } from '../lib/api';
 import type {
+  AssistantGraphCapability,
+  GraphProposal,
+  GraphProposalChoice,
+} from '../lib/graphCommands';
+import type {
   AssistantMessage,
   AssistantQuerySource,
   AssistantSource,
@@ -156,6 +161,22 @@ interface AssistantPanelProps {
    * through the existing `confirmProposal` path — it never infers another field.
    */
   stageField?: StageFieldOption;
+  /**
+   * P36R S5 — the OPT-IN graph capability. Passed by exactly ONE mount in this
+   * phase (Project Memory, and only while its Graph tab is showing); the four
+   * record surfaces pass nothing, so their behaviour is byte-identical to
+   * before — there is no code path here that runs without this prop.
+   *
+   * When present, a submitted question is first offered to a bounded,
+   * deterministic, OFFLINE classifier (`lib/graphCommands.ts`). No LLM, no
+   * model provider, no embedding, no vector search, no network: it is literal
+   * pattern matching over a frozen intent catalog. A recognised question is
+   * answered from the already-fetched projection and produces a PROPOSAL — the
+   * graph is not touched until the user presses "Apply to Graph". Anything the
+   * catalog does not recognise returns null and falls through to the existing
+   * read-only resolver, unchanged.
+   */
+  graphCapability?: AssistantGraphCapability;
 }
 
 /**
@@ -346,6 +367,7 @@ export function AssistantPanel({
   onRefresh,
   confirmApi = api,
   stageField,
+  graphCapability,
 }: AssistantPanelProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [messages, setMessages] = useState<Msg[]>(() => loadSession(experimentId).messages);
@@ -371,6 +393,21 @@ export function AssistantPanel({
   // mutated by holding or displaying it.
   const [proposal, setProposal] = useState<Proposal | null>(proposalProp ?? null);
   const [confirming, setConfirming] = useState(false);
+
+  // P36R S5 — the current UNAPPLIED graph-navigation proposal. Holding it (or
+  // rendering it) changes nothing: only the explicit "Apply to Graph" control
+  // calls `graphCapability.apply`.
+  const [graphProposal, setGraphProposal] = useState<GraphProposal | null>(null);
+
+  // An unapplied proposal belongs to the surface it was resolved against. When
+  // the capability is withdrawn — the Graph tab stopped showing, so the mounted
+  // graph and its index are gone — the proposal goes with it. Without this it
+  // survived the tab excursion and was re-offered on return against a DIFFERENT
+  // GraphSurfaceContext, with counts derived from a state that no longer exists.
+  // Dropping it applies nothing; the graph was never touched.
+  useEffect(() => {
+    if (!graphCapability) setGraphProposal(null);
+  }, [graphCapability]);
 
   const logRef = useRef<HTMLDivElement | null>(null);
   const replyRef = useRef<HTMLParagraphElement | null>(null);
@@ -552,6 +589,36 @@ export function AssistantPanel({
     }
   }
 
+  // P36R S5 — the ONE place a graph proposal is applied, behind an explicit
+  // click. It runs the SAME `GraphAction`s the equivalent typed command
+  // produces, through the graph surface's own reducer. It writes nothing to any
+  // record: `confirmProposal` remains the only write path in this panel.
+  function onApplyGraphProposal() {
+    if (!graphCapability || !graphProposal) return;
+    if (graphProposal.status !== 'ready' || graphProposal.actions.length === 0) return;
+    const applied = graphProposal;
+    graphCapability.apply(applied);
+    setGraphProposal(null);
+    appendAgentMessage(
+      `Applied to the graph: ${applied.command ?? applied.title}. This changed the view only — ` +
+        `no record, evidence entry, or export decision was touched.`,
+      'graph',
+      undefined,
+    );
+  }
+
+  // Picking one bounded candidate REPLACES the proposal with the same
+  // navigation resolved to that node/cluster. Still unapplied.
+  function onPickGraphChoice(choice: GraphProposalChoice) {
+    setGraphProposal(choice.proposal);
+    setLiveAnswer((prev) =>
+      prev
+        ? { ...prev, text: choice.proposal.explanation, id: uid(), timestamp: Date.now() }
+        : prev,
+    );
+    focusPendingRef.current = true;
+  }
+
   // Cancel — no mutation. Clears the proposal and restores focus to the reply.
   function onCancelProposal() {
     setProposal(null);
@@ -599,6 +666,36 @@ export function AssistantPanel({
   async function submitQuestion(text: string) {
     const question = text.trim();
     if (question === '' || loading) return; // empty is a no-op; guard overlapping submits
+
+    // P36R S5 — bounded graph-intent interception, BEFORE any network call and
+    // only when this mount opted in. `classify` is pure, offline and literal
+    // pattern matching over a frozen catalog; it returns null for anything it
+    // does not confidently recognise, and the unchanged resolver path below
+    // then runs. A miss is deliberately preferred to hijacking a memory
+    // question. Recognition produces a PROPOSAL — the graph is untouched.
+    const graphIntent = graphCapability?.classify(question) ?? null;
+    if (graphIntent) {
+      archiveLive();
+      setLiveQuestion(question);
+      setActiveIndex(null);
+      setComposerText('');
+      setGraphProposal(graphIntent);
+      const cls = classifyAnswer('graph', availability);
+      setLiveAnswer({
+        role: 'assistant',
+        text: graphIntent.explanation,
+        answeredFrom: 'graph',
+        hasGrounding: true,
+        resultType: cls.resultType,
+        authority: cls.authority,
+        actionability: cls.actionability,
+        id: uid(),
+        timestamp: Date.now(),
+      });
+      focusPendingRef.current = true;
+      return;
+    }
+    setGraphProposal(null);
     archiveLive();
     setLiveQuestion(question);
     setActiveIndex(null);
@@ -667,6 +764,9 @@ export function AssistantPanel({
     setLiveAnswer(null);
     setLiveQuestion(null);
     setActiveIndex(null);
+    // An unapplied graph proposal goes with the conversation that produced it.
+    // Dropping it applies nothing — the graph was never touched.
+    setGraphProposal(null);
     // P34.5 — the Clear button unmounts with the now-empty log, so move focus to
     // the always-present composer input rather than letting it fall to <body>.
     composerInputRef.current?.focus();
@@ -1073,6 +1173,20 @@ export function AssistantPanel({
         </section>
       ) : null}
 
+      {/* P36R S5 — the graph-navigation proposal. Its own region, above the
+          composer, never a chat message: it states plainly that it has NOT been
+          applied, and the graph is genuinely unchanged until the explicit
+          control below is pressed. Rendered only on a mount that opted in. */}
+      {graphCapability && graphProposal && (
+        <GraphProposalCard
+          proposal={graphProposal}
+          provenance={graphCapability.provenance}
+          onApply={onApplyGraphProposal}
+          onPick={onPickGraphChoice}
+          onDismiss={() => setGraphProposal(null)}
+        />
+      )}
+
       {/* P36R S2 — the composer DOCK: sticky at the bottom of the panel so asking
           another question never requires scrolling. P34.2 — the composer is WIRED
           to the READ-ONLY grounded resolver: a real text input + a SECONDARY-styled
@@ -1180,6 +1294,86 @@ function ConversationMessage({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * P36R S5 — an UNAPPLIED graph-navigation proposal.
+ *
+ * It shows what was resolved, the equivalent command-bar command (so the two
+ * front-ends are visibly one thing), the projection's provenance, and — only
+ * when something is actually resolvable — an explicit "Apply to Graph". An
+ * ambiguous token renders its BOUNDED candidates instead and applies nothing;
+ * an unresolvable one renders no apply control at all and says so.
+ *
+ * Nothing here mutates on render, and nothing here touches a record: applying
+ * changes a read-only view of an already-fetched projection.
+ */
+function GraphProposalCard({
+  proposal,
+  provenance,
+  onApply,
+  onPick,
+  onDismiss,
+}: {
+  proposal: GraphProposal;
+  provenance: string;
+  onApply: () => void;
+  onPick: (choice: GraphProposalChoice) => void;
+  onDismiss: () => void;
+}) {
+  const ready = proposal.status === 'ready' && proposal.actions.length > 0;
+  // The verdict guard covers EVERY assistant-rendered string, this one included.
+  const title = hasVerdictLanguage(proposal.title) ? VERDICT_ROUTE_TEXT : proposal.title;
+  return (
+    <section className="assistant-graph" aria-label="Graph navigation — not applied">
+      <div className="assistant-graph-eyebrow eyebrow">Graph Navigation — Not Applied</div>
+      <p className="assistant-graph-title">{title}</p>
+      {proposal.command && (
+        <p className="assistant-graph-command mono">
+          same as the command <span>{proposal.command}</span>
+        </p>
+      )}
+
+      {proposal.choices.length > 0 && (
+        <div className="assistant-graph-choices" role="group" aria-label="Candidates — pick one">
+          {proposal.choices.map((choice) => (
+            <button
+              type="button"
+              className="assistant-graph-choice mono"
+              key={choice.label}
+              onClick={() => onPick(choice)}
+            >
+              {choice.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <p className="assistant-graph-prov mono">{provenance}</p>
+
+      <div className="assistant-graph-actions">
+        {ready ? (
+          <button type="button" className="btn btn-secondary assistant-graph-apply" onClick={onApply}>
+            <CornerDownRight size={14} strokeWidth={2} aria-hidden="true" />
+            Apply to Graph
+          </button>
+        ) : (
+          <span className="assistant-graph-note">
+            Nothing to apply — the graph is unchanged.
+          </span>
+        )}
+        <button type="button" className="assistant-graph-dismiss" onClick={onDismiss}>
+          <X size={13} strokeWidth={2} aria-hidden="true" />
+          Dismiss
+        </button>
+      </div>
+
+      <p className="assistant-graph-note">
+        Applying changes the Project Memory view only. It validates nothing, completes no field, and
+        authorises no export.
+      </p>
+    </section>
   );
 }
 

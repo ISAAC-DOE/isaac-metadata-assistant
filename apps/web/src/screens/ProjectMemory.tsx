@@ -1,6 +1,12 @@
 import './screens.css';
 import '../components/assistant.css';
-import { useCallback, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -14,6 +20,12 @@ import { Network, ChevronDown, ChevronRight } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
+import {
+  classifyGraphQuestion,
+  describeGraphProvenance,
+  type AssistantGraphCapability,
+  type GraphSurfaceContext,
+} from '../lib/graphCommands';
 import { useFetch } from '../lib/useFetch';
 import type {
   ApiGraphStatus,
@@ -69,16 +81,44 @@ export function ProjectMemory() {
   // land somewhere. `?concept=<id>` auto-opens that concept in Concept Lookup;
   // `?file=<path>` auto-opens that file in the Source Index. Both reuse each
   // card's existing accordion expand/fetch mechanics — nothing new is fetched.
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const focusConceptId = params.get('concept');
   const focusFilePath = params.get('file');
+  // P36R S4: `?tab=` makes the section part of the link, so a shared graph URL
+  // (and a reload, and browser back) lands on the tab that owns the state. Read
+  // through a strict allowlist — an unknown value selects nothing.
+  const urlTab = params.get('tab');
+  const linkedTab = MEMORY_TABS.some((t) => t.id === urlTab) ? (urlTab as MemoryTab) : null;
 
   // P33 S3 (D6): a deep link selects the tab that owns the target — `?file=`
   // lands on Sources, `?concept=` on Concepts — so the auto-opened item is
   // visible on arrival; otherwise the page opens on Overview.
   const [activeTab, setActiveTab] = useState<MemoryTab>(
-    focusFilePath ? 'sources' : focusConceptId ? 'concepts' : 'overview',
+    focusFilePath ? 'sources' : focusConceptId ? 'concepts' : (linkedTab ?? 'overview'),
   );
+
+  // A manual tab click keeps `?tab=` truthful, but REPLACES the history entry:
+  // switching tabs is not a navigation worth a back-button stop. The command
+  // bar's own pushes (which carry graph state) still stack normally.
+  const selectTab = useCallback(
+    (tab: MemoryTab) => {
+      setActiveTab(tab);
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('tab', tab);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+
+  // Browser back/forward between two graph links: follow `?tab=` when it moves.
+  useEffect(() => {
+    if (linkedTab) setActiveTab(linkedTab);
+  }, [linkedTab]);
 
   // A ⌘K jump to a memory item navigates /memory → /memory?file=… / ?concept=…
   // — the SAME route, so React Router never remounts this screen and the
@@ -90,6 +130,43 @@ export function ProjectMemory() {
     if (focusFilePath) setActiveTab('sources');
     else if (focusConceptId) setActiveTab('concepts');
   }, [focusFilePath, focusConceptId]);
+
+  // P36R S5 — the mounted Graph surface publishes itself here (index, provenance,
+  // a state reader, and an external `apply`) so the Assistant's graph capability
+  // resolves against the SAME already-fetched projection and applies through the
+  // SAME reducer. Null whenever the Graph tab is not mounted.
+  const [graphSurface, setGraphSurface] = useState<GraphSurfaceContext | null>(null);
+  const onGraphReady = useCallback((ctx: GraphSurfaceContext | null) => setGraphSurface(ctx), []);
+
+  /**
+   * The OPT-IN Assistant graph capability.
+   *
+   * Scope, deliberately narrow and documented:
+   *  - Project Memory only — the four record surfaces pass nothing at all, so
+   *    their Assistant behaviour is unchanged.
+   *  - and only while the Graph tab is mounted, because that is where the
+   *    projection has actually been fetched. Enabling it on the other tabs would
+   *    mean pulling the ~120 KB projection on every Project Memory visit, which
+   *    is a real cost for a capability that belongs next to the graph.
+   *
+   * `classify` is pure, offline, literal pattern matching over a frozen catalog
+   * — no LLM, no provider, no embedding, no network. `apply` runs only from the
+   * explicit "Apply to Graph" control.
+   */
+  const graphCapability = useMemo<AssistantGraphCapability | undefined>(() => {
+    if (activeTab !== 'graph' || !graphSurface) return undefined;
+    const surface = graphSurface;
+    return {
+      // The WHOLE live view state, read fresh on every question. A proposal's
+      // stated counts are produced by folding its own actions onto exactly this
+      // state through the real reducer, so they are what "Apply to Graph" will
+      // put on screen — not an estimate computed from a subset of the filters.
+      classify: (question: string) =>
+        classifyGraphQuestion(question, surface.index, { state: surface.peek() }),
+      apply: (proposal) => surface.apply(proposal.command, proposal.actions),
+      provenance: describeGraphProvenance(surface.meta),
+    };
+  }, [activeTab, graphSurface]);
 
   // P25.7 / P33 S3 (D6): the grounded assistant, now in the right rail so it is
   // visible across all three tabs. It grounds ENTIRELY in the already-fetched
@@ -105,6 +182,7 @@ export function ProjectMemory() {
             queryScope="memory"
             availability={graph.data.availability}
             showAvailabilityHead={false}
+            graphCapability={graphCapability}
           />
         </div>
       </AssistantDrawer>
@@ -134,7 +212,7 @@ export function ProjectMemory() {
           as leads to verify — it never validates, completes, or supplies a value.
         </p>
 
-        <SectionTabs active={activeTab} onSelect={setActiveTab} />
+        <SectionTabs active={activeTab} onSelect={selectTab} />
 
         {activeTab === 'overview' && (
           <div id={panelId('overview')} role="tabpanel" aria-labelledby={tabId('overview')} tabIndex={0}>
@@ -164,7 +242,7 @@ export function ProjectMemory() {
 
         {activeTab === 'graph' && (
           <div id={panelId('graph')} role="tabpanel" aria-labelledby={tabId('graph')} tabIndex={0}>
-            <MemoryGraphCard />
+            <MemoryGraphCard onReady={onGraphReady} />
           </div>
         )}
       </div>

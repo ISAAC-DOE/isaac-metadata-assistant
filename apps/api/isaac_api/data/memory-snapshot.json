@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "80ec5b069b4508d27e3255f5e325fa30da42f570f781dba8539f4ff3a38ab07a"
+        "sha256": "4324585ed7913b4871ac8fb8c1823e04f7862aad2d65b9e283010dc01f530555"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10560,7 +10560,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "64c2788e15b879c50516389f81448800fe3a907f1c2b37d0c88d4c85224b07fd"
+        "sha256": "198d4c6a65e4884d794b9cb035ab7c4a554b0feb8504d91ba5ac8b5928635f88"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "33a502d9b612ca6aed9a267687dafba12545aff66f980cf581823eb4a6ef710c"
+    "served_manifest_fingerprint": "68ed803745e7104739c557b3574ab1b8b85750741439a248c84666602c6cea6c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
