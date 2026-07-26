@@ -52,6 +52,48 @@
   max-width: 72ch;
 }
 
+/* P36R S8 — the purpose disclosure. A <details>, so the four real uses are
+   available without the Validator growing into the visual centre of the app:
+   it stays a secondary Governance utility. */
+.rec-val-purpose {
+  margin-top: 12px;
+}
+.rec-val-purpose > summary {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--action);
+  cursor: pointer;
+  width: fit-content;
+}
+.rec-val-purpose > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.rec-val-purpose-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 72ch;
+}
+.rec-val-purpose-list li {
+  overflow-wrap: anywhere;
+}
+.rec-val-purpose-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  max-width: 72ch;
+}
+
+.rec-val-hint {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
 .rec-val-input-row {
   margin-top: 16px;
   display: flex;

@@ -50,6 +50,47 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
+// --- P36R S8: the clarifying purpose copy ---------------------------------------
+
+describe('RecordValidator — stated purpose (P36R S8 copy)', () => {
+  it('leads with the distinct purpose: validate WITHOUT adding to My Experiments', () => {
+    render(<RecordValidator />);
+    expect(
+      screen.getByText(/Validate a record without adding it to My Experiments\./i),
+    ).toBeInTheDocument();
+  });
+
+  it('lists the four things it is for, as a secondary disclosure', () => {
+    render(<RecordValidator />);
+    fireEvent.click(screen.getByText(/when to use this/i));
+    expect(screen.getByText(/Inspect an external JSON object/i)).toBeInTheDocument();
+    expect(screen.getByText(/Confirm API and CLI validation parity/i)).toBeInTheDocument();
+    expect(screen.getByText(/Diagnose structured schema errors by path/i)).toBeInTheDocument();
+    expect(screen.getByText(/Independently verify an artifact you already exported/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing checked here is created, saved, or changed\./i)).toBeInTheDocument();
+  });
+
+  it('names the authoritative gate it reuses, not a second implementation', () => {
+    render(<RecordValidator />);
+    expect(screen.getAllByText('isaac validate --official').length).toBeGreaterThan(0);
+    expect(screen.getByText('validate_official')).toBeInTheDocument();
+  });
+
+  it('states the 512 KB bound in the interface, not only in an error', () => {
+    render(<RecordValidator />);
+    expect(screen.getByText(/Accepts JSON up to 512 KB\./i)).toBeInTheDocument();
+  });
+
+  it('offers no propose/approve/edit/save affordance — only Upload and Validate', () => {
+    render(<RecordValidator />);
+    expect(screen.queryByRole('button', { name: /propose|approve|edit|delete|save|add to/i })).toBeNull();
+    expect(screen.getAllByRole('button').map((b) => b.textContent?.trim())).toEqual([
+      'Upload JSON File',
+      'Validate',
+    ]);
+  });
+});
+
 // --- honest scope + empty state -------------------------------------------------
 
 describe('RecordValidator — pre-validation', () => {

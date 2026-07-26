@@ -1678,7 +1678,7 @@ export const aboutResponseNoCommit = {
   build_commit: null,
 };
 
-// --- P36.6 Schema & Vocabulary browser fixture (GET /api/schema) ------------
+// --- P36.6 / P36R S8 Schema Reference browser fixture (GET /api/schema) -----
 // A small, hand-built SUBSET of the real vendored schema (schema/isaac_
 // record_v1.json) — just enough shape (required + optional top-level fields, a
 // const-typed field, an enum with a description, a multi-level nested object
@@ -1721,8 +1721,40 @@ export const schemaBrowserFixture = {
         properties: {
           outputs: {
             type: 'array',
-            items: { type: 'object', properties: {} },
             description: 'One or more descriptor output batches.',
+            items: {
+              type: 'object',
+              required: ['descriptors'],
+              properties: {
+                descriptors: {
+                  type: 'array',
+                  description: 'The descriptor rows in this batch.',
+                  items: {
+                    type: 'object',
+                    required: ['name'],
+                    properties: {
+                      // Pattern-constrained, NOT enumerated inline, and its
+                      // description cites the vocabulary source slug — the
+                      // exact shape the real schema uses for descriptors[].name,
+                      // so the Vocabulary ↔ schema link renders in tests.
+                      //
+                      // The cited slug ("Zebra-Terms") deliberately shares NO
+                      // substring with the production slug
+                      // ("Controlled-Vocabulary"): a hard-coded needle would
+                      // find nothing here, so these tests can only pass if the
+                      // link is genuinely derived from the vocabulary file's
+                      // own `source`.
+                      name: {
+                        type: 'string',
+                        pattern: '^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)*$',
+                        description:
+                          'Descriptor name. See Zebra-Terms for the canonical class list.',
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -1730,13 +1762,23 @@ export const schemaBrowserFixture = {
         type: 'object',
         description: 'The physical sample under study.',
         required: ['sample_form'],
+        allOf: [
+          {
+            if: { properties: { sample_form: { const: 'powder' } } },
+            then: { required: ['material'] },
+          },
+        ],
         properties: {
           sample_form: { type: 'string', description: 'Physical form of the sample.' },
           material: {
             type: 'object',
             description: 'Chemical/material identity of the sample.',
             properties: {
-              formula: { type: 'string', description: 'Chemical formula, e.g. CuO2.' },
+              formula: {
+                type: 'string',
+                description: 'Chemical formula, e.g. CuO2.',
+                examples: ['CuO2', 'Fe2O3'],
+              },
             },
           },
         },
@@ -1752,7 +1794,7 @@ export const schemaBrowserFixture = {
     descriptor_class: {
       field: 'descriptor_class',
       note: 'Fixture vocabulary note (synthetic, for tests).',
-      source: 'https://example.invalid/fixture-controlled-vocabulary',
+      source: 'https://example.invalid/wiki/Zebra-Terms',
       classes: {
         spectroscopy: ['white_line_energy', 'edge_shift'],
       },
