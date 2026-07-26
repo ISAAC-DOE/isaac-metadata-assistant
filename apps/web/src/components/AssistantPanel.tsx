@@ -51,6 +51,8 @@ import type {
   GraphProposalChoice,
 } from '../lib/graphCommands';
 import type {
+  AssistantAction,
+  AssistantActionKind,
   AssistantMessage,
   AssistantQuerySource,
   AssistantSource,
@@ -77,18 +79,42 @@ interface AssistantPanelProps {
    * The primary memory-plane axis (P24.10): available vs unavailable — passed
    * ONLY by screens that actually fetch GET /api/graph/status. When OMITTED
    * (P25.7), the screen makes no memory-availability claim: the panel renders
-   * neither the `memory:` head line nor the memory caveat.
+   * neither the header STATUS ROW nor the memory caveat.
+   *
+   * This prop is NOT presentational. Independently of whether the status row is
+   * visible, it drives BOTH the memory caveat (`MEMORY_UNAVAILABLE_CAVEAT`) and
+   * `classifyAnswer(answeredFrom, availability)` — a graph-sourced answer is
+   * `degraded` when memory is unavailable and `advisory` when it is available.
+   * A screen that knows the axis must therefore always pass it; suppressing the
+   * VISIBLE row is a separate decision (see `showAvailabilityStatus`). Nothing
+   * here is ever fabricated or defaulted.
    */
   availability?: MemoryAvailability;
   /**
-   * P33 HQA (#7) — whether to render the memory-availability label in the
-   * assistant head. Defaults to `true`. A screen that ALREADY shows a
-   * `GraphStatusChip` for the same availability axis passes `false` to suppress
-   * the redundant duplicate label (single-state). This is purely presentational:
-   * `availability` is still consumed — message classification (`classifyAnswer`)
-   * and the unavailable caveat are unchanged regardless of this flag.
+   * P33 HQA #7, restored at P36V S-A review — whether THIS panel renders the
+   * VISIBLE availability status row. Presentation only: it never changes how
+   * `availability` is used for `classifyAnswer` or for the memory caveat.
+   *
+   * There are three meaningful states, and all three exist in the app:
+   *
+   *   (a) `availability` given, `showAvailabilityStatus` true (the DEFAULT) —
+   *       the mount knows the axis and the panel is its SOLE visible owner.
+   *       Record Workbench and Export Readiness: neither renders a
+   *       `GraphStatusChip`, so the panel must state it or nobody does.
+   *   (b) `availability` given, `showAvailabilityStatus={false}` — the mount
+   *       knows the axis and still needs it for classification/caveat, but the
+   *       PAGE already owns the visible label. Project Memory (where the chip is
+   *       the page's subject) and Evidence Explorer (status-bar chip). Without
+   *       this state the identical fact is stated twice, and — because the chip's
+   *       accessible name is "Project memory available — memory plane, advisory
+   *       only, never a validator" while this row's is its visible text — a
+   *       screen reader hears ONE axis in TWO different wordings.
+   *   (c) `availability` omitted — the mount cannot truthfully know the axis
+   *       (Guided Completion loads only {detail, pending} and consults no graph),
+   *       so nothing is rendered and no status is invented. This flag is then
+   *       irrelevant: there is no state to show or suppress.
    */
-  showAvailabilityHead?: boolean;
+  showAvailabilityStatus?: boolean;
   /** Optional subordinate note, e.g. "truth questions route to the CLI…". */
   note?: string;
   /**
@@ -233,6 +259,15 @@ const MEMORY_HEAD_LABEL: Record<MemoryAvailability, string> = {
   unavailable: 'Memory Unavailable',
 };
 
+// P36V — id of the proposed-action eyebrow, used as that region's
+// `aria-labelledby` so its accessible name is exactly its visible text.
+const PROPOSED_EYEBROW_ID = 'assistant-proposed-eyebrow';
+
+// P36V (review, M1) — the same pattern for the Related Questions group: the
+// group is named BY its visible eyebrow rather than by a detached `aria-label`
+// duplicating the same words, which a screen reader would announce twice.
+const FOLLOWUPS_EYEBROW_ID = 'assistant-followups-eyebrow';
+
 // The safe replacement rendered whenever a would-be verdict string reaches the
 // panel — the assistant explains and routes; it never states PASS/FAIL.
 const VERDICT_ROUTE_TEXT =
@@ -252,6 +287,11 @@ const EMPTY_STATE_GUIDANCE = 'Pick a suggestion below, or ask your own question 
 // controls once a conversation exists. They collapse (never disappear); the
 // composer stays visible at all times, so asking again is never hidden.
 const MORE_DISCLOSURE_LABEL = 'Suggested Questions & Agent Actions';
+
+// P36V S-A — the visible Title-Case label for an ANSWER's own follow-ups. It is
+// deliberately different from the global "Suggested Questions" control group:
+// these belong to one specific answer and are rendered inside its bubble.
+const RELATED_QUESTIONS_LABEL = 'Related Questions';
 
 // P34.5 — a defensive client-side ceiling so a hung read-only query can never
 // leave the composer stuck in `loading` forever. On timeout the query REJECTS,
@@ -302,13 +342,21 @@ const KIND_META: Record<MessageKind, { label: string; Icon: LucideIcon; classNam
 };
 
 // P34.3 — a source's `navigate_to` is followed ONLY when it is a known in-app
-// client route (the record workbench or the memory plane). Anything else — an
+// client route (the record workbench, the memory plane, or — P36V S-B — the
+// governance plane that hosts the deterministic Validator). Anything else — an
 // absolute server path, an external URL, a bare token — is rendered as a plain,
 // non-navigating label chip. This is the render-time complement to the session
 // sanitizer, which strips any '/'-prefixed string on persistence: nav targets
 // are never persisted, only followed live for an explicitly-allowlisted route.
+//
+// The allowlist is what makes the P36V S-B Open Validator action safe by the
+// same rule as every cited source: an action whose `to` is not allowlisted is
+// never rendered as a navigating control.
 function isClientRoute(nav: string | null | undefined): nav is string {
-  return typeof nav === 'string' && (nav.startsWith('/record') || nav.startsWith('/memory'));
+  return (
+    typeof nav === 'string' &&
+    (nav.startsWith('/record') || nav.startsWith('/memory') || nav.startsWith('/governance'))
+  );
 }
 
 let msgSeq = 0;
@@ -328,25 +376,31 @@ function prefersReducedMotion(): boolean {
 const NEAR_BOTTOM_PX = 64;
 
 /**
- * Conversation-style assistant (P29.2; re-laid-out P36R S2). Layout top→bottom:
+ * Conversation-style assistant (P29.2; re-laid-out P36R S2; presentation
+ * contract re-specified P36V S-A). Layout top→bottom:
  *
- *   HEADER        icon + "Assistant" + memory status + Clear Conversation
- *                 (Clear only once there IS a conversation to clear)
+ *   HEADER        icon + "Assistant" title, the availability STATUS ROW directly
+ *                 beneath the title, and "Clear Conversation" on the right of the
+ *                 same block (only once there IS a conversation to clear)
  *   DEGRADED      the honest, manual-first degraded notice
  *   BODY          flex:1 / min-height:0 — the region that absorbs the rail height
- *                   · EMPTY STATE (no conversation): concise guidance +
- *                     Suggested Questions + Agent Actions
+ *                   · EMPTY STATE (no conversation): one guidance sentence +
+ *                     Suggested Questions + a subtle divider
  *                   · CONVERSATION (a conversation exists): the bounded,
  *                     scrollable conversation region (older → newest, newest at
- *                     the BOTTOM, live turn last) + the Suggested Questions /
- *                     Agent Actions collapsed into a disclosure
+ *                     the BOTTOM, live turn last)
  *   PROPOSED      StageAnswer / ProposalCard — a distinct proposed-ACTION region,
  *                 never a chat message, directly above the composer
- *   COMPOSER      sticky at the bottom of the panel, always reachable
- *   FOOTER        the single subordinate caption
+ *   FOOT          the sticky dock, in order:
+ *                   COMPOSER    directly beneath the transcript, always reachable
+ *                   CONTROLS    empty state → Agent Actions; conversation →
+ *                               Suggested Questions + Agent Actions collapsed
+ *                               into ONE compact disclosure (never between the
+ *                               transcript and the composer)
+ *                   FOOTER      the single italicised advisory caption
  *
  * The panel presents the P29.1 ephemeral session as a conversation and preserves
- * every honesty guard: `answered from:` beneath the response it supports, the
+ * every honesty guard: `Source:` beneath the response it supports, the
  * composer's persistent grounded-scope helper, the memory-availability caveat,
  * and the verdict-language guard over ALL rendered assistant text. It explains
  * and points to sources — it never renders a verdict, never mutates a record
@@ -357,7 +411,7 @@ export function AssistantPanel({
   experimentId = DEFAULT_SESSION_KEY,
   recordRev,
   availability,
-  showAvailabilityHead = true,
+  showAvailabilityStatus = true,
   note,
   queryScope = 'record',
   agentContext,
@@ -767,6 +821,14 @@ export function AssistantPanel({
     // An unapplied graph proposal goes with the conversation that produced it.
     // Dropping it applies nothing — the graph was never touched.
     setGraphProposal(null);
+    // P36V S-A (bug fix) — the STAGED, unconfirmed proposal is ephemeral
+    // conversation state too, and it used to SURVIVE a Clear: the panel returned
+    // to its resting empty state while an unconfirmed ProposalCard still sat
+    // above the composer, offering a Confirm bound to a conversation the reader
+    // had just discarded. Dropping it writes nothing — exactly the same no-op as
+    // Cancel (`onCancelProposal`); `confirmProposal` remains the only write path,
+    // and the record / workflow / Project Memory state is untouched.
+    setProposal(null);
     // P34.5 — the Clear button unmounts with the now-empty log, so move focus to
     // the always-present composer input rather than letting it fall to <body>.
     composerInputRef.current?.focus();
@@ -848,6 +910,24 @@ export function AssistantPanel({
   const liveFollowups = (liveAnswer?.followups as string[] | undefined) ?? [];
   const staleDescId = liveStale ? 'assistant-live-stale' : undefined;
 
+  // P36V S-B — the OPTIONAL bounded NAVIGATION action the live answer offers.
+  // Today the catalog holds exactly one: Open Validator. It is surfaced only
+  //   · for a RESOLVED answer (never while loading — a control must never hang
+  //     off "Working…");
+  //   · when the answer actually CARRIES one. The composer attaches it to exactly
+  //     the routed truth answers that used to append the retired prose sentence
+  //     "Open Validate to run the deterministic schema check." — so no new
+  //     condition surfaces it and no intent resolution changed;
+  //   · when its target passes the SAME client-route allowlist every cited source
+  //     must pass.
+  // Deriving or rendering it mutates NOTHING: no record write, no validation run,
+  // no validation result change. It is live-turn-only — the P29.1 session
+  // sanitizer's SAFE_KEYS allowlist drops `action` on archive, so an answer that
+  // scrolls into history never leaves a stale control above the composer.
+  const rawLiveAction = liveAnswer?.action as AssistantAction | undefined;
+  const liveAction =
+    !loading && rawLiveAction && isClientRoute(rawLiveAction.to) ? rawLiveAction : undefined;
+
   // Clicking a pill "asks" that PRECOMPOSED question: the previous live turn is
   // archived into the log, the pill's static answer becomes the new live turn, and
   // focus moves to it. No fetch, no mutation — presentation + P29.1 session wiring
@@ -864,6 +944,12 @@ export function AssistantPanel({
       role: 'assistant',
       text: ans.text,
       answeredFrom: ans.answeredFrom,
+      // P36V S-B — carry the answer's OPTIONAL bounded navigation action onto the
+      // live turn so the proposed-action region can offer it. Most answers carry
+      // none; carrying it copies the REFERENCE to the shared descriptor, which is
+      // frozen at its definition (`OPEN_VALIDATOR_ACTION`), so nothing here — and
+      // nothing downstream — can mutate the navigation target.
+      action: ans.action,
       recordRev,
       resultType: cls.resultType,
       authority: cls.authority,
@@ -889,10 +975,12 @@ export function AssistantPanel({
   // the controls and the transcript).
   const canClear = messages.length > 0 || !!liveAnswer;
 
-  // The Suggested Questions + Agent Actions controls. Rendered PROMINENTLY in the
-  // empty state and COLLAPSED into a disclosure once a conversation exists — the
-  // ability to ask is never hidden (the composer is always visible below).
-  const promptControls = (
+  // P36V S-A — the two control groups are now SEPARATE, because the empty state
+  // and the conversation state place them differently: empty → Suggested
+  // Questions ABOVE the composer, Agent Actions below it; conversation → both
+  // collapsed into ONE compact disclosure below the composer (so nothing sits
+  // between the transcript and the composer). Neither group is ever removed.
+  const suggestedQuestionControls = (
     <>
       <div className="assistant-suggested-eyebrow eyebrow">{LABELS.suggestedQuestions}</div>
       <div className="assistant-prompts">
@@ -910,32 +998,33 @@ export function AssistantPanel({
           </button>
         ))}
       </div>
-
-      {/* P29.4b — the INTENT pills. Each RUNS a real agent intent against the live
-          context; the result is appended to the conversation. Disabled while the
-          context is degraded/absent (manual-first: composed prompts stay live). */}
-      {shownAgentPrompts.length > 0 && (
-        <>
-          <div className="assistant-suggested-eyebrow eyebrow">Agent Actions</div>
-          <div className="assistant-agent-prompts">
-            {shownAgentPrompts.map((p) => (
-              <button
-                type="button"
-                className="assistant-agent-prompt"
-                key={p.intent}
-                data-intent={p.intent}
-                disabled={!agentActive}
-                onClick={() => runAgentIntent(p)}
-              >
-                <span>{p.label}</span>
-                <ChevronRight className="chev" size={15} strokeWidth={2} aria-hidden="true" />
-              </button>
-            ))}
-          </div>
-        </>
-      )}
     </>
   );
+
+  // P29.4b — the INTENT pills. Each RUNS a real agent intent against the live
+  // context; the result is appended to the conversation. Disabled while the
+  // context is degraded/absent (manual-first: composed prompts stay live).
+  const agentActionControls =
+    shownAgentPrompts.length > 0 ? (
+      <div className="assistant-agent-actions">
+        <div className="assistant-suggested-eyebrow eyebrow">Agent Actions</div>
+        <div className="assistant-agent-prompts">
+          {shownAgentPrompts.map((p) => (
+            <button
+              type="button"
+              className="assistant-agent-prompt"
+              key={p.intent}
+              data-intent={p.intent}
+              disabled={!agentActive}
+              onClick={() => runAgentIntent(p)}
+            >
+              <span>{p.label}</span>
+              <ChevronRight className="chev" size={15} strokeWidth={2} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </div>
+    ) : null;
 
   return (
     <section className="assistant" aria-label="Assistant (advisory)">
@@ -943,10 +1032,27 @@ export function AssistantPanel({
         <span className="assistant-icon" aria-hidden="true">
           <MessageSquare size={15} strokeWidth={2} />
         </span>
-        <span className="assistant-label">{LABELS.assistant}</span>
-        <div className="assistant-head-right">
-          {availability && showAvailabilityHead && (
-            <span className="assistant-memory">
+        {/* P36V S-A — title + STATUS ROW are one stacked block: the availability
+            state reads directly BENEATH the "Assistant" title (it used to sit at
+            the far right of the header, visually detached from the thing it
+            describes and competing with Clear Conversation for the same corner). */}
+        <div className="assistant-head-titles">
+          <span className="assistant-label">{LABELS.assistant}</span>
+          {/* The status row renders only where BOTH are true: the mounting screen
+              actually fetched GET /api/graph/status and passed `availability`
+              (a mount that cannot truthfully know it — Guided Completion loads
+              only {detail, pending} and consults no graph — renders NOTHING
+              here; a status is never fabricated, defaulted, or assumed), AND the
+              panel is the visible OWNER of that axis on the screen.
+
+              Project Memory and Evidence Explorer each already render a
+              page-level `GraphStatusChip` for this SAME axis, so they pass
+              `showAvailabilityStatus={false}`: one fact, stated once, in one
+              wording. They still pass `availability`, so `classifyAnswer` and
+              the memory caveat are completely unaffected — see the prop docs for
+              the three states. */}
+          {availability && showAvailabilityStatus && (
+            <span className="assistant-memory assistant-status-row">
               <span
                 className={`dot dot-memory${availability === 'available' ? ' dot-memory-available' : ''}`}
                 aria-hidden="true"
@@ -954,20 +1060,20 @@ export function AssistantPanel({
               {MEMORY_HEAD_LABEL[availability]}
             </span>
           )}
+        </div>
+        <div className="assistant-head-right">
           {/* P36R S2 — Clear Conversation lives in the HEADER (never between the
               controls and the transcript). It wipes THIS experiment's ephemeral
               session and returns the rail to its resting empty state; it touches
-              no record/truth state, so it needs no confirmation. */}
+              no record/truth state, so it needs no confirmation.
+              P36V S-A — the VISIBLE label is the full "Clear Conversation"; the
+              accessible name now comes from that same visible text (the previous
+              aria-label="Clear conversation" both contradicted the visible
+              "Clear" and differed in casing). */}
           {canClear && (
-            <button
-              type="button"
-              className="assistant-clear"
-              aria-label="Clear conversation"
-              title="Clear conversation"
-              onClick={clearConversation}
-            >
+            <button type="button" className="assistant-clear" onClick={clearConversation}>
               <X size={13} strokeWidth={2} aria-hidden="true" />
-              Clear
+              Clear Conversation
             </button>
           )}
         </div>
@@ -986,12 +1092,15 @@ export function AssistantPanel({
       {/* P36R S2 — the BODY absorbs the rail height (flex:1 / min-height:0) so the
           conversation region can flex instead of being clipped by a fixed height. */}
       <div className="assistant-body">
-        {/* EMPTY STATE — no conversation yet: concise guidance, then the prompt
-            controls at full prominence. */}
+        {/* EMPTY STATE (P36V S-A order) — one concise guidance sentence, then
+            Suggested Questions at full prominence, then a subtle divider marking
+            the break before the composer below. Agent Actions move BELOW the
+            composer (rendered in the foot). No filler card is added. */}
         {!hasConversation && (
           <div className="assistant-empty">
             <p className="assistant-empty-note">{EMPTY_STATE_GUIDANCE}</p>
-            {promptControls}
+            {suggestedQuestionControls}
+            <div className="assistant-empty-divider" aria-hidden="true" />
           </div>
         )}
 
@@ -1038,80 +1147,128 @@ export function AssistantPanel({
               staleness, and follow-ups all attach BENEATH it, inside this block —
               each attached to the response it supports. */}
           <div className="assistant-reply-block">
-            <p
-              className={`assistant-reply${liveReplyEmpty ? ' assistant-reply--empty' : ''}`}
-              ref={replyRef}
-              tabIndex={-1}
-              aria-live="polite"
-              aria-busy={loading || undefined}
-              aria-describedby={staleDescId}
+            {/* P36V S-A — the LIVE answer is now an unmistakable ASSISTANT BUBBLE,
+                the same one an archived turn wears: left-aligned, subtle border,
+                very light lavender surface (it sits inside the WHITE conversation
+                region — R2 — so a white-on-white bubble would be invisible), with
+                the assistant icon + the visible "Assistant" label. Before this it
+                was a bare, border-less, label-less <p>, so the newest and most
+                visible answer in the panel was the ONLY one with no attribution.
+                No coloured left/right accent edge is used (P36R R3 /
+                no-vertical-rail): the distinction is a full four-sided border +
+                the icon + the text label.
+
+                At rest the bubble collapses to nothing (`--empty`): no chrome and
+                no "Assistant" label with no answer behind it. The `.assistant-reply`
+                <p> inside is UNCHANGED as the single aria-live region — it stays
+                mounted in both states so it keeps announcing the next turn. */}
+            <div
+              className={`assistant-answer${liveReplyEmpty ? ' assistant-answer--empty' : ''}`}
+              data-role="assistant"
             >
-              {liveText}
-            </p>
-            {/* R2 — the `answered from:` line is suppressed for a free-form refusal
-                turn (empty grounding). Precomposed pill answers and error turns
-                leave `hasGrounding` undefined, so they still show it; only an
-                explicit `hasGrounding === false` (a refusal) hides it. */}
-            {!loading && liveAnswer && liveAnswer.hasGrounding !== false && (
-              <div className="assistant-sources">
-                <span className="answered-from">
-                  answered from: {SOURCE_LABELS[liveAnswer.answeredFrom as AssistantSource]}
-                </span>
-              </div>
-            )}
-            {/* P34.3 — the cited-source chips: the citation detail beneath the plane
-                label. For a Project-Memory answer these are the leads to verify. */}
-            {!loading && liveAnswer && liveSources.length > 0 && (
-              <ProvenanceChips sources={liveSources} />
-            )}
-            {/* P34.3 — the COMPACT live-answer staleness indicator (same visual as
-                an archived message's stale badge) + an explicit "Ask again". A
-                record change never auto-refetches; only this re-queries, at the
-                current rev. The indicator is associated with the answer via
-                aria-describedby above — no second live region is created. */}
-            {!loading && liveStale && (
-              <div className="assistant-live-stale-row">
-                <span id={staleDescId} className="assistant-msg-stale">
-                  <CircleDashed size={12} strokeWidth={2} aria-hidden="true" />
-                  Based on an earlier version
-                </span>
-                {liveQuestion && (
-                  <button
-                    type="button"
-                    className="assistant-ask-again"
-                    aria-label="Ask again with the current record"
-                    disabled={loading}
-                    onClick={() => {
-                      if (liveQuestion) void submitQuestion(liveQuestion);
-                    }}
-                  >
-                    <CornerDownRight size={13} strokeWidth={2} aria-hidden="true" />
-                    Ask again
-                  </button>
-                )}
-              </div>
-            )}
-            {/* P34.3 — suggested next questions. Shown only for a CURRENT (not
-                stale, not loading) answer; each re-queries through the SAME
-                read-only submitQuestion path — never a mutation. Capped at two,
-                visually distinct from the provenance chips and Suggested
-                Questions, and attached to the response they follow. */}
-            {!loading && liveAnswer && !liveStale && liveFollowups.length > 0 && (
-              <div className="assistant-followups" aria-label="Suggested next questions">
-                {liveFollowups.slice(0, 2).map((f) => (
-                  <button
-                    type="button"
-                    className="assistant-followup"
-                    key={f}
-                    disabled={loading}
-                    onClick={() => void submitQuestion(f)}
-                  >
-                    <span>{f}</span>
-                    <ChevronRight className="chev" size={13} strokeWidth={2} aria-hidden="true" />
-                  </button>
-                ))}
-              </div>
-            )}
+              {!liveReplyEmpty && (
+                <div className="assistant-msg-meta">
+                  <span className="assistant-msg-role">
+                    <MessageSquare size={13} strokeWidth={2} aria-hidden="true" />
+                    {LABELS.assistant}
+                  </span>
+                </div>
+              )}
+              <p
+                className={`assistant-reply${liveReplyEmpty ? ' assistant-reply--empty' : ''}`}
+                ref={replyRef}
+                tabIndex={-1}
+                aria-live="polite"
+                aria-busy={loading || undefined}
+                aria-describedby={staleDescId}
+              >
+                {liveText}
+              </p>
+              {/* R2 — the `Source:` line is suppressed for a free-form refusal
+                  turn (empty grounding). Precomposed pill answers and error turns
+                  leave `hasGrounding` undefined, so they still show it; only an
+                  explicit `hasGrounding === false` (a refusal) hides it. A refusal
+                  still renders as a fully labelled Assistant bubble — only the
+                  provenance line it cannot honestly attribute is withheld. */}
+              {!loading && liveAnswer && liveAnswer.hasGrounding !== false && (
+                <div className="assistant-sources">
+                  <span className="answered-from">
+                    Source: {SOURCE_LABELS[liveAnswer.answeredFrom as AssistantSource]}
+                  </span>
+                </div>
+              )}
+              {/* P34.3 — the cited-source chips: the citation detail beneath the plane
+                  label. For a Project-Memory answer these are the leads to verify. */}
+              {!loading && liveAnswer && liveSources.length > 0 && (
+                <ProvenanceChips sources={liveSources} />
+              )}
+              {/* P34.3 — the COMPACT live-answer staleness indicator (same visual as
+                  an archived message's stale badge) + an explicit "Ask again". A
+                  record change never auto-refetches; only this re-queries, at the
+                  current rev. The indicator is associated with the answer via
+                  aria-describedby above — no second live region is created. */}
+              {!loading && liveStale && (
+                <div className="assistant-live-stale-row">
+                  <span id={staleDescId} className="assistant-msg-stale">
+                    <CircleDashed size={12} strokeWidth={2} aria-hidden="true" />
+                    Based on an earlier version
+                  </span>
+                  {liveQuestion && (
+                    <button
+                      type="button"
+                      className="assistant-ask-again"
+                      aria-label="Ask again with the current record"
+                      disabled={loading}
+                      onClick={() => {
+                        if (liveQuestion) void submitQuestion(liveQuestion);
+                      }}
+                    >
+                      <CornerDownRight size={13} strokeWidth={2} aria-hidden="true" />
+                      Ask again
+                    </button>
+                  )}
+                </div>
+              )}
+              {/* P34.3 — the answer-specific follow-ups. Shown only for a CURRENT
+                  (not stale, not loading) answer; each re-queries through the SAME
+                  read-only submitQuestion path — never a mutation. Capped at two.
+                  P36V S-A — they now carry the VISIBLE Title-Case label "Related
+                  Questions", deliberately distinct from the global empty-state
+                  "Suggested Questions", and they live INSIDE the bubble of the
+                  answer they belong to. The group's accessible name is that same
+                  visible label (it used to be an invisible-only aria-label
+                  "Suggested next questions", which both hid the grouping from
+                  sighted readers and named it differently from anything on
+                  screen).
+                  P36V review (M1) — the name comes from the visible eyebrow via
+                  `aria-labelledby`, matching `.assistant-proposed`. A detached
+                  `aria-label` carrying the same words made a screen reader
+                  announce "Related Questions" twice: once as the group's name and
+                  again as the eyebrow's own text. */}
+              {!loading && liveAnswer && !liveStale && liveFollowups.length > 0 && (
+                <div
+                  className="assistant-followups"
+                  role="group"
+                  aria-labelledby={FOLLOWUPS_EYEBROW_ID}
+                >
+                  <div id={FOLLOWUPS_EYEBROW_ID} className="assistant-followups-eyebrow eyebrow">
+                    {RELATED_QUESTIONS_LABEL}
+                  </div>
+                  {liveFollowups.slice(0, 2).map((f) => (
+                    <button
+                      type="button"
+                      className="assistant-followup"
+                      key={f}
+                      disabled={loading}
+                      onClick={() => void submitQuestion(f)}
+                    >
+                      <span>{f}</span>
+                      <ChevronRight className="chev" size={13} strokeWidth={2} aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             {caveat && <p className="assistant-caveat">{caveat}</p>}
             {note && <p className="assistant-note">{note}</p>}
           </div>
@@ -1123,19 +1280,6 @@ export function AssistantPanel({
             Jump to Latest
           </button>
         )}
-
-        {/* P36R S2 — once a conversation exists the prompt controls collapse into a
-            native disclosure. They are never REMOVED (and the composer below is
-            always visible), so asking another question is never hidden. */}
-        {hasConversation && (
-          <details className="assistant-more">
-            <summary className="assistant-more-summary">
-              <ChevronRight className="chev" size={14} strokeWidth={2} aria-hidden="true" />
-              <span>{MORE_DISCLOSURE_LABEL}</span>
-            </summary>
-            <div className="assistant-more-body">{promptControls}</div>
-          </details>
-        )}
       </div>
 
       {/* P36R S2 — the PROPOSED-ACTION region. A staged answer and an unconfirmed
@@ -1143,10 +1287,19 @@ export function AssistantPanel({
           region directly above the composer, where they cannot scroll away and
           cannot be mistaken for something that already happened. Nothing here
           mutates on render; `confirmProposal` (behind an explicit Confirm) remains
-          the ONLY write path, and Cancel writes nothing. */}
-      {(canStage && stageField) || proposal ? (
-        <section className="assistant-proposed" aria-label="Proposed action — needs your confirmation">
-          <div className="assistant-proposed-eyebrow eyebrow">Proposed Action — Not Applied</div>
+          the ONLY write path, and Cancel writes nothing.
+
+          P36V — the region's accessible name IS the visible eyebrow
+          (`aria-labelledby`, not a detached `aria-label`), so the two can never
+          drift. The retired label read "needs your confirmation", which was untrue
+          of the navigation action this region now also holds: Open Validator
+          navigates and writes nothing, so there is nothing to confirm. "Not
+          Applied" is accurate for BOTH a staged write and a navigation lead. */}
+      {(canStage && stageField) || proposal || liveAction ? (
+        <section className="assistant-proposed" aria-labelledby={PROPOSED_EYEBROW_ID}>
+          <div id={PROPOSED_EYEBROW_ID} className="assistant-proposed-eyebrow eyebrow">
+            Proposed Action — Not Applied
+          </div>
           {/* P29.6 — the narrow STAGING trigger. For the CURRENT pending field
               only, the user SELECTS the labeled synthetic suggestion; it is routed
               through the guarded `proposeForField` (source:'user') to create the
@@ -1170,6 +1323,14 @@ export function AssistantPanel({
               onReevaluate={onRefresh}
             />
           )}
+
+          {/* P36V S-B — the answer's bounded NAVIGATION action (today: Open
+              Validator). It is a real, explicit user activation — a focusable
+              button, not a chat message and not a claim that anything already
+              happened. Activating it navigates client-side; it writes no field,
+              runs no validation, and changes no validation result. It is placed
+              LAST so a confirmation-critical staged value always reads first. */}
+          {liveAction && <AssistantNavAction action={liveAction} />}
         </section>
       ) : null}
 
@@ -1194,7 +1355,12 @@ export function AssistantPanel({
           answers over (not a general chatbot). Submitting calls only
           POST /assistant/query — a non-mutating query that never writes the
           record. An empty submit is a no-op; overlapping submits are ignored while
-          a query is in flight. The single subordinate caption is the footer. */}
+          a query is in flight.
+
+          P36V S-A — the composer is the FIRST thing in the dock, so it sits
+          DIRECTLY beneath the transcript. The prompt controls (which used to sit
+          between the transcript and the composer as a `<details>` accordion) now
+          come AFTER it, and the advisory caption is last in both states. */}
       <div className="assistant-foot">
         <form className="assistant-composer" onSubmit={onComposerSubmit}>
           <input
@@ -1216,6 +1382,28 @@ export function AssistantPanel({
           </button>
         </form>
         <p className="assistant-composer-helper">{ASSISTANT_COMPOSER_HELPER}</p>
+
+        {/* EMPTY STATE — Agent Actions sit below the composer (Suggested Questions
+            are above it, in the body). Rendered only where the screen actually
+            supplies live agent intents. */}
+        {!hasConversation && agentActionControls}
+
+        {/* CONVERSATION — both control groups collapse into ONE compact native
+            disclosure, still below the composer. They are never REMOVED (and the
+            composer above is always visible), so asking again is never hidden. */}
+        {hasConversation && (
+          <details className="assistant-more">
+            <summary className="assistant-more-summary">
+              <ChevronRight className="chev" size={14} strokeWidth={2} aria-hidden="true" />
+              <span>{MORE_DISCLOSURE_LABEL}</span>
+            </summary>
+            <div className="assistant-more-body">
+              {suggestedQuestionControls}
+              {agentActionControls}
+            </div>
+          </details>
+        )}
+
         <p className="assistant-caption">{SUBORDINATE_CAPTION}</p>
       </div>
     </section>
@@ -1288,9 +1476,10 @@ function ConversationMessage({
       <p className="assistant-msg-text">{text}</p>
       {isAssistant && source && (
         <div className="assistant-sources">
-          <span className="answered-from">
-            answered from: {SOURCE_LABELS[source] ?? source}
-          </span>
+          {/* P36V S-A — Title-Case label ("Source:"), replacing the lowercase
+              sentence fragment "answered from:". The LABEL VALUES themselves
+              (SOURCE_LABELS) are unchanged. */}
+          <span className="answered-from">Source: {SOURCE_LABELS[source] ?? source}</span>
         </div>
       )}
     </div>
@@ -1397,6 +1586,72 @@ function NavSourceChip({ label, to }: { label: string; to: string }) {
       <span>{label}</span>
       <ChevronRight className="chev" size={13} strokeWidth={2} aria-hidden="true" />
     </button>
+  );
+}
+
+/**
+ * P36V S-B — per-kind copy for a bounded navigation action. Keyed on the closed
+ * `AssistantActionKind` enum so a future kind must supply its OWN honest copy
+ * rather than silently inheriting a sentence written for the Validator.
+ */
+const NAV_ACTION_COPY: Record<AssistantActionKind, { head: string; note: string }> = {
+  'open-validator': {
+    head: 'Deterministic Schema Check',
+    note:
+      'The deterministic schema check runs on its own surface — Governance & Safety → Validator. ' +
+      'Opening it takes you there and does nothing else: no field is written, no check is run, and ' +
+      'no validation result changes.',
+  },
+};
+
+/**
+ * P36V S-B — the answer's bounded NAVIGATION action, rendered inside the
+ * proposed-action region as a real focusable button.
+ *
+ * It replaces the retired prose sentence "Open Validate to run the deterministic
+ * schema check." — copy that named a control the app never rendered, which is
+ * precisely why the action read as nonfunctional. Navigation goes through
+ * react-router `useNavigate`, so:
+ *   · the router's `basename` (the deployed `/krish` base path) is applied for us;
+ *   · it is a client-side transition — never a full-page reload;
+ *   · it is a history PUSH, so Back returns the reader to this screen.
+ * The hook lives in this CHILD (not in `AssistantPanel`) deliberately: the child
+ * mounts only when an action exists, so a panel rendered outside a Router — as
+ * several unit tests do — is unaffected.
+ *
+ * Visual chrome REUSES the proposed-action card classes (`.agent-stage*`) verbatim
+ * so the control looks native to the region — it needs no rule of its own, which
+ * is why no `.assistant-nav-action*` selectors exist. (An earlier comment claimed
+ * the reuse was to avoid touching `assistant.css` "out of scope for this slice";
+ * that was untrue — this slice edits that stylesheet extensively — and the two
+ * dead class hooks it named, styled by nothing, were removed. `data-action`
+ * remains as the per-kind hook.)
+ */
+function AssistantNavAction({ action }: { action: AssistantAction }) {
+  const navigate = useNavigate();
+  const copy = NAV_ACTION_COPY[action.kind];
+  const noteId = `assistant-nav-action-note-${action.kind}`;
+  return (
+    <div className="agent-stage" data-action={action.kind}>
+      <div className="agent-stage-head">
+        <Shield size={14} strokeWidth={2} aria-hidden="true" />
+        {copy.head}
+      </div>
+      <p className="agent-stage-note" id={noteId}>
+        {copy.note}
+      </p>
+      <div className="agent-stage-row">
+        <button
+          type="button"
+          className="btn btn-secondary agent-stage-submit"
+          aria-describedby={noteId}
+          onClick={() => navigate(action.to)}
+        >
+          <span>{action.label}</span>
+          <ChevronRight className="chev" size={14} strokeWidth={2} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
   );
 }
 

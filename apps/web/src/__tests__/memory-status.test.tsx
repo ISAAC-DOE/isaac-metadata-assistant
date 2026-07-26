@@ -242,7 +242,7 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     ]);
 
     // P34.2: the on-mount auto-reply was removed; the provenance answer is now
-    // surfaced by clicking its chip (answered from Project Memory).
+    // surfaced by clicking its chip (sourced from Project Memory).
     //
     // P36R S10 — this assertion used `findByText`, whose default 1 s poll window
     // made a DETERMINISTIC result look intermittent (one CI failure on PR #14,
@@ -261,7 +261,7 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     expect(
       panel.getByText(/Leads come from indexed project files and concepts/),
     ).toBeInTheDocument();
-    expect(panel.getByText('answered from: Project Memory')).toBeInTheDocument();
+    expect(panel.getByText('Source: Project Memory')).toBeInTheDocument();
     // leads-to-verify framing, never a verdict
     expect(assistant.textContent).toMatch(/leads to verify — never a validation verdict/);
     expect(assistant.textContent).not.toMatch(/\b(PASS|FAIL)\b/);

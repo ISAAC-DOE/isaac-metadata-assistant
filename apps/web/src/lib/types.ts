@@ -176,9 +176,34 @@ export type AssistantSource =
   | 'advisory'
   | 'workflow';
 
+/**
+ * P36V S-B — a bounded, deterministic NAVIGATION action an assistant answer may
+ * offer. It is a closed enum of one: the ONLY thing an action can do is send the
+ * reader to an in-app client route. It cannot mutate a record, run a validation,
+ * change a validation result, or authorize an export — the panel renders it as an
+ * explicit user-activated control in the proposed-action region and follows `to`
+ * through the SAME client-route allowlist every cited source passes.
+ */
+export type AssistantActionKind = 'open-validator';
+
+export interface AssistantAction {
+  kind: AssistantActionKind;
+  /** The VISIBLE Title-Case control label (e.g. "Open Validator"). */
+  label: string;
+  /** An in-app client route (allowlisted at render time); never an external URL. */
+  to: string;
+}
+
 export interface AssistantMessage {
   text: string; // sentence case; never renders PASS/FAIL
   answeredFrom: AssistantSource;
+  /**
+   * P36V S-B — an OPTIONAL navigation action offered alongside this answer. It
+   * replaced the dead "Open Validate to run the deterministic schema check."
+   * PROSE that used to be appended to the routed truth answers: a sentence that
+   * named a control the app never rendered.
+   */
+  action?: AssistantAction;
 }
 
 export interface SuggestedPrompt {

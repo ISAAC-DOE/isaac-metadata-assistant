@@ -170,7 +170,7 @@ describe('P34.3 provenance chips', () => {
     await ask(container, getByRole, 'anything related?');
 
     // the plane label is Project Memory; the chips ARE the cited memory leads.
-    expect(getByText('answered from: Project Memory')).toBeInTheDocument();
+    expect(getByText('Source: Project Memory')).toBeInTheDocument();
     const region = container.querySelector('.assistant-provenance') as HTMLElement;
     expect(region.querySelectorAll('.assistant-provenance-item').length).toBe(2);
     expect(within(region).getByRole('button', { name: 'Related Cu K-edge run' })).toBeTruthy();
@@ -211,7 +211,7 @@ describe('D1 — a cited source label carrying verdict language is never rendere
   });
 });
 
-describe('R2 — an honest refusal (empty grounding) hides the misleading `answered from:` line', () => {
+describe('R2 — an honest refusal (empty grounding) hides the misleading `Source:` line', () => {
   it('a refusal answer renders WITHOUT an answered-from line; a grounded answer still shows it', async () => {
     const spy = vi.spyOn(api, 'askAssistant').mockResolvedValue({
       answer:
@@ -233,8 +233,10 @@ describe('R2 — an honest refusal (empty grounding) hides the misleading `answe
         "isn't something I can answer",
       ),
     );
-    // the refusal shows NO `answered from:` provenance line.
-    expect(container.textContent).not.toMatch(/answered from:/i);
+    // the refusal shows NO `Source:` provenance line. Case-INSENSITIVE (P36V
+    // review, M5): the retired assertion was `/answered from:/i`, and dropping
+    // the flag would let a lowercase `source:` regression through.
+    expect(container.textContent).not.toMatch(/source:/i);
 
     // a subsequent normally-grounded answer DOES show the line again.
     spy.mockResolvedValue(answerResponse());
@@ -243,7 +245,7 @@ describe('R2 — an honest refusal (empty grounding) hides the misleading `answe
     await waitFor(() =>
       expect(container.querySelector('.assistant-provenance')).toBeTruthy(),
     );
-    expect(container.textContent).toMatch(/answered from:/i);
+    expect(container.textContent).toMatch(/Source:/);
   });
 });
 

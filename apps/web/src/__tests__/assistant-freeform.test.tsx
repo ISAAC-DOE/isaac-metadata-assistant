@@ -123,7 +123,7 @@ describe('P34.2 free-form submit', () => {
 
     expect(spy).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(getByText(/Cu K-edge XANES draft/i)).toBeInTheDocument());
-    expect(getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
+    expect(getByText('Source: Workflow & Artifacts')).toBeInTheDocument();
   });
 
   it('a provider/network error renders the honest unavailable message; controls stay usable', async () => {

@@ -165,8 +165,14 @@ function LoadedEvidence({
         {...compose({ context: 'evidence', bundle: data, selectedPath: selected.key })}
         experimentId={detail.id}
         recordRev={detail.rev}
+        /* This screen's STATUS BAR already renders a `GraphStatusChip` for the
+           availability axis (see the `graph` slot below), so the page owns the
+           visible label. The panel is still GIVEN the axis — it needs it for
+           `classifyAnswer` and for the memory caveat — but does not restate it
+           visibly: one fact, one wording, one place. (P33 HQA #7; retained
+           through P36V S-A.) */
         availability={graph.availability}
-        showAvailabilityHead={false}
+        showAvailabilityStatus={false}
         agentContext={agentContext}
         degraded={agentDegraded}
       />

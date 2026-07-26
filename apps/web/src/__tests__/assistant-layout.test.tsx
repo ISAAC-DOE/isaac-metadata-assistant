@@ -158,6 +158,12 @@ describe('P36R S2 empty state', () => {
     const composer = container.querySelector('.assistant-composer')!;
     expect(prompts.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(log.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // P36V S-A — Suggested Questions are separated from the composer by a subtle
+    // divider, and Agent Actions moved BELOW the composer.
+    const divider = container.querySelector('.assistant-empty-divider')!;
+    expect(divider).not.toBeNull();
+    expect(prompts.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(divider.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -186,6 +192,15 @@ describe('P36R S2 conversation state', () => {
     expect(disclosure.open).toBe(false);
     expect(disclosure.querySelector('.assistant-prompts')).not.toBeNull();
     expect(container.querySelector('.assistant-empty')).toBeNull();
+    // P36V S-A — and the disclosure is no longer BETWEEN the transcript and the
+    // composer: the composer sits directly beneath the transcript, the collapsed
+    // controls come after it.
+    const composerEl = container.querySelector('.assistant-composer')!;
+    expect(region.compareDocumentPosition(composerEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      composerEl.compareDocumentPosition(disclosure) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(disclosure.closest('.assistant-body')).toBeNull();
 
     // asking again is NEVER hidden: the composer is still present and enabled
     const box = getByRole('textbox') as HTMLInputElement;
@@ -305,7 +320,7 @@ describe('P36R S2 transcript legibility', () => {
     await waitFor(() => expect(container.querySelector('.assistant-provenance')).not.toBeNull());
 
     const block = container.querySelector('.assistant-reply-block')!;
-    // the `answered from:` line AND the cited-source chips both belong to the
+    // the `Source:` line AND the cited-source chips both belong to the
     // response block that owns the answer they describe
     expect(block.querySelector('.answered-from')).not.toBeNull();
     expect(block.querySelector('.assistant-provenance')).not.toBeNull();
@@ -314,11 +329,11 @@ describe('P36R S2 transcript legibility', () => {
     );
   });
 
-  it('an archived assistant turn carries its own `answered from:` line inside its own bubble', () => {
+  it('an archived assistant turn carries its own `Source:` line inside its own bubble', () => {
     appendMessage(EXP, { role: 'assistant', text: 'archived answer', answeredFrom: 'schema' });
     const { container } = panel();
     const bubble = container.querySelector('.assistant-msg-assistant')!;
-    expect(bubble.querySelector('.answered-from')?.textContent).toMatch(/answered from: Schema Rules/);
+    expect(bubble.querySelector('.answered-from')?.textContent).toMatch(/Source: Schema Rules/);
   });
 });
 
@@ -336,7 +351,21 @@ describe('P36R S2 proposed-action region', () => {
 
     const region = container.querySelector('.assistant-proposed') as HTMLElement;
     expect(region).not.toBeNull();
-    expect(region.getAttribute('aria-label')).toMatch(/proposed action/i);
+    // P36V — the accessible name now comes from the VISIBLE eyebrow via
+    // aria-labelledby rather than a detached aria-label, so a screen reader hears
+    // exactly what is on screen and the two cannot drift. Still asserts the name
+    // says "proposed action", and additionally pins it to the rendered text and
+    // forbids the retired "needs your confirmation" wording — which was untrue of
+    // the navigation action this region also holds (it writes nothing).
+    const namedBy = document.getElementById(region.getAttribute('aria-labelledby') ?? '');
+    expect(namedBy).not.toBeNull();
+    expect(namedBy!.textContent).toMatch(/proposed action/i);
+    expect(namedBy!.textContent?.trim()).toBe('Proposed Action — Not Applied');
+    expect(region.getAttribute('aria-label')).toBeNull();
+    // Scoped to the NAME, not the region text: a staged proposal card legitimately
+    // says "Needs Your Confirmation" about itself — a write does need confirming.
+    // What must never claim it is the region name, which also covers navigation.
+    expect(namedBy!.textContent).not.toMatch(/needs your confirmation/i);
     // it is labelled as a PROPOSAL and never implies the action already happened
     expect(region.textContent).toMatch(/not applied/i);
     expect(region.textContent).toMatch(/not changed the official record/i);

@@ -1,5 +1,6 @@
 import './screens.css';
-import { useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
@@ -33,8 +34,64 @@ const GOVERNANCE_TABS: { id: GovernanceTab; label: string }[] = [
 const tabId = (id: GovernanceTab) => `governance-tab-${id}`;
 const panelId = (id: GovernanceTab) => `governance-tabpanel-${id}`;
 
+/**
+ * P36V S-B — the `?tab=` deep-link parameter. The active tab is DERIVED from the
+ * URL (it used to be `useState`, so the Validator was unreachable by link), which
+ * is what lets the Assistant's Open Validator action land on the Validator tab
+ * with the tab genuinely selected. Anything unrecognised — a typo, an empty
+ * value, an absent param — falls back to `policy` without throwing.
+ */
+const TAB_PARAM = 'tab';
+
+function isGovernanceTab(value: string | null): value is GovernanceTab {
+  return GOVERNANCE_TABS.some((t) => t.id === value);
+}
+
+/** The Validator's own heading (`RecordValidator`'s `<h2 id>`), the focus target. */
+const VALIDATOR_HEADING_ID = 'rec-val-heading';
+
 export function GovernancePage() {
-  const [activeTab, setActiveTab] = useState<GovernanceTab>('policy');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+
+  const requestedTab = searchParams.get(TAB_PARAM);
+  const activeTab: GovernanceTab = isGovernanceTab(requestedTab) ? requestedTab : 'policy';
+
+  // An IN-PAGE tab activation must not have its focus stolen: the tablist's
+  // roving tabindex deliberately moves focus to the newly selected TAB. This flag
+  // marks a change that originated here so the arrival-focus effect below skips
+  // it — arriving from elsewhere (a link, or the Assistant's Open Validator
+  // action) still focuses the Validator.
+  const inPageSelectRef = useRef(false);
+
+  function selectTab(tab: GovernanceTab) {
+    inPageSelectRef.current = true;
+    const next = new URLSearchParams(searchParams);
+    next.set(TAB_PARAM, tab);
+    // `replace` for a within-page tab click: switching tabs is not a destination,
+    // and pushing each one would bury the screen the reader arrived from behind a
+    // stack of Back presses. The ARRIVING navigation (below / from the Assistant)
+    // is the PUSH, so one Back returns there.
+    setSearchParams(next, { replace: true });
+  }
+
+  // Arrival focus. `location.key` changes on EVERY navigation — including a
+  // repeat navigation to the identical URL — so activating Open Validator while
+  // already on the Validator tab still moves focus and scrolls the surface into
+  // view (the control is never perceptibly dead). Focus goes to the Validator's
+  // own heading; nothing here runs a validation or touches the record.
+  useEffect(() => {
+    if (inPageSelectRef.current) {
+      inPageSelectRef.current = false;
+      return;
+    }
+    if (activeTab !== 'validator') return;
+    const heading = document.getElementById(VALIDATOR_HEADING_ID);
+    if (!heading) return;
+    heading.focus();
+    // jsdom does not implement scrollIntoView — call it only where it exists.
+    heading.scrollIntoView?.({ block: 'start' });
+  }, [location.key, activeTab]);
 
   return (
     <AppShell
@@ -48,7 +105,7 @@ export function GovernancePage() {
         <span className="eyebrow">Data Governance</span>
         <h1>{LABELS.navGovernance}</h1>
 
-        <GovernanceSectionTabs active={activeTab} onSelect={setActiveTab} />
+        <GovernanceSectionTabs active={activeTab} onSelect={selectTab} />
       </div>
 
       {activeTab === 'policy' && (
