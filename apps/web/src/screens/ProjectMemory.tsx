@@ -7,7 +7,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
@@ -16,7 +16,7 @@ import { AssistantPanel } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { MemoryGraphCard } from './MemoryGraphCard';
-import { Network, ChevronDown, ChevronRight } from '../components/icons';
+import { Network, ChevronDown, ChevronRight, Search } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
@@ -25,6 +25,7 @@ import {
   describeGraphProvenance,
   type AssistantGraphCapability,
   type GraphSurfaceContext,
+  type GraphUrlParam,
 } from '../lib/graphCommands';
 import { useFetch } from '../lib/useFetch';
 import type {
@@ -801,15 +802,66 @@ function SourceIndexDetail({
   );
 }
 
-// --- Concept Lookup card (P24.5) ------------------------------------------
-// A browsable list of the 19 curated concepts Graphify anchored in project
-// docs — memory leads, not scientific conclusions. Reuses the Source Index
-// card's accordion pattern above (native-button activation, one-open-at-a-
-// time, inline loading/error-with-retry) rather than inventing a second
-// interaction language. Against the real local graph every concept currently
-// has zero edges, so `related.files`/`related.concepts` are honestly empty
-// for every real concept; the empty-leads note below is not a bug, it is the
-// current graph's honest state.
+// --- Concept Lookup card (P24.5 · redesigned P36R Slice 7) ----------------
+//
+// A MASTER-DETAIL browser over the curated concepts Graphify anchored in
+// project docs. It replaces the P24.5 flat single-open accordion, whose panel
+// pushed the rest of the page down and which offered no way to find anything.
+//
+// What it is NOT: a glossary. A concept row is a POINTER at the project
+// document the label was read out of — never a definition of the term and
+// never a scientific conclusion. Nothing on this surface is invented: every
+// word of the per-concept description below is assembled from fields the two
+// memory endpoints actually returned (`source_file`, `community_*`, and the
+// recorded `related` leads), and where a field is absent the sentence says so
+// instead of filling the gap.
+//
+// Against the real graph every concept currently has ZERO edges, so
+// `related.files` / `related.concepts` are honestly empty for every real
+// concept. The empty-leads copy is not a bug — it is the current graph's
+// honest state. Separately and permanently, the Graph tab's projection derives
+// edges ONLY from a file's `related.files[]`, never from a concept's `related`
+// (`memory_graph.py::_build_edges`), so a concept node has zero edges by
+// construction: no neighbourhood ("browse connected items") action is offered
+// for a concept at all, because it could only ever land on an empty
+// neighbourhood. Recorded leads, when a snapshot has any, are listed and
+// navigable in the detail panel instead.
+
+/** Sentinel filter values. Never a real community id or document path — the
+ *  backend's ids are numeric strings and its paths are repo-relative. */
+const CONCEPT_FILTER_ALL = 'all';
+const CONCEPT_FILTER_NO_CLUSTER = '__no_cluster__';
+const CONCEPT_FILTER_WITHHELD_DOC = '__withheld__';
+
+/** The same bound the graph search input enforces (`MAX_QUERY_LENGTH`), kept
+ *  local so this card takes no dependency on the graph module. */
+const CONCEPT_QUERY_MAX = 120;
+
+/**
+ * A Project Memory link expressed ENTIRELY in the Slice-4 graph URL contract
+ * (`lib/graphCommands.ts` → `GRAPH_URL_PARAMS` + Project Memory's own `tab`).
+ * This surface invents no parameter of its own: `gmode` / `gnode` are decoded by
+ * `decodeGraphActions`, bounded there, and resolved by the graph reducer's own
+ * `resolveNode` — so a concept id that is not a node produces the graph's honest
+ * "no node matches", never a guessed selection.
+ *
+ * Explore (select this concept on the canvas) is the ONLY graph link offered for
+ * a concept. A neighbourhood link (`gnbr`/`gdepth`) is deliberately not
+ * produced: `memory_graph.py::_build_edges` builds edges from file summaries'
+ * `related.files[]` ONLY and never from a concept's `related`, so a concept node
+ * has zero edges by construction and a 1-hop neighbourhood around one is always
+ * empty — a click that would land nowhere.
+ */
+export function conceptGraphSearch(conceptId: string): string {
+  const sp = new URLSearchParams();
+  // Typed at the boundary so the coupling to GRAPH_URL_PARAMS is checked by the
+  // compiler, not only by the URL-contract test.
+  const setGraphParam = (key: GraphUrlParam, value: string) => sp.set(key, value);
+  sp.set('tab', 'graph');
+  setGraphParam('gmode', 'explore');
+  setGraphParam('gnode', conceptId);
+  return `?${sp.toString()}`;
+}
 
 function ConceptLookupCard({ focusConceptId }: { focusConceptId?: string | null }) {
   const list = useFetch(() => api.getMemoryConcepts(), []);
@@ -825,10 +877,9 @@ function ConceptLookupCard({ focusConceptId }: { focusConceptId?: string | null 
       {list.status === 'loading' && <LoadingPanel label="Loading concepts…" />}
       {list.status === 'error' && <BackendDown error={list.error} onRetry={list.reload} />}
       {list.status === 'data' && (
-        <ConceptLookupList
+        <ConceptLookupBrowser
           available={list.data.available}
           concepts={list.data.concepts}
-          headingId={headingId}
           focusConceptId={focusConceptId}
         />
       )}
@@ -836,42 +887,171 @@ function ConceptLookupCard({ focusConceptId }: { focusConceptId?: string | null 
   );
 }
 
-interface ConceptLookupListProps {
+interface ConceptLookupBrowserProps {
   available: boolean;
   concepts: ApiMemoryConceptSummary[];
-  headingId: string;
   focusConceptId?: string | null;
 }
 
+const conceptRowId = (id: string) => domId('concept-row', id);
+
 /**
- * The concept list — a flat, ungrouped set of chips/rows (the design calls
- * for 19 concepts total, too few to need grouping the way 190 files did).
- * Only one concept's provenance panel is open at a time (accordion); a
- * related-concept lead inside an open panel can activate a different concept
- * the same way a click on that concept would.
+ * Master (searchable, filterable, keyboard-navigable list) + detail (the one
+ * selected concept). Nothing is fetched until a concept is selected, and the
+ * detail region is the ONLY thing that changes when the selection does — the
+ * list never reflows underneath the pointer the way the old accordion did.
  */
-function ConceptLookupList({
-  available,
-  concepts,
-  headingId,
-  focusConceptId,
-}: ConceptLookupListProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLookupBrowserProps) {
+  const navigate = useNavigate();
+  const [query, setQuery] = useState('');
+  const [docFilter, setDocFilter] = useState<string>(CONCEPT_FILTER_ALL);
+  const [clusterFilter, setClusterFilter] = useState<string>(CONCEPT_FILTER_ALL);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Roving-tabindex cursor for the master list. Focus and SELECTION are
+  // deliberately separate: an arrow key moves the reading cursor, Enter/Space
+  // (native button activation) selects. Coupling them would fire one detail
+  // fetch per arrow press.
+  const [focusIndex, setFocusIndex] = useState(0);
 
-  const toggle = useCallback((id: string) => {
-    setExpandedId((current) => (current === id ? null : id));
-  }, []);
-  const activate = useCallback((id: string) => {
-    setExpandedId(id);
+  const clearFilters = useCallback(() => {
+    setQuery('');
+    setDocFilter(CONCEPT_FILTER_ALL);
+    setClusterFilter(CONCEPT_FILTER_ALL);
   }, []);
 
-  // P26.5 deep link: `?concept=<id>` from the search palette auto-opens that
-  // concept (only when it is actually in the fetched list — never invented).
+  /** Select a concept and make sure it is actually visible in the master list
+   *  — a lead followed from inside the detail, or a `?concept=` deep link,
+   *  must not select something the active filters are hiding. */
+  const activate = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      clearFilters();
+      // Move the roving cursor onto what was just selected, so the next Tab into
+      // the list lands on the selection instead of a stale row. `clearFilters()`
+      // restores the unfiltered list, so the row's index in `concepts` IS its
+      // index in the list that will render.
+      const index = concepts.findIndex((c) => c.id === id);
+      if (index >= 0) setFocusIndex(index);
+    },
+    [clearFilters, concepts],
+  );
+
+  // P26.5 deep link: `?concept=<id>` from the ⌘K palette selects that concept
+  // (only when it is actually in the fetched list — never invented). Routed
+  // through `activate` so the deep link and an in-panel lead leave the list in
+  // exactly the same state.
   useEffect(() => {
     if (focusConceptId && concepts.some((c) => c.id === focusConceptId)) {
-      setExpandedId(focusConceptId);
+      activate(focusConceptId);
     }
-  }, [focusConceptId, concepts]);
+  }, [focusConceptId, concepts, activate]);
+
+  /** Anchor documents actually present among these concepts, with counts. */
+  const docOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    let withheld = 0;
+    for (const c of concepts) {
+      if (c.source_file === null) withheld += 1;
+      else counts.set(c.source_file, (counts.get(c.source_file) ?? 0) + 1);
+    }
+    return {
+      docs: [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+      withheld,
+    };
+  }, [concepts]);
+
+  /** Clusters actually present among these concepts, with counts. Labels come
+   *  from `communityLabel` — a real name, else the honest "community <id>". */
+  const clusterOptions = useMemo(() => {
+    const byId = new Map<string, { label: string; count: number }>();
+    let noCluster = 0;
+    for (const c of concepts) {
+      const label = communityLabel(c);
+      if (!c.community_id || !label) {
+        noCluster += 1;
+        continue;
+      }
+      const entry = byId.get(c.community_id);
+      if (entry) entry.count += 1;
+      else byId.set(c.community_id, { label, count: 1 });
+    }
+    const clusters = [...byId.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+    return {
+      clusters,
+      noCluster,
+      singletons: clusters.filter(([, v]) => v.count === 1).length,
+    };
+  }, [concepts]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return concepts.filter((c) => {
+      if (needle !== '' && !(c.label.toLowerCase().includes(needle) || c.id.toLowerCase().includes(needle))) {
+        return false;
+      }
+      if (docFilter !== CONCEPT_FILTER_ALL) {
+        if (docFilter === CONCEPT_FILTER_WITHHELD_DOC) {
+          if (c.source_file !== null) return false;
+        } else if (c.source_file !== docFilter) return false;
+      }
+      if (clusterFilter !== CONCEPT_FILTER_ALL) {
+        if (clusterFilter === CONCEPT_FILTER_NO_CLUSTER) {
+          if (c.community_id) return false;
+        } else if (c.community_id !== clusterFilter) return false;
+      }
+      return true;
+    });
+  }, [concepts, query, docFilter, clusterFilter]);
+
+  // The cursor can outrun a shrinking list (type a query, then press Down).
+  const cursor = filtered.length === 0 ? 0 : Math.min(focusIndex, filtered.length - 1);
+
+  /**
+   * Whether the per-row "source not in this deployment" marker distinguishes
+   * anything. Against the real snapshot EVERY anchored concept's file is absent
+   * from the deployment, so the marker was 19 identical chips carrying no
+   * signal. It is shown per row only when the list is genuinely mixed; when it
+   * is universal the fact is stated once, in full, above the list — never
+   * dropped.
+   *
+   * Both flags are derived from the FILTERED rows on purpose: a sentence about
+   * "the documents cited below" has to be true of the rows actually below it,
+   * not of the unfiltered dataset. Concepts whose anchor the backend withheld
+   * cite no document at all, so they are excluded from both flags — filtering
+   * down to only those leaves `allMissing` false and the aggregate note unshown
+   * rather than claiming something about documents that were never named.
+   */
+  const onDiskSpread = useMemo(() => {
+    const withSource = filtered.filter((c) => c.source_file !== null);
+    return {
+      mixed: withSource.some((c) => c.on_disk) && withSource.some((c) => !c.on_disk),
+      allMissing: withSource.length > 0 && withSource.every((c) => !c.on_disk),
+    };
+  }, [filtered]);
+
+  const onListKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+      let next: number | null = null;
+      if (e.key === 'ArrowDown') next = Math.min(index + 1, filtered.length - 1);
+      else if (e.key === 'ArrowUp') next = Math.max(index - 1, 0);
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = filtered.length - 1;
+      if (next === null || filtered.length === 0) return;
+      e.preventDefault();
+      setFocusIndex(next);
+      (document.getElementById(conceptRowId(filtered[next].id)) as HTMLButtonElement | null)?.focus();
+    },
+    [filtered],
+  );
+
+  const showInGraph = useCallback(
+    (id: string) => navigate(`/memory${conceptGraphSearch(id)}`),
+    [navigate],
+  );
+  const navigateToFile = useCallback(
+    (path: string) => navigate(`/memory?file=${encodeURIComponent(path)}`),
+    [navigate],
+  );
 
   if (!available) {
     return (
@@ -882,19 +1062,132 @@ function ConceptLookupList({
     );
   }
 
+  const listHeadingId = 'concept-lookup-list-heading';
+
   return (
     <>
-      <ul className="concept-lookup-rows" aria-labelledby={headingId}>
-        {concepts.map((concept) => (
-          <ConceptLookupRow
-            key={concept.id}
-            concept={concept}
-            expanded={expandedId === concept.id}
-            onToggle={() => toggle(concept.id)}
-            onActivateConcept={activate}
+      <div className="concept-lookup-toolbar">
+        <label className="concept-lookup-search">
+          <Search size={14} strokeWidth={2} aria-hidden="true" className="concept-lookup-search-icon" />
+          <span className="sr-only">Search concepts by name or id</span>
+          <input
+            type="search"
+            className="concept-lookup-search-input"
+            placeholder="Search concepts…"
+            maxLength={CONCEPT_QUERY_MAX}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
           />
-        ))}
-      </ul>
+        </label>
+        <label className="concept-lookup-filter">
+          <span>Anchor source</span>
+          <select value={docFilter} onChange={(e) => setDocFilter(e.target.value)}>
+            <option value={CONCEPT_FILTER_ALL}>All sources</option>
+            {docOptions.docs.map(([path, count]) => (
+              <option key={path} value={path}>
+                {path} ({count})
+              </option>
+            ))}
+            {docOptions.withheld > 0 && (
+              <option value={CONCEPT_FILTER_WITHHELD_DOC}>
+                anchor withheld ({docOptions.withheld})
+              </option>
+            )}
+          </select>
+        </label>
+        <label className="concept-lookup-filter">
+          <span>Cluster</span>
+          <select value={clusterFilter} onChange={(e) => setClusterFilter(e.target.value)}>
+            <option value={CONCEPT_FILTER_ALL}>All clusters</option>
+            {clusterOptions.clusters.map(([id, entry]) => (
+              <option key={id} value={id}>
+                {entry.label} ({entry.count})
+              </option>
+            ))}
+            {clusterOptions.noCluster > 0 && (
+              <option value={CONCEPT_FILTER_NO_CLUSTER}>
+                no cluster ({clusterOptions.noCluster})
+              </option>
+            )}
+          </select>
+        </label>
+      </div>
+      {clusterOptions.clusters.length > 0 && (
+        <p className="concept-lookup-filter-note">
+          {clusterOptions.singletons === clusterOptions.clusters.length
+            ? 'Every cluster represented here holds a single concept.'
+            : `${clusterOptions.singletons} of the ${clusterOptions.clusters.length} clusters represented here hold a single concept.`}{' '}
+          Clusters are derived automatically by the upstream graph builder — advisory groupings, not
+          categories the schema recognises.
+        </p>
+      )}
+      {/* Scoped to the documents actually cited by the rows below: `on_disk` is
+          a filesystem-presence check (see the detail render site), and a concept
+          whose anchor was withheld cites no document at all. */}
+      {onDiskSpread.allMissing && (
+        <p className="concept-lookup-filter-note">
+          This deployment does not carry any of the documents cited below — open them in the
+          project to read them.
+        </p>
+      )}
+
+      <div className="concept-lookup-split">
+        <div className="concept-lookup-master">
+          {/* The explicit space is load-bearing, not formatting: this heading is
+              the <ul>'s accessible name via aria-labelledby, and without a
+              separating text node it is computed as "Concepts3 of 3". */}
+          <h3 id={listHeadingId} className="concept-lookup-pane-heading">
+            Concepts{' '}
+            <span className="concept-lookup-pane-count">
+              {filtered.length} of {concepts.length}
+            </span>
+          </h3>
+          {filtered.length > 0 ? (
+            <ul className="concept-lookup-rows" aria-labelledby={listHeadingId}>
+              {filtered.map((concept, i) => (
+                <ConceptLookupRow
+                  key={concept.id}
+                  concept={concept}
+                  selected={selectedId === concept.id}
+                  showOnDiskBadge={onDiskSpread.mixed}
+                  tabIndex={i === cursor ? 0 : -1}
+                  onSelect={() => {
+                    setFocusIndex(i);
+                    setSelectedId(concept.id);
+                  }}
+                  onKeyDown={(e) => onListKeyDown(e, i)}
+                />
+              ))}
+            </ul>
+          ) : (
+            <p className="concept-lookup-empty-note">
+              No concept matches the current search and filters. Nothing was approximated — widen
+              the search or clear the filters.
+            </p>
+          )}
+        </div>
+
+        <div className="concept-lookup-detailpane">
+          {selectedId ? (
+            <ConceptLookupPanelBody
+              id={selectedId}
+              onActivateConcept={activate}
+              onShowInGraph={showInGraph}
+              onNavigateFile={navigateToFile}
+            />
+          ) : (
+            <div className="concept-lookup-detail-empty">
+              <p className="concept-lookup-detail-empty-title">
+                Select a concept to see where it is anchored.
+              </p>
+              <p className="concept-lookup-detail-empty-text">
+                Each entry points back to the project document project memory read it from, plus any
+                leads the current graph records for it. Nothing is fetched until you pick one.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
       <p className="concept-lookup-caption">leads — open the cited file to verify</p>
     </>
   );
@@ -902,50 +1195,70 @@ function ConceptLookupList({
 
 interface ConceptLookupRowProps {
   concept: ApiMemoryConceptSummary;
-  expanded: boolean;
-  onToggle: () => void;
-  onActivateConcept: (id: string) => void;
+  selected: boolean;
+  /** Only when the marker actually distinguishes the VISIBLE rows — see `onDiskSpread`. */
+  showOnDiskBadge: boolean;
+  tabIndex: number;
+  onSelect: () => void;
+  onKeyDown: (e: ReactKeyboardEvent<HTMLButtonElement>) => void;
 }
 
-function ConceptLookupRow({ concept, expanded, onToggle, onActivateConcept }: ConceptLookupRowProps) {
-  const panelId = domId('concept-panel', concept.id);
+function ConceptLookupRow({
+  concept,
+  selected,
+  showOnDiskBadge,
+  tabIndex,
+  onSelect,
+  onKeyDown,
+}: ConceptLookupRowProps) {
   const community = communityLabel(concept);
-  const Chevron = expanded ? ChevronDown : ChevronRight;
+  // Upstream names a single-member cluster after its one member, so for most
+  // real concepts `community_name` is character-for-character the label. Two
+  // identical strings on one row is noise, not context — the cluster is still
+  // stated in full in the detail panel, where it is a labelled field.
+  const clusterChip = community && community !== concept.label ? community : null;
 
-  // Keyboard accessibility comes from the native <button>, same as the Source
-  // Index rows above: no custom onKeyDown — a duplicate handler would
-  // double-toggle for keyboard users (Enter/Space already synthesize a click
-  // on the focused button). `aria-controls` only points at the panel id while
-  // the panel actually exists in the DOM.
+  // Selection comes from the native <button>: real browsers synthesize a click
+  // from Enter (keydown) and Space (keyup), so no activation key is handled
+  // here. `onKeyDown` only moves the roving-tabindex cursor (arrows/Home/End)
+  // and never selects.
   return (
     <li className="concept-lookup-row">
       <button
+        id={conceptRowId(concept.id)}
         type="button"
-        className="concept-lookup-row-btn"
-        aria-expanded={expanded}
-        aria-controls={expanded ? panelId : undefined}
-        onClick={onToggle}
+        className={`concept-lookup-row-btn${selected ? ' selected' : ''}`}
+        aria-current={selected ? 'true' : undefined}
+        tabIndex={tabIndex}
+        onClick={onSelect}
+        onKeyDown={onKeyDown}
       >
-        <Chevron className="concept-lookup-chevron" size={14} strokeWidth={2} aria-hidden="true" />
-        <span className="concept-lookup-label">{concept.label}</span>
-        {community && <span className="concept-lookup-community">{community}</span>}
+        <ChevronRight className="concept-lookup-chevron" size={14} strokeWidth={2} aria-hidden="true" />
+        <span className="concept-lookup-rowbody">
+          <span className="concept-lookup-label">{concept.label}</span>
+          {(clusterChip || (showOnDiskBadge && !concept.on_disk)) && (
+            <span className="concept-lookup-rowmeta">
+              {clusterChip && <span className="concept-lookup-community">{clusterChip}</span>}
+              {/* Filesystem presence, not snapshot membership — same `on_disk`
+                  semantics documented at the detail render site. */}
+              {showOnDiskBadge && !concept.on_disk && (
+                <span className="concept-lookup-badge">source not in this deployment</span>
+              )}
+            </span>
+          )}
+        </span>
       </button>
-      {expanded && (
-        <div id={panelId} className="concept-lookup-panel">
-          <ConceptLookupPanelBody id={concept.id} onActivateConcept={onActivateConcept} />
-        </div>
-      )}
     </li>
   );
 }
 
-function ConceptLookupPanelBody({
-  id,
-  onActivateConcept,
-}: {
-  id: string;
+interface ConceptDetailActions {
   onActivateConcept: (id: string) => void;
-}) {
+  onShowInGraph: (id: string) => void;
+  onNavigateFile: (path: string) => void;
+}
+
+function ConceptLookupPanelBody({ id, ...actions }: { id: string } & ConceptDetailActions) {
   const detail = useFetch(() => api.getMemoryConcept(id), [id]);
   return (
     <>
@@ -958,20 +1271,56 @@ function ConceptLookupPanelBody({
           </button>
         </div>
       )}
-      {detail.status === 'data' && (
-        <ConceptLookupDetail data={detail.data} onActivateConcept={onActivateConcept} />
-      )}
+      {detail.status === 'data' && <ConceptLookupDetail data={detail.data} {...actions} />}
     </>
   );
+}
+
+/**
+ * The plain-language description of ONE concept.
+ *
+ * There is no description field anywhere in the payload, and none is invented:
+ * this describes what the ROW IS — where project memory found it, which
+ * cluster the graph put it in, and how many leads it records — using only
+ * `source_file`, `community_*` and the recorded `related` lists. When a field
+ * is absent the sentence states the absence rather than filling it. It never
+ * explains, defines or endorses the scientific term itself.
+ */
+export function describeConcept(
+  concept: ApiMemoryConceptSummary,
+  leadCount: number,
+): string {
+  // A null `source_file` has TWO real shapes behind it (`memory.py::
+  // _served_source_file`): the graph node named no source at all, or it named
+  // one that is unsafe/not governance-served and was therefore withheld. The
+  // sentence must be true of both, so it states only what is observable here —
+  // that no source document is named — and does not assert that one exists.
+  const anchor = concept.source_file
+    ? `Project memory anchored this concept in ${concept.source_file} while indexing this project's own files.`
+    : 'Project memory names no source document for this concept — the graph either recorded none or pointed at one this deployment does not serve.';
+  const community = communityLabel(concept);
+  // Upstream names a cluster after one representative member, so a concept's
+  // cluster name is very often the concept's own label. Repeating it back as
+  // `grouped with the "<same words>" cluster` reads like a second fact; it is
+  // not one, and this says exactly what the two equal fields mean.
+  const cluster = !community
+    ? 'The graph puts it in no cluster.'
+    : community === concept.label
+      ? 'Its cluster in the graph carries the same name as the concept itself.'
+      : `The graph groups it with the "${community}" cluster.`;
+  const leads =
+    leadCount > 0
+      ? `${leadCount} related lead${leadCount === 1 ? '' : 's'} ${leadCount === 1 ? 'is' : 'are'} recorded for it in the current graph.`
+      : 'No related leads are recorded for it in the current graph.';
+  return `${anchor} ${cluster} ${leads}`;
 }
 
 function ConceptLookupDetail({
   data,
   onActivateConcept,
-}: {
-  data: ApiMemoryConceptResponse;
-  onActivateConcept: (id: string) => void;
-}) {
+  onShowInGraph,
+  onNavigateFile,
+}: { data: ApiMemoryConceptResponse } & ConceptDetailActions) {
   if (!data.available || !data.concept) {
     return (
       <p className="concept-lookup-panel-note">
@@ -981,14 +1330,33 @@ function ConceptLookupDetail({
   }
   const { concept, related } = data;
   const community = communityLabel(concept);
-  const hasLeads = related.files.length > 0 || related.concepts.length > 0;
+  const leadCount = related.files.length + related.concepts.length;
+  const hasLeads = leadCount > 0;
 
   return (
     <div className="concept-lookup-detail">
+      <h3 className="concept-lookup-detail-heading">{concept.label}</h3>
+      <p className="concept-lookup-description">{describeConcept(concept, leadCount)}</p>
+      {/* The closing instruction is conditional: with no citable source there is
+          nothing to open, and telling the reader to open one would be an
+          instruction they cannot follow. */}
+      <p className="concept-lookup-boundary">
+        A concept is a pointer into project documents — never a definition of the term, and never a
+        scientific conclusion.
+        {concept.source_file ? ' Open the cited source to judge it yourself.' : ''}
+      </p>
+
       <p className="concept-lookup-anchor">
         <span className="concept-lookup-anchor-label">anchor source</span>
         {concept.source_file ? (
-          <span className="mono">{concept.source_file}</span>
+          <button
+            type="button"
+            className="concept-lookup-anchor-link"
+            onClick={() => onNavigateFile(concept.source_file as string)}
+          >
+            <span className="mono">{concept.source_file}</span>
+            <span className="concept-lookup-anchor-action">open in Source Index</span>
+          </button>
         ) : (
           // P24.9: the graph anchor points at a governance-excluded source, so
           // the backend withheld the path — render an honest note, never an
@@ -996,35 +1364,81 @@ function ConceptLookupDetail({
           <span className="concept-lookup-anchor-missing">anchor withheld (excluded source)</span>
         )}
       </p>
+      {/* `on_disk` is a FILESYSTEM existence check on the backend
+          (`memory.py::_on_disk`: resolves the path strictly under the repo root
+          and never opens it). It says NOTHING about snapshot membership — every
+          served file is in the snapshot's served-content manifest, and the
+          deployed image simply does not copy `docs/`, which is why the hosted
+          build reports `on_disk:false` for files it happily serves provenance
+          for. Copy here must therefore speak about the deployment not carrying
+          the file, never about the snapshot excluding it. */}
       {concept.source_file && !concept.on_disk && (
-        <p className="concept-lookup-anchor-missing">not present locally on this backend</p>
+        <p className="concept-lookup-anchor-missing">
+          This deployment does not carry the file itself — open it in the project to read it.
+        </p>
       )}
 
       <dl className="concept-lookup-panel-figures">
+        {/* Same suppression rule as the row chip: upstream names a single-member
+            cluster after its one member, so for most real concepts this field
+            would repeat the heading directly above it verbatim. The fact is not
+            dropped — the description states it ("Its cluster in the graph
+            carries the same name as the concept itself"). A null community
+            still renders, as "—", because that is a different fact. */}
+        {community !== concept.label && (
+          <div className="concept-lookup-panel-figure">
+            <dt>Community</dt>
+            <dd>{community ?? '—'}</dd>
+          </div>
+        )}
         <div className="concept-lookup-panel-figure">
-          <dt>Community</dt>
-          <dd>{community ?? '—'}</dd>
+          <dt>Concept id</dt>
+          <dd className="mono">{concept.id}</dd>
         </div>
       </dl>
 
+      <div className="concept-lookup-actions">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => onShowInGraph(concept.id)}
+        >
+          Show in Graph Explore
+        </button>
+      </div>
+      {/* No neighbourhood action, and no promise of one: the Graph tab's
+          projection derives every edge from a FILE's `related.files[]`
+          (`memory_graph.py::_build_edges`) and never from a concept's
+          `related`, so a concept node carries zero edges whatever this
+          endpoint returns. Recorded leads are real and are listed below — they
+          are simply not edges of that projection. */}
+      <p className="concept-lookup-action-note">
+        {hasLeads
+          ? "Explore selects this concept on the shared graph canvas. The graph's reference projection records no edges for concepts, so nothing will be drawn joining it to anything else — the leads below come from this concept's own record, not from that projection."
+          : 'Explore selects this concept on the shared graph canvas. The current graph records no references to or from it, so nothing will be drawn joining it to anything else.'}
+      </p>
+
       <div className="concept-lookup-section">
-        <h3 className="concept-lookup-section-heading">Related leads</h3>
+        <h4 className="concept-lookup-section-heading">Related leads</h4>
         {hasLeads ? (
           <>
             {related.files.length > 0 && (
               <div className="concept-lookup-subsection">
-                <h4 className="concept-lookup-subsection-heading">Files</h4>
-                {/* Related files are inert labeled text in this slice — no
-                    cross-card navigation into the Source Index card, per the
-                    P24.5 scope boundary. */}
+                <h5 className="concept-lookup-subsection-heading">Files</h5>
                 <ul className="concept-lookup-related-list">
                   {related.files.map((rf) => (
                     <li key={rf.path}>
-                      <span className="mono">{rf.path}</span>
-                      {rf.relation && <span className="concept-lookup-relation">{rf.relation}</span>}
-                      {rf.file_type && (
-                        <span className="concept-lookup-relation">{rf.file_type}</span>
-                      )}
+                      <button
+                        type="button"
+                        className="concept-lookup-related-link"
+                        onClick={() => onNavigateFile(rf.path)}
+                      >
+                        <span className="mono">{rf.path}</span>
+                        {rf.relation && <span className="concept-lookup-relation">{rf.relation}</span>}
+                        {rf.file_type && (
+                          <span className="concept-lookup-relation">{rf.file_type}</span>
+                        )}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -1032,7 +1446,7 @@ function ConceptLookupDetail({
             )}
             {related.concepts.length > 0 && (
               <div className="concept-lookup-subsection">
-                <h4 className="concept-lookup-subsection-heading">Concepts</h4>
+                <h5 className="concept-lookup-subsection-heading">Concepts</h5>
                 <ul className="concept-lookup-related-list">
                   {related.concepts.map((rc) => (
                     <li key={rc.id}>

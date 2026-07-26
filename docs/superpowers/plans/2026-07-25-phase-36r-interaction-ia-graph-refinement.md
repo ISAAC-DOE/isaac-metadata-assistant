@@ -155,6 +155,47 @@ Conditions attached to this reconciliation:
 Recorded because an authorized acceptance criterion may be changed by evidence, but never
 dropped in silence.
 
+### R9 — The prescribed Concepts replacement copy was factually false. *(Slice 7)*
+
+The authorizing prompt asked for this substitution on the Concepts surface:
+
+> Replace awkward backend language such as `not present locally on this backend`
+> with user-facing language such as `The cited source is not included in this
+> deployed snapshot.`
+
+The *goal* is right — the original reads like backend jargon. The *suggested
+replacement is untrue*, and this plan propagated it verbatim into the Slice 7
+brief. Corrected here on the record.
+
+Verified against the source of truth:
+
+| Fact | Evidence |
+|---|---|
+| `on_disk` is a filesystem existence check, nothing to do with the snapshot | `apps/api/isaac_api/memory.py:827-841` — *"Existence-only check of `rel_path` resolved strictly under the repo root. Never opens or reads the file."* |
+| The cited sources **are** in the deployed snapshot | `docs/proposal-v2.md` and `docs/extraction.md` are both in `memory_inputs.served_content_manifest` (200 entries, with sha256) **and** in the snapshot's `served` list (201 entries) |
+| Every served file is `on_disk: false` in the container | the Docker `COPY` allowlist does not include `docs/` |
+
+So the replacement asserts the opposite of the truth: the source **is** included
+in the snapshot; what the deployment lacks is the *file itself* on disk. The
+independent review demonstrated the contradiction live — the anchor's
+"open in Source Index" action navigates to the file and renders its title and
+provenance **from the snapshot**, immediately after the panel claimed it was not
+included in that snapshot.
+
+**Corrected copy:** wording that keeps the plain-language goal while staying true
+to what `on_disk` actually means — the deployment does not carry the file itself,
+so it must be opened in the project to read. No claim is made about snapshot
+membership in either direction.
+
+The original awkward string was *accurate*; the proposed replacement was
+*readable*. The fix has to be both. A prescribed string is not exempt from the
+no-guessing rule just because it appears in the authorizing prompt.
+
+**Deferred to Slice 10:** the Sources card (`ProjectMemory.tsx:744-748`) and the
+graph detail panel still phrase this same boolean differently again
+("not present locally — cannot open", "not present on this backend — cannot
+open"). Three surfaces, one fact, three phrasings — unify in the cross-surface pass.
+
 ---
 
 ## 1. Permanent boundaries re-affirmed for this phase

@@ -10364,7 +10364,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
-        "sha256": "e9b3edbd30f3b969340e0c05cd88b9cf752d0d0ac164a46e0728ed19b95933dd"
+        "sha256": "9a69a29daf4aac5746be4409941bcf90c629291567d5a6525511aef8c5f12d33"
       },
       {
         "path": "apps/web/src/__tests__/memory-honesty.test.tsx",
@@ -10560,7 +10560,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "198d4c6a65e4884d794b9cb035ab7c4a554b0feb8504d91ba5ac8b5928635f88"
+        "sha256": "f26dbbb348ff23552caa072d591c1a6fb08c53182dd0855be873fae55402de93"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "68ed803745e7104739c557b3574ab1b8b85750741439a248c84666602c6cea6c"
+    "served_manifest_fingerprint": "9a41d4b506b8a9b19954ebe5e591e2d90c2f9855997bafaea8ea1e3d8a3ac54a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
