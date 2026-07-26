@@ -1146,7 +1146,8 @@ export interface ApiOpenApiResponse {
   components?: { schemas?: Record<string, unknown> };
 }
 
-// GET /api/schema — P36.6 read-only Schema & Vocabulary browser. Serves the
+// GET /api/schema — P36.6 read-only Schema Reference browser (renamed from
+// "Schema & Vocabulary" by P36R S8). Serves the
 // vendored official schema (loaded via `isaac_records.official.schema_path`,
 // never re-derived) plus every `vocabulary/*.json`, verbatim. This is the
 // reference plane (schema/vocabulary), NOT the portal Ontology system — no

@@ -57,6 +57,9 @@ export function GraphDetail({
   const community = communityText(node);
   const clusterEntry = node.community_id ? index.communityById.get(node.community_id) : undefined;
   const totalConnections = index.adjacency.get(node.id)?.length ?? 0;
+  // A file node IS the file; a concept node's `on_disk` describes its anchor
+  // source. Naming the referent keeps one sentence honest for both kinds.
+  const fileSubject = node.kind === 'file' ? 'the file itself' : 'its source file';
 
   return (
     <div className="memory-graph-detail">
@@ -94,10 +97,26 @@ export function GraphDetail({
         )}
       </dl>
 
-      {node.on_disk ? (
-        <p className="memory-graph-detail-ondisk">present locally on this backend (not opened here)</p>
+      {/* P36R S10 — ONE sentence for `on_disk`, shared with the Source Index and
+          Concepts. `on_disk` is a filesystem existence check under the repo root
+          (`memory.py::_on_disk`, which never opens the file), so the copy speaks
+          only about the deployment carrying the file — never about snapshot
+          membership, which is a different fact and is true of these files.
+          The subject differs by node kind because the referent differs: a file
+          node IS the file; a concept node's `on_disk` is computed from its
+          anchor source (`memory.py:755`). A concept with no served anchor gets
+          `on_disk:false` from `_on_disk(None)` with no file behind it at all, so
+          claiming a file is missing there would assert one exists. */}
+      {node.kind === 'concept' && !node.source_file ? (
+        <p className="memory-graph-detail-ondisk-missing">no linked source</p>
+      ) : node.on_disk ? (
+        <p className="memory-graph-detail-ondisk">
+          This deployment carries {fileSubject} — it is not opened or read here.
+        </p>
       ) : (
-        <p className="memory-graph-detail-ondisk-missing">not present on this backend — cannot open</p>
+        <p className="memory-graph-detail-ondisk-missing">
+          This deployment does not carry {fileSubject} — open it in the project to read it.
+        </p>
       )}
 
       <div className="memory-graph-detail-actions">

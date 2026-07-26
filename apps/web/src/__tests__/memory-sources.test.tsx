@@ -137,7 +137,10 @@ describe('P24.4 · Source Index — detail (real leads)', () => {
 });
 
 describe('P24.4 · Source Index — on_disk:false', () => {
-  it('shows "not present locally" with no open-style affordance, never invented content', async () => {
+  // P36R S10: one sentence for `on_disk` across Sources, Concepts and the graph
+  // detail pane — a filesystem-presence fact about the DEPLOYMENT, never a claim
+  // about snapshot membership (this file IS in the served snapshot).
+  it('shows the shared "does not carry the file itself" note with no open-style affordance, never invented content', async () => {
     stubFetchRoutes({
       'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusUnavailable },
@@ -149,12 +152,18 @@ describe('P24.4 · Source Index — on_disk:false', () => {
 
     const row = getByRole('button', { name: /docs\/fake-note\.md/ });
     fireEvent.click(row);
-    await findByText('not present locally — cannot open');
+    await findByText('This deployment does not carry the file itself — open it in the project to read it.');
 
     const panel = panelFor(row);
     const scoped = within(panel);
 
-    expect(scoped.getByText('not present locally — cannot open')).toBeInTheDocument();
+    expect(
+      scoped.getByText(
+        'This deployment does not carry the file itself — open it in the project to read it.',
+      ),
+    ).toBeInTheDocument();
+    // the copy must not claim the snapshot excludes it — that is a different fact
+    expect(panel.textContent).not.toMatch(/snapshot/i);
     expect(scoped.queryByText('local reference — open in your editor')).toBeNull();
     expect(panel.querySelector('a')).toBeNull(); // no link/open-style affordance
   });

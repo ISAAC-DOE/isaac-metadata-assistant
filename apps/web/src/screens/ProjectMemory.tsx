@@ -222,9 +222,17 @@ export function ProjectMemory() {
               {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
               {graph.status === 'data' && <MemoryStatusDetail data={graph.data} />}
             </div>
+            {/* P36R S10 — "Browse depth is out of scope for this first build."
+                was a roadmap note left in shipped copy, and it is no longer
+                true: the Graph tab offers 1-hop and 2-hop neighbourhoods and a
+                shortest-path search. Replaced with orientation that IS
+                verifiable — `/api/memory/files`, `/api/memory/concepts` and
+                `/api/memory/graph` all resolve the SAME
+                `memory.get_default_reader()` instance whose status this card
+                reports (`routes.py:1206/1290/1338/1394`). */}
             <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
               <Network size={15} strokeWidth={2} aria-hidden="true" />
-              Browse depth is out of scope for this first build.
+              Sources, Concepts and Graph all read the memory graph summarised above.
             </p>
           </div>
         )}
@@ -517,8 +525,12 @@ function MemoryUnavailablePanel({ integrity }: { integrity: SnapshotIntegrity })
   }
   return (
     <div className="memory-unavailable">
+      {/* P36R S10 — same "on this backend" jargon as the four unavailable
+          notices below; reworded identically. Not in the slice's listed set,
+          included because leaving one instance behind would defeat the point of
+          removing the other five. The meaning is unchanged. */}
       <p className="memory-unavailable-title">
-        Project memory is unavailable on this backend — the memory graph artifacts are not
+        Project memory is unavailable in this deployment — the memory graph artifacts are not
         present.
       </p>
       <p className="memory-unavailable-text">
@@ -594,9 +606,13 @@ function SourceIndexList({ available, files, focusFilePath }: SourceIndexListPro
 
   if (!available) {
     return (
+      // P36R S10 — a DIFFERENT fact from the `on_disk` copy above: here the
+      // memory graph itself is absent, so there is nothing to index. Reworded
+      // only to drop the "on this backend" jargon; the meaning is unchanged and
+      // is deliberately not merged with the per-file wording.
       <p className="source-index-unavailable">
-        Source Index is unavailable — the memory graph is not present on this backend (see
-        Project memory status above).
+        Source Index is unavailable — no memory graph is loaded in this deployment (see Project
+        memory status above).
       </p>
     );
   }
@@ -713,7 +729,7 @@ function SourceIndexDetail({
   if (!data.available || !data.file) {
     return (
       <p className="source-index-panel-note">
-        Source Index is unavailable — the memory graph is not present on this backend.
+        Source Index is unavailable — no memory graph is loaded in this deployment.
       </p>
     );
   }
@@ -743,8 +759,14 @@ function SourceIndexDetail({
           <span className="mono">{file.local_reference}</span>
         </p>
       ) : (
+        // P36R S10 — ONE sentence for `on_disk`, shared with Concepts and the
+        // graph detail pane. `on_disk` is a filesystem existence check on the
+        // repo root (`memory.py::_on_disk`, which never opens the file), so the
+        // copy speaks only about the deployment not carrying the file. It makes
+        // no claim about snapshot membership in either direction — this file IS
+        // in the served snapshot, which is how its provenance is rendered above.
         <p className="source-index-local-ref source-index-local-ref-missing">
-          not present locally — cannot open
+          This deployment does not carry the file itself — open it in the project to read it.
         </p>
       )}
 
@@ -831,7 +853,13 @@ function SourceIndexDetail({
  *  backend's ids are numeric strings and its paths are repo-relative. */
 const CONCEPT_FILTER_ALL = 'all';
 const CONCEPT_FILTER_NO_CLUSTER = '__no_cluster__';
-const CONCEPT_FILTER_WITHHELD_DOC = '__withheld__';
+const CONCEPT_FILTER_UNLINKED_DOC = '__unlinked__';
+
+/** P36R S10 — the Concepts detail pane's region id + accessible-name id, the
+ *  same pair `SchemaBrowser` (`schema-field-detail`) and `SettingsPage`
+ *  (`settings-api-detail`) use for their panes. */
+const CONCEPT_DETAIL_ID = 'concept-lookup-detail';
+const CONCEPT_DETAIL_NAME_ID = 'concept-lookup-detail-name';
 
 /** The same bound the graph search input enforces (`MAX_QUERY_LENGTH`), kept
  *  local so this card takes no dependency on the graph module. */
@@ -946,17 +974,23 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
     }
   }, [focusConceptId, concepts, activate]);
 
-  /** Anchor documents actually present among these concepts, with counts. */
+  /** Anchor documents actually present among these concepts, with counts.
+   *
+   *  P36R S10: a null `source_file` has TWO shapes behind it (`memory.py::
+   *  _served_source_file`) — the graph node named no source at all, or it named
+   *  one that is unsafe / not governance-served and was withheld. `unlinked`
+   *  counts both, so the option label must not assert that an excluded source
+   *  exists. Same correction `describeConcept` already carries. */
   const docOptions = useMemo(() => {
     const counts = new Map<string, number>();
-    let withheld = 0;
+    let unlinked = 0;
     for (const c of concepts) {
-      if (c.source_file === null) withheld += 1;
+      if (c.source_file === null) unlinked += 1;
       else counts.set(c.source_file, (counts.get(c.source_file) ?? 0) + 1);
     }
     return {
       docs: [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])),
-      withheld,
+      unlinked,
     };
   }, [concepts]);
 
@@ -990,7 +1024,7 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
         return false;
       }
       if (docFilter !== CONCEPT_FILTER_ALL) {
-        if (docFilter === CONCEPT_FILTER_WITHHELD_DOC) {
+        if (docFilter === CONCEPT_FILTER_UNLINKED_DOC) {
           if (c.source_file !== null) return false;
         } else if (c.source_file !== docFilter) return false;
       }
@@ -1016,8 +1050,9 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
    *
    * Both flags are derived from the FILTERED rows on purpose: a sentence about
    * "the documents cited below" has to be true of the rows actually below it,
-   * not of the unfiltered dataset. Concepts whose anchor the backend withheld
-   * cite no document at all, so they are excluded from both flags — filtering
+   * not of the unfiltered dataset. Concepts with no linked source (the graph
+   * named none, or named one the backend withheld) cite no document at all —
+   * `source_file` is null either way, so they are excluded from both flags: filtering
    * down to only those leaves `allMissing` false and the aggregate note unshown
    * rather than claiming something about documents that were never named.
    */
@@ -1056,8 +1091,8 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
   if (!available) {
     return (
       <p className="concept-lookup-unavailable">
-        Concept lookup is unavailable — the memory graph is not present on this backend (see
-        Project memory status above).
+        Concept lookup is unavailable — no memory graph is loaded in this deployment (see Project
+        memory status above).
       </p>
     );
   }
@@ -1088,9 +1123,9 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
                 {path} ({count})
               </option>
             ))}
-            {docOptions.withheld > 0 && (
-              <option value={CONCEPT_FILTER_WITHHELD_DOC}>
-                anchor withheld ({docOptions.withheld})
+            {docOptions.unlinked > 0 && (
+              <option value={CONCEPT_FILTER_UNLINKED_DOC}>
+                no linked source ({docOptions.unlinked})
               </option>
             )}
           </select>
@@ -1123,7 +1158,7 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
       )}
       {/* Scoped to the documents actually cited by the rows below: `on_disk` is
           a filesystem-presence check (see the detail render site), and a concept
-          whose anchor was withheld cites no document at all. */}
+          with no linked source cites no document at all. */}
       {onDiskSpread.allMissing && (
         <p className="concept-lookup-filter-note">
           This deployment does not carry any of the documents cited below — open them in the
@@ -1167,7 +1202,20 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
           )}
         </div>
 
-        <div className="concept-lookup-detailpane">
+        {/* P36R S10 — the same three attributes the Schema Reference and
+            Settings API detail panes already carry, so the three master-detail
+            panes this phase shipped behave identically for a screen reader.
+            `tabIndex={-1}` is a programmatic focus target that adds no tab stop;
+            the accessible name is whichever heading is showing. The name id is
+            present in the empty, error and resolved states; the brief loading
+            state carries its own `role="status"` announcement instead. */}
+        <div
+          className="concept-lookup-detailpane"
+          id={CONCEPT_DETAIL_ID}
+          role="region"
+          tabIndex={-1}
+          aria-labelledby={CONCEPT_DETAIL_NAME_ID}
+        >
           {selectedId ? (
             <ConceptLookupPanelBody
               id={selectedId}
@@ -1177,7 +1225,7 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
             />
           ) : (
             <div className="concept-lookup-detail-empty">
-              <p className="concept-lookup-detail-empty-title">
+              <p id={CONCEPT_DETAIL_NAME_ID} className="concept-lookup-detail-empty-title">
                 Select a concept to see where it is anchored.
               </p>
               <p className="concept-lookup-detail-empty-text">
@@ -1229,6 +1277,7 @@ function ConceptLookupRow({
         type="button"
         className={`concept-lookup-row-btn${selected ? ' selected' : ''}`}
         aria-current={selected ? 'true' : undefined}
+        aria-controls={CONCEPT_DETAIL_ID}
         tabIndex={tabIndex}
         onClick={onSelect}
         onKeyDown={onKeyDown}
@@ -1265,7 +1314,7 @@ function ConceptLookupPanelBody({ id, ...actions }: { id: string } & ConceptDeta
       {detail.status === 'loading' && <LoadingPanel label="Loading provenance…" />}
       {detail.status === 'error' && (
         <div className="concept-lookup-panel-error">
-          <p>Could not load provenance for this concept.</p>
+          <p id={CONCEPT_DETAIL_NAME_ID}>Could not load provenance for this concept.</p>
           <button type="button" className="btn btn-secondary" onClick={detail.reload}>
             Retry
           </button>
@@ -1323,8 +1372,8 @@ function ConceptLookupDetail({
 }: { data: ApiMemoryConceptResponse } & ConceptDetailActions) {
   if (!data.available || !data.concept) {
     return (
-      <p className="concept-lookup-panel-note">
-        Concept lookup is unavailable — the memory graph is not present on this backend.
+      <p id={CONCEPT_DETAIL_NAME_ID} className="concept-lookup-panel-note">
+        Concept lookup is unavailable — no memory graph is loaded in this deployment.
       </p>
     );
   }
@@ -1335,7 +1384,9 @@ function ConceptLookupDetail({
 
   return (
     <div className="concept-lookup-detail">
-      <h3 className="concept-lookup-detail-heading">{concept.label}</h3>
+      <h3 id={CONCEPT_DETAIL_NAME_ID} className="concept-lookup-detail-heading">
+        {concept.label}
+      </h3>
       <p className="concept-lookup-description">{describeConcept(concept, leadCount)}</p>
       {/* The closing instruction is conditional: with no citable source there is
           nothing to open, and telling the reader to open one would be an
@@ -1358,10 +1409,14 @@ function ConceptLookupDetail({
             <span className="concept-lookup-anchor-action">open in Source Index</span>
           </button>
         ) : (
-          // P24.9: the graph anchor points at a governance-excluded source, so
-          // the backend withheld the path — render an honest note, never an
-          // empty mono span.
-          <span className="concept-lookup-anchor-missing">anchor withheld (excluded source)</span>
+          // P24.9: render an honest note, never an empty mono span.
+          // P36R S10: a null `source_file` covers BOTH shapes of
+          // `memory.py::_served_source_file` — the graph node named no source
+          // at all, or it named one that is unsafe / not governance-served and
+          // was withheld. The old "anchor withheld (excluded source)" asserted
+          // the second shape, i.e. that an excluded source exists. This states
+          // only what is observable: no source is linked.
+          <span className="concept-lookup-anchor-missing">no linked source</span>
         )}
       </p>
       {/* `on_disk` is a FILESYSTEM existence check on the backend

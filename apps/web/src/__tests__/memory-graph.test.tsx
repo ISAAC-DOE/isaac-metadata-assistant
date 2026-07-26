@@ -266,7 +266,7 @@ describe('Graph tab — filters', () => {
     await view.findByText('Graph', { selector: 'h2' });
     toBrowse(view);
 
-    fireEvent.change(view.getByLabelText('Community'), { target: { value: '131' } });
+    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
 
     const list = within(document.querySelector('.memory-graph-list') as HTMLElement);
     expect(list.getByText('src/fake_mod.py')).toBeInTheDocument(); // community 131
@@ -280,7 +280,7 @@ describe('Graph tab — filters', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    const select = view.getByLabelText('Community') as HTMLSelectElement;
+    const select = view.getByLabelText('Cluster') as HTMLSelectElement;
     // Both fixture clusters hold one file, so both land in the honest group.
     expect(select.querySelector('optgroup[label*="Single-file"]')).not.toBeNull();
     expect(view.container.textContent).toMatch(
@@ -479,9 +479,12 @@ describe('Graph tab — node selection and detail panel', () => {
     expect(scoped.getByText('Export Pipeline')).toBeInTheDocument(); // Community
     expect(scoped.getByText('131')).toBeInTheDocument(); // Community ID
     expect(scoped.getByText('42')).toBeInTheDocument(); // Nodes
-    // fake_mod.py's fixture on_disk is true — an honest "present locally" note,
-    // never an actionable "open" affordance either way.
-    expect(scoped.getByText(/present locally on this backend/)).toBeInTheDocument();
+    // fake_mod.py's fixture on_disk is true — the SHARED `on_disk` sentence
+    // (P36R S10: identical in meaning on Sources, Concepts and here), never an
+    // actionable "open" affordance either way, and never a snapshot claim.
+    expect(
+      scoped.getByText('This deployment carries the file itself — it is not opened or read here.'),
+    ).toBeInTheDocument();
 
     // Connected nodes: the one real edge (relation "imports"), as a button.
     const connected = scoped.getByRole('button', { name: /src\/other_mod\.py/ });
@@ -495,7 +498,7 @@ describe('Graph tab — node selection and detail panel', () => {
     expect(pre?.textContent).not.toContain('other_mod'); // only the SELECTED node's JSON
   });
 
-  it('honestly reports "not present on this backend" for an on_disk:false node', async () => {
+  it('reports the shared "does not carry the file itself" sentence for an on_disk:false node', async () => {
     stubFetchRoutes(graphRoutes);
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
@@ -503,7 +506,14 @@ describe('Graph tab — node selection and detail panel', () => {
 
     fireEvent.click(view.getByText('docs/fake-note.md')); // on_disk:false in the fixture
     const detail = document.querySelector('.memory-graph-detail') as HTMLElement;
-    expect(within(detail).getByText(/not present on this backend — cannot open/)).toBeInTheDocument();
+    expect(
+      within(detail).getByText(
+        'This deployment does not carry the file itself — open it in the project to read it.',
+      ),
+    ).toBeInTheDocument();
+    // `on_disk` says nothing about snapshot membership (R9) — this node IS in
+    // the served projection, which is how it is rendered at all.
+    expect(detail.textContent).not.toMatch(/snapshot/i);
   });
 
   it('selecting a node via keyboard Enter on a canvas node opens/updates the detail panel', async () => {
@@ -724,7 +734,7 @@ describe('Graph tab — a11y', () => {
 
     expect(getByLabelText('Search graph nodes')).toBeInTheDocument();
     expect(getByLabelText('Show')).toBeInTheDocument();
-    expect(getByLabelText('Community')).toBeInTheDocument();
+    expect(getByLabelText('Cluster')).toBeInTheDocument();
     expect(getByLabelText('Find a cluster')).toBeInTheDocument();
     expect(getByLabelText('Path from')).toBeInTheDocument();
     expect(getByLabelText('Path to')).toBeInTheDocument();
@@ -884,7 +894,7 @@ describe('Graph tab — Browse mode', () => {
     // search / type / cluster / relationship / path — all still present
     expect(view.getByLabelText('Search graph nodes')).toBeInTheDocument();
     expect(view.getByLabelText('Show')).toBeInTheDocument();
-    expect(view.getByLabelText('Community')).toBeInTheDocument();
+    expect(view.getByLabelText('Cluster')).toBeInTheDocument();
     expect(view.getByRole('checkbox', { name: 'imports' })).toBeInTheDocument();
     expect(view.getByRole('button', { name: 'Find path' })).toBeInTheDocument();
     // …and the per-node capabilities, via the shared detail panel

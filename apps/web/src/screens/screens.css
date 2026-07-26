@@ -204,7 +204,7 @@
   max-width: 68ch;
 }
 /* P36R S1 — the Governance tab panels that host a whole COMPONENT (Validator,
-   Schema & Vocabulary) rather than page prose. They take the same shared
+   Schema Reference) rather than page prose. They take the same shared
    measure as the `.placeholder` header/Policy regions above them, so all four
    regions of that page align on one token, and they carry the panel offset as
    a class instead of an inline style.
@@ -238,8 +238,19 @@
 /* A local tablist (Overview · Sources · Concepts), NOT the global LeftNav.
    Same visual language as the evidence-preview tabs: underline-on-active,
    quiet otherwise. */
+/* P36R S10 — `flex-wrap: wrap`. Measured at 375px: the Project Memory row
+   (Overview · Sources · Concepts · Graph) needed 314px inside a 297px container,
+   so the Graph tab was clipped by 17px with no way to reach it. Wrapping was
+   chosen over `overflow-x: auto` because these rows hold 3–4 short tabs: wrapping
+   keeps every tab visible and clickable with nothing hidden, whereas a scroller
+   would hide the last tab behind an overlay scrollbar that macOS/iOS paint only
+   while scrolling — an affordance the reader has to already know about. It is
+   also label-length-independent, so a future longer tab label cannot re-clip.
+   Purely presentational: DOM order, roving tabindex and aria-selected are
+   untouched. */
 .section-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin: 18px 0 16px;
   border-bottom: 1px solid var(--border-faint);
@@ -656,15 +667,27 @@
   color: var(--text-quaternary);
   pointer-events: none;
 }
+/* P36R S10 — the master-list search field, converged with
+   `.settings-search-input` and `.schema-browser-search-input`. Measured at
+   1280×900 before the change, three fields in the SAME role: 31px / 34px / 33px
+   tall, 12.5px / 13px / 12.5px type, `7px 10px` / `8px 12px` / `8px 12px`
+   padding, `--surface` / `--screen-base` / `--screen-base` well. All three now
+   read 33px · 12.5px · `8px 12px` · `--screen-base`, with the same tuned focus
+   treatment. Only the icon inset differs from the un-iconed Schema field. */
 .concept-lookup-search-input {
   width: 100%;
   min-width: 0;
-  padding: 7px 10px 7px 30px;
+  padding: 8px 12px 8px 32px;
   font-size: 12.5px;
   color: var(--text-primary);
-  background: var(--surface);
+  background: var(--screen-base);
   border: 1px solid var(--border-input);
   border-radius: var(--radius-control);
+}
+.concept-lookup-search-input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+  border-color: var(--action);
 }
 .concept-lookup-search-input::placeholder {
   color: var(--text-quaternary);
@@ -723,6 +746,13 @@
   background: var(--surface-subtle);
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-inner);
+}
+/* P36R S10 — the pane is now a `tabIndex={-1}` programmatic focus target, so it
+   needs the same visible ring `.api-browser-detail` already carries. Identical
+   declaration; the three panes of this phase converge. */
+.concept-lookup-detailpane:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
 }
 .concept-lookup-pane-heading {
   display: flex;
