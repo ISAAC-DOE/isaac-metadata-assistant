@@ -125,7 +125,9 @@
   border-radius: var(--radius-control, 8px);
   background: var(--screen-base);
   color: var(--text-primary);
-  font-size: 13px;
+  /* P36R S10 — 13px here against 12.5px on the Concepts and Settings search
+     fields was the only difference left between three fields in one role. */
+  font-size: 12.5px;
 }
 .schema-browser-search-input:focus-visible {
   outline: 2px solid var(--action);
@@ -196,6 +198,13 @@
   background: var(--surface-subtle);
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-inner);
+}
+/* P36R S10 — this pane is a `tabIndex={-1}` programmatic focus target but was
+   the only one of the phase's three master-detail panes with no visible ring.
+   Identical declaration to `.api-browser-detail:focus-visible`. */
+.schema-fields-detailpane:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
 }
 
 .schema-field-rows {

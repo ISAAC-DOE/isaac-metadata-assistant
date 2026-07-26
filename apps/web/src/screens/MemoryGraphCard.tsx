@@ -158,8 +158,8 @@ function MemoryGraphBody({
     return (
       <div className="memory-graph-unavailable">
         <p className="memory-graph-unavailable-title">
-          The Graph tab is unavailable — the memory graph is not present on this backend (see
-          Project memory status on the Overview tab).
+          The Graph tab is unavailable — no memory graph is loaded in this deployment (see Project
+          memory status on the Overview tab).
         </p>
         <p className="memory-graph-unavailable-text">
           This is a quiet, advisory state, not an error — no nodes are shown while memory is
@@ -529,8 +529,15 @@ function MemoryGraphAvailable({
             onChange={(e) => setCommunityQuery(e.target.value)}
           />
         </label>
+        {/* P36R S10 — labelled "Cluster", not "Community". Every option this
+            control renders says "cluster" ("All clusters", "Multi-file
+            clusters", "Single-file clusters", and `communityOptionLabel`'s
+            `cluster <id>`), as does the "Find a cluster" input immediately
+            before it and the help drawer's "Cluster colours" section. The
+            payload field stays `community_id` and the command keyword stays
+            `community` — only the human label changes. */}
         <label className="memory-graph-filter">
-          <span>Community</span>
+          <span>Cluster</span>
           <select
             value={state.communityFilter}
             onChange={(e) => dispatch({ kind: 'filterCommunity', id: e.target.value })}

@@ -10364,7 +10364,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
-        "sha256": "9a69a29daf4aac5746be4409941bcf90c629291567d5a6525511aef8c5f12d33"
+        "sha256": "f1aed64d8fa8c1501a164beb5758a122439a64a6045af7bb2bb74f19eac990ea"
       },
       {
         "path": "apps/web/src/__tests__/memory-honesty.test.tsx",
@@ -10372,11 +10372,11 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-sources.test.tsx",
-        "sha256": "e19f323f12f538459d8fd984ca034dbf74c44cb6f312b08f34baa7c56221dea9"
+        "sha256": "977c4aad8ec5fb9e8f12f2a43342d343cc6b99c1acda9154ea773882ad107df1"
       },
       {
         "path": "apps/web/src/__tests__/memory-status.test.tsx",
-        "sha256": "a12a229a38f6b3ea77308414431e4039e2f6aec4d4b3616fdb9e1b48fbff080c"
+        "sha256": "a233df8fb3b28ea0b943bfe6b63d3b2aac81ba67c1f332ae73bd2d7d29c36233"
       },
       {
         "path": "apps/web/src/__tests__/modal-a11y.test.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "4dcabcdaa87a4df7054c8be4492c26d4f826adaf1471df127f2a295556f44792"
+        "sha256": "9d0050959329b89f15de0b4eca8ef1e6282456e305ce76bd27b096452c4743bd"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "83c910124505a097593ebd87f5cd2bcbdfad4bc269cb6c7364d79d301a296042"
+        "sha256": "f5ac07e57bbf7354a8c4b1bc1d1ea70ac9d5887034146d59fbc355aaddaf8601"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10560,7 +10560,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "f26dbbb348ff23552caa072d591c1a6fb08c53182dd0855be873fae55402de93"
+        "sha256": "aac94735fe09dc628548f4138a373c101e74527223ed6a1ce28b72066cf0022f"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "0203af4e199289da059899078ea00590e850ce9e7ad1b0bbc03aee3ba9f4a936"
+    "served_manifest_fingerprint": "e839392494e559c0c29ba4b4427679120c6b5c0dba678d805cbcac466ad6901f"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

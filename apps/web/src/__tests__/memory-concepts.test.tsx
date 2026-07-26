@@ -255,8 +255,11 @@ describe('P36R S7 · Concept Lookup — the aggregate missing-file note is true 
     // screen. The old note claimed "every concept below names a document you
     // will need to open in the project itself" — false for every visible row.
     // It must now be absent rather than false.
+    // P36R S10 renamed the sentinel `__withheld__` → `__unlinked__` with the
+    // option label "no linked source (N)": a null `source_file` also covers the
+    // graph naming no source at all, so "anchor withheld" overclaimed.
     fireEvent.change(getByRole('combobox', { name: /Anchor source/i }), {
-      target: { value: '__withheld__' },
+      target: { value: '__unlinked__' },
     });
     expect(rowButtons(container)).toHaveLength(1);
     expect(getByText('Withheld anchor')).toBeInTheDocument();
@@ -404,8 +407,13 @@ describe('P24.5 · Concept Lookup — empty-leads honesty', () => {
   });
 });
 
-describe('P24.9 · Concept Lookup — withheld anchor honesty', () => {
-  it('renders an honest "anchor withheld" note (not an empty mono span) when the backend nulls a governance-excluded anchor', async () => {
+describe('P24.9 · Concept Lookup — null-anchor honesty', () => {
+  // P36R S10: a null `source_file` has TWO shapes behind it
+  // (`memory.py::_served_source_file`) — the graph named no source at all, or it
+  // named one that is unsafe / not governance-served. The old copy ("anchor
+  // withheld (excluded source)") asserted the second, i.e. that an excluded
+  // source exists. The note must be true of either shape.
+  it('renders an honest "no linked source" note (not an empty mono span, and never asserting an excluded source exists)', async () => {
     stubFetchRoutes({
       ...baseRoutes,
       [conceptPath('concept-governance')]: { body: memoryConceptDetailWithheldAnchor },
@@ -415,12 +423,14 @@ describe('P24.9 · Concept Lookup — withheld anchor honesty', () => {
 
     fireEvent.click(getByRole('button', { name: /Governance allowlist/ }));
 
-    await findByText('anchor withheld (excluded source)');
+    await findByText('no linked source');
     const pane = detailPane(container);
     const scoped = within(pane);
 
-    // The honest withheld note is present...
-    expect(scoped.getByText('anchor withheld (excluded source)')).toBeInTheDocument();
+    // The honest null-anchor note is present...
+    expect(scoped.getByText('no linked source')).toBeInTheDocument();
+    // ...and it never asserts that an excluded source exists.
+    expect(pane.textContent).not.toMatch(/withheld|excluded source/i);
     // ...and no empty mono span was rendered for the withheld anchor.
     expect(pane.querySelectorAll('.concept-lookup-anchor .mono')).toHaveLength(0);
     // The missing-file note is suppressed when there is no anchor path.

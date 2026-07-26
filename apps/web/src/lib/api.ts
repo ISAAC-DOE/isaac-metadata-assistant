@@ -319,7 +319,8 @@ export const api = {
     return body as ApiValidateRecordResult;
   },
 
-  // P36.6 — the read-only Schema & Vocabulary browser. Serves the vendored
+  // P36.6 — the read-only Schema Reference browser (renamed from "Schema &
+  // Vocabulary" by P36R S8). Serves the vendored
   // official schema + vocabulary/*.json verbatim (reference plane, never truth
   // enforcement) — this client only parses the envelope, it never re-derives
   // or projects any part of it.

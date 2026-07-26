@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
-import { render, fireEvent, within } from '@testing-library/react';
+import { render, fireEvent, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import {
@@ -243,9 +243,23 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
 
     // P34.2: the on-mount auto-reply was removed; the provenance answer is now
     // surfaced by clicking its chip (answered from Project Memory).
-    fireEvent.click(panel.getByText('Where do these leads come from?').closest('button')!);
+    //
+    // P36R S10 — this assertion used `findByText`, whose default 1 s poll window
+    // made a DETERMINISTIC result look intermittent (one CI failure on PR #14,
+    // one local failure in ~35 runs). The path is synchronous:
+    // `AssistantPanel.ask()` reads `prompt.answer` — precomposed by
+    // `compose({ context: 'memory', graph })` from the SAME already-resolved
+    // status payload that rendered "Memory Available" above — and calls
+    // `setLiveQuestion` / `setLiveAnswer` / `setActiveIndex` directly. No fetch,
+    // no promise, no timer. So `act()` + `getByText` is the honest assertion:
+    // it flushes the update and then either finds the answer or fails at once
+    // against the real DOM. The timeout was NOT raised and nothing was retried,
+    // skipped or marked flaky — the polling was removed instead.
+    act(() => {
+      fireEvent.click(panel.getByText('Where do these leads come from?').closest('button')!);
+    });
     expect(
-      await panel.findByText(/Leads come from indexed project files and concepts/),
+      panel.getByText(/Leads come from indexed project files and concepts/),
     ).toBeInTheDocument();
     expect(panel.getByText('answered from: Project Memory')).toBeInTheDocument();
     // leads-to-verify framing, never a verdict
