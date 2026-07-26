@@ -1840,6 +1840,53 @@ export const openApiFixture = {
           { name: 'id', in: 'path', required: true },
           { name: 'If-Match', in: 'header', required: false },
         ],
+        // P36R S9 — request/response detail the master-detail browser renders
+        // when the contract supplies it. Two `$ref` cases on purpose: the 422
+        // names a schema that IS in `components` (one-level resolution), the
+        // 404 names one that is DELIBERATELY ABSENT, so the fallback that shows
+        // the raw `$ref` verbatim is covered and a synthesized placeholder
+        // shape would fail the suite.
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { type: 'object', title: 'SyntheticAnswersBody' },
+              example: { answers: [{ id: 'series', value: 'CuO2_merged.xdi' }] },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Successful Response',
+            content: {
+              'application/json': { schema: { type: 'object', title: 'SyntheticAnswersResult' } },
+            },
+          },
+          '404': {
+            description: 'Not Found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SyntheticFixtureAbsentTarget' },
+              },
+            },
+          },
+          '422': {
+            description: 'Validation Error',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SyntheticFixtureError' } },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    // `SyntheticFixtureAbsentTarget` is intentionally NOT declared here.
+    schemas: {
+      SyntheticFixtureError: {
+        type: 'object',
+        title: 'SyntheticFixtureError',
+        properties: { detail: { type: 'string' } },
       },
     },
   },

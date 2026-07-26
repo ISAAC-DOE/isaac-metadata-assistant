@@ -1099,11 +1099,34 @@ export interface OpenApiParameter {
   description?: string;
 }
 
+/** One media type entry (`content["application/json"]`). Only the keys the
+ *  browser renders are modeled; every value is displayed verbatim. */
+export interface OpenApiMediaType {
+  schema?: unknown;
+  example?: unknown;
+  examples?: Record<string, { summary?: string; description?: string; value?: unknown }>;
+}
+
+export interface OpenApiRequestBody {
+  description?: string;
+  required?: boolean;
+  content?: Record<string, OpenApiMediaType>;
+}
+
+export interface OpenApiResponse {
+  description?: string;
+  content?: Record<string, OpenApiMediaType>;
+}
+
 export interface OpenApiOperation {
   summary?: string;
   description?: string;
   tags?: string[];
+  operationId?: string;
   parameters?: OpenApiParameter[];
+  requestBody?: OpenApiRequestBody;
+  /** Keyed by status code as a STRING, exactly as OpenAPI emits it. */
+  responses?: Record<string, OpenApiResponse>;
 }
 
 // Only the HTTP methods this prototype's API actually uses; an unlisted key
@@ -1116,6 +1139,11 @@ export interface ApiOpenApiResponse {
   openapi: string;
   info?: { title?: string; version?: string; summary?: string };
   paths: Record<string, OpenApiPathItem>;
+  /** Present in the real generated document. Used ONLY to resolve a local
+   *  `#/components/schemas/<Name>` reference back to the schema it names — no
+   *  other interpretation, and never a fabricated shape when the target is
+   *  absent (the raw `$ref` is then shown as-is). */
+  components?: { schemas?: Record<string, unknown> };
 }
 
 // GET /api/schema — P36.6 read-only Schema & Vocabulary browser. Serves the
