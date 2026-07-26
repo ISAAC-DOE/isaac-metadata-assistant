@@ -1404,18 +1404,33 @@
   border-top: 1px solid var(--border);
 }
 
-/* ---- Settings: Help / About + API Documentation (P36.4) -------------- */
+/* ---- Settings: Overview · Data & Privacy · About · API (P36.4 · P36R S9) ---
+   The page is four LOCAL tabs (`.section-tabs`/`.section-tab`, shared with
+   Governance & Safety and Project Memory); each panel is a measured wrapper
+   holding one card. No accent border-left/right anywhere below — selection in
+   the API master list is carried by an inset ring + a heavier path +
+   `aria-current`, and the HTTP method by its TEXT, never colour alone. */
 
 /* P36R S1 — the measure is the SHARED content-width token (chrome.css
    `.screen-main[data-width]`), not a local literal, so these cards track the
    `.placeholder` wrapper they sit in instead of stair-stepping 340px narrower
-   than the version card above them. The 860px literal survives as the
+   than the page header above them. The 860px literal survives as the
    FALLBACK, so a settings card outside a width mode is unchanged. */
 .settings-card {
   max-width: var(--content-max, 860px);
 }
 .settings-card + .settings-card {
   margin-top: 18px;
+}
+/* The tab panel shares the page measure (same instrument as
+   `.governance-panel`) so the panel can never run wider than the tab bar. */
+.settings-panel {
+  max-width: var(--content-max, 860px);
+}
+.settings-panel:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
 }
 .settings-card-head {
   display: flex;
@@ -1440,9 +1455,24 @@
   max-width: 68ch;
 }
 
-/* Help / About — figures list, provenance note, doc references. */
+.settings-subheading {
+  margin: 18px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.settings-source-line {
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* Identity figures — a two-up definition list. */
 .settings-figures {
-  margin: 16px 0 0;
+  margin: 10px 0 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 2px 24px;
@@ -1452,6 +1482,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
   padding: 6px 0;
   border-bottom: 1px solid var(--border-faint);
 }
@@ -1461,10 +1492,19 @@
 }
 .settings-figure dd {
   margin: 0;
+  min-width: 0;
   font-size: 12.5px;
   color: var(--text-heading);
   font-weight: 500;
   text-align: right;
+  overflow-wrap: anywhere;
+}
+.settings-figures-caption {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+  max-width: 74ch;
 }
 .settings-commit {
   display: flex;
@@ -1488,8 +1528,75 @@
   text-align: right;
 }
 
-.settings-provenance-note {
+/* Boundary statements — a titled list, not a wall of prose. */
+/* `min(260px, 100%)` — NOT a bare 260px: a bare track minimum cannot shrink
+   below its floor, so on a ~340px-wide card the tiles overflowed their own
+   container by 5px (measured at 375×812). The min() clamps the floor to the
+   container, so the grid collapses to one column instead of overflowing. */
+.settings-points {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 12px;
+}
+.settings-points > li {
+  min-width: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner, 8px);
+  background: var(--surface-subtle);
+}
+.settings-points h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+.settings-points p {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.settings-jump {
   margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-jump-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--action);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+  overflow-wrap: anywhere;
+}
+.settings-jump-btn:hover {
+  color: var(--action-hover);
+  border-color: var(--action-selected-border);
+  background: var(--action-tint);
+}
+.settings-jump-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.settings-provenance-note {
+  margin-top: 8px;
+  /* The prose inside is capped at 74ch; without a matching cap on the box the
+     panel would stretch the full 1200px measure around a half-empty column. */
+  max-width: 80ch;
   padding: 12px 14px;
   border-radius: var(--radius-inner, 8px);
   border: 1px solid var(--border-hair);
@@ -1509,20 +1616,15 @@
 }
 
 .settings-docs-note {
-  margin-top: 14px;
-}
-.settings-docs-label {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  margin-top: 8px;
 }
 .settings-docs-list {
-  margin-top: 6px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 14px;
   list-style: none;
   padding: 0;
+  margin: 0;
 }
 .settings-docs-list code {
   font-size: 11.5px;
@@ -1534,9 +1636,9 @@
   color: var(--text-tertiary);
 }
 
-/* API Documentation — search + grouped, expandable rows. */
+/* ---- API browser: search + master/detail ------------------------------- */
 .settings-search {
-  margin-top: 16px;
+  margin-top: 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1587,67 +1689,136 @@
   color: var(--text-tertiary);
 }
 
-.api-docs-groups {
-  margin-top: 8px;
+/* Wrap-based, not breakpoint-based (same instrument as .schema-fields-split):
+   the LeftNav already consumes fixed width, so a viewport media query is the
+   wrong measure — the two columns wrap on their own flex-basis exactly when
+   the list would otherwise be starved. */
+.api-browser-split {
+  margin-top: 14px;
   display: flex;
-  flex-direction: column;
-  gap: 18px;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
 }
-.api-docs-group-heading {
+.api-browser-master {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.api-browser-detail {
+  flex: 1.5 1 360px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+}
+.api-browser-detail:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.api-browser-pane-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.api-browser-pane-count {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-quaternary);
+}
+
+.api-browser-list {
+  margin-top: 8px;
+  max-height: 520px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-token);
+}
+.api-browser-group-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 12px;
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-strong);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding-bottom: 4px;
+  letter-spacing: 0.04em;
+  color: var(--text-strong);
+  background: var(--surface);
   border-bottom: 1px solid var(--border-faint);
 }
-.api-docs-group-count {
-  font-size: 11px;
+.api-browser-group + .api-browser-group .api-browser-group-heading {
+  border-top: 1px solid var(--border-faint);
+}
+.api-browser-group-count {
+  font-size: 10.5px;
   font-weight: 500;
-  color: var(--text-tertiary);
   text-transform: none;
   letter-spacing: normal;
+  color: var(--text-quaternary);
 }
-.api-docs-rows {
+.api-browser-rows {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
 }
-.api-docs-row + .api-docs-row {
+.api-browser-row + .api-browser-row {
   border-top: 1px solid var(--border-hair);
 }
-.api-docs-row summary {
+.api-browser-rowbtn {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  row-gap: 4px;
-  gap: 10px;
-  padding: 9px 4px;
-  cursor: pointer;
-  list-style: none;
-}
-.api-docs-row summary::-webkit-details-marker {
-  display: none;
-}
-.api-docs-row summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  background: none;
+  border: none;
   border-radius: var(--radius-token);
+  text-align: left;
+  color: inherit;
+  transition: background 0.12s ease;
 }
-.api-docs-row-chevron {
-  flex: none;
-  color: var(--text-quaternary);
-  transition: transform 0.12s ease;
+.api-browser-rowbtn:hover {
+  background: var(--surface-subtle);
 }
-.api-docs-row details[open] .api-docs-row-chevron {
-  transform: rotate(90deg);
+/* Selection carries THREE cues, only one of which is colour: an inset ring, a
+   heavier path, and aria-current for assistive technology. */
+.api-browser-rowbtn.selected {
+  background: var(--action-tint);
+  box-shadow: inset 0 0 0 1px var(--action-selected-border);
 }
+.api-browser-rowbtn.selected .api-docs-path {
+  font-weight: 700;
+  color: var(--text-heading);
+}
+.api-browser-rowbtn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: -2px;
+}
+.api-browser-rowtext {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
 .api-docs-method {
   flex: none;
   font-family: var(--font-mono);
@@ -1665,28 +1836,66 @@
 .api-docs-method-put    { color: var(--needsyou-text); background: var(--needsyou-bg); border-color: var(--needsyou-border); }
 .api-docs-method-delete { color: var(--fail-text);     background: var(--fail-bg);     border-color: var(--fail-border); }
 .api-docs-path {
+  min-width: 0;
   font-size: 12px;
   color: var(--text-heading);
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .api-docs-summary-text {
-  font-size: 12px;
+  min-width: 0;
+  font-size: 11.5px;
   color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
-.api-docs-row-body {
-  padding: 0 4px 12px 26px;
+
+/* ---- API browser: detail pane ------------------------------------------ */
+.api-browser-detail-name {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+.api-browser-detail-path {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.api-browser-detail-summary {
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
 }
 .api-docs-description {
+  margin-top: 6px;
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-secondary);
   max-width: 74ch;
+  overflow-wrap: anywhere;
+}
+.api-browser-section {
+  margin-top: 14px;
+}
+.api-browser-section-heading {
+  margin: 0 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.api-browser-section-note {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 .api-docs-no-params {
   font-size: 11.5px;
@@ -1712,6 +1921,91 @@
   padding: 4px 12px 4px 0;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-hair);
+}
+
+.api-browser-responses {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.api-browser-response {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.api-browser-status {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.api-browser-response-body {
+  min-width: 0;
+  flex: 1;
+}
+.api-browser-media {
+  margin-top: 6px;
+  min-width: 0;
+}
+.api-browser-mediatype {
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
+}
+.api-browser-disclosure {
+  margin-top: 4px;
+  min-width: 0;
+}
+.api-browser-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--action);
+  cursor: pointer;
+}
+.api-browser-disclosure > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.api-browser-reftag {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.api-browser-json {
+  margin-top: 6px;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-token);
+  white-space: pre;
+}
+.api-browser-detail-source {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-hair);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
 }
 
 /* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
@@ -1747,8 +2041,11 @@
     grid-template-columns: 1fr;
   }
 
-  /* Settings (P36.4): the About figure's commit block and the API doc search
-     box go full-width on narrow screens instead of pinning to a fixed max. */
+  /* Settings (P36.4 · P36R S9): the About figure's commit block and the API
+     search box go full-width on narrow screens instead of pinning to a fixed
+     max, and the API master list keeps its own scroll box but shortens it
+     (520px -> 320px) so the stacked detail pane stays reachable without a long
+     scroll past the list. */
   .settings-figure dd {
     text-align: left;
   }
@@ -1761,6 +2058,9 @@
   }
   .settings-search-input-wrap {
     max-width: 100%;
+  }
+  .api-browser-list {
+    max-height: 320px;
   }
   .source-index-panel-figures {
     grid-template-columns: 1fr 1fr;
