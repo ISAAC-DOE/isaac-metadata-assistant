@@ -1,9 +1,13 @@
 /**
- * P36.6 — Governance & Safety reorganized into local page tabs: Policy ·
- * Validator · Schema & Vocabulary. Mirrors ProjectMemory's internal-tabs test
- * shape (`memory-tabs.test.tsx`). This slice is presentation/IA only: the
- * P36.3 Validator and its existing behavior must be unchanged, and the
+ * P36.6 / P36R S8 — Governance & Safety reorganized into local page tabs:
+ * Policy · Validator · Schema Reference. Mirrors ProjectMemory's internal-tabs
+ * test shape (`memory-tabs.test.tsx`). This slice is presentation/IA only: the
+ * P36.3 Validator's request path and behavior must be unchanged, and the
  * `active="governance"` LeftNav wiring must be preserved.
+ *
+ * P36R S8 renamed the third tab "Schema & Vocabulary" → "Schema Reference"
+ * (plan §R7); the vocabulary did not go away, it became one of that tab's three
+ * subviews.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -33,14 +37,19 @@ afterEach(() => {
 });
 
 describe('Governance & Safety — tablist', () => {
-  it('exposes an accessible tablist with Policy, Validator, and Schema & Vocabulary', () => {
+  it('exposes an accessible tablist with Policy, Validator, and Schema Reference', () => {
     renderPage();
     expect(screen.getByRole('tablist', { name: /Governance & Safety sections/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Policy' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Validator' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Schema & Vocabulary' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Schema Reference' })).toBeInTheDocument();
     // Policy is the default selected tab.
     expect(screen.getByRole('tab', { name: 'Policy' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('no longer offers the old "Schema & Vocabulary" tab label', () => {
+    renderPage();
+    expect(screen.queryByRole('tab', { name: 'Schema & Vocabulary' })).toBeNull();
   });
 });
 
@@ -51,10 +60,10 @@ describe('Governance & Safety — content routing', () => {
       screen.getByText(/This prototype is synthetic-only by default/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Standalone Validator/i)).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Schema & Vocabulary', level: 2 })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Schema Reference', level: 2 })).toBeNull();
   });
 
-  it('clicking Validator reveals the standalone validator (unchanged)', () => {
+  it('clicking Validator reveals the standalone validator (behavior unchanged)', () => {
     renderPage();
     fireEvent.click(screen.getByRole('tab', { name: 'Validator' }));
     expect(screen.getByText('Standalone Validator')).toBeInTheDocument();
@@ -62,12 +71,12 @@ describe('Governance & Safety — content routing', () => {
     expect(screen.queryByText(/This prototype is synthetic-only by default/i)).toBeNull();
   });
 
-  it('clicking Schema & Vocabulary reveals the new browser', async () => {
+  it('clicking Schema Reference reveals the browser', async () => {
     stubFetchRoutes({ 'GET /api/schema': { body: { schema_title: 't', schema_version: '1.05', schema: { properties: {} }, vocabularies: {} } } });
     renderPage();
-    fireEvent.click(screen.getByRole('tab', { name: 'Schema & Vocabulary' }));
-    expect(await screen.findByRole('heading', { name: 'Schema & Vocabulary', level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Schema & Vocabulary' })).toHaveAttribute(
+    fireEvent.click(screen.getByRole('tab', { name: 'Schema Reference' }));
+    expect(await screen.findByRole('heading', { name: 'Schema Reference', level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Schema Reference' })).toHaveAttribute(
       'aria-selected',
       'true',
     );
@@ -102,5 +111,21 @@ describe('Governance & Safety — keyboard navigation', () => {
     expect(validator).toHaveAttribute('aria-selected', 'true');
     expect(validator).toHaveFocus();
     expect(screen.getByText('Standalone Validator')).toBeInTheDocument();
+  });
+
+  it('End jumps to Schema Reference and Home returns to Policy', async () => {
+    stubFetchRoutes({ 'GET /api/schema': { body: { schema_title: 't', schema_version: '1.05', schema: { properties: {} }, vocabularies: {} } } });
+    renderPage();
+    const policy = screen.getByRole('tab', { name: 'Policy' });
+    policy.focus();
+    fireEvent.keyDown(policy, { key: 'End' });
+
+    const schema = screen.getByRole('tab', { name: 'Schema Reference' });
+    expect(schema).toHaveAttribute('aria-selected', 'true');
+    expect(schema).toHaveFocus();
+    expect(await screen.findByRole('heading', { name: 'Schema Reference', level: 2 })).toBeInTheDocument();
+
+    fireEvent.keyDown(schema, { key: 'Home' });
+    expect(screen.getByRole('tab', { name: 'Policy' })).toHaveAttribute('aria-selected', 'true');
   });
 });

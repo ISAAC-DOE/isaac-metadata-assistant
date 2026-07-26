@@ -327,7 +327,7 @@ describe('all four Governance regions share one measure', () => {
     expectMeasuredPanel(container, 'validator');
   });
 
-  it('the Schema & Vocabulary tab panel uses .governance-panel', async () => {
+  it('the Schema Reference tab panel uses .governance-panel', async () => {
     stubFetchRoutes({
       'GET /api/schema': {
         body: {
@@ -339,9 +339,9 @@ describe('all four Governance regions share one measure', () => {
       },
     });
     const { container, getByRole, findByRole } = routerRender(<GovernancePage />, '/governance');
-    fireEvent.click(getByRole('tab', { name: 'Schema & Vocabulary' }));
+    fireEvent.click(getByRole('tab', { name: 'Schema Reference' }));
     // settle the lazy schema fetch so the assertion runs against the loaded panel
-    await findByRole('heading', { name: 'Schema & Vocabulary', level: 2 });
+    await findByRole('heading', { name: 'Schema Reference', level: 2 });
     expectMeasuredPanel(container, 'schema');
   });
 });

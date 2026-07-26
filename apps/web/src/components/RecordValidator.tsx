@@ -17,6 +17,15 @@ import type { ApiValidateRecordResult, ValidationResult } from '../lib/types';
  *
  * Read-only and local: nothing here is uploaded to a model or persisted — the
  * candidate JSON is validated in memory and discarded (see routes.py docstring).
+ *
+ * P36R S8 — COPY ONLY. The distinct purpose (validate a record WITHOUT adding
+ * it to My Experiments) is now stated, and the four things it is actually for
+ * are listed in a disclosure so it stays a secondary Governance utility rather
+ * than the visual centre of the app. The request path, the 512 KB bound
+ * (client-side first, and again server-side), the no-persistence /
+ * no-content-logging guarantees, the structured errors, and the synthetic/
+ * private-data boundary copy are all UNCHANGED — there is still exactly one
+ * validator implementation, and it is the authoritative one.
  */
 
 const MAX_BYTES = 512 * 1024; // mirrors the server's bound; enforced client-side FIRST
@@ -129,8 +138,9 @@ export function RecordValidator() {
         <div>
           <h2 id="rec-val-heading">Standalone Validator</h2>
           <p className="rec-val-sub">
-            Paste or upload a candidate ISAAC record — checked against the official
-            schema, the same gate <code className="mono">isaac validate --official</code> runs.
+            <strong>Validate a record without adding it to My Experiments.</strong> Paste or upload a
+            candidate ISAAC record — checked against the official schema, the same gate{' '}
+            <code className="mono">isaac validate --official</code> runs.
           </p>
         </div>
       </header>
@@ -139,6 +149,24 @@ export function RecordValidator() {
         Synthetic/local validator: the record is checked in memory and discarded. Nothing here is
         uploaded to a model, indexed, or stored.
       </p>
+
+      <details className="rec-val-purpose">
+        <summary>When to use this</summary>
+        <ul className="rec-val-purpose-list">
+          <li>Inspect an external JSON object that is not — and need not become — a record here.</li>
+          <li>
+            Confirm API and CLI validation parity: this route reuses the same{' '}
+            <code className="mono">validate_official</code> gate as{' '}
+            <code className="mono">isaac validate --official</code>.
+          </li>
+          <li>Diagnose structured schema errors by path before fixing a draft.</li>
+          <li>Independently verify an artifact you already exported.</li>
+        </ul>
+        <p className="rec-val-purpose-note">
+          To build a record — draft, evidence, guided completion, export — start from My Experiments
+          instead. Nothing checked here is created, saved, or changed.
+        </p>
+      </details>
 
       <div className="rec-val-input-row">
         <label className="rec-val-label" htmlFor="rec-val-textarea">
@@ -187,6 +215,7 @@ export function RecordValidator() {
             Validate
           </button>
         </div>
+        <p className="rec-val-hint">Accepts JSON up to 512 KB.</p>
       </div>
 
       {/* No outer aria-live wrapper: each state below already carries its own live

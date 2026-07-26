@@ -1,7 +1,13 @@
 /*
- * P36.6 · Schema & Vocabulary browser (Governance & Safety). A card, same
- * primitive as every other card in the app (base.css `.card`). Purely a
+ * P36.6 · P36R S8 — Schema Reference browser (Governance & Safety). A card,
+ * same primitive as every other card in the app (base.css `.card`). Purely a
  * read-only reference view — no propose/review/approve/edit chrome anywhere.
+ *
+ * No-Vertical-Rail rule (no-vertical-rail.test.ts): every border below is a
+ * neutral `--border*` token; there is no accent/status border-left or
+ * border-right anywhere in this file. Selection in the Fields master list is
+ * carried by an inset ring + a heavier label + `aria-current`, never by colour
+ * alone; Required/Optional is carried by the badge TEXT, the tint is secondary.
  */
 
 /* P36R S1 — the measure is the SHARED content-width token published by
@@ -42,10 +48,62 @@
   margin-top: 14px;
   font-size: 11.5px;
   color: var(--text-tertiary);
+  overflow-wrap: anywhere;
 }
 
+/* ---- inner subview tabs ------------------------------------------------
+   Fields · Conditional Rules · Vocabulary. Visually a segmented control so it
+   never reads as a second copy of the page-level tab bar above it. */
+.schema-subtabs {
+  margin: 14px 0 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+  width: fit-content;
+  max-width: 100%;
+}
+.schema-subtab {
+  min-width: 0;
+  padding: 5px 13px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  overflow-wrap: anywhere;
+}
+.schema-subtab:hover {
+  color: var(--text-heading);
+}
+.schema-subtab.active {
+  background: var(--surface);
+  border: 1px solid var(--action-selected-border);
+  color: var(--action-hover);
+  font-weight: 600;
+}
+.schema-subtab:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.schema-view-panel {
+  margin-top: 14px;
+}
+.schema-view-panel:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+
+/* ---- shared search field ------------------------------------------------ */
+
 .schema-browser-search-row {
-  margin-top: 16px;
+  margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -60,6 +118,7 @@
 }
 .schema-browser-search-input {
   width: 100%;
+  min-width: 0;
   max-width: 420px;
   padding: 8px 12px;
   border: 1px solid var(--border-input);
@@ -77,84 +136,144 @@
   color: var(--text-quaternary);
 }
 
-.schema-browser-section {
-  margin-top: 22px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-faint);
-}
-.schema-browser-section h3 {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-heading);
-}
 .schema-browser-section-note {
-  margin-top: 4px;
+  margin-top: 6px;
   font-size: 12px;
   color: var(--text-tertiary);
   line-height: 1.5;
+  max-width: 76ch;
 }
 .schema-browser-empty {
   margin-top: 10px;
   font-size: 12.5px;
   color: var(--text-tertiary);
+  line-height: 1.55;
+  max-width: 72ch;
 }
 
-/* ---- field tree ------------------------------------------------------- */
+/* ---- pane headings ------------------------------------------------------ */
 
-.schema-field-tree {
-  margin-top: 10px;
-  list-style: none;
-  padding: 0;
+.schema-pane-heading {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 520px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.schema-pane-count {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-quaternary);
+}
+
+/* ---- Fields: master / detail -------------------------------------------
+   Wrap-based, not breakpoint-based (same instrument as .concept-lookup-split):
+   the LeftNav already consumes fixed width, so a viewport media query is the
+   wrong measure. The two columns wrap on their own flex-basis exactly when the
+   list would otherwise be starved, at any viewport, with no magic number. */
+.schema-fields-split {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.schema-fields-master {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.schema-fields-detailpane {
+  flex: 1.4 1 340px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+}
+
+.schema-field-rows {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 460px;
   overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-token);
-  padding: 8px;
 }
-.schema-field-row > details > summary,
-.schema-field-leaf {
-  list-style: none;
+.schema-field-row + .schema-field-row {
+  border-top: 1px solid var(--border-hair);
 }
-.schema-field-row summary::-webkit-details-marker {
-  display: none;
-}
-.schema-field-row summary {
-  cursor: pointer;
-  padding: 4px 6px;
+.schema-field-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  background: none;
+  border: none;
   border-radius: var(--radius-token);
+  text-align: left;
+  color: inherit;
+  transition: background 0.12s ease;
 }
-.schema-field-row summary:hover {
+.schema-field-btn:hover {
   background: var(--surface-subtle);
 }
-.schema-field-row summary:focus-visible,
-.schema-field-leaf:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 1px;
-  border-radius: var(--radius-token);
+/* Selection carries THREE cues, only one of which is colour: an inset ring, a
+   heavier name, and aria-current for assistive technology. */
+.schema-field-btn.selected {
+  background: var(--action-tint);
+  box-shadow: inset 0 0 0 1px var(--action-selected-border);
 }
-.schema-field-leaf {
-  padding: 4px 6px;
+.schema-field-btn.selected .schema-field-name {
+  font-weight: 700;
+  color: var(--text-heading);
+}
+.schema-field-btn.selected .schema-field-chevron {
+  color: var(--action);
+}
+.schema-field-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: -2px;
+}
+.schema-field-chevron {
+  flex: none;
+  margin-top: 3px;
+  color: var(--text-disabled);
 }
 
 .schema-field-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
+  min-width: 0;
+  flex: 1;
 }
 .schema-field-name {
+  min-width: 0;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-heading);
+  overflow-wrap: anywhere;
 }
 .schema-field-type {
+  min-width: 0;
   font-size: 11px;
   color: var(--text-slate);
+  overflow-wrap: anywhere;
 }
 .schema-field-badge {
+  flex: none;
   padding: 1px 8px;
   border-radius: var(--radius-pill);
   font-size: 10.5px;
@@ -174,41 +293,126 @@
   color: var(--text-tertiary);
 }
 
-.schema-field-body {
-  margin: 4px 0 6px 6px;
-  padding-left: 12px;
-  border-left: 2px solid var(--border-hair);
+/* ---- Fields: detail pane ------------------------------------------------ */
+
+.schema-detail-empty-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-heading);
 }
-.schema-field-path {
-  font-size: 11px;
-  color: var(--text-quaternary);
-  word-break: break-all;
+.schema-detail-empty-text {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
 }
-.schema-field-desc {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
+
+.schema-fielddetail-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-heading);
   overflow-wrap: anywhere;
 }
-.schema-field-enum {
-  margin-top: 6px;
+.schema-fielddetail-path {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
 }
-.schema-field-enum-label {
+.schema-fielddetail-meta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.schema-fielddetail-chip {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-faint);
+  background: var(--surface);
   font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.schema-field-desc {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.schema-fielddetail-nodesc {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
+}
+.schema-fielddetail-parent {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.schema-fielddetail-label {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.schema-fielddetail-section {
+  margin-top: 14px;
+}
+.schema-fielddetail-heading {
+  margin: 0 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+/* Sub-headings inside a detail section — currently the two DISTINCT kinds of
+   related conditional rule (names this field / constrains something nested
+   inside it), which must never read as one undifferentiated list. */
+.schema-fielddetail-subheading {
+  margin: 0 0 4px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+}
+.schema-fielddetail-rules + .schema-fielddetail-subheading {
+  margin-top: 10px;
+}
+.schema-fielddetail-value,
+.schema-fielddetail-pattern {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-token);
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+.schema-fielddetail-note {
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.55;
 }
 .schema-field-enum-list {
-  margin-top: 4px;
-  max-height: 140px;
+  margin: 0;
+  max-height: 160px;
   overflow-y: auto;
   padding: 6px 8px;
   border: 1px solid var(--border-hair);
   border-radius: var(--radius-token);
-  background: var(--surface-subtle);
+  background: var(--surface);
   font-size: 11.5px;
   color: var(--text-secondary);
   display: flex;
@@ -217,94 +421,281 @@
   list-style: none;
 }
 .schema-field-enum-list li {
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
-
-.schema-field-children {
-  margin-top: 4px;
-  margin-left: 14px;
-  list-style: none;
+.schema-fielddetail-examples {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.schema-fielddetail-children {
+  margin: 0;
   padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  border-left: 1px dashed var(--border-hair);
-  padding-left: 8px;
+  gap: 5px;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
-
-/* ---- relationships ------------------------------------------------------ */
-
-.schema-relationships-list {
-  margin-top: 10px;
-  list-style: none;
-  padding: 0;
+.schema-fielddetail-children li {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  min-width: 0;
 }
-.schema-relationship-row {
-  padding: 8px 10px;
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-token);
-  background: var(--surface-subtle);
+.schema-fielddetail-rules {
+  margin: 0 0 8px;
+  padding: 0 0 0 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
-.schema-relationship-scope {
+.schema-fielddetail-source {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-hair);
   font-size: 10.5px;
   color: var(--text-quaternary);
-}
-.schema-relationship-text {
-  margin-top: 2px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
-/* ---- vocabulary ----------------------------------------------------------- */
+/* A navigation affordance, never an edit affordance — it only changes which
+   field/rule this read-only reference is showing. */
+.schema-linkbtn {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 11.5px;
+  color: var(--action);
+  overflow-wrap: anywhere;
+}
+.schema-linkbtn:hover {
+  color: var(--action-hover);
+  text-decoration: underline;
+}
+.schema-linkbtn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+
+/* ---- Conditional Rules -------------------------------------------------- */
+
+.schema-rules-list {
+  margin: 14px 0 0;
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.schema-rule-card {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+.schema-rule-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+.schema-rule-scope {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
+}
+.schema-rule-sentence {
+  margin-top: 5px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.schema-rule-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+.schema-rule-cell {
+  min-width: 0;
+}
+.schema-rule-celltitle {
+  margin: 0 0 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.schema-rule-clauses,
+.schema-rule-paths {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  min-width: 0;
+}
+.schema-rule-clauses li,
+.schema-rule-paths li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.schema-rule-raw {
+  margin-top: 10px;
+}
+.schema-rule-raw > summary {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--action);
+  cursor: pointer;
+  width: fit-content;
+}
+.schema-rule-raw > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.schema-rule-rawpre {
+  margin-top: 8px;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-token);
+  white-space: pre;
+}
+
+/* ---- Vocabulary ---------------------------------------------------------- */
 
 .schema-vocab-list {
-  margin-top: 10px;
+  margin-top: 14px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 .schema-vocab-card {
+  min-width: 0;
   padding: 12px 14px;
   border: 1px solid var(--border-faint);
-  border-radius: var(--radius-token);
+  border-radius: var(--radius-inner);
 }
 .schema-vocab-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.schema-vocab-field {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.schema-vocab-provenance,
+.schema-vocab-link {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-token);
+  background: var(--surface-subtle);
 }
 .schema-vocab-note,
-.schema-vocab-source {
-  margin-top: 4px;
+.schema-vocab-source,
+.schema-vocab-linktext {
+  margin-top: 5px;
   font-size: 11.5px;
   color: var(--text-tertiary);
-  line-height: 1.5;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.schema-vocab-linktext {
+  color: var(--text-secondary);
+}
+.schema-vocab-linklist {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.schema-vocab-linklist li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.schema-vocab-linkchip {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
   overflow-wrap: anywhere;
 }
 .schema-vocab-group {
-  margin-top: 10px;
+  margin-top: 12px;
+  min-width: 0;
 }
 .schema-vocab-group-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-strong);
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
 }
 .schema-vocab-terms {
-  margin-top: 4px;
+  margin: 5px 0 0;
   display: flex;
   flex-wrap: wrap;
   gap: 5px 8px;
   padding: 0;
   list-style: none;
-  max-height: 160px;
-  overflow-y: auto;
+  min-width: 0;
 }
 .schema-vocab-term {
   padding: 2px 8px;
@@ -313,14 +704,16 @@
   background: var(--surface-subtle);
   font-size: 11px;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 .schema-vocab-scalar {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 12px;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 .schema-vocab-raw {
-  margin-top: 6px;
+  margin-top: 8px;
   max-height: 220px;
   overflow: auto;
   font-size: 11px;
@@ -337,5 +730,18 @@
   }
   .schema-browser-search-input {
     max-width: 100%;
+  }
+  .schema-subtabs {
+    width: 100%;
+  }
+  .schema-subtab {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .schema-field-btn {
+    transition: none;
   }
 }

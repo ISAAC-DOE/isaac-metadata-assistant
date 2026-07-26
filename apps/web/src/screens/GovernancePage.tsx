@@ -10,19 +10,24 @@ import { LABELS } from '../lib/labels';
 
 /**
  * Governance & Safety — the synthetic-only policy, the P36.3 standalone schema
- * Validator, and the P36.6 read-only Schema & Vocabulary browser, organized as
- * LOCAL page tabs (Policy / Validator / Schema & Vocabulary) — never added to
- * the global LeftNav (which keeps its single `active="governance"` entry).
- * Same tablist pattern (CSS classes + roving-tabindex keyboard nav) as Project
- * Memory's internal tabs (`ProjectMemory.tsx`'s `SectionTabs`; screens.css
+ * Validator, and the read-only Schema Reference browser, organized as LOCAL
+ * page tabs (Policy / Validator / Schema Reference) — never added to the global
+ * LeftNav (which keeps its single `active="governance"` entry). Same tablist
+ * pattern (CSS classes + roving-tabindex keyboard nav) as Project Memory's
+ * internal tabs (`ProjectMemory.tsx`'s `SectionTabs`; screens.css
  * `.section-tabs`/`.section-tab`) — not a new UI paradigm.
+ *
+ * P36R S8 renamed the third tab from "Schema & Vocabulary" to "Schema
+ * Reference" (plan §R7). The vocabulary is NOT empty — it is one of the three
+ * subviews inside that tab (Fields · Conditional Rules · Vocabulary), so the
+ * shorter name describes the surface without dropping anything from it.
  */
 type GovernanceTab = 'policy' | 'validator' | 'schema';
 
 const GOVERNANCE_TABS: { id: GovernanceTab; label: string }[] = [
   { id: 'policy', label: 'Policy' },
   { id: 'validator', label: 'Validator' },
-  { id: 'schema', label: 'Schema & Vocabulary' },
+  { id: 'schema', label: 'Schema Reference' },
 ];
 
 const tabId = (id: GovernanceTab) => `governance-tab-${id}`;
@@ -94,7 +99,7 @@ export function GovernancePage() {
 }
 
 // --- local page tabs (mirrors ProjectMemory.tsx's SectionTabs pattern) -----
-// A local tablist — Policy · Validator · Schema & Vocabulary — NOT part of the
+// A local tablist — Policy · Validator · Schema Reference — NOT part of the
 // global LeftNav. Roving tabindex + arrow/Home/End keyboard navigation
 // (automatic activation); native buttons carry Enter/Space activation.
 
