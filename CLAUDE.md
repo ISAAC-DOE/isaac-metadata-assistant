@@ -414,8 +414,32 @@ Current state:
   read `5bb25a8` once Flux rolls `v0.0.11`); responsive/200%-zoom sign-off + personal-deploy retirement
   remain OPEN. **Phase 37 (portal / Postgres / real data / API keys / roles / external LLM) remains NOT
   authorized** — readiness plan only: `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md`.
+- **Phase 36R (interaction, information architecture & graph exploration refinement) — COMPLETE**
+  at org HEAD `5b08ce5` (image `v0.0.19`); synthetic-only, deterministic, **no LLM added, no new npm
+  dependency, no backend route added or changed**, truth core untouched. Plan:
+  `docs/superpowers/plans/2026-07-25-phase-36r-interaction-ia-graph-refinement.md`; closure:
+  `docs/superpowers/plans/2026-07-26-phase-36r-closure.md`. Seven merge-commit PRs (#11–#17) →
+  images `v0.0.13`…`v0.0.19`. Frontend tests **751 → 1120** (62 → 69 files); backend **1029**
+  unchanged. Shipped: a shared `readable`/`wide`/`full` content-width system (the old
+  `.placeholder { max-width: 640px }` had squeezed Project Memory, Governance and Settings);
+  an Assistant conversation redesign across all five mounts (the log had been clipped to 340px of
+  761px content); a **native** Graph Explore/Browse over the committed 220-node/508-edge projection
+  with a deterministic seeded layout — the Graphify HTML was rejected because `graphify-out/` is
+  gitignored and excluded from the Docker COPY allowlist, it loads vis-network from a CDN, and its
+  `graph.json` carries paths the served-content manifest withholds (**R1**); a bounded deterministic
+  graph command bar and Assistant graph intents sharing ONE typed `GraphAction` model (**R6**);
+  Concepts and Schema Reference master-detail redesigns; and a Settings IA with an OpenAPI browser.
+  Every slice: Opus implement → **independent Opus review** → all Critical/Important fixed → green CI.
+  The reviews' most consequential catches were honesty defects that every test passed through —
+  including an Assistant stating a node count the applied action did not produce, and a Settings
+  claim that real artifacts are "refused before anything is read or extracted" when **no
+  real-vs-synthetic detection exists anywhere in the codebase** (the app enforces synthetic *mode*,
+  not synthetic *data*). **R9 records that the authorizing prompt's own prescribed copy was false**
+  and was corrected. **HOSTED QA of every image `v0.0.13`–`v0.0.19` is PENDING (Krish)** — `/krish`
+  is behind an Authentik edge this environment cannot authenticate to; no rollout is claimed as
+  verified. Responsive / 200%-zoom human sign-off and personal-deploy retirement remain OPEN.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
-- Start any further phase (beyond the authorized Phase 36 native-enhancement slices) only after explicit user approval.
+- Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
 Do not treat this note as a work authorization — confirm the actual head, branch, and status with the commands below before continuing.
 
