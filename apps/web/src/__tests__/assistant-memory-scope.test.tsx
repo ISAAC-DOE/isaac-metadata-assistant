@@ -14,7 +14,7 @@
  *     confirmProposal;
  *   - a record-scope panel still calls `api.askAssistant` (unchanged);
  *   - a Suggested-Question click renders through the SAME turn pipeline as a
- *     free-form answer (same `.assistant-reply` region + `answered from:` label,
+ *     free-form answer (same `.assistant-reply` region + `Source:` label,
  *     archives to the session identically) and calls NEITHER endpoint.
  */
 
@@ -132,7 +132,7 @@ describe('P34.4 memory scope — free-form question', () => {
     await waitFor(() => expect(getByText(/leads to verify/i)).toBeInTheDocument());
     expect(getByText(/Memory suggests/i)).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/\b(PASS|FAIL)\b/);
-    expect(getByText('answered from: Project Memory')).toBeInTheDocument();
+    expect(getByText('Source: Project Memory')).toBeInTheDocument();
 
     // the cited leads render as provenance chips; a /memory lead navigates in-app
     const region = container.querySelector('.assistant-provenance') as HTMLElement;
@@ -224,10 +224,10 @@ describe('P34.4 Suggested Questions use the SAME turn pipeline (no endpoint call
     fireEvent.click(getByText('How fresh is project memory?'));
 
     // it renders on the SAME live-turn surface as a free-form answer: the single
-    // `.assistant-reply` live region + the `answered from:` label.
+    // `.assistant-reply` live region + the `Source:` label.
     const reply = container.querySelector('.assistant-reply') as HTMLElement;
     expect(reply.textContent).toContain('Memory was indexed recently');
-    expect(getByText(/answered from:/i)).toBeInTheDocument();
+    expect(getByText(/Source:/)).toBeInTheDocument();
     // precomposed pills never route through EITHER free-form endpoint
     expect(mem).not.toHaveBeenCalled();
     expect(rec).not.toHaveBeenCalled();

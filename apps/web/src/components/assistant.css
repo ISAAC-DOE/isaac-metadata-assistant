@@ -1,8 +1,8 @@
 /*
  * Assistant surfaces — AssistantPanel + GuidedPrompt. Subordinate everywhere,
  * INDIGO ONLY (never a verdict green/red), never renders PASS/FAIL. Every reply
- * carries an `answered from:` chip. No colored vertical rail; no typing-dots
- * "deep thought" theater; no "verified by AI" badge.
+ * with a real source carries a `Source:` chip. No colored vertical rail; no
+ * typing-dots "deep thought" theater; no "verified by AI" badge.
  */
 
 /* ---- AssistantPanel ------------------------------------------------- */
@@ -59,18 +59,34 @@
   max-height: calc(100vh - 110px);
   min-height: 0;
 }
+/* P36V S-A — the header is a THREE-part block: the icon, a stacked
+ * title + status column, and the trailing control group. `align-items:
+ * flex-start` so the icon aligns with the title line rather than the vertical
+ * centre of a two-line block. */
 .assistant-head {
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 9px;
   margin-bottom: 14px;
   min-width: 0;
 }
-/* P36R S2 — the header's trailing group: memory status + Clear Conversation.
- * Grouping them means ONE `margin-left:auto` (never two competing autos) and a
- * graceful wrap at 308px / 200% zoom instead of horizontal overflow. */
+/* The stacked title + STATUS ROW. The status reads directly beneath the
+ * "Assistant" title — the thing it describes — instead of being pushed to the
+ * far right of the header where it competed with Clear Conversation. */
+.assistant-head-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 auto;
+  /* nudge the title's cap-height onto the icon square's optical centre */
+  padding-top: 3px;
+}
+/* P36R S2 — the header's trailing group: Clear Conversation.
+ * ONE `margin-left:auto` (never two competing autos) and a graceful wrap at
+ * 308px / 200% zoom instead of horizontal overflow. */
 .assistant-head-right {
   margin-left: auto;
   display: flex;
@@ -97,15 +113,21 @@
   font-weight: 600;
   color: var(--assist-text);
 }
+/* The availability STATUS ROW (P36V S-A) — a compact line directly beneath the
+ * title. `align-self: flex-start` keeps the row as wide as its content so the
+ * dot never drifts away from the label at 200% zoom. */
 .assistant-memory {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   gap: 6px;
+  max-width: 100%;
   font-size: 11px;
   color: var(--text-slate);
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.assistant-status-row .dot { flex: none; }
 
 /* ---- Body (P36R S2) -------------------------------------------------- */
 /* The height-absorbing middle of the panel. Everything that can grow lives
@@ -137,6 +159,14 @@
   overflow-wrap: anywhere;
 }
 .assistant-empty .assistant-suggested-eyebrow:first-of-type { margin-top: 14px; }
+/* P36V S-A — the subtle visual break between Suggested Questions and the
+ * composer below. A hairline divider, not a card and not a filler block. */
+.assistant-empty-divider {
+  flex: none;
+  height: 1px;
+  margin-top: 14px;
+  background: var(--border-hair);
+}
 
 /* ---- Conversation region (P29.2 · re-laid-out P36R S2) --------------- */
 /* Scrollable message list: older → newest, newest near the bottom. Never
@@ -183,8 +213,8 @@
   min-width: 0;
   padding: 8px 10px;
   border-radius: var(--radius-inner);
-  /* No per-message border: the conversation REGION carries the only border, so
-   * the transcript reads as one surface rather than a stack of outlined boxes. */
+  /* Base: no border. Each ROLE variant below opts into its own subtle full
+   * four-sided border (P36V S-A) — never a coloured left/right accent edge. */
   border: 1px solid transparent;
   background: var(--surface);
   /* long field values / explanations wrap instead of overflowing */
@@ -201,11 +231,47 @@
   background: var(--surface-subtle);
   border: 1px solid var(--border-faint);
 }
-.assistant-msg-assistant {
-  align-self: stretch;
-  background: var(--surface);
-  padding-left: 0;
-  padding-right: 0;
+/* P36V S-A — the ASSISTANT BUBBLE. Every assistant answer — archived
+ * (.assistant-msg-assistant) AND the live one (.assistant-answer) — reads as an
+ * unmistakable left-aligned bubble: a full four-sided subtle border, a very
+ * light lavender surface, and consistent internal padding.
+ *
+ * Why a tint at all: R2 made the conversation region WHITE (the surrounding rail
+ * is already lavender), so the previous treatment — `background: var(--surface)`
+ * with a TRANSPARENT border and zero horizontal padding — was literally
+ * invisible against its own container. `--assist-panel-bg` (#f8f8fd) on
+ * `--surface` (#ffffff) inside `--assist-border` (#e6e6f4) is distinguishable
+ * while staying restrained, and it is also distinct from the user bubble's
+ * neutral `--surface-subtle` / `--border-faint`.
+ *
+ * NO coloured left/right accent edge (P36R R3 + the permanent no-vertical-rail
+ * rule): the border is a full `border:` shorthand only. The role distinction
+ * never relies on colour — each bubble carries the assistant icon + the visible
+ * "Assistant" text label, and exposes data-role="assistant". */
+.assistant-msg-assistant,
+.assistant-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--assist-border);
+  background: var(--assist-panel-bg);
+  overflow-wrap: anywhere;
+}
+/* At rest the live bubble collapses to NOTHING: no chrome, no gap, and no
+ * "Assistant" label with no answer behind it (the label is not rendered in this
+ * state). The `.assistant-reply` <p> inside stays mounted as the single
+ * aria-live region — see `.assistant-reply--empty`. */
+.assistant-answer--empty {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
 }
 .assistant-msg-meta {
   display: flex;
@@ -225,7 +291,8 @@
   color: var(--text-tertiary);
 }
 .assistant-msg-user .assistant-msg-role { color: var(--text-slate); }
-.assistant-msg-assistant .assistant-msg-role { color: var(--assist-text); }
+.assistant-msg-assistant .assistant-msg-role,
+.assistant-answer .assistant-msg-role { color: var(--assist-text); }
 .assistant-msg-kind {
   display: inline-flex;
   align-items: center;
@@ -295,8 +362,10 @@
  * Agent Actions and the message log, exactly where a destructive-looking control
  * must not be). Shown only once there is a conversation to clear. Restrained and
  * secondary — it clears the ephemeral session, never any record/truth state, so
- * it needs no confirmation. Its accessible name is the full "Clear conversation"
- * (aria-label); the visible "Clear" keeps the header on one line at 308px. */
+ * it needs no confirmation.
+ * P36V S-A — the VISIBLE label is the full "Clear Conversation" and it is now
+ * also the accessible name (no contradicting aria-label). It may wrap to its own
+ * header line at 308px / 200% zoom rather than being abbreviated. */
 .assistant-clear {
   display: inline-flex;
   align-items: center;
@@ -326,9 +395,10 @@
   min-width: 0;
   max-width: 100%;
 }
-/* The live (current) answer. It reads as the newest ASSISTANT turn in the same
- * transcript: white region surface, no border of its own — the conversation
- * region carries the only border (P36R S2). */
+/* The live (current) answer's TEXT. It is the single aria-live region, and it now
+ * sits INSIDE `.assistant-answer` — the labelled assistant bubble that carries
+ * the border, surface and padding (P36V S-A). The <p> itself stays transparent
+ * and border-less so it does not double the bubble's chrome. */
 .assistant-reply {
   padding: 2px 0 0;
   background: transparent;
@@ -485,15 +555,23 @@ button.assistant-source-chip-nav:focus-visible {
 .assistant-ask-again:disabled { opacity: 0.55; cursor: default; }
 .assistant-ask-again:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
 
-/* P34.3 — suggested next-question chips for a CURRENT answer. Visually distinct
- * from the provenance chips (bordered, chevron-led, question text) and routed
- * through the same read-only submit path. */
+/* P34.3 — an answer's own follow-up chips. Visually distinct from the provenance
+ * chips (bordered, chevron-led, question text) and routed through the same
+ * read-only submit path.
+ * P36V S-A — the group now carries the VISIBLE "Related Questions" label and
+ * lives inside the bubble of the answer it belongs to, so it is never confused
+ * with the global "Suggested Questions" control group in the dock. */
 .assistant-followups {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
   max-width: 100%;
+}
+.assistant-followups-eyebrow {
+  margin: 2px 0 0;
+  color: var(--assist-text);
+  overflow-wrap: anywhere;
 }
 .assistant-followup {
   display: inline-flex;
@@ -575,6 +653,16 @@ button.assistant-source-chip-nav:focus-visible {
 .assistant-prompt .chev { margin-left: auto; color: var(--text-disabled); flex: none; }
 .assistant-prompt:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
 
+/* P36V S-A — the Agent Actions group. In the empty state it renders in the
+   composer dock BELOW the composer; in a conversation it renders inside the
+   collapsed disclosure. It never absorbs the bounded column. */
+.assistant-agent-actions {
+  flex: none;
+  min-width: 0;
+  margin-top: 2px;
+}
+.assistant-agent-actions .assistant-suggested-eyebrow { margin-top: 12px; }
+
 /* P29.4b — the INTENT pills. Same footprint as the guided prompts but tinted so
    a "runs the agent" action reads distinctly from a "shows a composed answer". */
 .assistant-agent-prompts {
@@ -616,6 +704,9 @@ button.assistant-source-chip-nav:focus-visible {
 .assistant-more {
   flex: none;
   min-width: 0;
+  /* P36V S-A — it now lives in the composer dock, AFTER the composer, so it
+   * needs its own separation from the helper line above it. */
+  margin-top: 10px;
 }
 .assistant-more > summary { list-style: none; }
 .assistant-more summary::-webkit-details-marker { display: none; }
@@ -954,11 +1045,15 @@ button.assistant-source-chip-nav:focus-visible {
   border: 1px solid var(--assist-border);
   border-radius: var(--radius-inner);
 }
+/* The single advisory footer. Subordinate treatment: a subtle hair divider
+ * above, 11px, secondary colour — plus (P36V S-A) ITALIC, so it is legibly a
+ * standing disclaimer rather than another line of panel copy. */
 .assistant-caption {
   margin-top: 10px;
   padding-top: 9px;
   border-top: 1px solid var(--border-hair);
   font-size: 11px;
+  font-style: italic;
   /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
   color: var(--text-secondary);
   line-height: 1.5;

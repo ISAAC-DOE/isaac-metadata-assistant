@@ -181,8 +181,18 @@ export function ProjectMemory() {
             {...compose({ context: 'memory', graph: graph.data })}
             experimentId="project-memory"
             queryScope="memory"
+            /* The PAGE owns the visible availability label here: the
+               `GraphStatusChip` on the status card below is this screen's own
+               subject. The panel is therefore GIVEN the axis — it needs it for
+               `classifyAnswer` and for the memory caveat — but does not restate
+               it visibly. One fact, one wording, one place. Without this the
+               identical "Memory Available" renders twice, and a screen reader
+               hears the chip's accessible name ("Project memory available —
+               memory plane, advisory only, never a validator") and this row's
+               visible text as two differently-worded claims about one axis.
+               (P33 HQA #7; retained through P36V S-A.) */
             availability={graph.data.availability}
-            showAvailabilityHead={false}
+            showAvailabilityStatus={false}
             graphCapability={graphCapability}
           />
         </div>

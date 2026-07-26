@@ -122,13 +122,28 @@ describe('S5 · Evidence & File Preview (live)', () => {
 
   it('mounts the memory-plane graph status chip in the status bar', async () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
-    const { findByText, getByText, getByLabelText } = renderAt('/record/demo/evidence');
+    const { findByText, getByText, getByLabelText, container } = renderAt(
+      '/record/demo/evidence',
+    );
     await findByText('Direct Fields');
     // the /graph/status chip (unavailable in this fixture) degrades quietly.
     // P33 S3 (D7): the state is ONE Title-Case text node; the memory-plane
     // framing moved off the redundant visible label onto the accessible name.
-    expect(getByText('Memory Unavailable')).toBeInTheDocument();
-    expect(getByLabelText(/memory plane, advisory only/i)).toBeInTheDocument();
+    // Singular getByText: it THROWS on a second match, so this also pins HQA#7 —
+    // the assistant does not restate the axis the status-bar chip owns.
+    const chip = getByText('Memory Unavailable');
+    // P36V review (M6) — assert the class GraphStatusChip ACTUALLY renders. The
+    // previous form `closest('.graph-status-chip, [class*="graph"]')` was
+    // near-vacuous: `.graph-status-chip` exists nowhere in the app, and the
+    // `[class*="graph"]` branch is satisfied by the element itself.
+    expect(chip.className).toBe('graph-chip-label');
+    const wrapper = chip.parentElement!;
+    expect(wrapper.classList.contains('graph-chip')).toBe(true);
+    expect(wrapper.classList.contains('graph-unavailable')).toBe(true);
+    expect(getByLabelText(/memory plane, advisory only/i)).toBe(wrapper);
+    // the assistant is mounted here but does NOT duplicate the axis
+    expect(container.querySelector('.assistant')).not.toBeNull();
+    expect(container.querySelector('.assistant .assistant-memory')).toBeNull();
   });
 });
 

@@ -5,7 +5,7 @@
  * The subordinate / no-truth rules are enforced structurally here, not by
  * convention (implementation-warnings.md · assistant guardrails):
  *   - indigo only; never a verdict color (enforced in AssistantPanel.css).
- *   - `answered from: <source>` on EVERY reply (required prop).
+ *   - `Source: <label>` on EVERY reply that has a real source (required prop).
  *   - never renders PASS/FAIL or a validity claim; truth questions route to the
  *     deterministic surfaces. `hasVerdictLanguage()` is the guard.
  */
@@ -14,7 +14,7 @@ import type { AssistantSource } from './types';
 
 /**
  * Approved Title-Case display map (P25.0 §2, Q-A/Q-B). The internal enum stays
- * machine-stable; the panel renders `answered from: <label>`. No label implies
+ * machine-stable; the panel renders `Source: <label>`. No label implies
  * the assistant itself validates, approves, certifies, or produces a verdict.
  */
 export const SOURCE_LABELS: Record<AssistantSource, string> = {
@@ -48,11 +48,20 @@ export const ROUTE_TO_CLI_NOTE =
 export const MEMORY_UNAVAILABLE_CAVEAT =
   'Project Memory is unavailable, so no memory-based answer is available here.';
 
-// The always-visible subordinate caption. This is the final placeholder form:
-// guided prompts are the only input — there is no free-text affordance to mark
-// as secondary or not-wired (removed at P25.2; see GUIDED_ONLY_NOTE below).
+// The always-visible subordinate caption — the single advisory footer of the
+// panel (rendered italicised, secondary, beneath a hair divider).
+//
+// P36V S-A re-worded this to Title-Case `Assistant` and dropped the explicit
+// negative claim `It never validates`. That was a WEAKENING, not a neutral
+// re-wording — and it happened in the same slice that added an Open Validator
+// button and a "Deterministic Schema Check" card to this very panel, i.e. exactly
+// when the reader most needs to be told that the Assistant itself validates
+// nothing. The claim is restored here (P36V S-A review, I2). Both halves are
+// load-bearing and asserted by `assistant.test.tsx`:
+//   · the explicit NEGATIVE capability claim — "It never validates";
+//   · the POSITIVE authority claim — deterministic validation is authoritative.
 export const SUBORDINATE_CAPTION =
-  'The assistant is advisory — it explains artifacts and points to sources. It never validates; deterministic validation is the authority.';
+  'The Assistant is advisory: it explains artifacts and points to sources. It never validates — deterministic validation remains authoritative.';
 
 // P25.2: legacy guided-only note. P33 S2 stopped rendering it standalone; P34.2
 // wired the composer to the grounded resolver, so it is no longer surfaced at all.

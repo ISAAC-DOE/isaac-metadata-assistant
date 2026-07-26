@@ -10,7 +10,7 @@ import type { AssistantMessage, AssistantQueryResponse, SuggestedPrompt } from '
  * (POST /assistant/query). This REWRITES the P33 S2 "inert visual-only composer"
  * contract — a deliberate flip: submitting a non-empty question now calls
  * api.askAssistant, shows a loading indicator, then renders the returned answer
- * with its `answered from:` label. There is NO "not supported in this build"
+ * with its `Source:` label. There is NO "not supported in this build"
  * notice anymore. An empty/whitespace submit is still a true no-op. The composer
  * path is READ-ONLY: it must never call submitAnswer / editField / confirmProposal.
  */
@@ -89,7 +89,7 @@ describe('AssistantPanel — wired composer (P34.2)', () => {
     await waitFor(() =>
       expect(getByText(/two fields still need you/i)).toBeInTheDocument(),
     );
-    expect(getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
+    expect(getByText('Source: Workflow & Artifacts')).toBeInTheDocument();
     expect(container.querySelector('.assistant-reply')!.getAttribute('aria-busy')).toBeNull();
   });
 

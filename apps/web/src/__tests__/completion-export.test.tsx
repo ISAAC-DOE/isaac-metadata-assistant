@@ -529,21 +529,22 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     expect(
       await panel.findByText('No coverage figures yet — coverage appears after export.'),
     ).toBeInTheDocument();
-    expect(panel.getByText('answered from: Evidence Audit')).toBeInTheDocument();
+    expect(panel.getByText('Source: Evidence Audit')).toBeInTheDocument();
 
     // ROUTE_TO_CLI_NOTE is preserved on the panel
     expect(panel.getByText(ROUTE_TO_CLI_NOTE)).toBeInTheDocument();
 
     // clicking the blocker chip routes to the deterministic check — it never
-    // states a verdict and never echoes validate.ok
+    // states a verdict and never echoes validate.ok. P36V S-B: the routing is now
+    // a real "Open Validator" CONTROL in the proposed-action region instead of the
+    // dead prose sentence "Open Validate to run the deterministic schema check."
     fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
     expect(
-      await panel.findByText(
-        'No blocking paths are listed in the current validation response. ' +
-          'Open Validate to run the deterministic schema check.',
-      ),
+      await panel.findByText('No blocking paths are listed in the current validation response.'),
     ).toBeInTheDocument();
-    expect(panel.getByText('answered from: Schema Rules')).toBeInTheDocument();
+    expect(panel.getByText('Source: Schema Rules')).toBeInTheDocument();
+    expect(assistant.textContent).not.toMatch(/open Validate\b/i);
+    expect(panel.getByRole('button', { name: /Open Validator/ })).toBeInTheDocument();
 
     // no verdict language anywhere in the assistant panel (the approved chip
     // label "…same as valid?" is a question, not a verdict, so the guard is the
@@ -564,7 +565,7 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
         'NO_LINKS — no relationships declared (advisory, non-gating; where: record.links).',
       ),
     ).toBeInTheDocument();
-    expect(panel.getByText('answered from: Advisory Checks')).toBeInTheDocument();
+    expect(panel.getByText('Source: Advisory Checks')).toBeInTheDocument();
   });
 
   it('post-export: coverage chip echoes evidence_present/expected live (33/33), never a verdict', async () => {
@@ -585,7 +586,7 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
           'evidence; the schema check is separate.',
       ),
     ).toBeInTheDocument();
-    expect(panel.getByText('answered from: Evidence Audit')).toBeInTheDocument();
+    expect(panel.getByText('Source: Evidence Audit')).toBeInTheDocument();
 
     // even though the SCREEN shows a real PASS verdict card, the assistant panel
     // itself never states PASS/FAIL or an "(in)valid against" conclusion
@@ -605,9 +606,11 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     'Confirm or skip each below.';
   const EXPLAIN_CURRENT =
     `${P[0].question} — about ${P[0].about}. Answer via propose → stage → confirm below.`;
+  // P36V S-B — the retired trailing prose clause is now the real Open Validator
+  // control; the rest of the approved copy is byte-identical.
   const MISSING_BEHAVIOR =
     'Leaving a field missing keeps it honest-missing — never guessed. Whether it blocks export ' +
-    'is a schema question — open Validate to run the deterministic schema check.';
+    'is a schema question.';
 
   it('mounts the three approved complete chips; the default reply is the LIVE pending summary', async () => {
     stubFetchRoutes(bundleRoutes('demo')); // 5 pending, live from /pending
@@ -628,7 +631,7 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     // on-mount auto-reply was removed), grounded in the LIVE pending list.
     fireEvent.click(panel.getByText('Which fields still need me?').closest('button')!);
     expect(await panel.findByText(PENDING_SUMMARY)).toBeInTheDocument();
-    expect(panel.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
+    expect(panel.getByText('Source: Workflow & Artifacts')).toBeInTheDocument();
 
     // honesty (P25.7): this memory-less screen never fetches graph status, so it
     // passes NO `availability` and the panel makes NO memory claim — neither the
@@ -641,11 +644,11 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(assistant.querySelector('.assistant-caveat')).toBeNull();
     expect(assistant.querySelector('.assistant-memory')).toBeNull();
     expect(assistant.textContent).not.toContain('memory:');
-    // the only source claim is the accurate `answered from:` provenance line
-    expect(assistant.textContent).toContain('answered from: Workflow & Artifacts');
+    // the only source claim is the accurate `Source:` provenance line
+    expect(assistant.textContent).toContain('Source: Workflow & Artifacts');
   });
 
-  it('the explain chip echoes the ACTIVE question live, answered from Workflow & Artifacts', async () => {
+  it('the explain chip echoes the ACTIVE question live, sourced from Workflow & Artifacts', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/complete');
 
@@ -657,14 +660,14 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(await panel.findByText(EXPLAIN_CURRENT)).toBeInTheDocument();
     // P29.2: scope the source-label assertion to the LIVE reply block — the
     // prior (also workflow-sourced) turn now archives into the conversation log
-    // with its own identical `answered from:` label, so the panel-wide query is
+    // with its own identical `Source:` label, so the panel-wide query is
     // legitimately ambiguous. The intent (the explain chip's live answer is
     // Workflow & Artifacts-sourced) is unchanged.
     const replyBlock = within(assistant.querySelector('.assistant-reply-block') as HTMLElement);
-    expect(replyBlock.getByText('answered from: Workflow & Artifacts')).toBeInTheDocument();
+    expect(replyBlock.getByText('Source: Workflow & Artifacts')).toBeInTheDocument();
   });
 
-  it('the missing-field chip routes to the deterministic schema check, answered from Schema Rules', async () => {
+  it('the missing-field chip offers the real Open Validator control, sourced from Schema Rules', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/complete');
 
@@ -674,7 +677,16 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
 
     fireEvent.click(panel.getByText('What if I leave one missing?').closest('button')!);
     expect(await panel.findByText(MISSING_BEHAVIOR)).toBeInTheDocument();
-    expect(panel.getByText('answered from: Schema Rules')).toBeInTheDocument();
+    expect(panel.getByText('Source: Schema Rules')).toBeInTheDocument();
+
+    // P36V S-B — the routing is a real, activatable CONTROL, not the dead prose
+    // sentence it replaced. The old copy must never come back.
+    expect(assistant.textContent).not.toMatch(/open Validate\b/i);
+    const go = panel.getByRole('button', { name: /Open Validator/ });
+    expect(go.tagName).toBe('BUTTON');
+    // …and it lives in the labelled proposed-action region, not in the transcript
+    expect(go.closest('.assistant-proposed')).not.toBeNull();
+    expect(go.closest('.assistant-log')).toBeNull();
 
     // the routed truth chip never states a verdict / validity conclusion
     expect(assistant.textContent).not.toMatch(VERDICT);

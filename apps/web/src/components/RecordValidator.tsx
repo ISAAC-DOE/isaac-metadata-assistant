@@ -136,7 +136,14 @@ export function RecordValidator() {
       <header className="rec-val-head">
         <FileJson size={18} strokeWidth={2} aria-hidden="true" className="rec-val-icon" />
         <div>
-          <h2 id="rec-val-heading">Standalone Validator</h2>
+          {/* P36V S-B — `tabIndex={-1}` makes the heading a programmatic focus
+              target (never a tab stop) so an arrival from elsewhere — the
+              Assistant's Open Validator action, or a `?tab=validator` deep link —
+              can land the reader on the Validator's own heading. Presentation and
+              behaviour are otherwise unchanged. */}
+          <h2 id="rec-val-heading" tabIndex={-1}>
+            Standalone Validator
+          </h2>
           <p className="rec-val-sub">
             <strong>Validate a record without adding it to My Experiments.</strong> Paste or upload a
             candidate ISAAC record — checked against the official schema, the same gate{' '}

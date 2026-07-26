@@ -5,6 +5,7 @@ import {
   COMPLETE_CATALOG,
   EVIDENCE_CATALOG,
   EXPORT_CATALOG,
+  OPEN_VALIDATOR_ACTION,
   REVIEW_CATALOG,
 } from './assistantComposer';
 import { SOURCE_LABELS } from './assistant';
@@ -124,12 +125,22 @@ describe('compose({context:"review"}) — full fixture bundle', () => {
     });
   });
 
-  it('blocking_paths echoes a path count + paths + routes to Validate; never echoes validity', () => {
+  // P36V S-B — the retired prose sentence "Open Validate to run the deterministic
+  // schema check." is now the real OPEN_VALIDATOR_ACTION. These assertions are
+  // STRICTER than before: they still pin the full answer object with `toEqual`
+  // (so the sentence cannot come back), and they additionally pin the action's
+  // kind, VISIBLE Title-Case label, and deep-linked target.
+  it('blocking_paths echoes a path count + paths + offers Open Validator; never echoes validity', () => {
     expect(out.prompts[1].answer).toEqual({
-      text:
-        '2 paths are listed as blocking export: $.assets, $.measurement.series. ' +
-        'Open Validate to run the deterministic schema check.',
+      text: '2 paths are listed as blocking export: $.assets, $.measurement.series.',
       answeredFrom: 'schema',
+      action: OPEN_VALIDATOR_ACTION,
+    });
+    expect(out.prompts[1].answer!.text).not.toContain('Open Validate');
+    expect(out.prompts[1].answer!.action).toEqual({
+      kind: 'open-validator',
+      label: 'Open Validator',
+      to: '/governance?tab=validator',
     });
   });
 
@@ -164,26 +175,23 @@ describe('compose review — degraded / edge branches', () => {
     expect(out.reply.text).toContain('listed as blocking export');
   });
 
-  it('validate errors empty → no-blocking-paths message, still routes to Validate', () => {
+  it('validate errors empty → no-blocking-paths message, still offers Open Validator', () => {
     const out = compose(reviewState({ validate: { ...validateDryRun, errors: [] } }));
     expect(out.prompts[1].answer).toEqual({
-      text:
-        'No blocking paths are listed in the current validation response. ' +
-        'Open Validate to run the deterministic schema check.',
+      text: 'No blocking paths are listed in the current validation response.',
       answeredFrom: 'schema',
+      action: OPEN_VALIDATOR_ACTION,
     });
   });
 
-  it('validate is a singular path → grammatical "1 path is listed"', () => {
+  it('validate is a singular path → grammatical "1 path is listed", plus the action', () => {
     const out = compose(
       reviewState({
         validate: { ...validateDryRun, errors: [{ path: '$.assets', message: 'required' }] },
       }),
     );
-    expect(out.prompts[1].answer!.text).toBe(
-      '1 path is listed as blocking export: $.assets. ' +
-        'Open Validate to run the deterministic schema check.',
-    );
+    expect(out.prompts[1].answer!.text).toBe('1 path is listed as blocking export: $.assets.');
+    expect(out.prompts[1].answer!.action).toEqual(OPEN_VALIDATOR_ACTION);
   });
 
   it('validate absent → blocking chip disabled (answer undefined)', () => {
@@ -562,12 +570,11 @@ describe('compose({context:"export"}) — post-export fixture bundle', () => {
     });
   });
 
-  it('blocking_paths (post-export, 0 errors) → no-blocking message, still routes to Validate', () => {
+  it('blocking_paths (post-export, 0 errors) → no-blocking message, still offers Open Validator', () => {
     expect(out.prompts[1].answer).toEqual({
-      text:
-        'No blocking paths are listed in the current validation response. ' +
-        'Open Validate to run the deterministic schema check.',
+      text: 'No blocking paths are listed in the current validation response.',
       answeredFrom: 'schema',
+      action: OPEN_VALIDATOR_ACTION,
     });
   });
 
@@ -628,34 +635,31 @@ describe('compose export — coverage echo variants + pre-export fallback + disa
 });
 
 describe('compose export — blocking_paths routing (shares §5.1 template; never echoes validity)', () => {
-  it('2 errors → path count + first paths + route (from validateDryRun)', () => {
+  it('2 errors → path count + first paths + the Open Validator action (from validateDryRun)', () => {
     const out = compose(exportState({ validate: validateDryRun }));
     expect(out.prompts[1].answer).toEqual({
-      text:
-        '2 paths are listed as blocking export: $.assets, $.measurement.series. ' +
-        'Open Validate to run the deterministic schema check.',
+      text: '2 paths are listed as blocking export: $.assets, $.measurement.series.',
       answeredFrom: 'schema',
+      action: OPEN_VALIDATOR_ACTION,
     });
   });
 
-  it('1 error → grammatical "1 path is listed"', () => {
+  it('1 error → grammatical "1 path is listed", plus the action', () => {
     const out = compose(
       exportState({
         validate: { ...validateDryRun, errors: [{ path: '$.assets', message: 'required' }] },
       }),
     );
-    expect(out.prompts[1].answer!.text).toBe(
-      '1 path is listed as blocking export: $.assets. ' +
-        'Open Validate to run the deterministic schema check.',
-    );
+    expect(out.prompts[1].answer!.text).toBe('1 path is listed as blocking export: $.assets.');
+    expect(out.prompts[1].answer!.action).toEqual(OPEN_VALIDATOR_ACTION);
   });
 
-  it('0 errors (validateReadyDryRun) → no-blocking message', () => {
+  it('0 errors (validateReadyDryRun) → no-blocking message, plus the action', () => {
     const out = compose(exportState({ validate: validateReadyDryRun }));
     expect(out.prompts[1].answer!.text).toBe(
-      'No blocking paths are listed in the current validation response. ' +
-        'Open Validate to run the deterministic schema check.',
+      'No blocking paths are listed in the current validation response.',
     );
+    expect(out.prompts[1].answer!.action).toEqual(OPEN_VALIDATOR_ACTION);
   });
 
   it('validate absent → blocking chip disabled (answer undefined)', () => {
@@ -1052,9 +1056,12 @@ const CP_SUMMARY =
   'Confirm or skip each below.';
 const CP_EXPLAIN_0 =
   `${CP[0].question} — about ${CP[0].about}. Answer via propose → stage → confirm below.`;
+// P36V S-B — the retired trailing prose clause ("— open Validate to run the
+// deterministic schema check") is now the real OPEN_VALIDATOR_ACTION control. The
+// rest of the approved copy is byte-identical.
 const MISSING_BEHAVIOR =
   'Leaving a field missing keeps it honest-missing — never guessed. Whether it blocks export ' +
-  'is a schema question — open Validate to run the deterministic schema check.';
+  'is a schema question.';
 
 describe('COMPLETE_CATALOG — the three complete chips (order + source labels)', () => {
   it('is exactly [pending_summary, explain_pending_item, missing_field_behavior] in order', () => {
@@ -1097,8 +1104,12 @@ describe('compose({context:"complete"}) — full fixture (current item = pending
     expect(out.prompts[1].answer).toEqual({ text: CP_EXPLAIN_0, answeredFrom: 'workflow' });
   });
 
-  it('missing_field_behavior is the routed static schema answer', () => {
-    expect(out.prompts[2].answer).toEqual({ text: MISSING_BEHAVIOR, answeredFrom: 'schema' });
+  it('missing_field_behavior is the routed static schema answer + the Open Validator action', () => {
+    expect(out.prompts[2].answer).toEqual({
+      text: MISSING_BEHAVIOR,
+      answeredFrom: 'schema',
+      action: OPEN_VALIDATOR_ACTION,
+    });
   });
 
   it('reply is the first non-null answer in priority order (pending summary leads)', () => {
@@ -1184,10 +1195,22 @@ describe('compose complete — explain_pending_item (selection, missing about, n
 });
 
 describe('compose complete — missing_field_behavior (static, routed, schema)', () => {
-  it('emits the exact approved copy and routes to the deterministic schema check', () => {
+  it('emits the exact approved copy and offers the real Open Validator action', () => {
     const out = compose(completeState(CP, CP[0].id));
-    expect(out.prompts[2].answer).toEqual({ text: MISSING_BEHAVIOR, answeredFrom: 'schema' });
-    expect(out.prompts[2].answer!.text).toContain('open Validate to run the deterministic schema check');
+    expect(out.prompts[2].answer).toEqual({
+      text: MISSING_BEHAVIOR,
+      answeredFrom: 'schema',
+      action: OPEN_VALIDATOR_ACTION,
+    });
+    // The routing is a CONTROL, not a sentence: the dead prose (in either casing)
+    // must never come back, and the action must carry the visible Title-Case
+    // label + the Validator deep link.
+    expect(out.prompts[2].answer!.text).not.toMatch(/open Validate/i);
+    expect(out.prompts[2].answer!.action).toEqual({
+      kind: 'open-validator',
+      label: 'Open Validator',
+      to: '/governance?tab=validator',
+    });
     expect(out.prompts[2].answer!.text).not.toContain('valid against');
   });
 });

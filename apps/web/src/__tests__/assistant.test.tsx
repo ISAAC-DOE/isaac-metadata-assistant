@@ -5,6 +5,7 @@ import {
   ASSISTANT_COMPOSER_HELPER,
   GUIDED_ONLY_NOTE,
   MEMORY_UNAVAILABLE_CAVEAT,
+  SUBORDINATE_CAPTION,
   hasVerdictLanguage,
 } from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
@@ -80,8 +81,8 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     // clicking a guided prompt surfaces an answer whose source renders as the
     // friendly Title-Case label, never the raw machine enum (P25.1).
     fireEvent.click(getByText('What is the evidence sidecar?'));
-    expect(getByText(/answered from:/)).toBeInTheDocument();
-    expect(queryByText(/answered from: files$/)).toBeNull();
+    expect(getByText(/Source:/)).toBeInTheDocument();
+    expect(queryByText(/Source: files$/)).toBeNull();
     // P36.1: the SAME live region now carries the answer text and drops the
     // empty modifier — it was never unmounted/re-mounted.
     expect(reply?.textContent).not.toBe('');
@@ -125,9 +126,9 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     expect(container.querySelector('.assistant-memory')).toBeNull();
     expect(container.querySelector('.assistant-caveat')).toBeNull();
     expect(queryByText(MEMORY_UNAVAILABLE_CAVEAT)).toBeNull();
-    // after asking a guided question, the accurate `answered from:` provenance shows
+    // after asking a guided question, the accurate `Source:` provenance shows
     fireEvent.click(getByText('What is the evidence sidecar?'));
-    expect(queryByText(/answered from:/)).toBeInTheDocument();
+    expect(queryByText(/Source:/)).toBeInTheDocument();
   });
 
   it('contains no PASS/FAIL strings', () => {
@@ -206,7 +207,7 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
 
   it('shows a WIRED composer (SECONDARY send) with the grounded-scope helper; the legacy guided-note stays de-duped and the subordinate caption is the single advisory footer', () => {
     const out = evidenceOut();
-    const { getByRole, getByText, queryByText, getByLabelText } = render(
+    const { getByRole, getByText, queryByText, getByLabelText, container } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
     // P34.2: a real labelled text input plus a SECONDARY-styled send control (never
@@ -221,9 +222,28 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
     expect(getByText(ASSISTANT_COMPOSER_HELPER)).toBeInTheDocument();
     // … and the legacy standalone guided-note is never surfaced.
     expect(queryByText(GUIDED_ONLY_NOTE)).toBeNull();
-    // subordinate-to-deterministic-validation caption remains the single footer
-    expect(getByText(/advisory — it explains/i)).toBeInTheDocument();
+    // subordinate-to-deterministic-validation caption remains the single footer.
+    // P36V S-A re-worded it and DROPPED the explicit negative claim "It never
+    // validates"; the review restored it. Both halves are pinned separately so
+    // neither can be dropped again silently:
+    //   · the exact approved sentence, verbatim, in exactly one element;
+    //   · the standalone POSITIVE assertion that the claim is present.
+    const caption = container.querySelector('.assistant-caption') as HTMLElement;
+    expect(caption).not.toBeNull();
+    expect(caption.textContent).toBe(SUBORDINATE_CAPTION);
+    expect(caption.textContent).toBe(
+      'The Assistant is advisory: it explains artifacts and points to sources. ' +
+        'It never validates — deterministic validation remains authoritative.',
+    );
+    expect(getByText(SUBORDINATE_CAPTION)).toBeInTheDocument();
+    expect(container.querySelectorAll('.assistant-caption').length).toBe(1);
+    // the explicit NEGATIVE capability claim, and the authority it defers to
     expect(getByText(/never validates/i)).toBeInTheDocument();
+    expect(caption.textContent).toMatch(/never validates/i);
+    expect(caption.textContent).toMatch(/deterministic validation remains authoritative/i);
+    // the retired wording is gone (no stale duplicate advisory sentence survives)
+    expect(queryByText(/advisory — it explains/i)).toBeNull();
+    expect(caption.textContent).not.toMatch(/points to sources; deterministic/);
   });
 
   it('prompt chips remain keyboard-accessible real buttons', () => {

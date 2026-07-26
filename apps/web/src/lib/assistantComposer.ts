@@ -14,8 +14,10 @@
  * and `memory` (Project Memory, P25.7) are all wired.
  */
 
+import { ROUTES } from './routes';
 import type {
   ApiValidateResult,
+  AssistantAction,
   AssistantMessage,
   ComposerOutput,
   GroundedChip,
@@ -48,29 +50,57 @@ function isUsableStr(x: unknown): x is string {
   return typeof x === 'string' && x.trim() !== '';
 }
 
-const ROUTE_TO_VALIDATE = 'Open Validate to run the deterministic schema check.';
+/**
+ * P36V S-B — the ONE navigation action this composer can attach: open the
+ * deterministic Validator (Governance & Safety → Validator).
+ *
+ * It REPLACES the retired prose sentence `'Open Validate to run the
+ * deterministic schema check.'`, which was appended to exactly these routed
+ * truth answers and named a control the app never rendered — the "action" was a
+ * sentence, not a button. The producing CONDITIONS are unchanged: the same three
+ * chips, under the same guards, in the same contexts.
+ *
+ * `to` is an in-app client route with a `?tab=` deep link, so the router's
+ * `basename` (the deployed `/krish` base path) is applied automatically and the
+ * Validator tab is genuinely selected on arrival. Offering it mutates nothing:
+ * it validates nothing, runs nothing, and changes no validation result.
+ *
+ * `Object.freeze` is real, not decorative: this ONE descriptor object is shared
+ * by every answer that carries the action (the composer hands out the same
+ * reference, and `AssistantPanel.ask` copies that reference onto the live turn),
+ * so a mutation anywhere would rewrite the navigation target everywhere. Frozen,
+ * it cannot. (P36V review, M4 — a comment already described it as frozen.)
+ */
+export const OPEN_VALIDATOR_ACTION: AssistantAction = Object.freeze({
+  kind: 'open-validator',
+  label: 'Open Validator',
+  to: `${ROUTES.governance}?tab=validator`,
+});
 
 /**
  * The blocking-paths answer, shared verbatim by the Record Workbench (§5.1) and
  * Ready to Export (§5.2 — "Same template as §5.1") so the two can never drift.
- * It states a COUNT of blocking paths + the first ≤3 paths + a route to the
- * deterministic check. It NEVER echoes `validate.ok` or concludes validity.
- * `null` when the validation payload is absent → the chip is disabled.
+ * It states a COUNT of blocking paths + the first ≤3 paths + the Open Validator
+ * ACTION (P36V S-B; previously a dead prose sentence). It NEVER echoes
+ * `validate.ok` or concludes validity. `null` when the validation payload is
+ * absent → the chip is disabled, so no action is offered either.
  */
 function blockingPathsMessage(validate: ApiValidateResult | undefined | null): AssistantMessage | null {
   if (!validate) return null; // data absent → chip disabled
   const errors = validate.errors;
   if (errors.length === 0) {
     return {
-      text: `No blocking paths are listed in the current validation response. ${ROUTE_TO_VALIDATE}`,
+      text: 'No blocking paths are listed in the current validation response.',
       answeredFrom: 'schema',
+      action: OPEN_VALIDATOR_ACTION,
     };
   }
   const verb = errors.length === 1 ? 'is' : 'are';
   const paths = joinCapped(errors.map((e) => e.path));
   return {
-    text: `${count(errors.length, 'path')} ${verb} listed as blocking export: ${paths}. ${ROUTE_TO_VALIDATE}`,
+    text: `${count(errors.length, 'path')} ${verb} listed as blocking export: ${paths}.`,
     answeredFrom: 'schema',
+    action: OPEN_VALIDATOR_ACTION,
   };
 }
 
@@ -439,15 +469,19 @@ export const COMPLETE_CATALOG: GroundedChip[] = [
     // Static/routed — never null within the complete context. States the
     // honest-missing behavior and routes the "does it block export?" truth
     // question to the deterministic schema check. Never echoes `validate.ok`.
-    // (Does not reuse ROUTE_TO_VALIDATE: the approved copy uses a mid-sentence
-    // lowercase "open Validate", not the const's sentence-leading "Open Validate".)
+    // P36V S-B — the retired trailing clause ("— open Validate to run the
+    // deterministic schema check") was the SAME dead prose in its mid-sentence
+    // lowercase form. It is now the real OPEN_VALIDATOR_ACTION control; the rest
+    // of the approved copy is untouched, and the chip's condition (any
+    // `complete` context) is unchanged.
     resolve(state): AssistantMessage | null {
       if (state.context !== 'complete') return null;
       return {
         text:
           'Leaving a field missing keeps it honest-missing — never guessed. Whether it blocks ' +
-          'export is a schema question — open Validate to run the deterministic schema check.',
+          'export is a schema question.',
         answeredFrom: 'schema',
+        action: OPEN_VALIDATOR_ACTION,
       };
     },
   },
