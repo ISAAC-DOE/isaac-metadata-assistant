@@ -12,11 +12,11 @@ import json
 import os
 import re
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
 import logging
 
-from fastapi import APIRouter, Body, Header, Request, Response
+from fastapi import APIRouter, Body, Header, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -58,6 +58,199 @@ _UPLOAD_BLOCKED = {
         "synthetic prototype."
     ),
 }
+
+
+# --- OpenAPI documentation metadata (documentation-only) ----------------------
+#
+# Everything in this section is consumed by FastAPI only when it GENERATES the
+# OpenAPI document. None of it is read at request time: it adds no handler,
+# declares no new status code, and changes no parsing, validation, side effect, or
+# response payload. Two rules keep the generated contract stable:
+#
+#   * ``422`` is declared here ONLY for an operation that has no path/query/body
+#     parameter, i.e. one for which FastAPI generates no automatic validation-error
+#     response. Declaring 422 on an operation that already has one would make
+#     FastAPI SKIP its own entry and so silently drop the ``HTTPValidationError``
+#     content ref (fastapi.openapi.utils.get_openapi_path). Those operations
+#     document their semantic 422 in prose instead.
+#   * Response *descriptions* only — never a model, schema, or status code.
+#
+# Wording rule: a consumer-facing ``description`` states what the operation
+# returns and requires. Internal reasoning stays in the docstrings/comments below,
+# which no longer reach OpenAPI once ``description=`` is set explicitly.
+
+TAG_META = "Health & Meta"
+TAG_EXPERIMENTS = "Experiments"
+TAG_DRAFTS = "Drafts & Answers"
+TAG_VALIDATION = "Validation"
+TAG_EVIDENCE = "Evidence"
+TAG_EXPORT = "Export & Artifacts"
+TAG_MEMORY = "Project Memory"
+TAG_GRAPH = "Graph"
+TAG_SEARCH = "Search"
+TAG_ASSISTANT = "Assistant"
+TAG_DEMO = "Demo"
+TAG_INGESTION = "Ingestion"
+TAG_UPLOADS = "Uploads"
+TAG_SCHEMA = "Schema & Vocabulary"
+
+#: Tag definitions registered on the app (``isaac_api.app.create_app`` passes this
+#: as ``openapi_tags``). Every tag any route below uses appears here exactly once,
+#: in the order the documentation should list the groups.
+OPENAPI_TAGS: list[dict] = [
+    {
+        "name": TAG_META,
+        "description": (
+            "Liveness, deployment identity, and this API's own machine-readable "
+            "description. Read-only."
+        ),
+    },
+    {
+        "name": TAG_EXPERIMENTS,
+        "description": (
+            "Listing and reading the experiments held in the workspace, plus a "
+            "cross-record triage projection. Read-only."
+        ),
+    },
+    {
+        "name": TAG_DRAFTS,
+        "description": (
+            "Reading a record's draft fields and its open blocking questions, and "
+            "answering or correcting them. The two write operations require an "
+            "explicit user confirmation and the record's current revision."
+        ),
+    },
+    {
+        "name": TAG_VALIDATION,
+        "description": (
+            "Checking a record against the vendored official ISAAC schema, "
+            "auditing exported artifacts, and the advisory non-gating warning "
+            "channel. Every verdict comes from the deterministic core."
+        ),
+    },
+    {
+        "name": TAG_EVIDENCE,
+        "description": (
+            "The per-field evidence trail, its evidence-support classification, "
+            "and previews of the source fixtures the evidence cites. Read-only."
+        ),
+    },
+    {
+        "name": TAG_EXPORT,
+        "description": (
+            "Producing an official ISAAC record plus its evidence sidecar, and "
+            "reading the artifacts a completed export wrote."
+        ),
+    },
+    {
+        "name": TAG_MEMORY,
+        "description": (
+            "The Project Memory plane: indexed concepts and files. It returns "
+            "leads to verify against the cited files, never a correctness ruling."
+        ),
+    },
+    {
+        "name": TAG_GRAPH,
+        "description": (
+            "Project Memory status and its deterministic reference-graph "
+            "projection. Read-only, and never a correctness ruling."
+        ),
+    },
+    {
+        "name": TAG_SEARCH,
+        "description": (
+            "One grouped search envelope over the workspace (truth plane) and "
+            "Project Memory (advisory leads), each group reported independently."
+        ),
+    },
+    {
+        "name": TAG_ASSISTANT,
+        "description": (
+            "Deterministic question answering over a fixed intent catalog. There "
+            "is no language model: an unsupported question is refused rather than "
+            "guessed, and nothing is ever mutated."
+        ),
+    },
+    {
+        "name": TAG_DEMO,
+        "description": (
+            "Running and resetting the committed synthetic demo. Both operate only "
+            "on the canonical synthetic records and accept no caller-supplied "
+            "ids or paths."
+        ),
+    },
+    {
+        "name": TAG_INGESTION,
+        "description": (
+            "Read-only preview of a campaign-sheet CSV reconciled against a "
+            "record. Nothing is stored, indexed, or applied."
+        ),
+    },
+    {
+        "name": TAG_UPLOADS,
+        "description": (
+            "The governance seam for file upload. It always refuses; no file is "
+            "read, parsed, or stored."
+        ),
+    },
+    {
+        "name": TAG_SCHEMA,
+        "description": (
+            "Read-only reference view of the vendored official ISAAC schema and "
+            "the controlled vocabularies. No editing affordance exists."
+        ),
+    },
+]
+
+
+_R_UNAUTHORIZED: dict = {
+    401: {
+        "description": (
+            "The deployment requires an API key and the request did not present a "
+            "valid one. Never returned when the deployment leaves this "
+            "authentication disabled, which is the default for local runs."
+        )
+    },
+}
+
+_R_EXPERIMENT_NOT_FOUND: dict = {
+    404: {"description": "No experiment in this workspace has that id."},
+}
+
+#: The optimistic-concurrency preconditions every write operation shares.
+_R_PRECONDITION: dict = {
+    400: {
+        "description": (
+            "The `If-Match` header was supplied but is not one or more strong "
+            "quoted validators."
+        )
+    },
+    412: {
+        "description": (
+            "`If-Match` did not match the record's current revision, so another "
+            "writer changed it first and nothing was written. The response echoes "
+            "the current `ETag` so a client can refresh in one further request."
+        )
+    },
+    428: {
+        "description": (
+            "`If-Match` was omitted. Every write requires the record's current "
+            "`ETag`, so a blind overwrite is not possible."
+        )
+    },
+}
+
+#: The path parameter naming an experiment. One description, used by every route
+#: that takes it, so the wording cannot drift between operations.
+ExperimentId = Annotated[
+    str,
+    Path(
+        description=(
+            "The id of an experiment in this workspace, as returned by "
+            "`GET /api/experiments`."
+        )
+    ),
+]
 
 
 def _now_iso() -> str:
@@ -260,7 +453,20 @@ def _build_commit() -> str | None:
     )
 
 
-@router.get("/health")
+@router.get(
+    "/health",
+    tags=[TAG_META],
+    summary="Report Liveness and Deploy Identity",
+    description=(
+        "Liveness banner for platform and container probes: the service status, "
+        "the runtime data mode, the name of the deterministic core package the "
+        "app calls in process, the app version, and the build commit when the "
+        "deployment supplies one (otherwise `null` — it is never guessed). This "
+        "is the one operation that stays reachable without credentials when the "
+        "deployment enables authentication. Read-only."
+    ),
+    response_description="The liveness banner.",
+)
 def health() -> dict:
     return {
         "status": "ok",
@@ -274,8 +480,35 @@ def health() -> dict:
 # --- 2. demo run --------------------------------------------------------------
 
 
-@router.post("/demo/run")
-def demo_run(body: dict = Body(default=None)) -> dict:
+@router.post(
+    "/demo/run",
+    tags=[TAG_DEMO],
+    summary="Run the Synthetic Demo Pipeline",
+    description=(
+        "Runs the committed synthetic demo pipeline and returns the ordered steps "
+        "it executed together with the resulting experiment id and status. "
+        "`mode: \"draft_only\"` (the default) extracts a draft from the committed "
+        "fixtures and runs the no-guessing draft checks; `mode: \"full\"` "
+        "additionally applies the committed simulated answers and exports an "
+        "official record. It writes into one fixed canonical experiment id per "
+        "mode, overwriting it in place, so re-running never adds a record and "
+        "never increases the record count. It reads only the two committed "
+        "synthetic fixtures and accepts no uploaded data.\n\n"
+        "A body other than `draft_only` or `full` for `mode` is rejected and "
+        "nothing runs."
+    ),
+    response_description="The experiment id, the ordered pipeline steps, and the resulting status.",
+    responses={**_R_UNAUTHORIZED},
+)
+def demo_run(
+    body: dict = Body(
+        default=None,
+        description=(
+            "Optional. `{\"mode\": \"draft_only\"}` (the default when the body is "
+            "omitted) or `{\"mode\": \"full\"}`."
+        ),
+    ),
+) -> dict:
     mode = (body or {}).get("mode", "draft_only")
     if mode not in ("draft_only", "full"):
         return JSONResponse(
@@ -417,8 +650,52 @@ def _reset_response(data: dict, *, mode: str, status: str, http: int) -> JSONRes
     return JSONResponse(status_code=http, content=resp.model_dump())
 
 
-@router.post("/demo/reset")
-def demo_reset(req: DemoResetRequest):
+@router.post(
+    "/demo/reset",
+    tags=[TAG_DEMO],
+    summary="Reset the Synthetic Demo Workspace",
+    description=(
+        "Restores the workspace to exactly the canonical synthetic demo scenarios "
+        "and reports the before/after counts, the removable set, and a state "
+        "histogram. `mode: \"preview\"` classifies only and mutates nothing; "
+        "`mode: \"execute\"` additionally requires the exact confirmation phrase "
+        "and refuses without it. It accepts no caller-supplied ids or paths — any "
+        "extra field is rejected — it removes only records it can classify as "
+        "managed synthetic-demo records, and it refuses to remove anything at all "
+        "if any record is ambiguous. No filesystem path appears in the response.\n\n"
+        "There is deliberately no general per-experiment delete operation."
+    ),
+    response_description=(
+        "The reset outcome: `ok` when it proceeded, or `refused` with the same "
+        "counts when it declined."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        403: {
+            "description": (
+                "Refused because the deployment is not in synthetic-only data "
+                "mode. Nothing was removed; the reported counts come from a "
+                "read-only classification."
+            )
+        },
+        409: {
+            "description": (
+                "Refused without mutating: either the `execute` confirmation "
+                "phrase was missing or wrong, or at least one record could not be "
+                "classified as a managed synthetic-demo record."
+            )
+        },
+    },
+)
+def demo_reset(
+    req: DemoResetRequest = Body(
+        description=(
+            "`mode` is `preview` or `execute`. `execute` also requires "
+            "`confirmation` to be the exact phrase the UI displays. Any other "
+            "field is rejected."
+        ),
+    ),
+):
     # demo_reset is a single-user, confirmation-gated synthetic-demo admin reset: a
     # whole-workspace rmtree-of-managed-legacy + reseed spanning MULTIPLE ids. It is
     # intentionally NOT coordinated with the per-record mutation locks (which guard a
@@ -454,7 +731,20 @@ def demo_reset(req: DemoResetRequest):
 # --- 3. list ------------------------------------------------------------------
 
 
-@router.get("/experiments")
+@router.get(
+    "/experiments",
+    tags=[TAG_EXPERIMENTS],
+    summary="List Workspace Experiments",
+    description=(
+        "One summary row per experiment currently in the workspace: its id, "
+        "title, derived status, creation time, how many blocking questions are "
+        "still open, how many fields carry evidence, whether it has been "
+        "exported, and the exported record id when there is one. Read-only, and "
+        "it states no validity verdict."
+    ),
+    response_description="Every experiment as a summary row.",
+    responses={**_R_UNAUTHORIZED},
+)
 def list_experiments() -> dict:
     return {"experiments": [_summary(e) for e in ws.list_experiments()]}
 
@@ -462,11 +752,43 @@ def list_experiments() -> dict:
 # --- 4. detail ----------------------------------------------------------------
 
 
-@router.get("/experiments/{experiment_id}")
+@router.get(
+    "/experiments/{experiment_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Get One Experiment's Detail Bundle",
+    description=(
+        "The full detail bundle for one experiment: its summary row plus whether "
+        "the draft passes the no-guessing checks, the exported artifact filenames "
+        "(basenames only, never a server path), the source files it was extracted "
+        "from, the derived workflow progression, the exported-artifact freshness "
+        "state, and the current revision metadata.\n\n"
+        "The response carries the record's current `ETag`. Send it back as "
+        "`If-None-Match` to receive `304` while the record is unchanged. "
+        "Read-only."
+    ),
+    response_description="The experiment detail bundle, with the current `ETag`.",
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        304: {
+            "description": (
+                "The record is unchanged since the `If-None-Match` validator "
+                "supplied. No body; the current `ETag` is returned."
+            )
+        },
+    },
+)
 def get_experiment(
-    experiment_id: str,
+    experiment_id: ExperimentId,
     response: Response,
-    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+    if_none_match: str | None = Header(
+        default=None,
+        alias="If-None-Match",
+        description=(
+            "Optional. A previously received `ETag`; while it still matches, the "
+            "response is `304` with no body."
+        ),
+    ),
 ):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
@@ -486,8 +808,21 @@ def get_experiment(
 # --- 5. draft (grouped) -------------------------------------------------------
 
 
-@router.get("/experiments/{experiment_id}/draft")
-def get_draft(experiment_id: str, response: Response):
+@router.get(
+    "/experiments/{experiment_id}/draft",
+    tags=[TAG_DRAFTS],
+    summary="Get a Record's Draft Fields",
+    description=(
+        "This record's draft fields, grouped into the stable sections the record "
+        "review screen renders. Each field carries its label, official path, "
+        "current value, the status derived from its evidence, and the kinds of "
+        "source that evidence came from. Read-only; the response carries the "
+        "record's current `ETag`."
+    ),
+    response_description="The draft's fields, grouped, with the current `ETag`.",
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def get_draft(experiment_id: ExperimentId, response: Response):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
@@ -498,8 +833,21 @@ def get_draft(experiment_id: str, response: Response):
 # --- 6. pending ---------------------------------------------------------------
 
 
-@router.get("/experiments/{experiment_id}/pending")
-def get_pending(experiment_id: str, response: Response):
+@router.get(
+    "/experiments/{experiment_id}/pending",
+    tags=[TAG_DRAFTS],
+    summary="List a Record's Open Blocking Questions",
+    description=(
+        "The questions that are still blocking this draft, each with the stable "
+        "key an answer must be submitted under, what the question is about, and — "
+        "for the committed synthetic demo only — a clearly labelled suggested "
+        "answer that is never applied automatically. Read-only; the response "
+        "carries the record's current `ETag`."
+    ),
+    response_description="The open blocking questions, with the current `ETag`.",
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def get_pending(experiment_id: ExperimentId, response: Response):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
@@ -537,12 +885,50 @@ def _answers_to_apply_shape(answers_by_id: dict, draft: dict, timestamp: str) ->
     return out
 
 
-@router.post("/experiments/{experiment_id}/answers")
+@router.post(
+    "/experiments/{experiment_id}/answers",
+    tags=[TAG_DRAFTS],
+    summary="Answer a Record's Blocking Questions",
+    description=(
+        "Applies caller-supplied answers to this draft's open blocking questions "
+        "and returns the refreshed question list, the record's status, its new "
+        "revision metadata, the derived workflow, and which downstream steps the "
+        "change reopened.\n\n"
+        "Requires `confirmed_by_user: true` and the record's current `ETag` in "
+        "`If-Match`. Blank and unrecognised answers are dropped rather than "
+        "invented, so a submission that changes nothing is a no-op: it is not "
+        "logged and does not advance the revision."
+    ),
+    response_description=(
+        "The refreshed blocking questions, status, revision metadata, workflow, "
+        "and the downstream invalidation, with the new `ETag`."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
 def post_answers(
-    experiment_id: str,
+    experiment_id: ExperimentId,
     response: Response,
-    body: dict = Body(...),
-    if_match: str | None = Header(default=None, alias="If-Match"),
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"answers\": {<key>: <value>}}`. The "
+            "keys come from `GET /api/experiments/{experiment_id}/pending`. "
+            "Omitting `confirmed_by_user: true` is rejected with `422`, and a key "
+            "that names no open question is ignored rather than invented."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The record's current `ETag`, exactly as a read operation "
+            "returned it."
+        ),
+    ),
 ):
     # Cheap existence pre-check OUTSIDE the lock so a bogus/non-existent id never
     # creates a permanent entry in the never-evicting per-record lock map (bounds
@@ -621,12 +1007,50 @@ def _has_correction_target(apply_shape: dict) -> bool:
     )
 
 
-@router.post("/experiments/{experiment_id}/edit")
+@router.post(
+    "/experiments/{experiment_id}/edit",
+    tags=[TAG_DRAFTS],
+    summary="Correct an Already-Answered Field",
+    description=(
+        "Overwrites the current value of a field that has already been answered, "
+        "recording a fresh user confirmation, and returns the same refreshed "
+        "bundle as the answers operation.\n\n"
+        "Requires `confirmed_by_user: true` and the record's current `ETag` in "
+        "`If-Match`. A body that names no recognised editable field is rejected "
+        "with `422` rather than silently doing nothing, and a value that fails the "
+        "core's own checks leaves the stored value unchanged. It never reopens or "
+        "creates a blocking question."
+    ),
+    response_description=(
+        "The refreshed blocking questions, status, revision metadata, workflow, "
+        "and the downstream invalidation, with the new `ETag`."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
 def post_edit(
-    experiment_id: str,
+    experiment_id: ExperimentId,
     response: Response,
-    body: dict = Body(...),
-    if_match: str | None = Header(default=None, alias="If-Match"),
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"answers\": {<key>: <value>}}`, where "
+            "each key names a field already present in the draft. Omitting "
+            "`confirmed_by_user: true`, or naming no recognised editable field, is "
+            "rejected with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The record's current `ETag`, exactly as a read operation "
+            "returned it."
+        ),
+    ),
 ):
     # Mirrors post_answers EXACTLY: existence pre-check OUTSIDE the lock so a bogus
     # id never pins a permanent entry in the never-evicting per-record lock map.
@@ -704,11 +1128,49 @@ def _write_record(exp: Experiment, result) -> None:
     atomic_write_text(sidecar_path, json.dumps(result.sidecar, indent=2) + "\n")
 
 
-@router.post("/experiments/{experiment_id}/export")
+@router.post(
+    "/experiments/{experiment_id}/export",
+    tags=[TAG_EXPORT],
+    summary="Export a Record to an Official ISAAC Record",
+    description=(
+        "Runs the schema-gated export for this record. On success it writes the "
+        "official ISAAC record and its evidence sidecar into the workspace and "
+        "returns the record id, the two artifact filenames (basenames only, never "
+        "a server path), the refreshed revision metadata, the workflow, and the "
+        "downstream invalidation.\n\n"
+        "A gated failure also returns `200`, with `ok: false`, the failing draft "
+        "and official reports, and a flat `errors` list — decide by reading `ok`, "
+        "not the status code. Nothing is written in that case.\n\n"
+        "Requires the record's current `ETag` in `If-Match`. Exported records are "
+        "immutable: exporting a record that already has one is refused."
+    ),
+    response_description=(
+        "The export result. `ok: true` means the record and sidecar were written; "
+        "`ok: false` means the gate refused and nothing was written."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+        409: {
+            "description": (
+                "This record has already been exported. Records are immutable, so "
+                "nothing was overwritten."
+            )
+        },
+    },
+)
 def post_export(
-    experiment_id: str,
+    experiment_id: ExperimentId,
     response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The record's current `ETag`, exactly as a read operation "
+            "returned it."
+        ),
+    ),
 ):
     # Cheap existence pre-check OUTSIDE the lock so a bogus/non-existent id never
     # creates a permanent entry in the never-evicting per-record lock map.
@@ -816,13 +1278,80 @@ async def _read_bounded_body(request: Request, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-@router.post("/experiments/{experiment_id}/ingestion/csv/preview")
+@router.post(
+    "/experiments/{experiment_id}/ingestion/csv/preview",
+    tags=[TAG_INGESTION],
+    summary="Preview a Campaign-Sheet CSV Against a Record",
+    description=(
+        "Read-only preview of a campaign-sheet CSV, reconciled field by field "
+        "against this record's current authoritative values. Returns the row and "
+        "candidate counts, the mapped candidate fields with their reconciliation "
+        "outcome, and non-actionable warnings for unrecognised columns.\n\n"
+        "Send the CSV as a raw `text/csv` request body, not as a multipart form. "
+        "The body is read in memory under a hard size limit and is never written "
+        "anywhere: no draft change, no revision bump, no export, no indexing, and "
+        "no retained upload. Only outcome metadata is logged — never the rows, the "
+        "candidate values, or the filename.\n\n"
+        "Requires the record's current `ETag` in `If-Match`, which is checked "
+        "before the body is read. Available only while the deployment is in "
+        "synthetic-only data mode.\n\n"
+        "A malformed CSV — unreadable, an empty or duplicated header column, a "
+        "missing required column, or a row, column, cell, or candidate count over "
+        "the limit — is rejected with `422` and a stable error code."
+    ),
+    response_description=(
+        "The typed preview: counts, reconciled candidate fields, and warnings. "
+        "Nothing was changed."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+        # Deliberately overrides the shared 400 above: on this route a 400 has two
+        # distinct causes, and the caller needs to know both.
+        400: {
+            "description": (
+                "Either the `If-Match` header is not one or more strong quoted "
+                "validators, or the body is empty, is not valid UTF-8, or contains "
+                "a NUL byte."
+            )
+        },
+        403: {
+            "description": (
+                "The deployment is not in synthetic-only data mode, so this "
+                "preview path is refused. Nothing was read."
+            )
+        },
+        413: {
+            "description": (
+                "The body exceeds the request size limit. The read is aborted the "
+                "moment the limit is passed, so an oversized body is never fully "
+                "held in memory and is never spooled to disk."
+            )
+        },
+    },
+)
 async def post_csv_preview(
-    experiment_id: str,
+    experiment_id: ExperimentId,
     request: Request,
     response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
-    x_filename: str | None = Header(default=None, alias="X-Filename"),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The record's current `ETag`, checked before the body is "
+            "read."
+        ),
+    ),
+    x_filename: str | None = Header(
+        default=None,
+        alias="X-Filename",
+        description=(
+            "Optional display name for the CSV, used only for evidence "
+            "attribution in the preview. It is sanitised to a bare filename and is "
+            "never used as a filesystem path, a record id, or a value."
+        ),
+    ),
 ):
     """READ-ONLY typed preview of an uploaded campaign-sheet CSV (P31.1).
 
@@ -899,8 +1428,24 @@ async def post_csv_preview(
 # --- 9. validate --------------------------------------------------------------
 
 
-@router.post("/experiments/{experiment_id}/validate")
-def post_validate(experiment_id: str):
+@router.post(
+    "/experiments/{experiment_id}/validate",
+    tags=[TAG_VALIDATION],
+    summary="Validate a Record Against the Official Schema",
+    description=(
+        "Checks this record against the vendored official ISAAC schema and returns "
+        "`ok`, a list of `{path, message}` errors, the schema label, and whether "
+        "the check was a dry run.\n\n"
+        "For an already-exported record the written record is validated "
+        "(`dry_run: false`). Otherwise the export is run in memory and the "
+        "resulting candidate record is validated without writing anything "
+        "(`dry_run: true`). Read-only in both cases. The verdict comes from the "
+        "same deterministic core function the command line uses."
+    ),
+    response_description="The official-schema verdict, its errors, and whether it was a dry run.",
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def post_validate(experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
@@ -947,7 +1492,39 @@ def post_validate(experiment_id: str):
 MAX_VALIDATE_RECORD_BYTES = 512 * 1024
 
 
-@router.post("/validate/record")
+@router.post(
+    "/validate/record",
+    tags=[TAG_VALIDATION],
+    summary="Validate a Supplied Candidate Record",
+    description=(
+        "Standalone validator for a candidate official ISAAC record supplied "
+        "directly as a JSON request body — no experiment, no draft, and no "
+        "workspace involved. Returns `ok`, a rendered summary line, the "
+        "`{path, message}` errors, and the schema version checked against.\n\n"
+        "It calls the same authoritative validator over the same vendored schema "
+        "that the per-experiment validation operation uses, so the two verdicts "
+        "agree by construction. The body is never written anywhere and its content "
+        "is never logged; only the outcome and error count are.\n\n"
+        "Send the record as a raw JSON body. The body is read in memory under a "
+        "hard size limit."
+    ),
+    response_description="The official-schema verdict, a rendered summary, and the errors.",
+    responses={
+        **_R_UNAUTHORIZED,
+        413: {
+            "description": (
+                "The body exceeds the request size limit. The read is aborted the "
+                "moment the limit is passed."
+            )
+        },
+        422: {
+            "description": (
+                "The body is not well-formed JSON, or it is valid JSON but not a "
+                "JSON object. Nothing was validated."
+            )
+        },
+    },
+)
 async def post_validate_record(request: Request):
     """Standalone validator: paste/upload a candidate official ISAAC record and
     check it against the vendored schema — no experiment, no draft, no workspace.
@@ -1006,8 +1583,22 @@ async def post_validate_record(request: Request):
 # --- 10. audit ----------------------------------------------------------------
 
 
-@router.post("/experiments/{experiment_id}/audit")
-def post_audit(experiment_id: str):
+@router.post(
+    "/experiments/{experiment_id}/audit",
+    tags=[TAG_VALIDATION],
+    summary="Audit a Record's Exported Artifacts",
+    description=(
+        "Runs the deterministic audit over the official record and evidence "
+        "sidecar this record's export wrote, returning the per-record "
+        "official-schema report, its evidence-coverage counts, and the rendered "
+        "text report.\n\n"
+        "A record that has not been exported yet returns `200` with no rows and a "
+        "message saying so, rather than an error. Read-only."
+    ),
+    response_description="The audit rows and the rendered text report.",
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def post_audit(experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
@@ -1038,16 +1629,47 @@ def _warnings_payload(exp: Experiment) -> dict:
     return payload
 
 
-@router.get("/experiments/{experiment_id}/warnings")
-def get_warnings(experiment_id: str):
+#: Both the GET and the POST form call ``_warnings_payload`` and nothing else, so
+#: they are documented with the same consumer-facing text.
+_WARNINGS_DESCRIPTION = (
+    "Advisory, non-gating warnings for this record. For an already-exported "
+    "record the written record is checked (`dry_run: false`); otherwise the "
+    "in-memory export candidate is checked (`dry_run: true`).\n\n"
+    "This channel deliberately carries no pass, fail, or validity field, and it "
+    "never blocks an export — read it as advice for a human, alongside the "
+    "official-schema verdict, not instead of it. The `GET` and `POST` forms are "
+    "equivalent: both are read-only and return the same payload."
+)
+_WARNINGS_RESPONSE_DESCRIPTION = (
+    "The advisory warnings and whether they were computed from a dry run. No "
+    "verdict field is present, by design."
+)
+
+
+@router.get(
+    "/experiments/{experiment_id}/warnings",
+    tags=[TAG_VALIDATION],
+    summary="Get a Record's Advisory Warnings",
+    description=_WARNINGS_DESCRIPTION,
+    response_description=_WARNINGS_RESPONSE_DESCRIPTION,
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def get_warnings(experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
     return _warnings_payload(exp)
 
 
-@router.post("/experiments/{experiment_id}/warnings")
-def post_warnings(experiment_id: str):
+@router.post(
+    "/experiments/{experiment_id}/warnings",
+    tags=[TAG_VALIDATION],
+    summary="Re-Check a Record's Advisory Warnings",
+    description=_WARNINGS_DESCRIPTION,
+    response_description=_WARNINGS_RESPONSE_DESCRIPTION,
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def post_warnings(experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
@@ -1057,8 +1679,22 @@ def post_warnings(experiment_id: str):
 # --- 12. evidence -------------------------------------------------------------
 
 
-@router.get("/experiments/{experiment_id}/evidence")
-def get_evidence(experiment_id: str):
+@router.get(
+    "/experiments/{experiment_id}/evidence",
+    tags=[TAG_EVIDENCE],
+    summary="Get a Record's Evidence Trail",
+    description=(
+        "The field-by-field evidence trail for this record: each official path, "
+        "its value, the kind of support behind it, and the source file and locator "
+        "cited.\n\n"
+        "For an already-exported record the trail is read from the evidence "
+        "sidecar written alongside the official record; otherwise it is read from "
+        "the draft's own evidence envelopes. Read-only."
+    ),
+    response_description="One evidence entry per field carrying a value.",
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def get_evidence(experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
@@ -1084,8 +1720,27 @@ _EVIDENCE_CLASSES = (
 )
 
 
-@router.get("/experiments/{experiment_id}/evidence-classification")
-def get_evidence_classification(experiment_id: str, response: Response):
+@router.get(
+    "/experiments/{experiment_id}/evidence-classification",
+    tags=[TAG_EVIDENCE],
+    summary="Classify a Record's Evidence Support",
+    description=(
+        "Per-field evidence-support classification for this record's current "
+        "state, plus a histogram over the five classes — `supported`, "
+        "`inferred_candidate`, `insufficient_evidence`, `conflicting_evidence` and "
+        "`unknown` — bound to the authoritative `record_rev` so a client can tell "
+        "when its view is stale.\n\n"
+        "This carries the evidence-support axis only. It deliberately reports no "
+        "validity, completion, exportability, or advisory verdict; those live in "
+        "their own operations. Read-only, and it takes no lock."
+    ),
+    response_description=(
+        "The per-field classifications, the five-class histogram, and the "
+        "revision they describe."
+    ),
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def get_evidence_classification(experiment_id: ExperimentId, response: Response):
     """Typed evidence-support classification for the CURRENT record (P28.4 view).
 
     Read-only; carries ONLY the evidence-support axis — ``field_results`` (from the
@@ -1109,8 +1764,50 @@ def get_evidence_classification(experiment_id: str, response: Response):
 # --- 13. source preview -------------------------------------------------------
 
 
-@router.get("/experiments/{experiment_id}/source-preview")
-def get_source_preview(experiment_id: str, source: str = ""):
+@router.get(
+    "/experiments/{experiment_id}/source-preview",
+    tags=[TAG_EVIDENCE],
+    summary="Preview a Cited Source Fixture",
+    description=(
+        "The text of one committed synthetic source fixture, line by line, "
+        "together with the one-based line numbers this record's evidence actually "
+        "cites in it. Read-only.\n\n"
+        "Only the two committed synthetic fixtures may be previewed. A name "
+        "containing a path separator or a traversal fragment is rejected, and any "
+        "other filename is refused with the allowed names listed in the response. "
+        "The fixture that cites fields rather than lines yields no cited line "
+        "numbers, which is expected rather than an error."
+    ),
+    response_description="The fixture's lines, its media type, and the cited line numbers.",
+    responses={
+        **_R_UNAUTHORIZED,
+        400: {
+            "description": (
+                "The `source` name is not a bare filename — it contains a path "
+                "separator or a traversal fragment. Nothing was read."
+            )
+        },
+        404: {
+            "description": (
+                "Either no experiment has that id, or the `source` name is a bare "
+                "filename outside the two-fixture allowlist. The allowed names are "
+                "listed in the refusal."
+            )
+        },
+    },
+)
+def get_source_preview(
+    experiment_id: ExperimentId,
+    source: Annotated[
+        str,
+        Query(
+            description=(
+                "The bare filename of a committed synthetic fixture. A path, a "
+                "traversal fragment, or any name outside the allowlist is refused."
+            )
+        ),
+    ] = "",
+):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
@@ -1141,8 +1838,25 @@ def get_source_preview(experiment_id: str, source: str = ""):
 # --- 13b. artifacts (exported record + sidecar content, read-only) ------------
 
 
-@router.get("/experiments/{experiment_id}/artifacts")
-def get_artifacts(experiment_id: str):
+@router.get(
+    "/experiments/{experiment_id}/artifacts",
+    tags=[TAG_EXPORT],
+    summary="Get a Record's Exported Artifacts",
+    description=(
+        "The official ISAAC record and the evidence-sidecar JSON that this "
+        "record's export wrote, plus their filenames as bare basenames — never a "
+        "server path.\n\n"
+        "Both files are resolved from the record id, never from a caller-supplied "
+        "path. A record that has not been exported yet returns `200` with null "
+        "payloads rather than an error. Read-only."
+    ),
+    response_description=(
+        "The record and sidecar JSON with their filenames, or nulls when nothing "
+        "has been exported."
+    ),
+    responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def get_artifacts(experiment_id: ExperimentId):
     """Return the written record + sidecar JSON for an exported experiment.
 
     Read-only: it reads ONLY the two files ``export`` wrote inside the workspace,
@@ -1203,7 +1917,28 @@ _GRAPH_STATUS_NOTES = {
 }
 
 
-@router.get("/graph/status")
+@router.get(
+    "/graph/status",
+    tags=[TAG_GRAPH],
+    summary="Get Project Memory Status",
+    description=(
+        "Provider-agnostic status for the Project Memory plane: whether it is "
+        "available, the integrity of its artifact, the provider serving it, "
+        "whether its indexing policy is consistent, the freshness of its indexed "
+        "sources together with the scope and basis of that judgement, the policy "
+        "and served-manifest fingerprints, the served file count, and the snapshot "
+        "schema version. Node, edge, community, file and concept counts are "
+        "included when a graph is readable and are explicit nulls otherwise, so "
+        "the response shape never changes.\n\n"
+        "The deployed app commit is reported as version metadata only and is never "
+        "an input to any freshness judgement. A freshness status that cannot be "
+        "proven is reported as unknown rather than assumed current.\n\n"
+        "Project Memory provides leads and provenance to confirm against the cited "
+        "files, never a correctness ruling. Read-only."
+    ),
+    response_description="The separated memory-plane status, with counts when a graph is readable.",
+    responses={**_R_UNAUTHORIZED},
+)
 def graph_status() -> dict:
     """Provider-agnostic, separated memory-plane status (P24.10).
 
@@ -1261,7 +1996,33 @@ def graph_status() -> dict:
 # --- 15. uploads (always blocked) ---------------------------------------------
 
 
-@router.post("/uploads")
+@router.post(
+    "/uploads",
+    tags=[TAG_UPLOADS],
+    summary="Refuse a File Upload (Governance Seam)",
+    description=(
+        "Always refuses with `403`. This is the write side of the synthetic-only "
+        "governance boundary: no multipart form is declared or parsed, and no file "
+        "is read, inspected, or stored. The refusal carries the reason and the "
+        "current synthetic-only flag so a client can explain the boundary to a "
+        "user.\n\n"
+        "Real or private data ingestion is approval-gated and is not enabled in "
+        "this prototype."
+    ),
+    response_description=(
+        "Not produced by this operation — every request is refused with the `403` "
+        "documented below."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        403: {
+            "description": (
+                "The refusal, with the reason and the current synthetic-only flag. "
+                "This is the only outcome."
+            )
+        },
+    },
+)
 def uploads():
     # Governance seam: no multipart is declared or parsed; no file is read or stored.
     # The refusal is tied to the authoritative runtime-mode source; uploads stay
@@ -1287,7 +2048,21 @@ def _memory_error(status_code: int, error: str, **extra) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=content)
 
 
-@router.get("/memory/concepts")
+@router.get(
+    "/memory/concepts",
+    tags=[TAG_MEMORY],
+    summary="List Project Memory Concepts",
+    description=(
+        "The concepts Project Memory has indexed, each with the label and summary "
+        "metadata the reader exposes.\n\n"
+        "When no graph is readable this returns `200` with `available: false`, a "
+        "stable machine-readable reason, and an empty list — never an error status "
+        "and never a fabricated concept. Read-only. Project Memory returns leads "
+        "to verify, never a validation verdict."
+    ),
+    response_description="The indexed concepts, or an honest unavailable envelope.",
+    responses={**_R_UNAUTHORIZED},
+)
 def get_memory_concepts() -> dict:
     reader = memory.get_default_reader()
     overview = reader.overview()
@@ -1307,8 +2082,39 @@ def get_memory_concepts() -> dict:
     }
 
 
-@router.get("/memory/concepts/{concept_id}")
-def get_memory_concept(concept_id: str):
+@router.get(
+    "/memory/concepts/{concept_id}",
+    tags=[TAG_MEMORY],
+    summary="Get One Project Memory Concept",
+    description=(
+        "One concept's detail together with the files and other concepts related "
+        "to it.\n\n"
+        "When no graph is readable this returns `200` with `available: false` and a "
+        "null concept: availability is reported before identity, because the set of "
+        "valid ids cannot be known without a graph, so an unknown id is only ever "
+        "reported once the graph is known to be readable. Read-only; leads to "
+        "verify, never a verdict."
+    ),
+    response_description="The concept and its related files and concepts.",
+    responses={
+        **_R_UNAUTHORIZED,
+        404: {
+            "description": (
+                "The graph is readable but holds no concept with that id."
+            )
+        },
+    },
+)
+def get_memory_concept(
+    concept_id: Annotated[
+        str,
+        Path(
+            description=(
+                "A concept id as listed by `GET /api/memory/concepts`."
+            )
+        ),
+    ],
+):
     reader = memory.get_default_reader()
     overview = reader.overview()
     if not overview["available"]:
@@ -1335,7 +2141,20 @@ def get_memory_concept(concept_id: str):
     }
 
 
-@router.get("/memory/files")
+@router.get(
+    "/memory/files",
+    tags=[TAG_MEMORY],
+    summary="List Indexed Project Memory Files",
+    description=(
+        "The repository files Project Memory has indexed and is allowed to serve, "
+        "each with the metadata the reader exposes for it.\n\n"
+        "When no graph is readable this returns `200` with `available: false`, a "
+        "stable reason, and an empty list. Read-only; leads to verify, never a "
+        "verdict."
+    ),
+    response_description="The indexed served files, or an honest unavailable envelope.",
+    responses={**_R_UNAUTHORIZED},
+)
 def get_memory_files() -> dict:
     reader = memory.get_default_reader()
     overview = reader.overview()
@@ -1355,8 +2174,46 @@ def get_memory_files() -> dict:
     }
 
 
-@router.get("/memory/file")
-def get_memory_file(path: str = ""):
+@router.get(
+    "/memory/file",
+    tags=[TAG_MEMORY],
+    summary="Get One Indexed File's Memory Entry",
+    description=(
+        "One indexed file's detail, the files and concepts related to it, and the "
+        "rationales recorded for those relationships.\n\n"
+        "An unsafe path is rejected regardless of whether a graph is readable, "
+        "because that guard is deterministic and does not depend on the graph. A "
+        "safe path that is simply not indexed is reported as not found once the "
+        "graph is known to be readable. Read-only; leads to verify, never a "
+        "verdict."
+    ),
+    response_description="The file's detail, its relations, and their rationales.",
+    responses={
+        **_R_UNAUTHORIZED,
+        400: {
+            "description": (
+                "The `path` is not a safe repository-relative path. Nothing was "
+                "read, and this is reported even when no graph is available."
+            )
+        },
+        404: {
+            "description": (
+                "The graph is readable but does not index that path."
+            )
+        },
+    },
+)
+def get_memory_file(
+    path: Annotated[
+        str,
+        Query(
+            description=(
+                "A repository-relative path of an indexed served file, as listed "
+                "by `GET /api/memory/files`."
+            )
+        ),
+    ] = "",
+):
     reader = memory.get_default_reader()
     # Unsafe path is a deterministic, availability-independent guard: it wins
     # even when the graph is absent (spec §3.5).
@@ -1391,7 +2248,23 @@ def get_memory_file(path: str = ""):
     }
 
 
-@router.get("/memory/graph")
+@router.get(
+    "/memory/graph",
+    tags=[TAG_GRAPH],
+    summary="Get the Project Memory Graph Projection",
+    description=(
+        "A deterministic, capped projection of the served-file reference graph: "
+        "nodes, undirected deduplicated edges, communities, and the provenance of "
+        "the projection. Every element is derived from the Project Memory reader's "
+        "public surface, so it describes the same graph the status operation "
+        "reports on.\n\n"
+        "When no graph is readable it returns an honest envelope with "
+        "`available: false` and zero nodes and edges rather than a fabricated "
+        "graph. Read-only; leads to verify, never a verdict."
+    ),
+    response_description="The nodes, edges, communities, and provenance of the projection.",
+    responses={**_R_UNAUTHORIZED},
+)
 def get_memory_graph() -> dict:
     """P36.2 — the Project Memory "Graph" tab: a deterministic, capped,
     served-file reference projection (nodes/edges/communities) derived purely
@@ -1431,9 +2304,59 @@ def _blank_group_rows(group: dict) -> dict:
     return group
 
 
-@router.get("/search")
+@router.get(
+    "/search",
+    tags=[TAG_SEARCH],
+    summary="Search the Workspace and Project Memory",
+    description=(
+        "One grouped envelope with two independently reported groups: `workspace` "
+        "(truth-plane leads from the experiment snapshot) and `memory` (advisory "
+        "Project Memory leads). Each group carries its own plane label, provider, "
+        "availability, reason, totals and pagination, so a memory lead can never "
+        "be mistaken for a truth-plane ruling, and one group's failure never "
+        "affects the other.\n\n"
+        "The envelope computes no verdict, and a plane that cannot answer degrades "
+        "inside the `200` body rather than returning an error status. Read-only; it "
+        "reshapes only content the read operations already expose."
+    ),
+    response_description="The normalised query, the scope applied, and the two plane groups.",
+    responses={**_R_UNAUTHORIZED},
+)
 def search_records(
-    q: str = "", scope: str = "all", limit: int = 10, offset: int = 0
+    q: Annotated[
+        str,
+        Query(
+            description=(
+                "The search text. It is truncated to 256 characters before "
+                "normalisation, and a query shorter than two normalised characters "
+                "returns no rows with the reason `query_too_short` in both groups."
+            )
+        ),
+    ] = "",
+    scope: Annotated[
+        str,
+        Query(
+            description=(
+                "Which planes are actually searched: `all` (the default), "
+                "`workspace`, or `memory`. The out-of-scope group is still present "
+                "and still reports its real availability, but carries no rows. An "
+                "unrecognised value falls back to `all`."
+            )
+        ),
+    ] = "all",
+    limit: Annotated[
+        int,
+        Query(
+            description=(
+                "Maximum rows to return per group. Clamped into the range 0 to 50; "
+                "the value actually applied is echoed in each group."
+            )
+        ),
+    ] = 10,
+    offset: Annotated[
+        int,
+        Query(description="Number of rows to skip within each group."),
+    ] = 0,
 ) -> dict:
     if scope not in _SEARCH_SCOPES:
         scope = "all"
@@ -1542,14 +2465,78 @@ def search_records(
 # key is set). It never mutates and never touches the truth path.
 
 
-@router.get("/runtime/records")
+@router.get(
+    "/runtime/records",
+    tags=[TAG_EXPERIMENTS],
+    summary="List a Cross-Record Triage Projection",
+    description=(
+        "A derived read model over the same experiment snapshot the search "
+        "operation uses, for triaging many records at once. Each row carries only a "
+        "fixed safe set of confirmed facts: the experiment id, title, derived "
+        "status, open-question count, exported flag, exported record id, a minimal "
+        "workflow summary, the five-class evidence histogram as counts only, the "
+        "exported-artifact freshness state, the current revision, the last update "
+        "time, and a client route to open the record. No field value, evidence "
+        "body, source locator, or filesystem path appears.\n\n"
+        "`total` is the filtered count taken before pagination, so a client can "
+        "page without losing the denominator. Rows are ordered deterministically. "
+        "Computed fresh on every call — no index, no cache, no lock, and no "
+        "mutation."
+    ),
+    response_description="The projected rows and the filtered total before pagination.",
+    responses={**_R_UNAUTHORIZED},
+)
 def runtime_record_projection(
-    status: str | None = None,
-    workflow_state: str | None = None,
-    artifact: str | None = None,
-    has_conflict: bool = False,
-    limit: int | None = None,
-    offset: int = 0,
+    status: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Keep only records whose derived status equals this value exactly. "
+                "Omit for no status filter."
+            )
+        ),
+    ] = None,
+    workflow_state: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Keep only records in this workflow state: `blocked`, `reopened`, "
+                "or `current`. An unrecognised value matches nothing rather than "
+                "being ignored, so a bad filter never returns the full set."
+            )
+        ),
+    ] = None,
+    artifact: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Keep only records with this exported-artifact freshness: `none`, "
+                "`current`, or `stale`. An unrecognised value matches nothing."
+            )
+        ),
+    ] = None,
+    has_conflict: Annotated[
+        bool,
+        Query(
+            description=(
+                "When true, keep only records with at least one field classified "
+                "as conflicting evidence."
+            )
+        ),
+    ] = False,
+    limit: Annotated[
+        int | None,
+        Query(
+            description=(
+                "Maximum rows to return after filtering. Omit to return every "
+                "filtered row."
+            )
+        ),
+    ] = None,
+    offset: Annotated[
+        int,
+        Query(description="Number of filtered rows to skip before returning any."),
+    ] = 0,
 ) -> dict:
     filters = {
         "status": status,
@@ -1620,11 +2607,51 @@ def _assistant_validate_dryrun(exp: Experiment) -> dict:
         return {"ok": False, "errors": [{"path": "$", "message": "Validation could not be completed."}]}
 
 
-@router.post("/experiments/{experiment_id}/assistant/query")
+#: Shared wording for the two assistant operations' request bodies.
+_ASSISTANT_BODY_DESCRIPTION = (
+    "`question` is required, must not be blank, and is capped at "
+    f"{_ASSISTANT_MAX_QUESTION} characters — an over-long question is rejected, "
+    "never truncated and answered. `grounded_rev` optionally states which record "
+    "revision the question was asked against. `history` is presentation-only: at "
+    f"most {_ASSISTANT_MAX_HISTORY} entries are kept and it never influences the "
+    "answer."
+)
+
+
+@router.post(
+    "/experiments/{experiment_id}/assistant/query",
+    tags=[TAG_ASSISTANT],
+    summary="Ask a Question About One Record",
+    description=(
+        "Answers a free-form question about this record by classifying it against "
+        "a fixed, finite intent catalog and answering from grounding assembled "
+        "read-only from what the API already exposes for the record: its summary, "
+        "open blocking questions, evidence trail, workflow, revision, an in-memory "
+        "validation dry run, and Project Memory search.\n\n"
+        "There is no language model. A question outside the catalog, or one too "
+        "ambiguous to route, is refused honestly rather than answered — it never "
+        "guesses a scientific value.\n\n"
+        "Read-only and advisory: it never changes the record, its revision, its "
+        "workflow, its evidence, its validation, its export, Project Memory, or any "
+        "file, and it never states a pass, fail, valid, or invalid conclusion. The "
+        "response carries the record's unchanged `ETag`."
+    ),
+    response_description="The resolved answer with the grounding it was derived from, or an honest refusal.",
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        400: {
+            "description": (
+                "The question is blank or exceeds the character limit. Nothing was "
+                "classified or answered."
+            )
+        },
+    },
+)
 def post_assistant_query(
-    experiment_id: str,
+    experiment_id: ExperimentId,
     response: Response,
-    req: AssistantQueryRequest = Body(...),
+    req: AssistantQueryRequest = Body(..., description=_ASSISTANT_BODY_DESCRIPTION),
 ):
     # Typed input guards: an empty/whitespace or oversized question is rejected
     # with a stable typed error (never a 500, never the question text logged).
@@ -1684,8 +2711,33 @@ def post_assistant_query(
 # param, loads/creates NO record, mutates nothing, and inherits the app-wide auth.
 
 
-@router.post("/assistant/memory/query")
-def post_assistant_memory_query(req: AssistantQueryRequest = Body(...)):
+@router.post(
+    "/assistant/memory/query",
+    tags=[TAG_ASSISTANT],
+    summary="Ask Project Memory a Question",
+    description=(
+        "The record-agnostic counterpart of the per-record assistant operation, for "
+        "surfaces that have no record open. The same fixed classifier is applied: a "
+        "project-memory question is answered purely from the Project Memory reader "
+        "as leads to verify, and any other question is refused honestly with a "
+        "pointer to open a record first.\n\n"
+        "There is no language model, no record is loaded or created, and nothing is "
+        "mutated. It never states a pass, fail, valid, or invalid conclusion."
+    ),
+    response_description="The memory-scoped answer with its leads, or an honest refusal.",
+    responses={
+        **_R_UNAUTHORIZED,
+        400: {
+            "description": (
+                "The question is blank or exceeds the character limit. Nothing was "
+                "classified or answered."
+            )
+        },
+    },
+)
+def post_assistant_memory_query(
+    req: AssistantQueryRequest = Body(..., description=_ASSISTANT_BODY_DESCRIPTION),
+):
     # Same typed guards as the record endpoint: empty/whitespace or oversized
     # questions are rejected with a stable typed error (never a 500).
     question = req.question if isinstance(req.question, str) else ""
@@ -1719,9 +2771,24 @@ def post_assistant_memory_query(req: AssistantQueryRequest = Body(...)):
 # base-path-correct under {base}/api/* exactly like every other route here.
 
 
-@router.get("/about")
+@router.get(
+    "/about",
+    tags=[TAG_META],
+    summary="Get App and Provenance Metadata",
+    description=(
+        "Non-sensitive identity and provenance for this deployment: the app "
+        "version, the build commit when the deployment supplies one (otherwise "
+        "`null` — it is never guessed), the official ISAAC record-schema version "
+        "this build validates against, the runtime data mode, the persistence "
+        "model, the data regime, and the name of the deterministic core package.\n\n"
+        "Every value is reused from the same authoritative source "
+        "`GET /api/health` reads, so the two can never disagree. Read-only."
+    ),
+    response_description="The app version, build commit, schema version, runtime mode, and data regime.",
+    responses={**_R_UNAUTHORIZED},
+)
 def about() -> dict:
-    """Non-sensitive app/provenance metadata for the Settings "Help / About" card.
+    """MAINTAINER NOTE (not the published description — see ``description=`` above).
 
     Every field is reused from an existing authoritative source — `__version__`
     and `_build_commit()` (the SAME deploy-identity read `/health` uses),
@@ -1729,10 +2796,13 @@ def about() -> dict:
     schema's version, read-only import — that module is never modified here),
     and `runtime_mode.runtime_mode()` (the SAME fail-closed resolver `/health`
     uses). `persistence` and `data_regime` are fixed, non-configurable literals
-    describing this prototype's current scope. Deliberately excludes hostnames,
-    infrastructure internals, environment values, secrets, and absolute paths —
-    only the same non-sensitive identity `/health` already exposes, expanded
-    with schema/persistence/regime context.
+    describing this prototype's current scope.
+
+    The published `description=` states what the endpoint RETURNS; it deliberately
+    does not enumerate what is withheld (hostnames, infrastructure internals,
+    environment values, credentials, absolute paths), because an enumeration of
+    withheld things reads as an inventory and is itself scanned by the
+    ``/api/openapi`` leak guard in ``tests/test_about_and_openapi.py``.
     """
     return {
         "app_version": __version__,
@@ -1745,7 +2815,22 @@ def about() -> dict:
     }
 
 
-@router.get("/openapi")
+@router.get(
+    "/openapi",
+    tags=[TAG_META],
+    summary="Get This API's OpenAPI Document",
+    description=(
+        "This application's own generated OpenAPI document — the same document "
+        "served at the root `/openapi.json`, but reachable under the deployment's "
+        "base path so a browser client can fetch it without knowing the root.\n\n"
+        "It is generated from the live routes, never hand-maintained, so it cannot "
+        "drift from what a caller can actually reach. It describes route signatures "
+        "and documentation only: no runtime state and no configuration values. "
+        "Read-only."
+    ),
+    response_description="The generated OpenAPI document for this application.",
+    responses={**_R_UNAUTHORIZED},
+)
 def api_openapi(request: Request) -> dict:
     """The app's generated OpenAPI schema, reachable under the base-path-prefixed
     router (byte-identical to the root `/openapi.json` FastAPI already serves,
@@ -1773,7 +2858,24 @@ def api_openapi(request: Request) -> dict:
 # plane, so the memory-plane forbidden-key rule does not apply here.
 
 
-@router.get("/schema")
+@router.get(
+    "/schema",
+    tags=[TAG_SCHEMA],
+    summary="Browse the Official Schema and Vocabularies",
+    description=(
+        "The vendored official ISAAC record schema verbatim, its title and the "
+        "version this build validates against, plus every controlled vocabulary in "
+        "the repository keyed by its filename stem.\n\n"
+        "Every field, type, required flag, enumeration, description and composition "
+        "relationship a client renders comes straight from these two sources; the "
+        "schema is loaded through the same path resolver the validator uses, never "
+        "a hardcoded copy. This is a read-only reference view of the public "
+        "canonical schema — there is no propose, review, approve, or edit "
+        "affordance."
+    ),
+    response_description="The official schema, its version, and the controlled vocabularies.",
+    responses={**_R_UNAUTHORIZED},
+)
 def get_schema() -> dict:
     schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
     vocab_dir = REPO_ROOT / "vocabulary"
