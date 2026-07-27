@@ -615,9 +615,19 @@ implementation and all independent review).
 ### Snapshot preflight (before any push that touches served files)
 
 The committed snapshot `apps/api/isaac_api/data/memory-snapshot.json` embeds a served-content manifest
-(currently 200 files) re-checked in CI by `apps/api/tests/test_committed_snapshot.py`. It includes
-`CLAUDE.md`, `AGENTS.md`, every `docs/*.md`, and each `.claude/skills/*/SKILL.md`. Editing any
-manifest-listed file is predictable drift — regenerate in the same commit; do not wait for CI. Pre-push
+(**201 entries** as of P36V) re-checked in CI by `apps/api/tests/test_committed_snapshot.py`. **It is far
+broader than documentation** — measured composition: **64 `apps/web/src/**` files** (the largest single
+bucket, including component, lib and `__tests__` files), 37 under `docs/` (35 `.md` plus two sample
+JSON artifacts), 36 `tests/**`, 15 `apps/api/**`,
+15 `src/**` (the truth core), 7 `docs/superpowers/**`, 5 `.claude/skills/*/SKILL.md`, plus root files
+(`CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `pyproject.toml`, …).
+
+**Practical consequence:** an ordinary frontend component edit, or even a test-file edit, causes snapshot
+drift. Do not assume a slice is "frontend only, so the snapshot is not my problem" — three P36V slices hit
+this independently after reading an earlier version of this section that listed only docs and skills.
+Editing any manifest-listed file is predictable drift — regenerate in the same commit; do not wait for CI.
+When two slices touch manifest-listed files in one working tree, regenerate **once** after both settle,
+or each will capture the other's in-flight hashes. Pre-push
 sequence: implementation → focused tests → full relevant tests → typecheck / Vite build → snapshot drift
 check → deterministic regeneration if required → path/secret/leak checks → independent review → commit →
 push → exact-HEAD CI → deployment/browser QA. Commands:

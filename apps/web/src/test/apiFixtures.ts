@@ -1810,35 +1810,90 @@ export const openApiFixture = {
     version: '0.1.0',
     summary: 'Synthetic-only FastAPI wrapper over the deterministic isaac_records core.',
   },
+  // P36V PR3 slice C — the document now REGISTERS tags, and grouping is derived
+  // from them (`lib/apiDocsModel.ts`). Four properties are covered on purpose:
+  //   · registration order is NOT alphabetical, so a test on group order can
+  //     only pass if the order comes from this array;
+  //   · `Experiments` is registered with NO description (the group chip must
+  //     render without inventing one);
+  //   · `Schema & Vocabulary` is registered but used by no operation below (a
+  //     registered tag must not conjure an empty group);
+  //   · `Validation` is used by an operation but NOT registered here (it must
+  //     still render, sorted after every registered tag).
+  tags: [
+    {
+      name: 'Health & Meta',
+      description: "Liveness, deployment identity, and this API's own machine-readable description.",
+    },
+    { name: 'Experiments' },
+    {
+      name: 'Drafts & Answers',
+      description: "Reading a record's draft fields and answering its blocking questions.",
+    },
+    {
+      name: 'Uploads',
+      description: 'The governance seam for file upload. It always refuses.',
+    },
+    {
+      name: 'Schema & Vocabulary',
+      description: 'Registered here but carried by no operation in this subset.',
+    },
+  ],
   paths: {
     '/api/health': {
       get: {
-        summary: 'Health',
+        tags: ['Health & Meta'],
+        summary: 'Report Liveness and Deploy Identity',
         description: 'Liveness, runtime mode, core, version, and build commit.',
         parameters: [],
+        // The ONLY operation with no documented 401 — so it is the one Quick
+        // Start may honestly propose as a first request.
+        responses: { '200': { description: 'The liveness banner.' } },
       },
     },
     '/api/about': {
       get: {
-        summary: 'About',
+        tags: ['Health & Meta'],
+        summary: 'Get App and Provenance Metadata',
         description: 'Non-sensitive app/provenance metadata for Settings.',
         parameters: [],
+        responses: {
+          '200': { description: 'The app and provenance metadata.' },
+          '401': { description: 'The deployment requires an API key and none was presented.' },
+        },
       },
     },
     '/api/experiments/{id}': {
       get: {
+        tags: ['Experiments'],
         summary: 'Get Experiment',
         description: 'Fetch one experiment detail by id.',
-        parameters: [{ name: 'id', in: 'path', required: true }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, description: 'The id of an experiment.' },
+        ],
+        responses: {
+          '200': { description: 'The experiment detail bundle.' },
+          '401': { description: 'The deployment requires an API key and none was presented.' },
+          '404': { description: 'No experiment in this workspace has that id.' },
+        },
       },
     },
     '/api/experiments/{id}/answers': {
       post: {
+        tags: ['Drafts & Answers'],
         summary: 'Submit Answers',
         description: 'Apply confirmed answers to pending blockers.',
         parameters: [
           { name: 'id', in: 'path', required: true },
-          { name: 'If-Match', in: 'header', required: false },
+          // Declared OPTIONAL even though its own wording says otherwise — the
+          // renderer reports the DECLARED flag and the wording verbatim, and
+          // never overrides one with the other.
+          {
+            name: 'If-Match',
+            in: 'header',
+            required: false,
+            description: "Required. The record's current ETag.",
+          },
         ],
         // P36R S9 — request/response detail the master-detail browser renders
         // when the contract supplies it. Two `$ref` cases on purpose: the 422
@@ -1862,6 +1917,7 @@ export const openApiFixture = {
               'application/json': { schema: { type: 'object', title: 'SyntheticAnswersResult' } },
             },
           },
+          '401': { description: 'The deployment requires an API key and none was presented.' },
           '404': {
             description: 'Not Found',
             content: {
@@ -1876,6 +1932,57 @@ export const openApiFixture = {
               'application/json': { schema: { $ref: '#/components/schemas/SyntheticFixtureError' } },
             },
           },
+        },
+      },
+    },
+    // A documented 200 that the handler NEVER produces. The document says so in
+    // its own words, and the browser must render that wording rather than
+    // presenting the 200 as an achievable outcome.
+    '/api/uploads': {
+      post: {
+        tags: ['Uploads'],
+        summary: 'Refuse a File Upload (Governance Seam)',
+        description: 'Always refuses. No file is read, parsed, or stored.',
+        responses: {
+          '200': {
+            description: 'Not produced by this operation — every request is refused with the 403.',
+          },
+          '401': { description: 'The deployment requires an API key and none was presented.' },
+          '403': { description: 'The refusal, with its reason. This is the only outcome.' },
+        },
+      },
+    },
+    // A write operation that reads the RAW request and therefore declares no
+    // `requestBody` — its expected body is described in prose only. The browser
+    // must say so instead of fabricating a schema. Its tag is deliberately not
+    // registered in `tags` above.
+    '/api/validate/record': {
+      post: {
+        tags: ['Validation'],
+        summary: 'Validate a Supplied Candidate Record',
+        description: 'Send the record as a raw JSON body. It is read in memory under a size limit.',
+        responses: {
+          '200': { description: 'The official-schema verdict and the errors.' },
+          '401': { description: 'The deployment requires an API key and none was presented.' },
+          '413': { description: 'The body exceeds the request size limit.' },
+          '422': { description: 'The body is not well-formed JSON, or is not a JSON object.' },
+        },
+      },
+    },
+    // NO tags at all — the deterministic untagged fallback bucket, sorted last.
+    // Its `q` is declared REQUIRED (the real one is not) so the generated
+    // samples' required-query-parameter placeholder is covered.
+    '/api/search': {
+      get: {
+        summary: 'Search the Workspace and Project Memory',
+        description: 'One grouped envelope with a workspace group and a memory group.',
+        parameters: [
+          { name: 'q', in: 'query', required: true, description: 'The search text.' },
+          { name: 'limit', in: 'query', required: false, description: 'Rows per group.' },
+        ],
+        responses: {
+          '200': { description: 'The normalised query and the two plane groups.' },
+          '401': { description: 'The deployment requires an API key and none was presented.' },
         },
       },
     },

@@ -150,10 +150,17 @@ altered), both suites, and `tsc -b` all confirmed the branch state was intact.
   topology. The same substance is expressed provider-neutrally: browser access through the
   deployment's identity layer is not equivalent to headless access for an external agent.
   The guard is left intact.
-- **N2 — Base URL is rendered relative.** `127.0.0.1` and `localhost` are forbidden
-  literals in Settings by the same guard, and an absolute origin would be wrong under a
-  deployed base path in any case. Quick Start shows the relative `/api`; code examples use
-  an unexpanded `$ISAAC_BASE_URL` placeholder rather than a host literal.
+- **N2 — Base URL is rendered relative, and DERIVED rather than hardcoded.** `127.0.0.1`
+  and `localhost` are forbidden literals in Settings by the same guard, and an absolute
+  origin would be wrong under a deployed base path in any case. This plan originally
+  specified the literal relative string `/api`; **that would have been wrong on the actual
+  hosted target.** `app.py` mounts the router at `base_path()`, so under `/krish` the
+  document's own paths — and therefore their shared base — are `/krish/api`. The base is
+  now derived from the longest common `/api`-terminated prefix of the served document's
+  paths, with tests pinning both the local case (`/api`) and a deployed case
+  (`/base/api`); when the paths share no single base the screen says so rather than
+  printing a wrong value. Code examples use an unexpanded `$ISAAC_BASE_URL` placeholder,
+  never a host literal.
 - **N3 — no accent edge on the Assistant bubble.** The spec calls a purple accent edge
   "optional". `apps/web/src/__tests__/no-vertical-rail.test.ts` enforces the permanent,
   system-wide no-vertical-rail rule (`no-vertical-rail-rule.md`). The edge is omitted; the

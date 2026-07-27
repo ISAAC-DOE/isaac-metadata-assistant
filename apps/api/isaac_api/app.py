@@ -23,7 +23,7 @@ from . import __version__
 from . import runtime_mode
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
-from .routes import router
+from .routes import OPENAPI_TAGS, router
 from .spa import mount_spa
 
 # Default: the Vite dev server origins. Deployed environments override via
@@ -53,6 +53,33 @@ def create_app() -> FastAPI:
         title="ISAAC Metadata Assistant — local UI backend",
         version=__version__,
         summary="Synthetic-only FastAPI wrapper over the deterministic isaac_records core.",
+        # Documentation metadata only (consumed when the OpenAPI document is
+        # generated, never at request time): the group descriptions for the tags
+        # the routes carry. Defined next to the routes so the names cannot drift.
+        openapi_tags=OPENAPI_TAGS,
+        description=(
+            "Every verdict this API reports is produced by the deterministic "
+            "`isaac_records` core, in process, so an answer here is byte-identical "
+            "to the same check run from the command line. The official ISAAC record "
+            "schema is the only authority on record validity.\n\n"
+            "Two planes are kept strictly separate. The truth plane decides "
+            "validity, completeness and exportability. The Project Memory plane "
+            "returns leads and provenance to confirm against the cited files — it "
+            "never issues a correctness ruling and cannot authorise an export.\n\n"
+            "Nothing here guesses. A value that is not supported by evidence stays "
+            "missing or becomes a blocking question, and a question the assistant "
+            "cannot answer from its fixed catalog is refused rather than invented.\n\n"
+            # P36V: the earlier wording ("only the committed synthetic fixtures
+            # can be read") was the loosest sentence in this description. No
+            # uploaded FILE is read, but the CSV-preview and record-validator
+            # operations do parse caller-supplied text. The frontend copy already
+            # says so plainly; this prose is now held to the same standard.
+            "This deployment runs in a synthetic-only data mode: file upload is "
+            "always refused and the workspace is seeded only from committed "
+            "synthetic fixtures. Two operations do parse text you supply in the "
+            "request body — the CSV preview and the standalone record validator — "
+            "and neither stores what it reads."
+        ),
     )
     # Order matters: Starlette treats the LAST-added middleware as outermost.
     # Auth is added first so CORSMiddleware wraps it — preflight short-circuits

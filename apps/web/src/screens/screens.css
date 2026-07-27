@@ -1571,19 +1571,15 @@
   line-height: 1.55;
   max-width: 74ch;
 }
-.settings-commit {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-}
 .settings-commit-short {
   font-weight: 600;
 }
+/* P36V PR3: the FULL sha now renders only inside About's Technical Details, so
+   this rule no longer stacks under a short sha — it just keeps a 40-character
+   hex string from widening the disclosure's grid track. */
 .settings-commit-full {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 400;
-  color: var(--text-tertiary);
   word-break: break-all;
 }
 .settings-commit-note {
@@ -1591,6 +1587,62 @@
   font-weight: 400;
   color: var(--text-tertiary);
   text-align: right;
+}
+
+/* P36V PR3 — Overview's "Boundaries at a Glance": a Title Case label beside a
+   ONE-LINE summary. Deliberately NOT `.settings-points` (the card grid Data &
+   Privacy uses for the canonical definitions) so a summary can never be mistaken
+   for the definition, and so adding a definition paragraph back here would look
+   as wrong as it reads. */
+.settings-summary-list {
+  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+}
+.settings-summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+  gap: 4px 16px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+.settings-summary-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.settings-summary-text {
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Data & Privacy edge cases: the quietest thing in a definition card, so the
+   always-visible sentence above stays the one that is read. Same native
+   `<details>` treatment as the Concepts Technical Details drawer. */
+.settings-more {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.settings-more > summary {
+  cursor: pointer;
+  color: var(--action);
+}
+.settings-more > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner, 8px);
+}
+.settings-more p {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 /* Boundary statements — a titled list, not a wall of prose. */
@@ -1680,9 +1732,50 @@
   color: var(--text-heading);
 }
 
-.settings-docs-note {
-  margin-top: 8px;
+/* P36V PR3 — About's Technical Details: the full commit sha, the raw response
+   field names, the source endpoints and the repository documentation paths, all
+   collapsed by default. Styled as an audit trail (identical treatment to
+   `.concept-lookup-technical`), never a section competing with Identity or
+   Authority above it. */
+.settings-technical {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-faint);
+  font-size: 11.5px;
+  color: var(--text-secondary);
 }
+.settings-technical > summary {
+  cursor: pointer;
+  color: var(--action);
+}
+.settings-technical > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner, 8px);
+}
+.settings-technical-figures {
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 10px 16px;
+}
+.settings-technical-figure {
+  min-width: 0;
+}
+.settings-technical-figures dt {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.settings-technical-figures dd {
+  margin: 3px 0 0;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
 .settings-docs-list {
   display: flex;
   flex-wrap: wrap;
@@ -2073,6 +2166,463 @@
   overflow-wrap: anywhere;
 }
 
+/* ======================================================================
+   P36V PR3 slice C — API tab: sub-navigation, API Keys, Quick Start,
+   generated code examples, Connect an Agent.
+
+   Light ISAAC language throughout: navy headings, the existing method
+   badges, hairline dividers, one accent (var(--action)). No dark "portal"
+   code theme — a code block is a light surface with a hairline border, and
+   every schema/example/sample stays behind a disclosure so the tab never
+   opens as a wall of monospace.
+   ====================================================================== */
+
+/* ---- sub-navigation (segmented, to read as nested under the page tabs) -- */
+.api-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 14px 0 4px;
+  padding: 3px;
+  width: fit-content;
+  max-width: 100%;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-control);
+}
+.api-subtabs-tab {
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-token);
+  background: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+.api-subtabs-tab:hover {
+  color: var(--text-secondary);
+}
+.api-subtabs-tab.active {
+  color: var(--action-hover);
+  font-weight: 600;
+  background: var(--surface);
+  border-color: var(--action-selected-border);
+  box-shadow: var(--shadow-card);
+}
+.api-subtabs-tab:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+.api-subpanel {
+  margin-top: 14px;
+  min-width: 0;
+}
+
+/* ---- section titles inside the API panels ------------------------------ */
+.api-section-title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+.api-explorer,
+.api-quickstart {
+  min-width: 0;
+}
+.api-explorer {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-faint);
+}
+
+/* ---- Quick Start ------------------------------------------------------- */
+.api-quickstart-rows {
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.api-quickstart-row {
+  display: grid;
+  grid-template-columns: minmax(0, 128px) minmax(0, 1fr);
+  gap: 4px 14px;
+  align-items: baseline;
+}
+.api-quickstart-row > dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.api-quickstart-row > dd {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.api-quickstart-value {
+  flex: none;
+  padding: 2px 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-token);
+  overflow-wrap: anywhere;
+}
+.api-quickstart-note {
+  min-width: 0;
+  flex: 1 1 220px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.api-quickstart-first {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+}
+.api-quickstart-first .api-quickstart-note {
+  display: block;
+  margin-top: 8px;
+  flex: none;
+}
+.api-quickstart-jump {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---- API Keys: an unavailable state that still looks finished ---------- */
+.api-keys-section + .api-keys-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-faint);
+}
+.api-keys-heading {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+.api-keys-lead {
+  margin: 0;
+  max-width: 74ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.api-keys-rows {
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.api-keys-row > dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.api-keys-row > dd {
+  margin: 2px 0 0;
+  max-width: 74ch;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.api-keys-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 14px;
+}
+.api-keys-create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-disabled);
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-control);
+  cursor: not-allowed;
+}
+.api-keys-create-reason {
+  margin: 0;
+  flex: 1 1 300px;
+  min-width: 0;
+  max-width: 66ch;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+.api-keys-empty {
+  padding: 18px 16px;
+  text-align: center;
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-inner);
+}
+.api-keys-empty-icon {
+  color: var(--text-quaternary);
+}
+.api-keys-empty-title {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.api-keys-empty-body {
+  margin: 5px auto 0;
+  max-width: 62ch;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+.api-keys-requirements {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 74ch;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.api-keys-note {
+  margin: 10px 0 0;
+  max-width: 74ch;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+.api-keys-jump {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---- detail pane: the operation's real tag + that tag's description ---- */
+.api-browser-detail-group {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.api-browser-detail-grouptag {
+  flex: none;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-slate);
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-pill);
+}
+.api-browser-detail-groupdesc {
+  min-width: 0;
+  flex: 1 1 200px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
+}
+.api-docs-param-desc {
+  min-width: 200px;
+  max-width: 46ch;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* ---- generated code examples ------------------------------------------- */
+.api-samples {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-hair);
+  min-width: 0;
+}
+.api-samples-summary {
+  width: fit-content;
+  max-width: 100%;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--action);
+  cursor: pointer;
+}
+.api-samples-summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.api-samples-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.api-samples-tabs-tab {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: none;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-pill);
+}
+.api-samples-tabs-tab:hover {
+  color: var(--text-secondary);
+}
+.api-samples-tabs-tab.active {
+  color: var(--action-hover);
+  font-weight: 600;
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+.api-samples-tabs-tab:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+.api-samples-panel {
+  margin-top: 8px;
+  min-width: 0;
+}
+.api-samples-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.api-samples-lang {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+.api-samples-code {
+  margin-top: 6px;
+  padding: 9px 11px;
+  max-height: 280px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-token);
+  white-space: pre;
+}
+.api-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--action);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-pill);
+}
+.api-copy-btn:hover {
+  color: var(--action-hover);
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+.api-copy-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+/* ---- Connect an Agent -------------------------------------------------- */
+.api-connect {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-faint);
+  min-width: 0;
+}
+.api-connect-summary {
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+}
+.api-connect-summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.api-connect-title {
+  display: inline;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+.api-connect-lead {
+  margin: 6px 0 0;
+  max-width: 74ch;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+.api-connect-body {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.api-connect-heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.api-connect-section p {
+  margin: 3px 0 0;
+  max-width: 76ch;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* Narrow widths only: the Quick Start label column and the disabled Create
+   control stack instead of squeezing. Nothing scrolls the page sideways —
+   the params table and every code block carry their own overflow container. */
+@media (max-width: 720px) {
+  .api-quickstart-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .api-keys-create-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 /* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
 /* Desktop (≥1024px) is byte-identical: every rule is inside a max-width query.
    The assistant right rail (.record-right / .memory-right) collapses into the
@@ -2106,20 +2656,21 @@
     grid-template-columns: 1fr;
   }
 
-  /* Settings (P36.4 · P36R S9): the About figure's commit block and the API
-     search box go full-width on narrow screens instead of pinning to a fixed
-     max, and the API master list keeps its own scroll box but shortens it
-     (520px -> 320px) so the stacked detail pane stays reachable without a long
-     scroll past the list. */
+  /* Settings (P36.4 · P36R S9 · P36V PR3): the identity figures, the boundary
+     summary rows and the API search box go full-width on narrow screens instead
+     of pinning to a fixed max, and the API master list keeps its own scroll box
+     but shortens it (520px -> 320px) so the stacked detail pane stays reachable
+     without a long scroll past the list. */
   .settings-figure dd {
     text-align: left;
   }
-  .settings-commit {
-    align-items: flex-start;
-  }
-  .settings-commit-note,
-  .settings-commit-full {
+  .settings-commit-note {
     text-align: left;
+  }
+  /* The label/summary pair stacks rather than sharing a 200px sidebar column. */
+  .settings-summary-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
   .settings-search-input-wrap {
     max-width: 100%;

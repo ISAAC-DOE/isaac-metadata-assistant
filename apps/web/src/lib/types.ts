@@ -1164,6 +1164,11 @@ export interface ApiOpenApiResponse {
   openapi: string;
   info?: { title?: string; version?: string; summary?: string };
   paths: Record<string, OpenApiPathItem>;
+  /** The document's registered tags, in declaration order. P36V PR3 slice C
+   *  groups the endpoint list by these REAL tags and takes each group's
+   *  description from here — replacing the path-segment inference that predated
+   *  the backend assigning tags. Absent/empty is handled, never assumed. */
+  tags?: { name: string; description?: string }[];
   /** Present in the real generated document. Used ONLY to resolve a local
    *  `#/components/schemas/<Name>` reference back to the schema it names — no
    *  other interpretation, and never a fabricated shape when the target is
