@@ -110,9 +110,21 @@ describe('P24.4 · Source Index — detail (real leads)', () => {
     const scoped = within(panel);
 
     expect(scoped.getByText('Provenance')).toBeInTheDocument(); // related.concepts label
-    expect(scoped.getByText('relates_to')).toBeInTheDocument(); // concept relation
+    // P36V S-B — a KNOWN relation renders through the shared display map, with the
+    // raw value kept exact in `title`; an UNKNOWN one falls through verbatim and is
+    // never guessed. Left raw, `imports` read `Imports` on the Concepts and Graph
+    // tabs and `imports` here, on one screen.
+    const fileRel = scoped.getByText('Imports'); // file relation, humanised
+    expect(fileRel).toHaveAttribute('title', 'imports');
+    expect(scoped.queryByText('imports')).toBeNull();
+    const conceptRel = scoped.getByText('relates_to'); // unknown -> verbatim
+    expect(conceptRel).toHaveAttribute('title', 'relates_to');
+    // The concept's RAW graph label is on `title` too. Nothing on this tab
+    // navigates to the concept and this tab has no Technical Details disclosure,
+    // so without it the raw label — which is what the Concepts tab's search
+    // actually matches — would be unreachable from here.
+    expect(scoped.getByText('Provenance')).toHaveAttribute('title', 'Provenance');
     expect(scoped.getByText('src/other_mod.py')).toBeInTheDocument(); // related.files path
-    expect(scoped.getByText('imports')).toBeInTheDocument(); // file relation
     expect(scoped.getByText('src/fake_mod.py')).toBeInTheDocument(); // local_reference
     expect(scoped.getByText('local reference — open in your editor')).toBeInTheDocument();
 
@@ -133,6 +145,39 @@ describe('P24.4 · Source Index — detail (real leads)', () => {
     fireEvent.click(row);
     expect(row).toHaveAttribute('aria-expanded', 'true');
     await findByText('Deterministic, doubly-gated export transform.');
+  });
+
+  it('keeps a DERIVED concept title lossless — the raw graph label stays reachable here', async () => {
+    // A label whose derived title genuinely differs: the trailing group is
+    // code-only, so `conceptDisplayTitle` drops it. On the Concepts tab the raw
+    // label is still visible verbatim in that pane's Technical Details; this tab
+    // has no such disclosure and nothing here navigates to the concept, so the
+    // raw label must be carried on `title` or it is unreachable from this surface
+    // — and the Concepts search matches the RAW label, not the derived one.
+    const raw = 'AI scientific consistency review (review.py NoOpReviewer)';
+    const detail = {
+      ...memoryFileDetailWithLeads,
+      related: {
+        ...memoryFileDetailWithLeads.related,
+        concepts: [{ id: 'concept-review', label: raw, relation: 'relates_to' }],
+      },
+    };
+    stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'GET /api/memory/files': { body: memoryFilesAvailable },
+      [filePath('src/fake_mod.py')]: { body: detail },
+    });
+    const { findByText, getByRole } = renderScreen();
+    await findByText('Source Index');
+    fireEvent.click(getByRole('button', { name: /src\/fake_mod\.py/ }));
+    await findByText('Deterministic, doubly-gated export transform.');
+
+    const label = await findByText('AI Scientific Consistency Review');
+    expect(label).toHaveAttribute('title', raw);
+    // The derivation is presentation only — the title is the RAW label, never a
+    // second copy of the derived one.
+    expect(label.getAttribute('title')).not.toBe(label.textContent);
   });
 });
 

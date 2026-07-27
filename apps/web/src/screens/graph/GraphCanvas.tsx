@@ -218,14 +218,22 @@ export function GraphCanvas({ index, state, dispatch, visibleIds, edges }: Graph
 
   return (
     <div className="graph-explore">
+      {/* P36V PR2 slice B — Fit and Reset already existed here as ICON-ONLY
+          buttons whose only name was an aria-label. They are now labelled in
+          Title Case, so the two viewport controls the redesign wants
+          "immediately visible" are legible rather than glyph-only. They are NOT
+          duplicated into the primary toolbar: one action, one control, and they
+          belong beside the viewport they act on (Browse has no viewport). Zoom
+          stays icon-only — a magnifier ± is unambiguous and the row must not
+          outgrow the canvas. */}
       <div className="graph-explore-toolbar">
         <button
           type="button"
           className="btn btn-secondary"
           onClick={() => dispatch({ kind: 'fit' })}
-          aria-label="Fit graph to view"
         >
           <Maximize2 size={14} strokeWidth={2} aria-hidden="true" />
+          Fit to View
         </button>
         <button
           type="button"
@@ -247,9 +255,9 @@ export function GraphCanvas({ index, state, dispatch, visibleIds, edges }: Graph
           type="button"
           className="btn btn-secondary"
           onClick={() => dispatch({ kind: 'reset' })}
-          aria-label="Reset view"
         >
           <RotateCcw size={14} strokeWidth={2} aria-hidden="true" />
+          Reset View
         </button>
         <span className="graph-explore-toolbar-sep" aria-hidden="true" />
         <span className="memory-graph-modenote">

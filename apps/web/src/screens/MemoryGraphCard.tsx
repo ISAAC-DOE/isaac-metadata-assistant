@@ -16,11 +16,12 @@
  * un-embedded figures), a scientific relationship map, or a validation verdict.
  */
 import './graph/graph.css';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleHelp, LayoutList, Network, Search } from '../components/icons';
 import { api, type ApiError } from '../lib/api';
+import { relationDisplayLabel } from '../lib/displayLabels';
 import { useFetch } from '../lib/useFetch';
 import {
   GRAPH_URL_PARAMS,
@@ -42,7 +43,6 @@ import {
   buildGraphIndex,
   communityColorIndex,
   communityLabelAmong,
-  communityOptionLabel,
   connectedNodes,
   filteredNodeIds,
   initialGraphViewState,
@@ -51,16 +51,23 @@ import {
   type GraphAction,
   type GraphCommunityEntry,
   type GraphIndex,
-  type GraphTypeFilter,
   type GraphViewState,
 } from '../lib/graphModel';
 import type { ApiMemoryGraphResponse } from '../lib/types';
-import { shortSha } from './ProjectMemory';
 import { GraphBrowse, type BrowseGrouping } from './graph/GraphBrowse';
 import { GraphCanvas } from './graph/GraphCanvas';
 import { GraphCommandBar } from './graph/GraphCommandBar';
 import { GraphDetail, GraphPathResult } from './graph/GraphDetail';
+import {
+  GraphActiveFilters,
+  GraphFiltersPanel,
+  GraphFiltersToggle,
+  activeFilterChips,
+  hiddenFilterCount,
+  noRelationshipsShown,
+} from './graph/GraphFilters';
 import { GraphHelp } from './graph/GraphHelp';
+import { GraphPathFinder, GraphPathToggle } from './graph/GraphPathFinder';
 
 // --- top-level card ---------------------------------------------------------
 
@@ -79,7 +86,7 @@ export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
   const graph = useFetch(() => api.getMemoryGraph(), []);
   const [helpOpen, setHelpOpen] = useState(false);
   const helpTriggerRef = useRef<HTMLButtonElement | null>(null);
-  // The help drawer has THREE openers: the "About this graph" trigger, the
+  // The help drawer has THREE openers: the "About This Graph" trigger, the
   // command bar's "Syntax" button, and typing `help`. Focus must return to
   // whichever one the user actually used — returning it to the trigger after a
   // typed `help` dropped the user out of the command input they were in.
@@ -114,13 +121,20 @@ export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
             onClick={openHelp}
           >
             <CircleHelp size={13} strokeWidth={2} aria-hidden="true" />
-            About this graph
+            About This Graph
           </button>
         )}
       </div>
+      {/* P36V PR2 slice B — ONE visible boundary statement. The longer
+          disclosures that used to stack up here (the un-embedded source graph's
+          figures, the four-layer projection chain, the snapshot provenance line,
+          the full cluster caveat) were RELOCATED into About This Graph, not
+          dropped: Graph Data carries the layer chain and the un-embedded
+          figures, Cluster Colors carries the cluster caveat, and Technical
+          Details carries the provenance fingerprint. */}
       <p className="memory-graph-subtitle">
-        A served-file reference graph derived from Project Memory — leads to verify, never a
-        validation verdict.
+        This graph shows project-file relationships and navigation leads. It does not represent
+        scientific truth or causality.
       </p>
       {graph.status === 'loading' && <LoadingPanel label="Loading graph…" />}
       {graph.status === 'error' && <MemoryGraphError error={graph.error} onRetry={graph.reload} />}
@@ -313,7 +327,10 @@ function MemoryGraphAvailable({
       const parsed = parseGraphCommand(raw);
       if (parsed.status === 'empty') return;
       if (parsed.status === 'help') {
-        const outcome = 'Opened the command syntax in About this graph.';
+        // "About This Graph" verbatim — the trigger's label and the dialog's own
+        // title. A lowercase paraphrase reads as a different thing than the
+        // control the user is being pointed at.
+        const outcome = 'Opened the command syntax in About This Graph.';
         setCommandError(null);
         // A previous command's notice would otherwise outrank this in the live
         // region and `help` would still announce nothing.
@@ -369,6 +386,21 @@ function MemoryGraphAvailable({
   const [pathFrom, setPathFrom] = useState('');
   const [pathTo, setPathTo] = useState('');
 
+  // P36V PR2 slice B — progressive disclosure. Both regions start closed; NO
+  // control was removed, and the active-filter chips below keep a collapsed
+  // Filters panel from hiding the fact that the view is narrowed.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [pathOpen, setPathOpen] = useState(false);
+  const filtersId = useId();
+  const pathId = useId();
+  // "Use as path start" in the detail panel writes into the path tool. With the
+  // tool collapsed that was a click with no visible effect at all, so it opens
+  // the tool it is filling in.
+  const usePathStart = useCallback((id: string) => {
+    setPathFrom(id);
+    setPathOpen(true);
+  }, []);
+
   const listIds = useMemo(() => filteredNodeIds(state, index), [state, index]);
   const canvasIds = useMemo(() => visibleNodeIds(state, index), [state, index]);
   const canvasEdges = useMemo(
@@ -384,17 +416,20 @@ function MemoryGraphAvailable({
 
   const shownCount = state.mode === 'explore' ? canvasIds.length : listIds.length;
 
-  const communityOptions = useMemo(() => {
-    const needle = communityQuery.trim().toLowerCase();
-    const match = (c: (typeof index.communitiesBySize)[number]) =>
-      needle === '' ||
-      (c.name ?? '').toLowerCase().includes(needle) ||
-      c.id.toLowerCase().includes(needle);
-    return {
-      multi: index.communitiesBySize.filter((c) => !c.isSingleton && match(c)),
-      single: index.communitiesBySize.filter((c) => c.isSingleton && match(c)),
-    };
-  }, [index.communitiesBySize, communityQuery]);
+  const chips = useMemo(() => activeFilterChips(state, index), [state, index]);
+  const filterCount = hiddenFilterCount(state, index);
+  // The chip row's controls remove themselves; focus must go somewhere real.
+  const filtersToggleRef = useRef<HTMLButtonElement | null>(null);
+  const focusFiltersToggle = useCallback(() => filtersToggleRef.current?.focus(), []);
+  // The old "Clear filters" button's behaviour, verbatim: the reducer's
+  // `clearFilters` (search, node type, cluster, relationship, focus) plus the
+  // two local text boxes it also emptied.
+  const clearAllFilters = useCallback(() => {
+    setPathFrom('');
+    setPathTo('');
+    setCommunityQuery('');
+    dispatch({ kind: 'clearFilters' });
+  }, [dispatch]);
 
   const navigateToFile = useCallback(
     (path: string) => navigate(`/memory?file=${encodeURIComponent(path)}`),
@@ -406,61 +441,22 @@ function MemoryGraphAvailable({
   );
 
   const meta = data.meta;
-  const u = meta.underlying_graph;
-  const underlyingKnown = u.node_count != null && u.edge_count != null && u.community_count != null;
 
   return (
     <div className="memory-graph-available">
+      {/* P36V PR2 slice B — the header is now ONE data line. The counts keep
+          their scope qualifier so the surface never reads as the whole graph;
+          the figures for the un-embedded source graph, the four-layer projection
+          chain and the provenance fingerprint all moved into About This Graph
+          (Graph Data / Technical Details). Nothing was dropped. */}
       <div className="memory-graph-header">
-        <div className="memory-graph-headline">
-          <p className="memory-graph-counts">
-            {meta.counts.files} files · {meta.counts.concepts} concepts ·{' '}
-            {meta.counts.reference_edges} reference{meta.counts.reference_edges === 1 ? '' : 's'} ·{' '}
-            {meta.counts.communities_rendered} communit
-            {meta.counts.communities_rendered === 1 ? 'y' : 'ies'} shown
-          </p>
-          <p className="memory-graph-provenance mono">
-            {meta.provenance.built_at_commit ? shortSha(meta.provenance.built_at_commit) : '—'} ·
-            source{' '}
-            {meta.provenance.source_graph_sha256 ? shortSha(meta.provenance.source_graph_sha256) : '—'}{' '}
-            · v{meta.provenance.snapshot_schema_version ?? '—'} · {meta.provenance.provider}
-          </p>
-        </div>
-        {/* The `{' '}` is load-bearing: JSX drops the newline between the
-            expression and the em dash, which rendered "…here— this Graph tab". */}
-        <p className="memory-graph-disclosure">
-          {underlyingKnown
-            ? `The underlying source graph (${u.node_count} nodes / ${u.edge_count} edges / ${u.community_count} communities) is not embedded here`
-            : 'The underlying source graph is not embedded here'}{' '}
-          — this Graph tab is a served-file reference projection only, never the full source graph.
+        <p className="memory-graph-counts">
+          {meta.counts.files} files · {meta.counts.concepts} concepts ·{' '}
+          {meta.counts.reference_edges} reference{meta.counts.reference_edges === 1 ? '' : 's'} ·{' '}
+          {meta.counts.communities_rendered} communit
+          {meta.counts.communities_rendered === 1 ? 'y' : 'ies'} shown — an advisory served-file
+          projection, never the full source graph.
         </p>
-        {/* The full layer chain stays on the page (not buried in help), but
-            collapsed: the one-line disclosure above is the honest headline and
-            this is the detail behind it. */}
-        <details className="memory-graph-layers-details">
-          <summary>How this projection is built</summary>
-          <ol className="memory-graph-layers">
-            <li>
-              Full Graphify source graph
-              {underlyingKnown
-                ? ` — ${u.node_count} nodes / ${u.edge_count} edges / ${u.community_count} clusters`
-                : ''}
-              , not embedded in this deployment.
-            </li>
-            <li>
-              Served-file projection — {meta.counts.files} files and {meta.counts.reference_edges}{' '}
-              references, the only part governance allows this deployment to serve.
-            </li>
-            <li>
-              Concepts — {meta.counts.concepts} doc-anchored concepts, carrying no edges in this
-              projection.
-            </li>
-            <li>
-              Clusters — {meta.counts.communities_rendered} automatically-derived groupings, advisory
-              only.
-            </li>
-          </ol>
-        </details>
         {data.truncated && (
           <p className="memory-graph-truncated-note">
             Showing a capped subset of the served-file graph — the node or reference count reached
@@ -469,8 +465,11 @@ function MemoryGraphAvailable({
         )}
       </div>
 
-      {/* mode switch + shared controls — the controls are identical in both
-          modes, so they live on one wrapping row with the switch. */}
+      {/* PRIMARY TOOLBAR — mode, search, and the two disclosures. Everything
+          else that used to live on this row (node type, cluster search, cluster
+          select, relationship checkboxes, grouping, the path form) is behind
+          Filters or Find a Path; the canvas viewport controls (Fit to View,
+          Reset View, zoom) are on the canvas toolbar they act on. */}
       <div className="memory-graph-controls">
         <div className="memory-graph-modeswitch" role="radiogroup" aria-label="Graph view mode">
           <button
@@ -509,155 +508,50 @@ function MemoryGraphAvailable({
             onChange={(e) => dispatch({ kind: 'search', query: e.target.value })}
           />
         </label>
-        <label className="memory-graph-filter">
-          <span>Show</span>
-          <select
-            value={state.typeFilter}
-            onChange={(e) => dispatch({ kind: 'filterType', value: e.target.value as GraphTypeFilter })}
-          >
-            <option value="all">Files &amp; concepts</option>
-            <option value="file">Files only</option>
-            <option value="concept">Concepts only</option>
-          </select>
-        </label>
-        <label className="memory-graph-filter">
-          <span>Find a cluster</span>
-          <input
-            type="text"
-            value={communityQuery}
-            placeholder="narrow the list…"
-            onChange={(e) => setCommunityQuery(e.target.value)}
-          />
-        </label>
-        {/* P36R S10 — labelled "Cluster", not "Community". Every option this
-            control renders says "cluster" ("All clusters", "Multi-file
-            clusters", "Single-file clusters", and `communityOptionLabel`'s
-            `cluster <id>`), as does the "Find a cluster" input immediately
-            before it and the help drawer's "Cluster colours" section. The
-            payload field stays `community_id` and the command keyword stays
-            `community` — only the human label changes. */}
-        <label className="memory-graph-filter">
-          <span>Cluster</span>
-          <select
-            value={state.communityFilter}
-            onChange={(e) => dispatch({ kind: 'filterCommunity', id: e.target.value })}
-          >
-            <option value="all">All clusters</option>
-            {communityOptions.multi.length > 0 && (
-              <optgroup label="Multi-file clusters">
-                {communityOptions.multi.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {communityOptionLabel(c)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {communityOptions.single.length > 0 && (
-              <optgroup label="Single-file clusters (label is one file's name)">
-                {communityOptions.single.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {communityOptionLabel(c)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-        </label>
-        {state.mode === 'browse' && (
-          <label className="memory-graph-filter">
-            <span>Group by</span>
-            <select value={grouping} onChange={(e) => setGrouping(e.target.value as BrowseGrouping)}>
-              <option value="type">File type</option>
-              <option value="community">Cluster</option>
-            </select>
-          </label>
-        )}
+        <GraphFiltersToggle
+          id={filtersId}
+          open={filtersOpen}
+          count={filterCount}
+          onToggle={() => setFiltersOpen((o) => !o)}
+          buttonRef={filtersToggleRef}
+        />
+        <GraphPathToggle id={pathId} open={pathOpen} onToggle={() => setPathOpen((o) => !o)} />
       </div>
-      <p className="memory-graph-community-note">
-        Clusters are derived automatically by the upstream graph builder and named after one
-        representative node — {index.counts.singletonCommunities} of {index.counts.communities} hold
-        a single file. Advisory groupings, not as categories the schema recognises.
-      </p>
 
-      <fieldset className="memory-graph-relations">
-        <legend>Relationships</legend>
-        <div className="memory-graph-relations-row">
-          {index.relationTypes.map((rel) => {
-            const checked = state.relationFilter === null || state.relationFilter.includes(rel);
-            return (
-              <label className="memory-graph-relation-check" key={rel}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => {
-                    const current = state.relationFilter ?? [...index.relationTypes];
-                    const next = current.includes(rel)
-                      ? current.filter((r) => r !== rel)
-                      : [...current, rel];
-                    // Everything ticked is "no filter" (null); anything less is
-                    // the exact set — including none, which honestly draws none.
-                    dispatch({
-                      kind: 'filterRelation',
-                      relations: next.length === index.relationTypes.length ? null : next,
-                    });
-                  }}
-                />
-                <span className="mono">{rel}</span>
-              </label>
-            );
-          })}
-          {index.relationTypes.length === 0 && (
-            <span className="memory-graph-relations-note">
-              No relationship values are present in this projection.
-            </span>
-          )}
-          <span className="memory-graph-relations-note">
-            the backend's own values · unticking one also stops paths travelling through it
-          </span>
-        </div>
-      </fieldset>
+      {filtersOpen && (
+        <GraphFiltersPanel
+          id={filtersId}
+          index={index}
+          state={state}
+          dispatch={dispatch}
+          communityQuery={communityQuery}
+          onCommunityQuery={setCommunityQuery}
+          grouping={grouping}
+          onGrouping={setGrouping}
+        />
+      )}
 
-      <form
-        className="memory-graph-pathform"
-        onSubmit={(e) => {
-          e.preventDefault();
-          dispatch({ kind: 'path', from: pathFrom, to: pathTo });
-        }}
-      >
-        <label className="memory-graph-pathfield">
-          <span>Path from</span>
-          <input
-            type="text"
-            value={pathFrom}
-            placeholder="file path or concept"
-            onChange={(e) => setPathFrom(e.target.value)}
-          />
-        </label>
-        <label className="memory-graph-pathfield">
-          <span>Path to</span>
-          <input
-            type="text"
-            value={pathTo}
-            placeholder="file path or concept"
-            onChange={(e) => setPathTo(e.target.value)}
-          />
-        </label>
-        <button type="submit" className="btn btn-secondary">
-          Find path
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => {
-            setPathFrom('');
-            setPathTo('');
-            setCommunityQuery('');
-            dispatch({ kind: 'clearFilters' });
-          }}
-        >
-          Clear filters
-        </button>
-      </form>
+      {/* Active filters stay visible whether or not the panel is open — a
+          collapsed disclosure must never be able to hide a narrowed view. */}
+      <GraphActiveFilters
+        chips={chips}
+        dispatch={dispatch}
+        onClearAll={clearAllFilters}
+        onFocusFiltersToggle={focusFiltersToggle}
+        noRelationships={noRelationshipsShown(state, index)}
+      />
+
+      {pathOpen && (
+        <GraphPathFinder
+          id={pathId}
+          state={state}
+          dispatch={dispatch}
+          from={pathFrom}
+          to={pathTo}
+          onFrom={setPathFrom}
+          onTo={setPathTo}
+        />
+      )}
 
       {/* P36R S4 — the deterministic command bar. A bounded grammar over the
           SAME actions the controls above dispatch; it adds no capability the
@@ -749,7 +643,7 @@ function MemoryGraphAvailable({
             relationFiltered={state.relationFilter !== null}
             onSelect={(id) => dispatch({ kind: 'select', nodeId: id })}
             onNeighbors={(id, depth) => dispatch({ kind: 'neighbors', nodeId: id, depth })}
-            onPathFrom={(id) => setPathFrom(id)}
+            onPathFrom={usePathStart}
             onNavigateFile={navigateToFile}
             onNavigateConcept={navigateToConcept}
           />
@@ -891,11 +785,29 @@ function GraphNoticeView({
 
 // --- legend -------------------------------------------------------------------
 
+/*
+ * P36V PR2 slice B — the legend now READS as a legend.
+ *
+ * Before: three run-on text fragments ("circle = file", "diamond = concept",
+ * "lines = references … (calls, imports, imports_from, references)") followed by
+ * a row of `name · N files` strings. The relation values were joined raw, the
+ * count was welded onto the cluster title, and the primary label for a node type
+ * was code-style text.
+ *
+ * Now: named groups, the ACTUAL mark beside a readable Title-Case type name, and
+ * the cluster's file count in its own element next to (not inside) its title.
+ *
+ * WHAT IS NOT RENAMED: cluster names. They are arbitrary upstream data and render
+ * verbatim, with the raw cluster id available on `title`. Only the closed
+ * five-value relationship vocabulary is relabelled.
+ *
+ * The coloured-cluster derivation below is UNCHANGED, deliberately: it is the
+ * same `communityColorIndex` the canvas paints with. Re-deriving it here (by
+ * rank, or by dropping singletons) is exactly how P36R once ended up with a
+ * coloured node that had no legend entry while the neutral swatch silently
+ * claimed it.
+ */
 function GraphLegend({ index }: { index: GraphIndex }) {
-  // ONE source of truth for "which clusters are coloured": the same function
-  // the canvas paints with. Re-deriving it here (by rank, or by dropping
-  // singletons) is exactly how a coloured node ends up with no legend entry
-  // while the neutral swatch silently claims it.
   const coloured = index.communitiesBySize
     .map((entry) => ({ entry, slot: communityColorIndex(entry.id, index) }))
     .filter((c): c is { entry: GraphCommunityEntry; slot: number } => c.slot !== null);
@@ -905,38 +817,92 @@ function GraphLegend({ index }: { index: GraphIndex }) {
     index.nodes.some((n) => !n.community_id);
   return (
     <div className="graph-legend">
-      <p className="graph-legend-row">
-        <span className="graph-legend-item">
-          <span className="graph-legend-swatch shape-file-outline" aria-hidden="true" />
-          circle = file
-        </span>
-        <span className="graph-legend-item">
-          <span className="graph-legend-swatch shape-concept shape-file-outline" aria-hidden="true" />
-          diamond = concept
-        </span>
-        <span className="graph-legend-item">
-          lines = references recorded in the projection ({index.relationTypes.join(', ') || 'none'})
-        </span>
-      </p>
+      {/* <h3>, not <h4>: the card's own heading is the <h2> above, and the
+          detail pane beside this legend opens at <h3>. An <h4> here both skipped
+          a level and put a deeper heading BEFORE a shallower one in document
+          order, which is exactly what a screen-reader outline cannot recover
+          from. */}
+      <h3 className="graph-legend-heading">Legend</h3>
+
+      <div className="graph-legend-group">
+        <p className="graph-legend-group-title">Node Types</p>
+        <div className="graph-legend-row">
+          <span className="graph-legend-item">
+            <span className="graph-legend-swatch shape-file-outline" aria-hidden="true" />
+            <span className="graph-legend-name">Files</span>
+          </span>
+          <span className="graph-legend-item">
+            <span className="graph-legend-swatch shape-concept shape-file-outline" aria-hidden="true" />
+            <span className="graph-legend-name">Concepts</span>
+          </span>
+        </div>
+      </div>
+
       {coloured.length > 0 && (
-        <p className="graph-legend-row">
-          {coloured.map(({ entry, slot }) => (
-            <span className="graph-legend-item" key={entry.id}>
-              <span className={`graph-legend-swatch c${slot}`} aria-hidden="true" />
-              {/* `name · N files`, never `name (28) (13)`: upstream names carry
-                  their own parenthetical, so a second one reads as the same
-                  kind of number. Identical names get their cluster id too. */}
-              {communityLabelAmong(entry, colouredEntries)}
-            </span>
-          ))}
-          {neutralExists && (
-            <span className="graph-legend-item">
-              <span className="graph-legend-swatch" aria-hidden="true" />
-              every other cluster, and nodes in no cluster
-            </span>
-          )}
-        </p>
+        <div className="graph-legend-group">
+          <p className="graph-legend-group-title">Clusters</p>
+          <div className="graph-legend-row">
+            {coloured.map(({ entry, slot }) => {
+              // `communityLabelAmong` is still the authority on WHICH text
+              // identifies this cluster (it appends `cluster <id>` when two
+              // clusters share a name) — but the file count is rendered as its
+              // own element rather than welded into the title.
+              const label = communityLabelAmong(entry, colouredEntries);
+              const suffix = ` · ${entry.file_count} file${entry.file_count === 1 ? '' : 's'}`;
+              const title = label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
+              return (
+                <span className="graph-legend-item" key={entry.id} title={`cluster ${entry.id}`}>
+                  <span className={`graph-legend-swatch c${slot}`} aria-hidden="true" />
+                  <span className="graph-legend-name">{title}</span>
+                  <span className="graph-legend-count">
+                    {entry.file_count} file{entry.file_count === 1 ? '' : 's'}
+                  </span>
+                </span>
+              );
+            })}
+            {neutralExists && (
+              <span className="graph-legend-item">
+                <span className="graph-legend-swatch" aria-hidden="true" />
+                <span className="graph-legend-name">Every Other Cluster, and Nodes in No Cluster</span>
+              </span>
+            )}
+          </div>
+        </div>
       )}
+
+      <div className="graph-legend-group">
+        <p className="graph-legend-group-title">References</p>
+        <div className="graph-legend-row">
+          <span className="graph-legend-item">
+            <span className="graph-legend-swatch graph-legend-line" aria-hidden="true" />
+            {/* Each relation is its OWN element carrying the backend's exact
+                value on `title`, exactly as a cluster entry carries
+                `cluster <id>`. This replaced a second visible copy of the whole
+                vocabulary — a `.graph-legend-raw` mono line printing
+                `calls · imports · imports_from · references · shares_data_with`
+                directly beneath the group that had just listed them in Title
+                Case. The raw token is already reachable at the three places
+                closer to the action (the filter checkbox's `title`,
+                GraphDetail's `title`, and About This Graph → Relationship
+                Types, which pairs each label with its value and says which of
+                the two the filter matches); an unlabelled row of context-free
+                mono tokens on the primary surface was the duplication this
+                slice exists to remove. */}
+            <span className="graph-legend-name">
+              {index.relationTypes.length > 0
+                ? index.relationTypes.map((rel, i) => (
+                    <span key={rel}>
+                      {i > 0 ? ' · ' : ''}
+                      <span className="graph-legend-relation" title={rel}>
+                        {relationDisplayLabel(rel)}
+                      </span>
+                    </span>
+                  ))
+                : 'No relationship values are present in this projection'}
+            </span>
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

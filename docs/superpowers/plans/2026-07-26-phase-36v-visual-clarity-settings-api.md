@@ -110,6 +110,35 @@ verify **N6** in the browser used a leaf-only DOM filter that silently excluded
 `.assistant-memory` (it wraps a status dot), producing a misleading count; re-verified with
 an outermost-statement query before the result was accepted.
 
+## 4b. PR 2 outcome
+
+Frontend **1165 → 1242 passed** (71 → 73 files). Backend 1029 unchanged. `tsc -b` clean;
+production build clean; snapshot regenerated, `--check` no drift, non-sha diff is
+`served_manifest_fingerprint` only.
+
+The graph surface went from **~13 interactive controls plus 7 prose blocks above the
+canvas** to four controls and two lines, carrying exactly the prescribed single boundary
+sentence. Verified in a production build at `/krish`: the Filters panel opens with every
+former control reachable; the trigger reports an active count; chips are removable; `Clear
+All Filters` restores 220 of 220 nodes; the help dialog renders exactly the ten prescribed
+sections in order with `aria-modal="true"`, Technical Details collapsed, focus moved inside,
+and Escape restoring focus to its trigger.
+
+Independent review returned **DO NOT SHIP** on one Critical and three Important findings.
+The Critical (**C1**) is the phase's most instructive defect: the active-filter chips
+enumerated the relations still **shown** rather than those **hidden**, so on the real
+five-relation payload unticking one relation produced a trigger reading "Filters 1 active"
+beside **four** chips whose accessible names — "Remove the Imports relationship filter" —
+named relations being kept, and whose activation *narrowed* the graph while every sibling
+control widened it. Both test fixtures carry only one or two relation types, so the wording
+reads correctly there and all 1242 tests passed. The orchestrator's own browser QA had
+exercised the cluster filter but not the relation filter, and missed it as well. Confirmed
+in the browser on the real payload before being fixed.
+
+The first review attempt stalled mid-mutation-probe. Tree integrity was re-established
+before continuing — snapshot `--check` (which fails if any manifest-listed source is
+altered), both suites, and `tsc -b` all confirmed the branch state was intact.
+
 ## 5. Reconciliations (recorded, never silent)
 
 - **N1 — the edge provider is not named in client copy.** The authorizing spec asks
@@ -157,6 +186,31 @@ an outermost-statement query before the result was accepted.
   pages already state it. Guided Completion renders nothing because it genuinely cannot
   know. This satisfies the phase's own "free of repeated definitions" goal and the
   accessibility requirements, which the literal reading contradicted.
+
+- **N7 — relation types are humanized; cluster names are not.** The spec lists
+  `cell_type → Cell Type` among its humanization requirements. Measured against the real
+  snapshot: relation types are a **closed set of five** (`references` 389, `imports` 382,
+  `calls` 160, `imports_from` 69, `shares_data_with` 2) and are safe to map explicitly.
+  Cluster/community names are **open-ended arbitrary data** — 100+ distinct values including
+  `SHE_work_function_eV`, `test_export.py`, `record_id`, `slab_model` and `cell_type` itself,
+  which is a `community_name`, not a field type. The same snake_case rule applied to that
+  namespace yields **"She Work Function Ev"** (destroying a standard-hydrogen-electrode
+  acronym and an electronvolt unit) and **"Test Export.py"**. Fabricating a scientific label
+  is precisely what the no-guessing rule forbids, so relation types are mapped through an
+  exhaustive verifiable table with **verbatim fallthrough for anything unknown**, and cluster
+  names render exactly as the data holds them, with the raw cluster id on `title`.
+  Readability was improved structurally instead: real node shapes, counts separated from
+  titles, and Technical Details disclosures. Independent review re-measured and endorsed the
+  boundary against the spec. Humanizing cluster names would require a curated per-value map
+  approved by a human — not a rule.
+- **N8 — the legend's secondary raw token line was removed.** It printed the five raw
+  relation values a second time, in a second casing, directly beneath a group already listing
+  them — the duplication this phase exists to remove — as an unlabelled bare `<p>` of
+  context-free monospace on the primary surface. The raw token remains available at the three
+  places closer to the action: the filter checkbox's own `title`, `GraphDetail`'s `title`, and
+  the help's Relationship Types section, which pairs each label with its raw value and states
+  which of the two the filter and the `relation` command match. Per-entry `title` attributes
+  replace the line, matching how cluster entries already expose their raw id.
 
 ## 6. Boundaries held
 

@@ -168,7 +168,7 @@ describe('graph command bar — commands drive the canonical state', () => {
     const view = await renderGraph();
     submit(view, 'help');
     const dialog = await view.findByRole('dialog');
-    expect(dialog.textContent).toContain('Command syntax');
+    expect(dialog.textContent).toContain('Command Bar');
     expect(dialog.textContent).toContain('path <node-a> -> <node-b>');
     expect(dialog.textContent).toContain('neighbors <node> [depth 1|2]');
   });
@@ -365,7 +365,7 @@ describe('graph command bar — keyboard-first', () => {
   it('returns focus to the control that OPENED the syntax panel', async () => {
     const view = await renderGraph();
     // Typed `help`: focus belongs back in the command input the user was in,
-    // not on the "About this graph" trigger they never touched.
+    // not on the "About This Graph" trigger they never touched.
     bar(view).focus();
     submit(view, 'help');
     await view.findByRole('dialog');
@@ -383,7 +383,7 @@ describe('graph command bar — keyboard-first', () => {
     expect(document.activeElement).toBe(syntax);
 
     // …and the card's own trigger still returns to the card's own trigger.
-    const trigger = view.getByRole('button', { name: /About this graph/ });
+    const trigger = view.getByRole('button', { name: /About This Graph/ });
     trigger.focus();
     fireEvent.click(trigger);
     await view.findByRole('dialog');

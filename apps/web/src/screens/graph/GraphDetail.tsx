@@ -7,6 +7,7 @@
  * relation values, neighbourhood expansion, source navigation, and the raw node
  * JSON. The canvas adds spatial insight; it adds no capability.
  */
+import { relationDisplayLabels } from '../../lib/displayLabels';
 import type { ApiMemoryGraphNode } from '../../lib/types';
 import type { GraphFocus, GraphIndex, GraphNeighbor } from '../../lib/graphModel';
 import { communityLabel } from '../ProjectMemory';
@@ -155,7 +156,16 @@ export function GraphDetail({
                   >
                     <span className="mono">{n?.label ?? nb.id}</span>
                     {nb.relations.length > 0 && (
-                      <span className="memory-graph-detail-relation">{nb.relations.join(', ')}</span>
+                      /* P36V PR2 slice B — the SAME closed five-value map the
+                         legend, the filter checkboxes and the chips use, so one
+                         relation does not read two ways on one surface. The
+                         backend's exact values stay in `title`. */
+                      <span
+                        className="memory-graph-detail-relation"
+                        title={nb.relations.join(', ')}
+                      >
+                        {relationDisplayLabels(nb.relations).join(' · ')}
+                      </span>
                     )}
                   </button>
                 </li>
@@ -223,8 +233,10 @@ export function GraphPathResult({
         semantic or scientific connection, and it is not evidence for anything in a record.
       </p>
       <div className="memory-graph-detail-actions">
+        {/* Distinct from the Find a Path tool's own "Clear Path", which resets
+            the tool's two inputs. This one dismisses the RESULT it sits beside. */}
         <button type="button" className="btn btn-secondary" onClick={onClear}>
-          Clear path
+          Clear Path Result
         </button>
       </div>
     </div>

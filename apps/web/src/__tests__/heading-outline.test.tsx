@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import {
@@ -7,6 +7,8 @@ import {
   evidenceBundleRoutes,
   experimentSummary,
   graphStatusAvailable,
+  graphStatusUnavailable,
+  memoryGraphAvailable,
   stubFetchRoutes,
 } from '../test/apiFixtures';
 
@@ -64,5 +66,63 @@ describe('A11Y-1 — one screen-level h1 per routed surface', () => {
   });
   it('Settings', async () => {
     expect(await h1CountAt('/settings', null, null)).toBe(1);
+  });
+});
+
+/*
+ * P36V PR2 — one h1 is necessary but not sufficient: an outline also has to be
+ * READABLE in document order. The Graph tab shipped a `<h4>Legend</h4>` under
+ * the card's `<h2>` and BEFORE the detail pane's `<h3>`, so the outline both
+ * skipped a level and went deeper-then-shallower — the one shape a screen
+ * reader's heading navigation cannot recover from. Level 1 is the app shell's.
+ */
+describe('A11Y — heading levels never skip a level or go backwards', () => {
+  const levels = (root: ParentNode): number[] =>
+    [...root.querySelectorAll('h1, h2, h3, h4, h5, h6')].map((h) => Number(h.tagName[1]));
+
+  /** Every step down must be by exactly one; steps up may go any distance. */
+  function assertMonotonic(found: number[], where: string) {
+    expect(found.length, `${where}: no headings found`).toBeGreaterThan(0);
+    for (let i = 1; i < found.length; i += 1) {
+      expect(
+        found[i] - found[i - 1],
+        `${where}: h${found[i - 1]} → h${found[i]} at index ${i} (${found.join(',')})`,
+      ).toBeLessThanOrEqual(1);
+    }
+  }
+
+  it('Project Memory · Graph (Explore, a node selected)', async () => {
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'GET /api/memory/graph': { body: memoryGraphAvailable },
+    });
+    const view = renderAt('/memory');
+    fireEvent.click(view.getByRole('tab', { name: 'Graph' }));
+    await view.findByText('Graph', { selector: 'h2' });
+
+    // The legend renders in Explore; the detail pane needs a selection, which
+    // Browse can make and Explore then keeps — that is the exact pairing that
+    // put an h4 before an h3.
+    fireEvent.click(view.getByRole('radio', { name: 'Browse' }));
+    fireEvent.click(view.getByText('src/fake_mod.py'));
+    fireEvent.click(view.getByRole('radio', { name: 'Explore' }));
+
+    const card = view.container.querySelector('.memory-graph-card') as HTMLElement;
+    expect(card.querySelector('.graph-legend')).not.toBeNull();
+    expect(card.querySelector('.memory-graph-detail')).not.toBeNull();
+    assertMonotonic(levels(card), 'graph card');
+    assertMonotonic(levels(view.container), 'Project Memory page');
+  });
+
+  it('Project Memory · Graph · About This Graph drawer', async () => {
+    stubFetchRoutes({
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'GET /api/memory/graph': { body: memoryGraphAvailable },
+    });
+    const view = renderAt('/memory');
+    fireEvent.click(view.getByRole('tab', { name: 'Graph' }));
+    await view.findByText('Graph', { selector: 'h2' });
+    fireEvent.click(view.getByRole('button', { name: 'About This Graph' }));
+    assertMonotonic(levels(view.getByRole('dialog')), 'graph help dialog');
   });
 });
