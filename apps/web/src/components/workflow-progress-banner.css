@@ -58,14 +58,16 @@
 
 .wf-progress-action { flex: none; }
 
-/* EvidenceExplorer mounts on a mainPad="none" screen (no ambient <main>
- * padding) — wrap the banner in this class there so its edges line up with
- * the padded panels below it (.evclass uses 20px 24px; other record screens'
- * mainPad="pad"/"centered" containers already provide this inset, so they
- * don't use it). */
-.wf-progress-banner-inset {
-  margin: 0 24px;
-}
+/* The banner declares NO top margin on purpose. On every record screen the
+ * distance between the TopBar and the first content element is owned by the
+ * shell's shared `--main-top-gutter` (chrome.css) — a banner-local margin-top
+ * would be a second, competing gutter that only one of the four screens got.
+ *
+ * The horizontal inset it needs on the unpadded `mainPad="none"` evidence
+ * screen is likewise shared: `.main-inset` in chrome.css (24px, matching the
+ * panels stacked below). It replaced the one-off `.wf-progress-banner-inset`
+ * that used to live here, which supplied horizontal spacing only and left the
+ * banner flush against the TopBar. */
 
 /* Narrow viewports: stack the text cluster above the action, full width —
  * matches the app's other max-width:640px collapse rules (screens.css). No

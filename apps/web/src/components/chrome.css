@@ -38,15 +38,57 @@
      `22px 26px`, so this is a real +2px per side on BOTH edges of EVERY padded
      main — including the screens that opt into no width mode. That is
      intentional (one consistent outer gutter across the app) and inert to
-     layout: `box-sizing: border-box` is global. Vertical padding is unchanged. */
+     layout: `box-sizing: border-box` is global. */
   --main-gutter: 28px;
+
+  /* The single named TOP content gutter (P36V1 S6) — the vertical counterpart
+     of --main-gutter. It is the ONE distance between the 60px TopBar/breadcrumb
+     and the first element of main content, and it is owned by the shell, not by
+     whatever component happens to render first.
+
+     Before this slice there was no such contract: `.screen-main.pad` hard-coded
+     22px, `.centered-col` hard-coded 24px, and `mainPad="none"` had NOTHING —
+     so EvidenceExplorer's LOADED branch (the only `mainPad="none"` mount in the
+     app, `variant="evidence"`) rendered its WorkflowProgressBanner flush against
+     the TopBar while the SAME file's loading / no-evidence branches
+     (`mainPad="pad"`) got 22px. One page, two answers.
+
+     Each preset now consumes this token EXACTLY ONCE, and nothing downstream
+     adds a second top gutter:
+       .pad       → main's own padding-top.
+       none       → main's padding-top (the `:not()` rule below).
+       centered   → `.centered-col`'s padding-top; main stays unpadded, because
+                    main is the flex CONTAINER there and the column is the child
+                    that owns the measure. Putting it in both would double it.
+     Components that previously supplied their own clearance were reconciled to
+     zero-top: `.evclass` (classification.css) is the one that existed. */
+  --main-top-gutter: 24px;
 }
 .screen-main.pad {
-  padding: 22px var(--main-gutter);
+  padding: var(--main-top-gutter) var(--main-gutter) 22px;
+}
+/* mainPad="none" — no ambient horizontal padding (a split layout such as
+   `variant="evidence"` lets its own panels own their insets), but the shared
+   TOP gutter still applies. This is why the fix lives here and not as a margin
+   bolted onto one banner: any future unpadded main inherits it automatically. */
+.screen-main:not(.pad):not(.centered) {
+  padding-top: var(--main-top-gutter);
 }
 .screen-main.centered {
   display: flex;
   justify-content: center;
+}
+
+/* Horizontal inset for content mounted DIRECTLY in an unpadded main (the
+   `mainPad="none"` case). 24px, deliberately not --main-gutter's 28px: it must
+   line up with the evidence panels stacked beneath it, which carry a 24px
+   internal inset (`.evclass` in classification.css, `.csv-recon` in
+   csv-reconcile.css). It sets NO vertical margin — the shared top gutter above
+   already positions the first element, and its children (LiveSyncNote,
+   WorkflowProgressBanner) own their own bottom margins. Replaces the one-off
+   `.wf-progress-banner-inset`. */
+.main-inset {
+  margin: 0 24px;
 }
 
 /* ---- Shared content-width system (P36R S1) --------------------------- */
@@ -92,7 +134,11 @@
 .centered-col {
   width: 100%;
   max-width: var(--content-max, 1040px);
-  padding: 24px var(--main-gutter);
+  /* Top from the shared token (see --main-top-gutter); sides from the shared
+     horizontal gutter; bottom is the column's own trailing space. `main` is the
+     flex container in this preset and adds no padding, so this is the single
+     top gutter, not a second one. */
+  padding: var(--main-top-gutter) var(--main-gutter) 24px;
 }
 .centered-col.narrow {
   max-width: var(--content-max, 720px);
@@ -413,6 +459,10 @@
   .app { padding: 10px; }
   .screen-card { min-height: calc(100vh - 20px); }
 
+  /* Responsive equivalent of the shared top gutter — ONE redeclaration of the
+     token, so every preset (.pad / none / .centered) tracks it together. */
+  .screen-main { --main-top-gutter: 20px; }
+
   /* Panes stack vertically instead of sitting in a fixed-width row. */
   .screen-body { flex-direction: column; }
 
@@ -438,6 +488,15 @@
 }
 
 @media (max-width: 640px) {
+  /* Phone widths: a smaller gutter, so the first element is never pushed an
+     excessive distance below the bar on a short viewport. `.centered-col` is
+     independently re-padded to 16px top by screens.css at this breakpoint —
+     the SAME value, so the two agree rather than fighting. */
+  .screen-main { --main-top-gutter: 16px; }
+  /* Track `.preview`'s 14px phone inset (evidence.css) so the banner still
+     lines up with the panels below it. */
+  .main-inset { margin: 0 14px; }
+
   .topbar { gap: 8px; padding: 0 12px; }
   /* Trim the search trigger to its icon and drop the supplementary mono
      filename so the topbar never overflows at phone widths. */

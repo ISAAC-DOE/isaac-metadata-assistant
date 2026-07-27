@@ -7,9 +7,15 @@
  * relation values, neighbourhood expansion, source navigation, and the raw node
  * JSON. The canvas adds spatial insight; it adds no capability.
  */
-import { relationDisplayLabels } from '../../lib/displayLabels';
+import { relationDisplayLabel, relationDisplayLabels } from '../../lib/displayLabels';
 import type { ApiMemoryGraphNode } from '../../lib/types';
 import type { GraphFocus, GraphIndex, GraphNeighbor } from '../../lib/graphModel';
+import {
+  deepStaleness,
+  stalenessSentence,
+  type DeepIndex,
+  type DeepNode,
+} from '../../lib/graphDeep';
 import { communityLabel } from '../ProjectMemory';
 
 /**
@@ -192,6 +198,235 @@ export function GraphDetail({
         <summary>Raw node data</summary>
         <pre className="mono">{JSON.stringify(node, null, 2)}</pre>
       </details>
+    </div>
+  );
+}
+
+// --- the DEEP mark's detail (P36V.1 Unit F) ----------------------------------
+//
+// The keyboard-equivalent of hovering a symbol or a cluster on the canvas, and
+// the reason the deep layer is not pointer-only: everything a click reveals
+// spatially is here as text — kind, cluster, source file and line, connection
+// count, and the ACTUAL recorded relationships split by direction, each one a
+// button that pins that node in turn. Rendered in Explore AND Browse.
+//
+// Bounded on purpose: a hub symbol can carry hundreds of edges, and a list that
+// long is not readable. The bound is stated, never silent.
+const DEEP_LIST_MAX = 40;
+
+export function GraphDeepDetail({
+  deep,
+  selectedId,
+  relationFilter,
+  onSelectDeep,
+  onNavigateFile,
+  onClear,
+}: {
+  deep: DeepIndex;
+  selectedId: string;
+  /** the active relationship filter — `null` means every type */
+  relationFilter: readonly string[] | null;
+  onSelectDeep: (id: string | null) => void;
+  onNavigateFile: (path: string) => void;
+  onClear: () => void;
+}) {
+  const cluster = deep.clusterByKey.get(selectedId);
+  const node = deep.byId.get(selectedId);
+  if (!cluster && !node) {
+    return (
+      <p className="memory-graph-detail-empty">
+        That mark is no longer on the canvas, so nothing is described here — an approximate match is
+        never substituted.
+      </p>
+    );
+  }
+
+  const allowed = (relation: string) => relationFilter === null || relationFilter.includes(relation);
+  const staleness = deepStaleness(deep.provenance);
+
+  const sourceFile = cluster ? cluster.sourceFile : node!.sourceFile;
+  const communityId = cluster ? cluster.communityId : node!.communityId;
+  const communityName = cluster
+    ? cluster.name
+    : (communityId !== null ? (deep.communityNames.get(communityId) ?? null) : null);
+  const title = cluster
+    ? (cluster.name ?? (cluster.communityId ? `cluster ${cluster.communityId}` : 'no cluster'))
+    : node!.label;
+
+  // A cluster lists its MEMBERS; a symbol lists its recorded relationships,
+  // split by direction, because direction is real in this payload.
+  const members: DeepNode[] = cluster
+    ? cluster.members.map((i) => deep.byIndex.get(i)).filter((n): n is DeepNode => n !== undefined)
+    : [];
+  const out: { other: DeepNode; relation: string }[] = [];
+  const inbound: { other: DeepNode; relation: string }[] = [];
+  if (node) {
+    for (const edgeIndex of deep.incident.get(node.index) ?? []) {
+      const edge = deep.edges[edgeIndex];
+      if (!allowed(edge.relation)) continue;
+      const otherIndex = edge.source === node.index ? edge.target : edge.source;
+      const other = deep.byIndex.get(otherIndex);
+      if (!other) continue;
+      (edge.source === node.index ? out : inbound).push({ other, relation: edge.relation });
+    }
+  }
+  const connections = cluster ? cluster.internalEdges + cluster.externalEdges : out.length + inbound.length;
+
+  return (
+    <div className="memory-graph-detail memory-graph-deep-detail">
+      <h3 className="memory-graph-detail-title mono">{title}</h3>
+      <dl className="memory-graph-detail-figures">
+        <div className="memory-graph-detail-figure">
+          <dt>Kind</dt>
+          <dd>
+            {cluster
+              ? `Cluster of ${cluster.members.length} node${cluster.members.length === 1 ? '' : 's'}`
+              : `${node!.fileType ?? 'unknown'} node`}
+          </dd>
+        </div>
+        <div className="memory-graph-detail-figure">
+          <dt>Cluster</dt>
+          <dd>{communityName ?? (communityId ? `cluster ${communityId}` : '—')}</dd>
+        </div>
+        <div className="memory-graph-detail-figure">
+          <dt>Cluster ID</dt>
+          <dd className="mono">{communityId ?? '—'}</dd>
+        </div>
+        <div className="memory-graph-detail-figure">
+          <dt>Source file</dt>
+          <dd className="mono">{sourceFile}</dd>
+        </div>
+        {node?.sourceLocation && (
+          <div className="memory-graph-detail-figure">
+            <dt>Location</dt>
+            <dd className="mono">{node.sourceLocation}</dd>
+          </div>
+        )}
+        <div className="memory-graph-detail-figure">
+          <dt>Relationships</dt>
+          <dd className="mono">{connections}</dd>
+        </div>
+      </dl>
+
+      <div className="memory-graph-detail-actions">
+        <button type="button" className="btn btn-secondary" onClick={() => onNavigateFile(sourceFile)}>
+          View in Sources
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={onClear}>
+          Unpin
+        </button>
+      </div>
+
+      {cluster && (
+        <div className="memory-graph-detail-section">
+          <h4 className="memory-graph-detail-section-heading">Nodes in this cluster</h4>
+          <ul className="memory-graph-detail-connected-list">
+            {members.slice(0, DEEP_LIST_MAX).map((m) => (
+              <li key={m.id}>
+                <button
+                  type="button"
+                  className="memory-graph-detail-connected-link"
+                  onClick={() => onSelectDeep(m.id)}
+                >
+                  <span className="mono">{m.label}</span>
+                  {m.sourceLocation && (
+                    <span className="memory-graph-detail-relation">{m.sourceLocation}</span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {members.length > DEEP_LIST_MAX && (
+            <p className="memory-graph-detail-empty-note">
+              Showing {DEEP_LIST_MAX} of {members.length} nodes in this cluster — the rest are on the
+              canvas at symbol zoom, not discarded.
+            </p>
+          )}
+        </div>
+      )}
+
+      {node && (
+        <>
+          <DeepRelationList
+            heading="References out"
+            entries={out}
+            emptyNote={
+              relationFilter === null
+                ? 'no outgoing relationship recorded for this node'
+                : 'no outgoing relationship of the selected types'
+            }
+            onSelectDeep={onSelectDeep}
+          />
+          <DeepRelationList
+            heading="Referenced by"
+            entries={inbound}
+            emptyNote={
+              relationFilter === null
+                ? 'no incoming relationship recorded for this node'
+                : 'no incoming relationship of the selected types'
+            }
+            onSelectDeep={onSelectDeep}
+          />
+        </>
+      )}
+
+      {/* The two boundary facts, where the detail is read: this layer is a
+          point-in-time index, and project memory returns leads, not verdicts. */}
+      <p className="memory-graph-deep-detail-provenance">{stalenessSentence(staleness)}</p>
+      <p className="memory-graph-path-caveat">
+        A recorded relationship is a navigational lead into the project source — it is not a
+        scientific relationship and it is not evidence for anything in a record.
+      </p>
+    </div>
+  );
+}
+
+/** One direction's relationship list. Direction is preserved from the payload;
+ *  the heading names it, so the arrow is not the only carrier of meaning. */
+function DeepRelationList({
+  heading,
+  entries,
+  emptyNote,
+  onSelectDeep,
+}: {
+  heading: string;
+  entries: { other: DeepNode; relation: string }[];
+  emptyNote: string;
+  onSelectDeep: (id: string) => void;
+}) {
+  return (
+    <div className="memory-graph-detail-section">
+      <h4 className="memory-graph-detail-section-heading">
+        {heading}
+        <span className="memory-graph-list-group-count">{entries.length}</span>
+      </h4>
+      {entries.length > 0 ? (
+        <ul className="memory-graph-detail-connected-list">
+          {entries.slice(0, DEEP_LIST_MAX).map((entry, i) => (
+            <li key={`${entry.other.id}-${entry.relation}-${i}`}>
+              <button
+                type="button"
+                className="memory-graph-detail-connected-link"
+                onClick={() => onSelectDeep(entry.other.id)}
+              >
+                <span className="mono">{entry.other.label}</span>
+                {/* The exact recorded value stays on `title`; the visible text is
+                    the shared display map every graph surface uses. */}
+                <span className="memory-graph-detail-relation" title={entry.relation}>
+                  {relationDisplayLabel(entry.relation)}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="memory-graph-detail-empty-note">{emptyNote}</p>
+      )}
+      {entries.length > DEEP_LIST_MAX && (
+        <p className="memory-graph-detail-empty-note">
+          Showing {DEEP_LIST_MAX} of {entries.length} — the bound is this panel's, not the graph's.
+        </p>
+      )}
     </div>
   );
 }

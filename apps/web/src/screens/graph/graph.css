@@ -563,6 +563,89 @@
   color: var(--text-quaternary);
   overflow-wrap: anywhere;
 }
+/* ---- suggested commands (P36V.1 G) ------------------------------------ */
+/* A compact, wrapping row of small cards ABOVE the canvas. Each carries a
+   readable label, the exact command it inserts, and a WORD saying whether the
+   press fills the bar or runs a view action — never a colour on its own. */
+.graph-cmd-suggest {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-faint);
+}
+.graph-cmd-suggest-title {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+.graph-cmd-suggest-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.graph-cmd-suggest-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 9px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-inner);
+}
+.graph-cmd-suggest-btn:hover {
+  border: 1px solid var(--action-selected-border);
+  background: var(--action-tint);
+}
+.graph-cmd-suggest-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+/* A view action that acts on the click is drawn on the subtle surface so it
+   reads as a different KIND of control — alongside, never instead of, the
+   "runs now" word inside it and the accessible name that says the same. */
+.graph-cmd-suggest-btn.is-view {
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border-strong);
+}
+.graph-cmd-suggest-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.graph-cmd-suggest-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 7px;
+  min-width: 0;
+}
+.graph-cmd-suggest-cmd {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.graph-cmd-suggest-mode {
+  font-size: 9.5px;
+  font-style: italic;
+  color: var(--text-quaternary);
+}
+.graph-cmd-suggest-note {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .graph-cmd-history {
   margin-top: 9px;
   padding-top: 8px;
@@ -817,6 +900,31 @@
   color: var(--text-tertiary);
   overflow-wrap: anywhere;
 }
+.memory-graph-list-deepcount {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-quaternary);
+}
+.memory-graph-list-deepnote {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+.memory-graph-deep-detail + .memory-graph-detail {
+  margin-top: 10px;
+}
+.memory-graph-deep-detail-provenance {
+  margin: 10px 0 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  color: var(--advisory-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .memory-graph-browse-note {
   margin-top: 10px;
   font-size: 11px;
@@ -918,7 +1026,12 @@
   cursor: pointer;
 }
 .memory-graph-node-label {
-  font-size: 11px;
+  /* P36V.1 Unit F — `font-size` and the halo's `stroke-width` are deliberately
+     NOT set here any more. Both are SVG user units, so a stylesheet value grew
+     with the viewBox and produced the enormous labels reported at 477% zoom.
+     They are set as ATTRIBUTES by the canvas (`screenBoundedUnits`), which is
+     the only place that knows the live scale. A CSS declaration would win over
+     the attribute, so re-adding one here would silently restore the defect. */
   fill: var(--gc-text-dim);
   font-family: var(--font-ui);
   pointer-events: none;
@@ -926,7 +1039,6 @@
      cluster stay legible where they overlap each other and the edges. */
   paint-order: stroke;
   stroke: var(--gc-bg);
-  stroke-width: 3px;
   stroke-linejoin: round;
 }
 .memory-graph-node.dim .memory-graph-node-shape {
@@ -956,6 +1068,43 @@
   stroke-width: 3.4;
 }
 
+/* ---- semantic zoom: the deep (cluster / symbol) layer ---------------- */
+/* One file's symbol cloud, outlined. Inert geometry — never focusable, never a
+   node: it marks the REAL container (`source_file`) the marks inside it sit in. */
+.memory-graph-deep-region-shape {
+  fill: none;
+  stroke: var(--gc-line);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.memory-graph-deep-region-label {
+  fill: var(--gc-text-dim);
+  font-family: var(--font-mono);
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: var(--gc-bg);
+  stroke-linejoin: round;
+}
+.memory-graph-deep-edge {
+  stroke: var(--gc-edge);
+  stroke-width: 1.1;
+}
+.memory-graph-deep-arrowhead {
+  fill: var(--gc-edge);
+  stroke: none;
+}
+/* A cluster reads as a soft disc, a symbol as a small square: shape carries the
+   level, so colour is never the only signal. */
+.memory-graph-deep-cluster .memory-graph-node-shape {
+  fill-opacity: 0.85;
+  stroke: var(--gc-bg);
+  stroke-width: 1.2;
+}
+.memory-graph-deep-symbol .memory-graph-node-shape {
+  stroke: var(--gc-bg);
+  stroke-width: 1;
+}
+
 /* canvas overlays: hover/focus summary + legend + render-bound note */
 .graph-canvas-overlay {
   position: absolute;
@@ -974,9 +1123,54 @@
   left: 10px;
   pointer-events: none;
 }
+.graph-canvas-hover {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(300px, calc(100% - 24px));
+}
+.graph-canvas-hover-title {
+  font-weight: 600;
+}
 .graph-canvas-hover .graph-canvas-hover-meta {
   color: var(--gc-text-dim);
   font-size: 11px;
+}
+.graph-canvas-hover-source {
+  color: var(--gc-text-dim);
+  font-size: 10.5px;
+}
+
+/* ---- semantic-zoom status + provenance (below the canvas) ------------- */
+.graph-lod-indicator {
+  font-variant-numeric: tabular-nums;
+}
+.graph-deep-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+.graph-deep-note.advisory {
+  padding: 7px 10px;
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  color: var(--advisory-text);
+  font-size: 11.5px;
+}
+/* STRUCTURAL STALENESS. Deliberately as prominent as an advisory notice: a
+   symbol map reads as a map of the current code, and this one is pinned to the
+   snapshot's build commit. */
+.graph-deep-staleness {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  color: var(--advisory-text);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 /* The legend sits BELOW the canvas in normal document flow (not as an overlay):
    real text, never covering nodes, and it reflows instead of needing a
@@ -1288,16 +1482,20 @@
 .graph-help-section {
   margin-top: 16px;
 }
+/* P36V.1 G — compact ISAAC-blue section eyebrows. The uppercase rhythm is kept
+   (it is how every other eyebrow in the app reads); only the hue moves from
+   neutral slate to the action blue, so the seven visible sections scan as
+   sections at a glance instead of as one long document. */
 .graph-help-section h4 {
   margin: 0 0 5px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-slate);
+  color: var(--action);
 }
-/* One nested level, inside Command Bar. Deliberately lighter than the section
-   headings so the ten-section rhythm still reads as ten. */
+/* One nested level, inside Commands. Deliberately lighter than the section
+   headings so the section rhythm still reads as sections. */
 .graph-help-subheading {
   margin: 10px 0 4px;
   font-size: 11.5px;
@@ -1381,6 +1579,91 @@
 }
 .graph-help-swatch.shape-concept {
   transform: rotate(45deg);
+}
+/* P36V.1 G — the shapes Unit F's deeper levels added, plus the two line forms.
+   Each row shows the actual shape beside its name, so the legend is never
+   colour-only. There is deliberately no separate "cluster" swatch: a cluster is
+   drawn as a circle, exactly like a file, and the help says so in prose rather
+   than inventing a shape the canvas does not draw. */
+.graph-help-swatch.shape-symbol {
+  border-radius: 3px;
+}
+.graph-help-swatch.shape-region {
+  border-radius: 50%;
+  background: none;
+  border: 1px dashed var(--text-tertiary);
+}
+.graph-help-swatch.shape-line,
+.graph-help-swatch.shape-arrow {
+  width: 14px;
+  height: 2px;
+}
+.graph-help-swatch.shape-arrow {
+  position: relative;
+}
+.graph-help-swatch.shape-arrow::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: -3px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--text-tertiary);
+}
+
+/* Two columns where the panel is wide enough, one where it is not — intrinsic,
+   so a narrow viewport and a 200% zoom both collapse it without a media query. */
+.graph-help-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 5px 14px;
+}
+
+/* The TWO boundary statements: advisory-tinted, always visible, never inside a
+   disclosure. Two paragraphs in one callout rather than two callouts, so the
+   surface carries one advisory block instead of stacking them. */
+.graph-help-boundary p {
+  margin: 0;
+}
+.graph-help-boundary p + p {
+  margin-top: 7px;
+}
+
+/* A nested disclosure INSIDE a section (currently "Every Command"). Lighter than
+   a section eyebrow — it is a detail of its section, not a section. */
+.graph-help-sub-details {
+  margin-top: 8px;
+}
+.graph-help-sub-details > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.graph-help-sub-details > summary::-webkit-details-marker {
+  display: none;
+}
+.graph-help-sub-details > summary::after {
+  content: ' \25b8';
+  color: var(--text-quaternary);
+}
+.graph-help-sub-details[open] > summary::after {
+  content: ' \25be';
+}
+.graph-help-sub-details > * + * {
+  margin-top: 5px;
+}
+/* Group titles INSIDE Technical Details. A <p>, not a heading: the disclosure is
+   already one outline node, and nesting h5/h6 under it would deepen the document
+   outline for reference data. */
+.graph-help-technical-heading {
+  margin-top: 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
 }
 /* Technical Details is a <details>: closed by default, never absent. Its
    <summary> carries the section title as PLAIN TEXT (a heading inside a summary

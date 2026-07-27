@@ -1,8 +1,14 @@
 /**
- * Small pieces shared by the API tab's two sub-surfaces (P36V PR3 slice C).
+ * Small pieces shared by the two API surfaces (P36V PR3 slice C).
  *
- * Kept in one place so the method badge, the copy affordance and the sub-tab
- * contract cannot drift between API Keys and Documentation.
+ * Kept in one place so the method badge, the copy affordance and the tablist
+ * contract cannot drift between API Access and the Endpoint Explorer.
+ *
+ * P36V-1 slice 12 deleted the `keys | docs` sub-tablist, which was one of
+ * {@link RovingTabs}' two consumers. The helper is NOT dead: the code-example
+ * language tabs still use it, and `settings-api.test.tsx` asserts that
+ * tablist's roles, roving tabindex and Arrow/Home/End behaviour. The three
+ * remaining exports are each consumed by `ApiDocs.tsx`.
  */
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 
@@ -87,7 +93,7 @@ export function CopyAnnouncer({ message }: { message: string }) {
  * A generic roving-tabindex tablist — the SAME contract as `SettingsSectionTabs`
  * and `GovernanceSectionTabs` (automatic activation, Arrow/Home/End, exactly one
  * tab in the tab order, `aria-controls` on the selected tab only), reused rather
- * than reimplemented for the API sub-navigation and the code-sample tabs.
+ * than reimplemented for the code-sample language tabs.
  */
 export function RovingTabs<T extends string>({
   className,

@@ -1,10 +1,10 @@
 /**
- * Settings → API → Documentation → Connect an Agent (P36V PR3 slice C).
+ * Settings → API Access → Connect an Agent (P36V PR3 slice C; P36V-1 slice 13).
  *
- * Eight short sections, collapsed behind one disclosure so the Documentation
- * sub-tab stays a reference surface rather than becoming a single-page manual.
- * The disclosure's `<summary>` carries the section's real `<h3>` (heading content
- * is permitted there), so collapsing it does not remove it from the outline.
+ * Eight short sections, collapsed behind one disclosure so the API Access tab
+ * stays a reference surface rather than becoming a single-page manual. The
+ * disclosure's `<summary>` carries the section's real `<h3>` (heading content is
+ * permitted there), so collapsing it does not remove it from the outline.
  *
  * Every claim below is either (a) derived from the generated contract and passed
  * in as {@link ConnectAnAgentFacts}, or (b) a boundary this repository's own code
@@ -12,12 +12,23 @@
  * frameworks, rate limits, scopes, streaming, webhooks, OAuth, or any key
  * functionality.
  *
- * On hosted access: the caveat is stated provider-neutrally on purpose. Naming
- * the identity layer in front of a deployment would disclose infrastructure
- * topology, which `settings-page.test.tsx` forbids on every Settings tab (the
- * same substring list the backend withholds from `GET /api/about`). The
- * SUBSTANCE — a browser session is not a headless credential — is stated in
- * full.
+ * P36V-1 slice 12 moved the endpoint browser to its own top-level tab, so the
+ * two references to the Endpoint Explorer "above" became false. They now name
+ * the TAB, and "Choose an Endpoint" carries a real control that goes there.
+ *
+ * P36V-1 slice 13 also removed three claims this guide was restating from
+ * elsewhere on the same tab — the key-unavailable reason (the status banner's),
+ * the browser-session / headless-credential boundary (an access row's) and the
+ * 401 count (Quick Start's, which derives it from the contract). This guide
+ * points at them instead of authoring a second copy, which is why
+ * {@link ConnectAnAgentFacts} no longer carries the two count fields: it renders
+ * no count.
+ *
+ * On hosted access: that boundary is stated provider-neutrally wherever it
+ * appears. Naming the identity layer in front of a deployment would disclose
+ * infrastructure topology, which `settings-page.test.tsx` forbids on every
+ * Settings tab (the same substring list the backend withholds from
+ * `GET /api/about`).
  */
 import { SAMPLE_BASE_ENV, SAMPLE_CREDENTIAL_ENV } from '../../lib/apiDocsModel';
 
@@ -26,9 +37,6 @@ export interface ConnectAnAgentFacts {
   requestMediaTypes: string[];
   /** Every failure status the contract documents, ascending. */
   errorCodes: string[];
-  /** Operations whose contract documents a `401`, out of the total. */
-  authRequiredCount: number;
-  operationCount: number;
 }
 
 function mediaTypeSentence(mediaTypes: string[]): string {
@@ -52,25 +60,29 @@ export function ConnectAnAgent({
   open,
   onOpenChange,
   summaryId,
+  onOpenExplorer,
 }: {
   facts: ConnectAnAgentFacts;
   /** Controlled so Quick Start's link can open it and move focus here. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
   summaryId: string;
+  /** Selects the Endpoint Explorer tab — the guide's first step is there. */
+  onOpenExplorer: () => void;
 }) {
-  const sections: { heading: string; body: string }[] = [
+  const sections: { heading: string; body: string; action?: string }[] = [
     {
       heading: 'Choose an Endpoint',
-      body: "Start in the Endpoint Explorer above. Each operation there carries its purpose, its declared parameters, its request body when it has one, and every response the contract documents — all generated from this app's own contract, so an agent never has to work from a guess about what exists.",
+      body: "Start on the Endpoint Explorer tab. Each operation there carries its purpose, its declared parameters, its request body when it has one, and every response the contract documents — all generated from this app's own contract, so an agent never has to work from a guess about what exists.",
+      action: 'Open the Endpoint Explorer',
     },
     {
       heading: 'Set the Base URL',
-      body: `Call the paths exactly as the Explorer lists them; each one is already complete. The samples write the origin as $${SAMPLE_BASE_ENV} and never hard-code one, because the correct origin is wherever this page is being served from — the caller's to supply, not this screen's to publish.`,
+      body: `Call the paths exactly as the Endpoint Explorer tab lists them; each one is already complete. The samples write the origin as $${SAMPLE_BASE_ENV} and never hard-code one, because the correct origin is wherever this page is being served from — the caller's to supply, not this screen's to publish.`,
     },
     {
       heading: 'Configure Authentication',
-      body: `When a deployment enables authentication, every call carries an "Authorization: Bearer" header holding that deployment's credential; the liveness check is the one operation that stays reachable without it. ${facts.authRequiredCount} of ${facts.operationCount} operations document a 401, which is how the Explorer marks them. Signing in through a deployment's identity layer with a browser is not the same thing as headless authentication: that gives a person an interactive session, not a credential a program can present on its own. And API keys are unavailable here — see API Keys — because this API has no operation that issues one.`,
+      body: `When a deployment enables authentication, every call carries an "Authorization: Bearer" header holding that deployment's credential; the liveness check is the one operation that stays reachable without it. Quick Start on this tab reports how many operations document a 401, the access rows at the top of this tab say what that one credential is and is not, and the Endpoint Explorer marks each operation.`,
     },
     {
       heading: 'Send Structured Requests',
@@ -112,6 +124,11 @@ export function ConnectAnAgent({
           <section className="api-connect-section" key={section.heading}>
             <h4 className="api-connect-heading">{section.heading}</h4>
             <p>{section.body}</p>
+            {section.action && (
+              <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
+                {section.action}
+              </button>
+            )}
           </section>
         ))}
       </div>

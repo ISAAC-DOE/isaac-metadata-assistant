@@ -154,10 +154,22 @@ describe('chrome.css — the width-mode tokens', () => {
     expect(chrome).toContain(`.screen-main[data-width='${mode}'] { --content-max: ${value}; }`);
   });
 
+  /*
+   * P36V1 S6 updated the two padding literals asserted here, and this test was
+   * updated with them rather than deleted. The horizontal contract it was
+   * written to protect is unchanged and still asserted: --main-gutter is 28px,
+   * it is used for the INLINE padding only, and it stays in the 24–32px band.
+   * What changed is the VERTICAL side — the old `22px` top literal became the
+   * shared `--main-top-gutter`, so `.pad` is no longer the only preset with an
+   * answer for "how far below the TopBar does content start?". The bottom
+   * padding is still 22px.
+   */
   it('names the main→rail gutter as a token and uses it for the inline padding only', () => {
     expect(chrome).toContain('--main-gutter: 28px;');
-    expect(chrome).toContain('.screen-main.pad { padding: 22px var(--main-gutter); }');
-    // vertical padding is unchanged (22px), and the token stays in 24–32px
+    expect(chrome).toContain(
+      '.screen-main.pad { padding: var(--main-top-gutter) var(--main-gutter) 22px; }',
+    );
+    // the horizontal token stays in 24–32px
     const gutter = Number(/--main-gutter:\s*(\d+)px/.exec(chrome)?.[1]);
     expect(gutter).toBeGreaterThanOrEqual(24);
     expect(gutter).toBeLessThanOrEqual(32);
@@ -169,8 +181,14 @@ describe('chrome.css — the width-mode tokens', () => {
   });
 
   it('takes no unreachable --main-gutter fallback (.centered-col is always inside .screen-main)', () => {
-    expect(chrome).toContain('padding: 24px var(--main-gutter);');
+    // P36V1 S6: the 24px top literal became the shared --main-top-gutter (the
+    // 24px bottom is the column's own trailing space and stayed a literal).
+    // The point of this test — that neither shell token carries a fallback,
+    // because `.centered-col` only ever mounts inside `.screen-main` — is
+    // unchanged and now covers both tokens.
+    expect(chrome).toContain('padding: var(--main-top-gutter) var(--main-gutter) 24px;');
     expect(chrome).not.toContain('var(--main-gutter, ');
+    expect(chrome).not.toContain('var(--main-top-gutter, ');
   });
 });
 

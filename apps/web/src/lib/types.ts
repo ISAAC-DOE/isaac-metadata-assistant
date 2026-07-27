@@ -204,6 +204,14 @@ export interface AssistantMessage {
    * named a control the app never rendered.
    */
   action?: AssistantAction;
+  /**
+   * P36V.1 Unit B — the EXACT technical locators behind a humanized answer, shown
+   * ONLY inside the collapsed `Technical Details` disclosure. The primary answer
+   * text carries human-facing location phrases (`the record itself`, `sample →
+   * material → formula`); the raw JSONPath — including the truth core's literal
+   * root marker `$` — lives here and nowhere else in the rendered answer.
+   */
+  technicalPaths?: string[];
 }
 
 export interface SuggestedPrompt {
@@ -239,6 +247,27 @@ export interface AssistantQuerySource {
   navigate_to: string | null;
 }
 
+/**
+ * P36V.1 Unit B — a navigation action carried by a FREE-FORM answer.
+ *
+ * Before this slice `AssistantQueryResponse` had no action field at all, so a
+ * free-form answer structurally could not render the working Open Validator
+ * control: the backend instead emitted a cited-source chip labelled
+ * "Open Validate" whose `navigate_to` was the record already on screen, which is
+ * why clicking it appeared to do nothing.
+ *
+ * `kind` is the contract; `label` and `to` make the API response self-describing.
+ * The client does NOT trust them for rendering — `resolveAssistantAction`
+ * (assistantComposer.ts) maps `kind` to this build's own frozen descriptor, so the
+ * visible label and the client route the router resolves under its `basename` stay
+ * frontend-owned. An unknown `kind` is dropped, never rendered.
+ */
+export interface AssistantQueryAction {
+  kind: string;
+  label: string;
+  to: string;
+}
+
 export interface AssistantQueryResponse {
   answer: string;
   result: AssistantQueryResult;
@@ -254,6 +283,18 @@ export interface AssistantQueryResponse {
   version: string | null;
   stale: boolean;
   followups: string[];
+  /**
+   * P36V.1 Unit B — the OPTIONAL bounded navigation action this answer offers
+   * (today only Open Validator, on the export-blocker / export-readiness intents).
+   * `null` on every other answer.
+   */
+  action?: AssistantQueryAction | null;
+  /**
+   * P36V.1 Unit B — the EXACT validation locators behind a humanized blocker
+   * answer, for the `Technical Details` disclosure only. Empty on every answer
+   * that reports no locators.
+   */
+  technical_paths?: string[] | null;
 }
 
 // --- grounded assistant composer (P25.1) ------------------------------

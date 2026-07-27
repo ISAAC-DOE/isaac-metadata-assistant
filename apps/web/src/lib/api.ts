@@ -11,6 +11,10 @@
  */
 
 import type { RuntimeRecord } from './crossRecordTriage';
+// P36V.1 Unit F — the deep graph layer's wire contract lives in `graphDeep.ts`
+// (with its decoder), not in `types.ts`, so the graph's deep layer stays one
+// self-contained module.
+import type { ApiGraphDetailResponse } from './graphDeep';
 import type {
   ApiAboutResponse,
   ApiAnswersResponse,
@@ -420,6 +424,17 @@ export const api = {
   // graph. One fetch; the screen does all search/filter/select client-side.
   getMemoryGraph(): Promise<ApiMemoryGraphResponse> {
     return getJson<ApiMemoryGraphResponse>('/memory/graph');
+  },
+
+  // P36V.1 Unit F — the DEEP (symbol-level) layer behind the Explore canvas's
+  // semantic zoom. A SEPARATE route from `/memory/graph` on purpose: it is
+  // ~500 kB of columnar rows, so it is fetched LAZILY — only once the reader
+  // has actually zoomed past the first level-of-detail threshold — and never on
+  // a plain visit to Project Memory. Metadata/provenance only, never file
+  // content; its structure is a point-in-time index of the snapshot's
+  // `built_at_commit`, which the surface states explicitly.
+  getMemoryGraphDetail(): Promise<ApiGraphDetailResponse> {
+    return getJson<ApiGraphDetailResponse>('/memory/graph/detail');
   },
 
   // P26.4 — grouped truth+memory search. One query fans out to the workspace

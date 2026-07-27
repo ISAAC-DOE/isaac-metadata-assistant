@@ -538,9 +538,13 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // states a verdict and never echoes validate.ok. P36V S-B: the routing is now
     // a real "Open Validator" CONTROL in the proposed-action region instead of the
     // dead prose sentence "Open Validate to run the deterministic schema check."
+    // P36V.1 Unit B — "paths" became "validation issues" so the same sentence
+    // covers the record-level case too (a root-level violation has no field path).
     fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
     expect(
-      await panel.findByText('No blocking paths are listed in the current validation response.'),
+      await panel.findByText(
+        'No blocking validation issues are listed in the current validation response.',
+      ),
     ).toBeInTheDocument();
     expect(panel.getByText('Source: Schema Rules')).toBeInTheDocument();
     expect(assistant.textContent).not.toMatch(/open Validate\b/i);
@@ -551,6 +555,96 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // reserved PASS/FAIL + "(in)valid against" language only)
     expect(assistant.textContent).not.toMatch(VERDICT);
     expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
+  });
+
+  // P36V.1 review M8 — the PRECOMPOSED (pill) path's `Technical Details`
+  // disclosure. Until now only the free-form path exercised that rendering
+  // (`assistant-blocker-humanization.test.tsx`), even though the pill answer carries
+  // `technicalPaths` through `AssistantPanel.ask` on a DIFFERENT code path from the
+  // wire answer. This is the pill path, end to end, in the DOM.
+  it('pre-export: the blocker PILL humanizes the locators and preserves them in Technical Details', async () => {
+    stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      // a root-level violation together with a nested one — the shape whose raw
+      // locator (`$`) used to be interpolated into the sentence
+      'POST /api/experiments/demo/validate': {
+        body: {
+          ok: false,
+          errors: [
+            { path: '$', message: "'sample' is a required property" },
+            { path: 'assets.0.sha256', message: 'too short' },
+          ],
+          schema: validateDryRun.schema,
+          dry_run: true,
+        },
+      },
+    });
+    const { container, findByText } = renderAt('/record/demo/export');
+    await findByText("What's left before export?");
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+
+    fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
+
+    const reply = (await waitFor(() => {
+      const el = assistant.querySelector('.assistant-reply');
+      expect(el!.textContent).toContain('may be blocking export');
+      return el as HTMLElement;
+    })) as HTMLElement;
+    expect(reply.textContent).toContain(
+      '2 validation issues may be blocking export: the record itself, assets → 0 → sha256.',
+    );
+    // the primary answer carries NO raw locator …
+    expect(reply.textContent).not.toContain('$');
+
+    // … and the exact locators live in the collapsed disclosure, and only there
+    const details = assistant.querySelector(
+      'details[data-details="technical"]',
+    ) as HTMLDetailsElement;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    expect(panel.getByText('Technical Details')).toBeInTheDocument();
+    expect([...details.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      '$',
+      'assets.0.sha256',
+    ]);
+    const outside = assistant.textContent!.replace(details.textContent!, '');
+    expect(outside).not.toContain('$');
+  });
+
+  it('pre-export: a validation CRASH pill claims no issue and offers no locators (IMPORTANT-1)', async () => {
+    stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      // exactly what routes.py emits when the dry-run itself raised
+      'POST /api/experiments/demo/validate': {
+        body: {
+          ok: false,
+          errors: [{ path: '$', message: 'Validation could not be completed.' }],
+          schema: validateDryRun.schema,
+          dry_run: true,
+        },
+      },
+    });
+    const { container, findByText } = renderAt('/record/demo/export');
+    await findByText("What's left before export?");
+    const assistant = container.querySelector('.assistant') as HTMLElement;
+    const panel = within(assistant);
+
+    fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
+
+    expect(
+      await panel.findByText(
+        'The deterministic schema check could not be completed for this record, so no ' +
+          'blocking locations can be listed.',
+      ),
+    ).toBeInTheDocument();
+    const reply = assistant.querySelector('.assistant-reply') as HTMLElement;
+    expect(reply.textContent).not.toMatch(/validation issue/);
+    expect(reply.textContent).not.toMatch(/record-level/);
+    expect(reply.textContent).not.toContain('$');
+    expect(assistant.querySelector('details[data-details="technical"]')).toBeNull();
+    // the reader can still reach the deterministic check
+    expect(panel.getByRole('button', { name: /Open Validator/ })).toBeInTheDocument();
   });
 
   it('pre-export: the advisory chip echoes the LIVE warning, flagged advisory / non-gating', async () => {

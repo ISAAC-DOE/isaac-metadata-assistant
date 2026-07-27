@@ -11,6 +11,7 @@
 import { useMemo } from 'react';
 import type { ApiMemoryFileSummary, ApiMemoryGraphNode } from '../../lib/types';
 import type { GraphAction, GraphIndex, GraphViewState } from '../../lib/graphModel';
+import type { DeepIndex } from '../../lib/graphDeep';
 import { groupFilesByType } from '../ProjectMemory';
 import { communityText } from './GraphDetail';
 
@@ -23,6 +24,14 @@ interface GraphBrowseProps {
   /** filtered node ids — the textual list is NOT capped by the canvas bound */
   ids: string[];
   grouping: BrowseGrouping;
+  /**
+   * P36V.1 Unit F — the deep layer, when the reader has opened it in Explore.
+   * Browse does not gain a viewport (pan/zoom are affordances OF a canvas), but
+   * it must not go quiet about structure Explore is showing: each file row gains
+   * its REAL symbol and cluster counts, and the selected symbol's full detail is
+   * in the shared deep detail panel beside this list.
+   */
+  deep?: DeepIndex | null;
 }
 
 interface BrowseGroup {
@@ -31,7 +40,14 @@ interface BrowseGroup {
   nodes: ApiMemoryGraphNode[];
 }
 
-export function GraphBrowse({ index, state, dispatch, ids, grouping }: GraphBrowseProps) {
+export function GraphBrowse({
+  index,
+  state,
+  dispatch,
+  ids,
+  grouping,
+  deep = null,
+}: GraphBrowseProps) {
   const nodes = useMemo(
     () => ids.map((id) => index.byId.get(id)).filter((n): n is ApiMemoryGraphNode => n !== undefined),
     [ids, index.byId],
@@ -84,8 +100,31 @@ export function GraphBrowse({ index, state, dispatch, ids, grouping }: GraphBrow
     return out;
   }, [nodes, grouping, index.byId, index.communityById]);
 
+  /** Files in THIS list that carry symbol-level structure, and how much. Derived
+   *  only from the deep payload's own `source_file` groups — never estimated. */
+  const deepSummary = useMemo(() => {
+    if (!deep) return null;
+    let withStructure = 0;
+    let symbols = 0;
+    for (const node of nodes) {
+      const members = deep.byFile.get(node.id);
+      if (!members || members.length === 0) continue;
+      withStructure += 1;
+      symbols += members.length;
+    }
+    return { withStructure, symbols, files: nodes.length };
+  }, [deep, nodes]);
+
   return (
     <div className="memory-graph-list" role="group" aria-label="Graph nodes">
+      {deepSummary && deepSummary.withStructure > 0 && (
+        <p className="memory-graph-list-deepnote">
+          {deepSummary.symbols} symbol-level node{deepSummary.symbols === 1 ? '' : 's'} are recorded
+          inside {deepSummary.withStructure} of the {deepSummary.files} listed here — the counts on
+          each row. Explore draws them when zoomed in; select one there to read its full detail in
+          the panel beside this list.
+        </p>
+      )}
       {nodes.length === 0 && (
         <p className="memory-graph-list-empty">
           No nodes match the current search, filters or focus.
@@ -115,6 +154,14 @@ export function GraphBrowse({ index, state, dispatch, ids, grouping }: GraphBrow
                     <span className="memory-graph-list-label mono">{node.label ?? node.id}</span>
                     {grouping !== 'community' && communityText(node) && (
                       <span className="memory-graph-list-community">{communityText(node)}</span>
+                    )}
+                    {deep && (deep.byFile.get(node.id)?.length ?? 0) > 0 && (
+                      <span className="memory-graph-list-deepcount">
+                        {deep.byFile.get(node.id)!.length} symbol
+                        {deep.byFile.get(node.id)!.length === 1 ? '' : 's'} ·{' '}
+                        {deep.clustersByFile.get(node.id)?.length ?? 0} cluster
+                        {(deep.clustersByFile.get(node.id)?.length ?? 0) === 1 ? '' : 's'}
+                      </span>
                     )}
                   </button>
                 </li>

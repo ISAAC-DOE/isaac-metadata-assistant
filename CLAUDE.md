@@ -615,10 +615,24 @@ implementation and all independent review).
 ### Snapshot preflight (before any push that touches served files)
 
 The committed snapshot `apps/api/isaac_api/data/memory-snapshot.json` embeds a served-content manifest
-(**201 entries** as of P36V) re-checked in CI by `apps/api/tests/test_committed_snapshot.py`. **It is far
-broader than documentation** — measured composition: **64 `apps/web/src/**` files** (the largest single
-bucket, including component, lib and `__tests__` files), 37 under `docs/` (35 `.md` plus two sample
-JSON artifacts), 36 `tests/**`, 15 `apps/api/**`,
+re-checked in CI by `apps/api/tests/test_committed_snapshot.py`.
+
+**Two counts, deliberately different by one — do not conflate them:**
+
+| Number | What it is | Where |
+|---|---|---|
+| **201** | the served **path set** — every repo-relative path the memory plane may describe | `snapshot["served"]`; also `memory-graph-detail.json`'s `served_file_count`, which the API labels `served_file_count_scope: "served_path_set"` |
+| **200** | the served **content manifest** — path + raw-bytes sha256, the drift-detection basis | `snapshot["memory_inputs"]["served_content_manifest"]` / `...["served_file_count"]` |
+
+The one path that is served but **not** content-hashed is
+`tests/fixtures/memory_snapshot/memory-snapshot.json`: the manifest builder self-excludes any
+`*memory-snapshot.json` it would otherwise hash (embedding a snapshot digest inside a snapshot is
+circular). So "201 served files" and "200 manifest entries" are both correct statements about
+different sets.
+
+The manifest **is far broader than documentation** — measured composition: **64 `apps/web/src/**` files**
+(the largest single bucket, including component, lib and `__tests__` files), 37 under `docs/` (35 `.md`
+plus two sample JSON artifacts), 36 `tests/**`, 15 `apps/api/**`,
 15 `src/**` (the truth core), 7 `docs/superpowers/**`, 5 `.claude/skills/*/SKILL.md`, plus root files
 (`CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `pyproject.toml`, …).
 
@@ -632,14 +646,24 @@ sequence: implementation → focused tests → full relevant tests → typecheck
 check → deterministic regeneration if required → path/secret/leak checks → independent review → commit →
 push → exact-HEAD CI → deployment/browser QA. Commands:
 
+**Two committed artifacts, one command.** Since P36V.1 the generator also produces the deep
+(symbol-level) graph artifact `apps/api/isaac_api/data/memory-graph-detail.json`. `--detail-out` is
+opt-in, so a command **without** it neither regenerates nor checks that artifact — `--check` will
+print "ok: no drift" while a stale deep artifact sits on disk, and a regeneration will rewrite the
+snapshot and leave the deep artifact stale. The script now says so on stderr, but **always pass
+`--detail-out`**:
+
 ```bash
-# drift check (exit 0 = no drift)
+# drift check for BOTH committed artifacts (exit 0 = no drift; 6 = drift, and both are reported)
 .venv/bin/python scripts/build_memory_snapshot.py --graph-dir graphify-out \
-  --out apps/api/isaac_api/data/memory-snapshot.json --check
-# deterministic regeneration (drop --check), then re-run the check + the gate test
+  --out apps/api/isaac_api/data/memory-snapshot.json \
+  --detail-out apps/api/isaac_api/data/memory-graph-detail.json --check
+# deterministic regeneration of BOTH (drop --check), then re-run the check + the gate tests
 .venv/bin/python scripts/build_memory_snapshot.py --graph-dir graphify-out \
-  --out apps/api/isaac_api/data/memory-snapshot.json
-.venv/bin/pytest apps/api/tests/test_committed_snapshot.py -q
+  --out apps/api/isaac_api/data/memory-snapshot.json \
+  --detail-out apps/api/isaac_api/data/memory-graph-detail.json
+.venv/bin/pytest apps/api/tests/test_committed_snapshot.py \
+  apps/api/tests/test_memory_graph_detail.py -q
 ```
 
 ### Shared Repository Synchronization Contract

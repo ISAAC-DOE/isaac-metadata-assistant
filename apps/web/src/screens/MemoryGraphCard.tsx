@@ -33,6 +33,7 @@ import {
   encodeGraphParams,
   graphParamKey,
   parseGraphCommand,
+  suggestedGraphCommands,
   type GraphCommandHistoryEntry,
   type GraphSurfaceContext,
   type GraphUrlParam,
@@ -40,6 +41,7 @@ import {
 import {
   PALETTE_SLOTS,
   applyGraphAction,
+  graphLodLevel,
   buildGraphIndex,
   communityColorIndex,
   communityLabelAmong,
@@ -53,11 +55,12 @@ import {
   type GraphIndex,
   type GraphViewState,
 } from '../lib/graphModel';
+import { decodeDeepGraph, type DeepIndex } from '../lib/graphDeep';
 import type { ApiMemoryGraphResponse } from '../lib/types';
 import { GraphBrowse, type BrowseGrouping } from './graph/GraphBrowse';
-import { GraphCanvas } from './graph/GraphCanvas';
+import { GraphCanvas, type DeepLayerState } from './graph/GraphCanvas';
 import { GraphCommandBar } from './graph/GraphCommandBar';
-import { GraphDetail, GraphPathResult } from './graph/GraphDetail';
+import { GraphDeepDetail, GraphDetail, GraphPathResult } from './graph/GraphDetail';
 import {
   GraphActiveFilters,
   GraphFiltersPanel,
@@ -66,7 +69,7 @@ import {
   hiddenFilterCount,
   noRelationshipsShown,
 } from './graph/GraphFilters';
-import { GraphHelp } from './graph/GraphHelp';
+import { GraphHelp, type GraphHelpExpand } from './graph/GraphHelp';
 import { GraphPathFinder, GraphPathToggle } from './graph/GraphPathFinder';
 
 // --- top-level card ---------------------------------------------------------
@@ -85,16 +88,23 @@ interface MemoryGraphCardProps {
 export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
   const graph = useFetch(() => api.getMemoryGraph(), []);
   const [helpOpen, setHelpOpen] = useState(false);
+  // P36V.1 G — which disclosure the dialog opens expanded. The "Syntax" control
+  // and a typed `help` asked for the grammar; the "View Technical Details"
+  // suggestion asked for the reference data; the plain trigger asked for
+  // neither, so nothing is pre-expanded for it.
+  const [helpExpand, setHelpExpand] = useState<GraphHelpExpand | null>(null);
   const helpTriggerRef = useRef<HTMLButtonElement | null>(null);
-  // The help drawer has THREE openers: the "About This Graph" trigger, the
-  // command bar's "Syntax" button, and typing `help`. Focus must return to
-  // whichever one the user actually used — returning it to the trigger after a
-  // typed `help` dropped the user out of the command input they were in.
+  // The help drawer has FOUR openers: the "About This Graph" trigger, the
+  // command bar's "Syntax" button, typing `help`, and the "View Technical
+  // Details" suggestion. Focus must return to whichever one the user actually
+  // used — returning it to the trigger after a typed `help` dropped the user out
+  // of the command input they were in.
   const helpReturnRef = useRef<HTMLElement | null>(null);
-  const openHelp = useCallback(() => {
+  const openHelp = useCallback((expand?: GraphHelpExpand) => {
     const active = typeof document === 'undefined' ? null : document.activeElement;
     helpReturnRef.current =
       active instanceof HTMLElement && active !== document.body ? active : null;
+    setHelpExpand(expand ?? null);
     setHelpOpen(true);
   }, []);
   const closeHelp = useCallback(() => {
@@ -118,7 +128,9 @@ export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
             className="memory-graph-help-trigger"
             aria-haspopup="dialog"
             aria-expanded={helpOpen}
-            onClick={openHelp}
+            /* An arrow, not the bare callback: React would pass the MouseEvent
+               as the `expand` argument. */
+            onClick={() => openHelp()}
           >
             <CircleHelp size={13} strokeWidth={2} aria-hidden="true" />
             About This Graph
@@ -148,6 +160,7 @@ export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
           paletteSlots={PALETTE_SLOTS}
           communityCount={graph.data.communities.length}
           singletonCount={graph.data.communities.filter((c) => c.file_count <= 1).length}
+          expand={helpExpand}
           onClose={closeHelp}
         />
       )}
@@ -166,7 +179,7 @@ function MemoryGraphBody({
 }: {
   data: ApiMemoryGraphResponse;
   onReady?: (ctx: GraphSurfaceContext | null) => void;
-  onOpenHelp: () => void;
+  onOpenHelp: (expand?: GraphHelpExpand) => void;
 }) {
   if (!data.available) {
     return (
@@ -201,7 +214,7 @@ function MemoryGraphAvailable({
 }: {
   data: ApiMemoryGraphResponse;
   onReady?: (ctx: GraphSurfaceContext | null) => void;
-  onOpenHelp: () => void;
+  onOpenHelp: (expand?: GraphHelpExpand) => void;
 }) {
   const navigate = useNavigate();
   const index = useMemo<GraphIndex>(() => buildGraphIndex(data), [data]);
@@ -336,7 +349,7 @@ function MemoryGraphAvailable({
         // region and `help` would still announce nothing.
         setState((s) => applyGraphAction(s, { kind: 'dismissNotice' }, index));
         setCommandOutcome(outcome);
-        onOpenHelp();
+        onOpenHelp('commands');
         pushHistory({ command: 'help', origin: 'command', status: 'help', outcome });
         return;
       }
@@ -380,6 +393,68 @@ function MemoryGraphAvailable({
     });
     return () => onReady(null);
   }, [onReady, index, data.meta, applyExternal]);
+
+  // --- the DEEP (symbol-level) layer, P36V.1 Unit F -------------------------
+  //
+  // LAZY on purpose. The artifact is ~500 kB of columnar rows; a visit to
+  // Project Memory that never zooms past the first level-of-detail threshold
+  // never requests it, so the tab stays ONE fetch for every reader who does not
+  // ask for detail. Requested at most once per mount, and any failure degrades
+  // to an honest `unavailable` — the canvas then keeps the file projection and
+  // says so rather than aggregating something in its place.
+  const [deep, setDeep] = useState<DeepLayerState>({ status: 'idle' });
+  const [deepSelectedId, setDeepSelectedId] = useState<string | null>(null);
+  const deepRequested = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => () => {
+    alive.current = false;
+  }, []);
+  // Requested only when the layer would actually be DRAWN: past the first
+  // threshold, in Explore, and with no neighbourhood/path focus active (a focus
+  // keeps the canvas on the base projection it was computed over, so fetching
+  // 500 kB there would buy nothing).
+  const deepNeeded =
+    graphLodLevel(state.view.scale) !== 'file' && state.mode === 'explore' && state.focus === null;
+  useEffect(() => {
+    if (!deepNeeded || deepRequested.current) return;
+    deepRequested.current = true;
+    setDeep({ status: 'loading' });
+    api
+      .getMemoryGraphDetail()
+      .then((res) => {
+        if (!alive.current) return;
+        const decoded = decodeDeepGraph(res);
+        if (decoded) {
+          setDeep({ status: 'ready', index: decoded });
+          return;
+        }
+        setDeep({
+          status: 'unavailable',
+          reason: res.reason ?? (res.available ? 'detail_schema_unrecognised' : 'detail_absent'),
+        });
+      })
+      .catch(() => {
+        if (alive.current) setDeep({ status: 'unavailable', reason: 'request_failed' });
+      });
+  }, [deepNeeded]);
+  const deepIndex: DeepIndex | null = deep.status === 'ready' ? deep.index : null;
+  /** Whether the canvas is actually drawing a deeper layer right now — the same
+   *  three conditions GraphCanvas uses to build a plan. */
+  const deepShowing = deepIndex !== null && deepNeeded;
+
+  /*
+   * P36V.1 G — the Suggested Commands set.
+   *
+   * Derived from the SAME live state and the SAME index the bar runs against,
+   * and — deliberately — from Unit F's `deepSelectedId` rather than a second
+   * selection mechanism of its own. Every entry is verified inside
+   * `suggestedGraphCommands` by folding its own command through the real parser
+   * and the real reducer, so nothing offered here can fail to resolve.
+   */
+  const suggestions = useMemo(
+    () => suggestedGraphCommands(index, { state, deep: deepIndex, deepSelectedId }),
+    [index, state, deepIndex, deepSelectedId],
+  );
 
   const [communityQuery, setCommunityQuery] = useState('');
   const [grouping, setGrouping] = useState<BrowseGrouping>('type');
@@ -559,6 +634,7 @@ function MemoryGraphAvailable({
       <GraphCommandBar
         index={index}
         history={history}
+        suggestions={suggestions}
         onRun={runCommand}
         onClearHistory={() => setHistory([])}
         onOpenHelp={onOpenHelp}
@@ -574,6 +650,14 @@ function MemoryGraphAvailable({
           {shownCount} of {index.counts.total} nodes shown
           {state.mode === 'explore' && listIds.length !== canvasIds.length
             ? ` on the canvas · ${listIds.length} match in Browse`
+            : ''}
+          {/* P36V.1 F — this count is about the FILE projection. Once the canvas
+              has zoomed into the deeper layers it is drawing something else, and
+              a count line sitting directly above it must not read as a
+              description of what is on screen. The canvas states its own counts
+              underneath itself. */}
+          {deepShowing
+            ? ' — the canvas is zoomed inside them, drawing symbol-level detail with its own counts below'
             : ''}
         </p>
         {state.focus && (
@@ -611,6 +695,9 @@ function MemoryGraphAvailable({
               dispatch={dispatch}
               visibleIds={canvasIds}
               edges={canvasEdges}
+              deep={deep}
+              deepSelectedId={deepSelectedId}
+              onDeepSelect={setDeepSelectedId}
             />
           ) : (
             <GraphBrowse
@@ -619,6 +706,7 @@ function MemoryGraphAvailable({
               dispatch={dispatch}
               ids={listIds}
               grouping={grouping}
+              deep={deepIndex}
             />
           )}
           {/* Explore only: the legend explains CANVAS marks (shape, colour,
@@ -628,6 +716,19 @@ function MemoryGraphAvailable({
         </div>
 
         <div className="memory-graph-side">
+          {/* The pinned DEEP mark's detail — rendered in BOTH modes, exactly as
+              GraphDetail is, so what a pointer discovers by clicking a symbol on
+              the canvas is readable as text from the keyboard too. */}
+          {deepIndex && deepSelectedId && (
+            <GraphDeepDetail
+              deep={deepIndex}
+              selectedId={deepSelectedId}
+              relationFilter={state.relationFilter}
+              onSelectDeep={setDeepSelectedId}
+              onNavigateFile={navigateToFile}
+              onClear={() => setDeepSelectedId(null)}
+            />
+          )}
           {state.focus?.kind === 'path' && (
             <GraphPathResult
               focus={state.focus}

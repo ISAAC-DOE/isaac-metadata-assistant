@@ -2274,6 +2274,51 @@ def get_memory_graph() -> dict:
     return memory_graph.build_graph_projection(memory.get_default_reader())
 
 
+@router.get(
+    "/memory/graph/detail",
+    tags=[TAG_GRAPH],
+    summary="Get the Symbol-Level Project Memory Graph Structure",
+    description=(
+        "The symbol-level structure of the source graph: the individual symbols, "
+        "document sections, and recorded rationales inside each served file, the "
+        "relations between them, and their community grouping. Every node, "
+        "relation, and direction is the source graph's own value, passed through "
+        "verbatim.\n\n"
+        "This is a point-in-time index, not a map of today's code. The structure "
+        "describes the commit reported as `built_at_commit`, which is generally "
+        "**not** the current repository head, and the response says so "
+        "machine-readably with `is_point_in_time: true` and "
+        "`describes_current_head: false`. Content freshness and structural "
+        "freshness are separate axes: the served-file content manifest is kept "
+        "current, while this structure stays pinned to the commit that was "
+        "indexed, and `served_set_consistency` reports whether the two still "
+        "describe the same set of served files.\n\n"
+        "Scoped to served files only — a symbol whose owning file is not served "
+        "is absent, never partially disclosed. Served separately from the graph "
+        "projection operation because it is much larger and is fetched only on "
+        "demand; that operation's own response is unaffected by this one.\n\n"
+        "When the artifact is absent or unreadable it returns an honest envelope "
+        "with `available: false` and zero nodes and edges rather than a "
+        "fabricated graph, and its provenance collapses to nulls rather than to "
+        "plausible-looking defaults. Read-only; leads to verify, never a verdict."
+    ),
+    response_description=(
+        "The symbol-level nodes, their relations, community names, and the "
+        "point-in-time provenance of the structure."
+    ),
+    responses={**_R_UNAUTHORIZED},
+)
+def get_memory_graph_detail() -> dict:
+    """The deep (symbol-level) memory-graph layer: a SEPARATE, lazily-fetched
+    endpoint over the committed graph-detail artifact. Deliberately not folded
+    into ``get_memory_graph`` — the base served-file projection's response shape
+    stays untouched. See ``memory_graph.build_graph_detail``; this handler needs
+    no try/except, because that function never raises (HTTP 200 always)."""
+    return memory_graph.build_graph_detail(
+        memory.get_default_detail_source(), memory.get_default_reader()
+    )
+
+
 # --- 17. search (composed truth + memory planes, grouped, no verdict) ----------
 #
 # Composes the two existing search cores into ONE grouped, plane-labeled envelope.

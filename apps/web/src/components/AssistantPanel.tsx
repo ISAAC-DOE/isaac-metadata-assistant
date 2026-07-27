@@ -45,6 +45,10 @@ import {
   type Proposal,
 } from '../lib/assistantAgent';
 import { api } from '../lib/api';
+// P36V.1 Unit B — the CLOSED local action catalog. A free-form answer's wire
+// action is resolved through it, so an unknown kind is dropped and the visible
+// label + client route stay frontend-owned.
+import { resolveAssistantAction } from '../lib/assistantComposer';
 import type {
   AssistantGraphCapability,
   GraphProposal,
@@ -293,6 +297,13 @@ const MORE_DISCLOSURE_LABEL = 'Suggested Questions & Agent Actions';
 // these belong to one specific answer and are rendered inside its bubble.
 const RELATED_QUESTIONS_LABEL = 'Related Questions';
 
+// P36V.1 Unit B — the visible Title-Case label of the collapsed disclosure holding
+// the EXACT validation locators. Everything technical the humanized answer no
+// longer shows inline (including the deterministic validator's literal `$` root
+// marker) lives behind this one control, so nothing is hidden from the reader who
+// wants it and nothing raw is pushed at the reader who does not.
+const TECHNICAL_DETAILS_LABEL = 'Technical Details';
+
 // P34.5 — a defensive client-side ceiling so a hung read-only query can never
 // leave the composer stuck in `loading` forever. On timeout the query REJECTS,
 // which flows through the SAME catch as any network error → the composer
@@ -377,13 +388,21 @@ const NEAR_BOTTOM_PX = 64;
 
 /**
  * Conversation-style assistant (P29.2; re-laid-out P36R S2; presentation
- * contract re-specified P36V S-A). Layout top→bottom:
+ * contract re-specified P36V S-A; header + scroll contract P36V.1). Layout
+ * top→bottom:
  *
- *   HEADER        icon + "Assistant" title, the availability STATUS ROW directly
- *                 beneath the title, and "Clear Conversation" on the right of the
- *                 same block (only once there IS a conversation to clear)
+ *   HEADER        ONE balanced row — LEFT: the chat icon + the "Assistant"
+ *                 title; RIGHT: the availability status (dot + Title-Case
+ *                 label), pushed to the header's right edge. Beneath that row,
+ *                 and only once there IS a conversation to clear, a compact
+ *                 right-aligned ACTION row holding "Clear Conversation" — never
+ *                 between the title and the status. With no conversation the
+ *                 action row is `:empty` and collapses, reserving no space.
  *   DEGRADED      the honest, manual-first degraded notice
- *   BODY          flex:1 / min-height:0 — the region that absorbs the rail height
+ *   BODY          flex:1 / min-height:0 / overflow-y:auto — the region that
+ *                 absorbs the rail height AND the panel's scrollport: its
+ *                 content is clipped and scrolled here, so it can never spill
+ *                 under the opaque sticky dock below
  *                   · EMPTY STATE (no conversation): one guidance sentence +
  *                     Suggested Questions + a subtle divider
  *                   · CONVERSATION (a conversation exists): the bounded,
@@ -788,6 +807,20 @@ export function AssistantPanel({
         result: resp.result,
         followups: resp.followups,
         version: resp.version,
+        // P36V.1 Unit B — the free-form answer's OPTIONAL bounded navigation
+        // action, resolved through this build's CLOSED catalog: the wire supplies
+        // the `kind`, the frontend supplies the label and the client route the
+        // router resolves under its `basename`. An unknown/absent kind yields
+        // undefined and no control is offered. Before this slice the response had
+        // no action field at all, so a free-form answer could not render the
+        // working Open Validator control — the backend instead cited a chip
+        // labelled "Open Validate" pointing at the record already on screen.
+        action: resolveAssistantAction(resp.action),
+        // P36V.1 Unit B — the EXACT validation locators for the collapsed
+        // Technical Details disclosure. This is the ONLY place the truth core's
+        // raw `$` root marker surfaces; the answer text carries the humanized
+        // location phrases instead.
+        technicalPaths: resp.technical_paths ?? undefined,
         id: uid(),
         timestamp: Date.now(),
       });
@@ -910,6 +943,17 @@ export function AssistantPanel({
   const liveFollowups = (liveAnswer?.followups as string[] | undefined) ?? [];
   const staleDescId = liveStale ? 'assistant-live-stale' : undefined;
 
+  // P36V.1 Unit B — the EXACT validation locators behind a humanized blocker
+  // answer. The primary answer text never shows the truth core's literal root
+  // marker `$` (it says "the record itself"); the unmodified locator is preserved
+  // here and rendered ONLY inside the collapsed Technical Details disclosure, so
+  // the technical reader loses nothing. Filtered to usable strings so an empty or
+  // non-string entry can never render a blank row. Live-turn only: the P29.1
+  // session sanitizer's SAFE_KEYS allowlist drops `technicalPaths` on archive.
+  const liveTechnicalPaths = ((liveAnswer?.technicalPaths as string[] | undefined) ?? []).filter(
+    (p) => typeof p === 'string' && p.trim() !== '',
+  );
+
   // P36V S-B — the OPTIONAL bounded NAVIGATION action the live answer offers.
   // Today the catalog holds exactly one: Open Validator. It is surfaced only
   //   · for a RESOLVED answer (never while loading — a control must never hang
@@ -950,6 +994,9 @@ export function AssistantPanel({
       // frozen at its definition (`OPEN_VALIDATOR_ACTION`), so nothing here — and
       // nothing downstream — can mutate the navigation target.
       action: ans.action,
+      // P36V.1 Unit B — the precomposed answer's exact validation locators, shown
+      // only inside the collapsed Technical Details disclosure.
+      technicalPaths: ans.technicalPaths,
       recordRev,
       resultType: cls.resultType,
       authority: cls.authority,
@@ -1032,10 +1079,15 @@ export function AssistantPanel({
         <span className="assistant-icon" aria-hidden="true">
           <MessageSquare size={15} strokeWidth={2} />
         </span>
-        {/* P36V S-A — title + STATUS ROW are one stacked block: the availability
-            state reads directly BENEATH the "Assistant" title (it used to sit at
-            the far right of the header, visually detached from the thing it
-            describes and competing with Clear Conversation for the same corner). */}
+        {/* P36V.1 S2 — the header ROW. The title is the LEFT group (with the
+            icon immediately before it); the availability status is the RIGHT
+            group, pushed to the header's right edge by CSS. The reading order —
+            "Assistant", then the status, then (below) Clear Conversation — is
+            the DOM order, so a screen reader hears the same row a sighted reader
+            sees. The status is no longer stacked under the title, and Clear
+            Conversation no longer competes with it for the same corner: it drops
+            to its own subordinate action row beneath (`.assistant-head-right`,
+            `flex-basis: 100%`). */}
         <div className="assistant-head-titles">
           <span className="assistant-label">{LABELS.assistant}</span>
           {/* The status row renders only where BOTH are true: the mounting screen
@@ -1066,6 +1118,10 @@ export function AssistantPanel({
               controls and the transcript). It wipes THIS experiment's ephemeral
               session and returns the rail to its resting empty state; it touches
               no record/truth state, so it needs no confirmation.
+              P36V.1 S2 — it now sits on its OWN compact right-aligned row BENEATH
+              the title + status row, so it can never be read as sitting between
+              the title and the status. When there is nothing to clear this
+              wrapper is empty and CSS `:empty` collapses it — no reserved space.
               P36V S-A — the VISIBLE label is the full "Clear Conversation"; the
               accessible name now comes from that same visible text (the previous
               aria-label="Clear conversation" both contradicted the visible
@@ -1201,6 +1257,40 @@ export function AssistantPanel({
                   label. For a Project-Memory answer these are the leads to verify. */}
               {!loading && liveAnswer && liveSources.length > 0 && (
                 <ProvenanceChips sources={liveSources} />
+              )}
+              {/* P36V.1 Unit B — TECHNICAL DETAILS. The answer above names the
+                  blocking locations in human terms ("the record itself", "sample →
+                  material → formula"); the EXACT locator the deterministic
+                  validator reported — including its literal `$` root marker — is
+                  preserved verbatim here and nowhere else in the rendered answer,
+                  behind a collapsed native <details> (the repo idiom, and the same
+                  `.assistant-more*` chrome the prompt disclosure uses, so it needs
+                  no stylesheet rule of its own). Opening it reveals data the
+                  screen already holds: it fetches nothing, runs no validation and
+                  mutates nothing. */}
+              {!loading && liveAnswer && liveTechnicalPaths.length > 0 && (
+                <details className="assistant-more" data-details="technical">
+                  <summary className="assistant-more-summary">
+                    <ChevronRight className="chev" size={13} strokeWidth={2} aria-hidden="true" />
+                    <span>{TECHNICAL_DETAILS_LABEL}</span>
+                  </summary>
+                  <div className="assistant-more-body">
+                    {/* The list's accessible name is DISTINCT from the
+                        disclosure's visible label above it — repeating the same
+                        words would make a screen reader announce "Technical
+                        Details" twice (the exact defect P36V review M1 caught on
+                        the follow-ups group). */}
+                    <ul className="assistant-provenance" aria-label="Reported validation locators">
+                      {liveTechnicalPaths.map((p, i) => (
+                        <li key={`${p}-${i}`} className="assistant-provenance-item">
+                          <span className="assistant-source-chip">
+                            <code>{p}</code>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </details>
               )}
               {/* P34.3 — the COMPACT live-answer staleness indicator (same visual as
                   an archived message's stale badge) + an explicit "Ask again". A

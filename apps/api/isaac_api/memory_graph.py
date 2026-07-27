@@ -31,9 +31,26 @@ response never carries a dangling edge.
 Route wiring: ``GET /api/memory/graph`` in ``routes.py`` calls
 ``build_graph_projection(memory.get_default_reader())`` and returns the dict
 verbatim (HTTP 200 always — this function never raises).
+
+Deep (symbol-level) layer
+-------------------------
+``build_graph_detail`` is a SECOND, independent envelope over the committed
+``memory-graph-detail.json`` artifact (see ``isaac_api.memory.GraphDetailSource``
+and ``scripts/build_memory_snapshot.py --detail-out``), wired to its OWN route
+``GET /api/memory/graph/detail`` so it is lazily fetched and never inflates the
+base projection. The base projection's response shape above is UNCHANGED by it.
+The deep layer is the symbol-level structure Graphify indexed at the artifact's
+``built_at_commit`` — a point-in-time snapshot that is generally NOT the current
+repository HEAD — and its provenance says so explicitly and machine-readably.
+
+The only import here is the sibling memory-plane module ``isaac_api.memory``
+(stdlib-only, Graphify-free, truth-free); this module still imports neither
+``graphify`` nor ``isaac_records``.
 """
 
 from __future__ import annotations
+
+from . import memory
 
 #: Deterministic sorted-prefix caps on the rendered response.
 MAX_NODES = 600
@@ -258,6 +275,279 @@ def _build_available(overview: dict, status: dict, reader) -> dict:
                 "note": _UNDERLYING_GRAPH_NOTE,
             },
             "provenance": _provenance(overview, status),
+        },
+    }
+
+
+# --- deep (symbol-level) detail layer -----------------------------------------
+#
+# Served by its OWN endpoint (``GET /api/memory/graph/detail``), lazily fetched,
+# and NEVER folded into ``build_graph_projection``'s response — the base
+# 220-node served-file projection above is untouched and stays byte-compatible
+# in shape.
+
+#: Deterministic sorted-prefix caps on the deep response. Node capping is a
+#: PREFIX, so the surviving 0-based edge endpoint indices stay valid; edges
+#: pointing past the cap are dropped before the edge cap is applied.
+DETAIL_MAX_NODES = 20000
+DETAIL_MAX_EDGES = 60000
+
+DETAIL_NOTE = (
+    "Project memory returns leads to verify — never a validation verdict. "
+    "This is the symbol-level structure of the source graph as indexed at "
+    "built_at_commit; it is a point-in-time snapshot, not a map of the current "
+    "repository HEAD."
+)
+
+#: Machine-readable staleness contract, repeated in every response's provenance.
+_DETAIL_PROVENANCE_NOTE = (
+    "structure describes built_at_commit (point-in-time Graphify index), while "
+    "the served-file content manifest is CI-current; the two are separate axes"
+)
+
+
+def _detail_provenance(data: dict, reader_status: dict, served_consistency: str) -> dict:
+    """Provenance sourced ONLY from the artifact plus the reader's own
+    ``status()`` — never invented, never defaulted to a flattering value."""
+    return {
+        "built_at_commit": data.get("built_at_commit"),
+        "source_graph_sha256": data.get("source_graph_sha256"),
+        "detail_schema_version": data.get("detail_schema_version"),
+        "generator": data.get("generator"),
+        "policy_fingerprint": data.get("policy_fingerprint"),
+        # The two honesty flags a consumer can branch on without parsing prose.
+        "is_point_in_time": True,
+        "describes_current_head": False,
+        "structural_scope": data.get("structural_scope"),
+        "structural_basis": data.get("structural_basis"),
+        # The served-file CONTENT manifest is a separate, CI-verified axis; the
+        # deep layer only pins the served PATH SET.
+        "served_content_scope": "served_files_only",
+        "served_content_basis": "ci_content_manifest",
+        # ``served_file_count`` counts the served PATH SET (every repo-relative
+        # path the memory plane may describe). It is deliberately NOT the size of
+        # the CI *content* manifest that the two ``served_content_*`` keys above
+        # name: the manifest excludes one served path that is not content-hashed
+        # (a committed fixture snapshot), so the manifest is one SMALLER than
+        # this number. ``served_file_count_scope`` makes that explicit so a
+        # consumer reading this block as a unit cannot infer an off-by-one story.
+        "served_file_count": data.get("served_file_count"),
+        "served_file_count_scope": "served_path_set",
+        "served_path_set_fingerprint": data.get("served_path_set_fingerprint"),
+        "served_set_consistency": served_consistency,
+        "snapshot_provider": reader_status.get("provider_kind"),
+        "snapshot_built_at_commit": reader_status.get("source_graph_commit"),
+        "note": _DETAIL_PROVENANCE_NOTE,
+    }
+
+
+def _rendered_counts(nodes: list, edges: list) -> dict:
+    """Counts recomputed from the rows this response ACTUALLY carries.
+
+    The artifact's own ``counts`` block is never echoed — truncated or not. A
+    response must describe what it contains: an artifact claiming
+    ``{"nodes": 999999999}`` while shipping 2,612 rows would still be reported
+    as 2,612 here. ``memory.GraphDetailSource._derive`` validates every row and
+    every edge endpoint but does NOT cross-check ``counts`` against
+    ``len(nodes)``/``len(edges)``, so echoing that block would let a hand-edited
+    or stale artifact overstate the graph while still being served as
+    ``integrity: "verified"``. Recomputation removes the possibility instead of
+    relying on the artifact being self-consistent.
+
+    Two independent layers cover the same defect from the other side: the
+    generator's ``_validate_detail_shape`` refuses to WRITE a counts/length
+    mismatch, and that validator is re-run against the REAL committed artifact
+    in CI (``test_committed_artifact_passes_the_generators_own_gates``).
+
+    ``communities`` is the number of DISTINCT community ids carried by the
+    rendered nodes rather than ``len(community_names)``: the response ships the
+    artifact's full name map verbatim, which for a truncated response can name
+    clusters no rendered node belongs to.
+    """
+    rendered_communities = {row[5] for row in nodes if row[5] is not None}
+    file_types: dict = {}
+    for row in nodes:
+        key = row[2] if row[2] is not None else "unknown"
+        file_types[key] = file_types.get(key, 0) + 1
+    relations: dict = {}
+    for edge in edges:
+        relations[edge[2]] = relations.get(edge[2], 0) + 1
+    return {
+        "nodes": len(nodes),
+        "edges": len(edges),
+        "communities": len(rendered_communities),
+        "file_types": dict(sorted(file_types.items())),
+        "relations": dict(sorted(relations.items())),
+    }
+
+
+def _detail_degraded(reason: str, integrity, reader_status: dict) -> dict:
+    """The honest ``available:false`` envelope — zero fabricated nodes/edges,
+    HTTP 200. Provenance collapses to nulls rather than plausible defaults."""
+    return {
+        "plane": "memory",
+        "note": DETAIL_NOTE,
+        "available": False,
+        "reason": reason,
+        "integrity": integrity,
+        "truncated": False,
+        "node_keys": [],
+        "edge_keys": [],
+        "nodes": [],
+        "edges": [],
+        "community_names": {},
+        "encoding": {},
+        "meta": {
+            "counts": {"nodes": 0, "edges": 0, "communities": 0,
+                       "file_types": {}, "relations": {}},
+            "provenance": {
+                "built_at_commit": None,
+                "source_graph_sha256": None,
+                "detail_schema_version": None,
+                "generator": None,
+                "policy_fingerprint": None,
+                "is_point_in_time": True,
+                "describes_current_head": False,
+                "structural_scope": None,
+                "structural_basis": None,
+                "served_content_scope": "served_files_only",
+                "served_content_basis": "ci_content_manifest",
+                "served_file_count": None,
+                "served_file_count_scope": "served_path_set",
+                "served_path_set_fingerprint": None,
+                "served_set_consistency": "unknown",
+                "snapshot_provider": reader_status.get("provider_kind"),
+                "snapshot_built_at_commit": reader_status.get("source_graph_commit"),
+                "note": _DETAIL_PROVENANCE_NOTE,
+            },
+        },
+    }
+
+
+def _served_set_consistency(data: dict, reader) -> str:
+    """``"current"`` / ``"stale"`` / ``"unknown"``: whether the deep layer and
+    the memory reader describe the SAME served path set.
+
+    Provable at runtime with no extra data: the reader's own ``files()`` is the
+    served path set, so the artifact's embedded path-set fingerprint can be
+    recomputed and compared. This is a PATH-SET check only — served-file
+    *content* drift is CI's authority and is never inferred here."""
+    embedded = data.get("served_path_set_fingerprint")
+    if not isinstance(embedded, str) or not embedded:
+        return "unknown"
+    try:
+        paths = [f.get("path") for f in (reader.files() or [])]
+    except Exception:
+        return "unknown"
+    paths = [p for p in paths if isinstance(p, str) and p]
+    if not paths:
+        return "unknown"
+    try:
+        recomputed = memory.compute_served_path_set_fingerprint(paths)
+    except Exception:
+        return "unknown"
+    return "current" if recomputed == embedded else "stale"
+
+
+def build_graph_detail(detail_source, reader) -> dict:
+    """The deep (symbol-level) layer's response envelope.
+
+    Reads the committed artifact through ``detail_source`` (a
+    ``memory.GraphDetailSource``) and passes its nodes/edges/relations through
+    VERBATIM — no node, edge, hierarchy, label or relation value is derived,
+    renamed or invented here. Direction is whatever the artifact recorded.
+
+    The one thing that is NOT taken from the artifact is ``meta.counts``: it is
+    always recomputed from the rows actually rendered, so the response cannot
+    state a count its own payload does not support (see ``_rendered_counts``).
+
+    Never raises: an absent/unreadable/unsupported artifact, an unavailable
+    memory reader, or any unanticipated failure degrades to the same honest
+    ``available:false`` envelope, so the route always answers HTTP 200."""
+    try:
+        reader_status = _safe_call(reader.status, {})
+        if not isinstance(reader_status, dict):
+            reader_status = {}
+    except Exception:
+        reader_status = {}
+
+    try:
+        loaded = detail_source.detail()
+    except Exception:
+        loaded = None
+    if not isinstance(loaded, dict) or not loaded.get("available"):
+        reason = (loaded.get("reason") if isinstance(loaded, dict) else None) \
+            or "detail_unreadable"
+        integrity = loaded.get("integrity") if isinstance(loaded, dict) else "unknown"
+        return _detail_degraded(reason, integrity, reader_status)
+
+    try:
+        return _build_detail_available(loaded, reader, reader_status)
+    except Exception:
+        # The artifact loaded but the envelope could not be derived coherently —
+        # degrade honestly rather than let an exception become a 500.
+        return _detail_degraded("detail_unreadable",
+                                loaded.get("integrity"), reader_status)
+
+
+def _build_detail_available(loaded: dict, reader, reader_status: dict) -> dict:
+    data = loaded.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("graph detail payload missing")
+
+    all_nodes = data.get("nodes")
+    all_edges = data.get("edges")
+    # Defense in depth: ``memory.GraphDetailSource`` already refuses an artifact
+    # whose ``nodes``/``edges`` are not lists of well-shaped rows, so this cannot
+    # trip for a source-loaded payload. It exists so a non-list payload from any
+    # other caller degrades honestly instead of being echoed back as a "graph".
+    if not isinstance(all_nodes, list) or not isinstance(all_edges, list):
+        raise ValueError("graph detail nodes/edges must be lists")
+
+    # Slicing/copying below is also the M5 cache-aliasing defence: the outer
+    # ``nodes``/``edges``/``community_names``/``encoding`` containers handed to the
+    # caller are NEVER the cached artifact's own containers, so a future in-place
+    # ``body["nodes"].sort()`` / ``.clear()`` / ``.append()`` cannot corrupt the
+    # process-wide cache. The ROWS themselves are still shared (a per-request deep
+    # copy of ~6.7k rows would be pure waste); that residual aliasing stays a
+    # documented read-only contract — see ``memory.GraphDetailSource`` — and is
+    # asserted by ``test_response_containers_do_not_alias_the_cached_artifact``.
+    nodes_truncated = len(all_nodes) > DETAIL_MAX_NODES
+    nodes = all_nodes[:DETAIL_MAX_NODES] if nodes_truncated else list(all_nodes)
+    if nodes_truncated:
+        limit = len(nodes)
+        surviving = [e for e in all_edges if e[0] < limit and e[1] < limit]
+    else:
+        surviving = list(all_edges)
+    edges_truncated = len(surviving) > DETAIL_MAX_EDGES
+    edges = surviving[:DETAIL_MAX_EDGES] if edges_truncated else surviving
+    truncated = nodes_truncated or edges_truncated
+
+    # ALWAYS recomputed from the rendered rows — the artifact's ``counts`` block
+    # is never echoed in either branch. See ``_rendered_counts``.
+    rendered_counts = _rendered_counts(nodes, edges)
+
+    provenance = _detail_provenance(
+        data, reader_status, _served_set_consistency(data, reader)
+    )
+    provenance["detail_schema_version"] = loaded.get("detail_schema_version")
+
+    return {
+        "plane": "memory",
+        "note": DETAIL_NOTE,
+        "available": True,
+        "reason": None,
+        "integrity": loaded.get("integrity"),
+        "truncated": truncated,
+        "node_keys": list(data.get("node_keys") or []),
+        "edge_keys": list(data.get("edge_keys") or []),
+        "nodes": nodes,
+        "edges": edges,
+        "community_names": dict(data.get("community_names") or {}),
+        "encoding": dict(data.get("encoding") or {}),
+        "meta": {
+            "counts": rendered_counts,
+            "provenance": provenance,
         },
     }
 

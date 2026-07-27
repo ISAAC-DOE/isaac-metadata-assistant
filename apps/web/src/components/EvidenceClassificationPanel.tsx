@@ -102,7 +102,11 @@ export function EvidenceClassificationPanel({
             {CLASS_ORDER.filter((c) => counts[c] > 0).map((c) => (
               <span key={c} className="evclass-count">
                 <StatusChip kind={EVIDENCE_CLASS_CHIP[c]} />
+                {/* The badge is the visual count; the noun is for screen readers
+                    only, so "Supported 3" is announced as "Supported 3 fields"
+                    without adding a repeated visible word to every pill. */}
                 <span className="evclass-count-n">{counts[c]}</span>
+                <span className="sr-only">{counts[c] === 1 ? 'field' : 'fields'}</span>
               </span>
             ))}
           </div>

@@ -1,18 +1,22 @@
 import './screens.css';
-import {
-  useMemo,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-} from 'react';
+import { useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { CircleHelp, LayoutList, ChevronRight, Shield, Settings } from '../components/icons';
+import {
+  CircleHelp,
+  LayoutList,
+  ChevronRight,
+  Lock,
+  Shield,
+  Settings,
+} from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
+import { SETTINGS_TAB_PARAM, isSettingsTab, type SettingsTabId } from '../lib/routes';
 import {
   ABOUT_RESPONSE_FIELDS,
   REPO_DOCS,
@@ -23,9 +27,8 @@ import {
   settingsFactsFrom,
 } from '../lib/settingsContent';
 import type { ApiAboutResponse, ApiOpenApiResponse } from '../lib/types';
-import { ApiDocsPanel } from './settings/ApiDocs';
+import { ApiExplorerPanel, ApiQuickStartPanel } from './settings/ApiDocs';
 import { ApiKeysPanel } from './settings/ApiKeys';
-import { RovingTabs } from './settings/apiShared';
 
 /**
  * Settings — P36R Slice 9 reorganised this surface into four local page tabs
@@ -42,10 +45,24 @@ import { RovingTabs } from './settings/apiShared';
  *   · About          — identity and provenance only, with the raw values
  *                     (full commit SHA, response field names, source
  *                     endpoints, repository doc paths) behind Technical Details.
- *   · API            — two sub-surfaces (slice C): API Keys, an honest
- *                     unavailable state, and Documentation, a Quick Start plus
- *                     the master-detail browser over `GET /api/openapi` plus a
- *                     Connect an Agent guide.
+ *   · API Access     — everything about REACHING this build as a program: the
+ *                     honest key-unavailable status, the access model, Quick
+ *                     Start, and the Connect an Agent guide.
+ *   · Endpoint Explorer — the master-detail browser over `GET /api/openapi`.
+ *
+ * P36V-1 slice 12 made those last two SEPARATE top-level tabs and deleted the
+ * `keys | docs` sub-tab layer. The Endpoint Explorer used to sit three levels
+ * deep (page tab → sub-tab → section) with no URL of its own; nothing in the app
+ * linked to it. A second tab and a `?tab=` value are strictly simpler than a
+ * nested tablist, and they make the browser itself linkable.
+ *
+ * ROUTING: the active tab is DERIVED from `?tab=` (see `lib/routes.ts`), exactly
+ * as `GovernancePage` derives its own — one convention, not two. It is a query
+ * VALUE, never a path literal, so the router `basename` ('' locally, '/krish'
+ * deployed) is honoured automatically and no screen hard-codes a base path.
+ * Selecting a tab PUSHES (Governance replaces, deliberately, because its tab
+ * changes arrive from elsewhere): here the five tabs are five destinations a
+ * reader links to and steps Back through, so Back/Forward walks the tabs.
  *
  * Every sentence on the first three tabs comes from `lib/settingsContent.ts`,
  * which holds each canonical definition exactly once so the wording cannot
@@ -54,30 +71,42 @@ import { RovingTabs } from './settings/apiShared';
  *
  * There are NO user-adjustable settings in this build, and none were invented
  * to fill a page: every tab is informational, and Overview says so plainly.
- * Overview and About render `GET /api/about` verbatim; the API tab renders the
- * app's own generated contract — never a hand-maintained duplicate, no CDN, no
- * Swagger UI/ReDoc.
+ * Overview and About render `GET /api/about` verbatim; the two API tabs render
+ * the app's own generated contract — never a hand-maintained duplicate, no CDN,
+ * no Swagger UI/ReDoc.
  *
  * Both fetches are issued once at page level so switching tabs is pure client
  * state and never re-hits the backend.
  */
 
-type SettingsTab = 'overview' | 'privacy' | 'about' | 'api';
+type SettingsTab = SettingsTabId;
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'privacy', label: 'Data & Privacy' },
   { id: 'about', label: 'About' },
-  { id: 'api', label: 'API' },
+  { id: 'api', label: 'API Access' },
+  { id: 'explorer', label: 'Endpoint Explorer' },
 ];
 
 const tabId = (id: SettingsTab) => `settings-tab-${id}`;
 const panelId = (id: SettingsTab) => `settings-tabpanel-${id}`;
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requested = searchParams.get(SETTINGS_TAB_PARAM);
+  const activeTab: SettingsTab = isSettingsTab(requested) ? requested : 'overview';
+
   const about = useFetch(() => api.getAbout(), []);
   const openapi = useFetch(() => api.getOpenApi(), []);
+
+  /** Client-side only: `setSearchParams` never reloads the document, and the
+   *  value is a query param, so the router's basename is preserved untouched. */
+  function setActiveTab(tab: SettingsTab) {
+    const next = new URLSearchParams(searchParams);
+    next.set(SETTINGS_TAB_PARAM, tab);
+    setSearchParams(next);
+  }
 
   return (
     <AppShell
@@ -141,7 +170,19 @@ export function SettingsPage() {
           aria-labelledby={tabId('api')}
           tabIndex={0}
         >
-          <ApiTab state={openapi} />
+          <ApiAccessTab state={openapi} onOpenExplorer={() => setActiveTab('explorer')} />
+        </div>
+      )}
+
+      {activeTab === 'explorer' && (
+        <div
+          className="settings-panel"
+          id={panelId('explorer')}
+          role="tabpanel"
+          aria-labelledby={tabId('explorer')}
+          tabIndex={0}
+        >
+          <EndpointExplorerTab state={openapi} />
         </div>
       )}
     </AppShell>
@@ -310,7 +351,11 @@ function OverviewBody({
           <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
         </button>
         <button type="button" className="settings-jump-btn" onClick={() => onSelectTab('api')}>
-          Browse the API
+          API Access
+          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
+        </button>
+        <button type="button" className="settings-jump-btn" onClick={() => onSelectTab('explorer')}>
+          Endpoint Explorer
           <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
         </button>
       </nav>
@@ -493,84 +538,73 @@ function AboutDetail({ data }: { data: ApiAboutResponse }) {
   );
 }
 
-// --- API tab: sub-navigation over two sub-surfaces --------------------------
+// --- API Access ---------------------------------------------------------------
 
 /**
- * The API tab is two jobs, so it is two sub-surfaces rather than one long page:
+ * Everything about REACHING this build as a program, on one tab and each thing
+ * said exactly once (P36V-1 slice 13):
  *
- *   · API Keys      — an honest UNAVAILABLE state. The backend has one shared
- *                     credential read from the environment and no operation that
- *                     creates, lists, revokes or rotates one, so nothing here
- *                     generates a key, writes to browser storage, or pretends a
- *                     control works (see `settings/ApiKeys.tsx`).
- *   · Documentation — Quick Start, the Endpoint Explorer, and Connect an Agent,
- *                     every fact derived from `GET /api/openapi`.
+ *   · the STATUS — key management is unavailable, stated once, at the top;
+ *   · the ACCESS MODEL, external-agent access and the hosted-authentication
+ *     boundary — one compact row each (`settings/ApiKeys.tsx`);
+ *   · CREATE API KEY — a genuinely `disabled` control with a programmatically
+ *     associated reason, and the backend contract that would be required first
+ *     behind a collapsed Technical Requirements disclosure;
+ *   · QUICK START — only facts the generated contract itself carries;
+ *   · CONNECT AN AGENT — the collapsed integration guide, which is also the one
+ *     canonical home of the credential-safety rules.
  *
- * The sub-tabs use the SAME accessible contract as the page tabs above and as
- * Governance & Safety — `RovingTabs`, which is that contract extracted rather
- * than a third reimplementation of it.
+ * The endpoint browser is NOT here: it is its own tab, so this surface stays
+ * short enough to read.
  *
- * API Keys is first and selected by default: it answers the question that brings
- * someone to a Settings "API" tab (can I get a key?) truthfully and immediately,
- * and links straight into Documentation. Only Documentation needs the fetch, so
- * the loading and unreachable states live in that panel alone.
+ * The key sections need no data, so they render immediately; only the
+ * contract-derived Quick Start and Connect an Agent wait on the fetch.
  */
-type ApiSubTab = 'keys' | 'docs';
+function ApiAccessTab({
+  state,
+  onOpenExplorer,
+}: {
+  state: OpenApiState;
+  onOpenExplorer: () => void;
+}) {
+  return (
+    <SettingsCard
+      icon={<Lock size={18} strokeWidth={2} aria-hidden="true" className="settings-card-icon" />}
+      headingId="settings-apiaccess-heading"
+      title="API Access"
+      sub="What a program can and cannot do with this build, and what it needs to send."
+    >
+      <ApiKeysPanel onOpenExplorer={onOpenExplorer} />
 
-const API_SUB_TABS: { id: ApiSubTab; label: string }[] = [
-  { id: 'keys', label: 'API Keys' },
-  { id: 'docs', label: 'Documentation' },
-];
+      {state.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
+      {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
+      {state.status === 'data' && (
+        <ApiQuickStartPanel schema={state.data} onOpenExplorer={onOpenExplorer} />
+      )}
+    </SettingsCard>
+  );
+}
 
-const apiSubTabId = (id: ApiSubTab) => `settings-api-subtab-${id}`;
-const apiSubPanelId = (id: ApiSubTab) => `settings-api-subpanel-${id}`;
+// --- Endpoint Explorer ---------------------------------------------------------
 
-function ApiTab({ state }: { state: OpenApiState }) {
-  const [sub, setSub] = useState<ApiSubTab>('keys');
+/**
+ * The master-detail browser over `GET /api/openapi`, promoted out of the old
+ * Documentation sub-tab into a top-level, deep-linkable tab. Nothing else lives
+ * here, so the full page measure belongs to the list and the detail pane.
+ */
+function EndpointExplorerTab({ state }: { state: OpenApiState }) {
   return (
     <SettingsCard
       icon={
         <LayoutList size={18} strokeWidth={2} aria-hidden="true" className="settings-card-icon" />
       }
       headingId="settings-apidocs-heading"
-      title="API"
-      sub="How a program reaches this build, and what this build can and cannot issue. The reference is generated from the app's own OpenAPI contract, never a hand-maintained duplicate."
+      title="Endpoint Explorer"
+      sub="Every operation this build exposes, read from the OpenAPI document the app generates for itself."
     >
-      <RovingTabs
-        className="api-subtabs"
-        label="API sections"
-        tabs={API_SUB_TABS}
-        active={sub}
-        onSelect={setSub}
-        tabId={apiSubTabId}
-        panelId={apiSubPanelId}
-      />
-
-      {sub === 'keys' && (
-        <div
-          className="api-subpanel"
-          id={apiSubPanelId('keys')}
-          role="tabpanel"
-          aria-labelledby={apiSubTabId('keys')}
-        >
-          <ApiKeysPanel onOpenDocumentation={() => setSub('docs')} />
-        </div>
-      )}
-
-      {sub === 'docs' && (
-        <div
-          className="api-subpanel"
-          id={apiSubPanelId('docs')}
-          role="tabpanel"
-          aria-labelledby={apiSubTabId('docs')}
-        >
-          {state.status === 'loading' && <LoadingPanel label="Loading API documentation…" />}
-          {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
-          {state.status === 'data' && (
-            <ApiDocsPanel schema={state.data} onOpenKeys={() => setSub('keys')} />
-          )}
-        </div>
-      )}
+      {state.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
+      {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
+      {state.status === 'data' && <ApiExplorerPanel schema={state.data} />}
     </SettingsCard>
   );
 }

@@ -17,6 +17,7 @@ All fixtures are synthetic; the truth/export path is untouched.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -527,3 +528,429 @@ def test_memory_scope_requires_auth_when_key_set(tmp_path, monkeypatch):
     c = TestClient(create_app())
     r = c.post("/api/assistant/memory/query", json={"question": "docs about xanes"})
     assert r.status_code == 401
+
+
+# --- P36V.1 Unit B: the humanized blocker copy + the real validate affordance ---
+#
+# Two hosted-QA defects are pinned here.
+#
+# (1) The Assistant said: "1 path is listed as blocking export: $." The literal `$`
+#     comes from the TRUTH CORE (`src/isaac_records/official.py:71` falls back to it
+#     for a root-level violation, where `err.absolute_path` is empty). `official.py`
+#     is NOT edited; the humanization is display-only, and the exact locator is
+#     preserved in `technical_paths` for the Technical Details disclosure.
+#
+# (2) The validate affordance was a CITED-SOURCE chip `{"label": "Open Validate",
+#     "navigate_to": base}` where `base` is `/record/<id>` — the record already on
+#     screen. Clicking it navigated to the current page, so nothing visibly
+#     happened. It is now a typed `action` targeting the standalone Validator, and
+#     the response no longer cites an action as if it were a source.
+
+
+def _action_of(client, exp_id, question) -> dict:
+    return _query(client, exp_id, question).json()
+
+
+def test_root_level_blocker_is_never_reported_as_the_raw_dollar_locator(client):
+    """The exact reported hosted defect. The seed new draft's validate dry-run
+    yields a single ROOT-level error whose locator is the literal `$`."""
+    body = _action_of(client, ws.SEED_NEW_DRAFT_ID, "why can't I export?")
+    assert body["result"] == "answered"
+    # the primary, user-facing answer names the RECORD, never the raw locator
+    assert "$" not in body["answer"]
+    assert body["answer"].startswith("1 record-level validation issue may be blocking export.")
+    assert "1 path is listed as blocking export" not in body["answer"]
+    # …and the exact locator survives, for the Technical Details disclosure only
+    assert body["technical_paths"] == ["$"]
+
+
+def test_export_blockers_carries_the_open_validator_action_not_a_self_navigating_chip(client):
+    body = _action_of(client, ws.SEED_NEW_DRAFT_ID, "what's blocking export?")
+    # the typed action mirrors the frontend's frozen OPEN_VALIDATOR_ACTION exactly
+    assert body["action"] == {
+        "kind": "open-validator",
+        "label": "Open Validator",
+        "to": "/governance?tab=validator",
+    }
+    # the misnamed, self-navigating cited-source chip is gone
+    assert body["sources"] == []
+    labels = [s["label"] for s in body["sources"]]
+    assert "Open Validate" not in labels
+    # the action target is a BASE-PATH-FREE in-app client route: the deployed
+    # `/krish` prefix is applied by the router's basename, never written here
+    assert body["action"]["to"].startswith("/governance")
+    assert not body["action"]["to"].startswith("/krish")
+    assert "://" not in body["action"]["to"]
+    # it never points at the record already on screen
+    assert not body["action"]["to"].startswith("/record")
+
+
+def test_export_readiness_carries_the_same_action(client):
+    body = _action_of(client, ws.SEED_READY_ID, "is this ready to export?")
+    assert body["action"]["kind"] == "open-validator"
+    assert body["action"]["to"] == "/governance?tab=validator"
+    assert body["sources"] == []
+
+
+def test_the_visible_control_name_is_open_validator_everywhere(client):
+    """Label consistency: the control is "Open Validator". The prose used to name
+    "Open Validate", a control that existed nowhere in the app under that name."""
+    assert "Open Validate to" not in aq._ROUTE_TO_VALIDATE
+    assert "Open Validator" in aq._ROUTE_TO_VALIDATE
+    for exp_id, q in (
+        (ws.SEED_NEW_DRAFT_ID, "what's blocking export?"),
+        (ws.SEED_READY_ID, "why can't I export?"),
+        (ws.SEED_READY_ID, "is this ready to export?"),
+    ):
+        answer = _action_of(client, exp_id, q)["answer"]
+        assert "Open Validator" in answer
+        # the retired name must not reappear in either casing
+        assert not re.search(r"open Validate\b", answer, re.I), answer
+
+
+def test_no_other_intent_offers_an_action(client):
+    """Nothing new was surfaced: only the two export intents carry the action."""
+    for q in ("what still needs me?", "what is the current step",
+              "summarize this record", "where did the formula come from",
+              "what's the evidence for the formula", "docs about xanes",
+              "what is the oxidation state of iron",
+              "what's the current step and what's missing"):
+        body = _action_of(client, ws.SEED_READY_ID, q)
+        assert body["action"] is None, (q, body["action"])
+        assert body["technical_paths"] == [], (q, body["technical_paths"])
+
+
+def test_memory_scope_response_has_the_same_shape_and_offers_no_action(client):
+    body = _mem_query(client, "docs about xanes").json()
+    assert body["action"] is None
+    assert body["technical_paths"] == []
+
+
+def test_every_answer_carries_both_new_keys(client):
+    """A stable response shape: the keys are always present, never conditionally
+    absent, so a client never has to distinguish absent from empty."""
+    for q in [q for q, _ in INTENT_CASES] + OPEN_WORLD:
+        body = _action_of(client, ws.SEED_READY_ID, q)
+        assert "action" in body and "technical_paths" in body, q
+        assert isinstance(body["technical_paths"], list), q
+
+
+def test_the_action_passes_the_same_guards_as_a_cited_source(client):
+    """The action goes through the SAME client-route allowlist, path/secret scrub
+    and verdict guard every cited source passes."""
+    body = _action_of(client, ws.SEED_NEW_DRAFT_ID, "why can't I export?")
+    action = body["action"]
+    _no_leak(action["label"])
+    _no_leak(action["to"])
+    assert aq.has_verdict_language(action["label"]) is False
+    assert action["to"].startswith(aq._CLIENT_ROUTE_PREFIXES)
+    # a hostile / unknown descriptor is refused outright, never passed through
+    assert aq._safe_action(None) is None
+    assert aq._safe_action({"kind": "open-validator", "label": "x"}) is None
+    assert aq._safe_action(
+        {"kind": "open-validator", "label": "x", "to": "/Users/me/secret"}
+    ) is None
+    assert aq._safe_action(
+        {"kind": "open-validator", "label": "x", "to": "https://evil.example"}
+    ) is None
+    assert aq._safe_action(
+        {"kind": "open-validator", "label": "Records valid against v1.05",
+         "to": "/governance?tab=validator"}
+    ) is None
+    assert aq._safe_action({"kind": "", "label": "x", "to": "/governance"}) is None
+
+
+def test_technical_paths_pass_the_path_secret_scrub(client):
+    """A locator is rendered verbatim in the disclosure, so it passes the same
+    scrub. One that trips it is never rewritten into something it is not — it is
+    replaced by the explicit withheld MARKER (P36V.1 review M5: a silent drop
+    desynchronized the stated count from the shown locators)."""
+    assert aq._safe_technical_paths(["$", "assets.0.sha256"]) == ["$", "assets.0.sha256"]
+    assert aq._safe_technical_paths(["/Users/me/x.json"]) == [aq.WITHHELD_TECHNICAL]
+    assert aq._safe_technical_paths(["Bearer abc"]) == [aq.WITHHELD_TECHNICAL]
+    # the unsafe content itself never survives, in either case
+    for shown in (aq._safe_technical_paths(["/Users/me/x.json"])
+                  + aq._safe_technical_paths(["Bearer abc"])):
+        _no_leak(shown)
+    assert aq._safe_technical_paths([None, "", 7, "$"]) == ["$"]
+    assert aq._safe_technical_paths("not a list") == []
+
+
+def test_new_copy_passes_the_verdict_guard_and_the_leak_scrub(client):
+    for exp_id in (ws.SEED_NEW_DRAFT_ID, ws.SEED_READY_ID):
+        for q in ("why can't I export?", "is this ready to export?"):
+            body = _action_of(client, exp_id, q)
+            assert aq.has_verdict_language(body["answer"]) is False, body["answer"]
+            assert aq._is_unsafe_string(body["answer"]) is False, body["answer"]
+            _no_leak(body["answer"])
+            for p in body["technical_paths"]:
+                _no_leak(p)
+
+
+def test_readiness_clause_is_grammatical(client):
+    """The clause used to read "This record has 5 fields still need you"."""
+    for exp_id in (ws.SEED_NEW_DRAFT_ID, ws.SEED_READY_ID):
+        answer = _action_of(client, exp_id, "is this ready to export?")["answer"]
+        assert "has 0 field" not in answer
+        assert re.search(r"On this record, \d+ fields? still needs? you\.", answer), answer
+
+
+def test_blocker_answers_stay_deterministic_and_read_only(client):
+    before = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json()
+    first = _action_of(client, ws.SEED_NEW_DRAFT_ID, "why can't I export?")
+    second = _action_of(client, ws.SEED_NEW_DRAFT_ID, "why can't I export?")
+    assert first == second
+    after = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json()
+    # rev + version unchanged: humanizing a locator and offering a navigation
+    # target mutated nothing and ran no validation that changed anything.
+    assert after["rev"] == before["rev"]
+    assert after["version"] == before["version"]
+
+
+def _ctx(**over) -> aq.AssistantContext:
+    """A minimal, workspace-free context for unit-level `answer()` tests."""
+    kwargs = dict(
+        record_summary={}, pending={"pending": []}, evidence_trail=[], workflow={},
+        record_rev=1, version_token="1.0", navigate_base="/record/x",
+    )
+    kwargs.update(over)
+    return aq.AssistantContext(**kwargs)
+
+
+def test_a_branch_that_raises_returns_no_partial_extras(monkeypatch):
+    """If a branch populates `extras` and then raises, the fallback answer must not
+    carry a half-built action / locator list.
+
+    P36V.1 review M3 — this test used to patch `blocking_summary`, which is called
+    BEFORE either extra is assigned, so `extras` was still empty when the exception
+    unwound and the `extras = {}` reset it claims to exercise was a no-op. It now
+    patches `_open_validator_action`, the LAST assignment in the branch: by the time
+    it raises, `extras["technical_paths"]` really is populated."""
+    ctx = _ctx(validate=lambda: {"ok": False, "errors": [{"path": "$"}]})
+
+    seen: dict = {}
+    real_technical = aq.technical_paths
+
+    def spy(paths):
+        out = real_technical(paths)
+        seen["technical"] = out
+        return out
+
+    def boom():
+        raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(aq, "technical_paths", spy)
+    monkeypatch.setattr(aq, "_open_validator_action", boom)
+    body = aq.answer(aq.classify("why can't I export?"), ctx, None)
+
+    # proof the partially-populated path was really exercised this time
+    assert seen["technical"] == ["$"]
+    assert body["result"] == "insufficient_context"
+    assert body["action"] is None
+    assert body["technical_paths"] == []
+    assert "$" not in body["answer"]
+
+
+# --- P36V.1 review IMPORTANT-1: the validation-CRASH sentinel ------------------
+#
+# `routes.py::_assistant_validate_dryrun` returns
+# `[{"path": "$", "message": "Validation could not be completed."}]` when the
+# deterministic dry-run RAISED. Read through the locator formatter alone that is
+# indistinguishable from a root-level violation, so the humanized answer told the
+# reader "1 record-level validation issue may be blocking export" — a confident
+# claim about an issue the validator never located. `routes.py` is NOT changed here;
+# the interpretation is.
+
+_SENTINEL = [{"path": "$", "message": "Validation could not be completed."}]
+
+
+def test_a_validation_crash_is_never_described_as_a_validation_issue():
+    body = aq.answer(aq.classify("why can't I export?"),
+                     _ctx(validate=lambda: {"ok": False, "errors": list(_SENTINEL)}), None)
+    assert body["result"] == "insufficient_context"
+    assert body["answer"].startswith(
+        "The deterministic schema check could not be completed for this record"
+    )
+    # no count, no location, no locator disclosure — none was reported
+    assert "validation issue" not in body["answer"]
+    assert "record-level" not in body["answer"]
+    assert "may be blocking export" not in body["answer"]
+    assert "$" not in body["answer"]
+    assert body["technical_paths"] == []
+    # the reader can still REACH the deterministic check
+    assert body["action"]["kind"] == "open-validator"
+    assert aq.has_verdict_language(body["answer"]) is False
+    assert aq._is_unsafe_string(body["answer"]) is False
+
+
+def test_a_genuine_root_level_issue_is_still_reported_as_one():
+    """The fix is discrimination, not a blanket mute."""
+    real = [{"path": "$", "message": "'sample' is a required property"}]
+    body = aq.answer(aq.classify("why can't I export?"),
+                     _ctx(validate=lambda: {"ok": False, "errors": real}), None)
+    assert body["result"] == "answered"
+    assert body["answer"].startswith("1 record-level validation issue may be blocking export.")
+    assert body["technical_paths"] == ["$"]
+
+
+def test_the_sentinel_alongside_a_real_finding_is_reported_as_findings():
+    mixed = _SENTINEL + [{"path": "assets", "message": "'assets' is a required property"}]
+    body = aq.answer(aq.classify("why can't I export?"),
+                     _ctx(validate=lambda: {"ok": False, "errors": mixed}), None)
+    assert body["result"] == "answered"
+    assert body["answer"].startswith(
+        "2 validation issues may be blocking export: the record itself, assets."
+    )
+    assert body["technical_paths"] == ["$", "assets"]
+
+
+def test_no_errors_is_still_the_honest_empty_answer_not_the_crash_answer():
+    body = aq.answer(aq.classify("why can't I export?"),
+                     _ctx(validate=lambda: {"ok": True, "errors": []}), None)
+    assert body["answer"].startswith(
+        "No blocking validation issues are listed in the current validation response."
+    )
+    assert body["result"] == "answered"
+
+
+def test_a_crashing_validator_reaches_the_honest_answer_END_TO_END(client, monkeypatch):
+    """The whole chain, through the real route: `export_draft` raises → `routes.py`
+    emits its sentinel → the resolver describes a crash, not a finding."""
+    from isaac_api import routes
+
+    def boom(*_a, **_k):
+        raise RuntimeError("synthetic export failure")
+
+    monkeypatch.setattr(routes, "export_draft", boom)
+    body = _action_of(client, ws.SEED_NEW_DRAFT_ID, "why can't I export?")
+    assert body["result"] == "insufficient_context"
+    assert "could not be completed" in body["answer"]
+    assert "validation issue" not in body["answer"]
+    assert "$" not in body["answer"]
+    assert body["technical_paths"] == []
+    # and the plain /validate endpoint really did emit the sentinel (the frontend
+    # composer's input) — proof the shape being interpreted is the shape produced
+    v = client.post(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/validate").json()
+    assert v["errors"] == [{"path": "$", "message": "Validation could not be completed."}]
+
+
+# --- P36V.1 review M4: a NEUTRALIZED answer ships no extras --------------------
+
+
+def test_a_verdict_guarded_answer_ships_no_action_and_no_locators():
+    """When the verdict guard replaces the text, the answer names no locations — so
+    it must not still carry a locator disclosure or a navigation control (M4)."""
+    trips = [{"path": "PASS.x", "message": "m"}, {"path": "assets", "message": "m"}]
+    body = aq.answer(aq.classify("why can't I export?"),
+                     _ctx(validate=lambda: {"ok": False, "errors": trips}), None)
+    assert body["answer"] == aq._NEUTRAL_ROUTED
+    assert body["action"] is None
+    assert body["technical_paths"] == []
+
+
+def test_a_leak_guarded_answer_ships_no_action_and_no_locators():
+    trips = [{"path": "/Users/me/secret.json", "message": "m"}]
+    body = aq.answer(aq.classify("why can't I export?"),
+                     _ctx(validate=lambda: {"ok": False, "errors": trips}), None)
+    assert body["answer"] == aq._NEUTRAL_ROUTED
+    assert body["action"] is None
+    assert body["technical_paths"] == []
+    _no_leak(body["answer"])
+
+
+# --- P36V.1 review M5: the stated count and the disclosure agree ---------------
+
+
+def test_an_unsafe_locator_is_disclosed_as_withheld_not_silently_dropped():
+    """The prose count comes from the unfiltered error list, so dropping an unsafe
+    4th locator produced "5 validation issues" beside 4 rows, with the missing one
+    named nowhere. The count stays truthful and the drop is now disclosed."""
+    errors = [
+        {"path": "assets", "message": "m"},
+        {"path": "sample.id", "message": "m"},
+        {"path": "measurement.series", "message": "m"},
+        {"path": "/Users/me/secret.json", "message": "m"},
+        {"path": "system.technique", "message": "m"},
+    ]
+    body = aq.answer(aq.classify("why can't I export?"),
+                     _ctx(validate=lambda: {"ok": False, "errors": errors}), None)
+    # the unsafe locator is past the ≤3 label cap, so the answer text stays safe …
+    assert body["answer"].startswith("5 validation issues may be blocking export:")
+    _no_leak(body["answer"])
+    # … and the disclosure has FIVE rows: the count and the list agree
+    assert len(body["technical_paths"]) == 5
+    assert body["technical_paths"][3] == aq.WITHHELD_TECHNICAL
+    assert body["technical_paths"] == [
+        "assets", "sample.id", "measurement.series", aq.WITHHELD_TECHNICAL,
+        "system.technique",
+    ]
+    for p in body["technical_paths"]:
+        _no_leak(p)
+
+
+def test_safe_technical_paths_marks_rather_than_hides_an_unsafe_locator():
+    assert aq._safe_technical_paths(["$", "assets.0.sha256"]) == ["$", "assets.0.sha256"]
+    assert aq._safe_technical_paths(["/Users/me/x.json"]) == [aq.WITHHELD_TECHNICAL]
+    assert aq._safe_technical_paths(["Bearer abc"]) == [aq.WITHHELD_TECHNICAL]
+    assert aq._safe_technical_paths(["a" * 40]) == [aq.WITHHELD_TECHNICAL]  # long hex
+    # the marker itself is not a locator, and leaks nothing
+    _no_leak(aq.WITHHELD_TECHNICAL)
+    assert "/" not in aq.WITHHELD_TECHNICAL
+    # entries that carry NO locator at all are still omitted (they cannot occur from
+    # `technical_paths`, which yields a non-empty string per error)
+    assert aq._safe_technical_paths([None, "", 7, "$"]) == ["$"]
+    assert aq._safe_technical_paths("not a list") == []
+
+
+# --- P36V.1 review IMPORTANT-3: cited sources open the surface they name -------
+
+
+def test_cited_sources_never_point_at_the_record_page_already_on_screen(client):
+    """"Complete Metadata" and "Evidence & Sources" targeted `base` — the record page
+    the question was asked from — so from the Record Workbench the chip was inert."""
+    base = f"/record/{ws.SEED_READY_ID}"
+    cases = {
+        "what still needs me?": ("Complete Metadata", f"{base}/complete"),
+        "where did the formula come from": ("Evidence & Sources", f"{base}/evidence"),
+        "what's the evidence for the formula": ("Evidence & Sources", f"{base}/evidence"),
+    }
+    for question, (label, expected) in cases.items():
+        body = _action_of(client, ws.SEED_READY_ID, question)
+        assert body["sources"], (question, body)
+        src = body["sources"][0]
+        assert src["label"] == label, question
+        assert src["navigate_to"] == expected, question
+        # it survived the SAME allowlist a cited source must pass …
+        assert aq._safe_navigate_to(expected) == expected
+        # … it is base-path-FREE and in-app
+        assert not expected.startswith("/krish")
+        assert "://" not in expected
+        assert expected != base, "the whole point: not the page already on screen"
+
+
+def test_the_two_record_root_citations_are_deliberate_and_still_allowlisted(client):
+    """The IMPORTANT-3 audit's deliberate leaves: "Workflow" (no `/workflow` client
+    route exists — `RecordWorkbench` IS the workflow surface) and "Record" (the
+    record root IS the record surface the label names)."""
+    base = f"/record/{ws.SEED_READY_ID}"
+    for question, label in (("what is the current step", "Workflow"),
+                            ("summarize this record", "Record")):
+        body = _action_of(client, ws.SEED_READY_ID, question)
+        src = body["sources"][0]
+        assert src["label"] == label, question
+        assert src["navigate_to"] == base, question
+        assert aq._safe_navigate_to(base) == base
+
+
+def test_every_cited_navigate_to_is_an_allowlisted_client_route(client):
+    """No new target escaped the allowlist, for ANY catalog question."""
+    for q, _intent in INTENT_CASES:
+        body = _action_of(client, ws.SEED_READY_ID, q)
+        for src in body["sources"]:
+            nav = src["navigate_to"]
+            if nav is None:
+                continue
+            assert nav.startswith(aq._CLIENT_ROUTE_PREFIXES), (q, nav)
+            assert aq._safe_navigate_to(nav) == nav, (q, nav)
+            _no_leak(nav)
+    assert aq.has_verdict_language(body["answer"]) is False

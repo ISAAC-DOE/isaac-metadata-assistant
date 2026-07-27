@@ -9,6 +9,7 @@ import {
   REVIEW_CATALOG,
 } from './assistantComposer';
 import { SOURCE_LABELS } from './assistant';
+import { VALIDATION_UNAVAILABLE_SUMMARY } from './assistantPaths';
 import {
   experimentDetail,
   draftResponse,
@@ -130,11 +131,15 @@ describe('compose({context:"review"}) — full fixture bundle', () => {
   // STRICTER than before: they still pin the full answer object with `toEqual`
   // (so the sentence cannot come back), and they additionally pin the action's
   // kind, VISIBLE Title-Case label, and deep-linked target.
-  it('blocking_paths echoes a path count + paths + offers Open Validator; never echoes validity', () => {
+  // P36V.1 Unit B — the locations are now HUMANIZED, and the exact locators move
+  // to `technicalPaths` (the Technical Details disclosure). The count and the
+  // chip's conditions are unchanged; only the rendering is.
+  it('blocking_paths echoes an issue count + humanized locations + offers Open Validator; never echoes validity', () => {
     expect(out.prompts[1].answer).toEqual({
-      text: '2 paths are listed as blocking export: $.assets, $.measurement.series.',
+      text: '2 validation issues may be blocking export: assets, measurement → series.',
       answeredFrom: 'schema',
       action: OPEN_VALIDATOR_ACTION,
+      technicalPaths: ['$.assets', '$.measurement.series'],
     });
     expect(out.prompts[1].answer!.text).not.toContain('Open Validate');
     expect(out.prompts[1].answer!.action).toEqual({
@@ -172,26 +177,130 @@ describe('compose review — degraded / edge branches', () => {
     const out = compose(reviewState({ pending: undefined }));
     expect(out.prompts[0].answer).toBeUndefined();
     expect(out.reply.answeredFrom).toBe('schema');
-    expect(out.reply.text).toContain('listed as blocking export');
+    expect(out.reply.text).toContain('may be blocking export');
   });
 
-  it('validate errors empty → no-blocking-paths message, still offers Open Validator', () => {
+  it('validate errors empty → no-blocking-issues message, still offers Open Validator', () => {
     const out = compose(reviewState({ validate: { ...validateDryRun, errors: [] } }));
     expect(out.prompts[1].answer).toEqual({
-      text: 'No blocking paths are listed in the current validation response.',
+      text: 'No blocking validation issues are listed in the current validation response.',
       answeredFrom: 'schema',
       action: OPEN_VALIDATOR_ACTION,
     });
+    // no locators reported → nothing for the Technical Details disclosure
+    expect(out.prompts[1].answer!.technicalPaths).toBeUndefined();
   });
 
-  it('validate is a singular path → grammatical "1 path is listed", plus the action', () => {
+  it('validate is a singular path → grammatical "1 validation issue", plus the action', () => {
     const out = compose(
       reviewState({
         validate: { ...validateDryRun, errors: [{ path: '$.assets', message: 'required' }] },
       }),
     );
-    expect(out.prompts[1].answer!.text).toBe('1 path is listed as blocking export: $.assets.');
+    expect(out.prompts[1].answer!.text).toBe(
+      '1 validation issue may be blocking export: assets.',
+    );
     expect(out.prompts[1].answer!.action).toEqual(OPEN_VALIDATOR_ACTION);
+    expect(out.prompts[1].answer!.technicalPaths).toEqual(['$.assets']);
+  });
+
+  // P36V.1 Unit B — the reported hosted defect: a ROOT-level schema violation.
+  // `src/isaac_records/official.py:71` renders it as the literal locator `$`, which
+  // the old copy interpolated straight into the sentence ("…blocking export: $.").
+  it('a ROOT-level violation reads as a record-level issue, never as the raw "$"', () => {
+    const out = compose(
+      reviewState({
+        validate: { ...validateDryRun, errors: [{ path: '$', message: "'sample' is required" }] },
+      }),
+    );
+    const answer = out.prompts[1].answer!;
+    expect(answer.text).toBe('1 record-level validation issue may be blocking export.');
+    expect(answer.text).not.toContain('$');
+    // …and the exact locator is still available, in the disclosure only
+    expect(answer.technicalPaths).toEqual(['$']);
+  });
+
+  it('a root-level and a nested violation together keep both locations distinct', () => {
+    const out = compose(
+      reviewState({
+        validate: {
+          ...validateDryRun,
+          errors: [
+            { path: '$', message: "'sample' is required" },
+            { path: 'assets.0.sha256', message: 'too short' },
+          ],
+        },
+      }),
+    );
+    const answer = out.prompts[1].answer!;
+    expect(answer.text).toBe(
+      '2 validation issues may be blocking export: the record itself, assets → 0 → sha256.',
+    );
+    expect(answer.text).not.toContain('$');
+    expect(answer.technicalPaths).toEqual(['$', 'assets.0.sha256']);
+  });
+
+  // P36V.1 review IMPORTANT-1 — the CRASH SENTINEL. `POST /validate` returns
+  // `[{path:'$', message:'Validation could not be completed.'}]` when the dry-run
+  // itself raised. Read through the locator formatter alone that is
+  // indistinguishable from a root-level violation, and this chip told the reader "1
+  // record-level validation issue may be blocking export" — a confident claim about
+  // an issue the validator never located.
+  it('a validation CRASH is never described as a validation issue', () => {
+    const out = compose(
+      reviewState({
+        validate: {
+          ...validateDryRun,
+          ok: false,
+          errors: [{ path: '$', message: 'Validation could not be completed.' }],
+        },
+      }),
+    );
+    const answer = out.prompts[1].answer!;
+    expect(answer.text).toBe(VALIDATION_UNAVAILABLE_SUMMARY);
+    // no count, no location, no locator disclosure — there is none to disclose
+    expect(answer.text).not.toMatch(/validation issue/);
+    expect(answer.text).not.toMatch(/blocking export/);
+    expect(answer.text).not.toContain('$');
+    expect(answer.technicalPaths).toBeUndefined();
+    // the reader can still reach the deterministic check
+    expect(answer.action).toEqual(OPEN_VALIDATOR_ACTION);
+    expect(answer.answeredFrom).toBe('schema');
+  });
+
+  it('a GENUINE root-level violation is still reported as one (the fix is not a blanket mute)', () => {
+    const out = compose(
+      reviewState({
+        validate: {
+          ...validateDryRun,
+          ok: false,
+          errors: [{ path: '$', message: "'sample' is a required property" }],
+        },
+      }),
+    );
+    const answer = out.prompts[1].answer!;
+    expect(answer.text).toBe('1 record-level validation issue may be blocking export.');
+    expect(answer.technicalPaths).toEqual(['$']);
+  });
+
+  it('the sentinel alongside a real finding is still reported as findings', () => {
+    const out = compose(
+      reviewState({
+        validate: {
+          ...validateDryRun,
+          ok: false,
+          errors: [
+            { path: '$', message: 'Validation could not be completed.' },
+            { path: 'assets', message: "'assets' is a required property" },
+          ],
+        },
+      }),
+    );
+    const answer = out.prompts[1].answer!;
+    expect(answer.text).toBe(
+      '2 validation issues may be blocking export: the record itself, assets.',
+    );
+    expect(answer.technicalPaths).toEqual(['$', 'assets']);
   });
 
   it('validate absent → blocking chip disabled (answer undefined)', () => {
@@ -572,7 +681,7 @@ describe('compose({context:"export"}) — post-export fixture bundle', () => {
 
   it('blocking_paths (post-export, 0 errors) → no-blocking message, still offers Open Validator', () => {
     expect(out.prompts[1].answer).toEqual({
-      text: 'No blocking paths are listed in the current validation response.',
+      text: 'No blocking validation issues are listed in the current validation response.',
       answeredFrom: 'schema',
       action: OPEN_VALIDATOR_ACTION,
     });
@@ -635,31 +744,66 @@ describe('compose export — coverage echo variants + pre-export fallback + disa
 });
 
 describe('compose export — blocking_paths routing (shares §5.1 template; never echoes validity)', () => {
-  it('2 errors → path count + first paths + the Open Validator action (from validateDryRun)', () => {
+  it('2 errors → issue count + humanized locations + the Open Validator action (from validateDryRun)', () => {
     const out = compose(exportState({ validate: validateDryRun }));
     expect(out.prompts[1].answer).toEqual({
-      text: '2 paths are listed as blocking export: $.assets, $.measurement.series.',
+      text: '2 validation issues may be blocking export: assets, measurement → series.',
       answeredFrom: 'schema',
       action: OPEN_VALIDATOR_ACTION,
+      technicalPaths: ['$.assets', '$.measurement.series'],
     });
   });
 
-  it('1 error → grammatical "1 path is listed", plus the action', () => {
+  it('1 error → grammatical "1 validation issue", plus the action', () => {
     const out = compose(
       exportState({
         validate: { ...validateDryRun, errors: [{ path: '$.assets', message: 'required' }] },
       }),
     );
-    expect(out.prompts[1].answer!.text).toBe('1 path is listed as blocking export: $.assets.');
+    expect(out.prompts[1].answer!.text).toBe(
+      '1 validation issue may be blocking export: assets.',
+    );
     expect(out.prompts[1].answer!.action).toEqual(OPEN_VALIDATOR_ACTION);
+  });
+
+  // Both mounts share ONE helper, so the root-level humanization is identical here.
+  it('a ROOT-level violation reads as record-level on Ready to Export too', () => {
+    const out = compose(
+      exportState({
+        validate: { ...validateDryRun, errors: [{ path: '$', message: "'assets' is required" }] },
+      }),
+    );
+    expect(out.prompts[1].answer!.text).toBe(
+      '1 record-level validation issue may be blocking export.',
+    );
+    expect(out.prompts[1].answer!.technicalPaths).toEqual(['$']);
   });
 
   it('0 errors (validateReadyDryRun) → no-blocking message, plus the action', () => {
     const out = compose(exportState({ validate: validateReadyDryRun }));
     expect(out.prompts[1].answer!.text).toBe(
-      'No blocking paths are listed in the current validation response.',
+      'No blocking validation issues are listed in the current validation response.',
     );
     expect(out.prompts[1].answer!.action).toEqual(OPEN_VALIDATOR_ACTION);
+  });
+
+  // IMPORTANT-1 on the SECOND mount: one helper, so the crash sentinel is separated
+  // from a finding here too.
+  it('a validation CRASH is never described as a validation issue on Ready to Export either', () => {
+    const out = compose(
+      exportState({
+        validate: {
+          ...validateDryRun,
+          ok: false,
+          errors: [{ path: '$', message: 'Validation could not be completed.' }],
+        },
+      }),
+    );
+    const answer = out.prompts[1].answer!;
+    expect(answer.text).toBe(VALIDATION_UNAVAILABLE_SUMMARY);
+    expect(answer.text).not.toMatch(/validation issue/);
+    expect(answer.technicalPaths).toBeUndefined();
+    expect(answer.action).toEqual(OPEN_VALIDATOR_ACTION);
   });
 
   it('validate absent → blocking chip disabled (answer undefined)', () => {

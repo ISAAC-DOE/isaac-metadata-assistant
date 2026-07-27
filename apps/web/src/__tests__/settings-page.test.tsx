@@ -1,11 +1,15 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 
 import { SettingsPage } from '../screens/SettingsPage';
 import { titleCase } from '../lib/labels';
+import { SETTINGS_TAB_IDS, ROUTES, isSettingsTab } from '../lib/routes';
 import {
   ABOUT_RESPONSE_FIELDS,
+  API_ACCESS_COPY,
+  API_ACCESS_ROWS,
+  API_KEY_REQUIREMENTS,
   REPO_DOCS,
   SETTINGS_SOURCE_ENDPOINTS,
   settingsAboutCopy,
@@ -31,27 +35,65 @@ import {
  * canonical definition now lives once in `lib/settingsContent.ts` and Overview
  * renders only ONE-LINE summaries of them. The anti-regression guard for that
  * whole slice is the "appears exactly once" suite at the bottom of this file —
- * it counts each canonical string across all four tabs and requires exactly 1.
+ * it counts each canonical string across all tabs and requires exactly 1.
  *
- * Guards preserved from P36.4/P36R: the honest `not set` build-commit branch,
- * the truth-vs-memory + no-guessing copy, the repository doc names rendered as
- * inert `<code>`, the HTTP method conveyed by TEXT, the honest `No parameters.`
- * state, and — unweakened — the forbidden-infrastructure-substring list.
+ * P36V-1 slices 11–13 changed the tab STRUCTURE, and this file asserts the new
+ * contract rather than the old one:
+ *
+ *   · FIVE page tabs. `API` became `API Access`, and the endpoint browser was
+ *     promoted out of a nested `keys | docs` sub-tablist into its own top-level
+ *     `Endpoint Explorer` tab. The sub-tablist is GONE, and a guard below fails
+ *     if any second tablist reappears on the page.
+ *   · The active tab is DERIVED from `?tab=`, exactly as GovernancePage derives
+ *     its own, so every tab is deep-linkable, survives a refresh, and is walked
+ *     by Back/Forward. `useState` is gone, and a guard below fails if selecting a
+ *     tab stops writing the URL.
+ *   · The API-access copy joined `lib/settingsContent.ts`, so the "appears
+ *     exactly once" suite now counts those strings too — across five surfaces.
+ *
+ * Guards preserved from P36.4/P36R/P36V: the honest `not set` build-commit
+ * branch, the truth-vs-memory + no-guessing copy, the repository doc names
+ * rendered as inert `<code>`, the HTTP method conveyed by TEXT, the honest
+ * `No parameters.` state, and — unweakened — the forbidden-infrastructure
+ * substring list.
  */
 
 const ABOUT_URL = 'GET /api/about';
 const OPENAPI_URL = 'GET /api/openapi';
 
-function renderSettings() {
+/**
+ * A probe inside the router. It exposes the live location and the real
+ * `navigate`, so a test can read what the tab selection wrote to the URL and
+ * press the browser's Back and Forward buttons (`navigate(-1)` / `navigate(1)`)
+ * exactly as a user would. Same instrument as `graph-command-bar.test.tsx`,
+ * for the same reason: a data router builds a `Request` per navigation, which
+ * fights the stubbed global `fetch`.
+ */
+let probeSearch = '';
+let probeNavigate: NavigateFunction | null = null;
+function RouterProbe() {
+  probeSearch = useLocation().search;
+  probeNavigate = useNavigate();
+  return null;
+}
+
+function renderSettings(entry = '/settings') {
+  probeSearch = '';
+  probeNavigate = null;
   return render(
     <MemoryRouter
-      initialEntries={['/settings']}
+      initialEntries={[entry]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <SettingsPage />
+      <RouterProbe />
     </MemoryRouter>,
   );
 }
+
+const search = () => probeSearch;
+const back = () => act(() => probeNavigate?.(-1));
+const forward = () => act(() => probeNavigate?.(1));
 
 function fullRoutes() {
   return { [ABOUT_URL]: { body: aboutResponse }, [OPENAPI_URL]: { body: openApiFixture } };
@@ -86,7 +128,7 @@ afterEach(() => {
 // --- tab structure ------------------------------------------------------------
 
 describe('Settings — tabs', () => {
-  it('renders exactly the four specified tabs, with Overview selected by default', () => {
+  it('renders exactly the five specified tabs, with Overview selected by default', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
 
@@ -95,17 +137,42 @@ describe('Settings — tabs', () => {
       'Overview',
       'Data & Privacy',
       'About',
-      'API',
+      'API Access',
+      'Endpoint Explorer',
     ]);
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'settings-tabpanel-overview');
+    // The renamed tab and the retired nested sub-tablist are both gone.
+    expect(screen.queryByRole('tab', { name: 'API' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'API Keys' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Documentation' })).toBeNull();
+  });
+
+  /**
+   * The `keys | docs` sub-tablist is deleted, not hidden. Asserting the tablist
+   * COUNT on every tab is stronger than asserting the two old labels are absent:
+   * it fails for any nested page-level tablist, whatever it is called. (The
+   * code-sample language tabs inside the Endpoint Explorer live behind a
+   * collapsed `<details>`, so they are not rendered until opened — which is
+   * itself the concision contract.)
+   */
+  it('has exactly ONE tablist on every tab — the nested sub-tablist is gone', () => {
+    for (const id of SETTINGS_TAB_IDS) {
+      stubFetchRoutes(fullRoutes());
+      const view = renderSettings(ROUTES.settingsTab(id));
+      const lists = screen.getAllByRole('tablist');
+      expect(lists, `${id}: expected one tablist`).toHaveLength(1);
+      expect(lists[0]).toHaveAccessibleName('Settings sections');
+      view.unmount();
+    }
   });
 
   it('uses a roving tabindex: only the selected tab is in the tab order', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     expect(tab('Overview')).toHaveAttribute('tabindex', '0');
-    expect(tab('API')).toHaveAttribute('tabindex', '-1');
+    expect(tab('API Access')).toHaveAttribute('tabindex', '-1');
+    expect(tab('Endpoint Explorer')).toHaveAttribute('tabindex', '-1');
     expect(screen.getAllByRole('tab').filter((t) => t.getAttribute('tabindex') === '0')).toHaveLength(1);
   });
 
@@ -114,6 +181,19 @@ describe('Settings — tabs', () => {
     renderSettings();
     expect(tab('Overview')).toHaveAttribute('aria-controls', 'settings-tabpanel-overview');
     expect(tab('About')).not.toHaveAttribute('aria-controls');
+    expect(tab('Endpoint Explorer')).not.toHaveAttribute('aria-controls');
+  });
+
+  it('every tab renders exactly one panel, labelled by its own tab', () => {
+    for (const id of SETTINGS_TAB_IDS) {
+      stubFetchRoutes(fullRoutes());
+      const view = renderSettings(ROUTES.settingsTab(id));
+      const panels = screen.getAllByRole('tabpanel');
+      expect(panels, `${id}: expected one panel`).toHaveLength(1);
+      expect(panels[0]).toHaveAttribute('id', `settings-tabpanel-${id}`);
+      expect(panels[0]).toHaveAttribute('aria-labelledby', `settings-tab-${id}`);
+      view.unmount();
+    }
   });
 
   it('clicking a tab switches the rendered panel', () => {
@@ -132,14 +212,29 @@ describe('Settings — tabs', () => {
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowRight' });
     expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
 
+    // End is now the FIFTH tab, not the fourth.
     fireEvent.keyDown(tab('Data & Privacy'), { key: 'End' });
-    expect(tab('API')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
 
-    fireEvent.keyDown(tab('API'), { key: 'Home' });
+    fireEvent.keyDown(tab('Endpoint Explorer'), { key: 'Home' });
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
 
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowLeft' });
-    expect(tab('API')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+
+    // ArrowLeft from the last tab reaches the new fourth tab, so the wrap is
+    // walking all five entries rather than a stale four-entry array.
+    fireEvent.keyDown(tab('Endpoint Explorer'), { key: 'ArrowLeft' });
+    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('keyboard selection moves focus with it, so the arrow keys stay usable', () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+    tab('Overview').focus();
+    fireEvent.keyDown(tab('Overview'), { key: 'End' });
+    expect(tab('Endpoint Explorer')).toHaveFocus();
+    expect(tab('Endpoint Explorer')).toHaveAttribute('tabindex', '0');
   });
 
   it('states plainly that there is nothing to configure (no invented settings)', () => {
@@ -151,6 +246,166 @@ describe('Settings — tabs', () => {
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
+});
+
+// --- deep-linkable tabs (`?tab=`) ---------------------------------------------
+
+/**
+ * P36V-1 slice 12. Both tab levels used to be plain `useState`: nothing was
+ * linkable and everything reset on refresh. The page now derives the active tab
+ * from `?tab=`, the SAME mechanism GovernancePage uses — a query VALUE, so the
+ * router basename ('' locally, '/krish' deployed) is honoured automatically and
+ * no screen writes a base path.
+ */
+describe('Settings — deep-linkable tabs (?tab=)', () => {
+  it('opens the tab named by ?tab=, for every tab id', () => {
+    for (const id of SETTINGS_TAB_IDS) {
+      stubFetchRoutes(fullRoutes());
+      const view = renderSettings(ROUTES.settingsTab(id));
+      const selected = screen.getAllByRole('tab').filter(
+        (t) => t.getAttribute('aria-selected') === 'true',
+      );
+      expect(selected, `${id}: exactly one selected tab`).toHaveLength(1);
+      expect(selected[0]).toHaveAttribute('id', `settings-tab-${id}`);
+      view.unmount();
+    }
+  });
+
+  it('?tab=api opens API Access with its real content, not an empty panel', async () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings('/settings?tab=api');
+    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByText(API_ACCESS_COPY.emptyTitle)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create API Key/i })).toBeDisabled();
+  });
+
+  it('?tab=explorer opens the Endpoint Explorer with the contract rendered', async () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings('/settings?tab=explorer');
+    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+    expect(
+      await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(`${ENDPOINT_COUNT} of ${ENDPOINT_COUNT} endpoints`)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['no query at all', '/settings'],
+    ['an empty value', '/settings?tab='],
+    ['an unrecognised value', '/settings?tab=not-a-tab'],
+    ['the retired sub-tab value', '/settings?tab=docs'],
+    ['a value differing only in case', '/settings?tab=API'],
+  ])('falls back to Overview for %s, with no dead route', (_what, entry) => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings(entry);
+    expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'settings-tabpanel-overview');
+    // A fallback, not an error: the page renders its normal content.
+    expect(screen.getByText(/no user-adjustable settings/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not found/i)).not.toBeInTheDocument();
+  });
+
+  it('the tab id guard accepts exactly the five ids and nothing else', () => {
+    for (const id of SETTINGS_TAB_IDS) expect(isSettingsTab(id)).toBe(true);
+    for (const bad of ['', 'API', 'docs', 'keys', 'overview ', null, undefined]) {
+      expect(isSettingsTab(bad), `must reject ${JSON.stringify(bad)}`).toBe(false);
+    }
+  });
+
+  /**
+   * `ROUTES.settingsTab` has NO in-app consumer by design (see `lib/routes.ts`):
+   * the page switches tabs with `setSearchParams` over a copy of the current
+   * params, which preserves any other query parameter, whereas navigating to a URL
+   * built by the helper would drop them. This test is the anti-drift guard that
+   * arrangement requires — the helper and the real mechanism must produce the same
+   * query string for EVERY tab, so the helper cannot rot into a stale convention.
+   */
+  it('the link helper and the page’s own tab mechanism agree for every tab', () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+    for (const [id, label] of [
+      ['privacy', 'Data & Privacy'],
+      ['about', 'About'],
+      ['api', 'API Access'],
+      ['explorer', 'Endpoint Explorer'],
+      ['overview', 'Overview'],
+    ] as const) {
+      openTab(label);
+      // A query VALUE, never a path segment...
+      expect(search()).toBe(`?tab=${id}`);
+      // ...and byte-identical to what the deep-link helper builds for that tab.
+      expect(`/settings${search()}`).toBe(ROUTES.settingsTab(id));
+      // Neither hard-codes a base path: a deployed basename must not appear.
+      expect(search()).not.toContain('/krish');
+    }
+  });
+
+  it('Back and Forward walk the tabs, because selecting one PUSHES', async () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+    await screen.findByText('0.1.0');
+
+    openTab('Data & Privacy');
+    openTab('API Access');
+    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
+
+    back();
+    expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
+    expect(search()).toBe('?tab=privacy');
+
+    back();
+    expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
+
+    forward();
+    expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
+    forward();
+    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('a deep-linked tab survives a refresh (a fresh mount at the same URL)', async () => {
+    stubFetchRoutes(fullRoutes());
+    const first = renderSettings('/settings?tab=explorer');
+    await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 });
+    first.unmount();
+
+    // Re-mounting at the same entry is what a reload does: no client state
+    // carries over, so the tab can only come back from the URL.
+    stubFetchRoutes(fullRoutes());
+    renderSettings('/settings?tab=explorer');
+    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+    expect(
+      await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
+    ).toBeInTheDocument();
+  });
+
+  it('an in-app deep link into one tab preserves every other query parameter', () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings('/settings?keep=me&tab=about');
+    expect(tab('About')).toHaveAttribute('aria-selected', 'true');
+    openTab('API Access');
+    expect(search()).toContain('keep=me');
+    expect(search()).toContain('tab=api');
+  });
+
+  /** Both fetches are issued ONCE at page level, so the five tabs are pure
+   *  client state: no tab switch, and no Back/Forward, may re-hit the backend. */
+  it('switching tabs never re-hits the backend', async () => {
+    const hits = stubFetchRoutes(fullRoutes());
+    renderSettings();
+    await screen.findByText('0.1.0');
+    const initial = [...hits];
+    expect(initial.filter((h) => h === ABOUT_URL)).toHaveLength(1);
+    expect(initial.filter((h) => h === OPENAPI_URL)).toHaveLength(1);
+
+    for (const name of ['Data & Privacy', 'About', 'API Access', 'Endpoint Explorer', 'Overview']) {
+      openTab(name);
+    }
+    await screen.findByText('0.1.0');
+    back();
+    forward();
+
+    expect(hits).toEqual(initial);
   });
 });
 
@@ -289,12 +544,25 @@ describe('Settings — Overview', () => {
     expect(screen.queryByText(/there is no database/i)).not.toBeInTheDocument();
   });
 
-  it('links into the deeper tabs', async () => {
+  /**
+   * The jump nav now has FOUR entries because there are four deeper tabs, and
+   * each one is asserted to land on its own tab AND to write its own `?tab=`
+   * value — stronger than the single "browse the api" click it replaces, which
+   * only checked that one button changed one `aria-selected`.
+   */
+  it.each([
+    ['Data & Privacy Detail', 'privacy', 'Data & Privacy'],
+    ['Version & Provenance', 'about', 'About'],
+    ['API Access', 'api', 'API Access'],
+    ['Endpoint Explorer', 'explorer', 'Endpoint Explorer'],
+  ])('links into the deeper tabs: %s', async (label, id, tabName) => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     await screen.findByText('0.1.0');
-    fireEvent.click(screen.getByRole('button', { name: /browse the api/i }));
-    expect(tab('API')).toHaveAttribute('aria-selected', 'true');
+    const nav = screen.getByRole('navigation', { name: 'More settings detail' });
+    fireEvent.click(within(nav).getByRole('button', { name: label }));
+    expect(tab(tabName)).toHaveAttribute('aria-selected', 'true');
+    expect(search()).toBe(`?tab=${id}`);
   });
 
   it('shows a backend-unreachable state without crashing', async () => {
@@ -570,20 +838,21 @@ describe('Settings — About', () => {
  * P36V PR3 slice C split the API tab into two sub-surfaces — API Keys (an honest
  * unavailable state) and Documentation (Quick Start + Endpoint Explorer +
  * Connect an Agent) — and replaced the path-segment group inference with the
- * document's REAL `tags`. The suite below keeps every P36R guard and tightens
- * the grouping one: the group names and their ORDER asserted here are obtainable
- * only from the document's `tags` array, so a revert to segment inference fails.
+ * document's REAL `tags`. P36V-1 slice 12 then promoted the browser out of that
+ * nested sub-tab into its own top-level, deep-linkable tab. The suite below
+ * keeps every P36R/P36V guard and tightens the grouping one: the group names and
+ * their ORDER asserted here are obtainable only from the document's `tags`
+ * array, so a revert to segment inference fails.
  *
- * The API-Keys surface, Quick Start, the generated code samples and Connect an
+ * The API-Access surface, Quick Start, the generated code samples and Connect an
  * Agent have their own file: `settings-api.test.tsx`.
  */
 const ENDPOINT_COUNT = 7;
 
-/** Open API → Documentation, where the Endpoint Explorer lives. */
+/** Open the Endpoint Explorer tab. It is one click now, not two. */
 async function openApiDocs() {
-  openTab('API');
-  fireEvent.click(tab('Documentation'));
-  return screen.findByRole('heading', { name: 'Endpoint Explorer' });
+  openTab('Endpoint Explorer');
+  return screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 });
 }
 
 /** The endpoint list, scoped: several paths also appear in Quick Start. */
@@ -598,9 +867,8 @@ describe('Settings — API browser', () => {
   it('shows a loading state before the fetch resolves', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('API');
-    fireEvent.click(tab('Documentation'));
-    expect(screen.getByText('Loading API documentation…')).toBeInTheDocument();
+    openTab('Endpoint Explorer');
+    expect(screen.getByText('Loading the API contract…')).toBeInTheDocument();
   });
 
   it('groups the endpoints by the document’s REAL tags, with the method as TEXT', async () => {
@@ -651,14 +919,29 @@ describe('Settings — API browser', () => {
     expect(document.querySelectorAll('[role="status"]')).toHaveLength(1);
   });
 
+  /**
+   * The provenance claim is unchanged, but the two halves now live on the two
+   * API tabs, so each is asserted where it renders instead of both being read
+   * off one combined sub-tab. The contract IDENTITY line is Quick Start's (it is
+   * the contract's own `openapi`/`info` values, joined by `quickStartFacts`);
+   * the "generated contract" attribution is the Explorer detail pane's.
+   */
   it('shows the OpenAPI contract identity verbatim, never a hand-written duplicate', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    await openApiDocs();
+    openTab('API Access');
     expect(
-      screen.getByText(/OpenAPI 3\.1\.0 · ISAAC Metadata Assistant — local UI backend · v0\.1\.0/),
+      await screen.findByText(
+        /OpenAPI 3\.1\.0 · ISAAC Metadata Assistant — local UI backend · v0\.1\.0/,
+      ),
     ).toBeInTheDocument();
+
+    openTab('Endpoint Explorer');
+    await openApiDocs();
     expect(screen.getByText(/this app's own\s+generated contract/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/read from the OpenAPI document the app generates for itself/i),
+    ).toBeInTheDocument();
   });
 
   it('the search box filters endpoints by path/summary/group, client-side, deterministically', async () => {
@@ -846,10 +1129,80 @@ describe('Settings — API browser', () => {
   it('shows a backend-unreachable state without crashing', async () => {
     stubFetchDown();
     renderSettings();
-    openTab('API');
-    fireEvent.click(tab('Documentation'));
+    openTab('Endpoint Explorer');
     const alerts = await screen.findAllByRole('alert');
     expect(alerts.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * P36V-1 slice 13 — CONCISION. The detail pane used to re-render a
+   * two-sentence authentication paragraph for every one of the seven endpoints;
+   * the per-operation fact is a single flag. The flag is now compact metadata,
+   * its meaning is stated ONCE for the tab, and both assertions below are
+   * stronger than the prose ones they replace because they also pin the count.
+   */
+  it('states the authentication rule once for the tab, not once per endpoint', async () => {
+    stubFetchRoutes(fullRoutes());
+    const { container } = renderSettings();
+    await openApiDocs();
+
+    expect(
+      countOccurrences(norm(container.textContent ?? ''), norm(API_ACCESS_COPY.authMarkerLegend)),
+    ).toBe(1);
+    // The retired per-endpoint paragraphs appear nowhere at all.
+    expect(container.textContent).not.toMatch(
+      /A credential is required when this deployment enables authentication/i,
+    );
+    expect(container.textContent).not.toMatch(
+      /so it stays reachable without a credential even where authentication is enabled/i,
+    );
+  });
+
+  /**
+   * P36V.1 — the Auth flag states the CONTRACT FACT (`401 documented`), not a
+   * deployment claim (`Credential required`). This page says, three tabs away and
+   * pinned above, that it "cannot report whether access is restricted"; a bare
+   * `Credential required` asserted exactly that unknowable. The conditional lives
+   * in the tab-level legend, which the flag references via `aria-describedby`.
+   */
+  it('marks each operation’s auth requirement as compact metadata, in TEXT', async () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+    await openApiDocs();
+    const detail = () => document.getElementById('settings-api-detail') as HTMLElement;
+
+    // GET /api/about documents a 401; GET /api/health is the only one that does not.
+    const meta = (label: string) => {
+      const item = Array.from(detail().querySelectorAll('.api-browser-meta-item')).find(
+        (el) => el.querySelector('dt')?.textContent === label,
+      ) as HTMLElement;
+      return item?.querySelector('dd')?.textContent;
+    };
+    expect(meta('Auth')).toBe('401 documented');
+    expect(meta('Parameters')).toBe('None');
+    expect(meta('Request Body')).toBe('None declared');
+
+    fireEvent.click(within(endpointList()).getByText('/api/health'));
+    expect(meta('Auth')).toBe('No 401 documented');
+
+    fireEvent.click(within(endpointList()).getByText('/api/experiments/{id}/answers'));
+    expect(meta('Auth')).toBe('401 documented');
+    expect(meta('Parameters')).toBe('2');
+    expect(meta('Request Body')).toBe('Required');
+
+    // The flag is tied to the legend that supplies the conditional it omits.
+    const legend = document.querySelector('.api-browser-legend') as HTMLElement;
+    const flag = detail().querySelector('.api-browser-meta-flag') as HTMLElement;
+    expect(flag.getAttribute('aria-describedby')).toBe(legend.id);
+  });
+
+  /** The flag must not re-assert what this page says it cannot know. */
+  it('never claims a credential IS required, on either API tab', async () => {
+    stubFetchRoutes(fullRoutes());
+    const { container } = renderSettings();
+    await openApiDocs();
+    expect(container.textContent).not.toMatch(/\bCredential required\b/);
+    expect(container.textContent).not.toMatch(/\bNo credential required\b/);
   });
 });
 
@@ -883,27 +1236,36 @@ const FORBIDDEN = [
 ];
 
 /**
- * Every distinct Settings surface, with a string that only appears once that
- * surface's own content has rendered. The API tab is TWO surfaces since slice C,
- * and both are covered: the sub-tab that shows an unavailable state and the one
- * that renders the whole generated contract plus the code samples.
+ * Every distinct Settings surface, with something that only resolves once that
+ * surface's own content has rendered. There are FIVE since slice 12: the API tab
+ * split into two top-level tabs rather than two sub-tabs, and each is opened
+ * here the way a user opens it — by activating its page tab.
+ *
+ * `settle` is a thunk rather than a string because the Endpoint Explorer's own
+ * name is also its tab's label, so it has to be found by ROLE to avoid matching
+ * the tab button.
  */
-const SURFACES: { name: string; open: () => void; settled: string | RegExp }[] = [
-  { name: 'Overview', open: () => openTab('Overview'), settled: '0.1.0' },
+const SURFACES: { name: string; open: () => void; settle: () => Promise<unknown> }[] = [
+  {
+    name: 'Overview',
+    open: () => openTab('Overview'),
+    settle: () => screen.findByText('0.1.0'),
+  },
   {
     name: 'Data & Privacy',
     open: () => openTab('Data & Privacy'),
-    settled: /only the synthetic workspace/i,
+    settle: () => screen.findByText(/only the synthetic workspace/i),
   },
-  { name: 'About', open: () => openTab('About'), settled: '0.1.0' },
-  { name: 'API · API Keys', open: () => openTab('API'), settled: 'No keys to show.' },
+  { name: 'About', open: () => openTab('About'), settle: () => screen.findByText('0.1.0') },
   {
-    name: 'API · Documentation',
-    open: () => {
-      openTab('API');
-      fireEvent.click(tab('Documentation'));
-    },
-    settled: 'Endpoint Explorer',
+    name: 'API Access',
+    open: () => openTab('API Access'),
+    settle: () => screen.findByText(API_ACCESS_COPY.emptyTitle),
+  },
+  {
+    name: 'Endpoint Explorer',
+    open: () => openTab('Endpoint Explorer'),
+    settle: () => screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
   },
 ];
 
@@ -914,7 +1276,7 @@ describe('Settings — no sensitive infrastructure detail is rendered', () => {
       stubFetchRoutes(fullRoutes());
       const { container } = renderSettings();
       surface.open();
-      await screen.findByText(surface.settled);
+      await surface.settle();
 
       const text = (container.textContent ?? '').toLowerCase();
       for (const needle of FORBIDDEN) {
@@ -927,9 +1289,8 @@ describe('Settings — no sensitive infrastructure detail is rendered', () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
     await screen.findByText('0.1.0');
-    openTab('API');
-    fireEvent.click(tab('Documentation'));
-    await screen.findByText('Endpoint Explorer');
+    openTab('Endpoint Explorer');
+    await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 });
 
     expect(container.querySelectorAll('script')).toHaveLength(0);
     expect(container.querySelectorAll('iframe')).toHaveLength(0);
@@ -954,7 +1315,7 @@ async function textOfEverySurface(): Promise<string[]> {
     stubFetchRoutes(fullRoutes());
     const view = renderSettings();
     surface.open();
-    await screen.findByText(surface.settled);
+    await surface.settle();
     out.push(norm(view.container.textContent ?? ''));
     view.unmount();
   }
@@ -983,6 +1344,16 @@ describe('Settings — every canonical string appears exactly once across the ta
     { what: 'About — truth vs. memory', text: about.truthVsMemory },
     { what: 'About — no-guessing', text: about.noGuessing },
     { what: 'About — identity caption', text: about.identityCaption },
+    /* P36V-1 slice 13 — the API surfaces joined the guard. Before it, the
+       key-unavailable reason was authored in FOUR places (the API-Keys lead, an
+       access row, Quick Start's authentication note and Connect an Agent) and
+       the browser-session / headless-credential boundary in two of them. */
+    ...Object.entries(API_ACCESS_COPY).map(([key, text]) => ({
+      what: `API Access — ${key}`,
+      text,
+    })),
+    ...API_ACCESS_ROWS.map((row) => ({ what: `API Access — ${row.term}`, text: row.detail })),
+    ...API_KEY_REQUIREMENTS.map((text, i) => ({ what: `API Access — requirement ${i + 1}`, text })),
   ];
 
   it.each(canonical.map((c) => [c.what, c.text]))('%s is rendered exactly once', async (_what, text) => {
@@ -1034,12 +1405,42 @@ describe('Settings — every canonical string appears exactly once across the ta
     expect(screen.getByText(/no user-adjustable settings/i)).toBeInTheDocument();
   });
 
+  /** Each API-access claim belongs to ONE tab. Counting only the total would
+   *  pass if a string moved to the wrong surface, so the surface is pinned too. */
+  it('the API-access copy renders on the API tabs and nowhere else', async () => {
+    const [overview, privacy, about_, apiAccess, explorer] = await textOfEverySurface();
+    const onApiAccess = [
+      API_ACCESS_COPY.statusHeading,
+      API_ACCESS_COPY.statusBody,
+      API_ACCESS_COPY.createDisabledReason,
+      API_ACCESS_COPY.requirementsNote,
+      API_ACCESS_COPY.emptyTitle,
+      API_ACCESS_COPY.emptyBody,
+      ...API_ACCESS_ROWS.map((r) => r.detail),
+      ...API_KEY_REQUIREMENTS,
+    ];
+    for (const text of onApiAccess) {
+      expect(apiAccess, `API Access must own: ${text.slice(0, 48)}`).toContain(norm(text));
+      for (const [name, other] of [
+        ['Overview', overview],
+        ['Data & Privacy', privacy],
+        ['About', about_],
+        ['Endpoint Explorer', explorer],
+      ] as const) {
+        expect(other, `${name} leaked: ${text.slice(0, 48)}`).not.toContain(norm(text));
+      }
+    }
+    // The Auth legend is the mirror case: Explorer's alone.
+    expect(explorer).toContain(norm(API_ACCESS_COPY.authMarkerLegend));
+    expect(apiAccess).not.toContain(norm(API_ACCESS_COPY.authMarkerLegend));
+  });
+
   it('the heading outline never skips a level on any surface', async () => {
     for (const surface of SURFACES) {
       stubFetchRoutes(fullRoutes());
       const view = renderSettings();
       surface.open();
-      await screen.findByText(surface.settled);
+      await surface.settle();
       const levels = Array.from(
         view.container.querySelectorAll('h1, h2, h3, h4, h5, h6'),
       ).map((h) => Number(h.tagName[1]));
