@@ -3,6 +3,7 @@ import { render, fireEvent, within, type RenderResult } from '@testing-library/r
 import { MemoryRouter } from 'react-router-dom';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import { HUB_LABEL_COUNT, LABEL_LIMIT, MAX_RENDER_NODES, edgeKey } from '../lib/graphModel';
+import { GRAPH_COMMANDS } from '../lib/graphCommands';
 import {
   stubFetchRoutes,
   graphStatusUnavailable,
@@ -44,6 +45,19 @@ function renderScreen(initialEntry = '/memory') {
 
 /** jsdom has no matchMedia, so the tab opens in Explore; this is the switch. */
 const toBrowse = (view: RenderResult) => fireEvent.click(view.getByRole('radio', { name: 'Browse' }));
+
+/*
+ * P36V PR2 slice B — the filter controls and the path tool moved behind two
+ * named disclosures (nothing was deleted; see the control-inventory test in
+ * section 4b). Tests that drive a filter or a path now open the region first,
+ * exactly as a user does.
+ */
+const openFilters = (view: RenderResult) =>
+  fireEvent.click(view.getByRole('button', { name: /^Filters/ }));
+const openPath = (view: RenderResult) =>
+  fireEvent.click(view.getByRole('button', { name: 'Find a Path' }));
+const openHelp = (view: RenderResult) =>
+  fireEvent.click(view.getByRole('button', { name: 'About This Graph' }));
 
 /**
  * A synthetic chain of `n` files in the real payload shape — the same shape
@@ -143,7 +157,7 @@ describe('Graph tab — appears and mounts', () => {
 // --- 2. counts + honest layered disclosure ---------------------------------
 
 describe('Graph tab — counts and disclosure', () => {
-  it('shows the rendered counts and the honest un-embedded-source-graph disclosure', async () => {
+  it('shows the rendered counts, scoped as a projection, on the surface itself', async () => {
     stubFetchRoutes(graphRoutes);
     const { findByText, container } = renderScreen();
     await findByText('Graph', { selector: 'h2' });
@@ -153,32 +167,41 @@ describe('Graph tab — counts and disclosure', () => {
     expect(text).toMatch(/2 concepts/);
     expect(text).toMatch(/1 reference\b/);
     expect(text).toMatch(/2 communities shown/);
-    // The un-embedded source graph's real, larger counts (2988 nodes / 4465
-    // edges / 257 communities) are disclosed, never hidden or confused with
-    // the rendered projection's own (much smaller) counts.
-    expect(text).toMatch(/2988 nodes/);
-    expect(text).toMatch(/4465 edges/);
-    expect(text).toMatch(/257 communities/);
-    expect(text).toMatch(/not embedded/i);
+    // P36V PR2 slice B moved the LONGER disclosures into About This Graph, so
+    // the counts line itself must still carry its own scope: these numbers are
+    // a projection's, not the whole graph's.
+    expect(text).toMatch(/an advisory served-file\s+projection, never the full source graph/);
     expect(text).not.toMatch(/knowledge graph/i);
     expect(text).not.toMatch(/ontology/i);
   });
 
-  it('spells out the four layers between the source graph and what is shown', async () => {
+  it('discloses the un-embedded source graph and the four layers in About This Graph', async () => {
     stubFetchRoutes(graphRoutes);
-    const { findByText, container } = renderScreen();
-    await findByText('Graph', { selector: 'h2' });
+    const view = renderScreen();
+    await view.findByText('Graph', { selector: 'h2' });
+    openHelp(view);
 
-    const layers = container.querySelector('.memory-graph-layers');
-    expect(layers).not.toBeNull();
-    const items = (layers as HTMLElement).querySelectorAll('li');
-    expect(items.length).toBe(4);
-    const text = (layers as HTMLElement).textContent ?? '';
-    expect(text).toMatch(/Full Graphify source graph/);
-    expect(text).toMatch(/Served-file projection/);
-    expect(text).toMatch(/Concepts/);
-    expect(text).toMatch(/Clusters/);
+    // The un-embedded source graph's real, larger counts (2988 nodes / 4465
+    // edges / 257 communities) are still disclosed, never hidden or confused
+    // with the rendered projection's own (much smaller) counts — they MOVED
+    // from the surface into Graph Data, they were not dropped.
+    const text = view.getByRole('dialog').textContent ?? '';
+    expect(text).toMatch(/2988 nodes/);
+    expect(text).toMatch(/4465 edges/);
+    expect(text).toMatch(/257 clusters/);
+    expect(text).toMatch(/not embedded/i);
+    expect(text).toMatch(/served-file reference projection only, never the full source graph/);
+
+    // ...and all four layers, with the counts they carried on the surface.
+    expect(text).toMatch(/1 · Source graph/);
+    expect(text).toMatch(/2 · Served-file projection/);
+    expect(text).toMatch(/3 · Concepts/);
+    expect(text).toMatch(/4 · Clusters/);
     expect(text).toMatch(/advisory only/);
+    // Pluralised, like the surface's own count line: this fixture carries ONE
+    // reference edge, so it must read "1 reference", not "1 references".
+    expect(text).toMatch(/3 files, 1 reference\./);
+    expect(text).not.toMatch(/1 references/);
   });
 
   it('never uses verdict language on this advisory surface', async () => {
@@ -201,7 +224,12 @@ describe('Graph tab — counts and disclosure', () => {
     ]) {
       expect(text, `verdict language in the graph card: ${claim}`).not.toMatch(claim);
     }
-    expect(text).toMatch(/leads to verify, never a validation verdict/);
+    // P36V PR2 slice B — ONE visible boundary statement replaced the four
+    // stacked disclosures. The card still refuses verdict language and still
+    // calls itself advisory in plain sight.
+    expect(text).toMatch(
+      /This graph shows project-file relationships and navigation leads\. It does not represent\s+scientific truth or causality\./,
+    );
     expect(text).toMatch(/advisory/i);
   });
 });
@@ -249,13 +277,14 @@ describe('Graph tab — filters', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
     toBrowse(view);
+    openFilters(view);
     const { getByLabelText, queryByText, getByText } = view;
 
-    fireEvent.change(getByLabelText('Show'), { target: { value: 'concept' } });
+    fireEvent.change(getByLabelText('Node Type'), { target: { value: 'concept' } });
     expect(queryByText('src/fake_mod.py')).toBeNull();
     expect(getByText('Provenance')).toBeInTheDocument();
 
-    fireEvent.change(getByLabelText('Show'), { target: { value: 'file' } });
+    fireEvent.change(getByLabelText('Node Type'), { target: { value: 'file' } });
     expect(getByText('src/fake_mod.py')).toBeInTheDocument();
     expect(queryByText('Provenance')).toBeNull();
   });
@@ -265,6 +294,7 @@ describe('Graph tab — filters', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
     toBrowse(view);
+    openFilters(view);
 
     fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
 
@@ -280,16 +310,20 @@ describe('Graph tab — filters', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
+    openFilters(view);
     const select = view.getByLabelText('Cluster') as HTMLSelectElement;
     // Both fixture clusters hold one file, so both land in the honest group.
     expect(select.querySelector('optgroup[label*="Single-file"]')).not.toBeNull();
+    // The caveat stays where the filtering happens; its FULL form (how many
+    // clusters hold a single file, and why they are not schema categories)
+    // moved into About This Graph -> Cluster Colors, checked in section 12.
     expect(view.container.textContent).toMatch(
-      /Clusters are derived automatically by the upstream graph builder/,
+      /Clusters are advisory groupings derived automatically upstream and named after one\s+representative node/,
     );
-    expect(view.container.textContent).toMatch(/not as categories/);
+    expect(view.container.textContent).toMatch(/not categories the schema recognises/);
 
     // The cluster list itself is filterable rather than a flat wall of options.
-    fireEvent.change(view.getByLabelText('Find a cluster'), { target: { value: 'export' } });
+    fireEvent.change(view.getByLabelText('Find a Cluster'), { target: { value: 'export' } });
     const options = [...select.querySelectorAll('option')].map((o) => o.textContent ?? '');
     expect(options.some((o) => o.includes('Export Pipeline'))).toBe(true);
     expect(options.some((o) => o.includes('unnamed cluster'))).toBe(false);
@@ -300,10 +334,13 @@ describe('Graph tab — filters', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
+    openFilters(view);
     expect(document.querySelectorAll('.memory-graph-edge').length).toBe(1);
-    fireEvent.click(view.getByRole('checkbox', { name: 'imports' }));
+    // The checkbox is LABELLED "Imports" (the closed five-value display map) and
+    // still carries the backend's own value as its title.
+    fireEvent.click(view.getByRole('checkbox', { name: 'Imports' }));
     expect(document.querySelectorAll('.memory-graph-edge').length).toBe(0);
-    fireEvent.click(view.getByRole('checkbox', { name: 'imports' }));
+    fireEvent.click(view.getByRole('checkbox', { name: 'Imports' }));
     expect(document.querySelectorAll('.memory-graph-edge').length).toBe(1);
   });
 });
@@ -449,14 +486,61 @@ describe('Graph tab — legend', () => {
     expect(legendSlots).toEqual(canvasSlots);
   });
 
-  it('labels a cluster as "name · N files", never with two adjacent parentheticals', async () => {
+  it('separates the cluster COUNT from its title, and never emits two adjacent parentheticals', async () => {
     stubFetchRoutes(graphRoutes);
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    const text = (document.querySelector('.graph-legend') as HTMLElement).textContent ?? '';
-    expect(text).toContain('Export Pipeline · 1 file');
-    expect(text).not.toMatch(/\)\s*\(/);
+    const legend = document.querySelector('.graph-legend') as HTMLElement;
+    const names = [...legend.querySelectorAll('.graph-legend-name')].map((n) => n.textContent);
+    const counts = [...legend.querySelectorAll('.graph-legend-count')].map((n) => n.textContent);
+    // The upstream name VERBATIM as the title — no `· 1 file` welded onto it.
+    expect(names).toContain('Export Pipeline');
+    expect(names.some((n) => (n ?? '').includes('· 1 file'))).toBe(false);
+    // ...and the count as its own element beside it.
+    expect(counts).toContain('1 file');
+    expect(legend.textContent ?? '').not.toMatch(/\)\s*\(/);
+  });
+
+  it('names node types readably, with the actual mark, and never as code-style text', async () => {
+    stubFetchRoutes(graphRoutes);
+    const view = renderScreen();
+    await view.findByText('Graph', { selector: 'h2' });
+
+    const legend = document.querySelector('.graph-legend') as HTMLElement;
+    const names = [...legend.querySelectorAll('.graph-legend-name')].map((n) => n.textContent);
+    expect(names).toContain('Files');
+    expect(names).toContain('Concepts');
+    // The old run-on code-ish fragments are gone.
+    expect(legend.textContent ?? '').not.toContain('circle = file');
+    expect(legend.textContent ?? '').not.toContain('diamond = concept');
+    // Every mark is aria-hidden: shape is decoration, the name carries meaning.
+    for (const swatch of legend.querySelectorAll('.graph-legend-swatch')) {
+      expect(swatch).toHaveAttribute('aria-hidden', 'true');
+    }
+    expect(legend.querySelector('.graph-legend-heading')?.textContent).toBe('Legend');
+  });
+
+  it('shows relationship types with readable labels, keeping the raw values visible', async () => {
+    stubFetchRoutes(graphRoutes);
+    const view = renderScreen();
+    await view.findByText('Graph', { selector: 'h2' });
+
+    const legend = document.querySelector('.graph-legend') as HTMLElement;
+    const names = [...legend.querySelectorAll('.graph-legend-name')].map((n) => n.textContent);
+    // The display label replaced the raw `relationTypes.join(', ')`...
+    expect(names).toContain('Imports');
+    // ...and each relation is its OWN entry pairing that label with the backend's
+    // exact value on `title`, exactly as a cluster entry carries `cluster <id>`.
+    // This replaced a `.graph-legend-raw` mono line that printed the whole
+    // vocabulary a second time, in a second casing, directly beneath the group
+    // that had just listed it — a per-entry pairing instead of a bare
+    // context-free row, so the raw value is still on the surface and is now
+    // attached to the label it belongs to.
+    const entries = [...legend.querySelectorAll('.graph-legend-relation')];
+    expect(entries.map((e) => e.textContent)).toEqual(['Imports']);
+    expect(entries.map((e) => e.getAttribute('title'))).toEqual(['imports']);
+    expect(legend.querySelector('.graph-legend-raw')).toBeNull();
   });
 });
 
@@ -486,9 +570,15 @@ describe('Graph tab — node selection and detail panel', () => {
       scoped.getByText('This deployment carries the file itself — it is not opened or read here.'),
     ).toBeInTheDocument();
 
-    // Connected nodes: the one real edge (relation "imports"), as a button.
+    // Connected nodes: the one real edge, as a button. Its relation reads through
+    // the SAME closed display map the legend and the filters use, and the
+    // backend's own value stays exact in the element's title.
     const connected = scoped.getByRole('button', { name: /src\/other_mod\.py/ });
-    expect(connected).toHaveTextContent('imports');
+    expect(connected).toHaveTextContent('Imports');
+    expect(connected.querySelector('.memory-graph-detail-relation')).toHaveAttribute(
+      'title',
+      'imports',
+    );
 
     // Collapsed raw JSON of the SELECTED node only.
     const details = scoped.getByText('Raw node data').closest('details');
@@ -581,9 +671,10 @@ describe('Graph tab — neighbourhood and path', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    fireEvent.change(view.getByLabelText('Path from'), { target: { value: 'src/fake_mod.py' } });
-    fireEvent.change(view.getByLabelText('Path to'), { target: { value: 'src/other_mod.py' } });
-    fireEvent.click(view.getByRole('button', { name: 'Find path' }));
+    openPath(view);
+    fireEvent.change(view.getByLabelText('From'), { target: { value: 'src/fake_mod.py' } });
+    fireEvent.change(view.getByLabelText('To'), { target: { value: 'src/other_mod.py' } });
+    fireEvent.click(view.getByRole('button', { name: 'Find Path' }));
 
     expect(view.container.textContent).toMatch(/Found a 1-step route/);
     const steps = document.querySelectorAll('.memory-graph-path-list li');
@@ -597,9 +688,10 @@ describe('Graph tab — neighbourhood and path', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    fireEvent.change(view.getByLabelText('Path from'), { target: { value: 'src/fake_mod.py' } });
-    fireEvent.change(view.getByLabelText('Path to'), { target: { value: 'docs/fake-note.md' } });
-    fireEvent.click(view.getByRole('button', { name: 'Find path' }));
+    openPath(view);
+    fireEvent.change(view.getByLabelText('From'), { target: { value: 'src/fake_mod.py' } });
+    fireEvent.change(view.getByLabelText('To'), { target: { value: 'docs/fake-note.md' } });
+    fireEvent.click(view.getByRole('button', { name: 'Find Path' }));
 
     expect(view.container.textContent).toMatch(/No path connects/);
     expect(document.querySelector('.memory-graph-path-list')).toBeNull();
@@ -612,9 +704,10 @@ describe('Graph tab — neighbourhood and path', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    fireEvent.change(view.getByLabelText('Path from'), { target: { value: 'mod' } });
-    fireEvent.change(view.getByLabelText('Path to'), { target: { value: 'docs/fake-note.md' } });
-    fireEvent.click(view.getByRole('button', { name: 'Find path' }));
+    openPath(view);
+    fireEvent.change(view.getByLabelText('From'), { target: { value: 'mod' } });
+    fireEvent.change(view.getByLabelText('To'), { target: { value: 'docs/fake-note.md' } });
+    fireEvent.click(view.getByRole('button', { name: 'Find Path' }));
 
     expect(view.container.textContent).toMatch(/matches 2 nodes, so no\s+identity was assumed/);
     const candidates = document.querySelectorAll('.memory-graph-candidate-btn');
@@ -629,9 +722,10 @@ describe('Graph tab — neighbourhood and path', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    fireEvent.change(view.getByLabelText('Path from'), { target: { value: 'nope/missing.py' } });
-    fireEvent.change(view.getByLabelText('Path to'), { target: { value: 'src/fake_mod.py' } });
-    fireEvent.click(view.getByRole('button', { name: 'Find path' }));
+    openPath(view);
+    fireEvent.change(view.getByLabelText('From'), { target: { value: 'nope/missing.py' } });
+    fireEvent.change(view.getByLabelText('To'), { target: { value: 'src/fake_mod.py' } });
+    fireEvent.click(view.getByRole('button', { name: 'Find Path' }));
 
     expect(view.container.textContent).toMatch(/No node in this projection matches/);
     expect(document.querySelector('.memory-graph-detail')).toBeNull(); // nothing selected
@@ -652,7 +746,7 @@ describe('Graph tab — viewport', () => {
     fireEvent.click(view.getByRole('button', { name: 'Zoom out' }));
     expect(view.container.textContent).toMatch(/zoom 100%/);
     fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
-    fireEvent.click(view.getByRole('button', { name: 'Reset view' }));
+    fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
     expect(view.container.textContent).toMatch(/zoom 100%/);
   });
 
@@ -663,7 +757,7 @@ describe('Graph tab — viewport', () => {
 
     const svg = () => document.querySelector('.memory-graph-svg') as SVGSVGElement;
     const before = svg().getAttribute('viewBox');
-    fireEvent.click(view.getByRole('button', { name: 'Fit graph to view' }));
+    fireEvent.click(view.getByRole('button', { name: 'Fit to View' }));
     expect(svg().getAttribute('viewBox')).not.toBe(before);
     expect(within(svg() as unknown as HTMLElement).getAllByRole('button').length).toBe(5);
   });
@@ -719,7 +813,12 @@ describe('Graph tab — source navigation', () => {
 
     expect(await view.findByText('Concept Lookup')).toBeInTheDocument();
     expect(view.getByRole('tab', { name: 'Concepts' })).toHaveAttribute('aria-selected', 'true');
-    expect(await view.findByText('anchor source')).toBeInTheDocument();
+    // The concept's provenance detail actually resolved for the deep-linked row.
+    // P36V S-A turned the lowercase "anchor source" eyebrow into a Title-Case
+    // section heading; this now pins the heading AND the anchor path it labels,
+    // which is a stronger check that the deep link landed on real provenance.
+    expect(await view.findByRole('heading', { level: 4, name: 'Anchor Source' })).toBeInTheDocument();
+    expect(view.getByRole('button', { name: /src\/fake_mod\.py/ })).toBeInTheDocument();
   });
 });
 
@@ -733,17 +832,25 @@ describe('Graph tab — a11y', () => {
     const { getByLabelText, getByRole } = view;
 
     expect(getByLabelText('Search graph nodes')).toBeInTheDocument();
-    expect(getByLabelText('Show')).toBeInTheDocument();
-    expect(getByLabelText('Cluster')).toBeInTheDocument();
-    expect(getByLabelText('Find a cluster')).toBeInTheDocument();
-    expect(getByLabelText('Path from')).toBeInTheDocument();
-    expect(getByLabelText('Path to')).toBeInTheDocument();
-    expect(getByRole('button', { name: 'Fit graph to view' })).toBeInTheDocument();
+    expect(getByRole('button', { name: 'Fit to View' })).toBeInTheDocument();
     expect(getByRole('button', { name: 'Zoom in' })).toBeInTheDocument();
     expect(getByRole('button', { name: 'Zoom out' })).toBeInTheDocument();
-    expect(getByRole('button', { name: 'Reset view' })).toBeInTheDocument();
+    expect(getByRole('button', { name: 'Reset View' })).toBeInTheDocument();
     expect(getByRole('radiogroup', { name: 'Graph view mode' })).toBeInTheDocument();
-    expect(getByRole('group', { name: 'Relationships' })).toBeInTheDocument();
+    // The disclosed controls keep their accessible names — the disclosure only
+    // changed WHEN they are mounted, never whether they are labelled.
+    openFilters(view);
+    expect(getByLabelText('Node Type')).toBeInTheDocument();
+    expect(getByLabelText('Cluster')).toBeInTheDocument();
+    expect(getByLabelText('Find a Cluster')).toBeInTheDocument();
+    expect(getByRole('group', { name: 'Relationship Types' })).toBeInTheDocument();
+    openPath(view);
+    expect(getByLabelText('From')).toBeInTheDocument();
+    expect(getByLabelText('To')).toBeInTheDocument();
+    // Both triggers state their own expanded state.
+    for (const name of [/^Filters/, /^Find a Path$/]) {
+      expect(getByRole('button', { name })).toHaveAttribute('aria-expanded', 'true');
+    }
 
     const svg = document.querySelector('.memory-graph-svg') as HTMLElement;
     expect(svg).toHaveAttribute('role', 'group');
@@ -797,9 +904,10 @@ describe('Graph tab — a11y', () => {
     expect(live().textContent ?? '').not.toMatch(/nodes shown/);
 
     // A path/neighbourhood result IS announced there, and there is still one.
-    fireEvent.change(view.getByLabelText('Path from'), { target: { value: 'src/fake_mod.py' } });
-    fireEvent.change(view.getByLabelText('Path to'), { target: { value: 'docs/fake-note.md' } });
-    fireEvent.click(view.getByRole('button', { name: 'Find path' }));
+    openPath(view);
+    fireEvent.change(view.getByLabelText('From'), { target: { value: 'src/fake_mod.py' } });
+    fireEvent.change(view.getByLabelText('To'), { target: { value: 'docs/fake-note.md' } });
+    fireEvent.click(view.getByRole('button', { name: 'Find Path' }));
     expect(card.querySelectorAll('[aria-live="polite"]').length).toBe(1);
     expect(live().textContent ?? '').toMatch(/No path connects/);
   });
@@ -879,7 +987,8 @@ describe('Graph tab — Browse mode', () => {
       );
     expect(headings().some((h) => h.startsWith('Code'))).toBe(true);
 
-    fireEvent.change(view.getByLabelText('Group by'), { target: { value: 'community' } });
+    openFilters(view);
+    fireEvent.change(view.getByLabelText('Group By'), { target: { value: 'community' } });
     expect(headings().some((h) => h.startsWith('Export Pipeline'))).toBe(true);
     expect(headings().some((h) => h.startsWith('No cluster'))).toBe(true);
   });
@@ -893,10 +1002,12 @@ describe('Graph tab — Browse mode', () => {
     expect(document.querySelector('.memory-graph-svg')).toBeNull();
     // search / type / cluster / relationship / path — all still present
     expect(view.getByLabelText('Search graph nodes')).toBeInTheDocument();
-    expect(view.getByLabelText('Show')).toBeInTheDocument();
+    openFilters(view);
+    expect(view.getByLabelText('Node Type')).toBeInTheDocument();
     expect(view.getByLabelText('Cluster')).toBeInTheDocument();
-    expect(view.getByRole('checkbox', { name: 'imports' })).toBeInTheDocument();
-    expect(view.getByRole('button', { name: 'Find path' })).toBeInTheDocument();
+    expect(view.getByRole('checkbox', { name: 'Imports' })).toBeInTheDocument();
+    openPath(view);
+    expect(view.getByRole('button', { name: 'Find Path' })).toBeInTheDocument();
     // …and the per-node capabilities, via the shared detail panel
     fireEvent.click(view.getByText('src/fake_mod.py'));
     expect(view.getByRole('button', { name: 'Show 1-hop neighbourhood' })).toBeInTheDocument();
@@ -914,12 +1025,12 @@ describe('Graph tab — help drawer', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    const trigger = view.getByRole('button', { name: 'About this graph' });
+    const trigger = view.getByRole('button', { name: 'About This Graph' });
     expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(trigger);
-    const dialog = view.getByRole('dialog', { name: 'About this graph' });
+    const dialog = view.getByRole('dialog', { name: 'About This Graph' });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(document.activeElement).toBe(dialog);
@@ -934,7 +1045,7 @@ describe('Graph tab — help drawer', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    const trigger = view.getByRole('button', { name: 'About this graph' });
+    const trigger = view.getByRole('button', { name: 'About This Graph' });
     fireEvent.click(trigger);
     fireEvent.click(view.getByRole('button', { name: 'Close graph help' }));
     expect(view.queryByRole('dialog')).toBeNull();
@@ -945,32 +1056,116 @@ describe('Graph tab — help drawer', () => {
     stubFetchRoutes(graphRoutes);
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
-    fireEvent.click(view.getByRole('button', { name: 'About this graph' }));
+    fireEvent.click(view.getByRole('button', { name: 'About This Graph' }));
 
-    const text = (view.getByRole('dialog').textContent ?? '').toLowerCase();
-    for (const topic of [
-      'what it does not represent',
-      'node shapes',
-      'cluster colours',
-      'relationship types',
-      'finding things',
-      'moving around the canvas',
-      'keyboard',
-      'explore vs browse',
-      'snapshot',
-      'command syntax',
-    ]) {
-      expect(text).toContain(topic);
-    }
+    const dialog = view.getByRole('dialog');
+    /*
+     * P36V PR2 slice B — exactly these TEN sections, in this order.
+     *
+     * Read off each section's own title element rather than `h4` alone: nine
+     * sections carry an <h4>, and Technical Details is a <details> whose
+     * <summary> carries its title as PLAIN TEXT. A heading nested inside a
+     * <summary> makes the disclosure's accessible name a heading node, which AT
+     * announces awkwardly — so the element differs while the section list, its
+     * order, and its wording are pinned exactly as before, plus the two extra
+     * structural guards below.
+     */
+    const headings = [...dialog.querySelectorAll('.graph-help-section')].map(
+      (s) => (s.querySelector(':scope > h4') ?? s.querySelector(':scope > summary'))?.textContent,
+    );
+    expect(headings).toEqual([
+      'What This Graph Shows',
+      'What It Does Not Show',
+      'Graph Data',
+      'Node Types',
+      'Cluster Colors',
+      'Relationship Types',
+      'How to Explore',
+      'Command Bar',
+      'Keyboard Controls',
+      'Technical Details',
+    ]);
+    // No <summary> anywhere in the drawer wraps a heading.
+    expect(dialog.querySelectorAll('summary h1, summary h2, summary h3, summary h4, summary h5')).toHaveLength(0);
+    // The Assistant material is FINDABLE — a named sub-heading nested inside
+    // Command Bar, not an unheaded trailing paragraph and not an eleventh
+    // top-level section.
+    const subs = [...dialog.querySelectorAll('h5')].map((h) => h.textContent);
+    expect(subs).toEqual(['Asking the Assistant']);
+    const commandBar = [...dialog.querySelectorAll('.graph-help-section')].find(
+      (s) => s.querySelector(':scope > h4')?.textContent === 'Command Bar',
+    );
+    expect(commandBar?.querySelector('h5')?.textContent).toBe('Asking the Assistant');
+
+    const text = (dialog.textContent ?? '').toLowerCase();
+    // Every fact the twelve previous headings carried, folded into the ten.
     expect(text).toContain('circle');
     expect(text).toContain('diamond');
+    expect(text).toContain('not causality');
+    expect(text).toContain('not the truth plane');
+    expect(text).toContain('neutral grey'); // cluster colours
+    expect(text).toContain('browse is permanent, not a'); // explore vs browse
+    expect(text).toContain('shortest route'); // path
+    expect(text).toContain('1 hop or 2 hops'); // neighbourhood
     // The 71-node unconnected belt is explained where a user can see it, not
     // only in a code comment: a perfect ring reads as meaning otherwise.
     expect(text).toContain('outer rings');
+    expect(text).toContain('fit to view'); // canvas movement
+    expect(text).toContain('reset view');
     expect(text).toContain('imports'); // the payload's own relation values
     expect(text).toContain('caab1d0'); // the snapshot fingerprint
+    expect(text).toContain('integrity verified');
     expect(text).toContain('advisory');
+    expect(text).toContain('never saved and never sent anywhere'); // command history
+    expect(text).toContain('apply to graph'); // asking the Assistant
+    expect(text).toContain('esc'); // keyboard
     expect(text).toMatch(/not a record|not a validation/);
+    // The relocated cluster caveat, in full.
+    expect(text).toContain('derived automatically by the upstream graph builder');
+    expect(text).toContain('not categories the schema recognises');
+  });
+
+  it('keeps the generated command grammar and collapses Technical Details by default', async () => {
+    stubFetchRoutes(graphRoutes);
+    const view = renderScreen();
+    await view.findByText('Graph', { selector: 'h2' });
+    openHelp(view);
+    const dialog = view.getByRole('dialog');
+
+    // Generated from GRAPH_COMMANDS, so the help can never document a command
+    // that does not exist or miss one.
+    const syntaxes = [...dialog.querySelectorAll('.graph-help-commands li')].map(
+      (li) => li.querySelector('.graph-help-kbd')?.textContent,
+    );
+    expect(syntaxes).toEqual(GRAPH_COMMANDS.map((c) => c.syntax));
+    expect(syntaxes.length).toBeGreaterThan(0);
+
+    // Technical Details is closed, not absent: its content is in the DOM.
+    const technical = dialog.querySelector('.graph-help-technical') as HTMLDetailsElement;
+    expect(technical).not.toBeNull();
+    expect(technical.open).toBe(false);
+    expect(technical.textContent).toContain('caab1d0');
+    expect(technical.textContent).toContain(String(MAX_RENDER_NODES));
+    expect(technical.textContent).toContain(String(LABEL_LIMIT));
+    expect(technical.textContent).toContain(String(HUB_LABEL_COUNT));
+  });
+
+  it('states which relationship value the filter matches, and never claims values are unrenamed', async () => {
+    stubFetchRoutes(graphRoutes);
+    const view = renderScreen();
+    await view.findByText('Graph', { selector: 'h2' });
+    openHelp(view);
+    const dialog = view.getByRole('dialog');
+
+    // The readable label AND the backend's own value, side by side.
+    const rows = [...dialog.querySelectorAll('.graph-help-legend li')].map((li) => li.textContent);
+    expect(rows.some((r) => (r ?? '').includes('Imports') && (r ?? '').includes('imports'))).toBe(
+      true,
+    );
+    // The old copy claimed "nothing is renamed or collapsed". A display map now
+    // renames for READING, so that sentence would be false and must not return.
+    expect(dialog.textContent).not.toMatch(/nothing is renamed or collapsed/);
+    expect(dialog.textContent).toMatch(/what the Relationship Types filter and the/);
   });
 
   it('is not offered when there is no graph to explain', async () => {
@@ -980,7 +1175,7 @@ describe('Graph tab — help drawer', () => {
     });
     const view = renderScreen();
     await view.findByText(/Graph tab is unavailable/);
-    expect(view.queryByRole('button', { name: 'About this graph' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'About This Graph' })).toBeNull();
   });
 });
 

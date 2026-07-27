@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ProjectMemory, conceptGraphSearch, describeConcept } from '../screens/ProjectMemory';
+import { conceptDisplayTitle } from '../lib/displayLabels';
 import { decodeGraphActions, GRAPH_URL_PARAMS } from '../lib/graphCommands';
 import {
   stubFetchRoutes,
@@ -28,6 +29,21 @@ import {
  * plain-language description assembled ONLY from returned fields, source
  * navigation, and the two graph actions — which reuse the Slice-4 bounded
  * graph URL contract rather than inventing a parameter.
+ *
+ * P36V slice A refines it further, and this file now pins the refinements:
+ *   · the master row and the detail heading show a DERIVED readable title
+ *     (`lib/displayLabels.ts`) — presentation only, so the raw graph label is
+ *     still what search matches and is still on screen verbatim inside the
+ *     detail pane's Technical Details disclosure. Every assertion that used to
+ *     pin the verbatim label now pins BOTH halves of that contract, which is
+ *     strictly more than it pinned before.
+ *   · Technical Details is collapsed by default and holds every raw identifier
+ *     the pane knows — nothing was removed from the surface to make room for it.
+ *   · a VISIBLE Clear Filters control finally backs the empty state's standing
+ *     instruction to "clear the filters".
+ *   · two duplicated sentences were removed (the standing "leads — open the
+ *     cited file to verify" caption, and the restated cluster advisory). This
+ *     file guards that their surviving claims are still made.
  */
 
 /** A probe inside the router, so a test can read the link an action produced. */
@@ -132,6 +148,57 @@ const conceptsAllAnchorsAbsent = {
   ],
 };
 
+/*
+ * Labels lifted VERBATIM from the committed snapshot's `concepts` array
+ * (apps/api/isaac_api/data/memory-snapshot.json), so the derived-title contract
+ * is exercised against REAL data shapes and not only against the tidy synthetic
+ * labels above. `REAL_CODE_QUALIFIER` carries a code-only trailing group the
+ * display title drops; `REAL_PROSE_QUALIFIER` carries a group that mixes an
+ * identifier with prose and must therefore survive word for word;
+ * `REAL_LONGEST` is the longest of the 19 (68 characters).
+ */
+const REAL_CODE_QUALIFIER = 'AI scientific consistency review (review.py NoOpReviewer)';
+const REAL_PROSE_QUALIFIER = 'Export transform (export.py, deterministic, doubly gated)';
+const REAL_LONGEST = 'Extraction interface seam (src/isaac_records/extract, Phase 2 stubs)';
+
+const conceptsWithRealLabels = {
+  ...memoryConceptsAvailable,
+  concepts: [
+    {
+      id: 'docs_proposal_v2_ai_scientific_review',
+      label: REAL_CODE_QUALIFIER,
+      community_id: '128',
+      community_name: REAL_CODE_QUALIFIER,
+      source_file: 'docs/fake-proposal.md',
+      on_disk: false,
+    },
+    {
+      id: 'concept-export-transform',
+      label: REAL_PROSE_QUALIFIER,
+      community_id: '129',
+      community_name: 'Export Pipeline',
+      source_file: 'docs/fake-note.md',
+      on_disk: false,
+    },
+    {
+      id: 'concept-extract-seam',
+      label: REAL_LONGEST,
+      community_id: null,
+      community_name: null,
+      source_file: null,
+      on_disk: false,
+    },
+  ],
+};
+
+const realConceptDetail = (index: 0 | 1 | 2) => ({
+  plane: 'memory' as const,
+  note: memoryConceptDetailWithLeads.note,
+  available: true,
+  concept: conceptsWithRealLabels.concepts[index],
+  related: { files: [], concepts: [] },
+});
+
 const rowButtons = (container: HTMLElement): HTMLElement[] =>
   Array.from(container.querySelectorAll<HTMLElement>('.concept-lookup-row-btn'));
 
@@ -148,19 +215,28 @@ describe('P24.5 · Concept Lookup — list', () => {
 
     expect(rowButtons(container)).toHaveLength(memoryConceptsAvailable.concepts.length);
 
+    // P36V S-A: each row shows the DERIVED readable title of its own label.
+    // These three fixture labels carry no code qualifier, so the derivation is
+    // pure Title Case — the row text is still one-for-one with a real concept.
     for (const c of memoryConceptsAvailable.concepts) {
-      expect(getByText(c.label)).toBeInTheDocument();
+      expect(getByText(conceptDisplayTitle(c.label))).toBeInTheDocument();
     }
+    expect(getByText('Governance Allowlist')).toBeInTheDocument();
+    expect(getByText('Two-Layer Architecture')).toBeInTheDocument();
 
     // community: real name, honest id-fallback, never invented
     expect(getByText('Export Pipeline')).toBeInTheDocument();
     expect(getByText('community 55')).toBeInTheDocument();
 
-    // standing caption + honest subtitle
-    expect(getByText('leads — open the cited file to verify')).toBeInTheDocument();
+    // honest subtitle — the ONE page-level explanation of what a concept is here
     expect(
       getByText('Concepts Graphify anchored in project docs — memory leads, not scientific conclusions.'),
     ).toBeInTheDocument();
+    // P36V S-A concision: the standing caption said the same thing a third time
+    // (the subtitle above and the detail pane's boundary note each still make the
+    // claim), so it is gone — and no reworded stand-in took its place.
+    expect(container.textContent).not.toMatch(/leads — open the cited file to verify/);
+    expect(container.textContent).not.toMatch(/open the cited file/i);
   });
 
   it('shows an honest "N of M" count and no detail until something is selected', async () => {
@@ -186,12 +262,12 @@ describe('P36R S7 · Concept Lookup — search', () => {
 
     fireEvent.change(search, { target: { value: 'govern' } }); // label match
     expect(rowButtons(container)).toHaveLength(1);
-    expect(getByText('Governance allowlist')).toBeInTheDocument();
+    expect(getByText('Governance Allowlist')).toBeInTheDocument();
     expect(getByText('1 of 3')).toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: 'concept-two' } }); // id match
     expect(rowButtons(container)).toHaveLength(1);
-    expect(getByText('Two-layer architecture')).toBeInTheDocument();
+    expect(getByText('Two-Layer Architecture')).toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: 'zzz-nothing' } });
     expect(rowButtons(container)).toHaveLength(0);
@@ -220,7 +296,7 @@ describe('P36R S7 · Concept Lookup — category filters', () => {
     // "no cluster" is a real, honest bucket — never folded into a made-up one.
     fireEvent.change(cluster, { target: { value: '__no_cluster__' } });
     expect(rowButtons(container)).toHaveLength(1);
-    expect(getByText('Two-layer architecture')).toBeInTheDocument();
+    expect(getByText('Two-Layer Architecture')).toBeInTheDocument();
     fireEvent.change(cluster, { target: { value: 'all' } });
     expect(rowButtons(container)).toHaveLength(4);
 
@@ -262,7 +338,7 @@ describe('P36R S7 · Concept Lookup — the aggregate missing-file note is true 
       target: { value: '__unlinked__' },
     });
     expect(rowButtons(container)).toHaveLength(1);
-    expect(getByText('Withheld anchor')).toBeInTheDocument();
+    expect(getByText('Withheld Anchor')).toBeInTheDocument();
     expect(queryByText(AGGREGATE_NOTE)).toBeNull();
     // …and nothing else on screen makes the claim in other words.
     expect(container.textContent).not.toMatch(/every concept below/i);
@@ -296,13 +372,31 @@ describe('P24.5 · Concept Lookup — detail (real leads)', () => {
     const scoped = within(detailPane(container));
 
     expect(scoped.getByRole('heading', { name: 'Provenance' })).toBeInTheDocument();
-    expect(scoped.getByText('src/fake_mod.py')).toBeInTheDocument(); // anchor source_file
-    expect(scoped.getByText('Export Pipeline')).toBeInTheDocument(); // community
-    expect(scoped.getByText('concept-provenance')).toBeInTheDocument(); // concept id
+    // P36V S-A: the anchor path and the cluster name are each stated TWICE now —
+    // once in their own labelled section, once raw inside Technical Details. The
+    // count is pinned so a silent third copy (or a silent deletion) fails here.
+    expect(scoped.getAllByText('src/fake_mod.py')).toHaveLength(2); // anchor source_file + raw
+    expect(scoped.getAllByText('Export Pipeline')).toHaveLength(2); // cluster + raw cluster name
+    expect(scoped.getByText('concept-provenance')).toBeInTheDocument(); // concept id (raw)
+    expect(scoped.getByRole('button', { name: /src\/fake_mod\.py/ })).toBeInTheDocument();
     expect(scoped.getByText('src/other_mod.py')).toBeInTheDocument(); // related.files path
-    expect(scoped.getByText('imports')).toBeInTheDocument(); // file relation
+    // P36V PR2 slice B — the graph's own relation vocabulary now reads through
+    // the closed five-value display map on this tab too, so `imports` shows as
+    // "Imports" with the backend's exact string kept in the title. The concept↔
+    // concept value below (`relates_to`) is OUTSIDE that measured set and is
+    // therefore rendered verbatim — the fallthrough, proved on a real surface.
+    const fileRelation = scoped.getByText('Imports');
+    expect(fileRelation).toBeInTheDocument();
+    expect(fileRelation).toHaveAttribute('title', 'imports');
+    expect(scoped.queryByText('imports')).toBeNull();
     expect(scoped.getByText('code')).toBeInTheDocument(); // file_type
-    expect(scoped.getByText('Governance allowlist')).toBeInTheDocument(); // related.concepts label
+    // A related-lead CONCEPT label uses the SAME derivation as the row and the
+    // detail heading. Rendering it verbatim made one concept read two ways on one
+    // surface: the lead said "Governance allowlist", and activating it produced
+    // the heading "Governance Allowlist". Both halves are pinned so neither the
+    // derivation nor the old verbatim form can come back silently.
+    expect(scoped.getByText('Governance Allowlist')).toBeInTheDocument(); // related.concepts label
+    expect(scoped.queryByText('Governance allowlist')).toBeNull();
     expect(scoped.getByText('relates_to')).toBeInTheDocument(); // concept relation
   });
 
@@ -373,15 +467,17 @@ describe('P24.5 · Concept Lookup — empty-leads honesty', () => {
       ...baseRoutes,
       [conceptPath('concept-governance')]: { body: memoryConceptDetailEmptyLeads },
     });
-    const { findByText, getByRole, container } = renderScreen();
+    const { findByText, findAllByText, getByRole, container } = renderScreen();
     await findByText('Concept Lookup');
 
-    fireEvent.click(getByRole('button', { name: /Governance allowlist/ }));
+    fireEvent.click(getByRole('button', { name: /Governance Allowlist/ }));
 
-    await findByText('docs/fake-note.md'); // anchor source_file still renders
+    await findAllByText('docs/fake-note.md'); // anchor source_file still renders
     const scoped = within(detailPane(container));
 
-    expect(scoped.getByText('docs/fake-note.md')).toBeInTheDocument();
+    // Twice by design (P36V S-A): the Anchor Source link plus the raw path in
+    // Technical Details. Pinned as a count so neither copy can vanish silently.
+    expect(scoped.getAllByText('docs/fake-note.md')).toHaveLength(2);
     // P36R S7 copy fix (corrected in review): user-facing language AND accurate
     // to what `on_disk` is — a backend FILESYSTEM existence check
     // (`memory.py::_on_disk`), never a statement about snapshot membership. The
@@ -421,7 +517,7 @@ describe('P24.9 · Concept Lookup — null-anchor honesty', () => {
     const { findByText, getByRole, container } = renderScreen();
     await findByText('Concept Lookup');
 
-    fireEvent.click(getByRole('button', { name: /Governance allowlist/ }));
+    fireEvent.click(getByRole('button', { name: /Governance Allowlist/ }));
 
     await findByText('no linked source');
     const pane = detailPane(container);
@@ -500,7 +596,7 @@ describe('P36R S7 · Concept Lookup — graph actions reuse the Slice-4 URL cont
     expect(scoped.queryByText(/1-hop neighbourhood/)).toBeNull();
     expect(
       scoped.getByText(
-        /The graph's reference projection records no edges for concepts.*the leads below come from this concept's own record, not from that projection/,
+        /The graph's reference projection records no edges for concepts.*the leads above come from this concept's own record, not from that projection/,
       ),
     ).toBeInTheDocument();
 
@@ -672,5 +768,324 @@ describe('P24.5 · Concept Lookup — no verdict or scientific-authority languag
     expect(text).not.toMatch(
       /\b(definition of|defined as|means that|established|proven|confirmed finding|scientifically)\b/i,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P36V slice A
+// ---------------------------------------------------------------------------
+
+/** The Technical Details disclosure of the resolved detail pane. */
+function technicalDisclosure(container: HTMLElement): HTMLDetailsElement {
+  const el = detailPane(container).querySelector('details.concept-lookup-technical');
+  if (!el) throw new Error('Technical Details disclosure not found');
+  return el as HTMLDetailsElement;
+}
+
+/** The `<dd>` beside a Technical Details `<dt>` label. */
+function technicalValue(container: HTMLElement, label: string): string {
+  const dt = Array.from(technicalDisclosure(container).querySelectorAll('dt')).find(
+    (node) => node.textContent === label,
+  );
+  if (!dt) throw new Error(`Technical Details has no "${label}" row`);
+  const dd = dt.parentElement?.querySelector('dd');
+  if (!dd) throw new Error(`Technical Details "${label}" row has no value`);
+  return dd.textContent ?? '';
+}
+
+describe('P36V S-A · Concepts — readable titles derived from real graph labels', () => {
+  it('the master row and the detail heading show the derived title, not the raw graph label', async () => {
+    stubFetchRoutes({
+      ...baseRoutes,
+      'GET /api/memory/concepts': { body: conceptsWithRealLabels },
+      [conceptPath('docs_proposal_v2_ai_scientific_review')]: { body: realConceptDetail(0) },
+    });
+    const { findByText, getByText, queryByText, getByRole, container } = renderScreen();
+    await findByText('Concept Lookup');
+
+    // Code-only trailing group dropped …
+    expect(getByText('AI Scientific Consistency Review')).toBeInTheDocument();
+    expect(queryByText(REAL_CODE_QUALIFIER)).toBeNull(); // not in the list
+    // … prose-bearing group KEPT word for word (deleting it would delete meaning).
+    expect(getByText('Export Transform (export.py, deterministic, doubly gated)')).toBeInTheDocument();
+    // … and the longest real label, group intact because "Phase 2 stubs" is prose.
+    expect(
+      getByText('Extraction Interface Seam (src/isaac_records/extract, Phase 2 stubs)'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(getByRole('button', { name: /AI Scientific Consistency Review/ }));
+    const heading = await findByText('AI Scientific Consistency Review', { selector: 'h3' });
+    expect(heading).toBeInTheDocument();
+    // The detail region's accessible name is the derived title.
+    expect(detailPane(container)).toHaveAccessibleName('AI Scientific Consistency Review');
+  });
+
+  it('the RAW graph label survives verbatim in Technical Details — nothing was deleted, only relocated', async () => {
+    stubFetchRoutes({
+      ...baseRoutes,
+      'GET /api/memory/concepts': { body: conceptsWithRealLabels },
+      [conceptPath('docs_proposal_v2_ai_scientific_review')]: { body: realConceptDetail(0) },
+    });
+    const { findByText, getByRole, container } = renderScreen();
+    await findByText('Concept Lookup');
+    fireEvent.click(getByRole('button', { name: /AI Scientific Consistency Review/ }));
+    await findByText('Technical Details');
+
+    // The no-data-loss guarantee: the exact string the graph stores is on screen.
+    expect(technicalValue(container, 'Graph Label')).toBe(REAL_CODE_QUALIFIER);
+    // Twice, because this concept's cluster is named after the concept itself —
+    // Graph Label and Cluster Name are legitimately the same string here.
+    expect(within(technicalDisclosure(container)).getAllByText(REAL_CODE_QUALIFIER)).toHaveLength(2);
+    // …together with every other raw identifier the pane knows.
+    expect(technicalValue(container, 'Concept ID')).toBe('docs_proposal_v2_ai_scientific_review');
+    expect(technicalValue(container, 'Source File')).toBe('docs/fake-proposal.md');
+    expect(technicalValue(container, 'Cluster Name')).toBe(REAL_CODE_QUALIFIER);
+    expect(technicalValue(container, 'Cluster ID')).toBe('128');
+  });
+
+  it('search still matches the RAW label — a fragment the derived title hides still finds the row', async () => {
+    stubFetchRoutes({
+      ...baseRoutes,
+      'GET /api/memory/concepts': { body: conceptsWithRealLabels },
+    });
+    const { findByText, getByRole, getByText, container } = renderScreen();
+    await findByText('Concept Lookup');
+
+    const search = getByRole('searchbox', { name: /Search concepts/i });
+    // "NoOpReviewer" exists ONLY in the raw label — the row shows the derived
+    // title. If the derivation had been written into state, this would find zero.
+    fireEvent.change(search, { target: { value: 'NoOpReviewer' } });
+    expect(rowButtons(container)).toHaveLength(1);
+    expect(getByText('AI Scientific Consistency Review')).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: 'review.py' } });
+    expect(rowButtons(container)).toHaveLength(1);
+  });
+
+  it('renders the longest real label with no nowrap constraint anywhere in the Concepts styles', async () => {
+    stubFetchRoutes({
+      ...baseRoutes,
+      'GET /api/memory/concepts': { body: conceptsWithRealLabels },
+      [conceptPath('concept-extract-seam')]: { body: realConceptDetail(2) },
+    });
+    const { findByText, getByRole, container } = renderScreen();
+    await findByText('Concept Lookup');
+
+    const longTitle = 'Extraction Interface Seam (src/isaac_records/extract, Phase 2 stubs)';
+    fireEvent.click(getByRole('button', { name: new RegExp('Extraction Interface Seam') }));
+    await findByText('Technical Details');
+    expect(await findByText(longTitle, { selector: 'h3' })).toBeInTheDocument();
+
+    // jsdom has no layout engine, so overflow is guarded structurally: the row
+    // label, the detail heading and every mono raw value must be free to wrap,
+    // and no Concepts rule may pin `white-space: nowrap` (the one declaration
+    // that would force a 68-character label to push <main> sideways at 375px).
+    const label = container.querySelector('.concept-lookup-label');
+    expect(label).not.toBeNull();
+    for (const el of [
+      label as Element,
+      detailPane(container).querySelector('.concept-lookup-detail-heading') as Element,
+      technicalDisclosure(container).querySelector('dd') as Element,
+    ]) {
+      expect(getComputedStyle(el).whiteSpace).not.toBe('nowrap');
+    }
+  });
+});
+
+describe('P36V S-A · Concepts — Technical Details disclosure', () => {
+  it('is collapsed by default, natively keyboard-operable, and named by its own summary', async () => {
+    stubFetchRoutes({
+      ...baseRoutes,
+      [conceptPath('concept-provenance')]: { body: memoryConceptDetailWithLeads },
+    });
+    const { findByText, getByRole, container } = renderScreen();
+    await findByText('Concept Lookup');
+    fireEvent.click(getByRole('button', { name: /Provenance/ }));
+    await findByText('Technical Details');
+
+    const details = technicalDisclosure(container);
+    expect(details.open).toBe(false);
+    expect(details).not.toHaveAttribute('open');
+
+    // A native <summary> as the FIRST child is what makes it reachable by Tab
+    // and operable by Enter/Space with no JS and no ARIA of ours.
+    const summary = details.firstElementChild as HTMLElement;
+    expect(summary.tagName).toBe('SUMMARY');
+    expect(summary.textContent).toBe('Technical Details'); // Title Case
+    expect(details.querySelectorAll('summary')).toHaveLength(1);
+
+    // Opening it reveals the raw values (they are in the DOM either way, which is
+    // why the row values are asserted by <dt> pairing rather than by visibility).
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    expect(technicalValue(container, 'Concept ID')).toBe('concept-provenance');
+  });
+
+  it('states an absent raw value as "—" rather than an empty row, and never as an invented one', async () => {
+    stubFetchRoutes({
+      ...baseRoutes,
+      [conceptPath('concept-governance')]: { body: memoryConceptDetailWithheldAnchor },
+    });
+    const { findByText, getByRole, container } = renderScreen();
+    await findByText('Concept Lookup');
+    fireEvent.click(getByRole('button', { name: /Governance Allowlist/ }));
+    await findByText('Technical Details');
+
+    expect(technicalValue(container, 'Source File')).toBe('—');
+    expect(technicalValue(container, 'Cluster Name')).toBe('—');
+    expect(technicalValue(container, 'Cluster ID')).toBe('55');
+    expect(technicalValue(container, 'Graph Label')).toBe('Governance allowlist');
+  });
+
+  it('the detail pane reads title → description → Anchor Source → Cluster → Related Leads → graph action → Technical Details', async () => {
+    stubFetchRoutes({
+      ...baseRoutes,
+      [conceptPath('concept-provenance')]: { body: memoryConceptDetailWithLeads },
+    });
+    const { findByText, getByRole, container } = renderScreen();
+    await findByText('Concept Lookup');
+    fireEvent.click(getByRole('button', { name: /Provenance/ }));
+    await findByText('Technical Details');
+
+    const pane = detailPane(container);
+    const order = Array.from(
+      pane.querySelectorAll('h3, .concept-lookup-description, h4, .concept-lookup-actions, summary'),
+    ).map((el) => {
+      if (el.tagName === 'H3') return 'TITLE';
+      if (el.classList.contains('concept-lookup-description')) return 'DESCRIPTION';
+      if (el.classList.contains('concept-lookup-actions')) return 'ACTIONS';
+      return el.textContent ?? '';
+    });
+
+    expect(order).toEqual([
+      'TITLE',
+      'DESCRIPTION',
+      'Anchor Source',
+      'Cluster',
+      'Related Leads',
+      'ACTIONS',
+      'Technical Details',
+    ]);
+    expect(within(pane).getByRole('button', { name: 'Show in Graph Explore' })).toBeInTheDocument();
+    // Section labels are Title Case; the description stays sentence case.
+    for (const name of ['Anchor Source', 'Cluster', 'Related Leads']) {
+      expect(within(pane).getByRole('heading', { name, level: 4 })).toBeInTheDocument();
+    }
+  });
+});
+
+describe('P36V S-A · Concepts — visible Clear Filters', () => {
+  const clearName = { name: 'Clear Filters' } as const;
+
+  it('appears only while something is narrowing the list, and resets search + both filters without changing filter semantics', async () => {
+    stubFetchRoutes({ ...baseRoutes, 'GET /api/memory/concepts': { body: conceptsForFiltering } });
+    const { findByText, getByRole, queryByRole, getByText, container } = renderScreen();
+    await findByText('Concept Lookup');
+
+    // Nothing active → no control (it would have nothing to do).
+    expect(queryByRole('button', clearName)).toBeNull();
+    expect(rowButtons(container)).toHaveLength(4);
+
+    const search = getByRole('searchbox', { name: /Search concepts/i });
+    fireEvent.change(search, { target: { value: 'govern' } });
+    expect(getByRole('button', clearName)).toBeInTheDocument();
+    expect(rowButtons(container)).toHaveLength(1);
+
+    fireEvent.click(getByRole('button', clearName));
+    expect(rowButtons(container)).toHaveLength(4);
+    expect((search as HTMLInputElement).value).toBe('');
+    expect(queryByRole('button', clearName)).toBeNull();
+
+    // A filter alone shows it too, and one click clears BOTH selects at once.
+    const cluster = getByRole('combobox', { name: /Cluster/i });
+    const doc = getByRole('combobox', { name: /Anchor source/i });
+    fireEvent.change(cluster, { target: { value: '55' } });
+    fireEvent.change(doc, { target: { value: 'docs/fake-note.md' } });
+    expect(getByRole('button', clearName)).toBeInTheDocument();
+    expect(rowButtons(container)).toHaveLength(2);
+
+    fireEvent.click(getByRole('button', clearName));
+    expect((cluster as HTMLSelectElement).value).toBe('all');
+    expect((doc as HTMLSelectElement).value).toBe('all');
+    expect(rowButtons(container)).toHaveLength(4);
+    expect(getByText('4 of 4')).toBeInTheDocument();
+  });
+
+  it('closes the empty state’s dead end — the instruction to clear the filters now has a control beside it', async () => {
+    stubFetchRoutes(baseRoutes);
+    const { findByText, getByRole, getByText, container } = renderScreen();
+    await findByText('Concept Lookup');
+
+    fireEvent.change(getByRole('searchbox', { name: /Search concepts/i }), {
+      target: { value: 'zzz-nothing' },
+    });
+    expect(rowButtons(container)).toHaveLength(0);
+    expect(getByText(/widen the search or clear the filters/)).toBeInTheDocument();
+
+    const clear = getByRole('button', clearName);
+    expect(clear).toBeInTheDocument();
+    fireEvent.click(clear);
+    expect(rowButtons(container)).toHaveLength(3);
+  });
+
+  it('hands focus to the search box instead of dropping it, since the button unmounts itself', async () => {
+    stubFetchRoutes(baseRoutes);
+    const { findByText, getByRole, queryByRole } = renderScreen();
+    await findByText('Concept Lookup');
+
+    const search = getByRole('searchbox', { name: /Search concepts/i });
+    fireEvent.change(search, { target: { value: 'zzz-nothing' } });
+
+    const clear = getByRole('button', clearName);
+    clear.focus();
+    expect(document.activeElement).toBe(clear);
+    fireEvent.click(clear);
+
+    // The control removed its own subtree. Without a deliberate move,
+    // `document.activeElement` becomes <body> and a keyboard user is dumped at
+    // the top of the document.
+    expect(queryByRole('button', clearName)).toBeNull();
+    expect(document.activeElement).toBe(search);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+describe('P36V S-A · Concepts — concision without deleting a claim', () => {
+  it('states the cluster advisory ONCE, keeping the unique on-screen singleton count', async () => {
+    stubFetchRoutes({ ...baseRoutes, 'GET /api/memory/concepts': { body: conceptsForFiltering } });
+    const { findByText, getByText, container } = renderScreen();
+    await findByText('Concept Lookup');
+
+    // The unique fact (how many of the clusters ON SCREEN hold one concept) and
+    // the advisory qualifier now live in one sentence instead of two.
+    expect(
+      getByText(
+        '1 of the 2 clusters represented here hold a single concept — advisory groupings from the upstream graph builder, not schema categories.',
+      ),
+    ).toBeInTheDocument();
+    // The long restatement that MemoryGraphCard and GraphHelp already carry in
+    // full on the Graph tab of this same screen is gone from Concepts.
+    expect(container.textContent).not.toMatch(/Clusters are derived automatically/);
+    expect(container.querySelectorAll('.concept-lookup-filter-note')).toHaveLength(1);
+    // …and the claim itself is not lost: it is still made here, once.
+    expect(container.textContent).toMatch(/advisory groupings/);
+  });
+
+  it('makes each surviving advisory claim exactly once on the resolved surface', async () => {
+    stubFetchRoutes({
+      ...baseRoutes,
+      [conceptPath('concept-provenance')]: { body: memoryConceptDetailWithLeads },
+    });
+    const { findByText, getByRole, container } = renderScreen();
+    await findByText('Concept Lookup');
+    fireEvent.click(getByRole('button', { name: /Provenance/ }));
+    await findByText('Technical Details');
+
+    const text = container.textContent ?? '';
+    const count = (needle: string) => text.split(needle).length - 1;
+    expect(count('memory leads, not scientific conclusions')).toBe(1); // page-level
+    expect(count('never a definition of the term')).toBe(1); // advisory note
+    expect(count('Open the cited source to judge it yourself')).toBe(1);
+    expect(count('leads — open the cited file to verify')).toBe(0); // removed
   });
 });

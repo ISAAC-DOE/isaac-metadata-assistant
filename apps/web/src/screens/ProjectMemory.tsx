@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
@@ -18,6 +19,7 @@ import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { MemoryGraphCard } from './MemoryGraphCard';
 import { Network, ChevronDown, ChevronRight, Search } from '../components/icons';
 import { LABELS } from '../lib/labels';
+import { conceptDisplayTitle, relationDisplayLabel } from '../lib/displayLabels';
 import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import {
@@ -794,7 +796,7 @@ function SourceIndexDetail({
       </div>
 
       <div className="source-index-section">
-        <h4 className="source-index-section-heading">Related files</h4>
+        <h4 className="source-index-section-heading">Related Files</h4>
         {related.files.length > 0 ? (
           <ul className="source-index-related-list">
             {related.files.map((rf) => (
@@ -805,7 +807,16 @@ function SourceIndexDetail({
                   onClick={() => onActivateFile(rf.path)}
                 >
                   <span className="mono">{rf.path}</span>
-                  {rf.relation && <span className="source-index-relation">{rf.relation}</span>}
+                  {/* P36V S-B — the same relation display map the Graph legend,
+                      GraphDetail and the Concepts pane use. Left raw here, one
+                      relation read `Imports` on two tabs and `imports` on this
+                      one. The raw value stays exact in `title`, and it is the raw
+                      value the filters and the `relation` command match. */}
+                  {rf.relation && (
+                    <span className="source-index-relation" title={rf.relation}>
+                      {relationDisplayLabel(rf.relation)}
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -816,13 +827,30 @@ function SourceIndexDetail({
       </div>
 
       <div className="source-index-section">
-        <h4 className="source-index-section-heading">Related concepts</h4>
+        <h4 className="source-index-section-heading">Related Concepts</h4>
         {related.concepts.length > 0 ? (
           <ul className="source-index-related-list">
             {related.concepts.map((rc) => (
               <li key={rc.id}>
-                <span className="source-index-concept-label">{rc.label ?? rc.id}</span>
-                {rc.relation && <span className="source-index-relation">{rc.relation}</span>}
+                {/* P36V S-B — derived concept title and mapped relation, matching
+                    the Concepts pane. Raw values remain reachable ON THIS
+                    SURFACE: the raw relation and the raw concept label are both
+                    on `title`. Nothing here navigates to the concept, and this
+                    tab has no Technical Details disclosure of its own — so
+                    without the `title` the raw label (which is what the Concepts
+                    tab's search actually matches) would be unreachable from here,
+                    and the derivation would stop being lossless for the reader. */}
+                <span
+                  className="source-index-concept-label"
+                  title={rc.label ? rc.label : undefined}
+                >
+                  {rc.label ? conceptDisplayTitle(rc.label) : rc.id}
+                </span>
+                {rc.relation && (
+                  <span className="source-index-relation" title={rc.relation}>
+                    {relationDisplayLabel(rc.relation)}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -951,6 +979,10 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
   // fetch per arrow press.
   const [focusIndex, setFocusIndex] = useState(0);
 
+  /** The always-mounted search box: the focus target when `Clear Filters`
+   *  removes itself (see its onClick). */
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
   const clearFilters = useCallback(() => {
     setQuery('');
     setDocFilter(CONCEPT_FILTER_ALL);
@@ -1066,6 +1098,12 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
    * down to only those leaves `allMissing` false and the aggregate note unshown
    * rather than claiming something about documents that were never named.
    */
+  /** Whether anything is narrowing the list right now — the only condition under
+   *  which a Clear Filters control has work to do, and therefore the only
+   *  condition under which it is rendered. */
+  const filtersActive =
+    query.trim() !== '' || docFilter !== CONCEPT_FILTER_ALL || clusterFilter !== CONCEPT_FILTER_ALL;
+
   const onDiskSpread = useMemo(() => {
     const withSource = filtered.filter((c) => c.source_file !== null);
     return {
@@ -1116,6 +1154,7 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
           <Search size={14} strokeWidth={2} aria-hidden="true" className="concept-lookup-search-icon" />
           <span className="sr-only">Search concepts by name or id</span>
           <input
+            ref={searchRef}
             type="search"
             className="concept-lookup-search-input"
             placeholder="Search concepts…"
@@ -1157,13 +1196,45 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
           </select>
         </label>
       </div>
+      {/* P36V S-A — a visible escape from the filters. The empty state has told
+          readers to "clear the filters" since S7 while `clearFilters` was only
+          ever called programmatically (by a followed lead or a `?concept=` deep
+          link), so the instruction pointed at no control. Filter SEMANTICS are
+          untouched: this is the same callback those two paths already use. */}
+      {filtersActive && (
+        <div className="concept-lookup-toolbar-actions">
+          <button
+            type="button"
+            className="btn btn-secondary concept-lookup-clear"
+            onClick={() => {
+              clearFilters();
+              // This button unmounts itself the moment the filters are cleared,
+              // which would leave `document.activeElement` on <body> and dump a
+              // keyboard user at the top of the document. Focus goes to the
+              // always-mounted search box — the control the reader would reach
+              // for next, and the one whose value was just emptied.
+              searchRef.current?.focus();
+            }}
+          >
+            Clear Filters
+          </button>
+        </div>
+      )}
+      {/* P36V S-A concision: the second sentence here ("Clusters are derived
+          automatically by the upstream graph builder — advisory groupings, not
+          categories the schema recognises") was a third copy of a claim already
+          made in full on the Graph tab of this same screen
+          (`MemoryGraphCard`'s community note and `GraphHelp`'s "Cluster
+          colours"). The unique fact — how many of the clusters ON SCREEN hold a
+          single concept — stays, and the advisory qualifier is compressed into
+          the same sentence rather than deleted: cluster filtering happens HERE,
+          so the reader choosing a cluster must not be left to over-trust it. */}
       {clusterOptions.clusters.length > 0 && (
         <p className="concept-lookup-filter-note">
           {clusterOptions.singletons === clusterOptions.clusters.length
-            ? 'Every cluster represented here holds a single concept.'
-            : `${clusterOptions.singletons} of the ${clusterOptions.clusters.length} clusters represented here hold a single concept.`}{' '}
-          Clusters are derived automatically by the upstream graph builder — advisory groupings, not
-          categories the schema recognises.
+            ? 'Every cluster represented here holds a single concept'
+            : `${clusterOptions.singletons} of the ${clusterOptions.clusters.length} clusters represented here hold a single concept`}{' '}
+          — advisory groupings from the upstream graph builder, not schema categories.
         </p>
       )}
       {/* Scoped to the documents actually cited by the rows below: `on_disk` is
@@ -1246,7 +1317,12 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
           )}
         </div>
       </div>
-      <p className="concept-lookup-caption">leads — open the cited file to verify</p>
+      {/* P36V S-A concision: the standing caption "leads — open the cited file to
+          verify" said nothing the card does not already say twice — the subtitle
+          above ("memory leads, not scientific conclusions") is the page-level
+          explanation, and the detail pane's boundary note carries "Open the cited
+          source to judge it yourself" exactly where a cited source is on screen.
+          Removed as a duplicate; neither surviving claim was weakened. */}
     </>
   );
 }
@@ -1294,7 +1370,12 @@ function ConceptLookupRow({
       >
         <ChevronRight className="concept-lookup-chevron" size={14} strokeWidth={2} aria-hidden="true" />
         <span className="concept-lookup-rowbody">
-          <span className="concept-lookup-label">{concept.label}</span>
+          {/* P36V S-A — the READABLE title (`lib/displayLabels.ts`), not the raw
+              graph label. Presentation only: `concept.label` is untouched in
+              state, still what search matches on, still what the cluster-chip
+              suppression compares against, and still rendered verbatim in the
+              detail pane's Technical Details disclosure. */}
+          <span className="concept-lookup-label">{conceptDisplayTitle(concept.label)}</span>
           {(clusterChip || (showOnDiskBadge && !concept.on_disk)) && (
             <span className="concept-lookup-rowmeta">
               {clusterChip && <span className="concept-lookup-community">{clusterChip}</span>}
@@ -1394,97 +1475,81 @@ function ConceptLookupDetail({
 
   return (
     <div className="concept-lookup-detail">
+      {/* P36V S-A — the derived readable title (`lib/displayLabels.ts`). The raw
+          `concept.label` is not gone: it is the first row of Technical Details
+          below, verbatim and selectable. */}
       <h3 id={CONCEPT_DETAIL_NAME_ID} className="concept-lookup-detail-heading">
-        {concept.label}
+        {conceptDisplayTitle(concept.label)}
       </h3>
       <p className="concept-lookup-description">{describeConcept(concept, leadCount)}</p>
-      {/* The closing instruction is conditional: with no citable source there is
-          nothing to open, and telling the reader to open one would be an
-          instruction they cannot follow. */}
+      {/* The one advisory note on this surface. The closing instruction is
+          conditional: with no citable source there is nothing to open, and
+          telling the reader to open one would be an instruction they cannot
+          follow. */}
       <p className="concept-lookup-boundary">
         A concept is a pointer into project documents — never a definition of the term, and never a
         scientific conclusion.
         {concept.source_file ? ' Open the cited source to judge it yourself.' : ''}
       </p>
 
-      <p className="concept-lookup-anchor">
-        <span className="concept-lookup-anchor-label">anchor source</span>
-        {concept.source_file ? (
-          <button
-            type="button"
-            className="concept-lookup-anchor-link"
-            onClick={() => onNavigateFile(concept.source_file as string)}
-          >
-            <span className="mono">{concept.source_file}</span>
-            <span className="concept-lookup-anchor-action">open in Source Index</span>
-          </button>
-        ) : (
-          // P24.9: render an honest note, never an empty mono span.
-          // P36R S10: a null `source_file` covers BOTH shapes of
-          // `memory.py::_served_source_file` — the graph node named no source
-          // at all, or it named one that is unsafe / not governance-served and
-          // was withheld. The old "anchor withheld (excluded source)" asserted
-          // the second shape, i.e. that an excluded source exists. This states
-          // only what is observable: no source is linked.
-          <span className="concept-lookup-anchor-missing">no linked source</span>
-        )}
-      </p>
-      {/* `on_disk` is a FILESYSTEM existence check on the backend
-          (`memory.py::_on_disk`: resolves the path strictly under the repo root
-          and never opens it). It says NOTHING about snapshot membership — every
-          served file is in the snapshot's served-content manifest, and the
-          deployed image simply does not copy `docs/`, which is why the hosted
-          build reports `on_disk:false` for files it happily serves provenance
-          for. Copy here must therefore speak about the deployment not carrying
-          the file, never about the snapshot excluding it. */}
-      {concept.source_file && !concept.on_disk && (
-        <p className="concept-lookup-anchor-missing">
-          This deployment does not carry the file itself — open it in the project to read it.
+      {/* P36V S-A hierarchy: Anchor Source → Cluster → Related Leads → the graph
+          action → Technical Details, each a labelled section under one heading
+          level. The old inline "anchor source" eyebrow span is now this heading —
+          the same two words, Title Cased. */}
+      <div className="concept-lookup-section">
+        <h4 className="concept-lookup-section-heading">Anchor Source</h4>
+        <p className="concept-lookup-anchor">
+          {concept.source_file ? (
+            <button
+              type="button"
+              className="concept-lookup-anchor-link"
+              onClick={() => onNavigateFile(concept.source_file as string)}
+            >
+              <span className="mono">{concept.source_file}</span>
+              <span className="concept-lookup-anchor-action">open in Source Index</span>
+            </button>
+          ) : (
+            // P24.9: render an honest note, never an empty mono span.
+            // P36R S10: a null `source_file` covers BOTH shapes of
+            // `memory.py::_served_source_file` — the graph node named no source
+            // at all, or it named one that is unsafe / not governance-served and
+            // was withheld. The old "anchor withheld (excluded source)" asserted
+            // the second shape, i.e. that an excluded source exists. This states
+            // only what is observable: no source is linked.
+            <span className="concept-lookup-anchor-missing">no linked source</span>
+          )}
         </p>
+        {/* `on_disk` is a FILESYSTEM existence check on the backend
+            (`memory.py::_on_disk`: resolves the path strictly under the repo root
+            and never opens it). It says NOTHING about snapshot membership — every
+            served file is in the snapshot's served-content manifest, and the
+            deployed image simply does not copy `docs/`, which is why the hosted
+            build reports `on_disk:false` for files it happily serves provenance
+            for. Copy here must therefore speak about the deployment not carrying
+            the file, never about the snapshot excluding it. */}
+        {concept.source_file && !concept.on_disk && (
+          <p className="concept-lookup-anchor-missing">
+            This deployment does not carry the file itself — open it in the project to read it.
+          </p>
+        )}
+      </div>
+
+      {/* Same suppression rule as the row chip: upstream names a single-member
+          cluster after its one member, so for most real concepts this section
+          would restate the concept's own label. The fact is not dropped — the
+          description states it ("Its cluster in the graph carries the same name
+          as the concept itself"), and `Cluster Name` / `Cluster ID` are listed
+          raw in Technical Details either way. A null community still renders,
+          as "—", because that is a different fact. */}
+      {community !== concept.label && (
+        <div className="concept-lookup-section">
+          <h4 className="concept-lookup-section-heading">Cluster</h4>
+          <p className="concept-lookup-metavalue">{community ?? '—'}</p>
+        </div>
       )}
 
-      <dl className="concept-lookup-panel-figures">
-        {/* Same suppression rule as the row chip: upstream names a single-member
-            cluster after its one member, so for most real concepts this field
-            would repeat the heading directly above it verbatim. The fact is not
-            dropped — the description states it ("Its cluster in the graph
-            carries the same name as the concept itself"). A null community
-            still renders, as "—", because that is a different fact. */}
-        {community !== concept.label && (
-          <div className="concept-lookup-panel-figure">
-            <dt>Community</dt>
-            <dd>{community ?? '—'}</dd>
-          </div>
-        )}
-        <div className="concept-lookup-panel-figure">
-          <dt>Concept id</dt>
-          <dd className="mono">{concept.id}</dd>
-        </div>
-      </dl>
-
-      <div className="concept-lookup-actions">
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => onShowInGraph(concept.id)}
-        >
-          Show in Graph Explore
-        </button>
-      </div>
-      {/* No neighbourhood action, and no promise of one: the Graph tab's
-          projection derives every edge from a FILE's `related.files[]`
-          (`memory_graph.py::_build_edges`) and never from a concept's
-          `related`, so a concept node carries zero edges whatever this
-          endpoint returns. Recorded leads are real and are listed below — they
-          are simply not edges of that projection. */}
-      <p className="concept-lookup-action-note">
-        {hasLeads
-          ? "Explore selects this concept on the shared graph canvas. The graph's reference projection records no edges for concepts, so nothing will be drawn joining it to anything else — the leads below come from this concept's own record, not from that projection."
-          : 'Explore selects this concept on the shared graph canvas. The current graph records no references to or from it, so nothing will be drawn joining it to anything else.'}
-      </p>
-
       <div className="concept-lookup-section">
-        <h4 className="concept-lookup-section-heading">Related leads</h4>
+        <h4 className="concept-lookup-section-heading">Related Leads</h4>
         {hasLeads ? (
           <>
             {related.files.length > 0 && (
@@ -1499,7 +1564,19 @@ function ConceptLookupDetail({
                         onClick={() => onNavigateFile(rf.path)}
                       >
                         <span className="mono">{rf.path}</span>
-                        {rf.relation && <span className="concept-lookup-relation">{rf.relation}</span>}
+                        {/* P36V PR2 slice B — the graph's own relation vocabulary
+                            surfaces here as a lead. It is displayed through the
+                            SAME closed five-value map the Graph tab uses, so
+                            `imports` does not read as a raw token on one surface
+                            and "Imports" on the other. A value outside that
+                            measured set (e.g. `relates_to` below) passes through
+                            verbatim — the `title` keeps the backend's exact
+                            string either way. */}
+                        {rf.relation && (
+                          <span className="concept-lookup-relation" title={rf.relation}>
+                            {relationDisplayLabel(rf.relation)}
+                          </span>
+                        )}
                         {rf.file_type && (
                           <span className="concept-lookup-relation">{rf.file_type}</span>
                         )}
@@ -1520,9 +1597,17 @@ function ConceptLookupDetail({
                         className="concept-lookup-related-link"
                         onClick={() => onActivateConcept(rc.id)}
                       >
-                        <span>{rc.label ?? rc.id}</span>
+                        {/* P36V S-A — the SAME derivation the row and detail heading
+                            use. Rendering the raw label here made one concept read
+                            two ways on one surface: a lead said "Governance
+                            allowlist" and activating it produced the heading
+                            "Governance Allowlist". The raw value is still exact in
+                            Technical Details once the lead is opened. */}
+                        <span>{rc.label ? conceptDisplayTitle(rc.label) : rc.id}</span>
                         {rc.relation && (
-                          <span className="concept-lookup-relation">{rc.relation}</span>
+                          <span className="concept-lookup-relation" title={rc.relation}>
+                            {relationDisplayLabel(rc.relation)}
+                          </span>
                         )}
                       </button>
                     </li>
@@ -1537,6 +1622,67 @@ function ConceptLookupDetail({
           </p>
         )}
       </div>
+
+      <div className="concept-lookup-section">
+        <div className="concept-lookup-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onShowInGraph(concept.id)}
+          >
+            Show in Graph Explore
+          </button>
+        </div>
+        {/* No neighbourhood action, and no promise of one: the Graph tab's
+            projection derives every edge from a FILE's `related.files[]`
+            (`memory_graph.py::_build_edges`) and never from a concept's
+            `related`, so a concept node carries zero edges whatever this
+            endpoint returns. Recorded leads are real and are listed above — they
+            are simply not edges of that projection. */}
+        <p className="concept-lookup-action-note">
+          {hasLeads
+            ? "Explore selects this concept on the shared graph canvas. The graph's reference projection records no edges for concepts, so nothing will be drawn joining it to anything else — the leads above come from this concept's own record, not from that projection."
+            : 'Explore selects this concept on the shared graph canvas. The current graph records no references to or from it, so nothing will be drawn joining it to anything else.'}
+        </p>
+      </div>
+
+      {/* P36V S-A — every RAW value this pane knows, in one collapsed-by-default
+          native disclosure. Nothing was deleted from the surface to make room
+          for it: the graph label moved out of the heading (which now shows the
+          derived title) and the concept id out of an unlabelled inline figure,
+          and both are here verbatim, alongside the exact anchor path and the raw
+          cluster identifiers — which the Cluster section deliberately suppresses
+          when it would restate the concept itself. `<details>`/`<summary>` is the
+          pattern already used by GraphDetail ("Raw node data") and the graph help
+          drawer ("Technical Details"): keyboard-operable and named by its own
+          summary, with no ARIA of our own. (MemoryGraphCard's "How this
+          projection is built" disclosure, cited here before, no longer exists —
+          this PR's slice B relocated its content into About This Graph.) */}
+      <details className="concept-lookup-technical">
+        <summary>Technical Details</summary>
+        <dl className="concept-lookup-technical-figures">
+          <div className="concept-lookup-technical-figure">
+            <dt>Graph Label</dt>
+            <dd className="mono">{concept.label}</dd>
+          </div>
+          <div className="concept-lookup-technical-figure">
+            <dt>Concept ID</dt>
+            <dd className="mono">{concept.id}</dd>
+          </div>
+          <div className="concept-lookup-technical-figure">
+            <dt>Source File</dt>
+            <dd className="mono">{concept.source_file ?? '—'}</dd>
+          </div>
+          <div className="concept-lookup-technical-figure">
+            <dt>Cluster Name</dt>
+            <dd className="mono">{concept.community_name ?? '—'}</dd>
+          </div>
+          <div className="concept-lookup-technical-figure">
+            <dt>Cluster ID</dt>
+            <dd className="mono">{concept.community_id ?? '—'}</dd>
+          </div>
+        </dl>
+      </details>
     </div>
   );
 }

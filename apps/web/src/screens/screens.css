@@ -715,6 +715,20 @@
   border: 1px solid var(--border-input);
   border-radius: var(--radius-control);
 }
+/* P36V S-A — the visible escape from an active search/filter. Its own row rather
+   than a fourth toolbar grid track: a 190px `minmax` track would have stretched
+   a two-word button across a third of the toolbar at wide widths, and the row is
+   only in the DOM while something is actually narrowing the list. */
+.concept-lookup-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.concept-lookup-clear {
+  font-size: 12px;
+  padding: 5px 10px;
+}
 .concept-lookup-filter-note {
   margin-top: 8px;
   font-size: 11.5px;
@@ -899,16 +913,9 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 8px;
-  margin-top: 12px;
   min-width: 0;
   font-size: 12px;
   color: var(--text-secondary);
-}
-.concept-lookup-anchor-label {
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
 }
 .concept-lookup-anchor-link {
   display: inline-flex;
@@ -940,20 +947,11 @@
   color: var(--text-tertiary);
   line-height: 1.5;
 }
-.concept-lookup-panel-figures {
-  margin: 10px 0 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 6px 16px;
-}
-.concept-lookup-panel-figure {
-  min-width: 0;
-}
-.concept-lookup-panel-figures dt {
-  font-size: 10.5px;
-  color: var(--text-tertiary);
-}
-.concept-lookup-panel-figures dd {
+/* P36V S-A — the single value under a labelled detail section (currently
+   Cluster). Replaces the old unlabelled <dl> figure grid, whose two rows
+   (Community / Concept id) are now a named section and a Technical Details row
+   respectively. */
+.concept-lookup-metavalue {
   margin: 0;
   font-size: 12px;
   font-weight: 500;
@@ -964,7 +962,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
 }
 .concept-lookup-action-note {
   margin-top: 6px;
@@ -972,11 +969,18 @@
   color: var(--text-tertiary);
   line-height: 1.5;
 }
+/* P36V S-A — one rhythm for every labelled section of the detail pane (Anchor
+   Source · Cluster · Related Leads · the graph action). A single hairline
+   divider plus consistent spacing, NOT a bordered card per subsection: the pane
+   is one column of related facts, and five boxes inside a box would read as five
+   unrelated widgets. `border-top` only — the No-Vertical-Rail rule stands. */
 .concept-lookup-section {
-  margin-top: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-faint);
 }
 .concept-lookup-section-heading {
-  margin: 0 0 4px;
+  margin: 0 0 5px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -1037,10 +1041,41 @@
   color: var(--text-tertiary);
   line-height: 1.5;
 }
-.concept-lookup-caption {
-  margin-top: 14px;
+/* P36V S-A — Technical Details: the raw graph values, collapsed by default.
+   Styled as the quietest thing in the pane (same treatment as the graph tab's
+   "Raw node data" disclosure) so it reads as an audit trail, not a section
+   competing with the readable content above it. */
+.concept-lookup-technical {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-faint);
   font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.concept-lookup-technical summary {
+  cursor: pointer;
+  color: var(--action);
+}
+.concept-lookup-technical-figures {
+  margin: 8px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 16px;
+}
+.concept-lookup-technical-figure {
+  min-width: 0;
+}
+.concept-lookup-technical-figures dt {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
   color: var(--text-tertiary);
+}
+.concept-lookup-technical-figures dd {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 .concept-lookup-panel-error {
   display: flex;
