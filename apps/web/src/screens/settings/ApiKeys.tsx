@@ -1,5 +1,6 @@
 /**
- * Settings → API → API Keys (P36V PR3 slice C).
+ * Settings → API Access → the key/access surface (P36V PR3 slice C; restructured
+ * by P36V-1 slices 11 & 13).
  *
  * This surface exists to tell the truth about a capability this build does NOT
  * have. The backend audit that decided its content:
@@ -10,7 +11,7 @@
  *   `OPTIONS`. There is no per-key identity, no hashed storage, no expiry, no
  *   scopes, and — confirmed by grepping the whole of `apps/api` — no operation
  *   anywhere that creates, lists, revokes or rotates a credential. The generated
- *   contract the Documentation sub-tab renders is the proof: it lists every
+ *   contract the Endpoint Explorer renders is the proof: it lists every
  *   operation this API has, and none of them is key management.
  *
  * So the classification is UNAVAILABLE, and the screen is built as a complete,
@@ -19,6 +20,7 @@
  *   · no key is ever generated, displayed, or partially displayed;
  *   · nothing is read from or written to `localStorage`, `sessionStorage`, or a
  *     cookie — this module contains no storage or cookie access at all;
+ *   · there is no input, no field, and no control that cannot function;
  *   · the Create control is a really-`disabled` native button with a
  *     programmatically associated reason (`aria-describedby`), not an enabled
  *     control that silently does nothing;
@@ -27,132 +29,146 @@
  * Real key management is deliberately NOT stubbed. It would need durable
  * credential storage, per-key identity, revocation and scopes — a later,
  * separately authorized phase.
+ *
+ * LAYOUT (slice 11). The old version was one 74ch column inside a 1200px card,
+ * so half the page was empty (plan §2.7). The arrangement is now:
+ *
+ *   ┌──────────────────────────────────────────────────────────────┐
+ *   │ status banner: icon · heading + one paragraph · → Explorer    │  full width
+ *   ├───────────────────────────────────┬──────────────────────────┤
+ *   │ How Access Works Today (rows)     │ Create API Key           │  2 columns
+ *   │                                   │ + Technical Requirements │
+ *   ├───────────────────────────────────┴──────────────────────────┤
+ *   │ Your API Keys — the intentional empty state                   │  full width
+ *   └──────────────────────────────────────────────────────────────┘
+ *
+ * The banner spends its width on a real second element (the Explorer action,
+ * pushed to the trailing edge) instead of trailing whitespace, and the grid
+ * splits the 1200px measure into two columns that each hold prose at a readable
+ * measure — the `.settings-provenance-note { max-width: 80ch }` precedent
+ * applied to a box rather than only to the text inside it. Below 900px the grid
+ * is one column in the same source order; below 720px the disabled control goes
+ * full width. Nothing scrolls sideways: this surface has no table and no `pre`.
+ *
+ * CONCISION (slice 13). Every string here comes from `lib/settingsContent.ts`,
+ * which holds each claim exactly once, and each is rendered in exactly one
+ * place: status → the banner · access model, external agents and the hosted
+ * boundary → one access row each · why the button is disabled → the button's own
+ * reason · the backend contract that would be needed → the Technical
+ * Requirements disclosure · the empty list → the empty state. Nothing restates
+ * anything above it, and the bearer-header / 401-count facts belong to Quick
+ * Start, which derives them from the contract instead of asserting them.
+ *
+ * ON THE BANNER'S RETIRED AUTHENTICATION SUMMARY — the record, corrected. The
+ * slice-13 report said the banner's authentication summary and the left column's
+ * access model were merged because the two were "judged identical". They are not
+ * identical, and that was never the reason: the banner carries the key-management
+ * STATUS (`statusHeading` / `statusBody` — no operation exists to issue a key),
+ * while `API_ACCESS_ROWS[0] 'Current Access Model'` describes the one
+ * deployment-wide credential that does exist. Two different claims. What actually
+ * happened is that a banner-level authentication SUMMARY — a third paraphrase of
+ * material Quick Start derives from the contract and the access rows state
+ * canonically — was consciously dropped, so each claim is stated exactly once.
+ * That is the right call under slice 13; the stated rationale was wrong.
+ *
+ * LANDMARKS. This surface has FOUR headed regions and it is nested inside the
+ * tab's own `settings-card` region, which was five `region` landmarks on one tab —
+ * landmark inflation that makes a landmark list useless for navigation. The four
+ * `<section>` elements are kept for document sectioning but carry no accessible
+ * name, so they are not landmarks; their `<h3>`s still structure the outline,
+ * which is how a screen-reader user navigates within a panel. The single landmark
+ * on the tab is the card, named by the tab's own heading.
  */
 import { Lock, ChevronRight } from '../../components/icons';
+import {
+  API_ACCESS_COPY,
+  API_ACCESS_ROWS,
+  API_KEY_REQUIREMENTS,
+} from '../../lib/settingsContent';
 
 /** The `aria-describedby` target for the disabled Create control. */
 const CREATE_REASON_ID = 'settings-api-create-reason';
 
-/** What a working key would enable, and what actually applies today. Four rows,
- *  one question each — the four the authorizing brief requires answered. */
-const ACCESS_ROWS: { term: string; detail: string }[] = [
-  {
-    term: 'What an API Key Would Enable',
-    detail:
-      'A program running outside this browser — a script, a notebook, or an agent — could call the operations listed under Documentation directly, without a person driving the interface.',
-  },
-  {
-    term: 'Authentication That Applies Today',
-    detail:
-      'One credential belonging to the whole deployment, set on the server before the app starts and required on every operation except the liveness check. It identifies the deployment, not a person, and this screen cannot see whether it is switched on.',
-  },
-  {
-    term: 'Key Management',
-    detail:
-      'Unavailable. This API has no operation that creates, lists, revokes, or rotates a credential, so there is nothing for this screen to manage. Documentation lists every operation the app has — none of them is key management.',
-  },
-  {
-    term: 'External Agent Access',
-    detail:
-      'Not through anything you can obtain here. Whoever operates this deployment holds the single credential; the app cannot issue a second one, and browsing this page does not give a program a way in.',
-  },
-];
-
-/** The contract that would have to exist first. Stated as requirements, never as
- *  a roadmap promise. */
-const REQUIREMENTS: string[] = [
-  'Durable storage for credentials, holding a hash rather than the value, so a stored credential cannot be read back.',
-  'Per-key identity, so a key names who or what holds it instead of standing for the whole deployment.',
-  'Revocation and expiry, so a key can be withdrawn without restarting the service.',
-  'Scopes, so a key issued for reading cannot be used to write or export.',
-  'A record of use, so a key that leaks can be traced and cut off.',
-];
-
-export function ApiKeysPanel({ onOpenDocumentation }: { onOpenDocumentation: () => void }) {
+export function ApiKeysPanel({ onOpenExplorer }: { onOpenExplorer: () => void }) {
   return (
-    <>
-      <section className="api-keys-section" aria-labelledby="settings-api-access-heading">
-        <h3 id="settings-api-access-heading" className="api-keys-heading">
-          API Access
-        </h3>
-        <p className="api-keys-lead">
-          Programmatic access to this build is limited to what the deployment itself is configured
-          with. There is no way to issue a key from this screen, and this screen will not pretend
-          otherwise.
-        </p>
-        <dl className="api-keys-rows">
-          {ACCESS_ROWS.map((row) => (
-            <div className="api-keys-row" key={row.term}>
-              <dt>{row.term}</dt>
-              <dd>{row.detail}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <section className="api-keys-section" aria-labelledby="settings-api-create-heading">
-        <h3 id="settings-api-create-heading" className="api-keys-heading">
-          Create API Key
-        </h3>
-        {/* A real `disabled` button — not an enabled control that quietly does
-            nothing — with its reason both programmatically associated
-            (aria-describedby) and always visible, so the explanation is
-            available whether or not the control can take focus. */}
-        <div className="api-keys-create">
-          <button
-            type="button"
-            className="api-keys-create-btn"
-            disabled
-            aria-describedby={CREATE_REASON_ID}
-          >
-            <Lock size={13} strokeWidth={2} aria-hidden="true" />
-            Create API Key
+    <div className="api-access">
+      {/* THE status, said once. Everything below answers a different question. */}
+      <section className="api-access-banner">
+        <Lock size={16} strokeWidth={2} aria-hidden="true" className="api-access-banner-icon" />
+        <div className="api-access-banner-body">
+          <h3 className="api-keys-heading">{API_ACCESS_COPY.statusHeading}</h3>
+          <p className="api-keys-lead">{API_ACCESS_COPY.statusBody}</p>
+        </div>
+        {/* The banner's trailing edge carries the one action the status implies,
+            so the full measure holds content rather than empty space. */}
+        <div className="api-access-banner-action">
+          <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
+            Endpoint Explorer
+            <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
           </button>
-          <p className="api-keys-create-reason" id={CREATE_REASON_ID}>
-            Unavailable in this build: the API has no operation that issues a credential, so there
-            is nothing this button could call. Enabling it would require server-side credential
-            storage, per-key identity, and revocation — none of which exists here.
-          </p>
         </div>
       </section>
 
-      <section className="api-keys-section" aria-labelledby="settings-api-list-heading">
-        <h3 id="settings-api-list-heading" className="api-keys-heading">
-          Your API Keys
-        </h3>
+      <div className="api-access-grid">
+        <section className="api-access-col">
+          <h3 className="api-keys-heading">How Access Works Today</h3>
+          <dl className="api-keys-rows">
+            {API_ACCESS_ROWS.map((row) => (
+              <div className="api-keys-row" key={row.term}>
+                <dt>{row.term}</dt>
+                <dd>{row.detail}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        <section className="api-access-col">
+          <h3 className="api-keys-heading">Create API Key</h3>
+          {/* A real `disabled` button — not an enabled control that quietly does
+              nothing — with its reason both programmatically associated
+              (aria-describedby) and always visible, so `disabled` is never the
+              only signal. The reason is deliberately SHORT: the full explanation
+              is the banner's, and repeating it here is exactly the duplication
+              slice 13 removed. */}
+          <div className="api-keys-create">
+            <button
+              type="button"
+              className="api-keys-create-btn"
+              disabled
+              aria-describedby={CREATE_REASON_ID}
+            >
+              <Lock size={13} strokeWidth={2} aria-hidden="true" />
+              Create API Key
+            </button>
+            <p className="api-keys-create-reason" id={CREATE_REASON_ID}>
+              {API_ACCESS_COPY.createDisabledReason}
+            </p>
+          </div>
+
+          <details className="api-keys-technical">
+            <summary>Technical Requirements</summary>
+            <p className="api-keys-note">{API_ACCESS_COPY.requirementsNote}</p>
+            <ul className="api-keys-requirements">
+              {API_KEY_REQUIREMENTS.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </details>
+        </section>
+      </div>
+
+      <section className="api-access-full">
+        <h3 className="api-keys-heading">Your API Keys</h3>
+        {/* Left-aligned row rather than a centred column: see the
+            `.api-keys-empty` note in `screens.css`. */}
         <div className="api-keys-empty">
           <Lock size={16} strokeWidth={1.8} aria-hidden="true" className="api-keys-empty-icon" />
-          <p className="api-keys-empty-title">No keys to show.</p>
-          <p className="api-keys-empty-body">
-            This list is empty by design, not by circumstance — nothing failed to load. There is no
-            place in this build where a key could be created or kept, so there is never anything
-            here to display, reveal, or copy.
-          </p>
+          <div className="api-keys-empty-text">
+            <p className="api-keys-empty-title">{API_ACCESS_COPY.emptyTitle}</p>
+            <p className="api-keys-empty-body">{API_ACCESS_COPY.emptyBody}</p>
+          </div>
         </div>
       </section>
-
-      <section className="api-keys-section" aria-labelledby="settings-api-required-heading">
-        <h3 id="settings-api-required-heading" className="api-keys-heading">
-          What Would Be Required
-        </h3>
-        <ul className="api-keys-requirements">
-          {REQUIREMENTS.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-        <p className="api-keys-note">
-          Each of those is a backend and security contract this prototype does not have. They belong
-          to a later, separately authorized phase, and none of them is stubbed out behind this
-          screen.
-        </p>
-      </section>
-
-      <nav className="api-keys-jump" aria-label="More API detail">
-        <button type="button" className="settings-jump-btn" onClick={onOpenDocumentation}>
-          Read the API Documentation
-          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
-        </button>
-      </nav>
-    </>
+    </div>
   );
 }

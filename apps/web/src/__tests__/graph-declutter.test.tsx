@@ -913,6 +913,16 @@ describe('graph data is never mutated by the redesign', () => {
     fireEvent.click(view.getByRole('button', { name: 'Find Path' }));
     fireEvent.click(view.getByRole('button', { name: 'Clear All Filters' }));
 
+    // P36V.1 Unit F — Find Path fits the route, which lands past the first
+    // level-of-detail threshold, and clearing the focus then lets the canvas ask
+    // for the lazily fetched symbol layer. This scenario deliberately does not
+    // stub that route (it is about payload immutability), so the surface must
+    // degrade honestly instead of drawing anything in its place. Awaited so the
+    // resulting state update is observed rather than left dangling.
+    expect(
+      await view.findByText(/Symbol-level detail is unavailable in this deployment/),
+    ).toBeInTheDocument();
+
     // No relabelling, no chip, no legend row wrote back into the payload.
     expect(JSON.stringify(payload)).toBe(before);
   });

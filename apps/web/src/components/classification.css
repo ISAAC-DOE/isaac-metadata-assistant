@@ -4,26 +4,58 @@
  * card, no colored rail; the class signal is carried by icon + text, never color
  * alone. The panel scrolls inside the record main column; it never forces the
  * page body to scroll sideways.
+ *
+ * P36V1 S7 — readability & hierarchy. The panel used to be one undifferentiated
+ * field of 12–12.5px gray: the section heading (15px) barely outranked the row
+ * text, the counts were quieter than their own labels, and the info control was
+ * an invisible gray glyph. Four levels are now distinguishable by TYPE and
+ * SPACING before any container is added (no card-ification):
+ *
+ *   1. section heading — 22px/600, the app's `.page-title` scale (screens.css)
+ *   2. supporting note — 13px muted, capped at a readable measure
+ *   3. status summary  — semantic StatusChip + a high-contrast count badge
+ *   4. field rows      — path (600 mono) · chip · explanation · source chip
+ *
+ * What did NOT change: the classification semantics. Class → chip mapping,
+ * CLASS_ORDER, the dashed-border convention for a candidate/unknown, and every
+ * palette token come from lib/status.ts + signals.css untouched. This file only
+ * changes size, weight, color-role and spacing.
  */
 
 .evclass {
-  padding: 20px 24px 8px;
+  /* No top padding: the shell owns the one gutter between the TopBar and the
+     first content element (`--main-top-gutter`, chrome.css). This panel is the
+     first element on the evidence screen whenever the live-sync note and the
+     workflow banner are both absent, so its own top padding would have been a
+     SECOND gutter in exactly that state. Horizontal 24px is the shared value
+     `.main-inset` (chrome.css) and `.csv-recon` also use — the stack lines up. */
+  padding: 0 24px 8px;
   border-bottom: 1px solid var(--border);
 }
 
 .evclass-head {
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
+/* Level 1. Matches `.page-title` (screens.css: 22px/600/-0.01em/--text-heading),
+   the app's existing large-heading step — this is the first VISIBLE heading on
+   the evidence screen (the <h1> is sr-only), so it takes that scale rather than
+   inventing a new one. */
 .evclass-title {
-  font-size: 15px;
+  font-size: 22px;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
   color: var(--text-heading);
 }
+/* Level 2. Clearly subordinate to the heading, but readable: --text-muted
+   (#5b6570) rather than the old --text-tertiary (#78838f), a comfortable 1.6
+   line-height, and the measure cap kept so the sentence never runs the full
+   width of a wide monitor. */
 .evclass-note {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  line-height: 1.5;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
   max-width: 64ch;
 }
 
@@ -40,7 +72,7 @@
   border: 1px solid var(--advisory-border);
 }
 .evclass-stale-text {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--advisory-text);
 }
 .evclass-stale-btn {
@@ -48,29 +80,46 @@
 }
 
 .evclass-empty {
-  font-size: 12.5px;
-  color: var(--text-tertiary);
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
-/* summary histogram */
+/* Level 3 — status summary.
+   Each entry is ONE pill: the semantic StatusChip (icon + label + its class
+   palette, dashed where the convention requires it) followed by a count badge
+   that is deliberately heavier and darker than the label beside it, so "how
+   many" and "of what" are never the same visual weight. The count uses tabular
+   figures so the badges align in a row. The chip itself is untouched — the
+   summary borrows its semantics, it does not restate them in another color. */
 .evclass-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 .evclass-count {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .evclass-count-n {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-strong);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-heading);
 }
 
-/* field rows */
+/* Level 4 — field rows */
 .evclass-list {
   display: flex;
   flex-direction: column;
@@ -80,7 +129,7 @@
   padding: 0;
 }
 .evclass-row {
-  padding: 12px 0;
+  padding: 14px 0;
   border-top: 1px solid var(--border-hair);
 }
 .evclass-row:first-child {
@@ -92,59 +141,101 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+/* The field PATH is the row's identity: medium weight and the heading ink, mono
+   because it is a literal JSON path. `overflow-wrap: anywhere` (not the old
+   `word-break: break-all`) breaks a long path only when it would otherwise
+   overflow, and prefers a natural boundary — so `system.technique` never
+   splits, and a very long path wraps instead of widening the page. */
 .evclass-field {
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-heading);
-  word-break: break-all;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
+/* The info control reads as interactive: an outlined ISAAC-blue glyph with a
+   distinct hover, a visible focus ring and a held "expanded" state. It was a
+   borderless --text-tertiary glyph on a transparent background, which looked
+   like decoration. Meaning is never carried by color alone here — the state is
+   also exposed as aria-expanded and the panel below it appears/disappears. */
 .evclass-info-btn {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
+  flex: none;
   padding: 0;
   border-radius: var(--radius-pill, 999px);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-tertiary);
+  border: 1px solid var(--border-input);
+  background: var(--surface);
+  color: var(--action);
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .evclass-info-btn:hover {
-  background: var(--surface-subtle);
-  color: var(--text-secondary);
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+  color: var(--action-hover);
+}
+.evclass-info-btn:active {
+  background: var(--action-selected-border);
 }
 .evclass-info-btn:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 2px;
 }
 .evclass-info-btn[aria-expanded='true'] {
-  background: var(--action-tint, var(--surface-subtle));
-  color: var(--text-secondary);
+  background: var(--action-tint);
+  border-color: var(--action);
+  color: var(--action-hover);
 }
 
+/* Plain-language explanation: ordinary body text, not a caption. */
 .evclass-explanation {
-  margin-top: 6px;
-  font-size: 12.5px;
+  margin-top: 7px;
+  font-size: 13px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.55;
+  max-width: 72ch;
 }
 
 .evclass-sources {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
-.evclass-source {
+/* The source artifact reads as ONE restrained blue reference chip rather than a
+   bordered mono token with a faint gray locator floating beside it. The inner
+   .src-token keeps its icon and label (the source-type signal is still icon +
+   text) but drops its own box so the two do not nest; the 0-3-0 specificity is
+   deliberate — it must also beat `.src-token.src-userconf` (evidence.css)
+   regardless of stylesheet order. */
+.evclass-row .evclass-source {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--selected-row-bg);
+  border: 1px solid var(--action-selected-border);
+}
+.evclass-row .evclass-source .src-token {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11.5px;
+  color: var(--text-muted);
 }
 .evclass-locator {
-  font-size: 11px;
-  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--action-hover);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .evclass-info {
@@ -153,9 +244,10 @@
   border-radius: var(--radius-inner, 8px);
   background: var(--surface-subtle);
   border: 1px solid var(--border-hair);
+  max-width: 72ch;
 }
 .evclass-info p {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   line-height: 1.55;
 }
@@ -165,4 +257,23 @@
 .evclass-info strong {
   color: var(--text-heading);
   font-weight: 600;
+}
+
+/* Narrow viewports — track `.preview`'s 14px phone inset (evidence.css) and
+   `.main-inset` (chrome.css) so the whole evidence stack keeps one edge. */
+@media (max-width: 640px) {
+  .evclass {
+    padding: 0 14px 8px;
+  }
+  .evclass-title {
+    font-size: 20px;
+  }
+}
+
+/* Motion is decorative here; the state is always carried by the border/tint and
+   by aria-expanded, both of which remain. */
+@media (prefers-reduced-motion: reduce) {
+  .evclass-info-btn {
+    transition: none;
+  }
 }

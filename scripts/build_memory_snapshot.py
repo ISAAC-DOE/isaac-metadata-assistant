@@ -50,6 +50,31 @@ CLI
 shape validation and the secret scan, and compares the result byte-for-byte
 to the existing ``--out`` file. It writes nothing and exits non-zero if the
 committed file is stale, malformed, or absent.
+
+Deep (symbol-level) graph detail layer
+--------------------------------------
+``--detail-out PATH`` additionally emits the **deep structural layer**: the
+symbol-level node/edge graph Graphify indexed, restricted to nodes whose
+``source_file`` is in the SAME served allowlist the snapshot ships. It is a
+SEPARATE, opt-in artifact (``memory-graph-detail.json``) — never folded into
+``memory-snapshot.json``, whose shape and ``snapshot_schema_version`` are
+deliberately left untouched (see :data:`DETAIL_SCHEMA_VERSION` for why).
+
+The deep layer is subject to the SAME fail-closed governance scan as the
+snapshot: every node ``source_file`` must be path-safe (``_is_unsafe``),
+governance-served (``memory._is_served``) AND a member of the snapshot's
+served set; rationale labels are truncated at
+:data:`MAX_RATIONALE_CHARS`; no value may carry a machine/home/absolute path
+or a credential-shaped token. Any hit aborts and writes NOTHING — neither
+artifact.
+
+It is honest about staleness: the structural graph describes the commit
+Graphify indexed (``built_at_commit``), which is generally NOT the current
+repository HEAD, while the served-file *content* manifest embedded in the
+snapshot is CI-current. The artifact carries
+``structural_scope: "point_in_time_source_graph"`` and a
+``served_path_set_fingerprint`` so a runtime can prove whether the deep layer
+and the snapshot describe the same served path set.
 """
 
 from __future__ import annotations
@@ -79,6 +104,52 @@ from isaac_api.memory import LocalGraphArtifactSource  # noqa: E402
 
 SNAPSHOT_SCHEMA_VERSION = 1
 SNAPSHOT_KIND = "isaac-memory-snapshot"
+
+#: The deep (symbol-level) structural layer's OWN schema version and kind.
+#:
+#: WHY a separate version rather than bumping ``SNAPSHOT_SCHEMA_VERSION`` to 2:
+#: ``memory-snapshot.json``'s shape does not change at all here (the deep layer
+#: is a sibling artifact, lazily loaded by its own endpoint), so bumping its
+#: version would be a false shape signal. It would also be actively harmful:
+#: ``memory.SUPPORTED_SNAPSHOT_SCHEMA_VERSION`` is a hashed input of
+#: ``memory.compute_memory_policy_fingerprint()``, so changing it silently
+#: invalidates the ``policy_fingerprint`` embedded in every already-committed
+#: snapshot and in ``tests/fixtures/memory_snapshot/memory-snapshot.json``,
+#: flipping their honest ``policy_consistency: "current"`` to ``"stale"``.
+#: Versioning the new artifact independently keeps both the snapshot contract
+#: and the governance-policy fingerprint stable.
+DETAIL_SCHEMA_VERSION = 1
+DETAIL_KIND = "isaac-memory-graph-detail"
+
+#: Positional row schemas for the deep layer's two bulk arrays. Declared IN the
+#: artifact (``node_keys`` / ``edge_keys``) so the compact encoding stays
+#: self-describing. Positional rows + node-index edge endpoints keep the
+#: committed artifact roughly a third of the size of the equivalent
+#: object-per-row form without losing any information.
+DETAIL_NODE_KEYS = ("id", "label", "file_type", "source_file", "source_location",
+                    "community_id")
+DETAIL_EDGE_KEYS = ("source_index", "target_index", "relation")
+
+#: Human/machine-readable description of the compact encoding, embedded in the
+#: artifact so no consumer has to infer it.
+DETAIL_ENCODING = {
+    "nodes": (
+        "Positional rows matching node_keys. Every source_file is repo-relative "
+        "and a member of the snapshot's served allowlist."
+    ),
+    "edges": (
+        "Positional rows matching edge_keys. source_index/target_index are "
+        "0-based indices into nodes[]. Direction is preserved exactly as the "
+        "source graph recorded it; relation is the source graph's own value, "
+        "never normalized or invented."
+    ),
+    "community_names": "Mapping of community_id -> curated community name.",
+}
+
+#: Honest provenance stamps for the deep layer (mirrors the snapshot's
+#: ``freshness_scope`` / ``freshness_basis`` convention).
+DETAIL_STRUCTURAL_SCOPE = "point_in_time_source_graph"
+DETAIL_STRUCTURAL_BASIS = "graphify_index_at_built_at_commit"
 #: Deliberately hardcoded (never derived from __file__), so the emitted value
 #: is always a stable repo-relative identifier, never an absolute local path.
 GENERATOR_PATH = "scripts/build_memory_snapshot.py"
@@ -133,6 +204,55 @@ _FORBIDDEN_KEYS = frozenset(
 # fields (via ``_is_unsafe`` + ``_is_served`` in ``_scan_for_leaks`` step 1), so a
 # legitimate slash-command CONCEPT LABEL like ``/isaac-export`` is not flagged.
 _WINDOWS_MACHINE_RE = re.compile(r"[A-Za-z]:\\|\\Users\\|\\home\\")  # unanchored, mid-string
+#: UNC network share (``\\fileserver\share\...``) — a machine/network location,
+#: not covered by the drive-letter/``\Users\`` patterns above.
+_UNC_SHARE_RE = re.compile(r"\\\\[A-Za-z0-9._-]+\\")
+#: Home shorthand ANYWHERE in a value: ``~/x`` and ``~someuser/x``. Note this is
+#: a MACHINE-MARKER rule, not the path-shape rule: a bare leading ``/`` is still
+#: allowed in non-path fields (see the slash-command exemption note above), but
+#: ``~/`` never is — there is no legitimate label that names a home directory.
+_HOME_SHORTHAND_RE = re.compile(r"~/|~[A-Za-z0-9._-]+/")
+#: Machine mount points / OS scratch roots. ``/Volumes/`` (macOS external and
+#: network volumes — e.g. a mounted beamtime disk), ``/var/folders/`` and
+#: ``/private/tmp|var`` (macOS per-user temp), plus the common Linux mount and
+#: vendor roots. All require the trailing slash, so ``src/optional/x`` (which
+#: contains ``/opt``) is not a hit.
+_MACHINE_MOUNT_RE = re.compile(
+    r"/(?:Volumes|mnt|media|opt|srv)/|/var/folders/|/private/(?:tmp|var)/"
+)
+#: ``file://`` URLs — a local filesystem location wearing a URL. The runtime-side
+#: response scan has always rejected these; the generator scan never did, which
+#: the cross-check test caught.
+_FILE_URL_RE = re.compile(r"(?i)file://")
+#: Email addresses — personal/organisational identifiers that must never reach a
+#: published label. Requires a local part, so a Python decorator such as
+#: ``@pytest.mark.parametrize`` is not a hit.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]{2,})+")
+#: Internal / organisational hostnames. Permissive on the left so a multi-label
+#: host (``foo.bar.internal``) is caught too.
+_INTERNAL_HOST_RE = re.compile(
+    r"(?i)[A-Za-z0-9-]+\.(?:slac|stanford|internal|corp|lan)(?![A-Za-z0-9-])"
+)
+#: mDNS ``*.local`` hostnames, guarded on BOTH sides against ``[A-Za-z0-9._-]``
+#: so the codebase's own governance vocabulary is not a false positive:
+#: ``.claude/settings.local.json``, ``.env.local`` and
+#: ``file_detail.local_reference`` are all dotted/underscored chains and do not
+#: match, while a real ``mymac.local`` does.
+_MDNS_HOST_RE = re.compile(r"(?i)(?<![A-Za-z0-9._-])[A-Za-z0-9-]+\.local(?![A-Za-z0-9._-])")
+#: IPv4 dotted quads. See ``_IPV4_EXEMPT_RE`` for the two disclosed exemptions.
+_IPV4_RE = re.compile(r"(?<![0-9A-Za-z.-])(?:\d{1,3}\.){3}\d{1,3}(?![0-9A-Za-z.-])")
+#: DISCLOSED EXEMPTION 1 (IP): loopback and the bind-any wildcard. These are
+#: documented, non-identifying literals that already appear throughout the served
+#: docs and dev instructions (``--host 127.0.0.1``, ``--host 0.0.0.0``); flagging
+#: them would block a legitimate regeneration without withholding anything. Any
+#: other address — private (``10.x`` / ``192.168.x`` / ``172.16-31.x``) or public
+#: — is still refused.
+_IPV4_EXEMPT_RE = re.compile(r"\A(?:0\.0\.0\.0|127\.\d{1,3}\.\d{1,3}\.\d{1,3})\Z")
+#: DISCLOSED EXEMPTION 2 (hostname): the project's OWN deployment host, which is
+#: already published in committed served documentation (``docs/deployment.md``).
+#: It is removed from the value before the hostname patterns run, so a genuinely
+#: internal neighbour such as ``s3df.slac.stanford.edu`` still fires.
+_PUBLIC_HOST_EXEMPTIONS = ("isaac.slac.stanford.edu",)
 _PRIVATE_KEY_RE = re.compile(r"-----BEGIN (?:[A-Z ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----")
 _CREDENTIAL_RE = re.compile(
     r"AKIA[0-9A-Z]{16}"       # AWS access key id
@@ -149,6 +269,18 @@ EXIT_SOURCE_UNAVAILABLE = 3
 EXIT_SHAPE_INVALID = 4
 EXIT_SECURITY_SCAN_FAILED = 5
 EXIT_CHECK_DRIFT = 6
+
+_DETAIL_REQUIRED_KEYS = frozenset({
+    "kind", "detail_schema_version", "generator",
+    "built_at_commit", "source_graph_sha256", "policy_fingerprint",
+    "structural_scope", "structural_basis",
+    "served_file_count", "served_path_set_fingerprint",
+    "encoding", "node_keys", "edge_keys",
+    "nodes", "edges", "community_names", "counts",
+})
+_DETAIL_COUNTS_KEYS = frozenset({
+    "nodes", "edges", "communities", "file_types", "relations",
+})
 
 
 class SnapshotError(RuntimeError):
@@ -470,6 +602,389 @@ def build_snapshot(
     }
 
 
+# --- deep (symbol-level) structural layer -------------------------------------
+
+
+def build_graph_detail(
+    graph_dir, *, served, source_graph_sha256=None, _rationale_originals=None
+) -> dict:
+    """Build the deep (symbol-level) structural layer from the SAME source graph
+    the snapshot was generated from, restricted to the snapshot's served set.
+
+    ``served`` is the snapshot's ``served`` list (governance-filtered AND
+    git-tracked). A node is retained ONLY when its ``source_file`` is a string
+    that is path-safe, governance-served, and a member of ``served``; every
+    other node — including every external/dependency node with no
+    ``source_file`` — is dropped. An edge is retained only when BOTH endpoints
+    survived that filter.
+
+    Nothing is invented: node ``id`` / ``label`` / ``file_type`` /
+    ``source_file`` / ``source_location`` / ``community`` and edge
+    ``source`` / ``target`` / ``relation`` are the source graph's own values,
+    passed through verbatim (``community`` is stringified to match the
+    snapshot's ``community_id`` convention; a ``rationale`` node's label is
+    truncated at :data:`MAX_RATIONALE_CHARS`, exactly like the snapshot's
+    rationales). No hierarchy, no synthetic node, no synthetic edge, no
+    relation renaming, and direction is preserved as recorded.
+
+    Raises :class:`SnapshotError` if the source graph is absent/unreadable."""
+    graph_dir = Path(graph_dir)
+    graph_path = graph_dir / memory.GRAPH_FILE
+    if not graph_path.is_file():
+        raise SnapshotError(f"source graph not found: {graph_path}")
+    graph_bytes = graph_path.read_bytes()
+    if source_graph_sha256 is None:
+        source_graph_sha256 = hashlib.sha256(graph_bytes).hexdigest()
+    try:
+        graph = json.loads(graph_bytes.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise SnapshotError(f"source graph unreadable: {graph_path}: {exc}") from exc
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        raise SnapshotError(f"source graph structurally invalid: {graph_path}")
+
+    served_set = frozenset(served)
+    links = graph.get("links")
+    if not isinstance(links, list):
+        links = graph.get("edges")
+    if not isinstance(links, list):
+        links = []
+
+    # -- nodes: explicit field allowlist. The source graph also carries
+    # ``norm_label`` / ``_origin`` / ``source_url`` / ``captured_at`` /
+    # ``author`` / ``contributor`` / ``rationale`` / ``type`` / ``ecosystem`` /
+    # ``version`` on some nodes; NONE of them are emitted. Adding a field is a
+    # deliberate act, never an accident of iteration.
+    kept: dict = {}  # node id -> row tuple pieces
+    for node in graph["nodes"]:
+        if not isinstance(node, dict):
+            continue
+        nid = node.get("id")
+        sf = node.get("source_file")
+        if not isinstance(nid, str) or not nid:
+            continue
+        if not isinstance(sf, str) or sf not in served_set:
+            continue
+        # Belt-and-suspenders over the served-set membership above: the same
+        # two rules every other path-bearing field in this generator obeys.
+        if LocalGraphArtifactSource._is_unsafe(sf) or not memory._is_served(sf):
+            continue
+        label = node.get("label")
+        if not isinstance(label, str):
+            label = None
+        file_type = node.get("file_type")
+        if not isinstance(file_type, str):
+            file_type = None
+        if file_type == memory.RATIONALE and label is not None:
+            if _rationale_originals is not None:
+                _rationale_originals.append(label)
+            label = _truncate_rationale(label)
+        loc = node.get("source_location")
+        if not isinstance(loc, str):
+            loc = None
+        community_id = None
+        if node.get("community") is not None:
+            community_id = str(node["community"])
+        if nid in kept:
+            raise SnapshotError(f"duplicate node id in source graph: {nid!r}")
+        kept[nid] = [nid, label, file_type, sf, loc, community_id]
+
+    # Deterministic node order (and therefore deterministic edge indices):
+    # by owning file, then by id. Independent of the source graph's own order.
+    node_rows = sorted(kept.values(), key=lambda r: (r[3], r[0]))
+    index_of = {row[0]: i for i, row in enumerate(node_rows)}
+
+    edge_rows = []
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        src, tgt = link.get("source"), link.get("target")
+        si, ti = index_of.get(src), index_of.get(tgt)
+        if si is None or ti is None:
+            continue
+        relation = link.get("relation")
+        if not isinstance(relation, str) or not relation:
+            continue  # never invent a relation for an unlabeled edge
+        edge_rows.append([si, ti, relation])
+    edge_rows.sort(key=lambda e: (e[0], e[1], e[2]))
+
+    labels = LocalGraphArtifactSource(graph_dir)._load_labels()
+    used_communities = sorted({r[5] for r in node_rows if r[5] is not None})
+    community_names = {}
+    for cid in used_communities:
+        name = labels.get(cid)
+        community_names[cid] = name if isinstance(name, str) else None
+
+    file_types: dict = {}
+    for row in node_rows:
+        key = row[2] if row[2] is not None else "unknown"
+        file_types[key] = file_types.get(key, 0) + 1
+    relations: dict = {}
+    for edge in edge_rows:
+        relations[edge[2]] = relations.get(edge[2], 0) + 1
+
+    served_list = sorted(served_set)
+    return {
+        "kind": DETAIL_KIND,
+        "detail_schema_version": DETAIL_SCHEMA_VERSION,
+        "generator": GENERATOR_PATH,
+        "built_at_commit": graph.get("built_at_commit"),
+        "source_graph_sha256": source_graph_sha256,
+        "policy_fingerprint": memory.compute_memory_policy_fingerprint(),
+        # Honest staleness stamps: the STRUCTURE describes built_at_commit, which
+        # is generally NOT the repository HEAD. Never present this as a current
+        # code map.
+        "structural_scope": DETAIL_STRUCTURAL_SCOPE,
+        "structural_basis": DETAIL_STRUCTURAL_BASIS,
+        # The served PATH SET size (``len(snapshot["served"])``), NOT the size of
+        # the snapshot's CI content manifest. The two differ by one: the manifest
+        # self-excludes any ``*memory-snapshot.json`` it would otherwise hash
+        # (see ``_manifest_paths``), so ``memory_inputs.served_file_count`` is one
+        # smaller than this. The runtime labels this explicitly when it publishes
+        # the value (``memory_graph._detail_provenance``:
+        # ``served_file_count_scope: "served_path_set"``).
+        "served_file_count": len(served_list),
+        # Single-sourced from the runtime reader module (never re-implemented
+        # here) so the value the runtime recomputes and the value baked into the
+        # artifact can never drift apart.
+        "served_path_set_fingerprint": memory.compute_served_path_set_fingerprint(
+            served_list
+        ),
+        "encoding": dict(DETAIL_ENCODING),
+        "node_keys": list(DETAIL_NODE_KEYS),
+        "edge_keys": list(DETAIL_EDGE_KEYS),
+        "nodes": node_rows,
+        "edges": edge_rows,
+        "community_names": community_names,
+        "counts": {
+            "nodes": len(node_rows),
+            "edges": len(edge_rows),
+            "communities": len(community_names),
+            "file_types": file_types,
+            "relations": relations,
+        },
+    }
+
+
+def _validate_detail_shape(detail: dict) -> list:
+    """Return a list of human-readable shape problems; empty means valid."""
+    issues = []
+    if not isinstance(detail, dict):
+        return ["graph detail is not a JSON object"]
+
+    keys = set(detail.keys())
+    if keys != _DETAIL_REQUIRED_KEYS:
+        missing = sorted(_DETAIL_REQUIRED_KEYS - keys)
+        extra = sorted(keys - _DETAIL_REQUIRED_KEYS)
+        if missing:
+            issues.append(f"missing top-level keys: {missing}")
+        if extra:
+            issues.append(f"unexpected top-level keys: {extra}")
+
+    if detail.get("kind") != DETAIL_KIND:
+        issues.append(f"kind must be {DETAIL_KIND!r}")
+    # ``isinstance(True, int)`` is True and ``True != 1`` is False, so a bare
+    # inequality would accept ``detail_schema_version: true`` as version 1.
+    detail_version = detail.get("detail_schema_version")
+    if not (isinstance(detail_version, int) and not isinstance(detail_version, bool)
+            and detail_version == DETAIL_SCHEMA_VERSION):
+        issues.append(f"detail_schema_version must be the int {DETAIL_SCHEMA_VERSION}")
+    if detail.get("structural_scope") != DETAIL_STRUCTURAL_SCOPE:
+        issues.append(f"structural_scope must be {DETAIL_STRUCTURAL_SCOPE!r}")
+    if detail.get("structural_basis") != DETAIL_STRUCTURAL_BASIS:
+        issues.append(f"structural_basis must be {DETAIL_STRUCTURAL_BASIS!r}")
+    if list(detail.get("node_keys") or []) != list(DETAIL_NODE_KEYS):
+        issues.append("node_keys must match DETAIL_NODE_KEYS")
+    if list(detail.get("edge_keys") or []) != list(DETAIL_EDGE_KEYS):
+        issues.append("edge_keys must match DETAIL_EDGE_KEYS")
+
+    # Provenance must be PRESENT and non-null — a deep layer whose provenance is
+    # unknown is worse than no deep layer (a consumer could mistake it for a
+    # current code map).
+    for prov_key in ("built_at_commit", "source_graph_sha256", "policy_fingerprint",
+                     "served_path_set_fingerprint"):
+        value = detail.get(prov_key)
+        if not (isinstance(value, str) and value):
+            issues.append(f"{prov_key} must be a non-empty string")
+    sha = detail.get("source_graph_sha256")
+    if isinstance(sha, str) and not re.fullmatch(r"[0-9a-f]{64}", sha):
+        issues.append("source_graph_sha256 must be a 64-char hex sha256 digest")
+
+    nodes = detail.get("nodes")
+    edges = detail.get("edges")
+    if not isinstance(nodes, list):
+        issues.append("nodes must be a list")
+        nodes = []
+    if not isinstance(edges, list):
+        issues.append("edges must be a list")
+        edges = []
+
+    seen_ids = set()
+    for i, row in enumerate(nodes):
+        if not (isinstance(row, list) and len(row) == len(DETAIL_NODE_KEYS)):
+            issues.append(f"nodes[{i}] must be a {len(DETAIL_NODE_KEYS)}-element row")
+            continue
+        nid, label, file_type, sf, loc, cid = row
+        if not (isinstance(nid, str) and nid):
+            issues.append(f"nodes[{i}].id must be a non-empty string")
+        elif nid in seen_ids:
+            issues.append(f"nodes[{i}].id duplicated: {nid!r}")
+        else:
+            seen_ids.add(nid)
+        if not (isinstance(sf, str) and sf):
+            issues.append(f"nodes[{i}].source_file must be a non-empty string")
+        for optional, name in ((label, "label"), (file_type, "file_type"),
+                               (loc, "source_location"), (cid, "community_id")):
+            if optional is not None and not isinstance(optional, str):
+                issues.append(f"nodes[{i}].{name} must be a string or null")
+        # ``source_location`` is a graph-internal line anchor (``L34``), never a
+        # path: reject anything path-shaped outright.
+        if isinstance(loc, str) and ("/" in loc or "\\" in loc):
+            issues.append(f"nodes[{i}].source_location must not be path-shaped: {loc!r}")
+        if isinstance(label, str) and len(label) > MAX_RATIONALE_CHARS \
+                and file_type == memory.RATIONALE:
+            issues.append(f"nodes[{i}].label exceeds MAX_RATIONALE_CHARS")
+
+    node_count = len(nodes)
+    for i, row in enumerate(edges):
+        if not (isinstance(row, list) and len(row) == len(DETAIL_EDGE_KEYS)):
+            issues.append(f"edges[{i}] must be a {len(DETAIL_EDGE_KEYS)}-element row")
+            continue
+        si, ti, relation = row
+        for endpoint, name in ((si, "source_index"), (ti, "target_index")):
+            if not (isinstance(endpoint, int) and not isinstance(endpoint, bool)
+                    and 0 <= endpoint < node_count):
+                issues.append(f"edges[{i}].{name} must index into nodes[]")
+        if not (isinstance(relation, str) and relation):
+            issues.append(f"edges[{i}].relation must be a non-empty string")
+
+    community_names = detail.get("community_names")
+    if not isinstance(community_names, dict):
+        issues.append("community_names must be an object")
+        community_names = {}
+    else:
+        for cid, name in community_names.items():
+            if not isinstance(cid, str):
+                issues.append(f"community_names key must be a string: {cid!r}")
+            if name is not None and not isinstance(name, str):
+                issues.append(f"community_names[{cid!r}] must be a string or null")
+
+    counts = detail.get("counts")
+    if not isinstance(counts, dict):
+        issues.append("counts must be an object")
+    else:
+        if set(counts.keys()) != _DETAIL_COUNTS_KEYS:
+            issues.append(f"counts keys mismatch: {sorted(counts.keys())}")
+        if counts.get("nodes") != node_count:
+            issues.append("counts.nodes must equal len(nodes)")
+        if counts.get("edges") != len(edges):
+            issues.append("counts.edges must equal len(edges)")
+        if counts.get("communities") != len(community_names):
+            issues.append("counts.communities must equal len(community_names)")
+        for hist_key in ("file_types", "relations"):
+            hist = counts.get(hist_key)
+            if not isinstance(hist, dict) or not all(
+                isinstance(v, int) and not isinstance(v, bool) for v in hist.values()
+            ):
+                issues.append(f"counts.{hist_key} must be an object of ints")
+
+    served_count = detail.get("served_file_count")
+    if not (isinstance(served_count, int) and not isinstance(served_count, bool)):
+        issues.append("served_file_count must be an int")
+
+    return issues
+
+
+def _scan_detail_for_leaks(detail: dict, *, served, repo_root, extra_strings=()) -> list:
+    """Fail-closed pre-write scan for the deep layer — the SAME policy the
+    snapshot scan enforces, applied to every field the deep layer adds.
+
+    (1) every node ``source_file`` must be path-safe, governance-served, AND a
+    member of the snapshot's served set (a deep node whose owning file the
+    snapshot does not serve must have been DROPPED, never emitted);
+    (2) the machine-leak / credential value rules run over EVERY string in the
+    artifact plus the un-truncated rationale originals;
+    (3) no forbidden verdict/content key; (4) any ``on_disk`` value must be
+    ``False`` (the deep layer emits none, so this asserts it stays that way)."""
+    issues: list = []
+    served_set = frozenset(served)
+
+    nodes = detail.get("nodes")
+    if not isinstance(nodes, list):
+        nodes = []
+    for i, row in enumerate(nodes):
+        if not (isinstance(row, list) and len(row) == len(DETAIL_NODE_KEYS)):
+            issues.append(f"nodes[{i}]: malformed row, cannot scan")
+            continue
+        sf = row[3]
+        context = f"nodes[{i}].source_file"
+        if not isinstance(sf, str):
+            issues.append(f"{context}: non-string path value {sf!r}")
+            continue
+        if LocalGraphArtifactSource._is_unsafe(sf):
+            issues.append(f"{context}: path-unsafe value {sf!r}")
+            continue
+        if not memory._is_served(sf):
+            issues.append(f"{context}: non-served (governance-excluded) path {sf!r}")
+            continue
+        if sf not in served_set:
+            issues.append(f"{context}: path outside the snapshot served set {sf!r}")
+
+    repo_root_str = str(Path(repo_root).resolve())
+    for s in _walk_strings(detail):
+        issues.extend(_machine_secret_issues(s, repo_root_str))
+    for s in extra_strings:
+        if isinstance(s, str):
+            issues.extend(_machine_secret_issues(s, repo_root_str))
+
+    forbidden_hit = set(_walk_keys(detail)) & _FORBIDDEN_KEYS
+    if forbidden_hit:
+        issues.append(f"forbidden verdict/content key(s) present: {sorted(forbidden_hit)}")
+
+    for on_disk in _walk_on_disk_values(detail):
+        if on_disk is not False:
+            issues.append(f"on_disk not forced false: {on_disk!r}")
+
+    return issues
+
+
+def _serialize_detail(detail: dict) -> bytes:
+    """Stable serialization for the deep layer: sorted keys, one NODE/EDGE ROW
+    PER LINE, trailing newline.
+
+    Why not plain ``_serialize``: with ``indent=2`` every scalar of every
+    positional row lands on its own line, which inflates the committed artifact
+    by ~50% and makes a diff of one changed node span six lines. Emitting each
+    row compactly on one line is both smaller AND more inspectable, while
+    remaining a pure, deterministic function of ``detail`` (sorted keys at every
+    level; no clock, no set iteration, no randomness)."""
+    row_keys = ("nodes", "edges")
+    keys = sorted(detail)
+    chunks = ["{\n"]
+    for position, key in enumerate(keys):
+        tail = "," if position < len(keys) - 1 else ""
+        key_json = json.dumps(key, ensure_ascii=False)
+        if key in row_keys and isinstance(detail[key], list):
+            rows = detail[key]
+            if not rows:
+                chunks.append(f"  {key_json}: []{tail}\n")
+                continue
+            chunks.append(f"  {key_json}: [\n")
+            for i, row in enumerate(rows):
+                row_tail = "," if i < len(rows) - 1 else ""
+                chunks.append(
+                    "    "
+                    + json.dumps(row, ensure_ascii=False, sort_keys=True,
+                                 separators=(",", ":"))
+                    + row_tail + "\n"
+                )
+            chunks.append(f"  ]{tail}\n")
+        else:
+            body = json.dumps(detail[key], ensure_ascii=False, sort_keys=True, indent=2)
+            chunks.append(f"  {key_json}: {body.replace(chr(10), chr(10) + '  ')}{tail}\n")
+    chunks.append("}\n")
+    return "".join(chunks).encode("utf-8")
+
+
 # --- shape validation ---------------------------------------------------------
 
 
@@ -620,16 +1135,60 @@ def _iter_path_fields(snapshot: dict):
 
 def _machine_secret_issues(s: str, repo_root_str: str) -> list:
     """Machine-leak / secret value checks applied to ANY string (NOT path-shape
-    rules). Bare ``startswith('/')`` / ``~`` / anchored-drive are deliberately
-    NOT here — a legitimate slash-command label like ``/isaac-export`` is not a
-    leak. Path-shape rejection happens only on path-bearing fields (step 1)."""
+    rules).
+
+    A bare leading ``/`` and an anchored drive letter are deliberately NOT
+    rejected here: a legitimate slash-command CONCEPT LABEL like
+    ``/isaac-export`` is not a leak, and that exemption is a live decision (the
+    real artifact carries five such labels). Path-SHAPE rejection — must not
+    start with ``/`` or ``~``, no ``..`` segment, no backslash — happens only on
+    the path-bearing fields (step 1 of each scanner). ``~`` IS rejected here,
+    however: a home-directory shorthand is a machine marker in any field.
+
+    Categories, all applied to every string of the artifact plus the
+    un-truncated rationale originals: home markers (``/Users/``, ``/home/``,
+    ``/root/``, ``~/``, ``~user/``), Windows/UNC machine paths, machine mount and
+    OS-scratch roots (``/Volumes/``, ``/var/folders/``, ``/private/tmp|var``,
+    ``/mnt|/media|/opt|/srv``), ``file://`` URLs, the generator's own repo root, email addresses,
+    internal/organisational hostnames, mDNS ``*.local`` hostnames, non-loopback
+    IPv4 addresses, private-key headers and credential-shaped tokens.
+
+    Two exemptions are disclosed and narrow: loopback/``0.0.0.0`` addresses
+    (``_IPV4_EXEMPT_RE``) and the project's own already-published deployment host
+    (``_PUBLIC_HOST_EXEMPTIONS``)."""
     issues: list = []
     if any(marker in s for marker in _HOME_MARKERS):
         issues.append(f"home-directory marker found in value: {s!r}")
+    if _HOME_SHORTHAND_RE.search(s):
+        issues.append(f"home-shorthand ('~/') marker found in value: {s!r}")
     if _WINDOWS_MACHINE_RE.search(s):
         issues.append(f"windows machine path marker found in value: {s!r}")
+    if _UNC_SHARE_RE.search(s):
+        issues.append(f"UNC network share marker found in value: {s!r}")
+    if _MACHINE_MOUNT_RE.search(s):
+        issues.append(f"machine mount/scratch root found in value: {s!r}")
+    if _FILE_URL_RE.search(s):
+        issues.append(f"file:// URL found in value: {s!r}")
     if repo_root_str and repo_root_str in s:
         issues.append(f"generator machine repo-root string found in value: {s!r}")
+    if _EMAIL_RE.search(s):
+        issues.append(f"email address found in value: {s!r}")
+
+    # Hostname rules run against a copy with the disclosed public-host exemption
+    # removed, so the exemption cannot mask a DIFFERENT internal host in the same
+    # string.
+    hostname_scope = s
+    for host in _PUBLIC_HOST_EXEMPTIONS:
+        hostname_scope = hostname_scope.replace(host, "")
+    if _INTERNAL_HOST_RE.search(hostname_scope):
+        issues.append(f"internal hostname found in value: {s!r}")
+    if _MDNS_HOST_RE.search(hostname_scope):
+        issues.append(f"mDNS '.local' hostname found in value: {s!r}")
+
+    for match in _IPV4_RE.finditer(s):
+        if not _IPV4_EXEMPT_RE.match(match.group(0)):
+            issues.append(f"IP address found in value: {match.group(0)!r} in {s!r}")
+
     if _PRIVATE_KEY_RE.search(s):
         issues.append("private-key marker found in a value")
     if _CREDENTIAL_RE.search(s):
@@ -732,6 +1291,14 @@ def _parse_args(argv):
                         help="Output snapshot path (or --check target)")
     parser.add_argument("--repo-root", default=Path("."), type=Path,
                         help="Anchors _is_served/on_disk semantics (paths only); default '.'")
+    parser.add_argument("--detail-out", default=None, type=Path,
+                        help=("Also emit (or, with --check, verify) the deep "
+                              "(symbol-level) structural layer at this path. Opt-in: "
+                              "omitting it means the deep artifact is neither written "
+                              "nor checked, and the run says so on stderr. The "
+                              "documented value is "
+                              "apps/api/isaac_api/data/memory-graph-detail.json — see "
+                              "CLAUDE.md section 17."))
     parser.add_argument("--check", action="store_true",
                         help="Scan+validate only; write nothing; nonzero on any issue/drift")
     return parser.parse_args(argv)
@@ -769,19 +1336,96 @@ def main(argv=None) -> int:
 
     payload = _serialize(snapshot)
 
+    # --- deep (symbol-level) structural layer, opt-in via --detail-out ---------
+    # Built from the SAME graph bytes and restricted to the SAME served set the
+    # snapshot just produced, so the two artifacts can never describe different
+    # served path sets. Every failure mode below aborts BOTH writes (fail
+    # closed): a half-written pair is worse than a stale pair.
+    detail_payload = None
+    if args.detail_out is not None:
+        detail_originals: list = []
+        try:
+            detail = build_graph_detail(
+                args.graph_dir,
+                served=snapshot["served"],
+                source_graph_sha256=snapshot["source_graph_sha256"],
+                _rationale_originals=detail_originals,
+            )
+        except SnapshotError as exc:
+            print(f"error: graph detail source unavailable: {exc}", file=sys.stderr)
+            return EXIT_SOURCE_UNAVAILABLE
+
+        detail_shape_issues = _validate_detail_shape(detail)
+        if detail_shape_issues:
+            print("error: graph detail shape invalid:", file=sys.stderr)
+            for issue in detail_shape_issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return EXIT_SHAPE_INVALID
+
+        detail_leak_issues = _scan_detail_for_leaks(
+            detail, served=snapshot["served"], repo_root=repo_root,
+            extra_strings=detail_originals,
+        )
+        if detail_leak_issues:
+            print(
+                "error: graph detail secret/governance scan failed; writing nothing:",
+                file=sys.stderr,
+            )
+            for issue in detail_leak_issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return EXIT_SECURITY_SCAN_FAILED
+
+        detail_payload = _serialize_detail(detail)
+
+    # A run without --detail-out neither writes nor checks the deep artifact. That
+    # is easy to do by accident (the documented command block omitted it for a
+    # while), and silence there is dangerous in BOTH directions: a --check run
+    # reports "no drift" while a stale deep artifact sits on disk, and a
+    # regeneration run rewrites the snapshot and leaves the deep artifact stale.
+    # So say so, on stderr, without changing the exit code or the default paths.
+    if args.detail_out is None:
+        verb = "checked" if args.check else "regenerated"
+        print(
+            f"note: --detail-out not given; the deep graph-detail artifact was NOT "
+            f"{verb}. If it exists on disk it may be stale and this run says nothing "
+            f"about it. Pass --detail-out "
+            f"apps/api/isaac_api/data/memory-graph-detail.json to include it.",
+            file=sys.stderr,
+        )
+
     if args.check:
+        # Both artifacts are reported, so an operator with two drifted files is
+        # never told about only one of them. The exit code is unchanged.
+        drift: list = []
         if not args.out.is_file():
-            print(f"error: --check target does not exist: {args.out}", file=sys.stderr)
+            drift.append(f"--check target does not exist: {args.out}")
+        elif args.out.read_bytes() != payload:
+            drift.append(f"snapshot is stale/drifted relative to {args.out}")
+        else:
+            print(f"ok: {args.out} matches regenerated snapshot (no drift)")
+
+        if detail_payload is not None:
+            if not args.detail_out.is_file():
+                drift.append(f"--check target does not exist: {args.detail_out}")
+            elif args.detail_out.read_bytes() != detail_payload:
+                drift.append(
+                    f"graph detail is stale/drifted relative to {args.detail_out}"
+                )
+            else:
+                print(f"ok: {args.detail_out} matches regenerated graph detail "
+                      f"(no drift)")
+
+        if drift:
+            for issue in drift:
+                print(f"error: {issue}", file=sys.stderr)
             return EXIT_CHECK_DRIFT
-        existing = args.out.read_bytes()
-        if existing != payload:
-            print(f"error: snapshot is stale/drifted relative to {args.out}", file=sys.stderr)
-            return EXIT_CHECK_DRIFT
-        print(f"ok: {args.out} matches regenerated snapshot (no drift)")
         return EXIT_OK
 
     _atomic_write(args.out, payload)
     print(f"wrote {args.out} ({len(payload)} bytes)")
+    if detail_payload is not None:
+        _atomic_write(args.detail_out, detail_payload)
+        print(f"wrote {args.detail_out} ({len(detail_payload)} bytes)")
     return EXIT_OK
 
 

@@ -1,0 +1,360 @@
+{
+  "_about": [
+    "P36V.1 Unit B — the ONE shared case table that locks the TypeScript and Python",
+    "validation-path formatters to identical behaviour.",
+    "",
+    "The two producers of the Assistant's blocker copy live in different runtimes",
+    "(apps/web/src/lib/assistantPaths.ts and apps/api/isaac_api/assistant_paths.py),",
+    "so literal code sharing is impossible. This table is the substitute: it is",
+    "replayed by BOTH suites — apps/web/src/lib/assistantPaths.test.ts and",
+    "apps/api/tests/test_assistant_paths.py — so a change made to one implementation",
+    "and not the other fails the other language's tests.",
+    "",
+    "`paths` is the raw locator list as it arrives from the validation response",
+    "(exactly what src/isaac_records/official.py emitted, including the literal `$`",
+    "root marker, plus the degenerate values a defensive reader must tolerate).",
+    "`locations` is the per-locator classification, `technical` is the byte-for-byte",
+    "Technical Details payload, and `summary` is the primary user-facing sentence.",
+    "A raw `$` may appear in `technical` and MUST NOT appear in `summary`.",
+    "",
+    "`unavailable_cases` locks the SECOND cross-language predicate: telling the API's",
+    "validation-CRASH sentinel ({path:'$', message:'Validation could not be",
+    "completed.'} — routes.py's defensive except) apart from a genuine root-level",
+    "violation. Read through the locator formatter alone the two are identical, and",
+    "both producers described the crash as '1 record-level validation issue may be",
+    "blocking export' (P36V.1 review IMPORTANT-1)."
+  ],
+  "cases": [
+    {
+      "name": "no locators at all",
+      "paths": [],
+      "locations": [],
+      "technical": [],
+      "summary": "No blocking validation issues are listed in the current validation response."
+    },
+    {
+      "name": "the root marker alone (the reported defect)",
+      "paths": ["$"],
+      "locations": [{ "kind": "record", "label": "the record itself", "technical": "$" }],
+      "technical": ["$"],
+      "summary": "1 record-level validation issue may be blocking export."
+    },
+    {
+      "name": "two root-level violations",
+      "paths": ["$", "$"],
+      "locations": [
+        { "kind": "record", "label": "the record itself", "technical": "$" },
+        { "kind": "record", "label": "the record itself", "technical": "$" }
+      ],
+      "technical": ["$", "$"],
+      "summary": "2 record-level validation issues may be blocking export."
+    },
+    {
+      "name": "root marker with a trailing separator",
+      "paths": ["$."],
+      "locations": [{ "kind": "record", "label": "the record itself", "technical": "$." }],
+      "technical": ["$."],
+      "summary": "1 record-level validation issue may be blocking export."
+    },
+    {
+      "name": "a normal nested JSON path",
+      "paths": ["sample.material.formula"],
+      "locations": [
+        {
+          "kind": "field",
+          "label": "sample → material → formula",
+          "technical": "sample.material.formula"
+        }
+      ],
+      "technical": ["sample.material.formula"],
+      "summary": "1 validation issue may be blocking export: sample → material → formula."
+    },
+    {
+      "name": "dollar-prefixed paths (the shape the web fixtures carry)",
+      "paths": ["$.assets", "$.measurement.series"],
+      "locations": [
+        { "kind": "field", "label": "assets", "technical": "$.assets" },
+        {
+          "kind": "field",
+          "label": "measurement → series",
+          "technical": "$.measurement.series"
+        }
+      ],
+      "technical": ["$.assets", "$.measurement.series"],
+      "summary": "2 validation issues may be blocking export: assets, measurement → series."
+    },
+    {
+      "name": "mixed: a root-level blocker together with a nested one",
+      "paths": ["$", "assets.0.sha256"],
+      "locations": [
+        { "kind": "record", "label": "the record itself", "technical": "$" },
+        {
+          "kind": "field",
+          "label": "assets → 0 → sha256",
+          "technical": "assets.0.sha256"
+        }
+      ],
+      "technical": ["$", "assets.0.sha256"],
+      "summary": "2 validation issues may be blocking export: the record itself, assets → 0 → sha256."
+    },
+    {
+      "name": "a missing path (null)",
+      "paths": [null],
+      "locations": [
+        {
+          "kind": "unknown",
+          "label": "an unreported location",
+          "technical": "(no path reported)"
+        }
+      ],
+      "technical": ["(no path reported)"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "a non-string path",
+      "paths": [7],
+      "locations": [
+        {
+          "kind": "unknown",
+          "label": "an unreported location",
+          "technical": "(no path reported)"
+        }
+      ],
+      "technical": ["(no path reported)"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "an empty path string",
+      "paths": [""],
+      "locations": [
+        {
+          "kind": "unknown",
+          "label": "an unreported location",
+          "technical": "(no path reported)"
+        }
+      ],
+      "technical": ["(no path reported)"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "a whitespace-only path string",
+      "paths": ["   "],
+      "locations": [
+        {
+          "kind": "unknown",
+          "label": "an unreported location",
+          "technical": "(no path reported)"
+        }
+      ],
+      "technical": ["(no path reported)"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "a reported-but-unusable locator keeps its exact technical form",
+      "paths": ["."],
+      "locations": [
+        { "kind": "unknown", "label": "an unreported location", "technical": "." }
+      ],
+      "technical": ["."],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "root marker plus a missing path",
+      "paths": ["$", null],
+      "locations": [
+        { "kind": "record", "label": "the record itself", "technical": "$" },
+        {
+          "kind": "unknown",
+          "label": "an unreported location",
+          "technical": "(no path reported)"
+        }
+      ],
+      "technical": ["$", "(no path reported)"],
+      "summary": "2 validation issues may be blocking export: the record itself, an unreported location."
+    },
+    {
+      "name": "a very long path",
+      "paths": ["measurement.series.0.data_points.42.uncertainty.standard_error"],
+      "locations": [
+        {
+          "kind": "field",
+          "label": "measurement → series → 0 → data_points → 42 → uncertainty → standard_error",
+          "technical": "measurement.series.0.data_points.42.uncertainty.standard_error"
+        }
+      ],
+      "technical": ["measurement.series.0.data_points.42.uncertainty.standard_error"],
+      "summary": "1 validation issue may be blocking export: measurement → series → 0 → data_points → 42 → uncertainty → standard_error."
+    },
+    {
+      "name": "distinct paths that share a prefix are never collapsed",
+      "paths": ["a.b", "a.b.c"],
+      "locations": [
+        { "kind": "field", "label": "a → b", "technical": "a.b" },
+        { "kind": "field", "label": "a → b → c", "technical": "a.b.c" }
+      ],
+      "technical": ["a.b", "a.b.c"],
+      "summary": "2 validation issues may be blocking export: a → b, a → b → c."
+    },
+    {
+      "name": "more than three locators are capped, and the count stays truthful",
+      "paths": ["$", "assets", "sample.id", "measurement.series", "system.technique"],
+      "locations": [
+        { "kind": "record", "label": "the record itself", "technical": "$" },
+        { "kind": "field", "label": "assets", "technical": "assets" },
+        { "kind": "field", "label": "sample → id", "technical": "sample.id" },
+        {
+          "kind": "field",
+          "label": "measurement → series",
+          "technical": "measurement.series"
+        },
+        {
+          "kind": "field",
+          "label": "system → technique",
+          "technical": "system.technique"
+        }
+      ],
+      "technical": ["$", "assets", "sample.id", "measurement.series", "system.technique"],
+      "summary": "5 validation issues may be blocking export: the record itself, assets, sample → id, …and 2 more."
+    },
+    {
+      "name": "surrounding whitespace is ignored for the label and preserved in the technical form",
+      "paths": ["  sample.id  "],
+      "locations": [
+        { "kind": "field", "label": "sample → id", "technical": "  sample.id  " }
+      ],
+      "technical": ["  sample.id  "],
+      "summary": "1 validation issue may be blocking export: sample → id."
+    },
+    {
+      "name": "M2: a doubled root marker never echoes a bare $ into the label",
+      "paths": ["$$"],
+      "locations": [
+        { "kind": "unknown", "label": "an unreported location", "technical": "$$" }
+      ],
+      "technical": ["$$"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "M2: a $ surviving as a MIDDLE segment claims no location",
+      "paths": ["a.$.b"],
+      "locations": [
+        { "kind": "unknown", "label": "an unreported location", "technical": "a.$.b" }
+      ],
+      "technical": ["a.$.b"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "M2: a $ surviving as a TRAILING segment claims no location",
+      "paths": ["assets.$"],
+      "locations": [
+        { "kind": "unknown", "label": "an unreported location", "technical": "assets.$" }
+      ],
+      "technical": ["assets.$"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "separators only, no root marker",
+      "paths": [".."],
+      "locations": [
+        { "kind": "unknown", "label": "an unreported location", "technical": ".." }
+      ],
+      "technical": [".."],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "M2 (documented collision): a locator already containing the rendered separator is echoed as-is",
+      "paths": ["a → b"],
+      "locations": [{ "kind": "field", "label": "a → b", "technical": "a → b" }],
+      "technical": ["a → b"],
+      "summary": "1 validation issue may be blocking export: a → b."
+    },
+    {
+      "name": "M1: a BOM-only locator resolves identically in BOTH runtimes (JS trim strips it, Python's does not)",
+      "paths": ["\ufeff"],
+      "locations": [
+        {
+          "kind": "unknown",
+          "label": "an unreported location",
+          "technical": "(no path reported)"
+        }
+      ],
+      "technical": ["(no path reported)"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "M1: a file-separator-only locator resolves identically in BOTH runtimes (Python strips it, JS trim does not)",
+      "paths": ["\u001c"],
+      "locations": [
+        {
+          "kind": "unknown",
+          "label": "an unreported location",
+          "technical": "(no path reported)"
+        }
+      ],
+      "technical": ["(no path reported)"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    },
+    {
+      "name": "M1: a NEL-only locator resolves identically in BOTH runtimes",
+      "paths": ["\u0085"],
+      "locations": [
+        {
+          "kind": "unknown",
+          "label": "an unreported location",
+          "technical": "(no path reported)"
+        }
+      ],
+      "technical": ["(no path reported)"],
+      "summary": "1 validation issue may be blocking export: an unreported location."
+    }
+  ],
+  "unavailable_cases": [
+    {
+      "name": "the exact crash sentinel routes.py emits",
+      "errors": [{ "path": "$", "message": "Validation could not be completed." }],
+      "unavailable": true
+    },
+    {
+      "name": "the sentinel with incidental surrounding whitespace",
+      "errors": [{ "path": "$", "message": "  Validation could not be completed.  " }],
+      "unavailable": true
+    },
+    {
+      "name": "a GENUINE root-level violation is NOT the sentinel",
+      "errors": [
+        { "path": "$", "message": "'sample' is a required property" }
+      ],
+      "unavailable": false
+    },
+    {
+      "name": "a genuine nested violation is NOT the sentinel",
+      "errors": [
+        { "path": "assets.0.sha256", "message": "'abc' does not match '^[0-9a-f]{64}$'" }
+      ],
+      "unavailable": false
+    },
+    {
+      "name": "no errors at all is NOT the sentinel (it is the honest empty answer)",
+      "errors": [],
+      "unavailable": false
+    },
+    {
+      "name": "the sentinel alongside a real finding is not treated as a crash",
+      "errors": [
+        { "path": "$", "message": "Validation could not be completed." },
+        { "path": "assets", "message": "'assets' is a required property" }
+      ],
+      "unavailable": false
+    },
+    {
+      "name": "a message-less error is NOT the sentinel",
+      "errors": [{ "path": "$" }],
+      "unavailable": false
+    },
+    {
+      "name": "a near-miss message is NOT the sentinel",
+      "errors": [{ "path": "$", "message": "Validation could not be completed" }],
+      "unavailable": false
+    }
+  ]
+}

@@ -490,18 +490,98 @@ describe('P36R S2 assistant.css structural contract', () => {
     expect(rail).toMatch(/min-height:\s*0/);
   });
 
-  it('the conversation is the ONLY scrolling part; head / empty state / composer are flex:none', () => {
+  /*
+   * P36V.1 S1 — REPLACES the previous assertion, which required
+   * `.assistant-empty` to be `flex: none`.
+   *
+   * That assertion encoded the DEFECT. `.assistant-empty` being `flex: none`
+   * meant it refused to shrink; the body around it had NO `overflow` (so
+   * `visible`); and the dock below is `position: sticky; bottom: 0; z-index: 1`
+   * on an OPAQUE `--assist-tint`. On a short viewport the empty state therefore
+   * painted straight out of the body box and the opaque dock repainted over it —
+   * hiding the third Suggested Question with nothing to scroll to reach it.
+   *
+   * The replacement is strictly stronger: it pins the same "the fixed chrome
+   * never absorbs the bounded column" property for every element that must keep
+   * it, AND adds the three declarations the old test never checked — the body is
+   * a real scroll container, the empty state may shrink, and the empty state
+   * scrolls its own content. Under the old assertion all three could be deleted
+   * and the suite stayed green.
+   *
+   * Honest scope: jsdom applies no CSS and reports 0 for every box metric, so
+   * this is a CSS-SOURCE assertion, not a rendered measurement. It proves the
+   * declarations exist; it does not prove pixels.
+   */
+  it('CSS SOURCE: the body is a scrollport, the empty state may shrink and scroll, and the fixed chrome stays flex:none', () => {
     const region = ruleBody(assistantCss, '.assistant-conversation');
     expect(region).toMatch(/flex:\s*1 1 auto/);
     expect(region).toMatch(/overflow-y:\s*auto/);
     // a positive floor (never collapses) that is still small enough to shrink
     // when a proposed action / degraded notice shares the bounded column
     expect(region).toMatch(/min-height:\s*\d+px/);
-    for (const sel of ['.assistant-head', '.assistant-empty', '.assistant-more', '.assistant-proposed', '.assistant-foot']) {
+
+    // (1) the BODY clips + scrolls, so nothing inside it can paint under the
+    //     opaque dock. `min-height: 0` is what lets `auto` have anything to do.
+    const body = ruleBody(assistantCss, '.assistant-body');
+    expect(body, '.assistant-body must be a real scroll container').toMatch(
+      /overflow-y:\s*auto/,
+    );
+    expect(body, '.assistant-body must not scroll horizontally').toMatch(
+      /overflow-x:\s*hidden/,
+    );
+    expect(body).toMatch(/min-height:\s*0/);
+    expect(body).toMatch(/min-width:\s*0/);
+    // it reserves space for the sticky dock rather than letting it sit flush
+    expect(body).toMatch(/padding-bottom:\s*\d+px/);
+
+    // (2) the EMPTY STATE may SHRINK — the exact property `flex: none` denied —
+    //     and never grows to claim height it does not need.
+    const empty = ruleBody(assistantCss, '.assistant-empty');
+    expect(empty.length).toBeGreaterThan(0);
+    expect(empty, '.assistant-empty must be allowed to shrink').not.toMatch(/flex:\s*none/);
+    expect(empty, '.assistant-empty must not grow').toMatch(/flex:\s*0 1 auto/);
+    expect(empty).toMatch(/min-height:\s*0/);
+    // (3) …and it scrolls its OWN content, so a squeezed empty state stays
+    //     reachable instead of being clipped or hidden under the dock.
+    expect(empty, '.assistant-empty must scroll rather than overflow').toMatch(
+      /overflow-y:\s*auto/,
+    );
+    expect(empty).toMatch(/overflow-x:\s*hidden/);
+
+    // (4) the fixed chrome still never absorbs the bounded column.
+    for (const sel of ['.assistant-head', '.assistant-more', '.assistant-proposed', '.assistant-foot']) {
       expect(ruleBody(assistantCss, sel), `${sel} must not absorb the column`).toMatch(
         /flex:\s*none/,
       );
     }
+    // the Jump-to-Latest control is a body flex item too and must not be
+    // squeezed to a sliver instead of the body scrolling
+    expect(ruleBody(assistantCss, '.assistant-jump')).toMatch(/flex:\s*none/);
+  });
+
+  /*
+   * P36V.1 S1 — the OCCLUSION guard. The dock can only hide body content if the
+   * body lets content escape its box. These two declarations are what make that
+   * impossible, so they are pinned independently of the contract test above.
+   */
+  it('CSS SOURCE: the opaque sticky dock cannot occlude body content', () => {
+    const foot = ruleBody(assistantCss, '.assistant-foot');
+    // the dock IS opaque and sticky — that is deliberate, and is exactly why the
+    // body must clip
+    expect(foot).toMatch(/position:\s*sticky/);
+    expect(foot).toMatch(/background:\s*var\(--assist-tint\)/);
+    // …so the body must never be left at the default `overflow: visible`
+    const body = ruleBody(assistantCss, '.assistant-body');
+    expect(body).toMatch(/overflow-y:\s*auto/);
+    expect(body).not.toMatch(/overflow(-y)?:\s*visible/);
+    // and the dock's own control groups are bounded, so a 7-pill Agent Actions
+    // list cannot grow the dock until it starves the body above it
+    const agent = ruleBody(assistantCss, '.assistant-agent-actions');
+    expect(agent).toMatch(/max-height:\s*\d+vh/);
+    expect(agent).toMatch(/overflow-y:\s*auto/);
+    const moreBody = ruleBody(assistantCss, '.assistant-more-body');
+    expect(moreBody).toMatch(/max-height:\s*\d+vh/);
+    expect(moreBody).toMatch(/overflow-y:\s*auto/);
   });
 
   it('every text carrier in the conversation wraps rather than forcing horizontal overflow', () => {

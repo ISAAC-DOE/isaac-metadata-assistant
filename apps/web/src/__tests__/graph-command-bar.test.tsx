@@ -168,9 +168,32 @@ describe('graph command bar — commands drive the canonical state', () => {
     const view = await renderGraph();
     submit(view, 'help');
     const dialog = await view.findByRole('dialog');
-    expect(dialog.textContent).toContain('Command Bar');
+    // P36V.1 G renamed the section "Command Bar" → "Commands" and moved the
+    // generated grammar into a nested "Every Command" disclosure — which a typed
+    // `help` (and the "Syntax" control) open EXPANDED, because the grammar is
+    // exactly what those two entry points asked for.
+    expect(dialog.textContent).toContain('Commands');
     expect(dialog.textContent).toContain('path <node-a> -> <node-b>');
     expect(dialog.textContent).toContain('neighbors <node> [depth 1|2]');
+    const grammar = dialog.querySelector('.graph-help-sub-details') as HTMLDetailsElement;
+    expect(grammar).not.toBeNull();
+    expect(grammar.open).toBe(true);
+    // …and Technical Details is NOT what was asked for, so it stays closed.
+    expect((dialog.querySelector('.graph-help-technical') as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it('the "Syntax" control opens the grammar expanded; "About This Graph" opens nothing expanded', async () => {
+    const view = await renderGraph();
+    fireEvent.click(view.getByRole('button', { name: 'Graph command syntax' }));
+    let dialog = await view.findByRole('dialog');
+    expect((dialog.querySelector('.graph-help-sub-details') as HTMLDetailsElement).open).toBe(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+
+    fireEvent.click(view.getByRole('button', { name: /About This Graph/ }));
+    dialog = await view.findByRole('dialog');
+    expect((dialog.querySelector('.graph-help-sub-details') as HTMLDetailsElement).open).toBe(false);
+    expect((dialog.querySelector('.graph-help-technical') as HTMLDetailsElement).open).toBe(false);
   });
 });
 

@@ -1846,6 +1846,15 @@
   font-size: 12.5px;
   color: var(--text-tertiary);
 }
+/* The authentication legend: stated once for the whole tab, above the list,
+   replacing a paragraph that used to repeat on every endpoint's detail pane. */
+.api-browser-legend {
+  margin-top: 6px;
+  max-width: 96ch;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+}
 
 /* Wrap-based, not breakpoint-based (same instrument as .schema-fields-split):
    the LeftNav already consumes fixed width, so a viewport media query is the
@@ -2029,6 +2038,35 @@
   color: var(--text-heading);
   overflow-wrap: anywhere;
 }
+/* Compact per-operation metadata. Wraps rather than scrolls, and every value is
+   TEXT: `required` only adds weight/colour on top of a word that already says
+   it, so nothing is conveyed by colour alone. */
+.api-browser-meta {
+  margin: 10px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+}
+.api-browser-meta-item {
+  min-width: 0;
+}
+.api-browser-meta-item dt {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.api-browser-meta-item dd {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.api-browser-meta-flag.required {
+  font-weight: 600;
+  color: var(--text-strong);
+}
 .api-docs-description {
   margin-top: 6px;
   font-size: 12px;
@@ -2138,7 +2176,14 @@
   outline-offset: 2px;
   border-radius: var(--radius-token);
 }
-.api-browser-reftag {
+/* `.api-browser-reftag` means ONE thing: the resolved schema reference behind a
+   Technical Schema / Example disclosure (`settings-page.test.tsx` reads the class
+   that way when it asserts an unresolvable `$ref` is NOT labelled as resolved).
+   The Full Description paragraph count is a different kind of chip and gets its
+   own class rather than borrowing that meaning — same typography, separate
+   selector, so either can change without moving the other. */
+.api-browser-reftag,
+.api-browser-morecount {
   font-size: 10.5px;
   font-weight: 400;
   color: var(--text-tertiary);
@@ -2167,8 +2212,13 @@
 }
 
 /* ======================================================================
-   P36V PR3 slice C — API tab: sub-navigation, API Keys, Quick Start,
-   generated code examples, Connect an Agent.
+   P36V PR3 slice C — the API surfaces: API Access, Quick Start, the endpoint
+   browser, generated code examples, Connect an Agent.
+
+   P36V-1 slice 12 promoted the endpoint browser to its own top-level tab and
+   deleted the `keys | docs` sub-tablist. Its rules (`.api-subtabs`,
+   `.api-subtabs-tab`, `.api-subpanel`) are deleted with it rather than left
+   behind: dead CSS is how a retired layer gets rebuilt by accident.
 
    Light ISAAC language throughout: navy headings, the existing method
    badges, hairline dividers, one accent (var(--action)). No dark "portal"
@@ -2176,47 +2226,6 @@
    every schema/example/sample stays behind a disclosure so the tab never
    opens as a wall of monospace.
    ====================================================================== */
-
-/* ---- sub-navigation (segmented, to read as nested under the page tabs) -- */
-.api-subtabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 14px 0 4px;
-  padding: 3px;
-  width: fit-content;
-  max-width: 100%;
-  background: var(--surface-subtle);
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-control);
-}
-.api-subtabs-tab {
-  padding: 5px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-token);
-  background: none;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-tertiary);
-}
-.api-subtabs-tab:hover {
-  color: var(--text-secondary);
-}
-.api-subtabs-tab.active {
-  color: var(--action-hover);
-  font-weight: 600;
-  background: var(--surface);
-  border-color: var(--action-selected-border);
-  box-shadow: var(--shadow-card);
-}
-.api-subtabs-tab:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 1px;
-}
-.api-subpanel {
-  margin-top: 14px;
-  min-width: 0;
-}
 
 /* ---- section titles inside the API panels ------------------------------ */
 .api-section-title {
@@ -2301,11 +2310,84 @@
   gap: 8px;
 }
 
-/* ---- API Keys: an unavailable state that still looks finished ---------- */
-.api-keys-section + .api-keys-section {
-  margin-top: 20px;
-  padding-top: 16px;
+/* ---- API Access: an unavailable state that still looks finished --------
+   P36V-1 slice 11. This surface used to be three stacked sections whose prose
+   was capped at 62–74ch inside a `width="wide"` card that publishes
+   `--content-max: 1200px`, so ~half the card was empty (plan §2.7). The measure
+   is now spent on structure instead of on whitespace: a full-width banner whose
+   trailing edge carries its action, a two-column access/create grid, and a
+   full-width key list. Each box carries its own cap — the
+   `.settings-provenance-note { max-width: 80ch }` precedent — so widening the
+   page redistributes columns and never lengthens a line of text.
+
+   One column below 900px (source order preserved: status, access, create, list).
+   Nothing here scrolls sideways: the surface has no table and no `pre`. */
+.api-access {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.api-access-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 20px;
+  padding: 12px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+}
+.api-access-banner-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+}
+/* Grows to the readable cap and no further; the action then sits at the
+   trailing edge rather than the text running the full 1200px. */
+.api-access-banner-body {
+  flex: 1 1 380px;
+  min-width: 0;
+  max-width: 90ch;
+}
+.api-access-banner-action {
+  flex: none;
+  margin-left: auto;
+}
+.api-access-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 20px 28px;
+  align-items: start;
+}
+.api-access-col,
+.api-access-full {
+  min-width: 0;
+}
+/* Collapsed by default so the requirements never lead the column. Same audit-
+   trail treatment as About's Technical Details. */
+.api-keys-technical {
+  margin-top: 16px;
+  padding-top: 12px;
   border-top: 1px solid var(--border-faint);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.api-keys-technical > summary {
+  cursor: pointer;
+  color: var(--action);
+}
+.api-keys-technical > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner, 8px);
+}
+@media (max-width: 900px) {
+  .api-access-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .api-access-banner-action {
+    margin-left: 0;
+  }
 }
 .api-keys-heading {
   margin: 0 0 6px;
@@ -2320,6 +2402,16 @@
   line-height: 1.6;
   color: var(--text-secondary);
 }
+/* The banner's prose fills its own capped box (`.api-access-banner-body`, 90ch)
+   instead of keeping the narrower 74ch measure the access rows use, so there is no
+   interior gap between the last word and the action beside it.
+   ORDER MATTERS FOR THE TESTS, not for the browser: this override wins on
+   specificity wherever it sits, but jsdom's `getComputedStyle` resolves by SOURCE
+   ORDER only and ignores specificity, so keeping it after `.api-keys-lead` is what
+   lets a computed-style assertion see the value a real browser applies. */
+.api-access-banner .api-keys-lead {
+  max-width: none;
+}
 .api-keys-rows {
   margin: 12px 0 0;
   display: flex;
@@ -2331,9 +2423,17 @@
   font-weight: 600;
   color: var(--text-heading);
 }
+/* The cap belongs to the COLUMN here, not to the sentence. The grid track is
+   already the measure: 1.4fr of `--content-max: 1200px` minus the 28px gap is a
+   little over 650px, so a 74ch cap (~490–535px at 12px) left roughly a fifth of
+   the widest column permanently blank — the very defect the two-column layout was
+   introduced to remove, surviving one level in. 92ch (~605–660px) fills the track
+   at the wide measure and still bounds the line if `--content-max` ever grows.
+   These are two-to-four-line definition answers, not running body prose, so the
+   45–75ch guidance for long-form reading is not the right target. */
 .api-keys-row > dd {
   margin: 2px 0 0;
-  max-width: 74ch;
+  max-width: 92ch;
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-secondary);
@@ -2367,25 +2467,42 @@
   line-height: 1.6;
   color: var(--text-tertiary);
 }
+/* The bottom third of this surface was the worst dead zone on it: a dashed box at
+   the full inner measure (~1160px) whose only content was a centred ~420px island
+   of text (`max-width: 62ch` plus `margin: … auto`), leaving roughly 740px blank
+   either side of it. The box itself is the empty LIST's own area and legitimately
+   spans the section, so the fix is to stop centring a narrow column inside it:
+   icon and text sit on one left-aligned row, and the body's cap is raised so the
+   cap is no longer what decides the width. ~105 characters of copy cannot fill
+   1160px under any layout — what changes is that the leftover space is now the
+   empty region's own space rather than symmetric whitespace framing an island. */
 .api-keys-empty {
-  padding: 18px 16px;
-  text-align: center;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px 12px;
+  padding: 16px;
+  text-align: left;
   background: var(--surface-subtle);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-inner);
 }
 .api-keys-empty-icon {
+  flex: none;
+  margin-top: 1px;
   color: var(--text-quaternary);
 }
+.api-keys-empty-text {
+  min-width: 0;
+}
 .api-keys-empty-title {
-  margin: 6px 0 0;
+  margin: 0;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-strong);
 }
 .api-keys-empty-body {
-  margin: 5px auto 0;
-  max-width: 62ch;
+  margin: 3px 0 0;
+  max-width: 100ch;
   font-size: 11.5px;
   line-height: 1.6;
   color: var(--text-tertiary);
@@ -2407,12 +2524,6 @@
   font-size: 11.5px;
   line-height: 1.6;
   color: var(--text-tertiary);
-}
-.api-keys-jump {
-  margin-top: 18px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 /* ---- detail pane: the operation's real tag + that tag's description ---- */

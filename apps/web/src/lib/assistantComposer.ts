@@ -14,10 +14,20 @@
  * and `memory` (Project Memory, P25.7) are all wired.
  */
 
+import {
+  NO_BLOCKING_ISSUES,
+  VALIDATION_UNAVAILABLE_SUMMARY,
+  blockingSummary,
+  count,
+  isValidationUnavailable,
+  joinCapped,
+  technicalPaths,
+} from './assistantPaths';
 import { ROUTES } from './routes';
 import type {
   ApiValidateResult,
   AssistantAction,
+  AssistantActionKind,
   AssistantMessage,
   ComposerOutput,
   GroundedChip,
@@ -25,23 +35,11 @@ import type {
   SuggestedPrompt,
 } from './types';
 
-/**
- * Deterministic pluralization: "1 field" / "2 fields". `plural` defaults to
- * `singular + 's'`. No `field(s)` / `entr(y/ies)` placeholders ever survive to
- * rendered output.
- */
-export function count(n: number, singular: string, plural?: string): string {
-  const word = n === 1 ? singular : (plural ?? `${singular}s`);
-  return `${n} ${word}`;
-}
-
-// Join the first ≤3 items with ", "; append ", …and K more" for the remainder.
-function joinCapped(items: string[]): string {
-  const shown = items.slice(0, 3);
-  const rest = items.length - shown.length;
-  const base = shown.join(', ');
-  return rest > 0 ? `${base}, …and ${rest} more` : base;
-}
+// P36V.1 Unit B — `count` and `joinCapped` now live in `./assistantPaths`, so
+// there is exactly ONE implementation of each per language (the blocker summary
+// needs both, and duplicating them was how the two producers were free to drift).
+// Re-exported unchanged: it is part of this module's existing public surface.
+export { count };
 
 // A string is "usable" only when it is present and non-empty after trim. This
 // guards every interpolated field so `undefined` / `null` / an empty value can
@@ -78,29 +76,87 @@ export const OPEN_VALIDATOR_ACTION: AssistantAction = Object.freeze({
 });
 
 /**
+ * P36V.1 Unit B — the CLOSED local catalog of navigation actions, keyed by kind.
+ *
+ * It exists because the free-form Assistant answer now carries an action over the
+ * WIRE (`AssistantQueryResponse.action`, emitted by
+ * `apps/api/isaac_api/assistant_query.py`). The panel resolves a wire action
+ * through this catalog rather than rendering the wire's own `label`/`to`, so the
+ * frontend stays the single owner of the visible label and of the client route the
+ * router resolves under its `basename`. A kind this build does not know is dropped,
+ * never rendered.
+ */
+export const ASSISTANT_ACTIONS: Readonly<Record<AssistantActionKind, AssistantAction>> =
+  Object.freeze({ 'open-validator': OPEN_VALIDATOR_ACTION });
+
+/**
+ * Resolve an UNTRUSTED wire action to this build's frozen descriptor for that
+ * kind, or `undefined`. Total: never throws for any shape.
+ *
+ * The wire's `label`/`to` are deliberately NOT trusted for rendering — the backend
+ * emits them so the API response is self-describing, and
+ * `apps/api/tests/test_assistant_query.py` + `open-validator-action.test.tsx` pin
+ * them equal to this catalog, but presentation and routing stay frontend-owned.
+ */
+export function resolveAssistantAction(raw: unknown): AssistantAction | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const kind = (raw as { kind?: unknown }).kind;
+  if (typeof kind !== 'string') return undefined;
+  return Object.prototype.hasOwnProperty.call(ASSISTANT_ACTIONS, kind)
+    ? ASSISTANT_ACTIONS[kind as AssistantActionKind]
+    : undefined;
+}
+
+/**
  * The blocking-paths answer, shared verbatim by the Record Workbench (§5.1) and
  * Ready to Export (§5.2 — "Same template as §5.1") so the two can never drift.
- * It states a COUNT of blocking paths + the first ≤3 paths + the Open Validator
- * ACTION (P36V S-B; previously a dead prose sentence). It NEVER echoes
+ * It states a COUNT of blocking locations + the first ≤3 locations + the Open
+ * Validator ACTION (P36V S-B; previously a dead prose sentence). It NEVER echoes
  * `validate.ok` or concludes validity. `null` when the validation payload is
  * absent → the chip is disabled, so no action is offered either.
+ *
+ * P36V.1 Unit B — the locations are HUMANIZED by the shared formatter
+ * (`./assistantPaths`, mirrored in `assistant_paths.py`) instead of interpolating
+ * the raw JSONPath list. The old copy rendered a root-level violation as its
+ * literal locator — "1 path is listed as blocking export: $." — which reads as a
+ * field name and names nothing actionable. The EXACT locators are preserved on
+ * `technicalPaths`, which the panel shows only inside a collapsed
+ * `Technical Details` disclosure. No validation semantics changed: the same
+ * `validate.errors` list, the same count, the same chip conditions.
+ *
+ * P36V.1 review IMPORTANT-1 — the CRASH SENTINEL is separated from a genuine
+ * root-level finding before any of that. `POST /api/experiments/{id}/validate`
+ * returns `[{path: '$', message: 'Validation could not be completed.'}]` when the
+ * dry-run itself raised; read through the locator formatter that is
+ * indistinguishable from a root-level violation, and the humanized copy told the
+ * reader "1 record-level validation issue may be blocking export" when the
+ * validator had located NO issue at all. The route is not changed (it is not this
+ * unit's file, and its payload is correct); the interpretation is. No count and no
+ * location are claimed, and no locator is disclosed — there is none to disclose.
  */
 function blockingPathsMessage(validate: ApiValidateResult | undefined | null): AssistantMessage | null {
   if (!validate) return null; // data absent → chip disabled
   const errors = validate.errors;
-  if (errors.length === 0) {
+  if (isValidationUnavailable(errors)) {
     return {
-      text: 'No blocking paths are listed in the current validation response.',
+      text: VALIDATION_UNAVAILABLE_SUMMARY,
       answeredFrom: 'schema',
       action: OPEN_VALIDATOR_ACTION,
     };
   }
-  const verb = errors.length === 1 ? 'is' : 'are';
-  const paths = joinCapped(errors.map((e) => e.path));
+  if (errors.length === 0) {
+    return {
+      text: NO_BLOCKING_ISSUES,
+      answeredFrom: 'schema',
+      action: OPEN_VALIDATOR_ACTION,
+    };
+  }
+  const paths = errors.map((e) => e.path);
   return {
-    text: `${count(errors.length, 'path')} ${verb} listed as blocking export: ${paths}.`,
+    text: blockingSummary(paths),
     answeredFrom: 'schema',
     action: OPEN_VALIDATOR_ACTION,
+    technicalPaths: technicalPaths(paths),
   };
 }
 

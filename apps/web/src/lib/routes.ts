@@ -3,12 +3,48 @@
  * and are reachable only when the WorkflowSpine gate allows.
  */
 
+/**
+ * Settings page tabs are deep-linkable through a stable `?tab=` query parameter
+ * — the SAME mechanism `GovernancePage` already uses, rather than a third
+ * convention. The tab id is the query VALUE, so every link stays relative to the
+ * router `basename` ('' locally, '/krish' in the deployed build) and no surface
+ * ever writes a base path of its own.
+ *
+ * An absent, empty or unrecognised value falls back to `overview` without
+ * throwing, so there is no dead route.
+ */
+export const SETTINGS_TAB_PARAM = 'tab';
+
+export const SETTINGS_TAB_IDS = ['overview', 'privacy', 'about', 'api', 'explorer'] as const;
+
+export type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
+
+export function isSettingsTab(value: string | null | undefined): value is SettingsTabId {
+  return SETTINGS_TAB_IDS.includes(value as SettingsTabId);
+}
+
 export const ROUTES = {
   experiments: '/experiments',
   load: '/load',
   memory: '/memory',
   governance: '/governance',
   settings: '/settings',
+  /**
+   * A deep link to one Settings tab, e.g. `/settings?tab=explorer`.
+   *
+   * Deliberately has no in-app consumer. `SettingsPage` switches tabs by copying
+   * the current `URLSearchParams` and calling `setSearchParams`, which PRESERVES
+   * any other query parameter on the URL; building a fresh path from this helper
+   * and navigating to it would silently drop them. So this exists for the two
+   * things that legitimately need a whole URL — an external/shared deep link and
+   * a test's router entry — and the app keeps the param-preserving mechanism.
+   *
+   * The drift that arrangement risks (this helper and the real mechanism
+   * disagreeing on the parameter or the path) is guarded in
+   * `__tests__/settings-page.test.tsx`, which asserts that activating a tab in the
+   * app produces exactly the query string this helper builds for that tab.
+   */
+  settingsTab: (tab: SettingsTabId) => `/settings?${SETTINGS_TAB_PARAM}=${tab}`,
   record: (id: string) => `/record/${id}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,

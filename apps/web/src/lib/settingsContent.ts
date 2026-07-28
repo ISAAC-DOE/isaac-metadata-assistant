@@ -242,3 +242,88 @@ export const REPO_DOCS: readonly string[] = [
 ];
 
 export const REPO_DOCS_CAPTION = 'Tracked in the repository, not served as pages by this app.';
+
+// --- API Access / Endpoint Explorer canonical copy (P36V-1 slice 13) ---------
+
+/**
+ * The API surfaces had the SAME four claims authored in four places: the
+ * key-unavailable status was in the API-Keys lead, in an access row, in Quick
+ * Start's Authentication note AND in Connect an Agent; the browser-session /
+ * headless-credential boundary was in two of those. Each claim now lives here
+ * exactly once and is rendered from here exactly once — `settings-page.test.tsx`
+ * counts every string below across all five tabs and requires a total of 1.
+ *
+ * Nothing here asserts a value the generated contract carries. Counts, media
+ * types, error codes, the base path and the operation list stay derived from
+ * `GET /api/openapi` in `lib/apiDocsModel.ts`; these strings only say what the
+ * BUILD does and does not have, which the contract cannot report about itself.
+ */
+export const API_ACCESS_COPY = {
+  /** THE status, on the API Access banner. Nothing else restates the reason. */
+  statusHeading: 'API Key Management Is Not Available in This Synthetic Preview',
+  statusBody:
+    'This API has no operation that creates, lists, revokes, or rotates a credential, so no key can be issued from this screen — and there is never a key here to reveal, copy, or store. The Endpoint Explorer tab is the proof: it lists every operation this build has.',
+  /** The disabled Create control's own reason — short, because the banner owns
+   *  the explanation. Always visible AND `aria-describedby`-associated.
+   *
+   *  It NAMES the section it points at rather than its position. "See the status
+   *  above" was true in both current source orders, but a positional reference is
+   *  the construction slice 12 had to remove elsewhere on this very surface (the
+   *  Endpoint Explorer "above" became false the moment it moved to its own tab),
+   *  and it reads as nonsense once the two-column grid stacks. */
+  createDisabledReason:
+    'Disabled: there is no operation for this button to call — see the API Key Management status on this tab.',
+  /** Lead-in to the collapsed Technical Requirements disclosure. */
+  requirementsNote:
+    'What would have to exist before a key could be issued. Each is a backend and security contract this prototype does not have; none of them is stubbed out behind this screen, and they belong to a later, separately authorized phase.',
+  /** The intentional empty state of Your API Keys. */
+  emptyTitle: 'No keys to show.',
+  emptyBody:
+    'This list is empty by design, not by circumstance — nothing failed to load.',
+  /**
+   * The ONE explanation of the Endpoint Explorer's per-operation Auth marker.
+   * It replaced a two-sentence authentication paragraph that was repeated on
+   * every single endpoint's detail pane; the marker itself is now compact
+   * metadata, and this legend is stated once for the whole tab.
+   */
+  authMarkerLegend:
+    "Auth reports whether the contract documents a 401 for an operation. Where a deployment enables authentication those operations need the deployment's credential, and the liveness check is the one that stays reachable without it.",
+} as const;
+
+/**
+ * How access works today — one question per row, each answer stated here and
+ * nowhere else on either API tab. The bearer-header name and the 401 counts are
+ * deliberately absent: Quick Start derives those from the contract.
+ */
+export const API_ACCESS_ROWS: readonly { term: string; detail: string }[] = [
+  {
+    term: 'Current Access Model',
+    detail:
+      'One credential belonging to the whole deployment, set on the server before the app starts and required on every operation except the liveness check. It identifies the deployment, not a person, and this screen cannot see whether it is switched on.',
+  },
+  {
+    term: 'What an API Key Would Enable',
+    detail:
+      'A program running outside this browser — a script, a notebook, or an agent — could call the operations listed on the Endpoint Explorer tab directly, without a person driving the interface.',
+  },
+  {
+    term: 'External Agent Access',
+    detail:
+      'Not through anything you can obtain here. Whoever operates this deployment holds the single credential; the app cannot issue a second one, and browsing this page does not give a program a way in.',
+  },
+  {
+    term: 'Hosted Authentication Boundary',
+    detail:
+      "Signing in through a deployment's identity layer with a browser is not the same thing as headless authentication: that gives a person an interactive session, not a credential a program can present on its own.",
+  },
+];
+
+/** The contract that would have to exist first. Requirements, never a roadmap
+ *  promise, and collapsed so they never lead the surface. */
+export const API_KEY_REQUIREMENTS: readonly string[] = [
+  'Durable storage for credentials, holding a hash rather than the value, so a stored credential cannot be read back.',
+  'Per-key identity, so a key names who or what holds it instead of standing for the whole deployment.',
+  'Revocation and expiry, so a key can be withdrawn without restarting the service.',
+  'Scopes, so a key issued for reading cannot be used to write or export.',
+  'A record of use, so a key that leaks can be traced and cut off.',
+];

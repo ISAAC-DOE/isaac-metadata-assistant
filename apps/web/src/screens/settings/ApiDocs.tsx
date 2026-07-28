@@ -1,21 +1,25 @@
 /**
- * Settings → API → Documentation (P36V PR3 slice C).
- *
- * Three surfaces over ONE source of truth — the document `GET /api/openapi`
+ * The OpenAPI-derived Settings surfaces (P36V PR3 slice C; split across two tabs
+ * by P36V-1 slice 12). ONE source of truth — the document `GET /api/openapi`
  * returns. There is no hand-maintained endpoint catalog anywhere in the client,
  * no CDN, no embedded API-explorer library, and no second description of any
- * operation:
+ * operation.
  *
- *   · Quick Start        — the handful of facts a caller needs first, every one
- *                          of them derived from that document.
- *   · Endpoint Explorer  — the P36R master-detail browser, REFINED: grouped by
- *                          the document's real `tags` (see `lib/apiDocsModel.ts`
- *                          for why the old path-segment inference had to go),
- *                          with Purpose, the authentication requirement,
- *                          parameters, request body, responses, error states,
- *                          generated code examples, and raw JSON only behind a
- *                          `Technical Schema` disclosure.
- *   · Connect an Agent   — a collapsed guide, in its own module.
+ * Two exported panels, one per Settings tab:
+ *
+ *   · {@link ApiQuickStartPanel} (API Access) — Quick Start, the handful of
+ *     facts a caller needs first, every one derived from that document, plus the
+ *     collapsed Connect an Agent guide.
+ *   · {@link ApiExplorerPanel} (Endpoint Explorer) — the master-detail browser,
+ *     grouped by the document's real `tags` (see `lib/apiDocsModel.ts` for why
+ *     the old path-segment inference had to go), with Purpose, whether the
+ *     contract declares a 401, parameters, request body, responses, error
+ *     states, generated code examples, and raw JSON only behind a
+ *     `Technical Schema` disclosure. Nothing here reports whether a DEPLOYMENT
+ *     enables authentication — the app cannot see that.
+ *
+ * Because those are now separate tabs, nothing here may call the Explorer
+ * "above": the prose names the TAB and offers a control that goes there.
  *
  * The base URL is always the RELATIVE path the contract itself declares; no
  * origin or host literal is ever displayed or assumed, and the generated samples
@@ -29,7 +33,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { Search } from '../../components/icons';
+import { ChevronRight, Search } from '../../components/icons';
 import {
   codeSamples,
   collectExamples,
@@ -45,6 +49,7 @@ import {
   type QuickStartFacts,
   type SampleId,
 } from '../../lib/apiDocsModel';
+import { API_ACCESS_COPY } from '../../lib/settingsContent';
 import type { ApiOpenApiResponse, OpenApiMediaType } from '../../lib/types';
 import { ConnectAnAgent } from './ConnectAnAgent';
 import { CopyAnnouncer, CopyButton, MethodBadge, RovingTabs } from './apiShared';
@@ -53,14 +58,22 @@ const API_DETAIL_ID = 'settings-api-detail';
 const API_DETAIL_NAME_ID = 'settings-api-detail-name';
 const API_LIST_HEADING_ID = 'settings-api-endpoints-heading';
 const CONNECT_SUMMARY_ID = 'settings-api-connect-summary';
+/** The tab-level Auth legend, referenced by every detail pane's Auth flag. */
+const AUTH_LEGEND_ID = 'settings-api-auth-legend';
 
 const slug = (value: string) => value.replace(/[^a-zA-Z0-9]+/g, '-');
 const endpointRowId = (key: string) => `settings-api-row-${slug(key)}`;
 const groupHeadingId = (key: string) => `settings-api-group-${slug(key)}`;
 
-export function ApiDocsPanel({ schema, onOpenKeys }: { schema: ApiOpenApiResponse; onOpenKeys: () => void }) {
+/** The API Access tab's contract-derived half: Quick Start + Connect an Agent. */
+export function ApiQuickStartPanel({
+  schema,
+  onOpenExplorer,
+}: {
+  schema: ApiOpenApiResponse;
+  onOpenExplorer: () => void;
+}) {
   const rows = useMemo(() => flattenOpenApi(schema), [schema]);
-  const descriptions = useMemo(() => tagDescriptions(schema), [schema]);
   const facts = useMemo(() => quickStartFacts(schema, rows), [schema, rows]);
 
   // ONE polite region for every copy affordance on this panel, so adding a copy
@@ -80,14 +93,8 @@ export function ApiDocsPanel({ schema, onOpenKeys }: { schema: ApiOpenApiRespons
       <QuickStart
         facts={facts}
         onCopied={onCopied}
-        onOpenKeys={onOpenKeys}
+        onOpenExplorer={onOpenExplorer}
         onOpenConnect={openConnect}
-      />
-      <ApiBrowser
-        schema={schema}
-        rows={rows}
-        descriptions={descriptions}
-        onCopied={onCopied}
       />
       <ConnectAnAgent
         open={connectOpen}
@@ -96,10 +103,25 @@ export function ApiDocsPanel({ schema, onOpenKeys }: { schema: ApiOpenApiRespons
         facts={{
           requestMediaTypes: facts.requestMediaTypes,
           errorCodes: facts.errorCodes,
-          authRequiredCount: facts.authRequiredCount,
-          operationCount: facts.operationCount,
         }}
+        onOpenExplorer={onOpenExplorer}
       />
+    </>
+  );
+}
+
+/** The Endpoint Explorer tab: the master-detail browser and nothing else. */
+export function ApiExplorerPanel({ schema }: { schema: ApiOpenApiResponse }) {
+  const rows = useMemo(() => flattenOpenApi(schema), [schema]);
+  const descriptions = useMemo(() => tagDescriptions(schema), [schema]);
+
+  const [copyMessage, setCopyMessage] = useState('');
+  const onCopied = useCallback((what: string) => setCopyMessage(`Copied ${what}.`), []);
+
+  return (
+    <>
+      <CopyAnnouncer message={copyMessage} />
+      <ApiBrowser schema={schema} rows={rows} descriptions={descriptions} onCopied={onCopied} />
     </>
   );
 }
@@ -117,12 +139,12 @@ export function ApiDocsPanel({ schema, onOpenKeys }: { schema: ApiOpenApiRespons
 function QuickStart({
   facts,
   onCopied,
-  onOpenKeys,
+  onOpenExplorer,
   onOpenConnect,
 }: {
   facts: QuickStartFacts;
   onCopied: (what: string) => void;
-  onOpenKeys: () => void;
+  onOpenExplorer: () => void;
   onOpenConnect: () => void;
 }) {
   const first = facts.firstRequest;
@@ -140,14 +162,14 @@ function QuickStart({
             <>
               <code className="mono api-quickstart-value">{facts.basePath}</code>
               <span className="api-quickstart-note">
-                Relative to the origin serving this page. Every path in the Endpoint Explorer
+                Relative to the origin serving this page. Every path on the Endpoint Explorer tab
                 already begins with it, so a request needs the origin and nothing else.
               </span>
             </>
           ) : (
             <span className="api-quickstart-note">
               The contract's paths share no single base, so there is no one base URL to
-              report. Use each path exactly as the Endpoint Explorer lists it.
+              report. Use each path exactly as the Endpoint Explorer tab lists it.
             </span>
           )}
         </QuickStartRow>
@@ -164,10 +186,13 @@ function QuickStart({
 
         <QuickStartRow label="Authentication">
           <code className="mono api-quickstart-value">Authorization: Bearer</code>
+          {/* The HEADER and the contract-derived COUNT, and nothing else: the
+              key-unavailable status is the banner's (stated once, above this),
+              and the hosted-session boundary is one of the access rows'. */}
           <span className="api-quickstart-note">
             One credential belonging to the deployment, sent on every call that needs it.{' '}
             {facts.authRequiredCount} of {facts.operationCount} operations document a 401, and the
-            Explorer marks which. No key can be issued from this app — see API Keys.
+            Endpoint Explorer tab marks which.
           </span>
         </QuickStartRow>
 
@@ -215,9 +240,15 @@ function QuickStart({
         </div>
       )}
 
+      {/* Where a reader goes next. The old first entry pointed at an "API Keys"
+          sub-tab that no longer exists — that content is now the status banner
+          at the top of THIS tab, so a jump to it would be a link to the page
+          you are on. The Endpoint Explorer is a different tab, and Connect an
+          Agent is the disclosure immediately below. */}
       <nav className="api-quickstart-jump" aria-label="More API detail">
-        <button type="button" className="settings-jump-btn" onClick={onOpenKeys}>
-          API Keys
+        <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
+          Browse Every Endpoint
+          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
         </button>
         <button type="button" className="settings-jump-btn" onClick={onOpenConnect}>
           Connect an Agent
@@ -329,6 +360,15 @@ function ApiBrowser({
         {filtered.length} of {rows.length} endpoint{rows.length === 1 ? '' : 's'}
       </p>
 
+      {/* The authentication explanation, ONCE for the whole tab. It used to be a
+          two-sentence paragraph re-rendered inside every endpoint's detail pane —
+          the same warning up to seven times per visit — while the per-operation
+          fact is a single flag. The flag is now compact metadata on the detail
+          pane and this legend says what it means, in one place. */}
+      <p className="api-browser-legend" id={AUTH_LEGEND_ID}>
+        {API_ACCESS_COPY.authMarkerLegend}
+      </p>
+
       {filtered.length === 0 && (
         <p className="settings-doc-empty">No endpoints match &ldquo;{query}&rdquo;.</p>
       )}
@@ -436,6 +476,110 @@ function ApiEndpointRow({
   );
 }
 
+/**
+ * Above this many characters of REMAINDER (every paragraph after the lead, joined)
+ * a description is long enough that collapsing the tail is worth the chrome.
+ *
+ * 400 characters is ~60–70 words, five or six lines at the detail pane's measure:
+ * a remainder that long materially doubles the Purpose section, while one below it
+ * costs more in `<details>` chrome — a summary row, a disclosure triangle and a
+ * count chip — than the text it would conceal. Measured against the real
+ * generated contract (35 operations, `GET /api/openapi`): lead paragraphs run
+ * 78–594 characters and remainders 0–1,118, so this threshold separates the three
+ * genuine docstrings from the 28 one-extra-sentence tails.
+ *
+ * The first version of this surface had NO threshold — any blank line produced a
+ * disclosure. That collapsed 31 of 35 operations and hid 8,568 of 18,314
+ * description characters (47%), including boundary copy this project requires to
+ * stay visible. See {@link BOUNDARY_CAVEAT_MARKERS}.
+ */
+export const PURPOSE_DISCLOSURE_MIN_CHARS = 400;
+
+/**
+ * The project's boundary/honesty vocabulary, lowercased. A remainder containing
+ * ANY of these is never collapsed, however long it is.
+ *
+ * This exists because length alone is the wrong instrument. Three of this API's
+ * descriptions exceed the threshold above, and every one of them carries its
+ * boundary claim AFTER the lead paragraph:
+ *
+ *   · `POST /api/experiments/{id}/assistant/query` ¶2 — "There is no language
+ *     model. A question outside the catalog … is refused honestly rather than
+ *     answered";
+ *   · `GET /api/memory/graph/detail` ¶2 — the structural-staleness disclosure
+ *     ("a point-in-time index, not a map of today's code");
+ *   · `GET /api/graph/status` ¶3 — "leads and provenance … never a correctness
+ *     ruling. Read-only."
+ *
+ * Hiding any of those would let the visible lead overstate what the code does —
+ * the exact inversion of the rule the sibling Data & Privacy surface enforces
+ * (progressive disclosure is for EDGE CASES, never for a caveat). The test is
+ * ALL-OR-NOTHING over the whole remainder, deliberately: rendering ¶2 and ¶4
+ * inline while hiding ¶3 would scramble the contract's own reading order.
+ *
+ * The list errs toward showing text: a false positive costs a slightly longer
+ * section, a false negative would hide a caveat.
+ */
+export const BOUNDARY_CAVEAT_MARKERS: readonly string[] = [
+  'never',
+  'cannot',
+  'no language model',
+  'refus', // refuse / refuses / refused / refusal
+  'honest',
+  'fabricat',
+  'guess',
+  'advisory',
+  'verdict',
+  'read-only',
+  'deliberately',
+  'point-in-time',
+  'approval-gated',
+  'synthetic-only',
+  'immutable',
+  'not enabled',
+];
+
+/** Does this paragraph carry a boundary/honesty claim that must stay visible? */
+export function isBoundaryCaveat(paragraph: string): boolean {
+  const lower = paragraph.toLowerCase();
+  return BOUNDARY_CAVEAT_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/**
+ * Split a contract description into its LEAD paragraph, the paragraphs rendered
+ * INLINE after it, and the paragraphs behind the disclosure — all verbatim.
+ *
+ * FastAPI publishes the route docstring as the operation description, and this
+ * API's longest runs to ~1,400 characters across four blank-line-separated
+ * paragraphs — a docstring, not a purpose. Only the blank-line boundaries are
+ * honoured (a single newline inside a paragraph is soft-wrapping from the source
+ * and collapses to a space); no sentence is shortened, truncated, re-worded or
+ * discarded, so every word of the contract's text is rendered either way.
+ *
+ * A remainder is collapsed only when it is BOTH long enough to be a wall
+ * ({@link PURPOSE_DISCLOSURE_MIN_CHARS}) AND free of boundary copy
+ * ({@link BOUNDARY_CAVEAT_MARKERS}). Against the real contract that is currently
+ * zero of 35 operations, which is the honest outcome: this API's descriptions are
+ * short-to-medium and boundary-laden, so nothing about them needs hiding. The
+ * disclosure remains for a future docstring that is genuinely long and carries no
+ * caveat.
+ */
+export function splitPurpose(description?: string): {
+  lead: string;
+  inline: string[];
+  collapsed: string[];
+} {
+  const paragraphs = (description ?? '')
+    .split(/\n[ \t]*\n/)
+    .map((p) => p.replace(/\s*\n\s*/g, ' ').trim())
+    .filter((p) => p.length > 0);
+  const lead = paragraphs[0] ?? '';
+  const rest = paragraphs.slice(1);
+  const collapse =
+    rest.join('').length > PURPOSE_DISCLOSURE_MIN_CHARS && !rest.some(isBoundaryCaveat);
+  return { lead, inline: collapse ? [] : rest, collapsed: collapse ? rest : [] };
+}
+
 function ApiEndpointDetail({
   row,
   schema,
@@ -449,6 +593,7 @@ function ApiEndpointDetail({
 }) {
   const ok = row.responses.filter((r) => !isErrorCode(r.code));
   const errors = row.responses.filter((r) => isErrorCode(r.code));
+  const purpose = splitPurpose(row.description);
   return (
     <>
       <h4 id={API_DETAIL_NAME_ID} className="api-browser-detail-name">
@@ -467,22 +612,89 @@ function ApiEndpointDetail({
 
       {row.summary && <p className="api-browser-detail-summary">{row.summary}</p>}
 
+      {/* Compact metadata, scannable in one pass. `Auth` is the per-operation
+          FLAG only — what it means is stated once for the whole tab, above the
+          list, rather than as a paragraph repeated on every endpoint. Each
+          value is the contract's own declaration, and the text carries the
+          meaning: no colour-only marker.
+
+          The flag reads `401 documented`, not `Credential required`. The app
+          CANNOT know whether a given deployment enables authentication — the
+          shared key is configured outside the browser, which is why Settings'
+          own Authentication Boundary says "this screen cannot report whether
+          access is restricted". What the app genuinely knows is what the
+          generated contract declares: whether this operation documents a 401.
+          The flag now states exactly that, so the marker no longer asserts
+          something the page elsewhere admits it cannot see.
+
+          `aria-describedby` additionally points at the tab-level legend, which
+          supplies the conditional ("where a deployment enables authentication
+          those operations need the deployment's credential") for a reader in the
+          detail pane who never scrolled past the list. Support for
+          `aria-describedby` on a non-interactive element varies by AT, so it is
+          a supplement — the label above is truthful on its own. */}
+      <dl className="api-browser-meta">
+        <div className="api-browser-meta-item">
+          <dt>Auth</dt>
+          <dd
+            className={row.authRequired ? 'api-browser-meta-flag required' : 'api-browser-meta-flag'}
+            aria-describedby={AUTH_LEGEND_ID}
+          >
+            {row.authRequired ? '401 documented' : 'No 401 documented'}
+          </dd>
+        </div>
+        <div className="api-browser-meta-item">
+          <dt>Parameters</dt>
+          <dd>{row.parameters.length === 0 ? 'None' : String(row.parameters.length)}</dd>
+        </div>
+        <div className="api-browser-meta-item">
+          <dt>Request Body</dt>
+          <dd>
+            {row.requestBody
+              ? row.requestBody.required
+                ? 'Required'
+                : 'Optional'
+              : 'None declared'}
+          </dd>
+        </div>
+      </dl>
+
       <section className="api-browser-section">
         <h5 className="api-browser-section-heading">Purpose</h5>
-        {row.description ? (
-          <p className="api-docs-description">{row.description}</p>
+        {purpose.lead ? (
+          <>
+            <p className="api-docs-description">{purpose.lead}</p>
+            {/* Short and medium remainders — and ANY remainder carrying a
+                boundary caveat, at any length — render in full, right here. See
+                `splitPurpose`: the disclosure below is reserved for a genuinely
+                long, caveat-free docstring tail, which no operation in the
+                current contract has. Keyed by index, not by text: two identical
+                paragraphs in one description are legal and must not collide. */}
+            {purpose.inline.map((paragraph, i) => (
+              <p className="api-docs-description" key={`purpose-inline-${i}`}>
+                {paragraph}
+              </p>
+            ))}
+            {purpose.collapsed.length > 0 && (
+              <details className="api-browser-disclosure">
+                <summary>
+                  Full Description
+                  <span className="api-browser-morecount mono">
+                    {purpose.collapsed.length} more paragraph
+                    {purpose.collapsed.length === 1 ? '' : 's'}
+                  </span>
+                </summary>
+                {purpose.collapsed.map((paragraph, i) => (
+                  <p className="api-docs-description" key={`purpose-collapsed-${i}`}>
+                    {paragraph}
+                  </p>
+                ))}
+              </details>
+            )}
+          </>
         ) : (
           <p className="api-docs-no-params">The contract states no purpose for this operation.</p>
         )}
-      </section>
-
-      <section className="api-browser-section">
-        <h5 className="api-browser-section-heading">Authentication</h5>
-        <p className="api-browser-section-note">
-          {row.authRequired
-            ? 'A credential is required when this deployment enables authentication: the contract documents a 401 for this operation. Send it as an Authorization: Bearer header.'
-            : 'The contract documents no 401 for this operation, so it stays reachable without a credential even where authentication is enabled.'}
-        </p>
       </section>
 
       <section className="api-browser-section">

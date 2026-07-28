@@ -59,36 +59,53 @@
   max-height: calc(100vh - 110px);
   min-height: 0;
 }
-/* P36V S-A — the header is a THREE-part block: the icon, a stacked
- * title + status column, and the trailing control group. `align-items:
- * flex-start` so the icon aligns with the title line rather than the vertical
- * centre of a two-line block. */
+/* P36V.1 S2 — the header is ONE BALANCED ROW plus an optional action row.
+ *
+ * Row 1 (`.assistant-head-titles`, stretched across the header):
+ *   LEFT  — the chat icon + the "Assistant" title
+ *   RIGHT — the availability status (dot + "Memory Available")
+ * Row 2 (`.assistant-head-right`, only when there IS a conversation):
+ *   a compact right-aligned action row holding Clear Conversation.
+ *
+ * It used to be a stacked block: the status sat on a SECOND line directly under
+ * the title while Clear Conversation took the whole right side of the header.
+ * That read as three competing levels in a 308px rail. `align-items: center`
+ * now aligns the icon, the title and the status on one optical baseline.
+ *
+ * The row gap is deliberately smaller than the column gap: the action row is a
+ * subordinate second line, not a peer of the title. */
 .assistant-head {
   flex: none;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 6px 9px;
   margin-bottom: 14px;
   min-width: 0;
 }
-/* The stacked title + STATUS ROW. The status reads directly beneath the
- * "Assistant" title — the thing it describes — instead of being pushed to the
- * far right of the header where it competed with Clear Conversation. */
+/* The header ROW's content: the title on the left, the status pushed to the
+ * right edge by its own `margin-left: auto`. `flex-wrap: nowrap` by default so
+ * the two groups never wrap accidentally at ordinary desktop width — the ONLY
+ * way they stack is the intentional narrow-viewport rule at the end of this
+ * block. */
 .assistant-head-titles {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 9px;
   min-width: 0;
   flex: 1 1 auto;
-  /* nudge the title's cap-height onto the icon square's optical centre */
-  padding-top: 3px;
 }
-/* P36R S2 — the header's trailing group: Clear Conversation.
- * ONE `margin-left:auto` (never two competing autos) and a graceful wrap at
- * 308px / 200% zoom instead of horizontal overflow. */
+/* P36V.1 S2 — the header's ACTION row: Clear Conversation, beneath the title +
+ * status row rather than between them. `flex-basis: 100%` puts it on its own
+ * header line (the header is `flex-wrap: wrap`), right-aligned and compact — so
+ * it never competes with the status for the same corner, and it is never
+ * rendered between the title and the status.
+ * `:empty` collapses it entirely, so with no conversation it occupies no space
+ * and contributes no row gap. */
 .assistant-head-right {
-  margin-left: auto;
+  flex: 0 0 100%;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -113,14 +130,19 @@
   font-weight: 600;
   color: var(--assist-text);
 }
-/* The availability STATUS ROW (P36V S-A) — a compact line directly beneath the
- * title. `align-self: flex-start` keeps the row as wide as its content so the
- * dot never drifts away from the label at 200% zoom. */
+/* The availability STATUS group (P36V.1 S2) — the RIGHT group of the header
+ * row: the state dot + its Title-Case label. `margin-left: auto` pushes it to
+ * the header's right edge; `flex: none` keeps it compact so the title keeps the
+ * remaining width. Its internal `gap` deliberately MATCHES the header's column
+ * gap (9px), i.e. the gap between the chat icon and "Assistant", so the two
+ * groups read as one balanced row rather than two unrelated clusters. */
 .assistant-memory {
   display: inline-flex;
   align-items: center;
-  align-self: flex-start;
-  gap: 6px;
+  align-self: center;
+  margin-left: auto;
+  flex: none;
+  gap: 9px;
   max-width: 100%;
   font-size: 11px;
   color: var(--text-slate);
@@ -128,10 +150,36 @@
   overflow-wrap: anywhere;
 }
 .assistant-status-row .dot { flex: none; }
+/* The ONE intentional responsive fallback: at a narrow viewport (and at 200%
+ * zoom, where the CSS viewport halves) the status drops to its own line under
+ * the title instead of squeezing it. Nothing else may wrap this row. */
+@media (max-width: 720px) {
+  .assistant-head-titles {
+    flex-wrap: wrap;
+    row-gap: 3px;
+  }
+  .assistant-head-titles .assistant-memory { margin-left: 0; }
+}
 
-/* ---- Body (P36R S2) -------------------------------------------------- */
-/* The height-absorbing middle of the panel. Everything that can grow lives
- * here; the composer dock below never moves. */
+/* ---- Body (P36R S2 · scroll contract fixed P36V.1 S1) ---------------- */
+/* The height-absorbing middle of the panel, and the panel's SCROLLPORT.
+ *
+ * THE BUG THIS FIXES. The body was `flex: 1 1 auto; min-height: 0` with NO
+ * `overflow`, so it defaulted to `visible`. Its empty-state child was
+ * `flex: none` — it refused to shrink — and also had no `overflow`, so on a
+ * short viewport the empty state simply painted OUTSIDE the body box, straight
+ * down over the composer dock. The dock (`.assistant-foot`) is
+ * `position: sticky; bottom: 0; z-index: 1` on an OPAQUE `var(--assist-tint)`
+ * background, so it repainted on top of the spill and the third Suggested
+ * Question disappeared under it. Nothing was scrollable, so it was unreachable.
+ *
+ * `overflow-y: auto` makes this box a real scroll container: its content is now
+ * CLIPPED to the body and scrolled, so it can never paint under the dock, and
+ * the dock — a normal-flow flex sibling AFTER the body — can never overlap it.
+ * `overflow-x: hidden` keeps a long path/hash from producing a horizontal
+ * scrollbar (every text carrier already declares `overflow-wrap: anywhere`).
+ * `min-height: 0` is what actually lets the flex item shrink below its content
+ * so `auto` has something to scroll. */
 .assistant-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -139,16 +187,37 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  /* The dock below is opaque and sticky. In the mounts where an ANCESTOR
+   * scrolls (the ≤1024px slide-over drawer, and the memory rail) the dock can
+   * slide over the tail of this box, so reserve a hair of space for it and keep
+   * a matching scroll padding so a programmatic scroll never parks the last row
+   * flush under it. */
+  padding-bottom: 6px;
+  scroll-padding-bottom: 6px;
 }
 
-/* ---- Empty state (P36R S2) ------------------------------------------ */
+/* ---- Empty state (P36R S2 · shrink contract fixed P36V.1 S1) --------- */
 /* No conversation yet: concise guidance, then the prompt controls at full
- * prominence. There is no conversation region to draw, so nothing is bordered. */
+ * prominence. There is no conversation region to draw, so nothing is bordered.
+ *
+ * `flex: 0 1 auto` + `min-height: 0` (it was `flex: none`) lets this box SHRINK
+ * to the height the body can actually give it, and its own `overflow-y: auto`
+ * then scrolls the Suggested Questions inside it — so the third question is
+ * reachable instead of hidden under the opaque dock. It never GROWS to claim
+ * space it does not need, so at a comfortable height there is no scrollbar at
+ * all and all three questions are simply visible. */
 .assistant-empty {
-  flex: none;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 .assistant-empty-note {
   margin: 0;
@@ -339,8 +408,12 @@
   overflow-wrap: anywhere;
 }
 
-/* Jump to Latest — appears only when new content arrives while scrolled up. */
+/* Jump to Latest — appears only when new content arrives while scrolled up.
+ * It is a flex item of the now-scrolling `.assistant-body`, so it declares
+ * `flex: none`: without it the default `flex-shrink: 1` would let a squeezed
+ * body compress the control to a sliver instead of scrolling. */
 .assistant-jump {
+  flex: none;
   align-self: center;
   display: inline-flex;
   align-items: center;
@@ -660,6 +733,16 @@ button.assistant-source-chip-nav:focus-visible {
   flex: none;
   min-width: 0;
   margin-top: 2px;
+  /* P36V.1 S1 — the dock is `flex: none`, so an Agent Actions list of up to 7
+   * pills (Record Workbench) would otherwise grow the dock without limit and
+   * starve the body above it — the second half of the squeeze that hid the
+   * third Suggested Question. Bound it to a fraction of the VIEWPORT (so it
+   * scales with zoom) and scroll it internally: the composer, the advisory
+   * caption and every pill all stay reachable. */
+  max-height: 32vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 .assistant-agent-actions .assistant-suggested-eyebrow { margin-top: 12px; }
 
@@ -730,7 +813,15 @@ button.assistant-source-chip-nav:focus-visible {
 .assistant-more[open] > .assistant-more-summary .chev { transform: rotate(90deg); }
 .assistant-more-summary:hover { background: var(--assist-tint); }
 .assistant-more-summary:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
-.assistant-more-body { min-width: 0; }
+/* Same bound as `.assistant-agent-actions`: an OPEN disclosure holding both
+ * control groups must not push the composer/caption out of the dock. */
+.assistant-more-body {
+  min-width: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
 .assistant-more-body .assistant-suggested-eyebrow:first-of-type { margin-top: 12px; }
 
 /* ---- Proposed-action region (P36R S2) ------------------------------- */
@@ -851,7 +942,15 @@ button.assistant-source-chip-nav:focus-visible {
  * viewport-bounded column (the conversation region above absorbs all squeeze),
  * AND it is `position: sticky; bottom: 0` with an opaque tint matching the
  * lavender rail, so it stays put in any mount where an ancestor DOES scroll
- * (the narrow slide-over drawer, and the memory rail). */
+ * (the narrow slide-over drawer, and the memory rail).
+ *
+ * P36V.1 S1 — the dock's background is OPAQUE (it has to be, or scrolled
+ * content would show through a sticky bar). That is precisely why it used to
+ * hide the third Suggested Question: the body above it overflowed `visible` and
+ * this box repainted over the spill at `z-index: 1`. The dock is unchanged; the
+ * fix is that `.assistant-body` is now a real scroll container, so there is no
+ * spill to paint over. The dock is a normal-flow flex sibling AFTER the body in
+ * the column — it never overlaps it, and it is never an overlay of the body. */
 .assistant-foot {
   flex: none;
   position: sticky;
@@ -975,6 +1074,8 @@ button.assistant-source-chip-nav:focus-visible {
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--text-tertiary);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .agent-stage-value {
   margin: 0 0 8px;
@@ -1034,6 +1135,8 @@ button.assistant-source-chip-nav:focus-visible {
   /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
   color: var(--text-secondary);
   line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .assistant-composer-notice {
   margin: 8px 0 0;

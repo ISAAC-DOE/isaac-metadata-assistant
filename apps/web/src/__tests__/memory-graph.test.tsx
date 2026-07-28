@@ -1060,45 +1060,52 @@ describe('Graph tab — help drawer', () => {
 
     const dialog = view.getByRole('dialog');
     /*
-     * P36V PR2 slice B — exactly these TEN sections, in this order.
+     * P36V.1 Unit G — exactly these EIGHT sections, in this order. Seven are
+     * visible; the eighth (Technical Details) is the one collapsed disclosure.
      *
-     * Read off each section's own title element rather than `h4` alone: nine
+     * The previous TEN prose sections were folded, not dropped: "What This Graph
+     * Shows" + layer 2 of "Graph Data" → "What You Are Viewing"; the rest of
+     * "Graph Data" and the palette arithmetic of "Cluster Colors" → Technical
+     * Details; "Relationship Types" → a readable-label legend, with the raw
+     * backend values in Technical Details; "How to Explore" → "Quick Guide";
+     * "Keyboard Controls" → Technical Details; "Command Bar" → "Commands", whose
+     * generated grammar is now a nested disclosure. "Zoom Levels" is new — it
+     * documents the semantic-zoom layer Unit F shipped, which the help did not
+     * describe at all.
+     *
+     * Read off each section's own title element rather than `h4` alone: seven
      * sections carry an <h4>, and Technical Details is a <details> whose
      * <summary> carries its title as PLAIN TEXT. A heading nested inside a
      * <summary> makes the disclosure's accessible name a heading node, which AT
-     * announces awkwardly — so the element differs while the section list, its
-     * order, and its wording are pinned exactly as before, plus the two extra
-     * structural guards below.
+     * announces awkwardly.
      */
     const headings = [...dialog.querySelectorAll('.graph-help-section')].map(
       (s) => (s.querySelector(':scope > h4') ?? s.querySelector(':scope > summary'))?.textContent,
     );
     expect(headings).toEqual([
-      'What This Graph Shows',
+      'What You Are Viewing',
       'What It Does Not Show',
-      'Graph Data',
       'Node Types',
-      'Cluster Colors',
-      'Relationship Types',
-      'How to Explore',
-      'Command Bar',
-      'Keyboard Controls',
+      'Relationships',
+      'Quick Guide',
+      'Zoom Levels',
+      'Commands',
       'Technical Details',
     ]);
     // No <summary> anywhere in the drawer wraps a heading.
     expect(dialog.querySelectorAll('summary h1, summary h2, summary h3, summary h4, summary h5')).toHaveLength(0);
     // The Assistant material is FINDABLE — a named sub-heading nested inside
-    // Command Bar, not an unheaded trailing paragraph and not an eleventh
-    // top-level section.
+    // Commands, not an unheaded trailing paragraph and not a ninth top-level
+    // section.
     const subs = [...dialog.querySelectorAll('h5')].map((h) => h.textContent);
     expect(subs).toEqual(['Asking the Assistant']);
     const commandBar = [...dialog.querySelectorAll('.graph-help-section')].find(
-      (s) => s.querySelector(':scope > h4')?.textContent === 'Command Bar',
+      (s) => s.querySelector(':scope > h4')?.textContent === 'Commands',
     );
     expect(commandBar?.querySelector('h5')?.textContent).toBe('Asking the Assistant');
 
     const text = (dialog.textContent ?? '').toLowerCase();
-    // Every fact the twelve previous headings carried, folded into the ten.
+    // Every fact the previous headings carried, folded into the eight.
     expect(text).toContain('circle');
     expect(text).toContain('diamond');
     expect(text).toContain('not causality');

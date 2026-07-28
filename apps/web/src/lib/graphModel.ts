@@ -46,7 +46,12 @@ export const LAYOUT_EXTENT = 1000;
 /** Base viewBox extent at scale 1. */
 export const VIEW_EXTENT = 1100;
 export const MIN_SCALE = 0.25;
-export const MAX_SCALE = 8;
+/** P36V.1 Unit F — raised from 8 (800%) to 24 (2400%) so the symbol level has
+ *  room to be READ, not just reached. At 800% the deepest layer's marks were
+ *  ~6 px apart inside a dense file; the extra range is what makes a 462-symbol
+ *  file legible. Nothing else about zoom changed: the step is still 1.25 and the
+ *  clamp is still the only place a scale is bounded. */
+export const MAX_SCALE = 24;
 /** Distinct community colours. Beyond this rank a cluster is drawn neutral —
  *  112 clusters cannot be 112 legible hues, and pretending otherwise would be
  *  a colour-coded lie. */
@@ -59,6 +64,143 @@ export const LABEL_LIMIT = 45;
  *  rather than noise on the 220-node ISAAC projection: it names each dense
  *  cluster's hub and stops. */
 export const HUB_LABEL_COUNT = 18;
+
+// ------------------------------------------------- level of detail (P36V.1 F)
+
+/**
+ * The three LOD levels of the Explore canvas, and the zoom thresholds between
+ * them. Each level is driven by a REAL field of the data — nothing here invents
+ * a hierarchy (see `lib/graphDeep.ts` for the evidence and the measurements):
+ *
+ *  `file`    — the served-file reference projection already fetched by
+ *              `GET /api/memory/graph` (201 files + 19 concepts). This IS the
+ *              file level; it is not re-derived.
+ *  `cluster` — `community_id` / `community_names` from the deep payload, grouped
+ *              per `source_file`. Measured: 188 of the 221 communities live
+ *              entirely inside ONE file, so a community is a grouping INSIDE a
+ *              file, not a container of files.
+ *  `symbol`  — the individual deep nodes, connected by the payload's own edges.
+ *              All 2,161 `contains` edges are within-file (0 cross-file), so
+ *              file→symbol containment is real, not assumed.
+ *
+ * Thresholds are deliberately above the zoom levels the existing suites drive
+ * (max 156%), so the deeper layers are opt-in by an actual zoom gesture.
+ */
+export type GraphLodLevel = 'file' | 'cluster' | 'symbol';
+export const LOD_CLUSTER_SCALE = 1.75;
+export const LOD_SYMBOL_SCALE = 4;
+
+/**
+ * Threshold comparisons are made with a tolerance, and that is not cosmetic.
+ *
+ * Zoom is applied as a MULTIPLICATION (`scale * factor`), so a scale that should
+ * land exactly on a threshold generally does not: "Reveal Detail" from 1.4
+ * dispatches factor 1.75/1.4 and arrives at 1.7499999999999998. With an exact
+ * `>=` that reads as the FILE level — so the control zoomed in and revealed
+ * nothing, which is the very complaint this layer exists to fix — and
+ * `nextLodScale` returned 1.75 again, so pressing it repeatedly could never reach
+ * the symbol level. Found by test, not by inspection.
+ */
+const SCALE_EPSILON = 1e-9;
+
+export function graphLodLevel(scale: number): GraphLodLevel {
+  if (scale >= LOD_SYMBOL_SCALE - SCALE_EPSILON) return 'symbol';
+  if (scale >= LOD_CLUSTER_SCALE - SCALE_EPSILON) return 'cluster';
+  return 'file';
+}
+
+/** The next threshold above `scale`, or null at the deepest level. Used by the
+ *  canvas's "Reveal Detail" control so one click lands exactly on a level
+ *  boundary instead of asking for six 1.25× presses. */
+export function nextLodScale(scale: number): number | null {
+  if (scale < LOD_CLUSTER_SCALE - SCALE_EPSILON) return LOD_CLUSTER_SCALE;
+  if (scale < LOD_SYMBOL_SCALE - SCALE_EPSILON) return LOD_SYMBOL_SCALE;
+  return null;
+}
+
+/**
+ * SCREEN-SPACE sizing — the core of the "zoom reveals structure instead of
+ * magnifying it" fix.
+ *
+ * The bug: `FILE_RADIUS`, the edge stroke widths and the 11px label font were
+ * constants in USER UNITS. The viewBox extent is `VIEW_EXTENT / scale`, so at
+ * 477% every mark was 4.8× larger on screen — pure magnification, and labels
+ * became enormous.
+ *
+ * The fix: sizes are declared as "user units at scale 1" — i.e. EXACTLY today's
+ * constants — and divided by the live scale. Rendered size = units × scale = the
+ * declared constant, invariant under zoom and bounded by the clamp below.
+ *
+ * WHAT THIS DOES AND DOES NOT PRESERVE at 100% zoom. An earlier version of this
+ * comment claimed the default view was "pixel-identical" to P36R. That was
+ * false and is corrected here:
+ *   · IDENTICAL — every mark radius (9 / 11), the label font (11), the label
+ *     baseline offset (24) and every position. Asserted in graph-deep-model.test.ts.
+ *   · CHANGED — stroke widths. `vector-effect="non-scaling-stroke"` is new on the
+ *     node shapes and the base edges (no stylesheet in this project had ever set
+ *     `vector-effect`), so `stroke-width: 1.5` now renders as 1.5 DEVICE pixels
+ *     instead of 1.5 user units ≈ 0.8 px on a 600 px canvas — roughly 1.8×
+ *     thicker, and the same for the 1.1 edge and the 2.4 / 3 / 3.4 emphasis
+ *     outlines. This is a deliberate trade: those widths are state-driven CSS
+ *     rules, so they cannot be attributes, and in user units a 3.4 focus ring
+ *     reached ~44 device pixels at the 2400 % clamp. Sub-pixel outlines that
+ *     rasterised inconsistently now render at their declared width, bounded at
+ *     every zoom. The default view Krish signed off therefore DID change, in this
+ *     one respect, and the report says so rather than claiming otherwise.
+ *
+ * Deliberately NOT measured from the DOM: a size derived from
+ * `getBoundingClientRect()` would make the render depend on layout, which is
+ * exactly the kind of non-determinism this module refuses everywhere else.
+ */
+export const MIN_MARK_UNITS_AT_SCALE_1 = 3;
+export const MAX_MARK_UNITS_AT_SCALE_1 = 22;
+
+/**
+ * Convert a size expressed in user units at scale 1 into user units for `scale`,
+ * clamped so the rendered size can never fall below MIN or exceed MAX.
+ *
+ * `screenBoundedUnits(u, s) * s ∈ [MIN, MAX]` for every s in [MIN_SCALE,
+ * MAX_SCALE] — asserted directly in graph-model.test.ts.
+ */
+export function screenBoundedUnits(
+  unitsAtScale1: number,
+  scale: number,
+  min: number = MIN_MARK_UNITS_AT_SCALE_1,
+  max: number = MAX_MARK_UNITS_AT_SCALE_1,
+): number {
+  const bounded = Math.min(max, Math.max(min, unitsAtScale1));
+  return bounded / clampScale(scale);
+}
+
+/** Reference mark sizes, in user units at scale 1. `file` / `concept` are the
+ *  P36R constants verbatim, so mark RADII at 100% are unchanged (see the stroke
+ *  caveat above for what did change). */
+export const MARK_UNITS = {
+  file: 9,
+  concept: 11,
+  /** a community cluster inside a file (the mid level) */
+  cluster: 10,
+  /** one deep node (the detail level) */
+  symbol: 6,
+} as const;
+/** Label font size, in user units at scale 1 — mirrors the P36R 11px CSS rule,
+ *  which is now applied as an attribute so it can track the zoom. */
+export const LABEL_UNITS = 11;
+/**
+ * Emphasis multiplier for a selected DEEP mark. Bounded by the same clamp.
+ *
+ * Deliberately NOT applied to the base file/concept marks. It was, and that made
+ * a selected file node 35 % larger at 100 % zoom than the P36R view Krish signed
+ * off — P36R rendered `r={FILE_RADIUS}` unconditionally and signalled selection
+ * with stroke colour and width alone. The base layer is restored to that.
+ *
+ * It is kept for the deep layer, which has no signed-off baseline and a real need
+ * for it: a symbol mark is 6 units against the file layer's 9–11, and up to 260 of
+ * them are on screen at once, so a pinned symbol among 260 identical rounded
+ * squares needs a size cue — a stroke colour alone is not a sufficient signal at
+ * that density, and colour must never be the only carrier.
+ */
+export const SELECTED_MARK_FACTOR = 1.35;
 
 // --------------------------------------------------------------------- types
 

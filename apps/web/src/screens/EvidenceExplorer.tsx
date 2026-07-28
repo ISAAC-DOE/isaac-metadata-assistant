@@ -214,11 +214,22 @@ function LoadedEvidence({
           graph={<GraphStatusChip availability={graph.availability} note={graph.note} />}
         />
       }
+      /* `none`: this is a split layout — the trail rail, `.evclass`, `.csv-recon`
+         and `.preview` each own their horizontal inset, so an ambient 28px from
+         `pad` would double-inset them. The TOP gutter is NOT opted out of: the
+         shell applies `--main-top-gutter` to every unpadded main (chrome.css),
+         which is what stopped this screen rendering flush against the TopBar
+         while its own loading / no-evidence branches got 22px. */
       mainPad="none"
     >
       <h1 className="sr-only">{LABELS.screenEvidence}</h1>
-      <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
-      <div className="wf-progress-banner-inset">
+      {/* One shared horizontal inset for BOTH transient notices, so the degraded
+          live-sync note lines up with the banner and the panels below instead of
+          running edge-to-edge. Each child renders null when it has nothing to
+          say; the wrapper carries no vertical margin, so an empty wrapper adds
+          no space and `.evclass` still starts exactly one gutter below the bar. */}
+      <div className="main-inset">
+        <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
         <WorkflowProgressBanner
           workflow={detail.workflow}
           recordId={id}

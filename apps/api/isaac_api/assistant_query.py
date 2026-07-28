@@ -9,9 +9,13 @@ scientific value, and never authorizes an export.
 
 Truth isolation (mirrors ``memory.py``)
 --------------------------------------
-Imports ONLY the standard library. It never imports ``isaac_records``, never
-imports ``graphify``, computes no verdict, and takes no filesystem/network
-action. Everything it needs is passed in via :class:`AssistantContext` — a
+Imports the standard library plus ONE sibling, presentation-only, stdlib-only
+module: :mod:`isaac_api.assistant_paths` (the display formatter for validation
+locators, mirrored in TypeScript). It never imports ``isaac_records``, never
+imports ``graphify``, never imports ``fastapi``, computes no verdict, and takes no
+filesystem/network action. Both facts are asserted by
+``apps/api/tests/test_assistant_paths.py``. Everything it needs is passed in via
+:class:`AssistantContext` — a
 read-only bundle the route assembles (with expensive grounding supplied as
 thunks invoked only for the matched intent). This keeps :func:`classify` pure and
 unit-testable without a workspace, and keeps :func:`answer` a deterministic
@@ -19,8 +23,10 @@ function of its inputs.
 
 Determinism
 -----------
-The SAME normalized question + SAME record state + SAME revision + SAME
-:data:`RESOLVER_VERSION` produce byte-identical output. Classification is an
+The SAME normalized question + SAME record state + SAME revision produce
+byte-identical output. (:data:`RESOLVER_VERSION` is NOT part of that — it is a
+documentation-only constant with no consumer anywhere in the repo, so it keys
+nothing at runtime; see its own comment.) Classification is an
 explicit finite catalog of alias/phrase triggers matched by plain
 string-containment (NO probabilistic scoring, NO ML, NO fuzzy classifier); an
 explicit precedence order breaks specific ties; genuine ties between distinct
@@ -35,9 +41,23 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from .assistant_paths import (
+    NO_BLOCKING_ISSUES,
+    VALIDATION_UNAVAILABLE_SUMMARY,
+    blocking_summary,
+    count as _count,
+    is_validation_unavailable,
+    join_capped as _join_capped,
+    technical_paths,
+)
+
 # Bump when the classification catalog, answer templates, or guards change so a
 # cached/grounded answer computed under an older resolver is detectably distinct.
-RESOLVER_VERSION = "p34.1"
+# P36V.1 Unit B changed the blocker answer TEMPLATE (locator humanization) and the
+# validate affordance, so this is bumped per its own contract. NOTE, honestly: this
+# constant currently has no consumer anywhere in the repo — bumping it documents the
+# template change but detects nothing at runtime.
+RESOLVER_VERSION = "p36v.1"
 
 _log = logging.getLogger("isaac_api.assistant_query")
 
@@ -312,13 +332,35 @@ _VERDICT_VALID = re.compile(r"\b(in)?valid against\b", re.I)
 #: Path/secret scrub — a port of ``assistantSession.ts::isUnsafeString``.
 _HEX_TOKEN = re.compile(r"\b[0-9a-f]{32,}\b", re.I)
 
-#: Client-route prefixes a ``navigate_to`` may use (never a filesystem path).
-_CLIENT_ROUTE_PREFIXES = ("/record", "/memory")
+#: Client-route prefixes a ``navigate_to`` / an action target may use (never a
+#: filesystem path, never an external URL). P36V.1 Unit B added ``/governance``:
+#: the standalone Validator lives at ``/governance?tab=validator``, and the SAME
+#: allowlist the frontend applies (``AssistantPanel.isClientRoute``) already
+#: includes it. The route is base-path-FREE — the deployed ``/krish`` prefix is
+#: applied by the router's ``basename``, never written here.
+_CLIENT_ROUTE_PREFIXES = ("/record", "/memory", "/governance")
 
-_NEUTRAL_ROUTED = (
-    "I can point you to the deterministic checks — open Validate for the schema "
-    "result."
-)
+#: The deterministic Validator's in-app client route. Kept as one constant so the
+#: action target and the allowlist can never disagree.
+_VALIDATOR_ROUTE = "/governance?tab=validator"
+
+#: P36V.1 Unit B — the ONE bounded navigation action a free-form answer may carry,
+#: mirroring the frontend's frozen ``OPEN_VALIDATOR_ACTION``
+#: (``apps/web/src/lib/assistantComposer.ts``). ``kind`` is the contract; ``label``
+#: and ``to`` make the response self-describing. It navigates and nothing else: it
+#: writes no field, runs no validation, changes no validation result, and
+#: authorizes no export. Handed out as a COPY (see :func:`_open_validator_action`)
+#: so no caller can mutate the shared target.
+_OPEN_VALIDATOR_ACTION = {
+    "kind": "open-validator",
+    "label": "Open Validator",
+    "to": _VALIDATOR_ROUTE,
+}
+
+
+def _open_validator_action() -> dict:
+    """A fresh copy of the Open Validator action descriptor."""
+    return dict(_OPEN_VALIDATOR_ACTION)
 
 
 def has_verdict_language(text: str) -> bool:
@@ -377,18 +419,11 @@ def _scrub_sources(sources: list) -> list:
 
 
 # --- template fragment helpers (mirror the frontend composer) -----------------
-
-
-def _count(n: int, singular: str, plural: Optional[str] = None) -> str:
-    word = singular if n == 1 else (plural or f"{singular}s")
-    return f"{n} {word}"
-
-
-def _join_capped(items: list) -> str:
-    shown = items[:3]
-    rest = len(items) - len(shown)
-    base = ", ".join(shown)
-    return f"{base}, …and {rest} more" if rest > 0 else base
+#
+# P36V.1 Unit B — ``_count`` and ``_join_capped`` are now imported from
+# :mod:`isaac_api.assistant_paths` (which the blocker summary needs anyway), so
+# there is exactly ONE implementation of each per language instead of two that were
+# free to drift. The internal names are unchanged, so no call site moved.
 
 
 def _pending_labels(pending_items: list) -> list:
@@ -469,7 +504,25 @@ _WORKFLOW_PATH = (
     "→ Export"
 )
 
-_ROUTE_TO_VALIDATE = "Open Validate to run the deterministic schema check."
+#: P36V.1 Unit B — the user-visible control is named **Open Validator** (the
+#: frontend's `OPEN_VALIDATOR_ACTION.label`). This prose used to say "Open
+#: Validate", naming a control that did not exist under that name anywhere in the
+#: app. It is used ONLY on the answers that also CARRY the action, so the sentence
+#: now names a control genuinely rendered beside it. It says "reach", not "run":
+#: activating it opens the Validator surface and runs nothing.
+_ROUTE_TO_VALIDATE = "Open Validator to reach the deterministic schema check."
+
+#: Where the deterministic schema check lives, for answers that carry NO action
+#: (the compose-failure fallback and the verdict-guard replacement). Naming the
+#: surface rather than a button avoids pointing at a control that is not on screen.
+_VALIDATOR_SURFACE = (
+    "The deterministic schema check runs on its own surface — Governance & Safety "
+    "→ Validator."
+)
+
+#: The neutral replacement text when the verdict guard or the path/secret scrub
+#: trips. It carries no verdict and names no absent control.
+_NEUTRAL_ROUTED = f"I can point you to the deterministic checks. {_VALIDATOR_SURFACE}"
 
 #: Supported next questions offered as followups, per intent.
 _FOLLOWUPS: dict[str, tuple[str, ...]] = {
@@ -501,24 +554,39 @@ def answer(classified: ClassifiedIntent, context: AssistantContext,
     mirror the frontend composer's tone and its 'never a verdict' rule. Every
     composed answer + source label passes the verdict guard and the path/secret
     scrub before it is returned."""
+    # P36V.1 Unit B — the two PRESENTATION extras a branch may contribute: the
+    # bounded navigation `action` and the exact `technical_paths`. They are
+    # collected through this out-dict rather than by widening every one of
+    # `_compose`'s ten return tuples (and those of its four helpers) to carry two
+    # more positional slots that nine of them would never use. Nothing here feeds
+    # classification, grounding, or any verdict — it is display data only.
+    extras: dict = {}
     try:
-        text, result, grounding, sources, followups = _compose(classified, context)
+        text, result, grounding, sources, followups = _compose(classified, context, extras)
     except Exception:
         # Never raise / never 500. Log a FIXED, path-free message (mirrors
         # post_validate) — never the question text or the exception detail.
         _log.exception("assistant_query compose failed intent=%s", classified.intent)
         text = (
             "I couldn't complete that from the record's grounded surfaces. "
-            f"{_ROUTE_TO_VALIDATE}"
+            f"{_VALIDATOR_SURFACE}"
         )
         result, grounding, sources, followups = "insufficient_context", [], [], []
+        # A partially-populated extras dict from a branch that then raised must
+        # never be returned alongside a fallback answer.
+        extras = {}
 
-    # Verdict guard: a composed answer must never state a verdict.
-    if has_verdict_language(text):
+    # Verdict guard: a composed answer must never state a verdict. Path/secret guard
+    # over the answer text: same replacement.
+    if has_verdict_language(text) or _is_unsafe_string(text):
         text = _NEUTRAL_ROUTED
-    # Path/secret guard over the answer text.
-    if _is_unsafe_string(text):
-        text = _NEUTRAL_ROUTED
+        # P36V.1 review M4 — the replacement names NO locations and (by design, see
+        # `_VALIDATOR_SURFACE`) carries no control, so the extras a neutralized
+        # branch had already contributed must go with it. Shipping
+        # `technical_paths` under an answer that lists no locations made the answer
+        # and its own disclosure disagree; shipping the action made the prose name a
+        # surface while a button pointed somewhere else.
+        extras = {}
 
     version = context.version_token
     return {
@@ -530,11 +598,97 @@ def answer(classified: ClassifiedIntent, context: AssistantContext,
         "version": version,
         "stale": grounded_rev is not None and grounded_rev != version,
         "followups": list(followups),
+        # P36V.1 Unit B — presentation extras, guarded by the SAME client-route
+        # allowlist every cited source passes.
+        "action": _safe_action(extras.get("action")),
+        "technical_paths": _safe_technical_paths(extras.get("technical_paths")),
     }
 
 
-def _compose(classified: ClassifiedIntent, ctx: AssistantContext):
-    """Return ``(answer, result, grounding, sources, followups)`` for an intent."""
+def _safe_action(action) -> Optional[dict]:
+    """Return the action only when it is a well-formed, allowlisted client-route
+    navigation descriptor, else ``None``.
+
+    The same rule every cited source passes: a target that is not an in-app client
+    route (an absolute server path, an external URL, a smuggled secret) is never
+    handed to the client."""
+    if not isinstance(action, dict):
+        return None
+    kind = action.get("kind")
+    label = action.get("label")
+    if not isinstance(kind, str) or not kind:
+        return None
+    if not isinstance(label, str) or not label or _is_unsafe_string(label):
+        return None
+    if has_verdict_language(label):
+        return None
+    to = _safe_navigate_to(action.get("to"))
+    if to is None:
+        return None
+    return {"kind": kind, "label": label, "to": to}
+
+
+#: P36V.1 review M5 — the explicit stand-in for a locator withheld from the
+#: disclosure because it trips the path/secret scrub. It is deliberately NOT a
+#: locator and cannot be mistaken for one (same idiom as
+#: ``assistant_paths.NO_PATH_TECHNICAL``): it discloses that something was withheld
+#: instead of silently shortening the list.
+WITHHELD_TECHNICAL = "(withheld: unsafe to display)"
+
+
+def _safe_technical_paths(paths) -> list:
+    """The exact validation locators, keeping only safe display strings.
+
+    These are JSON locators from the deterministic validator, never filesystem
+    paths — but they are rendered verbatim in the Technical Details disclosure, so
+    they pass the SAME path/secret scrub as every other emitted string. A locator
+    that trips it is never rewritten into something it is not: it is replaced by the
+    explicit :data:`WITHHELD_TECHNICAL` marker.
+
+    P36V.1 review M5 — that replacement (rather than a silent drop) is what keeps
+    the stated count and the shown disclosure consistent. The prose count comes from
+    the UNFILTERED error list, so dropping an unsafe 4th+ locator produced "5
+    validation issues" beside 4 rows, with the missing one never named in the text
+    either (the ≤3 label cap hides it) and nothing explaining the gap. The count
+    stays truthful — it is the validator's error count — and nothing is silently
+    truncated (no cap is introduced here).
+
+    An entry that is not a usable string at all is still omitted: it carries no
+    locator and cannot occur from :func:`assistant_paths.technical_paths`, which
+    yields a non-empty string for every error (``NO_PATH_TECHNICAL`` when the error
+    reported no path)."""
+    if not isinstance(paths, list):
+        return []
+    out: list = []
+    for p in paths:
+        if not isinstance(p, str) or not p:
+            continue
+        out.append(WITHHELD_TECHNICAL if _is_unsafe_string(p) else p)
+    return out
+
+
+#: P36V.1 review IMPORTANT-3 — the record SUB-SURFACE a cited source points at,
+#: appended to ``ctx.navigate_base`` (``/record/<id>``). These are the SAME client
+#: routes the frontend owns (``ROUTES.complete`` / ``ROUTES.evidence`` in
+#: ``apps/web/src/lib/routes.ts``, mounted by ``AppRoutes`` as
+#: ``/record/:id/complete`` and ``/record/:id/evidence``), they are inside the
+#: ``/record`` prefix both :func:`_safe_navigate_to` and the panel's
+#: ``isClientRoute`` allow, and they are base-path-FREE — the deployed ``/krish``
+#: prefix is applied by the router's ``basename``, never written here.
+#:
+#: They exist because a chip labelled "Complete Metadata" / "Evidence & Sources"
+#: whose target was ``base`` navigated to the record page ALREADY on screen when
+#: the question was asked from the Record Workbench — the same inert click this
+#: slice was opened to fix, in two more places.
+_COMPLETE_SUFFIX = "/complete"
+_EVIDENCE_SUFFIX = "/evidence"
+
+
+def _compose(classified: ClassifiedIntent, ctx: AssistantContext, extras: dict):
+    """Return ``(answer, result, grounding, sources, followups)`` for an intent.
+
+    ``extras`` is an out-dict for PRESENTATION-only additions (``action``,
+    ``technical_paths``); a branch that offers neither leaves it untouched."""
     intent = classified.intent
     base = ctx.navigate_base
     followups = list(_FOLLOWUPS.get(intent, ()))
@@ -547,33 +701,69 @@ def _compose(classified: ClassifiedIntent, ctx: AssistantContext):
             labels = _pending_labels(items)
             verb = "needs" if len(items) == 1 else "need"
             text = f"{_count(len(items), 'field')} still {verb} you: {_join_capped(labels)}."
-        return text, "answered", ["workflow"], [{"label": "Complete Metadata", "navigate_to": base}], followups
+        # IMPORTANT-3: "Complete Metadata" now points at the Guided Completion
+        # surface, not at the record root the reader was already on.
+        return text, "answered", ["workflow"], [
+            {"label": "Complete Metadata", "navigate_to": f"{base}{_COMPLETE_SUFFIX}"}
+        ], followups
 
     if intent == EXPORT_BLOCKERS:
         errors = (ctx.validate() or {}).get("errors") or []
+        # P36V.1 review IMPORTANT-1 — the CRASH SENTINEL, before anything is
+        # described as a finding. `routes.py::_assistant_validate_dryrun` returns
+        # `[{"path": "$", "message": "Validation could not be completed."}]` when the
+        # dry-run itself RAISED. Read through the locator formatter alone that is
+        # indistinguishable from a root-level violation, and this branch told the
+        # reader "1 record-level validation issue may be blocking export" — a
+        # confident claim about an issue the validator never located, i.e. exactly
+        # the guessing CLAUDE.md §3/§5 forbid. `routes.py` is NOT changed (its
+        # payload is correct and it is not this unit's file); the INTERPRETATION is.
+        # `insufficient_context` is the honest result: no count, no location, no
+        # locator disclosure (there is none), and no verdict either way.
+        if is_validation_unavailable(errors):
+            text = f"{VALIDATION_UNAVAILABLE_SUMMARY} {_ROUTE_TO_VALIDATE}"
+            extras["action"] = _open_validator_action()
+            return text, "insufficient_context", ["schema"], [], followups
+        # P36V.1 Unit B — the locators are HUMANIZED by the shared formatter
+        # (`assistant_paths`, mirrored in `assistantPaths.ts`). The old template
+        # interpolated the raw locator list, so a root-level violation rendered as
+        # "1 path is listed as blocking export: $." — naming nothing actionable.
+        # Note the old `str(e.get("path"))` also turned a MISSING path into the
+        # literal string "None"; the formatter reports it as an unreported location.
+        # The exact locators go to `technical_paths` for the collapsed Technical
+        # Details disclosure. Same errors, same count — presentation only.
+        raw_paths = [e.get("path") for e in errors]
         if not errors:
-            text = (
-                "No blocking paths are listed in the current validation response. "
-                f"{_ROUTE_TO_VALIDATE}"
-            )
+            text = f"{NO_BLOCKING_ISSUES} {_ROUTE_TO_VALIDATE}"
         else:
-            verb = "is" if len(errors) == 1 else "are"
-            paths = _join_capped([str(e.get("path")) for e in errors])
-            text = (
-                f"{_count(len(errors), 'path')} {verb} listed as blocking export: "
-                f"{paths}. {_ROUTE_TO_VALIDATE}"
-            )
-        return text, "answered", ["schema"], [{"label": "Open Validate", "navigate_to": base}], followups
+            text = f"{blocking_summary(raw_paths)} {_ROUTE_TO_VALIDATE}"
+            extras["technical_paths"] = technical_paths(raw_paths)
+        # P36V.1 Unit B — the validate affordance is now a real typed ACTION
+        # targeting the standalone Validator, replacing a cited-source chip labelled
+        # "Open Validate" whose `navigate_to` was `base` — the record ALREADY on
+        # screen — which is why clicking it appeared to do nothing. `sources` is now
+        # empty here: an action is not a citation, and the answer's plane label
+        # (Schema Rules, from `grounding`) already states where it came from.
+        extras["action"] = _open_validator_action()
+        return text, "answered", ["schema"], [], followups
 
     if intent == EXPORT_READINESS:
         pending_n = len(ctx.pending.get("pending") or [])
-        need = "field still needs" if pending_n == 1 else "fields still need"
+        # P36V.1 Unit B, incidental: this clause read "This record has 5 fields
+        # still need you" — ungrammatical, and in the very sentence whose
+        # punctuation this slice had to change. Now the SAME phrasing the
+        # PENDING_FIELDS answer uses. No semantic change: same count, same source.
+        verb = "needs" if pending_n == 1 else "need"
         text = (
             "Export readiness combines clearing every pending field with a passing "
-            f"deterministic schema check. This record has {pending_n} {need} you; "
-            f"{_ROUTE_TO_VALIDATE} Coverage figures appear after export."
+            f"deterministic schema check. On this record, {_count(pending_n, 'field')} "
+            f"still {verb} you. {_ROUTE_TO_VALIDATE} Coverage figures appear after export."
         )
-        return text, "answered", ["workflow", "schema"], [{"label": "Open Validate", "navigate_to": base}], followups
+        # Same fix as EXPORT_BLOCKERS: a real action instead of a self-navigating
+        # chip. (The sentence break before it was a semicolon, which read as
+        # "…needs you; Open Validator to…"; a full stop matches the new control name.)
+        extras["action"] = _open_validator_action()
+        return text, "answered", ["workflow", "schema"], [], followups
 
     if intent == WORKFLOW_STEP:
         current = ctx.workflow.get("current_step")
@@ -582,6 +772,13 @@ def _compose(classified: ClassifiedIntent, ctx: AssistantContext):
         else:
             label = _current_step_label(ctx.workflow, current)
             text = f"The current workflow step is '{label}'. The workflow is: {_WORKFLOW_PATH}."
+        # IMPORTANT-3 audit — DELIBERATELY left at the record root. The workflow
+        # surface IS the record page: `RecordWorkbench` renders both the
+        # `WorkflowSpine` and the `WorkflowProgressBanner`, and there is no
+        # `/workflow` client route to point at (`ROUTE_PATTERNS` has none). Adding
+        # one would be a new surface, not a fix. From the Record Workbench mount this
+        # citation is therefore a same-page link rather than a wrong one — the label
+        # names where the workflow is shown, and the target is that place.
         return text, "answered", ["workflow"], [{"label": "Workflow", "navigate_to": base}], followups
 
     if intent == FIELD_PROVENANCE:
@@ -644,7 +841,10 @@ def _provenance(classified, ctx, base, followups):
         )
     else:
         text = f"{label} has no cited source recorded yet."
-    return text, "answered", ["files"], [{"label": "Evidence & Sources", "navigate_to": base}], followups
+    # IMPORTANT-3: the citation opens the Evidence Explorer, not the record root.
+    return text, "answered", ["files"], [
+        {"label": "Evidence & Sources", "navigate_to": f"{base}{_EVIDENCE_SUFFIX}"}
+    ], followups
 
 
 def _evidence(classified, ctx, base, followups):
@@ -674,7 +874,10 @@ def _evidence(classified, ctx, base, followups):
             f"{_join_capped(shown)}. Multiple entries can provide separate support "
             "for the same field."
         )
-    return text, "answered", ["files"], [{"label": "Evidence & Sources", "navigate_to": base}], followups
+    # IMPORTANT-3: the citation opens the Evidence Explorer, not the record root.
+    return text, "answered", ["files"], [
+        {"label": "Evidence & Sources", "navigate_to": f"{base}{_EVIDENCE_SUFFIX}"}
+    ], followups
 
 
 def _record(ctx, base, followups):
@@ -688,6 +891,12 @@ def _record(ctx, base, followups):
         f"This record{name} is currently {status}, with "
         f"{_count(pending_n, 'pending field')} and {_count(evidenced, 'evidenced field')}."
     )
+    # IMPORTANT-3 audit — DELIBERATELY left at the record root. The label is
+    # "Record" and the record root IS the record surface, so the target matches what
+    # the chip names. From the Complete / Evidence / Export mounts it is a real
+    # navigation back to the record; from the Record Workbench it is a same-page
+    # link. Re-pointing it anywhere else would make the citation name one surface and
+    # open another.
     return text, "answered", ["workflow"], [{"label": "Record", "navigate_to": base}], followups
 
 
@@ -778,4 +987,9 @@ def answer_memory_scope(classified: ClassifiedIntent,
         "version": None,
         "stale": False,
         "followups": list(followups),
+        # P36V.1 Unit B — response-shape parity with the record endpoint. This
+        # record-less surface answers memory questions and refuses everything else,
+        # so it offers no validate affordance and reports no validation locators.
+        "action": None,
+        "technical_paths": [],
     }

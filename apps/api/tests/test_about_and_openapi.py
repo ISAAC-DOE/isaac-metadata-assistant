@@ -309,7 +309,7 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
             f"{auto!r} (from `{function_name}`)"
         )
         checked += 1
-    assert checked == 34, f"expected 34 documented operations, found {checked}"
+    assert checked == 35, f"expected 35 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -490,6 +490,7 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/memory/file", "get"): ["200", "400", "401", "404", "422"],
     ("/api/memory/files", "get"): ["200", "401"],
     ("/api/memory/graph", "get"): ["200", "401"],
+    ("/api/memory/graph/detail", "get"): ["200", "401"],
     ("/api/openapi", "get"): ["200", "401"],
     ("/api/runtime/records", "get"): ["200", "401", "422"],
     ("/api/schema", "get"): ["200", "401"],

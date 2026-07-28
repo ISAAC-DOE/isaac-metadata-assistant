@@ -29,6 +29,7 @@ import {
   applyGraphAction,
   communityOptionLabel,
   filteredNodeIds,
+  graphLodLevel,
   neighborhood,
   resolveCommunity,
   resolveNode,
@@ -41,6 +42,8 @@ import {
   type GraphTypeFilter,
   type GraphViewState,
 } from './graphModel';
+import { relationDisplayLabel } from './displayLabels';
+import type { DeepIndex } from './graphDeep';
 import type { ApiMemoryGraphMeta } from './types';
 
 // --------------------------------------------------------------- bounds
@@ -1422,4 +1425,533 @@ export function classifyGraphQuestion(
 
   // Anything else is NOT a graph question as far as this catalog is concerned.
   return null;
+}
+
+// --------------------------------------------- suggested commands (P36V.1 G)
+
+/*
+ * The visible "Suggested Commands" row beside the command bar.
+ *
+ * Every suggestion is a line of the grammar ABOVE — parsed by
+ * `parseGraphCommand` and applied by `applyGraphAction`. There is no second
+ * vocabulary, no second resolver and no second reducer, so a suggestion cannot
+ * reach behaviour the typed bar cannot reach, and cannot mean something
+ * different from the identical line typed by hand.
+ *
+ * A suggestion is offered ONLY after it has been folded through the real parser
+ * and the real reducer ON THE LIVE STATE and shown to produce something: a
+ * suggestion that resolves to nothing, or errors on Run, is worse than no
+ * suggestion at all (`foldsToSomething`).
+ *
+ * Clicking a suggestion INSERTS its exact canonical command into the bar and
+ * waits for an explicit Run. The single exception is a viewport-only view
+ * action, allowlisted by `DIRECTLY_RUNNABLE_SUGGESTIONS` and demoted to an
+ * insertion if it is not on that list — so no click can silently apply a filter,
+ * a focus, a path or a selection, and nothing here can touch a record.
+ */
+
+/** Most suggestions offered at once. The row sits above the canvas and must not
+ *  grow into it. */
+export const MAX_SUGGESTED_COMMANDS = 6;
+
+/**
+ * `find` topics offered when nothing is selected, in preference order. A topic
+ * is offered only when it actually matches nodes in the LIVE projection, so this
+ * list can never put a dead suggestion on screen — it only expresses which real
+ * matches are worth surfacing first.
+ */
+export const SUGGESTED_FIND_TOPICS: readonly string[] = [
+  'validation',
+  'export',
+  'evidence',
+  'schema',
+  'audit',
+  'record',
+  'memory',
+  'assistant',
+];
+
+/** Reference types preferred for the "show only …" suggestion. Falls back to
+ *  whatever the projection actually records; never names a type it does not. */
+const PREFERRED_SUGGESTED_RELATIONS: readonly string[] = ['imports', 'calls', 'references'];
+
+/**
+ * The ONLY commands a single click may run without an explicit Run.
+ *
+ * `fit` reframes the viewport and does nothing else: it sets no filter, moves no
+ * node, changes no selection, creates no focus and cannot write anything. Every
+ * other verb — including `reset`, which undoes node drags, and `clear filters`,
+ * which discards a narrowed view — is INSERTED and waits for the user.
+ */
+export const DIRECTLY_RUNNABLE_SUGGESTIONS: readonly string[] = ['fit'];
+
+/** Reducer notices that mean the token did NOT resolve. A candidate producing
+ *  one of these is dropped before it is ever offered. */
+const REFUSAL_NOTICES: ReadonlySet<GraphNotice['kind']> = new Set<GraphNotice['kind']>([
+  'not_found',
+  'ambiguous',
+  'community_not_found',
+  'community_ambiguous',
+  'relation_unknown',
+  'no_path',
+]);
+
+export type GraphSuggestionEffect =
+  /** puts `command` in the bar; the user presses Run */
+  | 'insert'
+  /** runs `command` on the click — viewport-only view actions only */
+  | 'run'
+  /** opens About This Graph at Technical Details; changes no graph state */
+  | 'help';
+
+export interface GraphSuggestedCommand {
+  /** stable key for React and for tests */
+  id: string;
+  /** human-readable Title Case label */
+  label: string;
+  /** the EXACT canonical command line. Null only for the `help` effect. */
+  command: string | null;
+  /** one short line: what it does. Never a claim about the science. */
+  detail: string;
+  effect: GraphSuggestionEffect;
+  /** true when `command` is deliberately INCOMPLETE and needs one more token
+   *  before it can run — the bar inserts it and opens the completion list. */
+  partial: boolean;
+}
+
+export interface GraphSuggestionContext {
+  /** the live view state, verbatim — the same object the reducer produced */
+  state: GraphViewState;
+  /** the decoded deep layer, once Unit F has fetched it */
+  deep?: DeepIndex | null;
+  /** Unit F's pinned deep mark (`deepSelectedId`), read — never duplicated */
+  deepSelectedId?: string | null;
+}
+
+interface SuggestionCandidate extends GraphSuggestedCommand {
+  /** A COMPLETE command used only to PROVE resolvability. For a `partial`
+   *  suggestion it is the resolvable core the insertion is a prefix of, since
+   *  the incomplete line itself is (correctly) a syntax error. */
+  verify: string | null;
+}
+
+/**
+ * Would this command actually do something on the live state?
+ *
+ * Folded through the REAL parser and the REAL reducer — not a private estimate.
+ * A refusal notice means the token did not resolve; an empty filtered set means
+ * the command would leave nothing on screen. Either way the suggestion is not
+ * offered.
+ */
+function foldsToSomething(command: string, index: GraphIndex, state: GraphViewState): boolean {
+  const parsed = parseGraphCommand(command);
+  if (parsed.status === 'help') return true;
+  if (parsed.status !== 'actions') return false;
+  let next = state;
+  for (const action of parsed.actions) next = applyGraphAction(next, action, index);
+  if (next.notice && REFUSAL_NOTICES.has(next.notice.kind)) return false;
+  return filteredNodeIds(next, index).length > 0;
+}
+
+/** Capitalise a single lowercase word from the fixed topic list. Deterministic,
+ *  and never applied to data — cluster names and node ids render verbatim. */
+const topicLabel = (topic: string): string => topic.charAt(0).toUpperCase() + topic.slice(1);
+
+const anyFilterActive = (s: GraphViewState): boolean =>
+  s.search.trim() !== '' ||
+  s.typeFilter !== 'all' ||
+  s.communityFilter !== 'all' ||
+  s.relationFilter !== null ||
+  s.focus !== null;
+
+/** The one non-command suggestion: a harmless disclosure of the exact counts,
+ *  snapshot fingerprint and render bounds. Opens a dialog; changes nothing. */
+const technicalDetailsCandidate = (): SuggestionCandidate => ({
+  id: 'technical-details',
+  label: 'View Technical Details',
+  command: null,
+  detail:
+    'Opens About This Graph at Technical Details — the exact counts, the snapshot fingerprint, ' +
+    'the projection layers and the render bounds. It changes nothing.',
+  effect: 'help',
+  partial: false,
+  verify: null,
+});
+
+/**
+ * Suggestions for the currently SELECTED base node.
+ *
+ * `path <id> -> ` is inserted deliberately unfinished: the completion list then
+ * offers real destinations for the missing token, which is strictly better than
+ * this row guessing one.
+ */
+function selectionCandidates(index: GraphIndex, state: GraphViewState): SuggestionCandidate[] {
+  const id = state.selectedId;
+  const node = id ? index.byId.get(id) : undefined;
+  if (!id || !node) return [];
+  const out: SuggestionCandidate[] = [];
+  const degree = (index.adjacency.get(id) ?? []).length;
+  // Zoomed past the first level-of-detail threshold, a neighbourhood focus
+  // SUSPENDS the deeper layers (GraphCanvas keeps the projection the focus was
+  // computed over). Saying so is cheaper than letting the canvas surprise the
+  // reader who pressed the suggestion.
+  const focusNote =
+    graphLodLevel(state.view.scale) === 'file'
+      ? ''
+      : ' At this zoom a focus returns the canvas to the file projection.';
+
+  if (degree > 0) {
+    const one = neighborhood(id, 1, index, state.relationFilter).ids.length;
+    const two = neighborhood(id, 2, index, state.relationFilter).ids.length;
+    out.push({
+      id: 'neighbors-1',
+      label: 'Show 1-Hop Neighbors',
+      command: `neighbors ${id}`,
+      detail: `Focuses the ${one} nodes one reference away from ${id}, inclusive.${focusNote}`,
+      effect: 'insert',
+      partial: false,
+      verify: `neighbors ${id}`,
+    });
+    // Offered only when it would actually widen the set — a depth-2 focus that
+    // draws the same nodes as depth 1 is a suggestion that does nothing.
+    if (two > one) {
+      out.push({
+        id: 'neighbors-2',
+        label: 'Show 2-Hop Neighbors',
+        command: `neighbors ${id} depth 2`,
+        detail: `Widens the focus to two references away — ${two} nodes in this projection.${focusNote}`,
+        effect: 'insert',
+        partial: false,
+        verify: `neighbors ${id} depth 2`,
+      });
+    }
+  }
+
+  const cid = node.community_id;
+  if (cid && index.communityById.has(cid) && state.communityFilter !== cid) {
+    out.push({
+      id: 'community-of-selected',
+      label: 'Show This Cluster',
+      command: `community ${cid}`,
+      detail:
+        `Filters to the cluster holding ${id}. Clusters are automatically derived, advisory ` +
+        'groupings — not categories the schema recognises.',
+      effect: 'insert',
+      partial: false,
+      verify: `community ${cid}`,
+    });
+  }
+
+  out.push({
+    id: 'path-start',
+    label: 'Start a Path From Here',
+    command: `path ${id} -> `,
+    detail:
+      'Puts an unfinished path command in the bar with this node as the start — choose a ' +
+      'destination from the completions, then press Run.',
+    effect: 'insert',
+    partial: true,
+    verify: `select ${id}`,
+  });
+
+  out.push({
+    id: 'select-none',
+    label: 'Clear the Selection',
+    command: 'select none',
+    detail: 'Deselects this node. No filter, focus or viewport is touched.',
+    effect: 'insert',
+    partial: false,
+    verify: 'select none',
+  });
+
+  out.push(technicalDetailsCandidate());
+  return out;
+}
+
+/**
+ * Suggestions for Unit F's pinned DEEP mark — a cluster or a symbol.
+ *
+ * Deliberately re-expressed in terms of the mark's FILE and CLUSTER. The
+ * grammar's `resolveNode` addresses the served-file projection: a symbol name is
+ * not a node in it, so `select export_record` would honestly answer "no node
+ * matches" — a suggestion that does nothing. Every entry here therefore names
+ * something the grammar can actually resolve, and the labels say which.
+ *
+ * Returns null when the mark cannot be resolved, or when nothing about it is
+ * addressable, so the caller falls back to the general set rather than showing
+ * an almost-empty row.
+ */
+function deepMarkCandidates(
+  index: GraphIndex,
+  deep: DeepIndex,
+  deepSelectedId: string,
+  state: GraphViewState,
+): SuggestionCandidate[] | null {
+  const symbol = deep.byId.get(deepSelectedId) ?? null;
+  const cluster = symbol ? null : (deep.clusterByKey.get(deepSelectedId) ?? null);
+  if (!symbol && !cluster) return null;
+  const sourceFile = symbol ? symbol.sourceFile : cluster!.sourceFile;
+  const communityId = symbol ? symbol.communityId : cluster!.communityId;
+  const what = symbol ? 'symbol' : 'cluster';
+  const out: SuggestionCandidate[] = [];
+
+  if (index.byId.has(sourceFile)) {
+    out.push({
+      id: 'deep-select-file',
+      label: 'Select the File It Is In',
+      command: `select ${sourceFile}`,
+      detail:
+        `${sourceFile} is the file this ${what} belongs to. Commands address files and concepts, ` +
+        'not symbol names, so its file is what can be named here.',
+      effect: 'insert',
+      partial: false,
+      verify: `select ${sourceFile}`,
+    });
+    if ((index.adjacency.get(sourceFile) ?? []).length > 0) {
+      out.push({
+        id: 'deep-neighbors',
+        label: "Show Its File's Neighbors",
+        command: `neighbors ${sourceFile}`,
+        detail:
+          `Focuses the files ${sourceFile} references. A focus returns the canvas to the file ` +
+          'projection it was computed over.',
+        effect: 'insert',
+        partial: false,
+        verify: `neighbors ${sourceFile}`,
+      });
+    }
+  }
+
+  if (communityId && index.communityById.has(communityId) && state.communityFilter !== communityId) {
+    out.push({
+      id: 'deep-community',
+      label: 'Show This Cluster',
+      command: `community ${communityId}`,
+      detail:
+        `Filters the file projection to the cluster this ${what} carries. Clusters are ` +
+        'automatically derived, advisory groupings — not categories the schema recognises.',
+      effect: 'insert',
+      partial: false,
+      verify: `community ${communityId}`,
+    });
+  }
+
+  if (index.byId.has(sourceFile)) {
+    out.push({
+      id: 'deep-path-start',
+      label: 'Start a Path From Its File',
+      command: `path ${sourceFile} -> `,
+      detail:
+        'Puts an unfinished path command in the bar with this file as the start — choose a ' +
+        'destination from the completions, then press Run.',
+      effect: 'insert',
+      partial: true,
+      verify: `select ${sourceFile}`,
+    });
+  }
+
+  if (out.length === 0) return null;
+  out.push(technicalDetailsCandidate());
+  return out;
+}
+
+/** The largest cluster that can be named unambiguously, or null. */
+function clusterCandidate(
+  index: GraphIndex,
+  state: GraphViewState,
+  resolves: (command: string) => boolean,
+): SuggestionCandidate | null {
+  for (const entry of index.communitiesBySize) {
+    if (state.communityFilter === entry.id) continue;
+    // Prefer the cluster's own NAME as the token when the name resolves to
+    // exactly this cluster; otherwise its id. Never a partial name.
+    const named =
+      entry.name !== null && resolveCommunity(entry.name, index).status === 'found'
+        ? entry.name
+        : null;
+    const command = `community ${named ?? entry.id}`;
+    if (!resolves(command)) continue;
+    return {
+      id: 'community-largest',
+      // Cluster names render VERBATIM — they are arbitrary upstream data
+      // (`test_export.py`, `SHE_work_function_eV`), never re-cased.
+      label: named ? `Show the ${named} Cluster` : 'Show the Largest Cluster',
+      command,
+      detail:
+        `Filters to ${communityOptionLabel(entry)}. Clusters are automatically derived, advisory ` +
+        'groupings — not categories the schema recognises.',
+      effect: 'insert',
+      partial: false,
+      verify: command,
+    };
+  }
+  return null;
+}
+
+/** One reference-type filter, named from the values the payload actually has. */
+function relationCandidate(
+  index: GraphIndex,
+  state: GraphViewState,
+  resolves: (command: string) => boolean,
+): SuggestionCandidate | null {
+  const rel =
+    PREFERRED_SUGGESTED_RELATIONS.find((r) => index.relationTypes.includes(r)) ??
+    index.relationTypes[0];
+  if (!rel) return null;
+  const active = state.relationFilter;
+  if (active && active.length === 1 && active[0] === rel) return null;
+  const command = `relation ${rel}`;
+  if (!resolves(command)) return null;
+  return {
+    id: 'relation-common',
+    label: `Show Only ${relationDisplayLabel(rel)} References`,
+    command,
+    detail:
+      'Draws only that reference type, and stops neighbourhoods and routes travelling through ' +
+      'the others.',
+    effect: 'insert',
+    partial: false,
+    verify: command,
+  };
+}
+
+/** The set offered when nothing is selected: real search topics, a real
+ *  cluster, a real reference type, and the two safe view/filter resets. */
+function generalCandidates(
+  index: GraphIndex,
+  state: GraphViewState,
+  resolves: (command: string) => boolean,
+): SuggestionCandidate[] {
+  const out: SuggestionCandidate[] = [];
+  const current = state.search.trim().toLowerCase();
+  for (const topic of SUGGESTED_FIND_TOPICS) {
+    if (out.length >= 2) break;
+    if (topic === current) continue;
+    const command = `find ${topic}`;
+    if (!resolves(command)) continue;
+    out.push({
+      id: `find-${topic}`,
+      label: `Find ${topicLabel(topic)}`,
+      command,
+      detail: `Filters to files and concepts whose path or label contains "${topic}".`,
+      effect: 'insert',
+      partial: false,
+      verify: command,
+    });
+  }
+
+  const cluster = clusterCandidate(index, state, resolves);
+  if (cluster) out.push(cluster);
+  const relation = relationCandidate(index, state, resolves);
+  if (relation) out.push(relation);
+
+  out.push({
+    id: 'fit',
+    label: 'Fit to View',
+    command: 'fit',
+    detail:
+      'Frames everything currently visible. A view action: it runs as soon as you press it, and ' +
+      'changes no filter, no selection and no record.',
+    effect: 'run',
+    partial: false,
+    verify: 'fit',
+  });
+
+  // Offered only when something is actually narrowing the view — otherwise it
+  // is a control that visibly does nothing.
+  if (anyFilterActive(state)) {
+    out.push({
+      id: 'clear-filters',
+      label: 'Clear Filters',
+      command: 'clear filters',
+      detail:
+        'Clears the search, the node-type, cluster and reference-type filters, and any ' +
+        'neighbourhood or route focus. The viewport is left where it is.',
+      effect: 'insert',
+      partial: false,
+      verify: 'clear filters',
+    });
+  }
+
+  return out;
+}
+
+/**
+ * The bounded, context-aware suggestion set for the mounted surface.
+ *
+ * Pure: a function of the already-fetched index and the live state. No fetch, no
+ * history, no ranking model, no LLM. The set changes when the selection, the
+ * pinned deep mark, the filters or the zoom level change, and returns to the
+ * general set the moment the selection clears.
+ */
+export function suggestedGraphCommands(
+  index: GraphIndex,
+  ctx: GraphSuggestionContext,
+): GraphSuggestedCommand[] {
+  const state = ctx.state;
+  const resolves = (command: string): boolean => foldsToSomething(command, index, state);
+
+  const deepList =
+    ctx.deep && ctx.deepSelectedId
+      ? deepMarkCandidates(index, ctx.deep, ctx.deepSelectedId, state)
+      : null;
+  const candidates =
+    deepList ??
+    (state.selectedId && index.byId.has(state.selectedId)
+      ? selectionCandidates(index, state)
+      : generalCandidates(index, state, resolves));
+
+  const out: GraphSuggestedCommand[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (out.length >= MAX_SUGGESTED_COMMANDS) break;
+    if (candidate.effect === 'help') {
+      out.push(strip(candidate, 'help'));
+      continue;
+    }
+    if (!candidate.command || seen.has(candidate.command)) continue;
+    if (candidate.verify && !resolves(candidate.verify)) continue;
+    // A `run` candidate is DEMOTED to an insertion unless it is on the
+    // viewport-only allowlist. The allowlist is the gate, not the author's
+    // intention, so a future candidate cannot become click-runnable by accident.
+    const effect: GraphSuggestionEffect =
+      candidate.effect === 'run' && !DIRECTLY_RUNNABLE_SUGGESTIONS.includes(candidate.command)
+        ? 'insert'
+        : candidate.effect;
+    seen.add(candidate.command);
+    out.push(strip(candidate, effect));
+  }
+  return out;
+}
+
+/** Drop the internal `verify` field — it is a construction detail, not UI. */
+function strip(
+  candidate: SuggestionCandidate,
+  effect: GraphSuggestionEffect,
+): GraphSuggestedCommand {
+  return {
+    id: candidate.id,
+    label: candidate.label,
+    command: candidate.command,
+    detail: candidate.detail,
+    effect,
+    partial: candidate.partial,
+  };
+}
+
+/**
+ * The spoken name of a suggestion: its label PLUS what pressing it does. The
+ * insert / run distinction lives in the accessible name itself, so it is never
+ * carried by a visual tag alone.
+ */
+export function suggestionActionSentence(s: GraphSuggestedCommand): string {
+  if (s.effect === 'help') return 'opens About This Graph at Technical Details';
+  const command = (s.command ?? '').trim();
+  if (s.effect === 'run') {
+    return `runs the view command "${command}" straight away — it only reframes the viewport`;
+  }
+  if (s.partial) {
+    return `puts the unfinished command "${command}" in the command bar; choose a destination, then press Run`;
+  }
+  return `puts the command "${command}" in the command bar; press Run to apply it`;
 }
