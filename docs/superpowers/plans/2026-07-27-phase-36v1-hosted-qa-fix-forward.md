@@ -640,3 +640,130 @@ This is recorded rather than smoothed over: the orchestration policy in `CLAUDE.
 production code for implementation subagents and requires independent review per state-changing
 slice. Where the budget limit forced the orchestrator to make source edits directly, those edits are
 named above and are limited to breakage repair and dead-file removal — no feature work.
+
+**The interrupted agent was then resumed from its own transcript** (far cheaper than re-briefing) with
+a revised priority: lock the two Criticals in with tests first, leave the tree green after every
+increment, and treat the Importants as best-effort. It completed **all** Criticals, Importants,
+Minors and the cross-unit decision — see §11.
+
+## 11. Unit F fix round — what landed
+
+All 15 findings closed. Frontend **1690 → 1721** tests (84 files), no test weakened.
+
+- **C1** `pendingFocus` is armed **only** from the two mark keydown handlers — the only path that can
+  destroy focus, since toolbar and command-bar actions keep focus on a control that stays mounted.
+  `transitionFocusTarget` resolves by **containment** in both directions (file→cluster, cluster→symbol
+  or its file, symbol→its cluster, any→its file), falling back to `svgRef.focus()`; never `<body>`.
+  The request stays armed across renders while the mark survives (the deep payload is lazy and can
+  replace the set a render later) and disarms the moment `document.activeElement` is no longer that
+  mark, so focus is never *stolen*. Tested in both directions from base and deep marks, including the
+  cold/lazy no-counterpart case and **two negative cases**.
+- **C2** Aggregates kept. Cluster copy now says a mark is a *group* and a line *summarises*; the
+  symbol level says "ONE recorded symbol / ONE recorded reference". One pure `deepCountsSentence`
+  states real backing, folds, multi-relation folds and intra-cluster edges counted-not-drawn. Visually
+  `.memory-graph-deep-edge-aggregate` is dashed, wider, and uses a **hollow** arrowhead against the
+  solid symbol-level one — shape and dash, never colour alone. Each aggregate carries a `<title>` and
+  `role="img"`/`aria-label` naming the backing count, both endpoint files and the folded relation
+  kinds, plus a keyboard-reachable sentence in the pinned cluster panel. `data-*` is now explicitly
+  test-only.
+- **I1** Resolved per cause. `vector-effect` **kept** (those widths are state-driven CSS rules, so they
+  cannot be attributes, and in user units the 3.4 focus ring reached ~44 device px at the 2400% clamp)
+  — and the fact that **the signed-off 100% view therefore changed** is now stated plainly in
+  `graphModel.ts` instead of denied. `SELECTED_MARK_FACTOR` **reverted** for the base layer, restoring
+  P36R parity; kept for deep marks only.
+- **I2** `placedDeepLabelIds` mirrors the base layer's `placedLabelIds`: all marks ≤ 24, else ≤ 18
+  collision-filtered landmarks, at **both** deep levels. Measured 0 labels / 260 marks before; > 0 at
+  both levels now, asserted against the real artifact, bound disclosed on the canvas.
+- **I3** One canvas-owned visually-hidden `role="status"`; the loading note's separate region was
+  folded into it, so the surface still has exactly one and the existing "one live region" tests still
+  hold. The string is a function of the drawn level and deep state only — no counts — and is empty on
+  arrival. Tested: one announcement per level change, **zero** across 3 zoom steps and 2 pans inside a
+  level, and the genuine "nothing drawn" crossing *is* announced.
+- **I4** `deepNeeded` no longer requires Explore. Browse has its own opt-in **Load Symbol-Level
+  Detail** control (still lazy, states the cost); each file row's count became a real `aria-expanded`
+  disclosure opening a textual symbol list (kind · cluster · line · relationship count, capped at 40,
+  **disclosed**); selecting one opens the shared `GraphDeepDetail`. `deepShowing` was split from
+  `deepNeeded` so a Browse fetch can never make the canvas count line lie.
+- **I5** True counts reproduced against the live backend: **968 file / 557 cluster / 985 symbol**;
+  labels 18 / 18 / 0-before; cluster 193 lines ↔ **300** backing, 73 folded, 63 multi-relation.
+  **1,263 was wrong and is corrected in the code.** The new `graph-real-artifact.test.tsx` reads the
+  committed artifact **from disk** — no duplicated bytes — and its header states exactly what is real
+  and what is reconstructed, so the per-level figures are same-order but not claimed equal to live.
+- **Minors** staleness gated on a drawn plan and de-duplicated (exactly one occurrence per screen,
+  asserted) · deep selection cleared when no deep layer is drawn, value cleared and prop untouched so
+  Unit G's contract holds, **Browse deliberately exempt** because there it is the textual route in ·
+  stale served-set clause covered both ways · neighbour cap, "capped from" wording and departing
+  concept nodes disclosed · raw NUL/SOH replaced with ` `/`` · the dead staleness branch
+  widened (it would still have printed a false denial for a HEAD-describing point-in-time payload).
+
+**A real defect found by its own new test:** *Reveal Detail* from 140% landed on
+`1.7499999999999998`, which read as the **file** level — so the button zoomed in and revealed nothing,
+and `nextLodScale` returned 1.75 again, meaning repeated presses could **never** reach the symbol
+level. Fixed with a scale epsilon and the exact float pinned in a test. The `LOD_*` constants are
+unchanged, so Unit G's help cannot drift from them.
+
+**Graph help corrections (orchestrator, copy only).** Unit F reported four items in `GraphHelp.tsx`,
+which it does not own. All were applied: the same false *"only the marks and the arrows come from the
+graph"* claim removed; the level-dependent meaning of a mark and a line documented; the neighbour cap,
+deep label bounds and pinned-symbol release disclosed; and the arrow legend corrected so a dashed
+aggregate cannot read as a single reference. **Unit G's concision guard was held, not relaxed** —
+adding honesty copy pushed visible text from ~5,500 to 5,773 chars against a 5,500 bound with a row
+over the 240-char limit, so redundant existing prose was trimmed to pay for it (final: 5,4xx visible,
+ratio 0.56). Weakening that bound to fit new prose would have been the exact "do not weaken tests"
+violation the phase forbids.
+
+## 12. Unit H — DEFERRED, with reasons
+
+Slice 14 (cross-surface visual-consistency sweep) was **not run as a separate unit.** Stating this
+plainly rather than implying coverage:
+
+- The org monthly spend limit ended the subagent budget mid-phase.
+- Much of slice 14's substance was already enforced *within* each unit and its independent review:
+  heading hierarchy, focus rings, chip colours, top gutters, long-path wrapping, no-colour-only
+  meaning and disclosure discipline were all findings-level items in the E, B, C and F reviews, and
+  all were fixed.
+- What is genuinely **not** done is a single pass comparing all changed surfaces against each other
+  for Title-Case/sentence-case consistency, divider and card-padding consistency, and cross-surface
+  chip-colour agreement. No claim is made that this was checked.
+
+## 13. Verification battery — final, on the merge candidate
+
+| Check | Result |
+|---|---|
+| Frontend suite | **1721 passed / 84 files** |
+| Backend suite | **1328 passed / 0 failed** |
+| `tsc -b` | clean |
+| Production build | clean, 1673 modules |
+| `/krish` base-path build | verified — `/krish/assets/` prefixing, `/krish/api` baked in |
+| Snapshot drift, BOTH artifacts | **exit 0** — `--detail-out` form |
+| Committed-artifact gates | 155 passed (`test_committed_snapshot` + `test_memory_graph_detail`) |
+| Secret scan (staged diff) | clean |
+| Forbidden-path scan | clean — no `dist/`, `examples/`, `drafts/`, `records/`, `graphify-out/`, `.env` |
+| `.only` / `.skip` / `xit` audit | none |
+| Bundle | JS 589.63 kB (gzip 171.14) · CSS 167.74 kB (gzip 24.21) |
+| Bundle vs `f563a66` baseline | **+55.50 kB JS (+16.47 gzip) · +8.89 kB CSS (+1.28 gzip)** |
+| New npm dependencies | **none** |
+
+**Not run, and not claimed:** Docker build/smoke (heavy, and the image content is unchanged in
+structure — the new artifact ships via the existing `COPY apps/api/`), and automated accessibility or
+contrast tooling (none exists in this repo).
+
+## 14. Visual QA — what was and was not done
+
+**No browser screenshot QA was performed.** This must be said directly, because the authorizing brief
+asked for it. The repository has **no Playwright, no screenshot harness and no visual-regression
+tooling** — only vitest + jsdom — and the phase forbids new dependencies. jsdom computes **no layout**:
+it produces no pixels, no reflow, no contrast and no frame rate.
+
+Every layout and hierarchy claim in this phase is therefore either a DOM-structure assertion or an
+arithmetic argument from declared CSS values. Where units reported layout improvements they said so
+explicitly, and those statements are reproduced here rather than upgraded:
+
+- Settings API Access: the residual dead zone is *reasoned* to fall from ~20–25% to under ~10% of the
+  widest column. **Not measured.**
+- The dashed aggregate stroke, the hollow arrowhead, the new Browse disclosures and the I1 stroke-width
+  change are **reasoned from declared values only.**
+- No contrast ratio was machine-verified. Unit G hand-computed ~5.6:1 for its section eyebrows; the
+  `runs now` / `fills the bar` tags are 9.5px italic and want a human look.
+
+**Krish's human visual sign-off is therefore still required and is not claimed here.**
