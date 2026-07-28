@@ -844,3 +844,78 @@ in CI (the 6 undetected tamper classes are pinned as explicit `False` rows rathe
 Unit H is genuinely not done; and the artifact publishes 1,846 new label strings at symbol
 granularity — inside the served boundary, correctly disclosed, but a real change in what the
 deployment tells a viewer about the repository's internals.
+
+## 16. Remaining human QA — the exact hosted checks Krish must make
+
+**HOSTED QA IS PENDING (Krish).** `/krish` is behind an Authentik edge this environment cannot
+authenticate to, so no rollout is claimed as verified. `/krish/api/health` should report the merge
+commit of PR #23 once Flux rolls the resulting image.
+
+Nothing below was verified visually by any agent. jsdom computes no layout, and this repository has no
+Playwright, no screenshot harness and no contrast tooling.
+
+### Assistant
+1. Empty state at a normal desktop height — **all three Suggested Questions fully visible**, none
+   clipped, none hidden under the composer. Then shorten the window: the Assistant **body** should
+   scroll internally, and the whole page should *not* start scrolling instead.
+2. `Memory Available` sits **inline in the title row**, right-aligned, at roughly the same spacing as
+   the gap between the chat icon and "Assistant". Narrow the window: it should drop to its own line
+   once, deliberately, not wrap mid-phrase.
+3. With a conversation: `Clear Conversation` reads in full (never "Clear"), sits **beneath** the title
+   row, and is absent — reserving no space — when there is no conversation. Clearing must reset the
+   transcript, related questions and actions.
+4. Ask what is blocking export on a record with a **root-level** validation error. It must read as a
+   record-level issue; a bare `$` must appear **only** inside Technical Details.
+5. Press `Open Validator` from the Complete Metadata screen. It must land on
+   **Governance & Safety → Validator** with that tab selected, move focus to the Validator heading,
+   and **browser Back must return to the record**. The record must be unchanged. Also try it while
+   already on Validator — it must give visible focus feedback, not appear inert.
+6. Check `Complete Metadata` and `Evidence & Sources` citations now open `/complete` and `/evidence`
+   rather than the page you are already on.
+
+### Evidence
+7. `Evidence & File Preview` — the yellow attention banner must have a clear gutter below the header,
+   not touch it. Check the no-banner and no-evidence states too: no double gap, no collapse.
+8. Readability: `Evidence Support` heading, status pills, field paths, explanations and source chips
+   should be clearly differentiated, and the info icon must not be faint grey. **Colour must never be
+   the only signal** — every status should read as text too.
+
+### Graph — the largest change, needs the most attention
+9. Overview at 100%: broad topology, readable, not a hairball.
+10. Zoom in past ~175% and then past ~400%: **deeper structure must appear**, not just bigger marks.
+    Labels must stay a readable size at every zoom, never enormous.
+11. **Keyboard, please test this specifically** — Tab to a node, then press `+` several times. Focus
+    must stay on a mark (or the canvas); it must **not** vanish to the top of the page. Then `-` back
+    out. This was broken and is the fix I would most like confirmed on real hardware.
+12. Cluster (mid) zoom: aggregate lines must look **clearly different** from single references —
+    dashed, hollow arrowhead — and hovering one must state how many references it stands for.
+13. The **structural staleness** notice must be visible and unsoftened: the structure describes commit
+    `caab1d0`, **not** current HEAD.
+14. `Suggested Commands`: clicking one **fills the command bar** and waits for Run; only `Fit to View`
+    runs immediately. Nothing should execute from hover.
+15. `About This Graph`: the first screenful should orient, not read as a document; Technical Details
+    collapsed; Escape closes; focus returns to the control you opened it from.
+16. **Browse** must still work as the text equivalent, including `Load Symbol-Level Detail` and the
+    per-file symbol lists — reachable with keyboard only.
+
+### Settings
+17. Five tabs: `Overview`, `Data & Privacy`, `About`, `API Access`, `Endpoint Explorer`.
+18. `API Access` at full desktop width — the right half must no longer be empty. Then tablet, then
+    mobile: one column, sensible order, no horizontal scrolling.
+19. Deep links: open `/krish/settings?tab=explorer` directly and **refresh** it. Then walk tabs with
+    Back/Forward.
+20. `Create API Key` must be visibly disabled **with a stated reason**, no fake fields, and
+    `What Would Be Required` collapsed.
+21. Endpoint Explorer: search, grouping, an endpoint's details, code examples, copy buttons, and
+    Technical Schema collapsed. Descriptions should now read **in full** — the boundary sentences
+    ("There is no language model", the staleness disclosure) must be visible, not hidden in a drawer.
+
+### Cross-surface
+22. **200% browser zoom** on Assistant, Evidence, Graph and Settings.
+23. A narrow window (~375px) on the same four.
+24. Any clipped row, any content trapped under a sticky control, any horizontal scrollbar.
+
+### If something is wrong
+The plan records what was verified and how (§13), and what was explicitly **not** (§14). Anything
+visual that fails here is expected to be un-caught by the test suite — that is the known gap, not a
+surprise.
