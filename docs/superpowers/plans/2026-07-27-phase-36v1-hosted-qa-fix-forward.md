@@ -767,3 +767,80 @@ explicitly, and those statements are reproduced here rather than upgraded:
   `runs now` / `fills the bar` tags are 9.5px italic and want a human look.
 
 **Krish's human visual sign-off is therefore still required and is not claimed here.**
+
+## 15. Final independent release review — `SHIP`
+
+A fifth independent reviewer, which implemented none of the work, re-ran every headline claim and
+audited the orchestrator's own unreviewed edits directly (the least-reviewed code in the PR, since the
+spend limit removed the subagent budget before they could be reviewed). **Zero Critical, zero
+Important, six Minor.**
+
+Independently reproduced: `tsc -b` exit 0 · frontend **1721 / 84** · backend **1328 / 0** · snapshot
+`--check` exit 0 for **both** artifacts · build clean at 1673 modules with bundle figures matching the
+PR table exactly. Boundary proof re-verified from the diff rather than from this document:
+`git diff f563a66..HEAD -- src/ schema/` is **empty**; `package.json`, `package-lock.json`,
+`pyproject.toml`, `Dockerfile`, `.dockerignore`, `.github/` and `k8s/` are **all unchanged**;
+`auth.py` untouched, so the new route sits behind the same global middleware.
+
+Its own scan of the committed deep artifact: zero absolute paths, UNC paths, `file://`, URLs or email
+addresses; 48 secret-*shaped* hits all inspected and all benign (symbol names such as
+`ApiKeyAuthMiddleware`, doc headings about secret handling, and the env-var **name**
+`ISAAC_UI_API_KEY`, already present in served docs — no values). 179 unique `source_file`, **0**
+outside the 201-path served set. It also confirmed neither committed artifact is itself in the
+manifest, so there is no regeneration circularity.
+
+It verified the orchestrator's help copy against **what `GraphCanvas.tsx` actually renders**, not
+against this plan: cluster mark is a `<circle>` (so the help is right that shape does not distinguish
+it from a file and the zoom level does), symbol mark is a rounded `<rect>`, the file region is a
+dashed circle, and the file level draws no arrows. The false *"only the marks and the arrows come from
+the graph"* claim is gone from **both** places it lived. It confirmed the three deleted files were
+never committed on this branch and are referenced by nothing.
+
+**Concision guard confirmed genuinely held, not circumvented:** `graph-help-concision.test.tsx` is
+untouched by the orchestrator's commit — the 5500 bound, the 0.7 ratio, the 240-char row limit and
+every string-visibility assertion are Unit G's originals. Both trimmed sentences were a positive
+fidelity claim and an over-narrow legend line that was itself *wrong* (it said arrows appear only
+between symbols, when cluster aggregates carry them too). No boundary string was lost; §2 of the
+guard still pins every one visible.
+
+### Ruling on the never-firing disclosure: KEEP
+
+`splitPurpose` runs on all 35 operations and its meaningful output today is the decision **not** to
+collapse; `isBoundaryCaveat` is the executable form of the project's "progressive disclosure is for
+edge cases, never for a caveat" rule. Deleting the disclosure would delete the rule with it and
+reinstate the wall-of-text failure for the next long docstring. The `<details>` render branch has only
+synthetic coverage, which is a Minor to revisit if the contract's docstrings lengthen. Raising
+`PURPOSE_DISCLOSURE_MIN_CHARS` or thinning `BOUNDARY_CAVEAT_MARKERS` to make it fire would be the
+wrong direction; the bias toward showing text is correct.
+
+### Minors — two fixed before merge, four recorded
+
+- **Fixed.** The PR body said "no Docker smoke" without the qualifier *locally*; CI's
+  `PR Docker Smoke` job **passed on this exact SHA**. An under-claim, but it misstated the
+  verification record. PR body corrected.
+- **Fixed.** `served_file_count_scope` had **zero** test coverage in either language, so the field
+  could have been renamed or dropped without a failing test — silently undoing the very
+  disambiguation it exists to provide. Now asserted on **both** the available branch (with
+  `served_file_count == 201`) and the degraded branch, where the count is null and the scope label is
+  the only thing left naming which set it would have described.
+- *Recorded.* `GraphHelp.tsx:243` "dashed means several" is imprecise in the safe direction: by this
+  phase's own figures **120 of 193** dashed cluster lines back exactly one reference. A reader cannot
+  mistake an aggregate for a 1:1 edge (the C2 concern), and each line's `<title>`/`aria-label` carries
+  the exact backing count.
+- *Recorded.* The level-dependent provenance explanation sits inside the collapsed Technical Details,
+  brushing against Unit G's own stricter rule. Mitigated: the always-visible canvas caption states it
+  in full at both deep levels, and the visible legend carries the short form.
+- *Recorded.* The CLAUDE.md §17 rewrite is not mentioned in the PR body (plan §5 covers it) —
+  instruction architecture is this repo's highest-risk documentation class, so the disclosure gap is
+  worth naming even though the content was verified correct by measurement.
+- *Recorded.* The 240-char row guard measures only rows outside `<details>`, so reference bullets are
+  length-unbounded by design — correct for its purpose, noted so it is not over-read.
+
+### Residual risks it upheld
+
+No pixels were verified anywhere; CI **cannot** prove the deep artifact matches its source, because
+the regeneration-determinism test skips whenever `graphify-out/graph.json` is absent, which is always
+in CI (the 6 undetected tamper classes are pinned as explicit `False` rows rather than papered over);
+Unit H is genuinely not done; and the artifact publishes 1,846 new label strings at symbol
+granularity — inside the served boundary, correctly disclosed, but a real change in what the
+deployment tells a viewer about the repository's internals.

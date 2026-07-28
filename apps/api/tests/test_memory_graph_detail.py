@@ -342,6 +342,11 @@ def test_unreadable_artifact_degrades_honestly(tmp_path, monkeypatch, mutate,
     # of the current head.
     assert provenance["is_point_in_time"] is True
     assert provenance["describes_current_head"] is False
+    # `served_file_count` is NULL here, so the scope label is the only thing left
+    # saying WHICH count it would have been. It must survive degradation too, or
+    # the 201-vs-200 disambiguation disappears exactly when a reader has least
+    # context (P36V.1 final release review, minor 2).
+    assert provenance["served_file_count_scope"] == "served_path_set"
 
 
 def test_base_graph_projection_is_unchanged_by_the_new_endpoint(tmp_path, monkeypatch):
@@ -501,6 +506,13 @@ def test_provenance_states_the_point_in_time_honesty_contract(tmp_path, monkeypa
     assert provenance["served_content_scope"] == "served_files_only"
     assert provenance["served_content_basis"] == "ci_content_manifest"
     assert "separate axes" in provenance["note"]
+    # `served_file_count` counts the served PATH SET (201), which is deliberately
+    # one larger than the served CONTENT MANIFEST (200) — the manifest builder
+    # self-excludes any `*memory-snapshot.json` it would otherwise hash. The two
+    # were being conflated, so the count must arrive with its scope named; a
+    # reader must never have to guess which set a bare number describes.
+    assert provenance["served_file_count_scope"] == "served_path_set"
+    assert provenance["served_file_count"] == 201
     # ...and the response's own note repeats it in prose.
     assert "point-in-time" in body["note"]
     assert "not a map of the current repository HEAD" in body["note"]
