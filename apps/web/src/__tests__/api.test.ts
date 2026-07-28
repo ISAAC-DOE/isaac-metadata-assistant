@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { api, ApiError, API_BASE, RUN_COMMAND } from '../lib/api';
+import { api, ApiError, API_BASE, RUN_COMMAND, isHostedBuild } from '../lib/api';
 import {
   EXP_ID,
   answersAfterNotebook,
@@ -396,5 +396,114 @@ describe('api.search — grouped truth+memory search client (P26.4)', () => {
     const res = await api.search('a');
     expect(res.workspace.reason).toBe('query_too_short');
     expect(res.memory.reason).toBe('query_too_short');
+  });
+});
+
+/*
+ * P36V.2 — what the client can OBSERVE about a failure.
+ *
+ * The hosted deployment sits behind an authenticating edge. When a session
+ * expires that edge answers an /api/* request with its sign-in HTML — often
+ * with HTTP 200 — and `res.json()` REJECTS. That rejection used to escape as a
+ * raw SyntaxError (not an ApiError), so screens rendered a crash instead of the
+ * honest down state. Every body read now goes through one guarded reader.
+ */
+describe('typed API client — edge intercepts and non-JSON bodies', () => {
+  /** A fetch stub with real response headers and a caller-chosen body. */
+  function stubRawResponse(opts: {
+    status?: number;
+    contentType?: string | null;
+    text: string;
+  }): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const status = opts.status ?? 200;
+        return {
+          ok: status < 400,
+          status,
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === 'content-type' ? (opts.contentType ?? null) : null,
+          },
+          json: async () => JSON.parse(opts.text) as unknown,
+        } as unknown as Response;
+      }),
+    );
+  }
+
+  const LOGIN_PAGE = '<!doctype html><title>Sign in</title>';
+
+  it('an HTML sign-in page with HTTP 200 becomes a typed ApiError, never a SyntaxError', async () => {
+    stubRawResponse({ status: 200, contentType: 'text/html; charset=utf-8', text: LOGIN_PAGE });
+    const error = await api.listExperiments().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).not.toBeInstanceOf(SyntaxError);
+    const api_error = error as ApiError;
+    expect(api_error.htmlIntercept).toBe(true);
+    expect(api_error.status).toBe(200);
+    expect(api_error.contentType).toBe('text/html; charset=utf-8');
+    expect(api_error.path).toBe('/experiments');
+    expect(api_error.unreachable).toBe(false);
+  });
+
+  it('an unparseable body with no content-type is still a typed ApiError', async () => {
+    stubRawResponse({ status: 200, contentType: null, text: 'not json at all' });
+    const error = await api.health().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(200);
+    expect((error as ApiError).htmlIntercept).toBe(false);
+    expect((error as ApiError).path).toBe('/health');
+  });
+
+  it('flags the intercept on a non-OK HTML response too (a redirected 401/403 page)', async () => {
+    stubRawResponse({ status: 403, contentType: 'text/html', text: LOGIN_PAGE });
+    const error = (await api.getSchema().catch((e: unknown) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(403);
+    expect(error.htmlIntercept).toBe(true);
+  });
+
+  it('guards POST readers as well (postJson)', async () => {
+    stubRawResponse({ status: 200, contentType: 'text/html', text: LOGIN_PAGE });
+    const error = (await api.validate(EXP_ID).catch((e: unknown) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.htmlIntercept).toBe(true);
+    expect(error.path).toBe(`/experiments/${EXP_ID}/validate`);
+  });
+
+  it('guards the bespoke readers: validateRecord, blockUpload, resetDemo', async () => {
+    stubRawResponse({ status: 200, contentType: 'text/html', text: LOGIN_PAGE });
+    for (const call of [
+      () => api.validateRecord({}),
+      () => api.blockUpload(),
+      () => api.resetDemo('preview'),
+    ]) {
+      const error = (await call().catch((e: unknown) => e)) as ApiError;
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.htmlIntercept).toBe(true);
+    }
+  });
+
+  it('a network-level failure carries the path and asserts no cause', async () => {
+    stubFetchDown();
+    const error = (await api.listExperiments().catch((e: unknown) => e)) as ApiError;
+    expect(error.unreachable).toBe(true);
+    expect(error.status).toBeUndefined();
+    expect(error.htmlIntercept).toBe(false);
+    expect(error.path).toBe('/experiments');
+    expect(error.message).toBe('The ISAAC API could not be reached.');
+  });
+
+  it('an ordinary JSON error keeps its status and gains the path, with no intercept', async () => {
+    stubFetchRoutes({ 'GET /api/experiments': { status: 500, body: { error: 'boom' } } });
+    const error = (await api.listExperiments().catch((e: unknown) => e)) as ApiError;
+    expect(error.status).toBe(500);
+    expect(error.htmlIntercept).toBe(false);
+    expect(error.path).toBe('/experiments');
+  });
+
+  it('the local build is the default; hosted is decided by VITE_API_BASE alone', () => {
+    expect(isHostedBuild).toBe(false);
   });
 });
