@@ -283,5 +283,360 @@ no `isaac-k8` change · no infrastructure change · **no Phase 37**.
 
 ---
 
-*Sections 7 onward (per-unit results, reviews, verification battery, release, remaining human QA)
-are completed as the phase proceeds.*
+## 7. Per-unit results, reviews and verdicts
+
+Every unit received a **separate independent reviewer that implemented none of the work under
+review**. Every reviewer returned findings in Critical / Important / Minor tiers with a `SHIP` /
+`DO NOT SHIP` verdict. **Four of four reviews returned `DO NOT SHIP` on the first pass.** All
+Critical and Important findings were fixed by a further fresh agent before the PR opened.
+
+### Unit A — Assistant layout, header, active-conversation polish (slices 1, 2, 5)
+
+Root cause was **not** a fixed-height container but a four-link chain (§2.1): `.assistant-body` had
+`flex: 1 1 auto; min-height: 0` but **no `overflow`** (default `visible`); `.assistant-empty` was
+`flex: none` and refused to shrink; and `.assistant-foot` is `position: sticky` on an **opaque**
+`var(--assist-tint)`, so it painted *over* the overflowed third suggestion with nothing scrollable.
+`assistant-layout.test.tsx` had **asserted** `flex: none` — the suite locked in the defect. Fixed by
+making the body a real scrollport and letting the empty state shrink; the locking assertion was
+replaced with a stronger contract assertion, never deleted.
+
+Header rebuilt as one balanced row (icon + `Assistant` left, status dot + `Memory Available` right at
+matching 9px gap) with `Clear Conversation` on a subordinate action row that `:empty`-collapses when
+there is no conversation. One intentional `max-width: 720px` fallback.
+
+*Orchestrator note carried into review:* both `.assistant-body` and `.assistant-empty` declare
+`overflow-y: auto` (nested scrollports in one axis).
+
+### Unit B — root-path humanization + Open Validator (slices 3, 4) — reviewed, then fixed
+
+**The brief's premise for slice 4 was wrong, and the unit said so with evidence.**
+`OPEN_VALIDATOR_ACTION` was *already* labelled `Open Validator`, *already* targeted
+`/governance?tab=validator`, and *already* resolved the `/krish` basename. Nothing needed renaming.
+The actually-inert control was the **backend** chip `{"label": "Open Validate", "navigate_to": base}`
+where `base = /record/<id>` — the record already on screen. Corroborated by `AssistantQueryResponse`
+having no `action` field, so a free-form answer structurally could not render the working button.
+
+`src/isaac_records/official.py:71` (`".".join(...) or "$"`) was **not** edited — humanisation is
+display-only. Two implementations (`assistantPaths.ts`, `assistant_paths.py`) with equivalence locked
+by one shared 17-case table replayed by both suites; the report states honestly that there is **no
+single shared formatter** because the producers are in different languages.
+
+Reviewer: 0 Critical, 3 Important. Fixes:
+- **The validator-crash sentinel was being reported as a finding.** `routes.py` emits
+  `{"path": "$", "message": "Validation could not be completed."}` when validation **fails to run**,
+  and `_compose` read only `path`. A crash therefore rendered as *"1 record-level validation issue
+  may be blocking export."* — false, and *more* credible than the old raw `$`, which at least looked
+  like a machine artefact. Now detected on `message` (a genuine root violation always carries a
+  jsonschema message, so the honesty-critical direction cannot false-negative) and answered as
+  `insufficient_context` with no count and no location. A test reads `routes.py` and asserts the
+  literal is still present in **both** producers, so the constant cannot drift from its source.
+- **The module's own documented invariant was false**: `$$`, `a.$.b`, `assets.$` emitted a bare `$`
+  as a primary label. Now any `$` inside any segment classifies as `unknown`. Enforced not by three
+  new cases but by a **generated 1,752-locator corpus** in both languages — which caught `$$$`, a
+  case no table entry covered. Verified against the schema that none of its 219 property names
+  contains `$` or `.`, so nothing reachable was downgraded.
+- **Two more instances of the reported defect were shipping.** `Complete Metadata` and
+  `Evidence & Sources` also pointed at the record root. The orchestrator **overrode the reviewer's
+  "defer, but record it"** and took the fix: they now open `/record/<id>/complete` and
+  `/record/<id>/evidence`, DOM-verified to render. Shipping known instances of the exact defect being
+  fixed, from the exact mount where it was reported, inside an image whose notes claim the class was
+  closed, would have put the same bug back into the next QA pass. `WORKFLOW_STEP` and
+  `RECORD_SUMMARY` were deliberately left at the record root (no `/workflow` route exists;
+  `RecordWorkbench` *is* the workflow surface, and the record root *is* the record surface) — pinned
+  by tests with the rationale.
+- `_safe_technical_paths` no longer silently drops an unsafe locator; it substitutes
+  `(withheld: unsafe to display)` so the stated count and the disclosure always agree — the project
+  bans silent caps.
+- **Deliberate in-scope addition, recorded not hidden:** a 2-line-per-language invisible-character
+  strip (`﻿\x1c\x1d\x1e\x1f\x85`). Without it the two implementations genuinely disagreed on those
+  inputs, and Python rendered an all-invisible locator as a **blank location label a reader sees**.
+
+Security-relevant change attacked and cleared by the reviewer: `_CLIENT_ROUTE_PREFIXES` gained
+`/governance`. `startswith` would accept `/governance-evil`, but no data-controlled value reaches it
+— the action target is a frozen constant and every source `navigate_to` is server-constructed. The
+client also refuses to trust the wire: `resolveAssistantAction` maps `kind` through a closed frozen
+catalog and returns the frontend's own descriptor, dropping unknown kinds.
+
+### Unit C — deep symbol-level graph layer + route (slice 8a) — reviewed, then fixed
+
+The layer had been built but was **unreachable and untested**: `build_graph_detail` had zero callers
+(no route) and zero tests. `GET /api/memory/graph/detail` was wired mirroring `get_memory_graph`
+(HTTP 200 always, honest `available: false`), the base projection proven byte-identical before and
+after, and 64 tests added.
+
+Reviewer: **0 Critical — data governance clean.** It wrote an independent 30-pattern scanner over all
+20,213 strings in the artifact, drove 22 hostile artifact states through a live client, and confirmed
+no leak. It also measured the real cost: 3.0 ms cold load, 1.6 µs cached, 2.12 MB retained, 2.6 ms
+per request — cheaper per request than the base projection — and confirmed the endpoint is genuinely
+lazy (the source is still `None` after app creation and after hitting the base projection).
+
+4 Important. Fixes:
+- **`meta.counts` echoed the artifact's own claimed counts unverified** on the non-truncated branch.
+  An artifact claiming 999,999,999 nodes was served as `available: true, integrity: "verified"`
+  alongside 2,612 actual nodes. Both branches now recompute from what was rendered.
+- **The real artifact never passed the generator's own validator or leak scanner in CI**, and the
+  test docstring falsely claimed *"a hand-edited or stale artifact cannot pass"*. 10 of 13 tamper
+  mutations survived — including reversing an edge's direction and injecting
+  `~/private/notes.xlsx`, `\\fileserver\slac\x`, `/Volumes/BEAMTIME/raw.h5` and an email address into
+  labels. The three missing gates were added. **Tamper detection: 12 undetected → 6.** The remaining
+  6 are semantically plausible single-row edits that **no CI-runnable gate can distinguish** while
+  `graphify-out/` is gitignored and absent from CI; they are pinned as explicit `False` rows in a
+  16-row table so the file cannot imply a guarantee it does not provide.
+- **The documented regeneration command covered neither artifact** (§5). This would have bitten the
+  orchestrator's own release step.
+- **The new safety scan reproduced the generator's blind spots.** Patterns widened in both the
+  generator and the test — and tuned **empirically against all 201 served files**, because naive
+  spellings false-positived on this repo's own vocabulary (`settings.local.json`, `.env.local`,
+  `src/optional/`, loopback literals). Cross-checking the two independent spellings **caught a real
+  gap: the generator never rejected `file://`** though the response scan always did. Two disclosed,
+  narrow, test-pinned exemptions: loopback/`0.0.0.0`, and `isaac.slac.stanford.edu` (already
+  published in served `docs/deployment.md`).
+- `detail_schema_version: true` was accepted as version 1 at every layer (`True != 1` is `False` in
+  Python). Fixed in both runtime and generator.
+
+**Disclosure delta, quantified here because the plan previously quantified it nowhere.** Relative to
+the committed snapshot the deep artifact newly discloses: 2,594 of 2,612 node ids; **1,846 of 2,133
+distinct node labels** (code 1,189 · document 632 · rationale 25 · concept 0); 78 of 221 community
+names; 845 distinct `source_location` anchors (the snapshot has none); and the 4,067-row edge list,
+which the snapshot does not embed at all. All labels ≤ 89 chars, all from git-tracked files inside
+the 201-path served set. **Not a governance violation — a real granularity increase from file level
+to symbol level**, and it is what makes the structural-staleness disclosure necessary rather than
+decorative.
+
+### Unit D — Evidence top gutter and hierarchy (slices 6, 7)
+
+Fixed **at the shared shell**, as the brief demanded, not as a per-banner margin. A new
+`--main-top-gutter` token in `chrome.css` is consumed **exactly once** per preset (`.pad`, the
+unpadded `:not(.pad):not(.centered)`, and `.centered-col`); the one-off
+`.wf-progress-banner-inset` was replaced by a shared `.main-inset`. `.evclass` was reconciled to zero
+top padding so no state produces a double gutter.
+
+*Orchestrator verification:* `mainPad` **defaults to `'none'`** in `AppShell.tsx:60`, so the new
+unpadded rule would hit any mount that merely omits the prop. All 14 `AppShell` mounts were
+enumerated — every one passes `mainPad` explicitly, and exactly one passes `"none"`
+(`EvidenceExplorer.tsx:223`). No regression.
+
+### Unit E — Settings space, navigation, concision (slices 11, 12, 13) — reviewed, then fixed
+
+Found half-done: 3 TypeScript errors (it did not compile) and 92 failing tests. **And the actual
+slice-11 fix was missing entirely** — the previous session had written the two-column JSX skeleton but
+**no CSS at all**, so `.api-access-grid` and friends were unstyled and the "two-column layout" was
+three stacked unstyled `div`s.
+
+Reviewer: 2 Critical, 4 Important. Fixes:
+- **The `Full Description` disclosure hid 47% of the contract text.** It fired on **31 of 35**
+  operations, hiding **8,568 of 18,314** characters — including exactly the boundary copy this
+  project requires visible: the Assistant's *"There is no language model…"*, the graph's
+  structural-staleness disclosure, and *"Project Memory provides leads … never a correctness
+  ruling."* This inverted the rule Unit E's own sibling suite enshrines
+  (`settings-page.test.tsx:612-635`). **A length threshold alone would not have fixed it**: at 400
+  chars the three remainders that still exceed it are precisely `assistant/query`, `csv/preview` and
+  `memory/graph/detail` — all three carrying their boundary claim in the remainder. The shipped rule
+  is length **and** a boundary-caveat check. Result: **0 of 35 operations collapse, 0 characters
+  hidden.** `apiFixtures.ts` gained all 35 real descriptions verbatim, because it previously
+  contained **zero** multi-paragraph descriptions and no test could have caught this.
+- **The `Auth` flag overstated what the app can know.** `Credential required` dropped the conditional
+  *"when this deployment enables authentication"*, contradicting the same page's admission that it
+  *cannot report whether access is restricted* — and the overstatement was regression-guarded by four
+  pinned assertions. Relabelled to the contract fact it genuinely knows: **`401 documented` /
+  `No 401 documented`**, plus the legend given an `id` referenced by `aria-describedby`.
+- Residual dead zone: `.api-keys-row > dd` was still capped at `74ch` (~20–25% of the widest column
+  blank) and `.api-keys-empty-body` put ~420px of centred text inside a ~1,160px dashed box. Caps
+  raised to `92ch` / `100ch` and the auto-centring island removed.
+- CSS-source-string assertions converted to `getComputedStyle` on rendered elements. **This corrected
+  the reviewer's own premise:** jsdom resolves the cascade by *source order and ignores specificity*,
+  so a computed check on `.api-access-banner .api-keys-lead` would have read `74ch` where a browser
+  computes `none`. The stylesheet was reordered so jsdom and browsers agree, which is what makes the
+  assertion meaningful.
+- The `cssRule()` helper was rebuilt to strip at-rule bodies (it could previously read a
+  `@media` override as the base rule) and to be robust to formatting.
+- **Record corrected:** Unit E's report claimed it merged the banner's authentication summary with
+  the access model because it "judged these identical". They are two different claims. What actually
+  happened is that a banner-level authentication summary was **consciously dropped** so each claim is
+  stated once — right call under slice 13, wrong stated rationale.
+
+### Unit F — graph semantic zoom (slice 8b) — reviewed; fixes in progress at the time of writing
+
+**Unit F contradicted the authorizing brief's proposed hierarchy, and the reviewer independently
+confirmed every number.** The brief proposed community → file → symbol. Measurement of this exact
+artifact:
+
+| Claim | Independently verified |
+|---|---|
+| `contains` edges within-file / cross-file | 2,161 / **0** |
+| nodes missing `source_file` | 0 of 2,612 |
+| nodes missing `community_id` | 0 of 2,612 |
+| communities lying entirely inside ONE file | **188** of 221 |
+| files spanning >1 community (max) | **75** (max **58**, `schema/isaac_record_v1.json`) |
+
+A community is therefore a grouping **inside** a file, not a container of files: the brief's ordering
+would have required **inventing containment the data denies**. Shipped levels are `file` (the
+existing 220-node projection, not re-derived) → `cluster` ((file, community) groups, 363 real) →
+`symbol` (payload rows), driven by `state.view.scale`.
+
+The original defect was confirmed as structural, not a bug: `FILE_RADIUS`/`CONCEPT_RADIUS`, edge
+widths and the 11px label font were constant **in user units**, and label visibility was gated by
+node **count**, never by scale — so zoom was pure magnification *by construction*.
+
+Reviewer verdict `DO NOT SHIP`: 2 Critical, 5 Important, 8 Minor — see §8.
+
+**Ruling on the mid-zoom aggregate edges** (the sharpest judgement in the phase, escalated
+deliberately rather than settled quietly): **honest in the model, dishonest on screen.** Verified
+honest — every drawn pair has ≥1 real backing edge, the cited `payloadIndex` is a real row whose
+endpoints are exactly in the two named groups, intra-group edges are counted not drawn, and the fold
+is on the ordered pair so arrow direction is real. Not an invented relationship, and **not removed**.
+What was wrong: 193 lines standing for **300** recorded edges, **63** of them silently bundling ≥2
+distinct relation types, all with the **same stroke and same arrowhead** as a genuine 1:1 symbol
+edge, and **0** carrying `<title>`/`aria` — the proof existed only in `data-*` attributes no user and
+no AT can perceive.
+
+### Unit G — suggested commands and help concision (slices 9, 10)
+
+Suggestions are derived from the live index, never hardcoded, and **every candidate is folded through
+the real parser and reducer** before being offered — a suggestion that would refuse or return an
+empty set is dropped. Two deviations from the brief's example list, both justified: `Community` →
+`Cluster` everywhere (the shipped surface says Cluster, while the grammar verb stays `community`),
+and `Find a Path From This Node` **not offered** because it is the same canonical command as
+`Use as Path Start` — offering one command under two labels would claim a capability the grammar does
+not have.
+
+Deep-level suggestions name the mark's **file** or **cluster**, never the symbol, because
+`resolveNode` addresses the served-file projection and a symbol name is genuinely not addressable.
+
+Insert-then-Run is the only path for anything that filters, focuses, selects or routes; direct
+execution is allowlisted to `fit` alone, enforced by demotion in the generator. Each chip shows a
+**word** (`fills the bar` / `runs now` / `opens help`), never colour alone.
+
+The `detail` / `zoom` verb was **declined** with reasons, the decisive one being that the parser is
+deliberately index-free and state-free and could not compute a target scale without a new
+`GraphAction` in a Unit F file — reported, not built.
+
+Help was rebuilt to eight sections, seven visible, with exact counts / fingerprints / builder ids /
+raw relation identifiers / the grammar table / bounds / keyboard detail moved into a collapsed
+Technical Details. **Boundary and honesty claims were deliberately kept OUTSIDE every `<details>`**,
+with tests asserting so — the same defect class that produced Unit E's C1.
+
+**Its shortcut audit found the previous help was wrong about the implementation**: `=`, `_`,
+`Space`/`Spacebar` and `Home`/`End` were all implemented but undocumented, and `Enter` on a deep mark
+**pins** rather than selects. The help now presses each documented key in a test and asserts the
+documented effect, so it cannot over-promise by prose again. It also corrected a legend that claimed
+a shape distinction the canvas does not draw (a cluster is a circle, exactly like a file).
+
+## 8. Unit F review findings — full list, and their disposition
+
+Recorded in full because they were adjudicated *before* the fix round, and because the fix round was
+interrupted by an org spend limit (§10).
+
+**Critical**
+1. **Keyboard focus is destroyed on every level-of-detail transition.** `GraphCanvas.tsx:192-194`
+   calls only `setRovingId`, never `.focus()`; React unmounts the focused `<g>` when the mark set is
+   replaced. Reproduced: focus a cluster mark → press `+` ×4 (keys the mark itself handles) →
+   `document.activeElement === document.body`. Roving tabindex is maintained correctly; DOM focus is
+   simply lost. The existing test crosses that exact boundary and asserts only the zoom readout.
+2. **Cluster level affirmatively misstates provenance.** The canvas prints, for *both* deep levels,
+   "only the marks and the arrows come from the graph" — at cluster level neither is a graph object —
+   and "193 relationships drawn" for 193 folds backing 300 real edges.
+
+**Important**
+3. **"The 100% view is pixel-identical to P36R" is false.** `vector-effect="non-scaling-stroke"` is
+   newly added and **no stylesheet has ever set `vector-effect`**, so strokes go from ~0.55×
+   user-unit to full device px (~1.8× thicker on a 600px canvas); and `SELECTED_MARK_FACTOR = 1.35`
+   makes a selected node 35% larger. The radius/label constants *are* preserved at scale 1 — but the
+   default view already signed off does change.
+4. **At symbol zoom, 260 marks render with ZERO labels** (`deepLabelIds` returns empty whenever
+   `level === 'symbol' && nodes.length > 24`). The defect being fixed was "zoom reveals nothing";
+   the deepest level reveals 260 anonymous shapes. Inconsistent with the base layer, which uses
+   collision-filtered `placedLabelIds` above `LABEL_LIMIT` rather than nothing.
+5. **Level transitions are announced to nobody** — no `role="status"` on the level chip, the counts
+   note, the focus-suspend note or the unavailable note. With finding 1, *Reveal Detail* gives a
+   screen-reader user no feedback **and** destroys focus.
+6. **Browse is a second-class fallback, not the accessible complement.** `deepNeeded` requires
+   `state.mode === 'explore'`, so entering Browse directly never fetches the layer; and Browse offers
+   per-file counts only, so `GraphDeepDetail` is reachable **only** by a canvas gesture. This
+   violates two explicit phase requirements ("no pointer-only graph access"; "Browse remains the
+   exact accessible textual complement").
+7. **The bounded-DOM test is vacuous and the reported number is wrong.** It asserts `< 1200` elements
+   against an **8-row fixture**. Real measured counts: **968** file / **557** cluster / **985**
+   symbol. Unit F's reported 1,263 is not reproducible and **would fail its own assertion**. (The
+   real answer is comfortably inside "do not render thousands".)
+
+**Minor** — staleness sentence duplicated and persisting at 100% zoom where no deep layer is drawn ·
+`MAX_DEEP_NEIGHBORS = 40` is the unit's only **silent** cap · the edge cap's wording never says
+"capped" · raw NUL/SOH bytes used as string separators (invisible in every diff/grep tool) · a dead
+`stalenessSentence` branch · the 19 base concept nodes vanish at deep levels with no disclosure ·
+the `served_set_consistency === 'stale'` clause has no coverage and is unreachable today.
+
+**Cross-unit decision (orchestrator):** `deepSelectedId` is never cleared when the canvas returns to
+the file level, so the pinned-symbol pane *and* Unit G's deep suggestion set persist at 100% zoom
+where no symbol is drawn. Deep-only UI must not claim state that is not on screen; the selection is
+to be cleared when the level returns to `file`.
+
+**Verified correct by the reviewer, and not to be re-litigated:** determinism is clean (no
+`Math.random`/`Date`/`performance.now`/`rAF`; the single `getBoundingClientRect` feeds only pointer
+panning and is pre-existing; two successive plans are `JSON.stringify`-identical) · the `graph.css`
+label-declaration removal is clean, with 0 competing `font-size`/`stroke-width` in any stylesheet
+including at-rules · the bounded-size tests do measure the rendered DOM · the base layer draws no
+arrows (correct, since its edges are deduplicated and undirected) · the file-level "only payload
+edges are drawn" invariant holds · caps are enforced in code and the node cap bites on real data
+(260 of 336) and **is** disclosed · performance reproduced (parse 0.97–1.08 ms, decode 10.3–12.8 ms,
+plan median 0.37–0.83 ms, worst 1.94 ms — the claimed 4.28 ms was conservative) · hover/keyboard
+tooltip equivalence is structural and tested · the degraded copy is honest · suspend-on-focus is
+explained and tested · *Reveal Detail* is justified (at 2400% centred on the origin the plan yields
+0 marks, so uncentred zoom genuinely reveals nothing).
+
+## 9. Orchestrator verification, and two corrections to the record
+
+Established independently rather than accepted from unit reports.
+
+**Baseline reconstruction.** Canonical `ISAAC-DOE/isaac-metadata-assistant` (`origin`); branch
+`feat/p36v1-hosted-qa-fix-forward`; local HEAD == `origin/main` == `f563a66` == the user-supplied
+hosted SHA; no open PRs; latest image tag `v0.0.24`; synthetic-only; ephemeral persistence.
+
+**Deep-artifact safety, verified before building any renderer on it.** 2,612 nodes · 4,067 edges ·
+221 communities · 493,985 bytes columnar; **byte-identical on rebuild** (sha256
+`e403d854f1c40ee14ccde587fdba44daaefc6a41bf06b9a970f2c9b3f7ebafce`); 179 unique `source_file`
+values, **all 179 inside** the served-content manifest; `git check-ignore` over all 179 returned
+**nothing**; zero `/Users/`, `/home/`, `/root/`, drive-letter, `file://`; zero `http://`/`https://`;
+zero secret-pattern matches. It ships via the existing `COPY apps/api/` with **no** Dockerfile or
+`.dockerignore` change (verified: no `data/` exclusion).
+
+**Correction 1 — the 200/201 counts.** I first reported CLAUDE.md §17's "201 entries" as simply
+wrong. It is more precise than that: `snapshot["served"]` genuinely has **201** paths and the content
+manifest has **200**; the difference is `tests/fixtures/memory_snapshot/memory-snapshot.json`, which
+the manifest builder self-excludes because embedding a snapshot digest inside a snapshot is circular.
+§17 conflated two different sets rather than being off by one. Both numbers are now documented with
+their meanings, and the response gained an additive `served_file_count_scope` field so a consumer
+cannot misread the provenance block.
+
+**Correction 2 — the "pathological test" was a false alarm I caused.** Unit B reported that
+`test_memory_graph_detail.py` had accumulated 43 minutes of CPU and would block CI. That process was
+**my own** backgrounded `pytest` run, launched 45 minutes earlier against the file while Unit C was
+still mid-edit, and stuck in that broken state. Killed; the identical command then ran **137 passed
+in 4.85s**. Three independent measurements agree, and Unit C's reviewer separately confirmed no
+residual pathology (also noting `pytest-randomly` is not installed, so a `-p no:randomly` control was
+a silent no-op). **There is no test-performance defect.** Operational lesson: never leave a long test
+process backgrounded across a unit's edit window — a stale process misleads every later agent that
+inspects the machine.
+
+## 10. Interruption, and how the phase was protected
+
+The Unit F fix round was terminated mid-edit by an **org monthly spend limit**, leaving two
+TypeScript errors in the tree. Recovery, in order:
+
+1. Diagnosed the breakage: an unused import in a scratch measurement file, and a half-applied
+   `served_file_count_scope` addition (the key had been added to a `keyof` constraint list before the
+   field existed on the interface).
+2. Confirmed **none** of the C1–I5 fixes had landed — `GraphCanvas.tsx` still had exactly one
+   `focus()` call, the pre-existing roving-navigation one.
+3. Added the missing interface field, and **deleted three orphaned files** the interrupted agent had
+   created: a scratch measurement test, `graphRealArtifact.ts` (imported by nothing), and
+   `real-graph-projection.json` — a 119 kB duplicate of served content inside the frontend tree,
+   which would have been free to drift from the backend. Safety-scanned before the decision (zero
+   absolute paths, URLs, emails); removed because it was dead weight, not because it was unsafe.
+4. Restored the tree to green and **committed a checkpoint** on the release branch, so any further
+   interruption is recoverable from git rather than from a working tree.
+
+This is recorded rather than smoothed over: the orchestration policy in `CLAUDE.md` §10 reserves
+production code for implementation subagents and requires independent review per state-changing
+slice. Where the budget limit forced the orchestrator to make source edits directly, those edits are
+named above and are limited to breakage repair and dead-file removal — no feature work.

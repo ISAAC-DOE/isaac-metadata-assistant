@@ -448,10 +448,36 @@ export function decodeDeepGraph(res: ApiGraphDetailResponse | null | undefined):
   };
 }
 
-/** The group key for a (file, community) pair. ` ` cannot occur in either
- *  value, so the key is unambiguous. */
+/** The group key for a (file, community) pair. U+0000 cannot occur in either
+ *  value, so the key is unambiguous.
+ *
+ *  Written as the ESCAPE `\u0000`, never as a literal control byte: a raw NUL is
+ *  invisible in every diff, grep and review tool, and a reviewer lost real time
+ *  chasing a phantom bug because of it. The two forms are byte-identical at
+ *  runtime; only one of them is readable. */
 export function clusterKeyOf(sourceFile: string, communityId: string | null): string {
-  return `${sourceFile} ${communityId ?? ''}`;
+  return `${sourceFile}\u0000${communityId ?? ''}`;
+}
+
+/**
+ * The honest, readable form of a backend `reason` token. An unknown token is
+ * shown VERBATIM rather than smoothed into a friendly guess about what failed.
+ *
+ * Shared by the canvas and by Browse, so the two cannot describe the same
+ * degraded state differently.
+ */
+export function describeDeepReason(reason: string): string {
+  if (reason === 'detail_absent') return 'the deployment ships no symbol-level artifact';
+  if (reason === 'detail_unreadable') return 'the symbol-level artifact could not be read';
+  if (reason === 'detail_unsupported') return 'the artifact uses an unsupported schema version';
+  if (reason === 'graph_absent' || reason === 'graph_unreadable') {
+    return 'no memory graph is loaded here';
+  }
+  if (reason === 'request_failed') return 'the request for it did not complete';
+  if (reason === 'detail_schema_unrecognised') {
+    return 'its column contract was not recognised, so nothing was decoded';
+  }
+  return reason;
 }
 
 // --------------------------------------------------- structural staleness
@@ -490,9 +516,34 @@ export function stalenessSentence(staleness: DeepStaleness): string {
   const commit = staleness.shortCommit
     ? `commit ${staleness.shortCommit}`
     : 'a commit the payload does not name';
-  if (staleness.describesCurrentHead && !staleness.isPointInTime) {
-    // Not reachable with today's artifact; handled rather than assumed away.
-    return `Symbol-level structure was indexed at ${commit}, which the payload reports as the current repository HEAD.`;
+  /*
+   * RETAINED AS A GUARD, and deliberately widened.
+   *
+   * `memory_graph.py::_detail_provenance` hardcodes `is_point_in_time: true` and
+   * `describes_current_head: false`, so neither branch below can be reached by
+   * today's backend. It is kept rather than deleted because deleting it would
+   * leave the ONLY code path printing "it does NOT describe the current
+   * repository HEAD" unconditionally — so a future backend that legitimately sets
+   * `describes_current_head: true` would make this surface state a falsehood, and
+   * nothing would fail. A guard against asserting a denial the payload
+   * contradicts is worth more than the dead-code tidiness of removing it.
+   *
+   * The condition was `describesCurrentHead && !isPointInTime`, which was the
+   * wrong guard: a payload reporting BOTH `describes_current_head: true` and
+   * `is_point_in_time: true` (an index of a commit that happens to be HEAD — the
+   * expected shape if the graph were ever rebuilt in CI) fell through to the
+   * denial. It now branches on `describesCurrentHead` alone and reports the
+   * point-in-time axis separately, because the two are independent facts.
+   * Covered by tests that drive the flags directly.
+   */
+  if (staleness.describesCurrentHead) {
+    return (
+      `Symbol-level structure was indexed at ${commit}, which the payload reports as the ` +
+      'current repository HEAD' +
+      (staleness.isPointInTime
+        ? ' — it is still a point-in-time index, so anything changed since that commit was indexed is absent.'
+        : '.')
+    );
   }
   return (
     `Symbol-level structure is a point-in-time index of ${commit} — it does NOT describe the ` +
@@ -573,6 +624,8 @@ export interface DeepRenderPlan {
   regions: DeepRegion[];
   nodes: DeepRenderNode[];
   edges: DeepRenderEdge[];
+  /** the marks that keep a standing label — bounded and collision-filtered */
+  labelIds: string[];
   /** base-visible files that carry deep structure and fall in the cull window */
   openFiles: number;
   /** …before the open-file cap */
@@ -581,10 +634,31 @@ export interface DeepRenderPlan {
   nodesTruncated: boolean;
   edgesConsidered: number;
   edgesTruncated: boolean;
+  /**
+   * How many REAL payload edges the drawn lines stand for. At the symbol level
+   * this equals `edges.length` (one line, one row). At the cluster level it is
+   * larger, because a line is a FOLD — and that difference is the fact the
+   * surface has to state rather than leave in a `data-` attribute.
+   */
+  edgesBacking: number;
+  /** drawn lines standing for more than one payload edge */
+  edgesFolded: number;
+  /** drawn lines folding more than one distinct relation VALUE */
+  edgesMultiRelation: number;
+  /** payload edges with both endpoints inside ONE drawn group: real, counted,
+   *  and deliberately not drawn at the cluster level */
+  edgesInsideGroups: number;
   /** base-visible files with NO symbol-level structure in this artifact */
   filesWithoutDeepStructure: number;
+  /** base-visible CONCEPT nodes. Concepts are not keyed by `source_file` in this
+   *  artifact, so they have no symbol-level counterpart and LEAVE the canvas at
+   *  the deeper levels — stated, not silently dropped. */
+  conceptsNotInLayer: number;
   /** files the base layout has no position for — never drawn at a guessed spot */
   unplacedFiles: number;
+  /** the pinned selection's real neighbour count, before MAX_DEEP_NEIGHBORS */
+  pinnedNeighborsConsidered: number;
+  pinnedNeighborsTruncated: boolean;
 }
 
 interface CullWindow {
@@ -630,6 +704,7 @@ export function deepRenderPlan(
 
   // --- 1. which files are open ---------------------------------------------
   let filesWithoutDeepStructure = 0;
+  let conceptsNotInLayer = 0;
   let unplacedFiles = 0;
   const candidates: { file: string; pos: GraphPoint; radius: number; distance: number }[] = [];
   for (const id of [...visibleBaseIds].sort(byAsc)) {
@@ -637,7 +712,13 @@ export function deepRenderPlan(
     if (!members || members.length === 0) {
       // A served file with no symbol-level structure in this artifact. Stated,
       // never padded out with a placeholder symbol.
-      if (base.byId.get(id)?.kind === 'file') filesWithoutDeepStructure += 1;
+      const kind = base.byId.get(id)?.kind;
+      if (kind === 'file') filesWithoutDeepStructure += 1;
+      // A concept is not keyed by `source_file` here, so it can never have deep
+      // members. Counting it separately is what lets the surface say that the
+      // concepts LEAVE the canvas at this zoom instead of implying they were
+      // files with no structure.
+      else if (kind === 'concept') conceptsNotInLayer += 1;
       continue;
     }
     const pos = nodePosition(id, state, base);
@@ -673,6 +754,8 @@ export function deepRenderPlan(
   const nodes: DeepRenderNode[] = [];
   let nodesConsidered = 0;
   let nodesTruncated = false;
+  let pinnedNeighborsConsidered = 0;
+  let pinnedNeighborsTruncated = false;
 
   if (level === 'cluster') {
     const all: DeepRenderNode[] = [];
@@ -719,6 +802,10 @@ export function deepRenderPlan(
         const other = edge.source === selected.index ? edge.target : edge.source;
         if (!neighbours.includes(other)) neighbours.push(other);
       }
+      // MAX_DEEP_NEIGHBORS was this unit's only SILENT cap. It is reported now,
+      // like every other bound on this surface.
+      pinnedNeighborsConsidered = neighbours.length;
+      pinnedNeighborsTruncated = neighbours.length > MAX_DEEP_NEIGHBORS;
       neighbours
         .sort((a, b) => byAsc(idOf(deep, a), idOf(deep, b)))
         .slice(0, MAX_DEEP_NEIGHBORS)
@@ -783,6 +870,7 @@ export function deepRenderPlan(
   const edges: DeepRenderEdge[] = [];
   let edgesConsidered = 0;
   let edgesTruncated = false;
+  let edgesInsideGroups = 0;
 
   if (level === 'symbol') {
     const rendered: DeepRenderEdge[] = [];
@@ -823,11 +911,17 @@ export function deepRenderPlan(
       const from = nodeAt(deep, edge.source);
       const to = nodeAt(deep, edge.target);
       if (!from || !to) continue;
-      if (from.clusterKey === to.clusterKey) continue; // inside one group: counted, not drawn
+      if (from.clusterKey === to.clusterKey) {
+        // Inside ONE drawn group: a real recorded edge, counted here and
+        // deliberately not drawn (a line from a mark to itself would say
+        // nothing). Disclosed in the counts note rather than dropped silently.
+        if (drawnById.has(from.clusterKey)) edgesInsideGroups += 1;
+        continue;
+      }
       const a = drawnById.get(from.clusterKey);
       const b = drawnById.get(to.clusterKey);
       if (!a || !b) continue;
-      const key = `${from.clusterKey}${to.clusterKey}`;
+      const key = `${from.clusterKey}\u0001${to.clusterKey}`;
       const entry = folded.get(key);
       if (entry) {
         entry.relations.add(edge.relation);
@@ -865,20 +959,218 @@ export function deepRenderPlan(
     edges.push(...aggregated.slice(0, MAX_DEEP_EDGES));
   }
 
+  // --- 4. what the DRAWN lines actually stand for --------------------------
+  // Computed over the lines that survive the cap, so the figures describe what is
+  // on screen and nothing else. At the cluster level a line is a fold; these
+  // three numbers are what makes that visible to a reader instead of only to a
+  // test reading `data-edge-backing`.
+  let edgesBacking = 0;
+  let edgesFolded = 0;
+  let edgesMultiRelation = 0;
+  for (const line of edges) {
+    edgesBacking += line.backing;
+    if (line.backing > 1) edgesFolded += 1;
+    if (line.relations.length > 1) edgesMultiRelation += 1;
+  }
+
   return {
     level,
     regions,
     nodes,
     edges,
+    labelIds: placedDeepLabelIds(nodes, state.view.scale),
     openFiles: open.length,
     candidateFiles,
     nodesConsidered,
     nodesTruncated,
     edgesConsidered,
     edgesTruncated,
+    edgesBacking,
+    edgesFolded,
+    edgesMultiRelation,
+    edgesInsideGroups,
     filesWithoutDeepStructure,
+    conceptsNotInLayer,
     unplacedFiles,
+    pinnedNeighborsConsidered,
+    pinnedNeighborsTruncated,
   };
+}
+
+// ------------------------------------------------------------- deep labelling
+
+/** Longest deep label painted before eliding — the same bound the base canvas
+ *  uses (`CANVAS_LABEL_MAX_CHARS`). */
+export const DEEP_LABEL_MAX_CHARS = 26;
+/** Below this many deep marks EVERY one is labelled. */
+export const DEEP_LABEL_LIMIT = 24;
+/** Landmark labels kept above that — the same count the base layer uses. */
+export const DEEP_HUB_LABEL_COUNT = 18;
+/** Candidates the placer may consider per label it will keep. */
+const DEEP_LABEL_CANDIDATE_FACTOR = 3;
+/** Mean advance per character of the UI font, as a fraction of the font size. */
+const LABEL_CHAR_RATIO = 5.9 / 11;
+
+/** The text actually painted under a deep mark. Lives here, beside the width
+ *  estimate that depends on it, so the two cannot drift apart. */
+export function deepMarkLabelText(label: string): string {
+  return label.length > DEEP_LABEL_MAX_CHARS
+    ? `${label.slice(0, DEEP_LABEL_MAX_CHARS - 1)}…`
+    : label;
+}
+
+/**
+ * Which deep marks keep a STANDING label.
+ *
+ * The defect this replaces: at the symbol level the old rule returned an EMPTY
+ * set whenever more than 24 marks were drawn — so the deepest level of a feature
+ * whose whole purpose is "zoom reveals detail" rendered 260 anonymous rounded
+ * squares, readable only one at a time by hover or focus. It was also
+ * inconsistent with the base layer, which above its own limit falls back to
+ * collision-filtered landmarks rather than to nothing.
+ *
+ * The rule now matches the base layer's (`placedLabelIds`): candidates in the
+ * plan's own ranking order (pinned, then most-connected / largest, ties by id),
+ * accepted greedily only while the label box does not collide with one already
+ * accepted. Labelling the top 18 outright would smear them across a cluster's
+ * dense core, which is noise rather than orientation.
+ *
+ * Deterministic: fixed candidate order, fixed geometry, no DOM measurement. The
+ * label box is estimated from the SAME screen-bounded font size the canvas paints
+ * with, so the filter and the paint agree at every zoom.
+ */
+export function placedDeepLabelIds(
+  nodes: readonly DeepRenderNode[],
+  scale: number,
+  count: number = DEEP_HUB_LABEL_COUNT,
+): string[] {
+  if (nodes.length === 0) return [];
+  if (nodes.length <= DEEP_LABEL_LIMIT) return nodes.map((n) => n.id);
+  if (count <= 0) return [];
+  // Screen-bounded font size, in the layout's own units at this scale — the same
+  // expression `DeepMark` renders with.
+  const fontUnits = Math.min(18, Math.max(6, 11)) / Math.min(24, Math.max(0.25, scale));
+  const halfHeight = fontUnits * 0.65;
+  const out: string[] = [];
+  const boxes: { x0: number; x1: number; y0: number; y1: number }[] = [];
+  for (const node of nodes.slice(0, count * DEEP_LABEL_CANDIDATE_FACTOR)) {
+    if (out.length >= count) break;
+    const halfWidth =
+      (deepMarkLabelText(node.label).length * fontUnits * LABEL_CHAR_RATIO) / 2;
+    const box = {
+      x0: node.x - halfWidth,
+      x1: node.x + halfWidth,
+      y0: node.y,
+      y1: node.y + halfHeight * 2,
+    };
+    if (boxes.some((b) => box.x0 < b.x1 && b.x0 < box.x1 && box.y0 < b.y1 && b.y0 < box.y1)) {
+      continue;
+    }
+    boxes.push(box);
+    out.push(node.id);
+  }
+  return out;
+}
+
+// --------------------------------------------------- the counts, said honestly
+
+const plural = (n: number, one: string, many: string = `${one}s`): string =>
+  `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The sentence rendered under the canvas at a deeper level.
+ *
+ * A pure function of the plan, deliberately: every figure in it is testable
+ * without mounting, and every bound this unit applies has to appear here or it is
+ * a SILENT cap. The reviewed defects it fixes:
+ *
+ *  · At the cluster level neither the marks nor the lines are graph objects: the
+ *    marks are (file, community) GROUPS and the lines are FOLDS. Saying
+ *    "N relationships drawn" for 193 lines backed by 300 recorded edges — with
+ *    63 of them bundling two different relation types under one identical stroke
+ *    — was true of the model and false on the screen. The real backing count, the
+ *    fold count and the multi-relation count are all stated.
+ *  · The edge cap never used the word "capped", unlike the node cap.
+ *  · `MAX_DEEP_NEIGHBORS` was disclosed nowhere at all.
+ *  · The base concept nodes vanish at the deeper levels; `filesWithoutDeepStructure`
+ *    counts only files, so nothing mentioned them.
+ */
+export function deepCountsSentence(plan: DeepRenderPlan, payloadTruncated = false): string {
+  const parts: string[] = [];
+  const marks =
+    plan.level === 'symbol'
+      ? plural(plan.nodes.length, 'symbol')
+      : plural(plan.nodes.length, 'cluster');
+  const cap = plan.nodesTruncated
+    ? `, capped from ${plan.nodesConsidered} — pan or zoom to reach the rest`
+    : '';
+  parts.push(
+    `${marks} and ${plural(plan.edges.length, 'line')} drawn inside ${plan.openFiles} of ` +
+      `${plural(plan.candidateFiles, 'file')} in view${cap}.`,
+  );
+
+  if (plan.level === 'cluster') {
+    parts.push(
+      `Each line SUMMARISES the ${plural(plan.edgesBacking, 'recorded reference')} between two ` +
+        'clusters, so one line can stand for several' +
+        (plan.edgesFolded > 0
+          ? `: ${plan.edgesFolded} of them do, and ${plan.edgesMultiRelation} fold more than one kind of reference`
+          : '') +
+        '.',
+    );
+    if (plan.edgesInsideGroups > 0) {
+      parts.push(
+        `A further ${plural(plan.edgesInsideGroups, 'recorded reference')} ` +
+          `${plan.edgesInsideGroups === 1 ? 'runs' : 'run'} between two nodes inside a single ` +
+          'cluster; those are counted here and not drawn as lines at this zoom.',
+      );
+    }
+  } else {
+    parts.push('Each line is ONE recorded reference, with the direction the payload recorded.');
+  }
+
+  if (plan.edgesTruncated) {
+    parts.push(
+      `The lines are capped from ${plan.edgesConsidered} that matched the view — the rest are not drawn.`,
+    );
+  }
+  if (plan.pinnedNeighborsTruncated) {
+    parts.push(
+      `The pinned mark has ${plan.pinnedNeighborsConsidered} recorded neighbours; ` +
+        `${MAX_DEEP_NEIGHBORS} of them are kept on screen around it.`,
+    );
+  }
+  if (plan.nodes.length > DEEP_LABEL_LIMIT) {
+    parts.push(
+      `${plan.labelIds.length} of the marks keep a standing label as landmarks; hover or focus ` +
+        'any other for its own.',
+    );
+  }
+  if (plan.filesWithoutDeepStructure > 0) {
+    parts.push(
+      `${plural(plan.filesWithoutDeepStructure, 'file')} ` +
+        `${plan.filesWithoutDeepStructure === 1 ? 'has' : 'have'} no symbol-level structure in ` +
+        'this graph at all.',
+    );
+  }
+  if (plan.conceptsNotInLayer > 0) {
+    parts.push(
+      `${plural(plan.conceptsNotInLayer, 'concept')} ` +
+        `${plan.conceptsNotInLayer === 1 ? 'is' : 'are'} not part of the symbol-level layer and ` +
+        `${plan.conceptsNotInLayer === 1 ? 'leaves' : 'leave'} the canvas at this zoom — zoom out ` +
+        'to the file projection to see them again.',
+    );
+  }
+  if (plan.unplacedFiles > 0) {
+    parts.push(
+      `${plural(plan.unplacedFiles, 'file')} could not be placed and ` +
+        `${plan.unplacedFiles === 1 ? 'is' : 'are'} not drawn.`,
+    );
+  }
+  if (payloadTruncated) {
+    parts.push('The served payload itself is capped, so this layer is not the whole source graph.');
+  }
+  return parts.join(' ');
 }
 
 /** The decoded node at a payload row index, or undefined when that row was

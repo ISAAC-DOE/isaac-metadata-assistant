@@ -43,7 +43,14 @@ import {
   MAX_RENDER_NODES,
   MAX_SCALE,
 } from '../../lib/graphModel';
-import { MAX_DEEP_EDGES, MAX_DEEP_NODES, MAX_OPEN_FILES } from '../../lib/graphDeep';
+import {
+  DEEP_HUB_LABEL_COUNT,
+  DEEP_LABEL_LIMIT,
+  MAX_DEEP_EDGES,
+  MAX_DEEP_NEIGHBORS,
+  MAX_DEEP_NODES,
+  MAX_OPEN_FILES,
+} from '../../lib/graphDeep';
 
 /**
  * Which disclosure the dialog opens expanded.
@@ -232,8 +239,8 @@ export function GraphHelp({
             </li>
             <li>
               <span className="graph-help-swatch shape-arrow" aria-hidden="true" />
-              <span className="graph-help-term">Line With an Arrow</span> — a directed reference
-              between symbols.
+              <span className="graph-help-term">Line With an Arrow</span> — a directed reference;
+              dashed means several.
             </li>
           </ul>
           <p className="graph-help-example">
@@ -243,9 +250,9 @@ export function GraphHelp({
           </p>
           <p className="graph-help-example">
             Clusters are derived automatically by the upstream graph builder and named after one
-            representative node: advisory groupings, not categories the schema recognises, shown
-            exactly as the builder wrote them. Nodes with no recorded reference sit on the outer
-            rings — where they are parked, not a relationship between them.
+            representative node: advisory groupings, not categories the schema recognises. Nodes with
+            no recorded reference sit on the outer rings — where they are parked, not a relationship
+            between them.
           </p>
         </div>
 
@@ -317,7 +324,7 @@ export function GraphHelp({
           </ul>
           <p className="graph-help-example">
             Browse is permanent, not a fallback: the same graph as text, with keyboard selection,
-            connected nodes and raw node data.
+            connected nodes and raw node data, symbol layer included.
           </p>
         </div>
 
@@ -529,9 +536,28 @@ export function GraphHelp({
               {MAX_OPEN_FILES.symbol} at the symbol level. Zoom is clamped at {pct(MAX_SCALE)}.
             </li>
             <li>
+              A symbol's local neighbourhood is bounded at {MAX_DEEP_NEIGHBORS} entries, and the
+              deeper levels label at most {DEEP_HUB_LABEL_COUNT} landmark marks once more than{' '}
+              {DEEP_LABEL_LIMIT} are drawn. Both bounds are stated on the canvas when they bite.
+            </li>
+            <li>
+              A pinned symbol is released when you zoom out of the level that drew it, so no panel
+              describes a mark that is gone. Browse keeps it — there it is the way in, not a canvas
+              selection. In Browse, <strong>Load Symbol-Level Detail</strong> fetches the symbol layer
+              on request and each file row then expands to its symbols.
+            </li>
+            <li>
               Layout is deterministic: the same payload always yields the same coordinates. There is
               no physics loop and no randomness. Positions inside a file are that layout, not a claim
-              about the code's structure — only the marks and the arrows come from the graph.
+              about the code's structure.
+            </li>
+            <li>
+              What is a recorded graph object depends on the level, and the canvas says which. At the
+              symbol level one mark is one recorded symbol and one line is one recorded reference. At
+              the cluster level a mark is a <em>group</em> of symbols and a line <em>summarises</em>{' '}
+              the references between two groups — one line can stand for several, of more than one
+              kind — so a cluster-level line is a real count over real references, not a single
+              recorded edge.
             </li>
           </ul>
         </details>

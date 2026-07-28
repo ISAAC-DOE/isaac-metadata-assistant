@@ -145,6 +145,26 @@ export const memoryGraphDetailUnavailable: ApiGraphDetailResponse = {
   },
 };
 
+/**
+ * The same payload, but reporting that the SERVED PATH SET has changed since the
+ * structure was indexed (`served_set_consistency: 'stale'`).
+ *
+ * Unreachable from today's backend, which measures the two path sets and finds
+ * them equal (`memory_graph.py::_served_set_consistency` returns `'current'`).
+ * The canvas has a clause for it, so the clause is driven from a fixture rather
+ * than left as the only untested branch of the provenance surface.
+ */
+export const memoryGraphDetailStaleServedSet: ApiGraphDetailResponse = {
+  ...memoryGraphDetailAvailable,
+  meta: {
+    ...memoryGraphDetailAvailable.meta,
+    provenance: {
+      ...memoryGraphDetailAvailable.meta.provenance,
+      served_set_consistency: 'stale',
+    },
+  },
+};
+
 /** A payload whose column contract is not the one this client decodes. */
 export const memoryGraphDetailUnknownSchema: ApiGraphDetailResponse = {
   ...memoryGraphDetailAvailable,

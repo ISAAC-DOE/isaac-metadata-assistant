@@ -409,12 +409,24 @@ function MemoryGraphAvailable({
   useEffect(() => () => {
     alive.current = false;
   }, []);
-  // Requested only when the layer would actually be DRAWN: past the first
-  // threshold, in Explore, and with no neighbourhood/path focus active (a focus
-  // keeps the canvas on the base projection it was computed over, so fetching
-  // 500 kB there would buy nothing).
-  const deepNeeded =
+  // Requested when the layer would actually be DRAWN on the canvas: past the
+  // first threshold, in Explore, and with no neighbourhood/path focus active (a
+  // focus keeps the canvas on the base projection it was computed over, so
+  // fetching 500 kB there would buy nothing).
+  const deepDrawnOnCanvas =
     graphLodLevel(state.view.scale) !== 'file' && state.mode === 'explore' && state.focus === null;
+  /*
+   * …OR when the reader asks for it in Browse.
+   *
+   * Requiring `mode === 'explore'` was the reviewed defect: Browse has no
+   * viewport, so it can never cross a zoom threshold, so a reader who entered
+   * Browse directly could never obtain the deep layer at all — which made the
+   * whole symbol level, and `GraphDeepDetail` with it, reachable only by a pointer
+   * gesture on the canvas. Browse now has its own explicit control; the fetch
+   * stays opt-in rather than becoming eager.
+   */
+  const [deepAskedInBrowse, setDeepAskedInBrowse] = useState(false);
+  const deepNeeded = deepDrawnOnCanvas || deepAskedInBrowse;
   useEffect(() => {
     if (!deepNeeded || deepRequested.current) return;
     deepRequested.current = true;
@@ -439,8 +451,30 @@ function MemoryGraphAvailable({
   }, [deepNeeded]);
   const deepIndex: DeepIndex | null = deep.status === 'ready' ? deep.index : null;
   /** Whether the canvas is actually drawing a deeper layer right now — the same
-   *  three conditions GraphCanvas uses to build a plan. */
-  const deepShowing = deepIndex !== null && deepNeeded;
+   *  three conditions GraphCanvas uses to build a plan. Deliberately NOT
+   *  `deepNeeded`: a Browse-initiated fetch must never make the count line above
+   *  the canvas claim the canvas is zoomed inside the files. */
+  const deepShowing = deepIndex !== null && deepDrawnOnCanvas;
+
+  /*
+   * DEEP-ONLY UI MUST NOT OUTLIVE THE DEEP LAYER (orchestrator decision, P36V.1).
+   *
+   * `deepSelectedId` was never cleared when the canvas zoomed back out, so the
+   * pinned-symbol panel — and Unit G's deep suggested commands, which read this
+   * same value — kept describing a mark that is not drawn at 100 % zoom. The value
+   * is CLEARED rather than the surfaces being special-cased, so every consumer of
+   * it (this panel, the suggestions, the canvas's `aria-pressed`) agrees without
+   * any of them needing to know the rule. The prop Unit G reads is unchanged.
+   *
+   * Explore only. In Browse nothing is drawn at any zoom, and the deep detail
+   * panel is Browse's textual route into the layer — clearing there would remove
+   * the keyboard path, not a stale claim.
+   */
+  useEffect(() => {
+    if (state.mode !== 'explore') return;
+    if (deepShowing) return;
+    setDeepSelectedId((current) => (current === null ? current : null));
+  }, [state.mode, deepShowing]);
 
   /*
    * P36V.1 G — the Suggested Commands set.
@@ -707,6 +741,11 @@ function MemoryGraphAvailable({
               ids={listIds}
               grouping={grouping}
               deep={deepIndex}
+              deepStatus={deep.status}
+              deepReason={deep.status === 'unavailable' ? deep.reason : null}
+              onRequestDeep={() => setDeepAskedInBrowse(true)}
+              deepSelectedId={deepSelectedId}
+              onSelectDeep={setDeepSelectedId}
             />
           )}
           {/* Explore only: the legend explains CANVAS marks (shape, colour,
@@ -727,6 +766,10 @@ function MemoryGraphAvailable({
               onSelectDeep={setDeepSelectedId}
               onNavigateFile={navigateToFile}
               onClear={() => setDeepSelectedId(null)}
+              /* The canvas states the structural staleness whenever it is
+                 drawing a deep layer; this panel states it otherwise. One
+                 screen, one statement. */
+              showProvenance={!deepShowing}
             />
           )}
           {state.focus?.kind === 'path' && (

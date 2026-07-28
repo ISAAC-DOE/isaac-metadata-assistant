@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "0047b4c6f7ca7136e73ebffc6f97e1faeba3affd5c776039e1d75918b8892b2e"
+        "sha256": "3ee5c8335db7549e2a08a238182568de57ce428af2c1401583cbee0d8a081622"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10272,11 +10272,11 @@
       },
       {
         "path": "apps/api/isaac_api/memory.py",
-        "sha256": "8986b5e0d1e0e262af99d622e1f1dd86b2c0ec9e0b9135fe9445a5ff9190ff50"
+        "sha256": "5f80784fb1b28b699dff048dbae6edb7529ef6802069305f39294f2df35420db"
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "2f9f40619ac162bd6704e67ca8cd44daddac42f2f32e58d8656442c9d62b22d8"
+        "sha256": "c0796310ed0025aee230bf20d28eb5f081d224bbfb2521a2ef45e4f4a401d193"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10340,7 +10340,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "9fdb346a25688d222665f30f1ba6a9a2f22c68fb6ec7216d79144e2d82cae472"
+        "sha256": "69fe986dbe105bc360cdb4b92cc94318f7488dd7bc6fb3c153c3c425081fcaa7"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "054bd57c1b7e4a1060ecd47f1e5f04cd1f2eaf515cf0187627dc469866590bf0"
+        "sha256": "33f5d16329db838e4345217b0a1d6565279c8fedd3a7f54ca5a0a91568e5c9fa"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "9d0050959329b89f15de0b4eca8ef1e6282456e305ce76bd27b096452c4743bd"
+        "sha256": "08346ee6861c7558abf7049b52ecedb9e6113c7ee5c87fa4cb1be4fa19e9c34d"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10516,7 +10516,7 @@
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "b73ace3ec3b194b4471570928058ec3e34ccd4e6b0ca77025a7cc1d2285055b9"
+        "sha256": "873b73c065eafbdc68f8161cb5f4c69a7bfa8418a61548857a7260d6886fac86"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "cd18c84eb6a06f323bd11c424eeda743c36f359e710ca8818fbcbe2bff8b25d6"
+        "sha256": "568091034c39a0c0209ef9959adfca1e904d0148ca69774efeb7d3affeb4c893"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10536,7 +10536,7 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "6f6ad4ff558d715a9a741081f2a3846737b19d776a6240e58c6899d2f7c2afe9"
+        "sha256": "7c28c9ce1a9c85a6c10b6bd95302ff793e657691bbb930ed79d0dab0b6b03927"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
@@ -10568,11 +10568,11 @@
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "b939e8154375d9a26253ef9ab0454ff03c467f6b4044c8e01da15d2b15605627"
+        "sha256": "0a9a64443d635f6f8a7cf10f6a7f689dd9e8370d550de5479394b3026ea67b54"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "87e0d25d56e8f2ad91e9d653d6f54de3e0619cf18ee35c1cebc263cc1cd6650d"
+        "sha256": "5116f3aab4f2c379bd95271acbd6f5aab674db471bac75892af5bfe96ca26d53"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10792,7 +10792,7 @@
       },
       {
         "path": "scripts/build_memory_snapshot.py",
-        "sha256": "868f3ebaf4727eef85e796e2fede664719ced9dae9a1faf7753a16488b6c258a"
+        "sha256": "8d0eae608b42cf874e45bff24cb049640f60aa8667e0a23e83d95af2b9aef75f"
       },
       {
         "path": "scripts/check_graphify_freshness.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "a3165fb406262a9b95ef5a3dee021aa70da2bba54534d5367c1a122dabff5d8e"
+    "served_manifest_fingerprint": "1d817ff909a46cec1a4f0f1ecef777556f0511bb4a2da6861b330ef869198a20"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

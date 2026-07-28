@@ -18,6 +18,7 @@ import {
   DEEP_EDGE_ROWS,
   DEEP_NODE_ROWS,
   memoryGraphDetailAvailable,
+  memoryGraphDetailStaleServedSet,
   memoryGraphDetailUnavailable,
 } from '../test/graphDeepFixture';
 
@@ -318,8 +319,8 @@ describe('semantic zoom — every drawn line is a real payload edge', () => {
       // Both endpoints are marks on screen: no line into nothing.
       const from = line.getAttribute('data-edge-from') ?? '';
       const to = line.getAttribute('data-edge-to') ?? '';
-      expect(marks.has(from.split(' ')[0])).toBe(true);
-      expect(marks.has(to.split(' ')[0])).toBe(true);
+      expect(marks.has(from.split('\u0000')[0])).toBe(true);
+      expect(marks.has(to.split('\u0000')[0])).toBe(true);
     }
     // A reduction can never produce more lines than the rows it reduces.
     expect(drawn.length).toBeLessThanOrEqual(DEEP_EDGE_ROWS.length);
@@ -352,6 +353,122 @@ describe('semantic zoom — every drawn line is a real payload edge', () => {
     for (const line of document.querySelectorAll('.memory-graph-edge')) {
       expect(line.getAttribute('marker-end')).toBeNull();
     }
+  });
+});
+
+// --- 4b. C2: the cluster level does not MISSTATE what it is drawing ---------
+
+describe('semantic zoom — an aggregate line says it is one, perceivably', () => {
+  const caption = () => document.querySelector('.graph-canvas-caption')?.textContent ?? '';
+  const note = () => document.querySelector('.graph-deep-note')?.textContent ?? '';
+
+  it('never claims the cluster level draws graph objects, and states the real backing count', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    reveal(view);
+    await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
+
+    // THE DEFECT: this exact sentence used to be printed at BOTH deep levels. At
+    // the cluster level neither the marks nor the lines are graph objects — the
+    // marks are (file, community) GROUPS and the lines are FOLDS.
+    expect(caption()).not.toContain('only the marks and the arrows come from the graph');
+    expect(caption()).toContain('GROUP of symbols');
+    expect(caption()).toContain('SUMMARISES');
+    expect(caption()).toMatch(/one line can stand for several/);
+
+    // The count line states the REAL number of recorded references behind the
+    // lines, not the line count dressed up as a relationship count.
+    const lines = deepEdges().length;
+    const backing = deepEdges().reduce(
+      (sum, e) => sum + Number(e.getAttribute('data-edge-backing')),
+      0,
+    );
+    expect(backing).toBeGreaterThan(lines); // the fixture really does fold
+    expect(note()).toContain(`${lines} line`);
+    expect(note()).toContain(`${backing} recorded reference`);
+    expect(note()).not.toMatch(new RegExp(`${lines} relationships? drawn`));
+  });
+
+  it('draws an aggregate line so it cannot be mistaken for a 1:1 edge', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    reveal(view);
+    await waitFor(() => expect(deepEdges().length).toBeGreaterThan(0));
+
+    for (const line of deepEdges()) {
+      // Distinct stroke treatment and a DIFFERENT arrowhead — not colour alone.
+      expect(line.classList.contains('memory-graph-deep-edge-aggregate')).toBe(true);
+      expect(line.getAttribute('marker-end')).toBe('url(#graph-deep-arrow-aggregate)');
+    }
+    // Both markers are defined, and the aggregate one is hollow (stroke, no fill).
+    expect(document.getElementById('graph-deep-arrow')).not.toBeNull();
+    expect(document.getElementById('graph-deep-arrow-aggregate')).not.toBeNull();
+    expect(
+      document.querySelector('.memory-graph-deep-arrowhead-aggregate'),
+    ).not.toBeNull();
+
+    // At the SYMBOL level a line is one real row: no aggregate treatment at all.
+    fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
+    await waitFor(() => expect(deepMarks()).toEqual([]));
+    await zoomToSymbols(view);
+    expect(deepEdges().length).toBeGreaterThan(0);
+    for (const line of deepEdges()) {
+      expect(line.classList.contains('memory-graph-deep-edge-aggregate')).toBe(false);
+      expect(line.getAttribute('marker-end')).toBe('url(#graph-deep-arrow)');
+      expect(line.querySelector('title')).toBeNull();
+    }
+    expect(caption()).toContain('ONE recorded reference');
+    expect(caption()).not.toContain('SUMMARISES');
+  });
+
+  it('gives every aggregate line a PERCEIVABLE description, not only data- attributes', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    reveal(view);
+    await waitFor(() => expect(deepEdges().length).toBeGreaterThan(0));
+
+    for (const line of deepEdges()) {
+      const backing = Number(line.getAttribute('data-edge-backing'));
+      const relations = (line.getAttribute('data-edge-relations') ?? '').split(',');
+      // A <title> (the native hover tooltip) AND an aria-label, both saying what
+      // the line summarises. The proof used to live only in `data-` attributes,
+      // which no reader and no assistive technology can reach.
+      const title = line.querySelector('title');
+      expect(title).not.toBeNull();
+      expect(line.getAttribute('role')).toBe('img');
+      const described = line.getAttribute('aria-label') ?? '';
+      expect(described).toBe(title!.textContent);
+      expect(described).toContain(`${backing} recorded reference`);
+      expect(described).toContain('summarised into this one line');
+      // The distinct relation kinds it folds are named, in readable form.
+      for (const relation of relations) {
+        expect(described.toLowerCase()).toContain(
+          relation.replace(/_/g, ' ').toLowerCase().slice(0, 6),
+        );
+      }
+      // Both endpoint files are named.
+      expect(described).toContain((line.getAttribute('data-edge-from') ?? '').split(' ')[0]);
+      expect(described).toContain((line.getAttribute('data-edge-to') ?? '').split(' ')[0]);
+    }
+  });
+
+  it('explains the fold as TEXT in the pinned cluster panel, reachable from the keyboard', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    reveal(view);
+    await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
+
+    const mark = deepMarks().find((m) => m.getAttribute('tabindex') === '0') as HTMLElement;
+    act(() => mark.focus());
+    fireEvent.keyDown(mark, { key: 'Enter' });
+    await waitFor(() => expect(document.querySelector('.memory-graph-deep-detail')).not.toBeNull());
+    const panel = document.querySelector('.memory-graph-deep-detail') as HTMLElement;
+    const text = panel.textContent ?? '';
+    // The two halves of the fold, in words, where a keyboard user reads detail:
+    // what is counted but not drawn, and what is summarised into a line.
+    expect(text).toMatch(/counted, not\s+drawn as a line at cluster zoom/);
+    expect(text).toMatch(/summarised into the dashed lines between\s+cluster marks/);
+    expect(text).toMatch(/one such line can stand for several recorded references/);
   });
 });
 
@@ -416,8 +533,17 @@ describe('semantic zoom — hover and keyboard focus are the same affordance', (
     for (const label of ['fake_mod.py', 'validate_draft', 'load_snapshot', 'other_mod.py']) {
       expect(text).toContain(label);
     }
-    // Structural staleness is repeated where the detail is read.
-    expect(text).toContain('does NOT describe the current repository HEAD');
+    // Structural staleness is stated ONCE on the screen, not twice. It used to be
+    // printed both under the canvas and again in this panel, which reads as two
+    // separate warnings and dilutes both. While the canvas is drawing a deep
+    // layer, the canvas carries it and the panel does not.
+    const claim = 'does NOT describe the current repository HEAD';
+    const occurrences = (view.container.textContent ?? '').split(claim).length - 1;
+    expect(occurrences).toBe(1);
+    expect(document.querySelector('.graph-deep-staleness')?.textContent).toContain(claim);
+    expect(document.querySelector('.memory-graph-deep-detail-provenance')).toBeNull();
+    // The panel still carries the leads-not-verdicts boundary, always.
+    expect(text).toContain('navigational lead into the project source');
 
     // Following a relationship pins that node instead.
     fireEvent.click(within(panel).getByRole('button', { name: /validate_draft/ }));
@@ -435,6 +561,148 @@ describe('semantic zoom — hover and keyboard focus are the same affordance', (
       ),
     );
     await waitFor(() => expect(document.querySelector('.memory-graph-deep-detail')).toBeNull());
+  });
+
+  /* --- C1: focus SURVIVES every level-of-detail transition ------------------
+   *
+   * The defect this pins: a level change replaces the whole mark set, React
+   * unmounts the focused <g>, and the roving tabindex — which was maintained
+   * correctly — says only where focus WOULD go, not where it is. Measured
+   * against the real artifact before the fix: focus a cluster, press `+` four
+   * times, and `document.activeElement === document.body`. Identical on the way
+   * out. A keyboard user zoomed into a cluster and was dumped at the top of the
+   * document with no indication anything had happened.
+   *
+   * The contract now asserted at BOTH crossings, in BOTH directions: focus lands
+   * on the mark that CONTAINS (or is contained by) the one it left, and never on
+   * <body>.
+   */
+  const active = () => document.activeElement as HTMLElement;
+  const activeIsMark = () => {
+    expect(active()).not.toBe(document.body);
+    expect(active().getAttribute('role')).toBe('button');
+    return active();
+  };
+  const baseMark = (name: RegExp) =>
+    within(svgEl() as unknown as HTMLElement).getByRole('button', { name });
+
+  /**
+   * Land on the CLUSTER level centred on `src/fake_mod.py` with the deep payload
+   * already fetched, then step back OUT one zoom notch to the file level, keeping
+   * that centre. This is the state a reader is actually in when they zoom a file
+   * open: the file under the pointer is in the middle of the viewport. (Pressing
+   * `+` from the default 100% centre instead moves the window off every file that
+   * carries structure, which is a different case — covered separately below.)
+   */
+  async function atFileLevelCentredOnFakeMod(view: RenderResult) {
+    await view.findByText('Graph', { selector: 'h2' });
+    selectBaseNode(/^src\/fake_mod\.py, file/);
+    reveal(view);
+    await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
+    fireEvent.keyDown(svgEl(), { key: '-' });
+    await waitFor(() => expect(deepMarks()).toEqual([]));
+  }
+
+  it('MOVES focus to the containing cluster across the file → cluster crossing', async () => {
+    const { view } = renderGraph(withDeep);
+    await atFileLevelCentredOnFakeMod(view);
+
+    const file = baseMark(/^src\/fake_mod\.py, file/);
+    act(() => file.focus());
+    expect(active()).toBe(file);
+
+    fireEvent.keyDown(active(), { key: '+' });
+    await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
+
+    // Focus is on a CLUSTER inside the file it was on — not on <body>, and not
+    // on whatever mark happens to be first in the plan.
+    const landed = activeIsMark();
+    expect(landed.classList.contains('memory-graph-deep-node')).toBe(true);
+    expect(landed.getAttribute('data-deep-file')).toBe('src/fake_mod.py');
+    // The roving tabindex agrees with where focus actually is.
+    expect(landed.getAttribute('tabindex')).toBe('0');
+    expect(deepMarks().filter((m) => m.getAttribute('tabindex') === '0').length).toBe(1);
+  });
+
+  it('MOVES focus into the same cluster across the cluster → symbol crossing, and back OUT again', async () => {
+    const { view } = renderGraph(withDeep);
+    await atFileLevelCentredOnFakeMod(view);
+    act(() => baseMark(/^src\/fake_mod\.py, file/).focus());
+
+    fireEvent.keyDown(active(), { key: '+' }); // → cluster
+    await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
+    const community = activeIsMark().getAttribute('data-deep-community');
+
+    // 175% → … → 427%: crosses LOD_SYMBOL_SCALE.
+    for (let i = 0; i < 4; i += 1) fireEvent.keyDown(active(), { key: '+' });
+    await waitFor(() =>
+      expect(deepMarks().every((m) => m.getAttribute('data-deep-kind') === 'symbol')).toBe(true),
+    );
+    const symbol = activeIsMark();
+    expect(symbol.getAttribute('data-deep-kind')).toBe('symbol');
+    expect(symbol.getAttribute('data-deep-file')).toBe('src/fake_mod.py');
+    // Containment, not proximity: the symbol belongs to the cluster left behind.
+    expect(symbol.getAttribute('data-deep-community')).toBe(community);
+
+    // ZOOM OUT, symbol → cluster: back to the cluster that symbol belongs to.
+    fireEvent.keyDown(active(), { key: '-' });
+    await waitFor(() =>
+      expect(deepMarks().every((m) => m.getAttribute('data-deep-kind') === 'cluster')).toBe(true),
+    );
+    expect(activeIsMark().getAttribute('data-deep-community')).toBe(community);
+
+    // ZOOM OUT, cluster → file: back to the file the cluster lived in.
+    for (let i = 0; i < 4; i += 1) fireEvent.keyDown(active(), { key: '-' });
+    await waitFor(() => expect(deepMarks()).toEqual([]));
+    expect(activeIsMark().getAttribute('aria-label')).toMatch(/^src\/fake_mod\.py, file/);
+  });
+
+  it('does NOT steal focus when no mark held it', async () => {
+    const { view } = renderGraph(withDeep);
+    await atFileLevelCentredOnFakeMod(view);
+    // Nothing on the canvas has focus — the reader is driving the toolbar. A
+    // level change must then leave focus exactly where the browser put it and
+    // must not yank it onto a mark: focus restoration is for focus that was
+    // genuinely DESTROYED, never a general "grab the canvas" behaviour.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    expect(active()).toBe(document.body);
+    reveal(view);
+    await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
+    expect(active()).toBe(document.body);
+    // …and the roving tabindex is still correct, so Tab still reaches the layer.
+    expect(deepMarks().filter((m) => m.getAttribute('tabindex') === '0').length).toBe(1);
+
+    // Same for a mark that was focused and then abandoned: the armed request is
+    // disarmed as soon as focus leaves it, so a later set change cannot yank it.
+    const mark = deepMarks().find((m) => m.getAttribute('tabindex') === '0') as HTMLElement;
+    act(() => mark.focus());
+    fireEvent.keyDown(mark, { key: '+' }); // arms the request, stays at cluster level
+    await waitFor(() => expect(view.container.textContent).toMatch(/zoom 219%/));
+    act(() => mark.blur());
+    expect(active()).toBe(document.body);
+    fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
+    fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
+    fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
+    await waitFor(() => expect(view.container.textContent).toMatch(/showing symbols/));
+    expect(active()).toBe(document.body);
+  });
+
+  it('never leaves focus on <body> when the crossing has no counterpart mark', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    // COLD path, and the hard case: the deep payload is fetched DURING this
+    // crossing (so the mark set is replaced a render later than the zoom), and
+    // the default centre leaves no file with structure in the window at 195%, so
+    // there is no counterpart mark to move to at all. The canvas — always mounted
+    // and focusable — is where focus must land.
+    const file = baseMark(/^src\/fake_mod\.py, file/);
+    act(() => file.focus());
+    for (let i = 0; i < 3; i += 1) fireEvent.keyDown(active(), { key: '+' });
+    await waitFor(() => expect(view.container.textContent).toMatch(/showing clusters|zoom 195%/));
+    await waitFor(() => expect(active()).not.toBe(document.body));
+    expect(active() === (svgEl() as unknown as HTMLElement) || active().getAttribute('role') === 'button').toBe(
+      true,
+    );
   });
 
   it('gives every deep mark a real focus stop, with a roving tabindex', async () => {
@@ -459,6 +727,91 @@ describe('semantic zoom — hover and keyboard focus are the same affordance', (
     // Zoom keys still work while a deep mark holds focus, as at the file level.
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: '-' });
     await waitFor(() => expect(view.container.textContent).toMatch(/zoom 320%/));
+  });
+});
+
+// --- 5b. I3: a level change is ANNOUNCED, once -------------------------------
+
+describe('semantic zoom — level changes reach a screen reader', () => {
+  /** The canvas's single polite status region. */
+  const statusRegion = () =>
+    [...document.querySelectorAll('[role="status"]')].find((el) =>
+      el.classList.contains('memory-graph-visually-hidden'),
+    ) as HTMLElement;
+  const announced = () => statusRegion()?.textContent ?? '';
+
+  it('announces nothing on arrival — the state you land in is not news', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    expect(statusRegion()).not.toBeUndefined();
+    expect(announced()).toBe('');
+  });
+
+  it('announces each level exactly once, and says what that level draws', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+
+    reveal(view);
+    await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
+    // The wording matches what the level actually is — a group and a summary, not
+    // "the marks and the arrows come from the graph".
+    expect(announced()).toContain('Cluster detail');
+    expect(announced()).toContain('group of symbols');
+    expect(announced()).toContain('summarises the references');
+    // ONE announcement: the text is one node, replaced, not appended to.
+    expect(statusRegion().children).toHaveLength(0);
+
+    reveal(view);
+    await waitFor(() => expect(view.container.textContent).toMatch(/showing symbols/));
+    expect(announced()).toContain('Symbol detail');
+    expect(announced()).toContain('one recorded reference');
+
+    fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
+    await waitFor(() => expect(deepMarks()).toEqual([]));
+    expect(announced()).toContain('The file projection');
+    expect(announced()).toContain('No symbol-level detail is drawn');
+  });
+
+  it('does NOT re-announce while panning or zooming inside one level', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    reveal(view);
+    await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
+    const atCluster = announced();
+    expect(atCluster).toContain('Cluster detail');
+    const node = statusRegion().firstChild;
+
+    // Three zoom steps and two pans that all stay inside the cluster level: the
+    // live region's text node must be untouched, or every arrow-key press would
+    // speak. (The counts note DOES change here — which is exactly why the counts
+    // are deliberately not in the region.)
+    for (let i = 0; i < 3; i += 1) fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
+    for (let i = 0; i < 2; i += 1) fireEvent.keyDown(svgEl(), { key: 'ArrowRight' });
+    await waitFor(() => expect(view.container.textContent).toMatch(/zoom 342%/));
+    expect(deepMarks().length).toBeGreaterThan(0);
+    expect(announced()).toBe(atCluster);
+    expect(statusRegion().firstChild).toBe(node);
+
+    // Panning right OFF every file with structure is a real state change, and it
+    // IS announced — silence there would leave a keyboard user panning into an
+    // empty canvas with no signal at all.
+    for (let i = 0; i < 30; i += 1) fireEvent.keyDown(svgEl(), { key: 'ArrowRight' });
+    await waitFor(() => expect(deepMarks()).toEqual([]));
+    expect(announced()).toContain('Nothing is drawn at this zoom');
+  });
+
+  it('announces the honest degraded and suspended states too', async () => {
+    const { view } = renderGraph({
+      ...baseRoutes,
+      [deepRoute]: { body: memoryGraphDetailUnavailable },
+    });
+    await view.findByText('Graph', { selector: 'h2' });
+    reveal(view);
+    await waitFor(() => expect(announced()).toMatch(/unavailable in this deployment/));
+    expect(announced()).toContain('stays on the file projection');
+    // There is exactly ONE status region on the canvas — the loading note's
+    // separate `role="status"` was folded into this one.
+    expect(document.querySelectorAll('[role="status"]').length).toBe(1);
   });
 });
 
@@ -510,6 +863,101 @@ describe('semantic zoom — the deeper layers inherit the surface they sit under
     );
     expect(view.container.textContent).toMatch(/showing files \(focus active\)/);
     expect(baseNodes().length).toBeGreaterThan(0);
+  });
+
+  /* --- I4: Browse is the accessible COMPLEMENT, not a second-class fallback ---
+   *
+   * The defect: the deep payload was fetched only when the CANVAS crossed a zoom
+   * threshold (`deepNeeded` required `mode === 'explore'`), so a reader who
+   * entered Browse directly never fetched it — measured: 0 deep notes, 0 per-row
+   * counts — and even once populated Browse offered per-file COUNTS only, with no
+   * symbol list and no way to select a symbol. `GraphDeepDetail` was therefore
+   * reachable only through a canvas interaction, which violates both "no
+   * pointer-only graph access" and "Browse remains the exact accessible textual
+   * complement to Graph Explore".
+   */
+  it('offers its OWN way into the deep layer, and does not fetch it unasked', async () => {
+    const { view, calls } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    fireEvent.click(view.getByRole('radio', { name: 'Browse' }));
+
+    // Still lazy: entering Browse does not pull the ~500 kB artifact by itself.
+    expect(calls).not.toContain(deepRoute);
+    const load = view.getByRole('button', { name: 'Load Symbol-Level Detail' });
+    // …and it says what it will do before doing it.
+    expect(document.querySelector('.memory-graph-list-deepload')?.textContent).toMatch(
+      /separate, larger artifact, so it is fetched only when asked for/,
+    );
+
+    fireEvent.click(load);
+    await waitFor(() =>
+      expect(document.querySelectorAll('.memory-graph-list-deepcount').length).toBeGreaterThan(0),
+    );
+    expect(calls.filter((c) => c === deepRoute).length).toBe(1);
+    expect(view.queryByRole('button', { name: 'Load Symbol-Level Detail' })).toBeNull();
+    // Browse gained the LAYER, not a viewport.
+    expect(view.queryByRole('button', { name: 'Reveal Detail' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Zoom in' })).toBeNull();
+  });
+
+  it('reaches a symbol and its full detail from Browse alone, with no canvas gesture', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    fireEvent.click(view.getByRole('radio', { name: 'Browse' }));
+    fireEvent.click(view.getByRole('button', { name: 'Load Symbol-Level Detail' }));
+    await waitFor(() =>
+      expect(document.querySelectorAll('.memory-graph-list-deepcount').length).toBeGreaterThan(0),
+    );
+    // No canvas exists in Browse at all, so nothing below can be a canvas gesture.
+    expect(document.querySelector('.memory-graph-svg')).toBeNull();
+
+    // The row's count is a real disclosure BUTTON, not static text.
+    const toggle = view.getByRole('button', { name: /4 symbols · 2 clusters/ });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const list = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    expect(list).not.toBeNull();
+
+    // Every symbol of that file, as text: kind, cluster, line, relationship count.
+    const symbol = within(list as HTMLElement).getByRole('button', { name: /export_record/ });
+    expect(symbol.textContent).toContain('code');
+    expect(symbol.textContent).toContain('Export Pipeline');
+    expect(symbol.textContent).toContain('L20');
+    expect(symbol.textContent).toMatch(/4 recorded relationships/);
+
+    // Selecting it opens the SHARED deep detail panel — the same component the
+    // canvas opens, with the relationships split by direction.
+    expect(symbol.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(symbol);
+    await waitFor(() => expect(document.querySelector('.memory-graph-deep-detail')).not.toBeNull());
+    const panel = document.querySelector('.memory-graph-deep-detail') as HTMLElement;
+    expect(panel.textContent).toContain('export_record');
+    expect(panel.textContent).toContain('References out');
+    expect(panel.textContent).toContain('Referenced by');
+    expect(
+      view.getByRole('button', { name: /export_record/, pressed: true }),
+    ).not.toBeNull();
+    // Toggling it off again needs no Clear control to hunt for.
+    fireEvent.click(symbol);
+    await waitFor(() => expect(document.querySelector('.memory-graph-deep-detail')).toBeNull());
+  });
+
+  it('degrades honestly in Browse when the layer is unavailable', async () => {
+    const { view } = renderGraph({
+      ...baseRoutes,
+      [deepRoute]: { body: memoryGraphDetailUnavailable },
+    });
+    await view.findByText('Graph', { selector: 'h2' });
+    fireEvent.click(view.getByRole('radio', { name: 'Browse' }));
+    fireEvent.click(view.getByRole('button', { name: 'Load Symbol-Level Detail' }));
+    await waitFor(() =>
+      expect(document.querySelector('.memory-graph-list-deepnote.advisory')).not.toBeNull(),
+    );
+    const note = document.querySelector('.memory-graph-list-deepnote.advisory') as HTMLElement;
+    expect(note.textContent).toContain('the deployment ships no symbol-level artifact');
+    expect(note.textContent).toMatch(/nothing was aggregated, estimated or stood in for/);
+    expect(document.querySelectorAll('.memory-graph-list-deepcount')).toHaveLength(0);
   });
 
   it('reflects the deeper structure in Browse as text, without gaining a viewport', async () => {
@@ -586,33 +1034,120 @@ describe('semantic zoom — honesty when the layer is missing or stale', () => {
     expect(note.getAttribute('data-staleness-commit')).toBe(DEEP_BUILT_AT_COMMIT);
     // It is on the surface, not only inside the About This Graph dialog.
     expect(note.closest('[role="dialog"]')).toBeNull();
+
+    // …and it does NOT outlive the layer it describes. Back at the file level no
+    // deep layer is drawn, so the canvas makes no claim about one. It used to
+    // persist for the rest of the session once the payload had been fetched.
+    fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
+    await waitFor(() => expect(deepMarks()).toEqual([]));
+    expect(document.querySelector('.graph-deep-staleness')).toBeNull();
+    expect(view.container.textContent).not.toContain('point-in-time index');
+  });
+
+  it('adds the served-set clause when the payload reports the path set has moved (M2)', async () => {
+    // `served_set_consistency` is a second, INDEPENDENT axis: the structure's
+    // commit and whether the served file set still matches it. The backend
+    // measures `current` today, so this clause had no coverage at all — it is
+    // driven from a fixture here rather than left unexercised.
+    const { view } = renderGraph({
+      ...baseRoutes,
+      [deepRoute]: { body: memoryGraphDetailStaleServedSet },
+    });
+    await view.findByText('Graph', { selector: 'h2' });
+    reveal(view);
+    await waitFor(() => expect(document.querySelector('.graph-deep-staleness')).not.toBeNull());
+    const text = document.querySelector('.graph-deep-staleness')?.textContent ?? '';
+    // Both axes, in one place, neither collapsed into the other.
+    expect(text).toContain('does NOT describe the current repository HEAD');
+    expect(text).toContain('The served file set has also changed since then');
+    expect(text).toContain('some files here may no longer be served');
+  });
+
+  it('makes no served-set claim when the payload reports the path set is current', async () => {
+    const { view } = renderGraph(withDeep);
+    await view.findByText('Graph', { selector: 'h2' });
+    reveal(view);
+    await waitFor(() => expect(document.querySelector('.graph-deep-staleness')).not.toBeNull());
+    expect(document.querySelector('.graph-deep-staleness')?.textContent).not.toContain(
+      'The served file set has also changed',
+    );
+  });
+
+  it('clears the pinned deep mark when the canvas zooms back out of the layer', async () => {
+    // The orchestrator's cross-unit ruling: deep-only UI must not persist when no
+    // deep layer is drawn. The pinned-symbol panel — and Unit G's deep suggested
+    // commands, which read the same `deepSelectedId` — used to keep describing a
+    // symbol that is not on screen at 100% zoom.
+    const { view } = renderGraph(withDeep);
+    await zoomToSymbols(view);
+    const mark = deepMarks().find((m) =>
+      (m.getAttribute('aria-label') ?? '').startsWith('export_record'),
+    ) as SVGGElement;
+    fireEvent.keyDown(mark, { key: 'Enter' });
+    await waitFor(() => expect(document.querySelector('.memory-graph-deep-detail')).not.toBeNull());
+
+    fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
+    await waitFor(() => expect(deepMarks()).toEqual([]));
+    expect(document.querySelector('.memory-graph-deep-detail')).toBeNull();
+
+    // Browse is NOT affected: nothing is drawn there at any zoom, and the panel
+    // is Browse's textual route into the layer, so clearing there would remove a
+    // keyboard path rather than a stale claim.
+    await zoomToSymbols(view);
+    fireEvent.keyDown(
+      deepMarks().find((m) =>
+        (m.getAttribute('aria-label') ?? '').startsWith('export_record'),
+      ) as SVGGElement,
+      { key: 'Enter' },
+    );
+    await waitFor(() => expect(document.querySelector('.memory-graph-deep-detail')).not.toBeNull());
+    fireEvent.click(view.getByRole('radio', { name: 'Browse' }));
+    expect(document.querySelector('.memory-graph-deep-detail')).not.toBeNull();
+    // …and there the panel DOES carry the staleness sentence, because no canvas
+    // is stating it.
+    expect(document.querySelector('.memory-graph-deep-detail-provenance')?.textContent).toContain(
+      'does NOT describe the current repository HEAD',
+    );
   });
 });
 
 // --- 8. bounded DOM, and the viewport controls ------------------------------
 
 describe('semantic zoom — a bounded number of elements, and the same controls', () => {
-  it('draws a few hundred elements at most, at every level', async () => {
+  /*
+   * The element BOUND is asserted at real payload size in
+   * `graph-real-artifact.test.tsx` — against the committed 2,612-row artifact,
+   * where the caps can actually bite. It used to be asserted here, against this
+   * file's EIGHT-row fixture, which could never reach any cap and therefore
+   * proved nothing; the 1,263 elements reported alongside it were also not
+   * reproducible (the real figures are 968 file / 557 cluster / 985 symbol).
+   *
+   * What this fixture is good for is the SHAPE of the render: one level at a
+   * time, and no stray element left behind by the level that just unmounted.
+   */
+  it('draws exactly one level at a time, leaving nothing from the other behind', async () => {
     const { view } = renderGraph(withDeep);
     await view.findByText('Graph', { selector: 'h2' });
-    const countAll = () => svgEl().querySelectorAll('*').length;
-    const atFile = countAll();
+    expect(baseNodes().length).toBe(memoryGraphAvailable.nodes.length);
+    expect(deepMarks()).toEqual([]);
+    expect(document.querySelectorAll('.memory-graph-deep-region')).toHaveLength(0);
 
     reveal(view);
     await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
-    const atCluster = countAll();
+    expect(baseNodes()).toEqual([]);
+    expect(document.querySelectorAll('.memory-graph-edges')).toHaveLength(0);
 
-    // Back to the file projection first: a base node has to be selectable to
-    // anchor the descent to the symbol level.
     fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
     await waitFor(() => expect(deepMarks()).toEqual([]));
     await zoomToSymbols(view);
-    const atSymbol = countAll();
+    expect(baseNodes()).toEqual([]);
+    expect(deepMarks().every((m) => m.getAttribute('data-deep-kind') === 'symbol')).toBe(true);
 
-    for (const count of [atFile, atCluster, atSymbol]) {
-      expect(count).toBeGreaterThan(0);
-      expect(count).toBeLessThan(1200);
-    }
+    fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
+    await waitFor(() => expect(baseNodes().length).toBe(memoryGraphAvailable.nodes.length));
+    expect(deepMarks()).toEqual([]);
+    expect(deepEdges()).toEqual([]);
+    expect(document.querySelectorAll('.memory-graph-deep-region')).toHaveLength(0);
   });
 
   it('keeps Fit to View and Reset View working at the deepest level', async () => {

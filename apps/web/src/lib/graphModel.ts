@@ -90,9 +90,22 @@ export type GraphLodLevel = 'file' | 'cluster' | 'symbol';
 export const LOD_CLUSTER_SCALE = 1.75;
 export const LOD_SYMBOL_SCALE = 4;
 
+/**
+ * Threshold comparisons are made with a tolerance, and that is not cosmetic.
+ *
+ * Zoom is applied as a MULTIPLICATION (`scale * factor`), so a scale that should
+ * land exactly on a threshold generally does not: "Reveal Detail" from 1.4
+ * dispatches factor 1.75/1.4 and arrives at 1.7499999999999998. With an exact
+ * `>=` that reads as the FILE level — so the control zoomed in and revealed
+ * nothing, which is the very complaint this layer exists to fix — and
+ * `nextLodScale` returned 1.75 again, so pressing it repeatedly could never reach
+ * the symbol level. Found by test, not by inspection.
+ */
+const SCALE_EPSILON = 1e-9;
+
 export function graphLodLevel(scale: number): GraphLodLevel {
-  if (scale >= LOD_SYMBOL_SCALE) return 'symbol';
-  if (scale >= LOD_CLUSTER_SCALE) return 'cluster';
+  if (scale >= LOD_SYMBOL_SCALE - SCALE_EPSILON) return 'symbol';
+  if (scale >= LOD_CLUSTER_SCALE - SCALE_EPSILON) return 'cluster';
   return 'file';
 }
 
@@ -100,8 +113,8 @@ export function graphLodLevel(scale: number): GraphLodLevel {
  *  canvas's "Reveal Detail" control so one click lands exactly on a level
  *  boundary instead of asking for six 1.25× presses. */
 export function nextLodScale(scale: number): number | null {
-  if (scale < LOD_CLUSTER_SCALE) return LOD_CLUSTER_SCALE;
-  if (scale < LOD_SYMBOL_SCALE) return LOD_SYMBOL_SCALE;
+  if (scale < LOD_CLUSTER_SCALE - SCALE_EPSILON) return LOD_CLUSTER_SCALE;
+  if (scale < LOD_SYMBOL_SCALE - SCALE_EPSILON) return LOD_SYMBOL_SCALE;
   return null;
 }
 
@@ -173,7 +186,20 @@ export const MARK_UNITS = {
 /** Label font size, in user units at scale 1 — mirrors the P36R 11px CSS rule,
  *  which is now applied as an attribute so it can track the zoom. */
 export const LABEL_UNITS = 11;
-/** Emphasis multiplier for the selected mark. Bounded by the same clamp. */
+/**
+ * Emphasis multiplier for a selected DEEP mark. Bounded by the same clamp.
+ *
+ * Deliberately NOT applied to the base file/concept marks. It was, and that made
+ * a selected file node 35 % larger at 100 % zoom than the P36R view Krish signed
+ * off — P36R rendered `r={FILE_RADIUS}` unconditionally and signalled selection
+ * with stroke colour and width alone. The base layer is restored to that.
+ *
+ * It is kept for the deep layer, which has no signed-off baseline and a real need
+ * for it: a symbol mark is 6 units against the file layer's 9–11, and up to 260 of
+ * them are on screen at once, so a pinned symbol among 260 identical rounded
+ * squares needs a size cue — a stroke colour alone is not a sufficient signal at
+ * that density, and colour must never be the only carrier.
+ */
 export const SELECTED_MARK_FACTOR = 1.35;
 
 // --------------------------------------------------------------------- types

@@ -221,6 +221,7 @@ export function GraphDeepDetail({
   onSelectDeep,
   onNavigateFile,
   onClear,
+  showProvenance = true,
 }: {
   deep: DeepIndex;
   selectedId: string;
@@ -229,6 +230,16 @@ export function GraphDeepDetail({
   onSelectDeep: (id: string | null) => void;
   onNavigateFile: (path: string) => void;
   onClear: () => void;
+  /**
+   * Whether THIS panel carries the structural-staleness sentence.
+   *
+   * `false` when the canvas beside it is already showing it — the same sentence
+   * appeared twice on one screen, which reads as two separate warnings and dilutes
+   * both. It is never dropped: the caller passes `false` only when the canvas is
+   * drawing a deep layer and therefore rendering the sentence itself, and `true`
+   * everywhere else (Browse, and Explore back at the file level).
+   */
+  showProvenance?: boolean;
 }) {
   const cluster = deep.clusterByKey.get(selectedId);
   const node = deep.byId.get(selectedId);
@@ -317,6 +328,22 @@ export function GraphDeepDetail({
         </button>
       </div>
 
+      {/* What the LINES around this cluster mean, in text, where a keyboard user
+          reaches it. At cluster zoom a line is a FOLD: the references that leave
+          this group are summarised into one line per destination group, and the
+          ones that stay inside it are counted and not drawn at all. Both figures
+          are the payload's own tallies (`internalEdges` / `externalEdges`). */}
+      {cluster && (
+        <p className="memory-graph-detail-empty-note">
+          {cluster.internalEdges} of these {cluster.internalEdges === 1 ? 'runs' : 'run'} between two
+          nodes inside this cluster and {cluster.internalEdges === 1 ? 'is' : 'are'} counted, not
+          drawn as a line at cluster zoom; {cluster.externalEdges} leave it and{' '}
+          {cluster.externalEdges === 1 ? 'is' : 'are'} summarised into the dashed lines between
+          cluster marks — one such line can stand for several recorded references, of more than one
+          kind. Zoom in to the symbol level to see each one drawn separately.
+        </p>
+      )}
+
       {cluster && (
         <div className="memory-graph-detail-section">
           <h4 className="memory-graph-detail-section-heading">Nodes in this cluster</h4>
@@ -371,8 +398,12 @@ export function GraphDeepDetail({
       )}
 
       {/* The two boundary facts, where the detail is read: this layer is a
-          point-in-time index, and project memory returns leads, not verdicts. */}
-      <p className="memory-graph-deep-detail-provenance">{stalenessSentence(staleness)}</p>
+          point-in-time index, and project memory returns leads, not verdicts.
+          The first is suppressed when the canvas beside this panel is already
+          stating it, so one screen carries it exactly once. */}
+      {showProvenance && (
+        <p className="memory-graph-deep-detail-provenance">{stalenessSentence(staleness)}</p>
+      )}
       <p className="memory-graph-path-caveat">
         A recorded relationship is a navigational lead into the project source — it is not a
         scientific relationship and it is not evidence for anything in a record.

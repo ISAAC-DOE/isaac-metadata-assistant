@@ -66,11 +66,15 @@ import {
   type GraphViewState,
 } from '../../lib/graphModel';
 import {
+  deepCountsSentence,
+  deepMarkLabelText,
+  describeDeepReason,
   deepRelationSummary,
   deepRenderPlan,
   stalenessSentence,
   deepStaleness,
   type DeepIndex,
+  type DeepRenderEdge,
   type DeepRenderNode,
   type DeepRenderPlan,
 } from '../../lib/graphDeep';
@@ -95,8 +99,6 @@ const REGION_LABEL_UNITS = 12;
  *  base projection's edges are de-duplicated and undirected, so drawing an
  *  arrow there would assert a direction the base payload does not carry. */
 const ARROW_UNITS = 7;
-/** Above this many deep marks, only landmarks / hover / selection are labelled. */
-const DEEP_LABEL_LIMIT = 24;
 /** Label halo width reference (user units at scale 1) — mirrors the P36R
  *  `stroke-width: 3px` rule that used to live in graph.css. */
 const LABEL_HALO_UNITS = 3;
@@ -118,6 +120,67 @@ function viewportAction(key: string): GraphAction | null {
 
 /** What the pointer or the keyboard is currently on. */
 type HoverTarget = { layer: 'base' | 'deep'; id: string } | null;
+
+/**
+ * Where focus should LAND after a level-of-detail transition unmounted the mark
+ * that held it.
+ *
+ * The rule is containment, in both directions, so focus tracks the SAME piece of
+ * the graph the reader was on rather than jumping to whatever happens to be
+ * first:
+ *   file → cluster : a cluster inside that file.
+ *   cluster → symbol: a symbol inside that cluster, else inside that file.
+ *   symbol → cluster: the cluster that symbol belongs to.
+ *   * → file       : the file the mark lived in.
+ * `null` means no counterpart is drawn (its file was culled, filtered out, or the
+ * viewport moved off it) — the caller then focuses the canvas, which is always
+ * mounted and always focusable.
+ */
+function transitionFocusTarget(
+  pending: { id: string; layer: 'base' | 'deep' },
+  plan: DeepRenderPlan | null,
+  focusIds: readonly string[],
+  deepIndex: DeepIndex | null,
+): string | null {
+  // The mark survived (a zoom inside one level, or a fit that changed nothing
+  // about the set): keep focus exactly where it was.
+  if (focusIds.includes(pending.id)) return pending.id;
+
+  // Resolve what the departing mark WAS, in the payload's own terms.
+  let file: string | null = null;
+  let clusterKey: string | null = null;
+  if (pending.layer === 'base') {
+    file = pending.id; // a base file node's id IS its path; a concept has no counterpart
+  } else if (deepIndex) {
+    const cluster = deepIndex.clusterByKey.get(pending.id);
+    if (cluster) {
+      file = cluster.sourceFile;
+      clusterKey = cluster.key;
+    } else {
+      const node = deepIndex.byId.get(pending.id);
+      if (node) {
+        file = node.sourceFile;
+        clusterKey = node.clusterKey;
+      }
+    }
+  }
+  if (file === null) return null;
+
+  if (!plan) return focusIds.includes(file) ? file : null;
+
+  if (plan.level === 'cluster') {
+    if (clusterKey !== null && focusIds.includes(clusterKey)) return clusterKey;
+    return plan.nodes.find((n) => n.sourceFile === file)?.id ?? null;
+  }
+  // Symbol level: prefer a symbol from the same cluster, then the same file.
+  if (clusterKey !== null && deepIndex) {
+    const sameCluster = plan.nodes.find(
+      (n) => deepIndex.byId.get(n.id)?.clusterKey === clusterKey,
+    );
+    if (sameCluster) return sameCluster.id;
+  }
+  return plan.nodes.find((n) => n.sourceFile === file)?.id ?? null;
+}
 
 interface TooltipContent {
   title: string;
@@ -189,9 +252,52 @@ export function GraphCanvas({
   );
   const domPrefix = plan ? 'graph-deep-node' : 'graph-node';
   const [rovingId, setRovingId] = useState<string | null>(focusIds[0] ?? null);
+
+  /**
+   * A level-of-detail transition REPLACES the whole mark set, so the `<g>` that
+   * held DOM focus is unmounted and the browser drops focus on `<body>`.
+   * Maintaining the roving tabindex is not enough: the tabindex says where focus
+   * WOULD go, not where it is. A keyboard user who zoomed into a cluster used to
+   * be dumped at the top of the document with no indication anything had
+   * happened.
+   *
+   * This ref records that a mark held focus at the moment a viewport action was
+   * dispatched FROM that mark — the only path that can destroy focus, because
+   * every other trigger (toolbar button, command bar, search box) keeps focus on
+   * a control that stays mounted. The effect below then moves focus deliberately.
+   */
+  const pendingFocus = useRef<{ id: string; layer: 'base' | 'deep' } | null>(null);
+
   useEffect(() => {
-    setRovingId((current) => (current && focusIds.includes(current) ? current : (focusIds[0] ?? null)));
-  }, [focusIds]);
+    const prefix = plan ? 'graph-deep-node' : 'graph-node';
+    const pending = pendingFocus.current;
+    const target = pending ? transitionFocusTarget(pending, plan, focusIds, deepIndex) : null;
+    setRovingId((current) => {
+      if (pending && target !== pending.id) return target ?? focusIds[0] ?? null;
+      return current && focusIds.includes(current) ? current : (focusIds[0] ?? null);
+    });
+    if (!pending) return;
+
+    if (target === pending.id) {
+      // The mark survived this render — a zoom step that stayed inside one level,
+      // or a threshold crossing whose deeper layer is still being FETCHED (the
+      // deep payload is lazy, so the set can be replaced a render or two later).
+      // The request therefore stays armed, but only for as long as that mark
+      // really holds focus: if the reader has since tabbed away, a later set
+      // change must not yank focus back onto the canvas.
+      const held = document.getElementById(domId(prefix, pending.id));
+      if (!held || document.activeElement !== held) pendingFocus.current = null;
+      return;
+    }
+    pendingFocus.current = null;
+    // Focus goes to the corresponding mark at the new level where one exists,
+    // and to the canvas itself when it does not — never to <body> by accident.
+    const el = target
+      ? (document.getElementById(domId(prefix, target)) as SVGGElement | null)
+      : null;
+    if (el) el.focus();
+    else svgRef.current?.focus();
+  }, [focusIds, plan, deepIndex]);
 
   const visibleSet = useMemo(() => new Set(visibleIds), [visibleIds]);
 
@@ -219,15 +325,11 @@ export function GraphCanvas({
     [showAllLabels, visibleIds, index, state.moved],
   );
 
-  /** Deep marks that keep a standing label: all of them while few are drawn,
-   *  otherwise the largest groups / most-connected symbols (the plan is already
-   *  in that order), bounded. Hover, focus and selection add their own. */
-  const deepLabelIds = useMemo(() => {
-    if (!plan) return new Set<string>();
-    if (plan.nodes.length <= DEEP_LABEL_LIMIT) return new Set(plan.nodes.map((n) => n.id));
-    if (plan.level === 'symbol') return new Set<string>();
-    return new Set(plan.nodes.slice(0, HUB_LABEL_COUNT).map((n) => n.id));
-  }, [plan]);
+  /** Deep marks that keep a standing label. Decided by the PLAN (see
+   *  `placedDeepLabelIds`) so the same collision-filtered landmark rule applies
+   *  at both deeper levels, exactly as the base layer already does above its own
+   *  limit. Hover, focus and selection add their own on top. */
+  const deepLabelIds = useMemo(() => new Set(plan?.labelIds ?? []), [plan]);
 
   /** Visible nodes with no recorded reference at all — the outer-ring belt. */
   const isolatedVisible = useMemo(
@@ -358,6 +460,9 @@ export function GraphCanvas({
     if (viewport) {
       e.preventDefault();
       e.stopPropagation();
+      // This press can cross a level-of-detail threshold and unmount this very
+      // mark; record where focus was so it can be MOVED, not lost.
+      pendingFocus.current = { id, layer: 'base' };
       dispatch(viewport);
       return;
     }
@@ -378,6 +483,7 @@ export function GraphCanvas({
     if (viewport) {
       e.preventDefault();
       e.stopPropagation();
+      pendingFocus.current = { id, layer: 'deep' };
       dispatch(viewport);
       return;
     }
@@ -438,6 +544,22 @@ export function GraphCanvas({
   }, [dispatch, index, state, visibleIds]);
   const staleness = deepIndex ? deepStaleness(deepIndex.provenance) : null;
   const arrowUnits = screenBoundedUnits(ARROW_UNITS, scale, 2, 12);
+
+  // --- I3: the level change, announced --------------------------------------
+  // The region starts EMPTY and is only written when the descriptor actually
+  // changes, so mounting the tab announces nothing and a pan announces nothing.
+  const announcement = levelAnnouncement(plan, level, focusSuspends, deep);
+  const [announced, setAnnounced] = useState('');
+  const lastAnnouncement = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastAnnouncement.current === null) {
+      lastAnnouncement.current = announcement; // the state on arrival is not news
+      return;
+    }
+    if (lastAnnouncement.current === announcement) return;
+    lastAnnouncement.current = announcement;
+    setAnnounced(announcement);
+  }, [announcement]);
 
   return (
     <div className="graph-explore">
@@ -542,6 +664,23 @@ export function GraphCanvas({
                     d={`M0,0 L${arrowUnits},${arrowUnits / 2} L0,${arrowUnits} Z`}
                   />
                 </marker>
+                {/* A HOLLOW chevron for an aggregate line, so the arrowhead of a
+                    fold cannot be confused with the solid arrowhead of a
+                    symbol-level 1:1 edge. Shape, not colour. */}
+                <marker
+                  id="graph-deep-arrow-aggregate"
+                  markerUnits="userSpaceOnUse"
+                  markerWidth={arrowUnits}
+                  markerHeight={arrowUnits}
+                  refX={arrowUnits}
+                  refY={arrowUnits / 2}
+                  orient="auto"
+                >
+                  <path
+                    className="memory-graph-deep-arrowhead-aggregate"
+                    d={`M0,0 L${arrowUnits},${arrowUnits / 2} L0,${arrowUnits}`}
+                  />
+                </marker>
               </defs>
             )}
 
@@ -584,14 +723,25 @@ export function GraphCanvas({
                     const dy = e.y2 - e.y1;
                     const len = Math.hypot(dx, dy);
                     const t = len > shorten ? (len - shorten) / len : 1;
+                    /* An AGGREGATE line — every line at the cluster level — is a
+                       fold over the ordered group pair, not a graph object. It
+                       must not be mistakable for a symbol-level 1:1 edge, so it
+                       is drawn dashed, at a different width, with a hollow
+                       arrowhead (shape and dash, never colour alone), and it
+                       carries a real accessible description. */
+                    const aggregate = plan.level === 'cluster';
                     return (
                       <line
                         key={e.key}
-                        className="memory-graph-edge memory-graph-deep-edge"
+                        className={`memory-graph-edge memory-graph-deep-edge${
+                          aggregate ? ' memory-graph-deep-edge-aggregate' : ''
+                        }`}
                         /* PROOF ATTRIBUTES: the payload row this line stands
                            for, how many real rows it folds, and their real
                            relation values. A test reads these back against the
-                           fetched payload. */
+                           fetched payload. They are for tests — a reader gets
+                           the <title> and the aria-label below, because a
+                           `data-` attribute is perceivable to nobody. */
                         data-edge-index={e.payloadIndex}
                         data-edge-backing={e.backing}
                         data-edge-relations={e.relations.join(',')}
@@ -602,8 +752,15 @@ export function GraphCanvas({
                         x2={e.x1 + dx * t}
                         y2={e.y1 + dy * t}
                         vectorEffect="non-scaling-stroke"
-                        markerEnd="url(#graph-deep-arrow)"
-                      />
+                        markerEnd={
+                          aggregate ? 'url(#graph-deep-arrow-aggregate)' : 'url(#graph-deep-arrow)'
+                        }
+                        {...(aggregate
+                          ? { role: 'img', 'aria-label': aggregateLineDescription(e) }
+                          : {})}
+                      >
+                        {aggregate && <title>{aggregateLineDescription(e)}</title>}
+                      </line>
                     );
                   })}
                 </g>
@@ -714,8 +871,14 @@ export function GraphCanvas({
       {/* STRUCTURAL STALENESS — on the surface, not buried in a dialog. The
           symbol layer reads as a map of the current code and it is not one: its
           structure is pinned to the snapshot's `built_at_commit`. Rendered from
-          the payload's own provenance fields, and never softened. */}
-      {staleness && (
+          the payload's own provenance fields, and never softened.
+
+          Gated on `plan`, not on the payload being loaded. It used to appear
+          whenever the deep payload had EVER been fetched — including back at 100%
+          zoom, where no deep layer is drawn at all, so the canvas carried a
+          provenance claim about something not on screen. A claim about a layer
+          belongs only where that layer is. */}
+      {plan && staleness && (
         <p className="graph-deep-staleness" data-staleness-commit={staleness.builtAtCommit ?? ''}>
           {stalenessSentence(staleness)}
           {staleness.servedSetConsistency === 'stale'
@@ -724,10 +887,18 @@ export function GraphCanvas({
         </p>
       )}
 
+      {/* ONE polite status region for the canvas layer, and the canvas's only one:
+          the `role="status"` that used to sit on the loading note below is gone,
+          folded into this. Visually hidden because everything it says is already
+          on screen for a sighted reader (the level chip, the notes, the counts) —
+          a visible copy would be duplicated text, and a second live region would
+          compete with the surface's command/notice region above. */}
+      <p className="memory-graph-visually-hidden" role="status">
+        {announced}
+      </p>
+
       {deep.status === 'loading' && (
-        <p className="graph-deep-note" role="status">
-          Loading the symbol-level structure…
-        </p>
+        <p className="graph-deep-note">Loading the symbol-level structure…</p>
       )}
       {deep.status === 'unavailable' && (
         <p className="graph-deep-note advisory">
@@ -749,31 +920,12 @@ export function GraphCanvas({
           a statement about the viewport, not about the graph.
         </p>
       )}
+      {/* Every figure here — and every bound this layer applies — comes from ONE
+          pure function of the plan, so each is unit-testable and none can become
+          a silent cap. See `deepCountsSentence`. */}
       {plan && plan.nodes.length > 0 && (
         <p className="graph-deep-note">
-          {plan.level === 'symbol'
-            ? `${plan.nodes.length} symbol${plan.nodes.length === 1 ? '' : 's'}`
-            : `${plan.nodes.length} cluster${plan.nodes.length === 1 ? '' : 's'}`}{' '}
-          and {plan.edges.length} relationship{plan.edges.length === 1 ? '' : 's'} drawn inside{' '}
-          {plan.openFiles} of {plan.candidateFiles} file
-          {plan.candidateFiles === 1 ? '' : 's'} in view
-          {plan.nodesTruncated
-            ? `, capped from ${plan.nodesConsidered} — pan or zoom to reach the rest`
-            : ''}
-          {plan.edgesTruncated ? `; ${plan.edgesConsidered} relationships matched the view` : ''}.
-          {plan.filesWithoutDeepStructure > 0
-            ? ` ${plan.filesWithoutDeepStructure} file${
-                plan.filesWithoutDeepStructure === 1 ? ' has' : 's have'
-              } no symbol-level structure in this graph at all.`
-            : ''}
-          {plan.unplacedFiles > 0
-            ? ` ${plan.unplacedFiles} file${
-                plan.unplacedFiles === 1 ? '' : 's'
-              } could not be placed and ${plan.unplacedFiles === 1 ? 'is' : 'are'} not drawn.`
-            : ''}
-          {deepIndex?.truncated
-            ? ' The served payload itself is capped, so the layer is not the whole source graph.'
-            : ''}
+          {deepCountsSentence(plan, Boolean(deepIndex?.truncated))}
         </p>
       )}
 
@@ -785,11 +937,29 @@ export function GraphCanvas({
       )}
 
       <p className="graph-canvas-caption">
-        {plan ? (
+        {/* WHAT EACH LEVEL ACTUALLY DRAWS. The previous copy said, for BOTH deep
+            levels, that "only the marks and the arrows come from the graph". At
+            the cluster level neither is a graph object — a mark is a
+            (file, community) GROUP and a line is a FOLD over the real edges
+            between two such groups — so the sentence asserted a provenance the
+            level does not have. Each level now says what it is drawing. */}
+        {plan?.level === 'cluster' ? (
           <>
-            Drag the background to pan. Hover or focus a mark for its detail; Enter pins it. Zoom out
-            to return to the file projection. Positions inside a file are a deterministic layout, not
-            a claim about the code's structure — only the marks and the arrows come from the graph.
+            Drag the background to pan. Each mark here is a GROUP of symbols that share one file and
+            one recorded cluster; each dashed line SUMMARISES the references recorded between two
+            such groups, so one line can stand for several of different kinds — hover or focus a line
+            to read exactly what it summarises. Hover or focus a mark for its detail; Enter pins it.
+            Zoom in for the individual symbols, out for the file projection. Positions inside a file
+            are a deterministic layout, not a claim about the code's structure; the groups and the
+            counts come from the graph.
+          </>
+        ) : plan ? (
+          <>
+            Drag the background to pan. Each mark is ONE symbol recorded in the graph and each solid
+            arrow is ONE recorded reference, in the direction the payload recorded it. Hover or focus
+            a mark for its detail; Enter pins it. Zoom out to return to the file projection.
+            Positions inside a file are a deterministic layout, not a claim about the code's
+            structure — the marks and the arrows themselves come from the graph.
           </>
         ) : (
           <>
@@ -814,21 +984,76 @@ export function GraphCanvas({
 }
 
 /**
- * The honest, readable form of a backend `reason` token. An unknown token is
- * shown VERBATIM rather than smoothed into a friendly guess about what failed.
+ * What an AGGREGATE line summarises, in words.
+ *
+ * This is the perceivable half of the fold's honesty. The model was already
+ * truthful — every drawn pair has at least one real backing row, and the cited
+ * `payloadIndex` is a real row whose endpoints are exactly in the two named
+ * groups — but the proof existed ONLY in `data-` attributes, which no reader and
+ * no assistive technology can reach. Rendered as both a `<title>` (the native
+ * hover tooltip) and an `aria-label` on the line.
+ *
+ * The two group keys are `<file>\u0000<community>` pairs (see `clusterKeyOf`);
+ * only the file part is shown, because the cluster's own name is already on the
+ * marks at either end.
  */
-function describeDeepReason(reason: string): string {
-  if (reason === 'detail_absent') return 'the deployment ships no symbol-level artifact';
-  if (reason === 'detail_unreadable') return 'the symbol-level artifact could not be read';
-  if (reason === 'detail_unsupported') return 'the artifact uses an unsupported schema version';
-  if (reason === 'graph_absent' || reason === 'graph_unreadable') {
-    return 'no memory graph is loaded here';
+function aggregateLineDescription(edge: DeepRenderEdge): string {
+  const fileOf = (key: string) => key.split('\u0000')[0];
+  const kinds = edge.relations.map((r) => relationDisplayLabel(r)).join(', ');
+  return (
+    `${edge.backing} recorded reference${edge.backing === 1 ? '' : 's'} ` +
+    `from ${fileOf(edge.from)} to ${fileOf(edge.to)}, summarised into this one line — ` +
+    `${edge.relations.length === 1 ? 'kind' : 'kinds'}: ${kinds}`
+  );
+}
+
+/**
+ * What to ANNOUNCE about the layer, for a reader who cannot see the canvas.
+ *
+ * Every visible signal that a level changed was plain text with no live region:
+ * the level chip, the counts note carrying the cap disclosures, the focus-suspend
+ * note and the unavailable note. Only the loading note had `role="status"`. So
+ * pressing "Reveal Detail" gave a screen-reader user no feedback at all — and,
+ * before C1, also destroyed their focus.
+ *
+ * DELIBERATELY COARSE. The string is a function of the drawn LEVEL and the deep
+ * layer's STATE, and of nothing that changes while panning or zooming inside a
+ * level. It carries no counts: the counts note is a visible status line that
+ * changes on every pan, and routing it through a live region would announce a new
+ * figure on every arrow-key press. React only rewrites the region's text node when
+ * this string changes, so a level change produces exactly one announcement and a
+ * pan produces none.
+ */
+function levelAnnouncement(
+  plan: DeepRenderPlan | null,
+  level: GraphLodLevel,
+  focusSuspends: boolean,
+  deep: DeepLayerState,
+): string {
+  if (deep.status === 'loading') return 'Loading the symbol-level structure.';
+  if (deep.status === 'unavailable') {
+    return 'Symbol-level detail is unavailable in this deployment. The canvas stays on the file projection.';
   }
-  if (reason === 'request_failed') return 'the request for it did not complete';
-  if (reason === 'detail_schema_unrecognised') {
-    return 'its column contract was not recognised, so nothing was decoded';
+  if (level !== 'file' && focusSuspends) {
+    return 'A neighbourhood or path focus is active, so the canvas keeps the file projection it was computed over.';
   }
-  return reason;
+  if (plan && plan.nodes.length === 0) {
+    return 'Nothing is drawn at this zoom: no file with symbol-level structure is inside the viewport. Pan, fit the view, or zoom out.';
+  }
+  if (plan?.level === 'cluster') {
+    return (
+      'Cluster detail. Each mark is a group of symbols that share one file and one recorded ' +
+      'cluster, and each dashed line summarises the references recorded between two such groups. ' +
+      'The figures are in the note below the canvas.'
+    );
+  }
+  if (plan?.level === 'symbol') {
+    return (
+      'Symbol detail. Each mark is one recorded symbol and each arrow is one recorded reference. ' +
+      'The figures are in the note below the canvas.'
+    );
+  }
+  return 'The file projection. No symbol-level detail is drawn at this zoom.';
 }
 
 /** The level line in the toolbar — what is on screen, and what the next zoom
@@ -968,10 +1193,13 @@ function CanvasNode({
     .filter(Boolean)
     .join(' ');
 
-  // Screen-bounded geometry: identical to the P36R constants at scale 1, and
-  // constant on screen above it.
+  // Screen-bounded geometry. At scale 1 this is EXACTLY the P36R radius — the
+  // selection-size multiplier is deliberately not applied here (see
+  // SELECTED_MARK_FACTOR): P36R drew `r={FILE_RADIUS}` unconditionally and
+  // signalled selection with stroke colour and width, and enlarging a selected
+  // base mark by 35 % changed the default view that was already signed off.
   const base = node.kind === 'file' ? MARK_UNITS.file : MARK_UNITS.concept;
-  const radius = screenBoundedUnits(base * (isSelected ? SELECTED_MARK_FACTOR : 1), scale);
+  const radius = screenBoundedUnits(base, scale);
   const fontUnits = screenBoundedUnits(LABEL_UNITS, scale, 6, 18);
   const labelOffset = screenBoundedUnits(MARK_UNITS.concept + 13, scale, 8, 34);
 
@@ -1124,18 +1352,12 @@ function DeepMark({
              viewBox and swallowed the glyphs at deep zoom. */
           strokeWidth={screenBoundedUnits(LABEL_HALO_UNITS, scale, 0.5, 4)}
         >
-          {deepMarkLabel(mark)}
+          {/* The elision lives in `graphDeep` beside the label-placement width
+              estimate that depends on it, so the filter and the painted text
+              cannot drift apart. */}
+          {deepMarkLabelText(mark.label)}
         </text>
       )}
     </g>
   );
-}
-
-/** Longest deep label painted before eliding — the same bound the base canvas
- *  uses (`CANVAS_LABEL_MAX_CHARS`), applied to the deep label. */
-const DEEP_LABEL_MAX_CHARS = 26;
-
-export function deepMarkLabel(mark: DeepRenderNode): string {
-  const raw = mark.label;
-  return raw.length > DEEP_LABEL_MAX_CHARS ? `${raw.slice(0, DEEP_LABEL_MAX_CHARS - 1)}…` : raw;
 }
