@@ -20,8 +20,8 @@ import './search-dialog.css';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, ApiError, RUN_COMMAND } from '../lib/api';
-import { LoadingPanel } from './FetchStates';
+import { api, ApiError, isHostedBuild, RUN_COMMAND } from '../lib/api';
+import { downCopy, DownTechnicalDetails, LoadingPanel } from './FetchStates';
 import { hasVerdictLanguage } from '../lib/assistant';
 import { Search } from './icons';
 import { crossRecordTriage } from '../lib/crossRecordTriage';
@@ -361,19 +361,7 @@ export function SearchDialog() {
               )}
 
               {shouldFetch && results.status === 'error' && (
-                // Compact, honest backend-down state — server-derived truth only,
-                // never fabricated results. Shows the exact command to start the
-                // local backend (mirrors FetchStates.BackendDown), kept to a
-                // single title element so it reads as one clear message.
-                <div className="search-down" role="status">
-                  <p className="search-down-title">
-                    Search is unavailable — the backend is not reachable.
-                  </p>
-                  <p className="search-down-text">
-                    The local ISAAC API is not responding. Start it, then try again:
-                  </p>
-                  <pre className="search-down-cmd mono">{RUN_COMMAND}</pre>
-                </div>
+                <SearchDown error={results.error} />
               )}
 
               {shouldFetch && results.status === 'data' && (
@@ -383,6 +371,43 @@ export function SearchDialog() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The compact failure state for the palette. It renders the SAME `downCopy` and
+ * the SAME Technical Details disclosure as `BackendDown`, so the two render
+ * sites cannot drift apart: a hosted build never shows the local run command
+ * here either, and an expired session says so here too. Kept `role="status"`
+ * (not `alert`) — the dialog already has the reader's attention.
+ */
+function SearchDown({ error }: { error: ApiError }) {
+  const copy = downCopy(error);
+  return (
+    <div className="search-down" role="status">
+      <p className="search-down-title">
+        Search is unavailable — no server-derived results can be shown.
+      </p>
+      {copy.lines.map((line) => (
+        <p className="search-down-text" key={line}>
+          {line}
+        </p>
+      ))}
+      {/* Compile-time guard — see the identical note in FetchStates.BackendDown. */}
+      {!isHostedBuild && copy.showRunCommand && (
+        <pre className="search-down-cmd mono">{RUN_COMMAND}</pre>
+      )}
+      {copy.offerReload && (
+        <button
+          type="button"
+          className="btn btn-secondary search-down-action"
+          onClick={() => window.location.reload()}
+        >
+          Reload
+        </button>
+      )}
+      <DownTechnicalDetails error={error} />
     </div>
   );
 }

@@ -5,9 +5,15 @@
  * field status / evidence / status) and never computes any of it. Every verdict
  * comes from an endpoint; this module only parses envelopes and unwraps arrays.
  *
- * Base URL comes from `VITE_API_BASE` (default `http://127.0.0.1:8000/api`).
- * A network failure surfaces as an `ApiError` with `unreachable: true` so screens
- * can render the "Backend Not Running" state — never fabricated data.
+ * Base URL comes from `VITE_API_BASE` (default `http://127.0.0.1:8000/api`),
+ * which also decides `isHostedBuild` — the one place the app knows whether it is
+ * a hosted deployment or a local dev build.
+ *
+ * Every failure surfaces as a typed `ApiError` carrying what was actually
+ * OBSERVED — `unreachable` (the request never completed), an HTTP `status`, and
+ * `htmlIntercept` (an `/api/*` path answered with HTML, i.e. an authenticating
+ * edge served a sign-in page). Screens render the honest down state from those
+ * signals and never fabricate data — or a cause.
  */
 
 import type { RuntimeRecord } from './crossRecordTriage';
@@ -54,10 +60,36 @@ import type {
   RecordBundle,
 } from './types';
 
-const RAW_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8000/api';
+/**
+ * The base a build with no `VITE_API_BASE` falls back to — the local FastAPI
+ * dev server. Kept as a named literal because `isHostedBuild` compares against
+ * it (see below).
+ */
+const LOCAL_API_BASE = 'http://127.0.0.1:8000/api';
+
+const RAW_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? LOCAL_API_BASE;
 
 export const API_BASE = RAW_BASE.replace(/\/+$/, '');
+
+/**
+ * Hosted vs. local, decided ONCE here — never sniffed per component.
+ *
+ * A hosted image is built with an explicit `VITE_API_BASE` (`/krish/api` for
+ * the S3DF deployment); a local build leaves it unset and falls back to
+ * `LOCAL_API_BASE`. Vite substitutes `import.meta.env.VITE_API_BASE` with a
+ * string LITERAL at build time, so this is a comparison of two compile-time
+ * literals: a hosted bundle folds it to `true` and can then drop every
+ * local-only branch — including `RUN_COMMAND`, which must never ship in a
+ * hosted build (telling a hosted user to start a server on their laptop is
+ * both unactionable and false).
+ *
+ * Consequence worth stating: a developer who points `VITE_API_BASE` at some
+ * other base (e.g. `http://localhost:8000/api`) is treated as "hosted" — i.e.
+ * we stop claiming the local run command is the remedy. That is the safe
+ * direction: we withhold an instruction we cannot justify rather than assert
+ * one we cannot support.
+ */
+export const isHostedBuild = RAW_BASE !== LOCAL_API_BASE;
 
 /**
  * Optional shared-secret for the deployed demo backend. Read lazily per request
@@ -76,27 +108,121 @@ function apiKey(): string | undefined {
  */
 export const RESET_CONFIRMATION = 'RESET SYNTHETIC DEMO';
 
-/** The exact command that starts the local backend (shown in the down state). */
+/**
+ * The exact command that starts the local backend (shown in the LOCAL down
+ * state only). Every render site guards it with `!isHostedBuild` so a hosted
+ * bundle constant-folds the branch away and never ships this string.
+ */
 export const RUN_COMMAND =
   '.venv/bin/uvicorn isaac_api.app:app --app-dir apps/api --host 127.0.0.1 --port 8000';
 
-/** A fetch/HTTP failure. `unreachable` distinguishes "backend down" from an HTTP status. */
+/**
+ * A fetch/HTTP failure. `unreachable` distinguishes "the request never
+ * completed" from "the server answered with a status"; `htmlIntercept`
+ * distinguishes "an authenticating edge answered instead of our JSON API"
+ * from either. Screens branch on these to say something TRUE about the
+ * cause instead of a single guessed one.
+ */
 export class ApiError extends Error {
   readonly status?: number;
   readonly unreachable: boolean;
   /** The parsed error body, when the caller read it (e.g. the P27.5 412
    *  `stale_write` payload carrying `current_version`). Undefined otherwise. */
   readonly body?: unknown;
+  /**
+   * The API path that failed (as passed to `request`, without the base). Safe
+   * to display: this client puts credentials in the `Authorization` HEADER and
+   * never in a URL, so a path can never carry a token.
+   */
+  readonly path?: string;
+  /** The response `Content-Type`, when the response reported one. */
+  readonly contentType?: string;
+  /**
+   * True when a response to an `/api/*` path carried `text/html`. Our API only
+   * ever answers JSON, so HTML on an API path is an edge/proxy intercept — in
+   * this deployment, the identity provider's sign-in page. That is observed
+   * evidence of an authentication redirect, not an inference.
+   */
+  readonly htmlIntercept: boolean;
 
   constructor(
     message: string,
-    opts: { status?: number; unreachable?: boolean; body?: unknown } = {},
+    opts: {
+      status?: number;
+      unreachable?: boolean;
+      body?: unknown;
+      path?: string;
+      contentType?: string;
+      htmlIntercept?: boolean;
+    } = {},
   ) {
     super(message);
     this.name = 'ApiError';
     this.status = opts.status;
     this.unreachable = opts.unreachable ?? false;
     this.body = opts.body;
+    this.path = opts.path;
+    this.contentType = opts.contentType;
+    this.htmlIntercept = opts.htmlIntercept ?? false;
+  }
+}
+
+/** `text/html`, with or without a charset parameter. */
+const HTML_CONTENT_TYPE = /^\s*text\/html\b/i;
+
+const HTML_INTERCEPT_MESSAGE =
+  'The API path returned an HTML page instead of JSON (an edge intercept).';
+
+/** The response `Content-Type`, tolerating a stub/response without headers. */
+function contentTypeOf(res: Response): string | undefined {
+  const raw = res.headers?.get?.('content-type');
+  return raw ?? undefined;
+}
+
+function isHtml(contentType: string | undefined): boolean {
+  return contentType !== undefined && HTML_CONTENT_TYPE.test(contentType);
+}
+
+/** The typed error for a non-OK response, carrying every observable signal. */
+function httpError(res: Response, path: string): ApiError {
+  const contentType = contentTypeOf(res);
+  const htmlIntercept = isHtml(contentType);
+  return new ApiError(
+    htmlIntercept ? HTML_INTERCEPT_MESSAGE : `Request failed (${res.status}).`,
+    { status: res.status, path, contentType, htmlIntercept },
+  );
+}
+
+/**
+ * Read a response body as JSON — the ONE place this module parses a body.
+ *
+ * `res.json()` REJECTS on a non-JSON body, and the case that matters is not
+ * hypothetical: an authenticating edge can answer an `/api/*` request with its
+ * sign-in HTML and HTTP **200**. Before this was centralized, that rejection
+ * escaped every reader as a raw `SyntaxError` — not an `ApiError` — so screens
+ * rendered a generic crash instead of the honest down state. Here the HTML case
+ * is detected from the `Content-Type` first (so the caller learns it was an
+ * intercept, not corrupt JSON), and any other parse failure still becomes a
+ * typed `ApiError`.
+ */
+async function readJson<T>(res: Response, path: string): Promise<T> {
+  const contentType = contentTypeOf(res);
+  if (isHtml(contentType)) {
+    throw new ApiError(HTML_INTERCEPT_MESSAGE, {
+      status: res.status,
+      path,
+      contentType,
+      htmlIntercept: true,
+    });
+  }
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new ApiError(`The API response was not valid JSON (${res.status}).`, {
+      status: res.status,
+      path,
+      contentType,
+    });
   }
 }
 
@@ -118,14 +244,15 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
     });
   } catch {
     // Network-level failure (server not started, connection refused, CORS reject).
-    throw new ApiError('The local backend is not reachable.', { unreachable: true });
+    // Deliberately does NOT name a cause: from here the two are indistinguishable.
+    throw new ApiError('The ISAAC API could not be reached.', { unreachable: true, path });
   }
 }
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await request(path);
-  if (!res.ok) throw new ApiError(`Request failed (${res.status}).`, { status: res.status });
-  return (await res.json()) as T;
+  if (!res.ok) throw httpError(res, path);
+  return readJson<T>(res, path);
 }
 
 async function postJson<T>(path: string, body?: unknown): Promise<T> {
@@ -133,8 +260,8 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
     method: 'POST',
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new ApiError(`Request failed (${res.status}).`, { status: res.status });
-  return (await res.json()) as T;
+  if (!res.ok) throw httpError(res, path);
+  return readJson<T>(res, path);
 }
 
 /**
@@ -142,14 +269,21 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
  * 400 (`malformed_if_match`) the JSON body is read and attached — it carries the
  * P27.5 conflict payload (`current_version`, `current_rev`, …) the screen needs.
  * A 409 (export immutability) and every other status keep the plain-error shape,
- * so existing callers (e.g. the export 409 branch) are unaffected.
+ * so existing callers (e.g. the export 409 branch) are unaffected. An HTML
+ * intercept short-circuits: there is no conflict payload in a sign-in page.
  */
-async function mutationError(res: Response): Promise<ApiError> {
-  if (res.status === 412 || res.status === 400) {
+async function mutationError(res: Response, path: string): Promise<ApiError> {
+  const err = httpError(res, path);
+  if (!err.htmlIntercept && (res.status === 412 || res.status === 400)) {
     const body = await res.json().catch(() => undefined);
-    return new ApiError(`Request failed (${res.status}).`, { status: res.status, body });
+    return new ApiError(err.message, {
+      status: res.status,
+      path,
+      contentType: err.contentType,
+      body,
+    });
   }
-  return new ApiError(`Request failed (${res.status}).`, { status: res.status });
+  return err;
 }
 
 const enc = encodeURIComponent;
@@ -196,13 +330,14 @@ export const api = {
     version: string,
     signal?: AbortSignal,
   ): Promise<{ changed: boolean; detail?: ApiExperimentDetail }> {
-    const res = await request(`/experiments/${enc(id)}`, {
+    const path = `/experiments/${enc(id)}`;
+    const res = await request(path, {
       headers: { 'If-None-Match': `"${version}"` },
       signal,
     });
     if (res.status === 304) return { changed: false };
-    if (res.ok) return { changed: true, detail: (await res.json()) as ApiExperimentDetail };
-    throw new ApiError('unexpected status', { status: res.status });
+    if (res.ok) return { changed: true, detail: await readJson<ApiExperimentDetail>(res, path) };
+    throw httpError(res, path);
   },
 
   async getDraftGroups(id: string) {
@@ -226,14 +361,15 @@ export const api = {
     answersById: Record<string, unknown>,
     version?: string,
   ): Promise<ApiAnswersResponse> {
-    const res = await request(`/experiments/${enc(id)}/answers`, {
+    const path = `/experiments/${enc(id)}/answers`;
+    const res = await request(path, {
       method: 'POST',
       body: JSON.stringify({ answers: answersById, confirmed_by_user: true }),
       // Truthiness guard: never send an empty `If-Match: ""` for a blank token.
       ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
     });
-    if (res.ok) return (await res.json()) as ApiAnswersResponse;
-    throw await mutationError(res);
+    if (res.ok) return readJson<ApiAnswersResponse>(res, path);
+    throw await mutationError(res, path);
   },
 
   // P28.3 — correct/re-confirm an ALREADY-answered field. Same wire shape and
@@ -248,13 +384,14 @@ export const api = {
     answersById: Record<string, unknown>,
     version?: string,
   ): Promise<ApiAnswersResponse> {
-    const res = await request(`/experiments/${enc(id)}/edit`, {
+    const path = `/experiments/${enc(id)}/edit`;
+    const res = await request(path, {
       method: 'POST',
       body: JSON.stringify({ answers: answersById, confirmed_by_user: true }),
       ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
     });
-    if (res.ok) return (await res.json()) as ApiAnswersResponse;
-    throw await mutationError(res);
+    if (res.ok) return readJson<ApiAnswersResponse>(res, path);
+    throw await mutationError(res, path);
   },
 
   // P31.3 — CSV reconciliation preview (RECONCILIATION-ONLY). Uploads the raw
@@ -269,7 +406,8 @@ export const api = {
     csvText: string,
     opts: { version: string; filename?: string },
   ): Promise<ApiCsvPreview> {
-    const res = await request(`/experiments/${enc(id)}/ingestion/csv/preview`, {
+    const path = `/experiments/${enc(id)}/ingestion/csv/preview`;
+    const res = await request(path, {
       method: 'POST',
       body: csvText,
       headers: {
@@ -278,8 +416,8 @@ export const api = {
         ...(opts.filename ? { 'X-Filename': opts.filename } : {}),
       },
     });
-    if (res.ok) return (await res.json()) as ApiCsvPreview;
-    throw await mutationError(res);
+    if (res.ok) return readJson<ApiCsvPreview>(res, path);
+    throw await mutationError(res, path);
   },
 
   // S6 — the schema-gated export. A 409 (record already exists) is thrown as an
@@ -287,13 +425,14 @@ export const api = {
   // threaded `version` is sent as `If-Match: "<version>"`; a 412 stale write (or
   // 400 malformed token) is thrown as an ApiError carrying the parsed body.
   async exportRecord(id: string, version?: string): Promise<ApiExportResponse> {
-    const res = await request(`/experiments/${enc(id)}/export`, {
+    const path = `/experiments/${enc(id)}/export`;
+    const res = await request(path, {
       method: 'POST',
       // Truthiness guard: never send an empty `If-Match: ""` for a blank token.
       ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
     });
-    if (res.ok) return (await res.json()) as ApiExportResponse;
-    throw await mutationError(res);
+    if (res.ok) return readJson<ApiExportResponse>(res, path);
+    throw await mutationError(res, path);
   },
 
   // The three signals — each fetched from its own endpoint, never merged here.
@@ -308,19 +447,28 @@ export const api = {
   // JSON / oversized) is parsed and attached to the thrown ApiError so the
   // screen can show the server's exact reason instead of a generic status.
   async validateRecord(json: unknown): Promise<ApiValidateRecordResult> {
-    const res = await request('/validate/record', {
+    const path = '/validate/record';
+    const res = await request(path, {
       method: 'POST',
       body: JSON.stringify(json),
     });
-    const body = await res.json().catch(() => undefined);
     if (!res.ok) {
-      const typed = body as ApiValidateRecordError | undefined;
-      throw new ApiError(typed?.message ?? `Request failed (${res.status}).`, {
+      const err = httpError(res, path);
+      // An intercepted sign-in page carries no typed {error,message} body.
+      if (err.htmlIntercept) throw err;
+      const typed = (await res.json().catch(() => undefined)) as
+        | ApiValidateRecordError
+        | undefined;
+      throw new ApiError(typed?.message ?? err.message, {
         status: res.status,
+        path,
+        contentType: err.contentType,
         body: typed,
       });
     }
-    return body as ApiValidateRecordResult;
+    // Previously an unparseable 200 body silently resolved to `undefined` and
+    // was cast to a result; now it is a typed ApiError like every other read.
+    return readJson<ApiValidateRecordResult>(res, path);
   },
 
   // P36.6 — the read-only Schema Reference browser (renamed from "Schema &
@@ -507,15 +655,17 @@ export const api = {
       body: JSON.stringify(payload),
     });
     if (res.status === 200 || res.status === 403 || res.status === 409) {
-      return (await res.json()) as ApiDemoResetResult;
+      // readJson still guards the HTML-intercept case: an edge sign-in page can
+      // carry any status, and it is never a typed reset result.
+      return readJson<ApiDemoResetResult>(res, '/demo/reset');
     }
-    throw new ApiError(`Request failed (${res.status}).`, { status: res.status });
+    throw httpError(res, '/demo/reset');
   },
 
   // S2 — governance seam. Always 403; we read the verbatim reason from the body.
   async blockUpload(): Promise<ApiUploadsBlocked> {
     const res = await request('/uploads', { method: 'POST' });
-    return (await res.json()) as ApiUploadsBlocked;
+    return readJson<ApiUploadsBlocked>(res, '/uploads');
   },
 
   // S3 — the full record bundle in one concurrent load. The eight endpoints stay

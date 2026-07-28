@@ -63,3 +63,75 @@
 .fetch-state.error .btn {
   align-self: flex-start;
 }
+
+/* --- ISAAC identity on the down state -----------------------------------
+   Reuses the TopBar's `.brand-tile` (chrome.css) verbatim; only the row and
+   the wordmark are new. Presentational — never a link (see DownBrand). */
+.fetch-state-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.fetch-state-brand-name {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--text-heading);
+}
+
+.fetch-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* --- Technical Details -------------------------------------------------
+   Its OWN box below the message, visually separate from the copy — the same
+   collapsed `<details>` convention Settings and Graph Help use. */
+.fetch-state-technical {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint, var(--border));
+  border-radius: var(--radius-inner);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.fetch-state-technical > summary {
+  cursor: pointer;
+  color: var(--action);
+}
+.fetch-state-technical > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner, 8px);
+}
+.fetch-state-technical-figures {
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 10px 16px;
+}
+.fetch-state-technical-figure {
+  min-width: 0;
+}
+.fetch-state-technical-figures dt {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.fetch-state-technical-figures dd {
+  margin: 3px 0 0;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.fetch-state-technical-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
