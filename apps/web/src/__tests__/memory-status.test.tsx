@@ -52,7 +52,7 @@ describe('P24.10 · status card — available, fully current', () => {
     expect(getByText('2296')).toBeInTheDocument();
     expect(getByText('3447')).toBeInTheDocument();
     expect(getByText('214')).toBeInTheDocument();
-    expect(getByText('190')).toBeInTheDocument(); // Indexed files = file_count
+    expect(getByText('190')).toBeInTheDocument(); // "Served Files (Path Set)" = file_count
     expect(getByText('19')).toBeInTheDocument();
 
     // the three separated axes, each individually honest
@@ -109,7 +109,7 @@ describe('P24.10 · status card — pre-regen snapshot (available, currency not 
 
     await findByText('Memory Available');
 
-    // available → real counts render (Indexed files comes from file_count = 9)
+    // available → real counts render ("Served Files (Path Set)" = file_count = 9)
     expect(getByText('42')).toBeInTheDocument();
     expect(getByText('17')).toBeInTheDocument();
     expect(getByText('9')).toBeInTheDocument();
@@ -124,9 +124,30 @@ describe('P24.10 · status card — pre-regen snapshot (available, currency not 
     // the indexed-sources scope caveat is still shown
     expect(getByText(/only the files already in the snapshot/i)).toBeInTheDocument();
 
-    // served_file_count is null (pre-regen) — no broken/empty "served" figure,
-    // and no fabricated age (graph_mtime null, so never a 1970 epoch artifact)
-    expect(container.textContent).not.toMatch(/served files/i);
+    /* served_file_count is null (pre-regen) — no broken/empty "served" figure.
+     *
+     * This used to read `not.toMatch(/served files/i)`, which worked only because
+     * the one figure derived from `file_count` was then labelled "Indexed files".
+     * That label was the SAME number the Statistics dashboard labels "Served
+     * Files (Path Set)" — one backend field under two names, on an endpoint that
+     * genuinely carries two similar counts — so the screen now uses the
+     * scope-naming label and the word "served" is legitimately on the page.
+     *
+     * The guard is restated as what it was actually protecting, and is now
+     * stricter than the substring form: EXACTLY ONE served-labelled figure
+     * exists, it names its scope, and its value is `file_count` (9) — never the
+     * null status-plane `served_file_count`, which would render blank or as a
+     * fabricated number. */
+    const servedRows = [...container.querySelectorAll('.memory-figure')].filter((row) =>
+      /served/i.test(row.querySelector('dt')?.textContent ?? ''),
+    );
+    expect(servedRows.map((row) => row.querySelector('dt')?.textContent?.trim())).toEqual([
+      'Served Files (Path Set)',
+    ]);
+    expect(servedRows[0].querySelector('dd')?.textContent?.trim()).toBe('9');
+    expect(graphStatusPreRegen.served_file_count).toBeNull();
+
+    // no fabricated age (graph_mtime null, so never a 1970 epoch artifact)
     expect(container.textContent).not.toMatch(/1970/);
     expect(container.textContent).not.toMatch(/\bAge\b/);
 

@@ -59,6 +59,9 @@ import {
  * substring list.
  */
 
+/** The page-level tablist's `aria-label` (`SettingsPage`'s `SettingsSectionTabs`). */
+const SETTINGS_TABLIST_NAME = 'Settings & API sections';
+
 const ABOUT_URL = 'GET /api/about';
 const OPENAPI_URL = 'GET /api/openapi';
 const GRAPH_STATUS_URL = 'GET /api/graph/status';
@@ -129,6 +132,31 @@ function openTab(name: string) {
   fireEvent.click(tab(name));
 }
 
+/** The page-level tablist, resolved by its accessible name. */
+const pageTablist = () => screen.getByRole('tablist', { name: SETTINGS_TABLIST_NAME });
+
+/**
+ * The label of the currently selected PAGE tab.
+ *
+ * Every settings panel is `aria-labelledby` its own tab, so this string is also
+ * that panel's accessible name — which is how the guards below resolve the
+ * panel. Read from the one tab whose `aria-selected` is `true`, never from a
+ * position and never from a hand-copied label list that could drift from
+ * `SETTINGS_TABS`.
+ *
+ * The `within(pageTablist())` scope is load-bearing, not decoration: a loaded
+ * Endpoint Explorer also renders the Code Examples language tablist, whose own
+ * `cURL` tab is `aria-selected="true"` too — so an unscoped search for "the
+ * selected tab" finds TWO.
+ */
+function selectedTabLabel(): string {
+  const selected = within(pageTablist())
+    .getAllByRole('tab')
+    .filter((t) => t.getAttribute('aria-selected') === 'true');
+  expect(selected, 'exactly one selected page tab').toHaveLength(1);
+  return selected[0].textContent ?? '';
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -159,10 +187,13 @@ describe('Settings — tabs', () => {
   /**
    * The `keys | docs` sub-tablist is deleted, not hidden. Asserting the tablist
    * COUNT on every tab is stronger than asserting the two old labels are absent:
-   * it fails for any nested page-level tablist, whatever it is called. (The
-   * code-sample language tabs inside the Endpoint Explorer live behind a
-   * collapsed `<details>`, so they are not rendered until opened — which is
-   * itself the concision contract.)
+   * it fails for any nested page-level tablist, whatever it is called.
+   *
+   * The count is a PRE-LOAD fact, though. The code-sample language tabs inside
+   * the Endpoint Explorer sit behind a collapsed `<details>` — hidden in a real
+   * browser, but jsdom applies no such UA style, so once the contract has loaded
+   * they ARE in the accessibility tree and this page has two tablists. Hence the
+   * name-scoped resolution below.
    */
   it('has exactly ONE tablist on every tab — the nested sub-tablist is gone', () => {
     for (const id of SETTINGS_TAB_IDS) {
@@ -170,7 +201,16 @@ describe('Settings — tabs', () => {
       const view = renderSettings(ROUTES.settingsTab(id));
       const lists = screen.getAllByRole('tablist');
       expect(lists, `${id}: expected one tablist`).toHaveLength(1);
-      expect(lists[0]).toHaveAccessibleName('Settings sections');
+      /* Resolve the PAGE tablist by its accessible name, not as `lists[0]`.
+         The count above holds only while the stubbed fetches are still
+         unresolved: once the Endpoint Explorer has its contract, the detail
+         pane's Code Examples section renders a SECOND, nested (non-page-level)
+         tablist of its own. Positional indexing would then silently assert about
+         whichever tablist happened to come first in the DOM, so this guard would
+         read as "the page tablist is named correctly" while actually only
+         meaning "there happens to be one tablist right now". Do not simplify it
+         back to `lists[0]`. */
+      expect(pageTablist(), `${id}: page tablist resolved by name`).toBeInTheDocument();
       view.unmount();
     }
   });
@@ -198,8 +238,20 @@ describe('Settings — tabs', () => {
       const view = renderSettings(ROUTES.settingsTab(id));
       const panels = screen.getAllByRole('tabpanel');
       expect(panels, `${id}: expected one panel`).toHaveLength(1);
-      expect(panels[0]).toHaveAttribute('id', `settings-tabpanel-${id}`);
-      expect(panels[0]).toHaveAttribute('aria-labelledby', `settings-tab-${id}`);
+      /* Resolve the SETTINGS panel by its accessible name — each panel is
+         `aria-labelledby` its own tab, so the name is that tab's label — rather
+         than as `panels[0]` or an unscoped `getByRole('tabpanel')`. The count
+         above is only true pre-load: once the Endpoint Explorer has its
+         contract, the detail pane's Code Examples section renders its own nested
+         tabpanel, at which point an unscoped query is ambiguous and a positional
+         one can resolve the wrong element. Name-scoping is what makes this guard
+         assert the thing it claims. */
+      const panel = screen.getByRole('tabpanel', { name: selectedTabLabel() });
+      expect(panel, `${id}: panel resolved by name`).toHaveAttribute(
+        'id',
+        `settings-tabpanel-${id}`,
+      );
+      expect(panel).toHaveAttribute('aria-labelledby', `settings-tab-${id}`);
       view.unmount();
     }
   });

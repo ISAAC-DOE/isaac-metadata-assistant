@@ -2079,3 +2079,83 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/openapi", description: "This application's own generated OpenAPI document — the same document served at the root `/openapi.json`, but reachable under the deployment's base path so a browser client can fetch it without knowing the root.\n\nIt is generated from the live routes, never hand-maintained, so it cannot drift from what a caller can actually reach. It describes route signatures and documentation only: no runtime state and no configuration values. Read-only." },
   { op: "GET /api/schema", description: "The vendored official ISAAC record schema verbatim, its title and the version this build validates against, plus every controlled vocabulary in the repository keyed by its filename stem.\n\nEvery field, type, required flag, enumeration, description and composition relationship a client renders comes straight from these two sources; the schema is loaded through the same path resolver the validator uses, never a hardcoded copy. This is a read-only reference view of the public canonical schema — there is no propose, review, approve, or edit affordance." },
 ];
+
+// --- Statistics dashboard fixtures (the four page-level reads) ---------------
+//
+// The Statistics page reads `GET /api/runtime/records` with NO filters, so its
+// route key is the BARE path. `runtimeRecordsRoutes()` above serves only the four
+// FILTERED keys the triage chips build, and none of them matches — hence the
+// separate bundle below rather than a widening of that helper.
+
+/** The one extra row's id. Unmistakably synthetic, like every id in this file. */
+const STATS_EXTRA_ID = '01SYNTHSTATS00000000000005';
+
+/**
+ * The five projected rows the Statistics page is exercised against.
+ *
+ * `runtimeRecords` above carries 1 needs_attention / 1 ready_to_export /
+ * 1 in_review / 1 done, which is NOT the real canonical distribution of the
+ * synthetic seed set (2 / 1 / 1 / 1 — the same distribution `RESET_STATE_COUNTS`
+ * pins for the demo reset). It is consumed by the triage suites, so it is reused
+ * VERBATIM here and extended by one row rather than altered.
+ *
+ * The extra row's `current_step` is `review_evidence`, which no `runtimeRecords`
+ * row occupies, so the five rows span five of the six canonical workflow buckets
+ * and leave `load_record` at ZERO — the empty bucket a distribution must still
+ * draw. Its evidence histogram is deliberately spread across four of the five
+ * classes so no class total is a coincidence of a single row.
+ */
+export const statisticsRuntimeRecords = [
+  ...runtimeRecords,
+  {
+    experiment_id: STATS_EXTRA_ID,
+    title: 'Synthetic XANES — Second Needs Attention',
+    status: 'needs_attention',
+    pending_count: 2,
+    exported: false,
+    record_id: null,
+    workflow: { current_step: 'review_evidence', blocked: false, reopened: false },
+    evidence_counts: { supported: 4, inferred_candidate: 2, insufficient_evidence: 1, conflicting_evidence: 0, unknown: 1 },
+    artifact_state: 'none',
+    record_rev: 2,
+    updated_utc: '2099-07-05T00:00:00Z',
+    navigate_to: `/record/${STATS_EXTRA_ID}`,
+  },
+];
+
+/** The body `GET /api/runtime/records` serves for the five rows above. */
+export const statisticsRecordsBody = {
+  records: statisticsRuntimeRecords,
+  total: statisticsRuntimeRecords.length,
+};
+
+/**
+ * EXACTLY the four route keys the Statistics page requests, in the order the
+ * page issues them. Exported so a test can assert the request set itself instead
+ * of restating four literals it might mistype.
+ */
+export const STATISTICS_ROUTE_KEYS = [
+  'GET /api/runtime/records',
+  'GET /api/graph/status',
+  'GET /api/about',
+  'GET /api/openapi',
+] as const;
+
+/**
+ * The Statistics page's four page-level reads, keyed exactly as `lib/api` builds
+ * them.
+ *
+ * Any source may be replaced with any `RouteEntry`, which is how a test fails ONE
+ * of the four (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
+ * swaps in a different graph body, without disturbing the other three.
+ */
+export function statisticsRoutes(
+  over: Partial<Record<'records' | 'graph' | 'about' | 'openapi', RouteEntry>> = {},
+): Record<string, RouteEntry> {
+  return {
+    'GET /api/runtime/records': over.records ?? { body: statisticsRecordsBody },
+    'GET /api/graph/status': over.graph ?? { body: graphStatusAvailable },
+    'GET /api/about': over.about ?? { body: aboutResponse },
+    'GET /api/openapi': over.openapi ?? { body: openApiFixture },
+  };
+}

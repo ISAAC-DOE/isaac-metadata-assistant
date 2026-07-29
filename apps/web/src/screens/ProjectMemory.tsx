@@ -473,11 +473,18 @@ function MemoryFigures({ data }: { data: ApiGraphStatus }) {
   if (data.community_count != null) {
     rows.push({ label: 'Communities', value: String(data.community_count), mono: true });
   }
-  // "Indexed files" is the served file count from the overview (file_count).
-  // The status-plane `served_file_count` can be null pre-regen; we never render
-  // a broken/empty "served" figure from it — the count shown here is file_count.
+  /* This figure is `file_count` — the served PATH SET from the overview — and
+     the label names that scope. It used to read "Indexed files", which is the
+     same number the Statistics dashboard labels "Served Files (Path Set)": one
+     backend field under two different names, on an endpoint that really does
+     carry TWO similar counts (`file_count` = the path set, `served_file_count` =
+     the content manifest, smaller by one — CLAUDE.md §17). A reader comparing
+     the two screens could reasonably have concluded they were two metrics. One
+     number, one name, and the name states which set it is.
+     The status-plane `served_file_count` can be null pre-regen; we never render
+     a broken/empty "served" figure from it — the count shown here is file_count. */
   if (data.file_count != null) {
-    rows.push({ label: 'Indexed files', value: String(data.file_count), mono: true });
+    rows.push({ label: 'Served Files (Path Set)', value: String(data.file_count), mono: true });
   }
   if (data.concept_count != null) {
     rows.push({ label: 'Concepts', value: String(data.concept_count), mono: true });
@@ -485,11 +492,24 @@ function MemoryFigures({ data }: { data: ApiGraphStatus }) {
   if (data.provider !== 'unavailable') {
     rows.push({ label: 'Provider', value: data.provider, mono: true });
   }
+  /* The 7-char short sha, kept as-is (Statistics states the same field in full).
+     A deliberate formatting difference, so the label says which form it is
+     rather than presenting a truncation as the whole value. */
   if (data.source_graph_commit != null) {
-    rows.push({ label: 'Source graph commit', value: shortSha(data.source_graph_commit), mono: true });
+    rows.push({
+      label: 'Source Graph Commit (Short)',
+      value: shortSha(data.source_graph_commit),
+      mono: true,
+    });
   }
+  /* Same field, same name as Statistics' row. The `v` prefix stays: it reads as
+     a version rather than as a count, and it is the only difference left. */
   if (data.snapshot_schema_version != null) {
-    rows.push({ label: 'Snapshot schema', value: `v${data.snapshot_schema_version}`, mono: true });
+    rows.push({
+      label: 'Snapshot Schema Version',
+      value: `v${data.snapshot_schema_version}`,
+      mono: true,
+    });
   }
   // No invented timestamps: the age line is derived from the shipped age
   // signal (`graph_mtime`) only, and is omitted entirely when it is absent.

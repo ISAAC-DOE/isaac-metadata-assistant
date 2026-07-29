@@ -1,0 +1,598 @@
+/*
+ * Statistics — presentational stylesheet for the read-only workspace-insights
+ * dashboard.
+ *
+ * SCOPE: every rule below is scoped under the page root class `.statistics`
+ * (the wrapper the wiring slice mounts as a sibling of the `.placeholder`
+ * page header) or under a `.stats-*` / `.stat-card*` class name. Nothing here
+ * targets a bare element selector, so nothing leaks into the rest of the app.
+ *
+ * NO interaction-state rule exists in this file. Nothing on this surface is
+ * clickable, so there is no `:hover` / `:active` / `:focus` declaration to
+ * collide with the reserved pass/fail hues (interaction-states.test.ts), and
+ * `:focus-visible` stays entirely on the global ring in base.css.
+ *
+ * NO `border-left` / `border-right` appears anywhere in this file: every
+ * colour is carried by `background`, `border` (all four sides) or `color`,
+ * per the permanent no-vertical-rail rule.
+ *
+ * NO transition, no animation, no gradient, no transform. Rendering is fully
+ * static, so the global `prefers-reduced-motion` blanket in base.css:258-277
+ * needs no companion rule here.
+ */
+
+/* ---- page root -------------------------------------------------------- */
+
+/*
+ * The measured wrapper. `StatisticsPage` mounts under
+ * `AppShell width="wide"`, which publishes `--content-max: 1200px` on
+ * `<main>`; this wrapper consumes that token so it lines up exactly with the
+ * `.placeholder` header above it instead of stair-stepping to its own
+ * literal. The 1200px fallback only applies if this ever mounts outside a
+ * width mode.
+ *
+ * CATEGORICAL BAR PALETTE — declared here as PAGE-SCOPED custom properties,
+ * following the `.graph-canvas` precedent (graph.css:1041-1060), NOT as
+ * `:root` tokens: these six slots are local to this one surface and must not
+ * enter the global design system.
+ *
+ * They are the existing palette's own accent hues, not a new rainbow. Five of
+ * the six are lifted VERBATIM from tokens.css; only slot 3 is authored, to
+ * fill the yellow-green gap between slot 2 and slot 4 at the same muted,
+ * mid-dark character as its neighbours.
+ *
+ * Slot 3 is deliberately NOT `--pass-solid` (#2f8557). Green is a RESERVED
+ * validation-verdict hue in this system, and a workflow-stage bucket is not a
+ * verdict; the moss #5c7f33 is a visibly different, yellower hue so a stage
+ * bar can never be misread as "passed".
+ *
+ * `--assist*` (lavender) is reserved for Assistant surfaces and is absent.
+ * `--fail-*` (red) is reserved for genuine failure and is absent.
+ *
+ * CONTRAST — these bars are graphical objects, so the applicable bar is
+ * WCAG 1.4.11 non-text contrast, 3:1. Ratios computed with the WCAG relative
+ * luminance formula against `--surface` #ffffff (the card background the bars
+ * sit on). The second figure is against `--surface-subtle` #fbfcfd
+ * (L = 0.9724), which lowers every ratio by ~0.1; all twelve clear 3:1.
+ *
+ *   slot 1  #2c6ab0  blue    (= --action, verbatim)          5.53:1  / 5.39:1
+ *   slot 2  #2f7d78  teal    (= --verified-text, verbatim)   4.86:1  / 4.73:1
+ *   slot 3  #5c7f33  moss    (authored; see note above)      4.63:1  / 4.51:1
+ *   slot 4  #b07d2b  ochre   (= --advisory-icon, verbatim)   3.61:1  / 3.52:1  <- lowest
+ *   slot 5  #7a6bb0  violet  (= --src-derivation, verbatim)  4.61:1  / 4.49:1
+ *   slot 6  #5b6b7d  slate   (= --cover-text, verbatim)      5.46:1  / 5.32:1
+ *
+ * Mutual distinguishability: hue angles are roughly 211 / 176 / 85 / 38 /
+ * 253 / 211-desaturated, so five of the six are well separated on the wheel.
+ * The one close pair is slot 1 and slot 6, which share a hue angle but differ
+ * sharply in chroma (S ~60% vs ~16%) — that accent-vs-neutral split is the
+ * design system's own distinction, and the two are placed at opposite ends of
+ * the ramp so adjacent stages never use them together. Colour is never the
+ * sole carrier regardless: every bar renders its own label and count as real
+ * text, and the whole distribution is restated in the `role="img"` label.
+ */
+.statistics {
+  --stats-cat-1: #2c6ab0;
+  --stats-cat-2: #2f7d78;
+  --stats-cat-3: #5c7f33;
+  --stats-cat-4: #b07d2b;
+  --stats-cat-5: #7a6bb0;
+  --stats-cat-6: #5b6b7d;
+
+  max-width: var(--content-max, 1200px);
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ---- section card shell ---------------------------------------------- */
+
+/* `.placeholder-card` (screens.css:220) carries an 18px top margin for the
+   stacked-sibling case. Inside this flex column the 18px `gap` above owns
+   that rhythm, so the margin is dropped to avoid doubling it to 36px. */
+.statistics .stats-card {
+  margin-top: 0;
+  min-width: 0;
+}
+.statistics .stats-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-bottom: 14px;
+}
+.statistics .stats-card-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--action);
+}
+.statistics .stats-card-headings {
+  min-width: 0;
+}
+.statistics .stats-card-head h2,
+.statistics .stats-card-head h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+}
+.statistics .stats-card-sub {
+  margin-top: 5px;
+  /* Prose measure — see the note on `.stats-note` below, which explains why
+     both prose classes carry the same 68ch cap this design system uses. */
+  max-width: 68ch;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+/* ---- layout: the at-a-glance card grid ------------------------------- */
+
+/*
+ * A balanced row of four on desktop, two columns on tablet, one column at
+ * narrow widths — logical (DOM) order preserved throughout, because these are
+ * grid AUTO-placed items with no explicit line assignment and no `order`.
+ *
+ * `minmax(0, 1fr)` rather than a bare `1fr` on purpose: `1fr` floors at
+ * `auto`, so one long unbroken value (a 64-char sha256, a ULID) would push
+ * the track past its share and overflow the page horizontally. The `0`
+ * minimum lets the track shrink; `overflow-wrap` on the value (below) then
+ * breaks the string inside it.
+ *
+ * Measured at 375x812 (the narrow reference this repo designs against, per
+ * the precedent comment in screens.css): at 375px the shell drops its rails,
+ * `.screen-main.pad` leaves 375 - 56 = 319px of content box, and a single
+ * full-bleed column plus `overflow-wrap: anywhere` on every value keeps the
+ * page's horizontal scroll width at exactly 375px. Also checked at 320px,
+ * where the same one-column rule holds with no overflow.
+ */
+.statistics .stats-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/*
+ * A two-up section row (e.g. an evidence card beside an export-gate card).
+ * Provided by this slice as part of the layout system; the wiring slice
+ * applies it. Same minmax(0, …) reasoning as above.
+ */
+.statistics .stats-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+/*
+ * The designated wrapper for any WIDE block a later slice adds (the API
+ * method/group table is the expected case): it scrolls inside itself rather
+ * than widening the page. None of the six primitives in StatsPrimitives.tsx
+ * needs it today — every one of them either wraps (`flex-wrap`, grid
+ * reflow, `overflow-wrap`) or is percentage-bounded — so it is deliberately
+ * unused here and is part of the stylesheet contract, not dead styling for a
+ * primitive that exists.
+ */
+.statistics .stats-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* Tablet: two columns. */
+@media (max-width: 900px) {
+  .statistics .stats-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .statistics .stats-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Narrow (measured at 375x812 and again at 320px): one column. */
+@media (max-width: 560px) {
+  .statistics .stats-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- StatCard -------------------------------------------------------- */
+
+/* A single at-a-glance metric, as a one-group <dl>: <dt> label, <dd> value,
+   optional <dd> note. Never bare divs of numbers (screens.css:292-294). */
+.statistics .stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+.statistics .stat-card-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+  line-height: 1.4;
+}
+.statistics .stat-card-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+}
+.statistics .stat-card-value {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-heading);
+  /* A ULID, a commit sha or a long word like "Synthetic-Only" must break
+     inside the track rather than widen it — see the minmax(0, …) note. */
+  overflow-wrap: anywhere;
+}
+.statistics .stat-card-note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Tone. Each tone is a background / border / value-colour triple from ONE
+ * token family, so the card reads as a member of the system rather than a
+ * painted exception. Tone is decoration only: the label and the value always
+ * state the meaning in words, so removing all colour loses no information.
+ * `quiet` is the neutral `--cover-*` family, used where a figure is simply
+ * not available — never the red `--fail-*` family, which is reserved for a
+ * genuine validation failure.
+ */
+.statistics .stat-card[data-tone='good'] {
+  background: var(--pass-bg);
+  border-color: var(--pass-border);
+}
+.statistics .stat-card[data-tone='good'] .stat-card-value {
+  color: var(--pass-text);
+}
+.statistics .stat-card[data-tone='attention'] {
+  background: var(--advisory-bg);
+  border-color: var(--advisory-border);
+}
+.statistics .stat-card[data-tone='attention'] .stat-card-value {
+  color: var(--advisory-text);
+}
+.statistics .stat-card[data-tone='quiet'] {
+  background: var(--cover-bg);
+  border-color: var(--cover-border);
+}
+.statistics .stat-card[data-tone='quiet'] .stat-card-label,
+.statistics .stat-card[data-tone='quiet'] .stat-card-value,
+.statistics .stat-card[data-tone='quiet'] .stat-card-note {
+  color: var(--cover-text);
+}
+/* `quiet` values are usually a sentence ("Not Available"), not a number. */
+.statistics .stat-card[data-tone='quiet'] .stat-card-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---- FigureList ------------------------------------------------------ */
+
+/* The labelled figure grid. `auto-fit` + `minmax(0, …)` collapses from a row
+   of figures to a single column as the card narrows, with no media query and
+   no horizontal overflow at 375px. */
+.statistics .stats-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 22px;
+}
+.statistics .stats-figure {
+  min-width: 0;
+}
+.statistics .stats-figure dt {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+  line-height: 1.4;
+}
+.statistics .stats-figure dd {
+  margin-top: 3px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* ---- StageBars ------------------------------------------------------- */
+
+.statistics .stats-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.statistics .stats-bars-caption {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.statistics .stats-bars-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Label and count on one line, the track spanning both columns beneath.
+   `minmax(0, 1fr)` for the label track so a long stage name wraps instead of
+   pushing the count off the card. */
+.statistics .stats-bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 5px 12px;
+}
+.statistics .stats-bar-label {
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-strong);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.statistics .stats-bar-count {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+/* The track is a neutral container, not data — the bar segment inside it
+   carries the value and the contrast-checked colour. A zero-count row keeps
+   its full-width track and a zero-width segment, and states the `0` in text. */
+.statistics .stats-bar-track {
+  grid-column: 1 / -1;
+  display: flex;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--border-faint);
+  overflow: hidden;
+}
+.statistics .stats-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--cover-text);
+}
+.statistics .stats-bar-fill[data-cat='1'] { background: var(--stats-cat-1); }
+.statistics .stats-bar-fill[data-cat='2'] { background: var(--stats-cat-2); }
+.statistics .stats-bar-fill[data-cat='3'] { background: var(--stats-cat-3); }
+.statistics .stats-bar-fill[data-cat='4'] { background: var(--stats-cat-4); }
+.statistics .stats-bar-fill[data-cat='5'] { background: var(--stats-cat-5); }
+.statistics .stats-bar-fill[data-cat='6'] { background: var(--stats-cat-6); }
+
+/* ---- MiniBreakdown --------------------------------------------------- */
+
+.statistics .stats-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.statistics .stats-mini-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+  line-height: 1.4;
+}
+/* Wraps rather than scrolls: five chip+badge pairs reflow to three rows in
+   the 319px content box at 375x812, so nothing overflows and no scroll
+   container is needed. */
+.statistics .stats-mini-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.statistics .stats-mini-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Count badge, matching the `.evclass-count-n` precedent
+   (components/classification.css:105-113). */
+.statistics .stats-mini-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+/* ---- UnavailableNote ------------------------------------------------- */
+
+/*
+ * The honest-absence state. Restrained and NEUTRAL by construction: the
+ * `--cover-*` family (signal 3 in tokens.css, "evidence audit coverage"),
+ * which is what this design system uses for not-run / not-available. It is
+ * explicitly NOT an error: no `--fail-*` token, no red, no alert role in the
+ * markup, no warning icon. A missing figure is a fact, not a fault.
+ */
+.statistics .stats-unavailable {
+  padding: 10px 12px;
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-inner);
+  background: var(--cover-bg);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--cover-text);
+}
+
+/* ======================================================================
+ * WIRING SLICE ADDITIONS — appended only; nothing above is altered.
+ *
+ * Same constraints as the rest of this file: no `border-left` / `border-right`
+ * anywhere, no `:hover` / `:active` / `:focus` rule, and no transition,
+ * animation, gradient or transform. The Refresh control and every link reuse the
+ * app's global `.btn` / anchor styling, so this slice introduces no
+ * interaction-state declaration of its own.
+ *
+ * TWO KINDS OF `max-width` LIVE HERE, and only two: the measured page root at
+ * the top (a LAYOUT cap, consuming `--content-max`), and the PROSE measure on
+ * the two text classes that carry sentences — `.stats-card-sub` and
+ * `.stats-note` (a `ch` measure, the same idiom `screens.css:202-205`
+ * established for page prose). Neither is a re-hardcoded
+ * layout literal, and nothing here targets a bare element selector, so no
+ * global paragraph measure is imposed on the app.
+ * ====================================================================== */
+
+/* ---- header meta row -------------------------------------------------- */
+
+/* "Last read from the API" beside the Refresh control. Wraps rather than
+   overflowing at narrow widths; the button keeps its global `.btn` styling. */
+.statistics .stats-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+}
+.statistics .stats-meta-read {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.statistics .stats-meta-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+}
+.statistics .stats-meta-read time {
+  overflow-wrap: anywhere;
+}
+
+/* ---- in-card prose, blocks and sub-groups ---------------------------- */
+
+/*
+ * Sentence-case supporting copy inside a section card.
+ *
+ * MEASURE. This page mounts at `width="wide"` (`--content-max: 1200px`), and
+ * these two classes carry the only multi-sentence prose on it — the Export Gate
+ * explanation is four sentences and the privacy section two paragraphs. With no
+ * cap they ran the full ~1160px of the content box, roughly twice the ~68ch this
+ * design system settled on for readable prose (`screens.css:202-205`). Same
+ * measure, expressed the same way, so the two agree by construction rather than
+ * by coincidence.
+ *
+ * Scoped to these two CLASSES on purpose. The system's page-prose rule is
+ * `.placeholder > p`, which does not reach inside a card; the alternative — a
+ * bare `p { max-width }` — is forbidden outright (`layout-width-modes.test.tsx`)
+ * because it would re-cap paragraphs that already sit in bounded containers.
+ * Nothing else in this file gets a measure: figures, cards, chips and bars are
+ * grid tracks and percentage-bounded segments, not prose.
+ */
+.statistics .stats-note {
+  margin-top: 12px;
+  max-width: 68ch;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.statistics .stats-note:first-child {
+  margin-top: 0;
+}
+
+/* Spacing-only wrapper for a nested COMPONENT (a figure, a bar group, an
+   unavailable note) — deliberately carries no colour or font, so it cannot
+   restyle what it wraps. */
+.statistics .stats-block {
+  margin-top: 14px;
+  min-width: 0;
+}
+/* The same wrapper for a block that PRECEDES what it qualifies (the truncated-
+   body caveat above the glance grid): its spacing belongs below it, not above.
+   Declared after `.stats-block`, equal specificity, so it wins by source order
+   for the two properties it restates. */
+.statistics .stats-block-lead {
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+
+/* One of the two labelled groups inside a shared section card (Evidence /
+   Export Gate). Its own `gap` owns the rhythm, so nested prose drops its
+   margin to avoid doubling. */
+.statistics .stats-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.statistics .stats-group > h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+}
+.statistics .stats-group .stats-note,
+.statistics .stats-group .stats-block {
+  margin-top: 0;
+}
+
+/* The two runtime cards read a DIFFERENT endpoint than the four record cards,
+   so they are their own grid; two tracks rather than four keeps them from
+   sitting in half an empty row. Restated at the narrow breakpoint because this
+   rule follows the shared media query in source order. */
+.statistics .stats-cards-pair {
+  margin-top: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 560px) {
+  .statistics .stats-cards-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Cross-surface links out of a section. */
+.statistics .stats-actions {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* The defensive empty-workspace block. */
+.statistics .stats-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.statistics .stats-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+  line-height: 1.4;
+}
+.statistics .stats-empty .stats-note,
+.statistics .stats-empty .stats-actions {
+  margin-top: 0;
+}
+
+/* The Project Memory freshness lead-in. A weight/colour emphasis only — the
+   sentence beside it carries the meaning, so nothing is signalled by colour. */
+.statistics .stats-freshness-label {
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+/* The localized retry control inside an unavailable note. */
+.statistics .stats-retry {
+  margin-top: 10px;
+}

@@ -29,6 +29,7 @@ import { AppRoutes } from '../App';
 import { GovernancePage } from '../screens/GovernancePage';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import { SettingsPage } from '../screens/SettingsPage';
+import { StatisticsPage } from '../screens/statistics/StatisticsPage';
 import {
   aboutResponse,
   bundleRoutes,
@@ -37,6 +38,7 @@ import {
   memoryConceptsAvailable,
   memoryFilesAvailable,
   openApiFixture,
+  statisticsRoutes,
   stubFetchRoutes,
 } from '../test/apiFixtures';
 
@@ -301,6 +303,13 @@ describe('screens opt into the width system', () => {
     });
     const { container, findByText } = routerRender(<SettingsPage />, '/settings');
     await findByText('0.1.0'); // Help/About resolved — settles both card fetches
+    expect(mainOf(container).getAttribute('data-width')).toBe('wide');
+  });
+
+  it('Statistics renders wide', async () => {
+    stubFetchRoutes(statisticsRoutes());
+    const { container, findByText } = routerRender(<StatisticsPage />, '/statistics');
+    await findByText('Synthetic-Only'); // the /api/about card resolved
     expect(mainOf(container).getAttribute('data-width')).toBe('wide');
   });
 

@@ -10328,7 +10328,7 @@
       },
       {
         "path": "apps/web/src/App.tsx",
-        "sha256": "662befd7782beb3200c3e78777715abf6f10d0dcfb79bdbb4b09520cab77e005"
+        "sha256": "e6d68df3aaa5b8b1d117fe1daac547e2276bd8d0d477042daf2fee70cc42d8a0"
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
@@ -10376,7 +10376,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-status.test.tsx",
-        "sha256": "583eead17c2bd557a4e48b6bac6c8364ac27cd17f74b894b2b8f742aa9f3d7ac"
+        "sha256": "e54bc26a924d335b9449c69ae91b88577de13348afe6ffd96ade2781240a6ff4"
       },
       {
         "path": "apps/web/src/__tests__/modal-a11y.test.tsx",
@@ -10464,7 +10464,7 @@
       },
       {
         "path": "apps/web/src/components/LeftNav.tsx",
-        "sha256": "c81d27a661fb1743e08641d12c624501cc4cfd796af87058b01ad6d5fc10c277"
+        "sha256": "00a1ec0d1b4a76b083f1e46891330a34ef398efa49cf7e67d93afa4ea7b4b87b"
       },
       {
         "path": "apps/web/src/components/SourcePreview.tsx",
@@ -10492,11 +10492,11 @@
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
-        "sha256": "2900d371542f66035c8fbdba55f4fc29c35b0eeec8fe69fa053403fb259506ea"
+        "sha256": "171e2ecebfa58461209b9faf5f58532ab51016da287d79d5d9aa924735ee2e47"
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "5d6804f4a4aa859a8d761e9f53bd41ead7c2907ebcdcb3f511c75de8bb699fe1"
+        "sha256": "84cb9797ba9378329e6035acad42eba0323596dbad2c08266b3d4b088cff70a1"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -10512,11 +10512,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "bd216ba97b3c0f89c4a20ae9a5d2ff5a4bb246f673875f0bdcdb524922a0a146"
+        "sha256": "986bbf3a1c14e059d2a36aa821daf02543663e77e476b15dcca7295ff4f2910f"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "873b73c065eafbdc68f8161cb5f4c69a7bfa8418a61548857a7260d6886fac86"
+        "sha256": "4426f24ac711bec4f38a57f0c020ff2128124d813524e3ab45df5963b8b020b5"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10560,7 +10560,7 @@
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "70185682de1da50693657b21345db6924db3a3d72295711400e8c45aeab7daa4"
+        "sha256": "e4ccab1703d02162d8e8ee35e9ede053300730dea4af8c019b09d62b9edb0d75"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
@@ -10568,11 +10568,11 @@
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "1328168afacb5a4c468420d5bf8c2c416f7488d28ed70aefaefa14d6f4c35428"
+        "sha256": "7036d140921e3f50c72b4547d189d07e176aec3e2750b108612cabd869e1a3ca"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "a28a495ccad1312d0d7604dc1d8cd8fbe3b412839f2172d915859a9fcf0b1443"
+        "sha256": "39dd3225e898113b45b492d2dd46b78da5d4cb8db04ebebe47c5fef18646313b"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10772,7 +10772,7 @@
       },
       {
         "path": "docs/ui-local-dev.md",
-        "sha256": "42a38a6cb5ea4155be31989dafff80d2859ee8e6ad01de4b38f790010126109f"
+        "sha256": "f11862c8028b3bc0dc588e6e9fb29131e353ed5e0a5eac382067747b4b533493"
       },
       {
         "path": "pyproject.toml",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "e7d5dc1cda32b92020f3e934a65de268c902564ec1a57a505e4a728ce3a5360c"
+    "served_manifest_fingerprint": "df84a1f5a51a205cb58ad2e62ee3d8470e45b3119229f7d5ecd19a2a322cfa2e"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
