@@ -26,7 +26,10 @@ export function AdvisoryChip({ advisory, explain }: AdvisoryChipProps) {
         <span className="advisory-nongating">non-gating</span>
       </div>
       {count === 0 ? (
-        <p className="advisory-none">No advisory warnings from the local seam.</p>
+        // "from the local seam" was a locality claim plus internal jargon on a
+        // reviewer-facing surface: the check runs wherever the backend runs, and
+        // "seam" names nothing a reader can see.
+        <p className="advisory-none">No advisory warnings.</p>
       ) : (
         advisory.warnings.map((w) => (
           <div key={w.code}>

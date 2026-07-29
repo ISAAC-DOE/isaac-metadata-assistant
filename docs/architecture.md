@@ -55,12 +55,13 @@ where something is designed but not yet built, it says so.
  (official ISAAC v1.05)              (evidence sidecar)
         │
         ▼
- ┌───────────────────────────┐
- │ AUDIT   audit.py           │
- │   every record re-validates │
- │   + every sidecar path      │
- │   resolves (0 dangling)     │
- └───────────────────────────┘
+ ┌───────────────────────────────┐
+ │ AUDIT   audit.py              │
+ │   every record re-validates   │
+ │   (this alone sets PASS/FAIL) │
+ │   + sidecar coverage and      │
+ │   dangling paths REPORTED     │
+ └───────────────────────────────┘
 ```
 
 ## The two planes
@@ -86,7 +87,7 @@ deterministic source wins.
 | `official.py` | truth | `validate_official(record, root)` — jsonschema against the vendored schema |
 | `draft_validator.py` | truth | `validate_draft(draft)` — no-guessing checks (evidence required, missing ⇒ null, assets need sha256) |
 | `export.py` | truth | `transform` (draft → official shape), `build_sidecar`, `export_draft` (gated by both validators) |
-| `audit.py` | truth | Re-validate every record in a dir + confirm sidecar dotted paths resolve |
+| `audit.py` | truth | Re-validate every record in a dir — that result alone sets PASS/FAIL and the exit status — and **report** sidecar coverage and dangling sidecar paths (reported, never gated) |
 | `cli.py` | truth | `isaac validate | export | audit | new-id` |
 | `ids.py` / `models.py` | truth | ULID record ids; the draft envelope + evidence constructors |
 | `extract/structured.py` | truth-adjacent | Structured sheet (`.csv`/`.xlsx`) → evidenced `fields` with precise locators |

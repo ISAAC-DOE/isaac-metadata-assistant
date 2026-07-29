@@ -539,26 +539,69 @@ class _SeedSpec:
     title: str
     draft_fn: "callable"
     exported: bool
+    #: Human-readable name of the SEEDED FIXTURE IDENTITY — HOW this canonical
+    #: scenario was MATERIALISED at setup time by ``draft_fn`` (and, for seed 5,
+    #: by the export run in ``_materialise_seed``).
+    #:
+    #: The label is a statement about materialisation, in the PAST TENSE, and it is
+    #: deliberately NEVER refreshed afterwards. That combination is what keeps it
+    #: honest: the value being invariant is NOT by itself non-contradiction — an
+    #: invariant *present-tense state description* over a mutating record is
+    #: guaranteed to go false (an earlier wording, "Scenario 2 · Partially
+    #: Confirmed", survived unchanged while the record was fully confirmed,
+    #: exported and done). What cannot be falsified by any later user action is how
+    #: the fixture was built, so that — and only that — is what the wording says.
+    #:
+    #: Presentation only, and DERIVED — see ``scenario_label``: it is never
+    #: persisted in ``Experiment.to_state`` and never reaches a draft, an official
+    #: record, an evidence sidecar, or an export.
+    scenario: str
 
 
 def _seed_specs() -> list["_SeedSpec"]:
     return [
+        # The `Scenario N` prefix is retained deliberately: it is what makes "these
+        # are five different scenarios, not five duplicates" legible at a glance,
+        # and the demo script refers to the records by number. Everything after the
+        # prefix names the MATERIALISATION, in the past tense.
         _SeedSpec(SEED_NEW_DRAFT_ID, "2026-07-12T00:00:01Z",
-                  f"{_SEED_TITLE_BASE} · New Draft", _raw_draft, False),
+                  f"{_SEED_TITLE_BASE} · New Draft", _raw_draft, False,
+                  "Scenario 1 · seeded: extraction only"),
         _SeedSpec(SEED_PARTIAL_ID, "2026-07-12T00:00:02Z",
-                  f"{_SEED_TITLE_BASE} · Partially Completed", _partial_draft, False),
+                  f"{_SEED_TITLE_BASE} · Partially Completed", _partial_draft, False,
+                  "Scenario 2 · seeded: partial answers applied"),
         _SeedSpec(SEED_READY_ID, "2026-07-12T00:00:03Z",
-                  f"{_SEED_TITLE_BASE} · Ready to Export", _full_draft, False),
+                  f"{_SEED_TITLE_BASE} · Ready to Export", _full_draft, False,
+                  "Scenario 3 · seeded: all answers applied"),
         _SeedSpec(SEED_REVIEW_ID, "2026-07-12T00:00:04Z",
-                  f"{_SEED_TITLE_BASE} · Export Review Required", _review_draft, False),
+                  f"{_SEED_TITLE_BASE} · Export Review Required", _review_draft, False,
+                  "Scenario 4 · seeded: descriptor uncertainty omitted"),
         _SeedSpec(SEED_DONE_ID, "2026-07-12T00:00:05Z",
-                  f"{_SEED_TITLE_BASE} · Exported Record", _full_draft, True),
+                  f"{_SEED_TITLE_BASE} · Exported Record", _full_draft, True,
+                  "Scenario 5 · seeded: export run at setup"),
     ]
 
 
 #: (created_utc, title) for the canonical ids the idempotent demo overwrites in
 #: place, so demo-run reuses the scenario's stable identity instead of appending.
 SEED_META = {s.id: (s.created_utc, s.title) for s in _seed_specs()}
+
+#: id -> scenario label for the five canonical seeds, derived from the SAME
+#: ``_SeedSpec`` rows that build the titles (one source of truth; the label is
+#: never recovered by parsing a title, and the title is never rewritten).
+SEED_SCENARIOS: dict[str, str] = {s.id: s.scenario for s in _seed_specs()}
+
+
+def scenario_label(experiment_id: str) -> str | None:
+    """The derived scenario label for a canonical synthetic seed, else ``None``.
+
+    Purely derived at read/serialization time from the record id — nothing is
+    stored on disk (``Experiment`` has no ``scenario`` field and ``to_state``
+    writes none), so a saved + reloaded record carries no new key. A
+    user-created / non-canonical id has NO scenario and yields ``None``, which
+    the UI renders as nothing at all.
+    """
+    return SEED_SCENARIOS.get(experiment_id)
 
 
 def _write_seed_record(exp: Experiment, result) -> None:

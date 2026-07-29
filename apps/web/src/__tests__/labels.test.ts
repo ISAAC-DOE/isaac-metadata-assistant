@@ -61,5 +61,8 @@ describe('LABELS vocabulary', () => {
   it('keeps the brand and technical version strings verbatim', () => {
     expect(LABELS.brand).toBe('ISAAC');
     expect(LABELS.version).toContain('isaac v0.1.0');
+    // The environment half is DERIVED (see `lib/runtimeContext.ts`); under the
+    // default test env (no VITE_API_BASE) that derivation is the local build.
+    expect(LABELS.version).toBe('isaac v0.1.0 · local dev');
   });
 });

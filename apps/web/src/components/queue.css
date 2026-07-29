@@ -71,6 +71,39 @@
   font-weight: 600;
   color: var(--text-heading);
 }
+/* The server-derived canonical-seed scenario label: a quiet secondary line under
+ * the scientific title. Deliberately smaller + lower-emphasis than the title, and
+ * carried by icon + TEXT (never color — it uses no semantic color token at all),
+ * so it cannot compete with the title or restate the lifecycle chip.
+ *
+ * Narrow-width safety: `.exp-main` is already `flex: 1; min-width: 0`, so this
+ * block child is bounded by the shrunken main column and can never push
+ * `.exp-trailing` (which is `flex: none`) off the row. The label wraps onto more
+ * lines instead of clipping; the icon is `flex: none` so it is never squashed, and
+ * `overflow-wrap: anywhere` keeps a pathologically long unbroken token inside the
+ * column rather than overflowing it. `align-items: flex-start` keeps the glyph on
+ * the first line when the text does wrap. */
+.exp-scenario {
+  margin-top: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+}
+.exp-scenario-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-quaternary);
+}
+.exp-scenario-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .exp-sub {
   margin-top: 5px;
   display: flex;

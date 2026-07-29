@@ -91,6 +91,10 @@ export function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary 
   return {
     id: s.id,
     title: stripLifecycleSuffix(s.title),
+    // Passed through verbatim — the label text is authored by the backend from the
+    // same seed spec that builds the title. Nothing here parses a title to recover
+    // it, and a missing/null value stays undefined so the row renders nothing.
+    scenario: s.scenario ?? undefined,
     technique: TECHNIQUE,
     idOrDraft: s.exported && s.record_id ? s.record_id : 'draft',
     meta: s.created_utc ? `created ${s.created_utc.slice(0, 10)}` : undefined,

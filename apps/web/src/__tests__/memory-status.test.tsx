@@ -163,7 +163,21 @@ describe('P24.10 · status card — malformed snapshot (unavailable + integrity 
 });
 
 describe('P24.10 · status card — unavailable (no artifact present)', () => {
-  it('renders an honest unavailable panel with hosted + future-wiring copy, no counts, no error styling', async () => {
+  /*
+   * The copy this asserts was CORRECTED, and the assertions were tightened to
+   * the new true strings rather than relaxed.
+   *
+   * It used to say "the hosted demo does not currently ship the Graphify graph
+   * artifacts; when run locally against local artifacts, Project Memory works".
+   * Both halves became false: `apps/api/isaac_api/data/memory-snapshot.json` and
+   * `memory-graph-detail.json` are tracked in git and ship in the image (the
+   * Dockerfile's `COPY apps/api/ apps/api/`), and `memory.py::_resolve_reader_choice`
+   * PREFERS that packaged snapshot over any live `graphify-out/`. So the hosted
+   * deployment does have Project Memory, and the panel now describes the
+   * condition that actually produces it — naming the two possibilities the
+   * browser cannot distinguish and asserting neither.
+   */
+  it('renders an honest unavailable panel that names the real condition, no counts, no error styling', async () => {
     stubFetchRoutes({
       'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
       'GET /api/graph/status': { body: graphStatusUnavailable },
@@ -173,10 +187,28 @@ describe('P24.10 · status card — unavailable (no artifact present)', () => {
 
     await findByText('Memory Unavailable');
     expect(
-      await findByText(/memory graph artifacts are not present/i),
+      await findByText(/no memory graph artifact was found where this build reads it/i),
     ).toBeInTheDocument();
-    expect(container.textContent).toMatch(/hosted demo does not currently ship/i);
-    expect(container.textContent).toMatch(/wired later to an approved source/i);
+    // The verifiable fact: the artifacts ARE shipped.
+    expect(container.textContent).toMatch(/ships its memory artifacts with the application/i);
+    // Two possible conditions, neither asserted — no signal separates them.
+    expect(container.textContent).toMatch(/cannot tell which of two conditions applies/i);
+    expect(container.textContent).toMatch(/not included in this build/i);
+    expect(container.textContent).toMatch(
+      /configured to read a memory source that is not present/i,
+    );
+    // The retired claims must not come back.
+    expect(container.textContent).not.toMatch(/hosted demo does not currently ship/i);
+    expect(container.textContent).not.toMatch(/Graphify graph artifacts/i);
+    expect(container.textContent).not.toMatch(/institution-hosted/i);
+    expect(container.textContent).not.toMatch(/behind login/i);
+    // No locality claim at all: this panel renders on the hosted deployment too.
+    expect(container.querySelector('.memory-unavailable')!.textContent).not.toMatch(
+      /\blocal\b|\blocally\b|localhost|uvicorn/i,
+    );
+    // The forward-looking sentence is kept, with the corrected access vocabulary.
+    expect(container.textContent).toMatch(/pointed at a richer approved source/i);
+    expect(container.textContent).toMatch(/ISAAC manages no accounts or roles/i);
 
     // no counts / figures rendered, and never the error/verdict visual language
     expect(container.querySelector('.memory-figures')).toBeNull();

@@ -135,3 +135,68 @@
   line-height: 1.5;
   color: var(--text-tertiary);
 }
+
+/* --- Copy Diagnostics --------------------------------------------------
+   Deliberately SECONDARY: a small bordered button in the technical register,
+   never a primary action. It sits inside the collapsed Technical Details box on
+   the failure state and inside About's own technical disclosure, so it inherits
+   both boxes' quiet type scale rather than competing with the page. */
+.fetch-state-diagnostics {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-faint, var(--border));
+}
+.fetch-state-diagnostics-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--action);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner, 8px);
+  cursor: pointer;
+}
+.fetch-state-diagnostics-btn:hover {
+  background: var(--surface-subtle);
+}
+.fetch-state-diagnostics-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.fetch-state-diagnostics-note {
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+/* The clipboard-unavailable path. Stated in words, not colour. */
+.fetch-state-diagnostics-fallback {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.fetch-state-diagnostics-block {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 340px;
+  /* Wide, pre-formatted content scrolls inside its own box — the page never
+     scrolls sideways because of it. */
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner, 8px);
+  white-space: pre;
+  user-select: text;
+}
+.fetch-state-diagnostics-block:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}

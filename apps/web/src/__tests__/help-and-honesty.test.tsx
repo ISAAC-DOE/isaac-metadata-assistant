@@ -94,7 +94,17 @@ describe('P22D · Help is a real, working popover', () => {
     expect(getByText(/"I don't know" is always a safe answer/)).toBeInTheDocument();
     expect(getByText(/the only signal that gates export/i)).toBeInTheDocument();
     expect(getByText(/never blocks or authorizes anything/i)).toBeInTheDocument();
-    expect(getByText(/synthetic demo data only/i)).toBeInTheDocument();
+    // Was `/synthetic demo data only/i`, from the sentence "This prototype runs
+    // on synthetic demo data only — no real experiment data." That was a flat
+    // guarantee the app cannot make: it enforces the runtime MODE, and there is
+    // no real-vs-synthetic detector anywhere in the backend. Help now says what
+    // the code actually does, and this assertion pins both halves.
+    expect(
+      getByText(/configured for synthetic-only operation/i),
+    ).toBeInTheDocument();
+    expect(
+      getByText(/not the contents of what it is handed/i),
+    ).toBeInTheDocument();
   });
 
   it('closes on Escape and returns focus to the Help button', () => {

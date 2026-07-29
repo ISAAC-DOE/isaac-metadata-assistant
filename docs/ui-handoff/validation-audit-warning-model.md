@@ -24,7 +24,7 @@ evidence intact?", and "are there soft notes?" — three orthogonal questions. G
 ## Hard failure vs. soft warning
 
 - **A warning does not mean the record is invalid.** A record can be officially valid, audit-clean, and
-  still carry advisory warnings. The committed sample does exactly this: PASS, `evidence 26/26`, and one
+  still carry advisory warnings. The committed sample does exactly this: PASS, `evidence 33/33`, and one
   `⚠ [NO_LINKS]` warning. The UI must not render a warning with failure semantics (red, blocked, error icon).
 - **Zero warnings does not prove portal acceptance.** The advisory warnings are two local heuristics
   (`NO_LINKS`, `QC_NONVALID_WITHOUT_EVIDENCE`), **not** the upstream `portal/validation.py` — which is not
@@ -41,10 +41,14 @@ evidence intact?", and "are there soft notes?" — three orthogonal questions. G
   record and **fails official validation by design** (running `isaac validate <ULID>.evidence.json --official`
   is a known mistake). A UI must never offer or imply "validate this sidecar." `isaac audit` already handles
   this correctly: it validates the record and *separately* reports sidecar coverage.
-- **Coverage counts the dotted JSON-path keys.** In the sample, `evidence 26/26` means all 26 direct field
-  entries resolve. The namespaced `assets:` / `descriptors:` / `implicit:` keys are provenance for structured
-  blocks and are not part of that count — don't surface "26/26" as if it were a completeness percentage of
-  the whole record.
+- **The coverage denominator is enumerated from the RECORD, not from the sidecar's keys.** In the sample,
+  `evidence 33/33` means all **33 record-enumerated evidence targets** are covered: every scalar leaf
+  reachable by dict-only traversal, plus one block target per series, QC verdict, link, asset, descriptor,
+  and contributor (`audit.py:1-13, 43-85`). Do **not** state the sidecar's key count instead — that sample
+  sidecar holds 36 entries (26 dotted JSON-paths + 10 namespaced block keys), and `26/26` was a stale,
+  wrong figure. Namespaced `assets:` / `descriptors:` / `implicit:` / `series:` / `qc:` / `links:` /
+  `attribution:` keys *do* count, as the block targets. And don't surface the ratio as if it were a
+  completeness percentage of the whole record.
 
 ## Why Graphify does not validate
 
@@ -74,7 +78,8 @@ Visual semantics are suggestions for the designer, not requirements.
 
 ### Audit PASS
 - **Suggested visual:** secondary success indicator, distinct from the validation badge (e.g. a coverage
-  chip `evidence 26/26`).
+  chip `evidence 33/33` — the denominator is the record-enumerated target count, not the sidecar's key
+  count).
 - **Say:** "Evidence audit clean — all N evidence paths resolve (0 dangling)."
 - **Do not say:** "audit passed" as a synonym for "valid." Audit is coverage, not the validity verdict.
 - **Source:** `isaac audit --records-dir <dir>`.
@@ -119,9 +124,9 @@ authority the tool doesn't have.
 |---|---|---|
 | Official PASS | "Valid against official ISAAC schema v1.05." | "Approved by ISAAC," "Portal-validated," "Certified." |
 | Official FAIL | "Invalid against official ISAAC schema v1.05 — 2 errors. Export blocked." | "Rejected by ISAAC," "Failed portal." |
-| Audit clean | "Evidence audit clean — 26/26 evidence paths resolve." | "Fully complete record," "100% verified." |
+| Audit clean | "Evidence audit clean — 33/33 evidence targets covered." (The denominator is enumerated from the record — scalar leaves plus one target per series/QC/link/asset/descriptor/contributor — never the sidecar's key count.) | "Fully complete record," "100% verified." |
 | Warning present | "1 advisory warning (non-gating) — does not affect validity or export." | "1 issue found," "1 error." |
-| No warnings | "No advisory warnings from the local seam." | "Portal-clean," "Accepted by ISAAC," "No issues." |
+| No warnings | "No advisory warnings." | "Portal-clean," "Accepted by ISAAC," "No issues," "No advisory warnings from the local seam." |
 | Blocker open | "Awaiting confirmation: sha256 of `…/CuO2_merged.xdi`. Not exportable until answered." | "Auto-filling…," "Estimated value." |
 | Graphify lead | "Related (project memory — open the cited file to confirm): `export.py` L83." | "Graphify says this record is valid." |
 | Graphify down | "Project memory unavailable — answered from source files." | (silently showing nothing, or inventing a graph result) |

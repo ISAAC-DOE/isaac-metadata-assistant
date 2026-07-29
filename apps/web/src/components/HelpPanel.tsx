@@ -125,7 +125,16 @@ export function HelpPanel() {
 
             <section className="help-section">
               <h3>Synthetic mode</h3>
-              <p>This prototype runs on synthetic demo data only — no real experiment data.</p>
+              {/* Was "This prototype runs on synthetic demo data only — no real
+                  experiment data." — a flat guarantee the app cannot make: it
+                  enforces the runtime MODE, and there is no real-vs-synthetic
+                  detector anywhere in the backend (`isaac_api/runtime_mode.py`). */}
+              <p>
+                This deployment is configured for synthetic-only operation, and real mode
+                intentionally refuses to start because the required ingestion and governance
+                guardrails do not exist yet. What the app enforces is that mode, not the contents of
+                what it is handed.
+              </p>
             </section>
 
             <section className="help-section">

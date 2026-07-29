@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
-import { LoadingPanel, BackendDown } from '../components/FetchStates';
+import { LoadingPanel, BackendDown, DiagnosticsPanel } from '../components/FetchStates';
 import {
   CircleHelp,
   LayoutList,
@@ -26,7 +26,8 @@ import {
   settingsConcepts,
   settingsFactsFrom,
 } from '../lib/settingsContent';
-import type { ApiAboutResponse, ApiOpenApiResponse } from '../lib/types';
+import { diagnosticsAppFrom, diagnosticsMemoryFrom } from '../lib/diagnostics';
+import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../lib/types';
 import { ApiExplorerPanel, ApiQuickStartPanel } from './settings/ApiDocs';
 import { ApiKeysPanel } from './settings/ApiKeys';
 
@@ -75,8 +76,10 @@ import { ApiKeysPanel } from './settings/ApiKeys';
  * the app's own generated contract — never a hand-maintained duplicate, no CDN,
  * no Swagger UI/ReDoc.
  *
- * Both fetches are issued once at page level so switching tabs is pure client
- * state and never re-hits the backend.
+ * All THREE fetches (`/api/about`, `/api/openapi`, `/api/graph/status`) are
+ * issued once at page level so switching tabs is pure client state and never
+ * re-hits the backend. The third feeds Copy Diagnostics' memory-provenance rows
+ * on About; it is the cheap status endpoint, never the graph payload.
  */
 
 type SettingsTab = SettingsTabId;
@@ -99,6 +102,12 @@ export function SettingsPage() {
 
   const about = useFetch(() => api.getAbout(), []);
   const openapi = useFetch(() => api.getOpenApi(), []);
+  /* Copy Diagnostics' memory-provenance rows (About tab). Issued HERE with the
+     other two rather than inside the About panel, because a panel-scoped fetch
+     would re-hit the backend on every switch back to About — the one thing this
+     page's fetch layout deliberately avoids. `GET /api/graph/status` is the cheap
+     provider-agnostic status endpoint, not the graph payload. */
+  const graphStatus = useFetch(() => api.getGraphStatus(), []);
 
   /** Client-side only: `setSearchParams` never reloads the document, and the
    *  value is a query param, so the router's basename is preserved untouched. */
@@ -158,7 +167,7 @@ export function SettingsPage() {
           aria-labelledby={tabId('about')}
           tabIndex={0}
         >
-          <AboutTab state={about} />
+          <AboutTab state={about} graphStatus={graphStatus} />
         </div>
       )}
 
@@ -272,6 +281,7 @@ function SettingsCard({
 
 type AboutState = ReturnType<typeof useFetch<ApiAboutResponse>>;
 type OpenApiState = ReturnType<typeof useFetch<ApiOpenApiResponse>>;
+type GraphStatusState = ReturnType<typeof useFetch<ApiGraphStatus>>;
 
 // --- Overview ---------------------------------------------------------------
 
@@ -437,7 +447,7 @@ function PrivacyBody({ data }: { data: ApiAboutResponse }) {
 
 // --- About ------------------------------------------------------------------
 
-function AboutTab({ state }: { state: AboutState }) {
+function AboutTab({ state, graphStatus }: { state: AboutState; graphStatus: GraphStatusState }) {
   return (
     <SettingsCard
       icon={
@@ -449,7 +459,7 @@ function AboutTab({ state }: { state: AboutState }) {
     >
       {state.status === 'loading' && <LoadingPanel label="Loading app info…" />}
       {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
-      {state.status === 'data' && <AboutDetail data={state.data} />}
+      {state.status === 'data' && <AboutDetail data={state.data} graphStatus={graphStatus} />}
     </SettingsCard>
   );
 }
@@ -462,7 +472,13 @@ function AboutTab({ state }: { state: AboutState }) {
  * documentation paths) sits behind Technical Details, the same collapsed
  * `<details>` pattern the Concepts detail pane uses.
  */
-function AboutDetail({ data }: { data: ApiAboutResponse }) {
+function AboutDetail({
+  data,
+  graphStatus,
+}: {
+  data: ApiAboutResponse;
+  graphStatus: GraphStatusState;
+}) {
   const copy = useMemo(() => settingsAboutCopy(settingsFactsFrom(data)), [data]);
   return (
     <>
@@ -534,6 +550,31 @@ function AboutDetail({ data }: { data: ApiAboutResponse }) {
           </div>
         </dl>
       </details>
+
+      {/*
+        THE NORMAL-STATE HOME OF COPY DIAGNOSTICS.
+
+        WHY ABOUT, and not Overview or the Help panel. About is already the tab
+        whose single job is identity and provenance, and already the ONE place
+        that renders raw values (the full commit SHA, the response field names,
+        the source endpoints) — a pasteable dump of exactly those values belongs
+        beside them. Overview is a summary surface that states no raw value; Help
+        is a floating panel where a multi-line monospace fallback block has
+        nowhere to go. It sits just BELOW Technical Details rather than inside it,
+        so reaching it is one activation and not two.
+
+        It is the SAME control over the SAME generator the failure state uses
+        (`components/FetchStates.tsx`), so the two surfaces cannot drift.
+
+        A failing or unavailable `GET /api/graph/status` is NOT an error state
+        here: the memory rows report "not available", which is the honest outcome
+        and still leaves every build fact in the report.
+      */}
+      <DiagnosticsPanel
+        app={diagnosticsAppFrom(data)}
+        memory={graphStatus.status === 'data' ? diagnosticsMemoryFrom(graphStatus.data) : null}
+        tab="about"
+      />
     </>
   );
 }

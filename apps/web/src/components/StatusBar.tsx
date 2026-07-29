@@ -2,6 +2,7 @@ import './chrome.css';
 import type { ReactNode } from 'react';
 import { StatusChip } from './StatusChip';
 import { LABELS } from '../lib/labels';
+import { RUNTIME_BADGE } from '../lib/runtimeContext';
 import type { AdvisoryResult, AuditResult, ValidationResult } from '../lib/types';
 
 interface StatusBarProps {
@@ -116,7 +117,10 @@ export function StatusBar({
       ))}
       <span className="statusbar-tail">
         {graph}
-        <span className="statusbar-right">local · offline · no telemetry</span>
+        {/* Derived, never a literal: this footer renders on the hosted
+            deployment too, where the old `local · offline · no telemetry` was
+            false on two of its three claims. See `lib/runtimeContext.ts`. */}
+        <span className="statusbar-right">{RUNTIME_BADGE}</span>
       </span>
     </footer>
   );

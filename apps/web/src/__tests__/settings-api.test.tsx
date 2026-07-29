@@ -1064,7 +1064,10 @@ describe('the Full Description rule over the REAL generated contract', () => {
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
     );
-    expect(total).toBe(18314);
+    // 18,314 -> 18,481: the captured copy of `GET /api/experiments` was refreshed to
+    // match the backend description again (it had gone stale when that docstring
+    // gained the derived `scenario` sentence), which is +167 characters.
+    expect(total).toBe(18481);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(39);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {

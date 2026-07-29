@@ -126,7 +126,13 @@ describe('P24.4 · Source Index — detail (real leads)', () => {
     expect(scoped.getByText('Provenance')).toHaveAttribute('title', 'Provenance');
     expect(scoped.getByText('src/other_mod.py')).toBeInTheDocument(); // related.files path
     expect(scoped.getByText('src/fake_mod.py')).toBeInTheDocument(); // local_reference
-    expect(scoped.getByText('local reference — open in your editor')).toBeInTheDocument();
+    // P36V.2 F4 — the label names the value ("repository path") and instructs
+    // nothing: "open in your editor" is unactionable on a deployment, which has
+    // no checkout and no editor. Both halves are pinned, so neither the old
+    // instruction nor a locality claim can come back.
+    expect(scoped.getByText('repository path')).toBeInTheDocument();
+    expect(panel.textContent).not.toMatch(/open in your editor/i);
+    expect(panel.querySelector('.source-index-local-ref')!.textContent).not.toMatch(/\blocal\b/i);
 
     // collapse via click
     fireEvent.click(row);
@@ -209,7 +215,8 @@ describe('P24.4 · Source Index — on_disk:false', () => {
     ).toBeInTheDocument();
     // the copy must not claim the snapshot excludes it — that is a different fact
     expect(panel.textContent).not.toMatch(/snapshot/i);
-    expect(scoped.queryByText('local reference — open in your editor')).toBeNull();
+    expect(scoped.queryByText('repository path')).toBeNull();
+    expect(panel.textContent).not.toMatch(/open in your editor/i);
     expect(panel.querySelector('a')).toBeNull(); // no link/open-style affordance
   });
 });

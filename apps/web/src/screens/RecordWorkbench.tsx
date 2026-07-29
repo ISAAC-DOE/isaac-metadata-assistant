@@ -72,7 +72,7 @@ export function RecordWorkbench() {
       >
         <h1 className="sr-only">{LABELS.screenReview}</h1>
         {bundle.status === 'loading' ? (
-          <LoadingPanel label="Loading the record from the local backend…" />
+          <LoadingPanel label="Loading the record from the ISAAC API…" />
         ) : (
           <BackendDown error={bundle.error} onRetry={bundle.reload} />
         )}
