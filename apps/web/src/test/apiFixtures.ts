@@ -876,14 +876,26 @@ export const CANONICAL_RESET_IDS = [
 
 const RESET_TITLE_BASE = 'Synthetic XANES — CuO (Cu K-edge)';
 
+/** The five derived scenario labels the API serves for the canonical seed ids
+ * (mirrors `workspace.SEED_SCENARIOS`; derived server-side, never stored). Each
+ * names how that fixture was MATERIALISED at setup, in the past tense, so a later
+ * mutation cannot falsify it. */
+export const CANONICAL_SCENARIO_LABELS = [
+  'Scenario 1 · seeded: extraction only',
+  'Scenario 2 · seeded: partial answers applied',
+  'Scenario 3 · seeded: all answers applied',
+  'Scenario 4 · seeded: descriptor uncertainty omitted',
+  'Scenario 5 · seeded: export run at setup',
+];
+
 /** The five canonical scenarios as a summary list (post-reset dashboard).
  * Distribution: needs_attention:2, ready_to_export:1, in_review:1, done:1. */
 export const canonicalFiveSummaries = [
-  { id: CANONICAL_RESET_IDS[0], title: `${RESET_TITLE_BASE} · New Draft`, status: 'needs_attention', created_utc: '2026-07-12T00:00:01Z', pending_count: 5, evidenced_field_count: 26, exported: false, record_id: null },
-  { id: CANONICAL_RESET_IDS[1], title: `${RESET_TITLE_BASE} · Partially Completed`, status: 'needs_attention', created_utc: '2026-07-12T00:00:02Z', pending_count: 2, evidenced_field_count: 30, exported: false, record_id: null },
-  { id: CANONICAL_RESET_IDS[2], title: `${RESET_TITLE_BASE} · Ready to Export`, status: 'ready_to_export', created_utc: '2026-07-12T00:00:03Z', pending_count: 0, evidenced_field_count: 33, exported: false, record_id: null },
-  { id: CANONICAL_RESET_IDS[3], title: `${RESET_TITLE_BASE} · Export Review Required`, status: 'in_review', created_utc: '2026-07-12T00:00:04Z', pending_count: 0, evidenced_field_count: 33, exported: false, record_id: null },
-  { id: CANONICAL_RESET_IDS[4], title: `${RESET_TITLE_BASE} · Exported Record`, status: 'done', created_utc: '2026-07-12T00:00:05Z', pending_count: 0, evidenced_field_count: 33, exported: true, record_id: CANONICAL_RESET_IDS[4] },
+  { id: CANONICAL_RESET_IDS[0], title: `${RESET_TITLE_BASE} · New Draft`, scenario: CANONICAL_SCENARIO_LABELS[0], status: 'needs_attention', created_utc: '2026-07-12T00:00:01Z', pending_count: 5, evidenced_field_count: 26, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[1], title: `${RESET_TITLE_BASE} · Partially Completed`, scenario: CANONICAL_SCENARIO_LABELS[1], status: 'needs_attention', created_utc: '2026-07-12T00:00:02Z', pending_count: 2, evidenced_field_count: 30, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[2], title: `${RESET_TITLE_BASE} · Ready to Export`, scenario: CANONICAL_SCENARIO_LABELS[2], status: 'ready_to_export', created_utc: '2026-07-12T00:00:03Z', pending_count: 0, evidenced_field_count: 33, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[3], title: `${RESET_TITLE_BASE} · Export Review Required`, scenario: CANONICAL_SCENARIO_LABELS[3], status: 'in_review', created_utc: '2026-07-12T00:00:04Z', pending_count: 0, evidenced_field_count: 33, exported: false, record_id: null },
+  { id: CANONICAL_RESET_IDS[4], title: `${RESET_TITLE_BASE} · Exported Record`, scenario: CANONICAL_SCENARIO_LABELS[4], status: 'done', created_utc: '2026-07-12T00:00:05Z', pending_count: 0, evidenced_field_count: 33, exported: true, record_id: CANONICAL_RESET_IDS[4] },
 ];
 
 /** Two managed-legacy demo records (random ids + the committed demo marker). */
@@ -2034,7 +2046,7 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/health", description: "Liveness banner for platform and container probes: the service status, the runtime data mode, the name of the deterministic core package the app calls in process, the app version, and the build commit when the deployment supplies one (otherwise `null` — it is never guessed). This is the one operation that stays reachable without credentials when the deployment enables authentication. Read-only." },
   { op: "POST /api/demo/run", description: "Runs the committed synthetic demo pipeline and returns the ordered steps it executed together with the resulting experiment id and status. `mode: \"draft_only\"` (the default) extracts a draft from the committed fixtures and runs the no-guessing draft checks; `mode: \"full\"` additionally applies the committed simulated answers and exports an official record. It writes into one fixed canonical experiment id per mode, overwriting it in place, so re-running never adds a record and never increases the record count. It reads only the two committed synthetic fixtures and accepts no uploaded data.\n\nA body other than `draft_only` or `full` for `mode` is rejected and nothing runs." },
   { op: "POST /api/demo/reset", description: "Restores the workspace to exactly the canonical synthetic demo scenarios and reports the before/after counts, the removable set, and a state histogram. `mode: \"preview\"` classifies only and mutates nothing; `mode: \"execute\"` additionally requires the exact confirmation phrase and refuses without it. It accepts no caller-supplied ids or paths — any extra field is rejected — it removes only records it can classify as managed synthetic-demo records, and it refuses to remove anything at all if any record is ambiguous. No filesystem path appears in the response.\n\nThere is deliberately no general per-experiment delete operation." },
-  { op: "GET /api/experiments", description: "One summary row per experiment currently in the workspace: its id, title, derived status, creation time, how many blocking questions are still open, how many fields carry evidence, whether it has been exported, and the exported record id when there is one. Read-only, and it states no validity verdict." },
+  { op: "GET /api/experiments", description: "One summary row per experiment currently in the workspace: its id, title, derived status, creation time, how many blocking questions are still open, how many fields carry evidence, whether it has been exported, and the exported record id when there is one. Rows for the five canonical synthetic seeds also carry a derived, never-stored `scenario` label naming which seeded fixture they are; it is null for any other record. Read-only, and it states no validity verdict." },
   { op: "GET /api/experiments/{experiment_id}", description: "The full detail bundle for one experiment: its summary row plus whether the draft passes the no-guessing checks, the exported artifact filenames (basenames only, never a server path), the source files it was extracted from, the derived workflow progression, the exported-artifact freshness state, and the current revision metadata.\n\nThe response carries the record's current `ETag`. Send it back as `If-None-Match` to receive `304` while the record is unchanged. Read-only." },
   { op: "GET /api/experiments/{experiment_id}/draft", description: "This record's draft fields, grouped into the stable sections the record review screen renders. Each field carries its label, official path, current value, the status derived from its evidence, and the kinds of source that evidence came from. Read-only; the response carries the record's current `ETag`." },
   { op: "GET /api/experiments/{experiment_id}/pending", description: "The questions that are still blocking this draft, each with the stable key an answer must be submitted under, what the question is about, and — for the committed synthetic demo only — a clearly labelled suggested answer that is never applied automatically. Read-only; the response carries the record's current `ETag`." },

@@ -353,6 +353,9 @@ export interface ExperimentTrailing {
 export interface ExperimentSummary {
   id: string;
   title: string; // authored with real subscripts (CuO₂)
+  // Server-supplied scenario label for a canonical synthetic seed; undefined for
+  // every other record, in which case the row renders nothing for it.
+  scenario?: string;
   technique: string; // Cu K-edge XANES
   idOrDraft: string; // mono ULID or "draft · name"
   meta?: string; // "updated 2099-04-02" | "with G. Hopper"
@@ -419,6 +422,16 @@ export type ApiExperimentStatus =
 export interface ApiExperimentSummary {
   id: string;
   title: string;
+  // The backend's DERIVED, never-stored scenario label for one of the five
+  // canonical synthetic seeds (e.g. "Scenario 4 · seeded: descriptor
+  // uncertainty omitted"). `null`/absent for every user-created record.
+  // It names how the seeded fixture was MATERIALISED, in the past tense, and is
+  // deliberately never refreshed — so advancing the record changes `status`
+  // below without falsifying the label. Invariance alone would not be enough:
+  // an invariant present-tense state description over a mutating record is
+  // guaranteed to go false.
+  // The text is authored server-side; the client only renders it.
+  scenario?: string | null;
   status: ApiExperimentStatus;
   created_utc: string;
   pending_count: number;

@@ -535,24 +535,59 @@ function MemoryUnavailablePanel({ integrity }: { integrity: SnapshotIntegrity })
       </div>
     );
   }
+  /*
+   * The integrity-unknown case: no artifact was found at all.
+   *
+   * THE COPY THIS REPLACED WAS STALE, NOT JUST LOCAL-FLAVOURED. It said "the
+   * hosted demo does not currently ship the Graphify graph artifacts; when run
+   * locally against local artifacts, Project Memory works" — two false claims by
+   * the time it was read. Both artifacts are COMMITTED
+   * (`apps/api/isaac_api/data/memory-snapshot.json` and
+   * `memory-graph-detail.json` are tracked in git) and both ship in the image
+   * (the Dockerfile's `COPY apps/api/ apps/api/` carries the whole directory),
+   * and `memory.py::_resolve_reader_choice` prefers that packaged snapshot over
+   * any live `graphify-out/`. So Project Memory works on the deployment, and the
+   * old copy told a reader the opposite.
+   *
+   * WHAT IS ACTUALLY TRUE WHEN THIS PANEL RENDERS. `integrity:"unknown"` means
+   * the reader found no artifact where it looked. Given the artifact is shipped,
+   * that leaves two plausible conditions — it was not included in this
+   * particular build, or this deployment points its memory source elsewhere
+   * (`_resolve_reader_choice` honours `ISAAC_MEMORY_SNAPSHOT` /
+   * `ISAAC_MEMORY_DIR` first) — and the browser has NO signal that separates
+   * them. So both are named and neither is asserted, the same discipline
+   * `downCopy` uses for an unreachable API. No cause is invented, and the word
+   * "local" is gone: it was never a fact this panel could know.
+   *
+   * THE INDEPENDENCE CLAIM IS SCOPED TO THE TRUTH PATH, because the broader one
+   * was false. "No other surface depends on it" was contradicted by the code:
+   * `api.ts::getRecordBundle` and `getExportReadiness` both fetch
+   * `GET /api/graph/status`, the status bar renders a memory chip from it, and
+   * `AssistantPanel` classifies a graph-sourced answer as DEGRADED when
+   * availability is unavailable. What is true — and what a reader needs — is that
+   * no verdict, validation result or export decision depends on memory, and that
+   * the surfaces which do consume it report unavailability instead of guessing.
+   */
   return (
     <div className="memory-unavailable">
-      {/* P36R S10 — same "on this backend" jargon as the four unavailable
-          notices below; reworded identically. Not in the slice's listed set,
-          included because leaving one instance behind would defeat the point of
-          removing the other five. The meaning is unchanged. */}
       <p className="memory-unavailable-title">
-        Project memory is unavailable in this deployment — the memory graph artifacts are not
-        present.
+        Project memory is unavailable in this deployment — no memory graph artifact was found where
+        this build reads it.
       </p>
       <p className="memory-unavailable-text">
-        The hosted demo does not currently ship the Graphify graph artifacts; when run locally
-        against local artifacts, Project Memory works.
+        ISAAC ships its memory artifacts with the application — a sanitized graph snapshot and a
+        symbol-level graph — so an absent artifact is not the expected state. This page cannot tell
+        which of two conditions applies: the artifacts were not included in this build, or this
+        deployment is configured to read a memory source that is not present. The memory plane is
+        advisory and optional: no record verdict, validation result, or export decision depends on
+        it. The surfaces that do draw on memory — the status-bar memory chip, and the assistant's
+        memory-sourced answers — report it as unavailable rather than inventing one.
       </p>
       <p className="memory-unavailable-text">
-        Future path: hosted Project Memory is designed to be wired later to an approved source —
-        a sanitized graph snapshot, a database-backed memory index, or an institution-hosted
-        memory service behind login.
+        Future path: the memory source can later be pointed at a richer approved source — a broader
+        sanitized snapshot, or a database-backed memory index. Reaching any such source would be
+        controlled by the deployment where it is operated; ISAAC manages no accounts or roles of its
+        own.
       </p>
     </div>
   );
@@ -767,7 +802,15 @@ function SourceIndexDetail({
 
       {file.on_disk ? (
         <p className="source-index-local-ref">
-          <span className="source-index-local-ref-label">local reference — open in your editor</span>
+          {/*
+            P36V.2 F4 — the label names the value and instructs nothing. It used
+            to read "local reference — open in your editor", which is
+            unactionable on a deployment: there is no checkout and no editor
+            there. `file.local_reference` is a repo-relative path, so that is
+            what it is called. (The label is inert text either way; nothing here
+            fetches or renders file bytes.)
+          */}
+          <span className="source-index-local-ref-label">repository path</span>
           <span className="mono">{file.local_reference}</span>
         </p>
       ) : (

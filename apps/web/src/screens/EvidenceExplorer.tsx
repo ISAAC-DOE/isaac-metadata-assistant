@@ -60,7 +60,7 @@ export function EvidenceExplorer() {
       >
         <h1 className="sr-only">{LABELS.screenEvidence}</h1>
         {bundle.status === 'loading' ? (
-          <LoadingPanel label="Loading the evidence trail from the local backend…" />
+          <LoadingPanel label="Loading the evidence trail from the ISAAC API…" />
         ) : (
           <BackendDown error={bundle.error} onRetry={bundle.reload} />
         )}

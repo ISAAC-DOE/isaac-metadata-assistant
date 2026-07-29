@@ -45,11 +45,19 @@ review*, not to ingest real beamline data yet (that is a decision below).
 - **Completion** — applies human answers to blockers as `user_confirmation` evidence; never invents.
 - **Schema-gated export** → official ISAAC v1.05 record + evidence sidecar; refuses unless *both*
   no-guessing and official-schema checks pass. No `--force`.
-- **Audit** — every stored record re-validates and every sidecar path resolves (0 dangling).
+- **Audit** — every stored record re-validates against the official schema, and that result alone
+  sets the PASS/FAIL verdict and the exit status (`cli.py::cmd_audit`). Sidecar coverage and dangling
+  sidecar paths are *reported* alongside it, not enforced: a record with a dangling — or entirely
+  missing — sidecar still passes audit.
 - **CLI**: `isaac validate | export | audit | new-id`, and the `/isaac-*` skill workflow.
 
-Demo result: official record `01JQZ0SYNTHXANESDEMO000000` — 26 evidenced fields, 5 blockers
-correctly refused then human-answered, valid against v1.05, clean audit (`evidence 26/26`).
+Demo result: official record `01JQZ0SYNTHXANESDEMO000000` — 5 blockers correctly refused then
+human-answered, valid against v1.05, clean audit (`PASS … 0 schema errors, evidence 33/33` —
+`.venv/bin/isaac audit --records-dir /tmp/isaac-demo` after `scripts/run_synthetic_demo.py`). The
+denominator **33 is enumerated from the record**, not from the sidecar: every scalar leaf reachable by
+dict-only traversal, plus one block target per series / QC verdict / link / asset / descriptor /
+contributor (`audit.py:1-13, 43-85`). It is *not* the sidecar's key count — the sidecar holds 36
+entries, of which 26 are dotted JSON-paths and 10 are namespaced block keys.
 
 ## 3. What is intentionally synthetic / demo-only
 
@@ -98,8 +106,10 @@ ISAAC as an *optional companion file* (record stays 100% standard; sidecar trave
 
 - **Tradeoffs / risks.** Pro: full field-level auditability without touching the standard; the
   record alone always validates. Con: it is out-of-standard, so a consumer that only reads the
-  record loses provenance; risk of drift between record and sidecar (mitigated today by the audit
-  that checks every sidecar path resolves).
+  record loses provenance; risk of drift between record and sidecar. That drift risk is **surfaced,
+  not prevented**: `isaac audit` *reports* dangling sidecar paths (and coverage) but does not gate on
+  them — only official-schema validation sets the verdict and exit status (`cli.py:96`), so a record
+  with a dangling — or entirely missing — sidecar still passes.
 - **If yes (adopt/endorse).** We document it as a supported convention and can pitch it upstream as
   an optional artifact. No code change required — it already works.
 - **If no (native-only).** We map what fits into native slots and **drop** evidence that has no home

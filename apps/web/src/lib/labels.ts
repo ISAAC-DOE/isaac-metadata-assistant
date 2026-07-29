@@ -10,6 +10,8 @@
  * technical token (XANES, sha256, JSON paths, v1.05) is never Title-Cased.
  */
 
+import { VERSION_BADGE } from './runtimeContext';
+
 // Technical identifiers that must render exactly as written (never re-cased).
 export const TECHNICAL: readonly string[] = [
   'ISAAC',
@@ -99,7 +101,9 @@ export function titleCase(input: string): string {
 export const LABELS = {
   // App / brand
   brand: 'ISAAC',
-  version: 'isaac v0.1.0 · local',
+  // Derived, never a literal: the old `isaac v0.1.0 · local` rendered on the
+  // hosted deployment too, where "local" is false. See `lib/runtimeContext.ts`.
+  version: VERSION_BADGE,
 
   // Nav destinations
   navExperiments: 'My Experiments',

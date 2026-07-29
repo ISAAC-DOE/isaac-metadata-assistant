@@ -97,7 +97,7 @@ export function ExportReadiness() {
       >
         <h1 className="sr-only">{LABELS.screenExport}</h1>
         {load.name === 'loading' ? (
-          <LoadingPanel label="Loading validation, coverage and advisory from the local backend…" />
+          <LoadingPanel label="Loading validation, coverage and advisory from the ISAAC API…" />
         ) : (
           <BackendDown error={load.error} onRetry={() => runFetch(true)} />
         )}
@@ -427,9 +427,13 @@ function LoadedExport({
                 ) : (
                   <div className="coverage-loading card">Coverage loading…</div>
                 )}
+                {/* Was "A clean local run": on the hosted deployment the run
+                    happens on the server, not the reader's machine. The claim
+                    that matters is "here, not upstream" — which is what it now
+                    says. */}
                 <AdvisoryChip
                   advisory={advisory}
-                  explain="A clean local run is not portal sign-off — the upstream validator isn't vendored here."
+                  explain="A clean run here is not portal sign-off — the upstream validator isn't vendored here."
                 />
               </div>
 
@@ -525,7 +529,7 @@ function LoadedExport({
               </div>
               <p className="preexport-text">
                 All blockers are resolved and the in-memory dry-run would pass the official ISAAC
-                schema. Exporting runs the real, gated validation and writes the local record +
+                schema. Exporting runs the real, gated validation and writes the official record +
                 evidence sidecar. There is no override and no portal submission.
               </p>
               <button

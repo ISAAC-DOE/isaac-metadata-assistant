@@ -824,6 +824,170 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .assistant-more-body .assistant-suggested-eyebrow:first-of-type { margin-top: 12px; }
 
+/* ---- What Can I Ask? (P36X) ----------------------------------------- */
+/* The per-surface capability catalog, opened from the composer dock.
+ *
+ * It OVERLAYS upward (`position: absolute; bottom: 100%`) rather than expanding
+ * the dock: the dock is `position: sticky` on an opaque background at the bottom
+ * of the panel, so an in-flow expansion here would grow the dock and eat the
+ * transcript above it — the exact squeeze P36V.1 S1 had to undo for the
+ * Suggested Questions. The anchor keeps its own size, so nothing reflows.
+ *
+ * Bounded like every other assistant scrollport (`max-height` + `overflow-y`),
+ * so a long list scrolls INSIDE the popover at a narrow viewport or 200% zoom
+ * instead of escaping the panel; `overflow-x: hidden` plus `overflow-wrap` on
+ * every text carrier keeps a long example from producing a sideways scrollbar.
+ *
+ * CLIP MITIGATION (P36X review). On the empty-conversation state `.assistant` is
+ * content-sized and capped at `calc(100vh - 110px)`, so a tall popover opening
+ * upward can exceed the space above the trigger and have its TOP edge clipped by
+ * the `.screen-card { overflow: hidden }` ancestor. That clip is OUTSIDE this
+ * popover's scrollport, so clipped content cannot be scrolled back into view.
+ * Two conservative mitigations, no repositioning rewrite:
+ *   1. the cap is 34vh, not 46vh — less likely to exceed the space above; and
+ *   2. the SCROLLPORT is the group list (`-list`), not the whole panel, and the
+ *      two honesty-critical sentences plus Close sit BELOW it as `flex: none`
+ *      rows nearest the trigger — the edge least exposed to the clip, and out of
+ *      the scroll region so they are visible without scrolling.
+ * The panel keeps its own `overflow-y: auto` as a last resort, so in an extreme
+ * viewport the fixed rows scroll rather than being clipped away. Whether the
+ * empty-state popover fits at all remains a HUMAN browser check: jsdom computes
+ * no layout, so nothing in the test suite can prove it. */
+.assistant-capabilities {
+  position: relative;
+  flex: none;
+  min-width: 0;
+  margin-top: 8px;
+}
+.assistant-capabilities-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--assist-border);
+  background: var(--assist-panel-bg);
+  color: var(--assist-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.assistant-capabilities-trigger > span { min-width: 0; overflow-wrap: anywhere; }
+.assistant-capabilities-trigger:hover { background: var(--assist-tint); }
+.assistant-capabilities-trigger:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+.assistant-capabilities-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 2;
+  min-width: 0;
+  max-height: 34vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid var(--assist-border);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+  box-shadow: var(--shadow-screen);
+}
+.assistant-capabilities-panel:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+/* The catalog is the ONE scroll region; `min-height: 0` is what lets it shrink
+ * inside the flex column instead of pushing the sentences below it out. */
+.assistant-capabilities-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.assistant-capabilities-note {
+  flex: none;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+/* The BOUNDARY carries this control's honesty claim — that anything outside the
+ * catalog is refused, not guessed — so it does NOT share the note's tertiary text
+ * on the white popover surface: #78838f on #ffffff at 11px is 3.86:1, below AA.
+ * --text-secondary is 8.07:1 here. The same correction `.assistant-composer-helper`
+ * already carries from the P33 S2 review; this is the one string in scope for it
+ * (tertiary text at 10–12px is pervasive and pre-existing elsewhere). */
+.assistant-capabilities-boundary {
+  flex: none;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  border-top: 1px solid var(--border-hair);
+  padding-top: 8px;
+  color: var(--text-secondary);
+}
+.assistant-capabilities-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.assistant-capabilities-eyebrow {
+  margin: 0;
+  color: var(--assist-text);
+  overflow-wrap: anywhere;
+}
+.assistant-capabilities-example {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.assistant-capabilities-example > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.assistant-capabilities-example .chev { color: var(--text-quaternary); flex: 0 0 auto; }
+.assistant-capabilities-example:hover { border-color: var(--assist-border); background: var(--assist-panel-bg); }
+.assistant-capabilities-example:active { border-color: var(--assist-border); background: var(--assist-tint); }
+.assistant-capabilities-example:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+.assistant-capabilities-close {
+  flex: none;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.assistant-capabilities-close:hover { background: var(--assist-tint); color: var(--assist-text); }
+.assistant-capabilities-close:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+
 /* ---- Proposed-action region (P36R S2) ------------------------------- */
 /* A staged answer and an unconfirmed proposal are NOT chat messages: they live
  * in their own labelled region above the composer, where they cannot scroll away

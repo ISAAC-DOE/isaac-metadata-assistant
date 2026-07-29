@@ -152,8 +152,12 @@ export function RecordValidator() {
         </div>
       </header>
 
+      {/* Was "Synthetic/local validator", which asserted the reader's machine on
+          a build that also runs hosted. "Synthetic-mode" is a claim about the
+          BUILD's configured mode — the app cannot tell real data from synthetic
+          by looking at it, and nothing here tries to. */}
       <p className="rec-val-scope-note" id="rec-val-scope-note-id">
-        Synthetic/local validator: the record is checked in memory and discarded. Nothing here is
+        Synthetic-mode validator: the record is checked in memory and discarded. Nothing here is
         uploaded to a model, indexed, or stored.
       </p>
 

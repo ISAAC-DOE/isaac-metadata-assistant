@@ -21,6 +21,7 @@ import {
   stubFetchDown,
   aboutResponse,
   aboutResponseNoCommit,
+  graphStatusAvailable,
   openApiFixture,
 } from '../test/apiFixtures';
 
@@ -60,6 +61,7 @@ import {
 
 const ABOUT_URL = 'GET /api/about';
 const OPENAPI_URL = 'GET /api/openapi';
+const GRAPH_STATUS_URL = 'GET /api/graph/status';
 
 /**
  * A probe inside the router. It exposes the live location and the real
@@ -96,7 +98,13 @@ const back = () => act(() => probeNavigate?.(-1));
 const forward = () => act(() => probeNavigate?.(1));
 
 function fullRoutes() {
-  return { [ABOUT_URL]: { body: aboutResponse }, [OPENAPI_URL]: { body: openApiFixture } };
+  return {
+    [ABOUT_URL]: { body: aboutResponse },
+    [OPENAPI_URL]: { body: openApiFixture },
+    // Copy Diagnostics' memory-provenance rows (About tab). Page-level, like the
+    // other two, so a tab switch never re-hits it — see the fetch-count test.
+    [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
+  };
 }
 
 const tab = (name: string) => screen.getByRole('tab', { name });
@@ -388,8 +396,8 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     expect(search()).toContain('tab=api');
   });
 
-  /** Both fetches are issued ONCE at page level, so the five tabs are pure
-   *  client state: no tab switch, and no Back/Forward, may re-hit the backend. */
+  /** Every page-level fetch is issued ONCE, so the five tabs are pure client
+   *  state: no tab switch, and no Back/Forward, may re-hit the backend. */
   it('switching tabs never re-hits the backend', async () => {
     const hits = stubFetchRoutes(fullRoutes());
     renderSettings();
@@ -397,6 +405,11 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     const initial = [...hits];
     expect(initial.filter((h) => h === ABOUT_URL)).toHaveLength(1);
     expect(initial.filter((h) => h === OPENAPI_URL)).toHaveLength(1);
+    // The graph status is issued once at mount too. The `hits` equality below
+    // catches a re-fetch on a tab switch, but NOT a double-issue at mount —
+    // that would already be in `initial`. Pin it explicitly, as for the other
+    // two page-level fetches.
+    expect(initial.filter((h) => h === GRAPH_STATUS_URL)).toHaveLength(1);
 
     for (const name of ['Data & Privacy', 'About', 'API Access', 'Endpoint Explorer', 'Overview']) {
       openTab(name);
@@ -526,6 +539,7 @@ describe('Settings — Overview', () => {
     stubFetchRoutes({
       [ABOUT_URL]: { body: { ...aboutResponse, data_regime: 'mixed-somehow' } },
       [OPENAPI_URL]: { body: openApiFixture },
+      [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
     });
     renderSettings();
     expect(
@@ -538,6 +552,7 @@ describe('Settings — Overview', () => {
     stubFetchRoutes({
       [ABOUT_URL]: { body: { ...aboutResponse, persistence: 'durable' } },
       [OPENAPI_URL]: { body: openApiFixture },
+      [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
     });
     renderSettings();
     expect(await screen.findByText(/reports persistence as "durable"/i)).toBeInTheDocument();
@@ -615,7 +630,16 @@ describe('Settings — Data & Privacy', () => {
     expect(screen.getByText(/only unmistakably synthetic data is in scope/i)).toBeInTheDocument();
     expect(screen.getByText(/there is no database/i)).toBeInTheDocument();
     expect(screen.getByText(/no analytics, no usage tracking/i)).toBeInTheDocument();
-    expect(screen.getByText(/no accounts, no sign-in, and no user profiles/i)).toBeInTheDocument();
+    // Was `/no accounts, no sign-in, and no user profiles/i`. That sentence read
+    // as "this deployment is open", which is the opposite of how it is operated:
+    // the hosted deployment sits behind an institutional single-sign-on edge.
+    // The definition now separates app-managed identity from edge access, and
+    // this assertion pins the app-managed half by name.
+    expect(
+      screen.getByText(
+        /ISAAC itself does not manage user accounts, profiles, or application roles/i,
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/decided only by the official isaac v1\.05 schema/i),
     ).toBeInTheDocument();
@@ -656,7 +680,18 @@ describe('Settings — Data & Privacy', () => {
     expect(
       await screen.findByText(/there is no language model in this build/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/never written down or logged/i)).toBeInTheDocument();
+    // The Assistant-conversation privacy claim, pinned to what the code ACTUALLY
+    // does. `lib/assistantSession.ts::writeStorage` persists the transcript to
+    // `sessionStorage`, so the old copy ("never written down or logged") was a false
+    // privacy claim. This is strictly stronger than the assertion it replaces: it
+    // pins the true statement AND forbids the false one from coming back.
+    expect(
+      screen.getByText(/the transcript is written to sessionStorage in that tab/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/survives a page reload and is erased when the tab closes/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/never written down/i)).not.toBeInTheDocument();
   });
 
   /** The Data & Privacy half of the same three anti-overstatement guards. */
@@ -785,6 +820,7 @@ describe('Settings — About', () => {
     stubFetchRoutes({
       [ABOUT_URL]: { body: aboutResponseNoCommit },
       [OPENAPI_URL]: { body: openApiFixture },
+      [GRAPH_STATUS_URL]: { body: graphStatusAvailable },
     });
     renderSettings();
     openTab('About');

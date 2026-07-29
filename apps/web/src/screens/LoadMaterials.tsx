@@ -107,14 +107,21 @@ export function LoadMaterials() {
               </span>
               <div>
                 <div className="onramp-title">{LABELS.actionLoadLocal}</div>
-                <div className="onramp-tagline">stays on this machine</div>
+                <div className="onramp-tagline">not enabled in this build</div>
               </div>
-              <span className="onramp-tag">Local-First</span>
+              <span className="onramp-tag">Approval-Gated</span>
             </div>
             {upload.name === 'idle' && (
+              /*
+               * The affordance states what activating it does. There is no file
+               * input element here and no drop handler: clicking sends an empty
+               * `POST /api/uploads`, which the server refuses with 403 without
+               * declaring or parsing a form. So no picker opens and no file is
+               * chosen, sent, or read — and the control must not imply otherwise.
+               */
               <button type="button" className="drop-target" onClick={tryLocalFiles}>
-                Drop <span className="mono">.csv</span> / <span className="mono">.xlsx</span> or an
-                archive listing — structured formats only, unstructured extraction is not built yet.
+                Loading your own files is not enabled here. This control opens no file picker and
+                takes no dropped file — select it and the server states its refusal.
               </button>
             )}
             {upload.name === 'blocked' && (
@@ -130,8 +137,9 @@ export function LoadMaterials() {
             )}
             <p className="onramp-warn">
               <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
-              A file that looks real or private is intercepted and routed to governance — nothing is
-              extracted.
+              Every file upload is refused outright, whatever it contains — no file is read, parsed,
+              or inspected. Keeping real or private artifacts out is the operator's responsibility,
+              not a check this software performs.
             </p>
           </div>
         </div>

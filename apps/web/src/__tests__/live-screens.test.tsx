@@ -87,9 +87,13 @@ describe('S1 · My Experiments renders live queue groups from injected data', ()
 describe('S2 · Load Materials', () => {
   it('local structured files are approval-gated: the 403 governance message shows verbatim', async () => {
     stubFetchRoutes({ 'POST /api/uploads': { status: 403, body: uploadsBlocked } });
-    const { findByText, getByText } = renderAt('/load');
+    const { findByText, getByText, getByRole, container } = renderAt('/load');
 
-    fireEvent.click(getByText(/structured formats only/));
+    // P36V.2 F1 — the control is a plain button and the panel has NO file input,
+    // so no picker can open and no file is ever chosen, sent or read. The copy
+    // now says exactly that, and is selected on here so it cannot drift back.
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+    fireEvent.click(getByRole('button', { name: /opens no file picker/i }));
 
     expect(await findByText(/Blocked by governance\./)).toBeInTheDocument();
     expect(getByText(new RegExp(uploadsBlocked.reason))).toBeInTheDocument();
@@ -99,9 +103,9 @@ describe('S2 · Load Materials', () => {
 
   it('uploads with the backend down → Backend Not Running with the run command, never governance copy', async () => {
     stubFetchDown();
-    const { findByText, getByText, queryByText } = renderAt('/load');
+    const { findByText, getByText, getByRole, queryByText } = renderAt('/load');
 
-    fireEvent.click(getByText(/structured formats only/));
+    fireEvent.click(getByRole('button', { name: /opens no file picker/i }));
 
     expect(await findByText('Backend Not Running')).toBeInTheDocument();
     expect(getByText(RUN_COMMAND)).toBeInTheDocument();

@@ -32,11 +32,22 @@
  *  - the app cannot tell whether the deployment restricts access. The optional
  *    shared key the backend can require is configured outside the browser, so
  *    the client may state the uncertainty but never a status.
+ *  - access is FOUR separate things and the copy keeps them separate: (a) the
+ *    edge in front of the deployment, which decides whether a browser reaches
+ *    ISAAC at all; (b) app-managed identity and roles, which do not exist;
+ *    (c) the optional shared bearer key the backend can require; (d) per-user
+ *    API-key management, which no operation in this build provides. Collapsing
+ *    them produced the old "no sign-in and no accounts" summary, which read as
+ *    "this deployment is open" — the opposite of how it is operated.
+ *  - a claim about (a) is a claim about how the deployment is CONFIGURED and
+ *    OPERATED. Say so explicitly; the browser observes none of it.
  *  - infrastructure topology is never named. `apps/api/tests/
  *    test_about_and_openapi.py` withholds a fixed list of substrings from
  *    `GET /api/about`, and `src/__tests__/settings-page.test.tsx` re-asserts it
- *    on the rendered text of every tab. Describe the access boundary
- *    provider-neutrally.
+ *    on the rendered text of every tab. That list forbids naming the identity
+ *    PRODUCT in front of a deployment, so the copy says "institutional single
+ *    sign-on" and never the vendor; the operating institution and the fact that
+ *    an edge exists are not on the withheld list and are stated plainly.
  *
  * Any value-dependent sentence is built from the facts the backend actually
  * reported. When the backend reports something the copy does not cover, the
@@ -111,7 +122,7 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
         ? 'Synthetic-only mode — file upload is refused outright, and the app cannot tell real data from synthetic.'
         : `The backend reports the data regime as "${dataRegime}".`,
       detail: syntheticOnly
-        ? 'Only unmistakably synthetic data is in scope, and this build runs in synthetic-only mode: file upload is refused outright. What the app enforces is that mode, not the contents of what it is handed — it cannot tell real data from synthetic, so keeping real artifacts out is a responsibility of whoever operates it, not a check the software performs.'
+        ? 'Only unmistakably synthetic data is in scope, and this build runs in synthetic-only mode: file upload is refused outright. Real mode intentionally refuses to start, because the ingestion and governance guardrails it would need do not exist yet. What the app enforces is that mode, not the contents of what it is handed — it cannot tell real data from synthetic, so keeping real artifacts out is a responsibility of whoever operates it, not a check the software performs.'
         : `The backend reports the data regime as "${dataRegime}". This screen states only what the backend reports.`,
     },
     {
@@ -143,8 +154,14 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
         ? 'There is no database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it. The backend reports that storage as ephemeral: it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be.'
         : `The backend reports persistence as "${persistence}". This screen states only what the backend reports.`,
       more: {
+        // Was "they exist only in the open browser tab and are never written down or
+        // logged." The second half was false: `lib/assistantSession.ts` writes the
+        // transcript to `sessionStorage` under `isaac.assistant.session.<id>` (see
+        // `writeStorage`), so it IS written down and it DOES survive a reload. The
+        // true, and still strong, statement is where it is written, how long it lives,
+        // and what is stripped first — not that nothing is stored.
         label: 'Assistant Conversations',
-        text: 'Assistant conversations are more ephemeral still: they exist only in the open browser tab and are never written down or logged.',
+        text: 'Assistant conversations stay in the browser tab that created them, but they are not held only in memory: the transcript is written to sessionStorage in that tab, so it survives a page reload and is erased when the tab closes. It is never sent to a server, never logged, and never written to localStorage or IndexedDB. Only the most recent 40 messages are kept, and credentials, absolute file paths, long hex digests and record verdicts are stripped before anything is stored.',
       },
     },
     {
@@ -157,9 +174,13 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
     {
       id: 'no-external-model-calls',
       heading: 'No External Model Calls',
-      summary: 'No language model at all — the assistant answers from a bounded local catalog.',
+      // "local catalog" / "over local data" read against "external provider"
+      // here, but "local" is still a locality word this app cannot claim on a
+      // deployment — so both name WHERE the catalog and the data actually are.
+      summary:
+        'No language model at all — the assistant answers from a bounded in-repository catalog.',
       detail:
-        'There is no language model in this build. The assistant answers from a bounded, deterministic catalog over local data, and refuses anything outside it rather than guessing. Nothing you type is sent to a model provider.',
+        "There is no language model in this build. The assistant answers from a bounded, deterministic catalog over the deployment's own data, and refuses anything outside it rather than guessing. Nothing you type is sent to a model provider.",
     },
     {
       id: 'project-memory-boundary',
@@ -178,12 +199,12 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       id: 'authentication-boundary',
       heading: 'Authentication Boundary',
       summary:
-        'No sign-in and no accounts, and this screen cannot report whether access is restricted.',
+        'Access is controlled by the deployment, not by ISAAC accounts — and this screen cannot report whether access is restricted.',
       detail:
-        'The app has no accounts, no sign-in, and no user profiles, and none of this is configurable here. Access can be restricted in two places: by the environment this build is deployed into, and by an optional shared key the backend requires when an operator sets one. This screen has no way to report whether either restriction is active.',
+        'Four separate things, deliberately not merged into one. First, access to a deployed ISAAC instance is controlled in front of ISAAC, at the network edge where it is operated. The SLAC-hosted deployment is configured to sit behind institutional single sign-on, so a browser session is established there before any ISAAC page loads — a statement about how the deployment is operated, never something this app verified, because the browser cannot see the edge. Second, ISAAC itself does not manage user accounts, profiles, or application roles, and none of that is configurable here. Third, the backend can additionally require one shared bearer key on every operation except the liveness check; it belongs to the deployment rather than to a person, and this screen has no way to report whether either restriction is active. Fourth, there is no per-user API-key management in this build: no operation creates, lists, revokes, or rotates a credential.',
       more: {
         label: 'About That Shared Key',
-        text: 'The key belongs to the deployment rather than to any user, and the app never displays it.',
+        text: 'The backend reads it once at startup from its own environment and compares it on each request. The app never displays it, and nothing on this screen can create, replace, or reveal one.',
       },
     },
   ];

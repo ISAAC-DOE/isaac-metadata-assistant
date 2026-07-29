@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "c0796310ed0025aee230bf20d28eb5f081d224bbfb2521a2ef45e4f4a401d193"
+        "sha256": "f9ed5d76106747a428176ab8080600807e3a972d7c213e9309db7e33a92480e7"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "bae184bce161dd3a3a3eb680623f0e310a563c9c96ace4b702343ee628d85f30"
+        "sha256": "56423494a448e7f3efff321d74560da2583e3e854fcc4d6d9e2fd1a3dd15bd8f"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10348,7 +10348,7 @@
       },
       {
         "path": "apps/web/src/__tests__/help-and-honesty.test.tsx",
-        "sha256": "d52a282ee8cbd5f29c9a3058c2c20ff28d7e4cc7c7b1cd99996aea0cd19767ef"
+        "sha256": "cbbdfde20dfc7388d077f075525314b3ed3149fc140175a83949a07d118b2699"
       },
       {
         "path": "apps/web/src/__tests__/interaction-states.test.ts",
@@ -10356,11 +10356,11 @@
       },
       {
         "path": "apps/web/src/__tests__/labels.test.ts",
-        "sha256": "6d712581a957572ca8e4bbc848af553103807842800da57062ce608757940c06"
+        "sha256": "7753509aab8d5ea1bd2c4b6c8d2bd10dc87e468ac216aca6865c801b46a3e98f"
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
-        "sha256": "60f1c50f684b0cb35c68f55ea5a9bb0ddd7dd7dcad2b16f47f8165f26b5f8090"
+        "sha256": "6156d736b8420d2c7c868f14a587546ca6020402054502e5be22f334ae711cf4"
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
@@ -10372,11 +10372,11 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-sources.test.tsx",
-        "sha256": "acdcfbcb6b33b4452983ba15cb503bb50937d5900496476fb8010d80b0ff20d0"
+        "sha256": "456dbef5dc0e1d8f1f46467376ae3e61f46af7e1507045822e9f108e0a3a4e35"
       },
       {
         "path": "apps/web/src/__tests__/memory-status.test.tsx",
-        "sha256": "61daf514af44c0cd03fca01c7f859c684c29b59e9c2aea00cbe4f5e46a8d6727"
+        "sha256": "583eead17c2bd557a4e48b6bac6c8364ac27cd17f74b894b2b8f742aa9f3d7ac"
       },
       {
         "path": "apps/web/src/__tests__/modal-a11y.test.tsx",
@@ -10384,7 +10384,7 @@
       },
       {
         "path": "apps/web/src/__tests__/navigation.test.tsx",
-        "sha256": "5dc178277cac734eadae39e95913ca3ff7ca45831efab06fed7edcaa13d2d9de"
+        "sha256": "016f28b21b4154994899be133174aae475d34a98d8256a5c3963bf3592dfdd75"
       },
       {
         "path": "apps/web/src/__tests__/no-vertical-rail.test.ts",
@@ -10400,7 +10400,7 @@
       },
       {
         "path": "apps/web/src/components/AdvisoryChip.tsx",
-        "sha256": "e624cd06dd1e49fd71e146302f7b02ad1c0239db618c3d937ad792b4f9b51a05"
+        "sha256": "d611f69319710f9798039a96d528929ad94e6ad7ad08b1ea1750d2933dd45ca8"
       },
       {
         "path": "apps/web/src/components/AppShell.tsx",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "33f5d16329db838e4345217b0a1d6565279c8fedd3a7f54ca5a0a91568e5c9fa"
+        "sha256": "b9d4e27375d207387fb5e7f5eb445e02b3448400907d8df81cc5a402836e9848"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10432,11 +10432,11 @@
       },
       {
         "path": "apps/web/src/components/ExperimentRow.tsx",
-        "sha256": "911e3bee9cc9be2ff54353fb76ce8a92119be71b6bd7be1edb4684a976df5e9c"
+        "sha256": "1d14794056671d7745da66555bd501dd3f3275458816e237099f009c92d719d1"
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "94af3898124006d739023162b42ae2c77a77268466f028c90ab52ca1739e3132"
+        "sha256": "306c349e27d2c1a402fa78ab0d0c36789137104e5097d2c952448adfb0787a7f"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10460,7 +10460,7 @@
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
-        "sha256": "b0c67d032fb520cf09c027a840eb845d2a3c264941f77a2f509da92514561df0"
+        "sha256": "3031780c903098ae28e5591af6905a0902e1e6a773de314097043bc8b0e4ac37"
       },
       {
         "path": "apps/web/src/components/LeftNav.tsx",
@@ -10476,7 +10476,7 @@
       },
       {
         "path": "apps/web/src/components/StatusBar.tsx",
-        "sha256": "b0bc45b3b5cd0deadde37df1800c640f8d853675393a43344a5d86863dcc1afb"
+        "sha256": "0b468a1ce0da4fedf0e93c77383d6b178017e289e0621a5be31bf533b4502748"
       },
       {
         "path": "apps/web/src/components/StatusChip.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "bcc7082785dc4088c88739b2b0f54ee331376f7395556837fb71b75f769e3295"
+        "sha256": "06628f31ffeb8b059492cceb367e35056f8ee3e5a238f65ef729b6190fae12e8"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "6ea69f60de4b89da4f6d8b4238c92d60b777878031fde371cb0c87117cc45d14"
+        "sha256": "bd216ba97b3c0f89c4a20ae9a5d2ff5a4bb246f673875f0bdcdb524922a0a146"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "568091034c39a0c0209ef9959adfca1e904d0148ca69774efeb7d3affeb4c893"
+        "sha256": "9e87e8d25f015dad493144ed81403d9d07f506b9f0e873af35b6387955d18f2e"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10536,7 +10536,7 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "7c28c9ce1a9c85a6c10b6bd95302ff793e657691bbb930ed79d0dab0b6b03927"
+        "sha256": "168b59831f5a6f332b0f20a8d27a894373aa442831126e4aebf885dcc0bd52e9"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
@@ -10544,35 +10544,35 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "2ea4622bdaeddd73b43f3a418417ae6344c05b41e7b4a8d5feed20d0e0e4faa1"
+        "sha256": "e9a0aa636ec7c00ce4e7338783dac57498fd30156ad9a74bb8acaa756cdcb654"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
-        "sha256": "1ff5c5050f2314e4672956c438d189ac12cdab67939b879e317f0922b2cedeae"
+        "sha256": "7eb01234a5aa49eaaea5c33181956c3719cdf747ae3cd2e61e494d4794d00dad"
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "bd0a5e403ca3e08eaf1c0c754295d54f340ad7e4e87ff302768d2ab1b5d65fb4"
+        "sha256": "3e928870e98b11e78cd26b8ad6d78fb2d8037c71c487c6d0e36a07e4b783f859"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
-        "sha256": "a3198ed1177e51eb3291bca8e32be9ac29720af270ae326b71cfbe5b333785cb"
+        "sha256": "6e4aa7e5da1e33138b4d9d570c85aeaac8eb17f88fa89d9a0c99e9df327083d1"
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "ecdc55c259bbec23b8030223f4da432f9b869dccdf72766104c3fbb497ef0497"
+        "sha256": "70185682de1da50693657b21345db6924db3a3d72295711400e8c45aeab7daa4"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "bad86eb110d1876db66865c4c8dcdb1aa56e2ce4b59d8fb504a35f75a2fbb878"
+        "sha256": "7aa04a684d4a0b5a29eeabac6c48d092ba28b15079058d8a85a4dcbad7ae7172"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "0a9a64443d635f6f8a7cf10f6a7f689dd9e8370d550de5479394b3026ea67b54"
+        "sha256": "1328168afacb5a4c468420d5bf8c2c416f7488d28ed70aefaefa14d6f4c35428"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "5116f3aab4f2c379bd95271acbd6f5aab674db471bac75892af5bfe96ca26d53"
+        "sha256": "a28a495ccad1312d0d7604dc1d8cd8fbe3b412839f2172d915859a9fcf0b1443"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10600,7 +10600,7 @@
       },
       {
         "path": "docs/architecture.md",
-        "sha256": "1f77c699468a44fd856b74c54b477bb20504cf315fc151f5167f7d98ab2688e7"
+        "sha256": "a89068eefa8f469e70e85b112d149de6fdaaee5d7086cccf1e986035012f4e6a"
       },
       {
         "path": "docs/claude-workflow.md",
@@ -10652,7 +10652,7 @@
       },
       {
         "path": "docs/mentor-decisions.md",
-        "sha256": "8e045a46a4878bfb56a47e309331e319dc77ef798f17bdce9b953392f93d7559"
+        "sha256": "de3ab24c1b929250f99e943285f87985d161e53b3ef66eecb147c72d177d8211"
       },
       {
         "path": "docs/operator-playbook.md",
@@ -10768,7 +10768,7 @@
       },
       {
         "path": "docs/ui-handoff/validation-audit-warning-model.md",
-        "sha256": "73fed71a867c001b685a948944d541e66070d1dc7304e20fa5265e7de93682e7"
+        "sha256": "eb81e1c3afde45b91189982db7918d73f1fe4f992cf0cf9f8470435fdd321312"
       },
       {
         "path": "docs/ui-local-dev.md",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "af0cd63cd418da5c0aebf6502405fd7bf9be862f46d1aee56b88ee432bc088ad"
+    "served_manifest_fingerprint": "e7d5dc1cda32b92020f3e934a65de268c902564ec1a57a505e4a728ce3a5360c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

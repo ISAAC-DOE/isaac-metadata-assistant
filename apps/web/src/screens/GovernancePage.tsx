@@ -119,8 +119,8 @@ export function GovernancePage() {
           <p>
             This prototype is synthetic-only by default. Real SLAC/SSRL or private artifacts require
             written data-governance approval before they can be read, indexed, or sent to any model.
-            Nothing is uploaded to a model or index without that approval — a real-looking file is
-            intercepted here and nothing is extracted.
+            Nothing is uploaded to a model or index without that approval: every file upload is
+            refused outright, whatever it contains, and no file is read, parsed, or inspected.
           </p>
           <div style={{ marginTop: 18 }}>
             <GovernanceBanner />

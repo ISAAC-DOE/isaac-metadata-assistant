@@ -386,6 +386,15 @@ def _summary(exp: Experiment) -> dict:
     return {
         "id": exp.id,
         "title": exp.title,
+        # P-pre-dean — the DERIVED scenario label for the five canonical synthetic
+        # seeds (``None`` for any user-created record). Computed here from the id
+        # alone; never stored on the experiment, never part of a draft/record/
+        # sidecar/export. It names the SEEDED FIXTURE AT MATERIALISATION TIME and is
+        # deliberately never refreshed, so it is worded in the past tense — a later
+        # mutation changes the derived `status` below without falsifying the label.
+        # (Invariance alone would NOT be enough: an invariant present-tense state
+        # description over a mutating record is guaranteed to go false.)
+        "scenario": ws.scenario_label(exp.id),
         "status": exp.status(),
         "created_utc": exp.created_utc,
         "pending_count": exp.pending_count(),
@@ -739,8 +748,10 @@ def demo_reset(
         "One summary row per experiment currently in the workspace: its id, "
         "title, derived status, creation time, how many blocking questions are "
         "still open, how many fields carry evidence, whether it has been "
-        "exported, and the exported record id when there is one. Read-only, and "
-        "it states no validity verdict."
+        "exported, and the exported record id when there is one. Rows for the "
+        "five canonical synthetic seeds also carry a derived, never-stored "
+        "`scenario` label naming which seeded fixture they are; it is null for "
+        "any other record. Read-only, and it states no validity verdict."
     ),
     response_description="Every experiment as a summary row.",
     responses={**_R_UNAUTHORIZED},

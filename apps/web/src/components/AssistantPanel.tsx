@@ -1,5 +1,5 @@
 import './assistant.css';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MessageSquare,
@@ -26,6 +26,18 @@ import {
   hasVerdictLanguage,
 } from '../lib/assistant';
 import { classifyAnswer, type MessageKind } from '../lib/assistantConversation';
+// P36X — the REAL, per-surface capability catalog behind "What Can I Ask?". The
+// groups are selected from `queryScope` + whether a `graphCapability` is wired,
+// so the list can never advertise a family the current surface would refuse.
+import {
+  CAPABILITIES_BOUNDARY,
+  CAPABILITIES_CLOSE_LABEL,
+  CAPABILITIES_DRAFT_KEPT_NOTE,
+  CAPABILITIES_INSERT_NOTE,
+  CAPABILITIES_MEMORY_SCOPE_NOTE,
+  CAPABILITIES_TRIGGER_LABEL,
+  capabilityGroupsFor,
+} from '../lib/assistantCapabilities';
 import {
   appendMessage,
   clearSession,
@@ -297,6 +309,10 @@ const MORE_DISCLOSURE_LABEL = 'Suggested Questions & Agent Actions';
 // these belong to one specific answer and are rendered inside its bubble.
 const RELATED_QUESTIONS_LABEL = 'Related Questions';
 
+// P36X — the id of the "What Can I Ask?" panel, so the trigger can own it via
+// `aria-controls` and the two are unambiguously one control pair.
+const CAPABILITIES_PANEL_ID = 'assistant-capabilities-panel';
+
 // P36V.1 Unit B — the visible Title-Case label of the collapsed disclosure holding
 // the EXACT validation locators. Everything technical the humanized answer no
 // longer shows inline (including the deterministic validator's literal `$` root
@@ -472,6 +488,10 @@ export function AssistantPanel({
   // calls `graphCapability.apply`.
   const [graphProposal, setGraphProposal] = useState<GraphProposal | null>(null);
 
+  // P36X — is the "What Can I Ask?" panel showing? Presentation only: opening it
+  // fetches nothing, submits nothing and mutates nothing.
+  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
+
   // An unapplied proposal belongs to the surface it was resolved against. When
   // the capability is withdrawn — the Graph tab stopped showing, so the mounted
   // graph and its index are gone — the proposal goes with it. Without this it
@@ -488,6 +508,14 @@ export function AssistantPanel({
   // button unmounts when the log empties; focus must land somewhere sensible, not
   // be lost to <body>).
   const composerInputRef = useRef<HTMLInputElement | null>(null);
+  // P36X — the "What Can I Ask?" trigger (focus returns here on dismissal) and
+  // the panel it controls (focus moves into it on open).
+  const capabilitiesTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const capabilitiesPanelRef = useRef<HTMLDivElement | null>(null);
+  // The anchor wrapping BOTH the trigger and the popover — the "inside" test for
+  // outside-pointerdown dismissal (a pointerdown on the trigger itself is inside,
+  // so the trigger's own toggle keeps working instead of firing twice).
+  const capabilitiesRootRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
   const mountedRef = useRef(false);
   const focusPendingRef = useRef(false);
@@ -864,6 +892,89 @@ export function AssistantPanel({
     setProposal(null);
     // P34.5 — the Clear button unmounts with the now-empty log, so move focus to
     // the always-present composer input rather than letting it fall to <body>.
+    composerInputRef.current?.focus();
+  }
+
+  // P36X — the capability groups that are genuinely supported HERE. `queryScope`
+  // decides which read-only resolver a typed question reaches, and the presence of
+  // `graphCapability` IS the graph interception (`submitQuestion` consults
+  // `classifyGraphQuestion` only when it was supplied). Both are props this panel
+  // already receives, so no mounting screen had to change — and the list can never
+  // offer a family the current surface would refuse.
+  const capabilityGroups = useMemo(
+    () => capabilityGroupsFor(queryScope, { graph: !!graphCapability }),
+    [queryScope, graphCapability],
+  );
+
+  // Dismiss the panel and return focus to the trigger that opened it (the ONLY
+  // place focus can sensibly land: the trigger is always mounted).
+  const closeCapabilities = useCallback(() => {
+    setCapabilitiesOpen(false);
+    capabilitiesTriggerRef.current?.focus();
+  }, []);
+
+  // On open, move focus into the panel so a keyboard reader lands on the list it
+  // just asked for rather than continuing past the trigger.
+  useEffect(() => {
+    if (capabilitiesOpen) capabilitiesPanelRef.current?.focus();
+  }, [capabilitiesOpen]);
+
+  /*
+   * DOCUMENT-LEVEL dismissal while the popover is open.
+   *
+   * The popover is non-modal by design (no backdrop, no focus trap: it is a short
+   * reference list, not a task), but non-modal must not mean unclosable. Two
+   * defects made it strandable:
+   *
+   *   · nothing dismissed it on an outside click, so clicking into the transcript
+   *     left an opaque overlay sitting over the composer input; and
+   *   · Escape was handled ONLY by `onKeyDown` on the panel element, and React
+   *     delegates from that subtree — so the moment focus left the panel (Tab past
+   *     Close, or Shift-Tab back onto the now-covered composer) Escape went dead.
+   *
+   * Both listeners live on `document` for exactly as long as the panel is open and
+   * are removed on close/unmount. `closeCapabilities` returns focus to the trigger,
+   * so every dismissal path — Escape inside, Escape outside, outside pointerdown,
+   * Close, choosing an example (which focuses the composer instead, the next thing
+   * to use) — leaves focus somewhere deliberate. Still no focus trap, still no
+   * `aria-modal`, and nothing outside is made inert.
+   */
+  useEffect(() => {
+    if (!capabilitiesOpen) return;
+    function onDocumentKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') closeCapabilities();
+    }
+    function onDocumentPointerDown(event: Event) {
+      const target = event.target;
+      // A pointerdown anywhere in the anchor (trigger OR panel) is not "outside".
+      if (target instanceof Node && capabilitiesRootRef.current?.contains(target)) return;
+      closeCapabilities();
+    }
+    document.addEventListener('keydown', onDocumentKeyDown);
+    document.addEventListener('pointerdown', onDocumentPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onDocumentKeyDown);
+      document.removeEventListener('pointerdown', onDocumentPointerDown);
+    };
+  }, [capabilitiesOpen, closeCapabilities]);
+
+  // Choosing an example INSERTS its exact text into the composer. It does NOT
+  // submit: no query is sent, nothing is answered, and the reader can edit the
+  // question first (several examples deliberately say "this field", which the
+  // resolver answers by listing the record's really traceable fields). Focus moves
+  // to the composer — the next thing to use — instead of back to the trigger.
+  //
+  // It also never DESTROYS work: a half-typed question is the reader's, and an
+  // example list is a reference, not a reset. So the insert applies only to an
+  // empty (or whitespace-only) composer; with a real draft present the panel still
+  // closes and still focuses the input, leaving the draft exactly as typed. That
+  // is announced BEFORE the click — while the panel is open the note reads
+  // `CAPABILITIES_DRAFT_KEPT_NOTE` instead of the insert note — so declining to
+  // overwrite is predictable rather than a control that silently does nothing.
+  const composerHasDraft = composerText.trim() !== '';
+  function insertCapabilityExample(text: string) {
+    if (!composerHasDraft) setComposerText(text);
+    setCapabilitiesOpen(false);
     composerInputRef.current?.focus();
   }
 
@@ -1472,6 +1583,105 @@ export function AssistantPanel({
           </button>
         </form>
         <p className="assistant-composer-helper">{ASSISTANT_COMPOSER_HELPER}</p>
+
+        {/* P36X — "What Can I Ask?": the real, per-surface capability catalog.
+            The composer's helper line above names the grounded scopes in one
+            sentence; this control shows the actual question families and a
+            traced example of each, for THIS surface only.
+
+            It is a compact non-modal popover, not a document: a disclosure-style
+            trigger (`aria-expanded` + `aria-controls`) over a `role="dialog"`
+            region dismissed by Escape (from inside OR outside the panel), by a
+            pointerdown outside the anchor, or by Close — every one of which
+            returns focus to the trigger. Choosing an example only fills the
+            composer — it never submits, never fetches and never mutates, and it
+            never overwrites a draft already in the box.
+
+            CONTENT ORDER is load-bearing, not cosmetic. The popover opens UPWARD
+            from a dock that can sit close to the top of a content-sized rail, so
+            its TOP edge is the edge an ancestor `overflow: hidden` would clip —
+            and clipping there is outside this popover's own scrollport, so
+            clipped content is not recoverable by scrolling. The scrollable
+            capability groups therefore go FIRST (highest, and individually
+            reachable by scrolling the list), while the two honesty-critical
+            sentences and Close sit LAST, nearest the trigger, outside the scroll
+            region so they are always visible without scrolling. */}
+        <div className="assistant-capabilities" ref={capabilitiesRootRef}>
+          <button
+            type="button"
+            className="assistant-capabilities-trigger"
+            ref={capabilitiesTriggerRef}
+            aria-expanded={capabilitiesOpen}
+            aria-controls={CAPABILITIES_PANEL_ID}
+            aria-haspopup="dialog"
+            onClick={() => (capabilitiesOpen ? closeCapabilities() : setCapabilitiesOpen(true))}
+          >
+            <CircleHelp size={13} strokeWidth={2} aria-hidden="true" />
+            <span>{CAPABILITIES_TRIGGER_LABEL}</span>
+          </button>
+          {capabilitiesOpen && (
+            <div
+              className="assistant-capabilities-panel"
+              id={CAPABILITIES_PANEL_ID}
+              ref={capabilitiesPanelRef}
+              role="dialog"
+              aria-label={CAPABILITIES_TRIGGER_LABEL}
+              tabIndex={-1}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  closeCapabilities();
+                }
+              }}
+            >
+              {/* The one scroll region: a long catalog scrolls HERE, so the
+                  sentences below it can never be pushed out of view. */}
+              <div className="assistant-capabilities-list">
+                {capabilityGroups.map((group) => (
+                  <div className="assistant-capabilities-group" key={group.heading}>
+                    <div className="assistant-capabilities-eyebrow eyebrow">{group.heading}</div>
+                    {group.examples.map((example) => (
+                      <button
+                        type="button"
+                        className="assistant-capabilities-example"
+                        key={example.text}
+                        data-intent={example.intent}
+                        onClick={() => insertCapabilityExample(example.text)}
+                      >
+                        <span>{example.text}</span>
+                        <ChevronRight
+                          className="chev"
+                          size={13}
+                          strokeWidth={2}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <p className="assistant-capabilities-note">
+                {composerHasDraft ? CAPABILITIES_DRAFT_KEPT_NOTE : CAPABILITIES_INSERT_NOTE}
+              </p>
+              {queryScope === 'memory' && (
+                <p className="assistant-capabilities-note">{CAPABILITIES_MEMORY_SCOPE_NOTE}</p>
+              )}
+              {/* The boundary is stated in the panel itself, never behind a
+                  further disclosure and never inside the scroll region: a bounded
+                  catalog is exactly what a reader asking "what can I ask?" needs
+                  to be told. */}
+              <p className="assistant-capabilities-boundary">{CAPABILITIES_BOUNDARY}</p>
+              <button
+                type="button"
+                className="assistant-capabilities-close"
+                onClick={closeCapabilities}
+              >
+                <X size={13} strokeWidth={2} aria-hidden="true" />
+                {CAPABILITIES_CLOSE_LABEL}
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* EMPTY STATE — Agent Actions sit below the composer (Suggested Questions
             are above it, in the body). Rendered only where the screen actually
