@@ -8,6 +8,7 @@ import { EvidenceExplorer } from './screens/EvidenceExplorer';
 import { ExportReadiness } from './screens/ExportReadiness';
 import { ProjectMemory } from './screens/ProjectMemory';
 import { GovernancePage } from './screens/GovernancePage';
+import { StatisticsPage } from './screens/statistics/StatisticsPage';
 import { SettingsPage } from './screens/SettingsPage';
 
 /** The route table. Record sub-surfaces (complete/evidence/export) are nested
@@ -24,6 +25,7 @@ export function AppRoutes() {
       <Route path={ROUTE_PATTERNS.export} element={<ExportReadiness />} />
       <Route path={ROUTE_PATTERNS.memory} element={<ProjectMemory />} />
       <Route path={ROUTE_PATTERNS.governance} element={<GovernancePage />} />
+      <Route path={ROUTE_PATTERNS.statistics} element={<StatisticsPage />} />
       <Route path={ROUTE_PATTERNS.settings} element={<SettingsPage />} />
       <Route path="*" element={<Navigate to={ROUTES.experiments} replace />} />
     </Routes>

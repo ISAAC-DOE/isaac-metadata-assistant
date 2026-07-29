@@ -28,16 +28,19 @@ export const ROUTES = {
   load: '/load',
   memory: '/memory',
   governance: '/governance',
+  statistics: '/statistics',
   settings: '/settings',
   /**
-   * A deep link to one Settings tab, e.g. `/settings?tab=explorer`.
+   * A deep link to one Settings & API tab, e.g. `/settings?tab=explorer`.
    *
-   * Deliberately has no in-app consumer. `SettingsPage` switches tabs by copying
-   * the current `URLSearchParams` and calling `setSearchParams`, which PRESERVES
-   * any other query parameter on the URL; building a fresh path from this helper
-   * and navigating to it would silently drop them. So this exists for the two
-   * things that legitimately need a whole URL — an external/shared deep link and
-   * a test's router entry — and the app keeps the param-preserving mechanism.
+   * Deliberately NOT used for switching tabs from inside `SettingsPage`. That
+   * screen switches by copying the current `URLSearchParams` and calling
+   * `setSearchParams`, which PRESERVES any other query parameter on the URL;
+   * building a fresh path from this helper and navigating to it would silently
+   * drop them. So this helper is for the cases that legitimately need a whole
+   * URL — an external/shared deep link, a cross-surface link INTO one tab, and a
+   * test's router entry — while the page itself keeps the param-preserving
+   * mechanism.
    *
    * The drift that arrangement risks (this helper and the real mechanism
    * disagreeing on the parameter or the path) is guarded in
@@ -57,6 +60,7 @@ export const ROUTE_PATTERNS = {
   load: '/load',
   memory: '/memory',
   governance: '/governance',
+  statistics: '/statistics',
   settings: '/settings',
   record: '/record/:id',
   complete: '/record/:id/complete',

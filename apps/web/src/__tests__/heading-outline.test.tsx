@@ -9,6 +9,7 @@ import {
   graphStatusAvailable,
   graphStatusUnavailable,
   memoryGraphAvailable,
+  statisticsRoutes,
   stubFetchRoutes,
 } from '../test/apiFixtures';
 
@@ -67,6 +68,11 @@ describe('A11Y-1 — one screen-level h1 per routed surface', () => {
   it('Settings', async () => {
     expect(await h1CountAt('/settings', null, null)).toBe(1);
   });
+  it('Statistics', async () => {
+    // Awaiting the Title-Cased runtime mode settles the /api/about read, so the
+    // count is taken on the LOADED dashboard rather than on its loading state.
+    expect(await h1CountAt('/statistics', statisticsRoutes(), 'Synthetic-Only')).toBe(1);
+  });
 });
 
 /*
@@ -112,6 +118,24 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
     expect(card.querySelector('.memory-graph-detail')).not.toBeNull();
     assertMonotonic(levels(card), 'graph card');
     assertMonotonic(levels(view.container), 'Project Memory page');
+  });
+
+  /*
+   * `/statistics` was in the one-h1 suite above but absent from this one — the
+   * only screen whose outline goes THREE levels deep (its Evidence and Validation
+   * card nests `Evidence Support` and `Export Gate` under its own h2), which is
+   * precisely the shape a skip or a backwards step hides in. Its real outline is
+   * h1 → h2×6, with two h3s inside the third h2: [1,2,2,2,3,3,2,2,2].
+   */
+  it('Statistics (all six sections loaded)', async () => {
+    stubFetchRoutes(statisticsRoutes());
+    const view = renderAt('/statistics');
+    // Settles /api/about, which is the last of the four sections to paint.
+    await view.findByText('Synthetic-Only');
+
+    const found = levels(view.container);
+    expect(found).toEqual([1, 2, 2, 2, 3, 3, 2, 2, 2]);
+    assertMonotonic(found, 'Statistics page');
   });
 
   it('Project Memory · Graph · About This Graph drawer', async () => {

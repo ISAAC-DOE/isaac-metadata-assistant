@@ -637,7 +637,7 @@ export const MEMORY_CATALOG: GroundedChip[] = [
     source: 'graph',
     resolve(state): AssistantMessage | null {
       if (state.context !== 'memory') return null;
-      // Grounds on `file_count` (the "Indexed files" figure the screen renders),
+      // Grounds on `file_count` (the "Served Files (Path Set)" figure the screen renders),
       // NOT served_file_count (withheld by the screen) and NOT any invented
       // count. Null → the honest unavailable-count string, never a fabrication.
       const { file_count } = state.graph;

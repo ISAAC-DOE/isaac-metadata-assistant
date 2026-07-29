@@ -226,7 +226,7 @@ function SettingsSectionTabs({
   }
 
   return (
-    <div className="section-tabs" role="tablist" aria-label="Settings sections">
+    <div className="section-tabs" role="tablist" aria-label="Settings & API sections">
       {SETTINGS_TABS.map((tab, i) => {
         const selected = active === tab.id;
         return (

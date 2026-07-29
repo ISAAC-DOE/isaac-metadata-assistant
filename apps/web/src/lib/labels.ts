@@ -109,7 +109,11 @@ export const LABELS = {
   navExperiments: 'My Experiments',
   navMemory: 'Project Memory',
   navGovernance: 'Governance & Safety',
-  navSettings: 'Settings',
+  navStatistics: 'Statistics',
+  // Names what the destination actually holds — runtime status plus programmatic
+  // access — rather than promising preferences this build does not have. This is
+  // the SINGLE authored string: the nav label and the page <h1> both read it.
+  navSettings: 'Settings & API',
 
   // Screen titles
   screenExperiments: 'My Experiments',

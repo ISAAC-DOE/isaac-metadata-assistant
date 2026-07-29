@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Check, Pencil, Lock, TriangleAlert, CircleDashed } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
+import { CANONICAL_STEPS } from '../lib/workflowSteps';
 import type { ApiWorkflow, ApiWorkflowStep } from '../lib/types';
 
 interface WorkflowSpineProps {
@@ -24,17 +25,6 @@ const STEP_ROUTE: Record<string, ((id: string) => string) | undefined> = {
   review_export_readiness: ROUTES.export,
   export: ROUTES.export,
 };
-
-// Fixed canonical order + labels for the loading skeleton only. The live spine
-// always uses the backend-provided labels; this exists purely so the shape is
-// visible before the bundle arrives, with NO fabricated meta.
-const SKELETON_STEPS: { id: string; label: string }[] = [
-  { id: 'load_record', label: 'Load Record' },
-  { id: 'complete_metadata', label: 'Complete Metadata' },
-  { id: 'review_evidence', label: 'Review Evidence' },
-  { id: 'review_export_readiness', label: 'Review Export Readiness' },
-  { id: 'export', label: 'Export' },
-];
 
 // Only completed and current steps navigate. Gating is preserved by keeping
 // blocked/reopened steps non-interactive — forward motion is earned by resolving
@@ -69,11 +59,15 @@ function Disc({ state }: { state: ApiWorkflowStep['state'] }) {
 export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
   if (workflow === null) {
     // Loading skeleton: labels only, muted discs, nothing navigable, no counts.
+    // The fixed order + labels come from `lib/workflowSteps.ts` (CANONICAL_STEPS),
+    // the ONE client-side copy — a second hand-maintained array used to live here.
+    // The live spine below still renders the backend's own labels; the skeleton
+    // exists purely so the shape is visible before the bundle arrives.
     return (
       <nav className="spine" aria-label="Workflow pipeline">
         <div className="spine-eyebrow eyebrow">{LABELS.workflowEyebrow}</div>
         <ol className="spine-steps">
-          {SKELETON_STEPS.map((step) => (
+          {CANONICAL_STEPS.map((step) => (
             <li key={step.id} className="spine-step skeleton" aria-disabled>
               <span className="spine-step-row">
                 <span className="spine-disc" aria-hidden="true">

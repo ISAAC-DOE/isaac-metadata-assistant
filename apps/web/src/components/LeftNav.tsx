@@ -1,16 +1,17 @@
 import './chrome.css';
 import { Link } from 'react-router-dom';
-import { LayoutList, Network, ShieldCheck, Settings } from './icons';
+import { LayoutList, Network, ShieldCheck, BarChart3, Settings } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import type { LucideIcon } from './icons';
 
-export type NavKey = 'experiments' | 'memory' | 'governance' | 'settings';
+export type NavKey = 'experiments' | 'memory' | 'governance' | 'statistics' | 'settings';
 
 const ITEMS: { key: NavKey; label: string; icon: LucideIcon; to: string }[] = [
   { key: 'experiments', label: LABELS.navExperiments, icon: LayoutList, to: ROUTES.experiments },
   { key: 'memory', label: LABELS.navMemory, icon: Network, to: ROUTES.memory },
   { key: 'governance', label: LABELS.navGovernance, icon: ShieldCheck, to: ROUTES.governance },
+  { key: 'statistics', label: LABELS.navStatistics, icon: BarChart3, to: ROUTES.statistics },
   { key: 'settings', label: LABELS.navSettings, icon: Settings, to: ROUTES.settings },
 ];
 

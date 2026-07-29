@@ -33,6 +33,7 @@ import {
   Circle,
   Download,
   LayoutList,
+  BarChart3,
   Search,
   X,
   ZoomIn,
@@ -111,6 +112,10 @@ export {
   Circle,
   Download,
   LayoutList,
+  // The Statistics destination glyph: a plain axis-and-bars mark. Chosen over the
+  // trend/gauge-shaped alternatives because that surface states counts only — it
+  // carries no trend line, gauge or health score (see the statistics screen).
+  BarChart3,
   Search,
   X,
   ZoomIn,

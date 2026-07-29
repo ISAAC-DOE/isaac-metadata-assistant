@@ -78,7 +78,12 @@ export interface ApiEndpoint {
   authRequired: boolean;
 }
 
-const METHOD_ORDER: OpenApiMethod[] = ['get', 'post', 'put', 'delete'];
+/** The one display/iteration order for HTTP methods, shared by `flattenOpenApi`
+ *  and every consumer that renders a method breakdown. `readonly` on purpose: it
+ *  is only ever iterated and filtered, and a shared module-level array that a
+ *  consumer could `sort()` or `push()` into would silently reorder the Endpoint
+ *  Explorer and the Statistics method bars alike. */
+export const METHOD_ORDER: readonly OpenApiMethod[] = ['get', 'post', 'put', 'delete'] as const;
 
 /** Numeric status codes sort numerically; a non-numeric key (`default`) sorts
  *  after them, by name, so ordering is total and stable. */

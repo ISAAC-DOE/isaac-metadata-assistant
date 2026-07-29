@@ -34,12 +34,25 @@ Read this before demoing it to anyone:
   the optional project-memory graph. It never renders a verdict and never gates
   anything.
 - **The assistant is advisory and subordinate.** It never renders `PASS`/`FAIL`
-  or a validity claim; deterministic validation, evidence, and audit are the
-  authority. In this prototype the assistant panel shows **static,
-  source-labeled sample answers** (`apps/web/src/lib/assistant.ts`) — every
-  reply and suggested-question answer names the deterministic source it is
-  grounded in. **Freeform chat is not wired**; only the pre-written suggested
-  questions are clickable.
+  or a validity claim (guarded by `hasVerdictLanguage()` in
+  `apps/web/src/lib/assistant.ts`); deterministic validation, evidence, and audit
+  are the authority. Every reply names the deterministic source it is grounded in
+  (`Source: <label>`), and Q&A is **read-only** — it mutates no record.
+  Since Phase 34 the composer accepts **free-form typed questions**, which means
+  flexible natural-language phrasing over a **bounded, deterministic intent
+  catalog** — eight intent families matched by plain lowercase substring
+  containment against an explicit finite trigger list
+  (`apps/api/isaac_api/assistant_query.py`). **No LLM, no model provider, and no
+  generated text of any kind.** Unsupported, ambiguous, and open-world questions
+  are **refused honestly, never guessed**. Capability is **scope-dependent**: the
+  record surfaces answer all eight families, while the record-less Project Memory
+  scope answers project-memory questions only and honestly refuses every
+  record-family one ("This is the Project Memory view…") rather than fabricating a
+  record answer with no record to ground it. The pre-composed suggested-question
+  chips remain clickable and resolve locally, in the frontend
+  (`apps/web/src/lib/assistantComposer.ts`) — a separate mechanism from the
+  backend resolver. The **What Can I Ask?** control lists the real, per-surface
+  catalog (`apps/web/src/lib/assistantCapabilities.ts`).
 - **Validation, evidence audit, and advisory warnings are three separate
   signals**, always rendered in three separate, labeled components — never
   merged into one badge:
@@ -112,12 +125,23 @@ curl -s http://127.0.0.1:8000/api/health
 
 The backend persists UI state (experiments, exported records/sidecars) under a
 workspace directory **outside the repo**: `ISAAC_UI_WORKSPACE` (default
-`/tmp/isaac-ui-workspace`). It is a thin wrapper — 21 endpoints under
-`/api/*` (17 experiment/pipeline endpoints plus 4 read-only `/api/memory/*`
-project-memory endpoints) — that imports and calls the same `isaac_records` functions the CLI
-uses (`draft_validator`, `official`, `export`, `audit`); it adds no validation
-logic of its own. See `apps/api/README.md` for the full endpoint list and
-governance notes.
+`/tmp/isaac-ui-workspace`). It is a thin wrapper — **35 documented operations**
+on the single router mounted at `/api` (`apps/api/isaac_api/routes.py`, itself
+under the deploy base path from `ISAAC_BASE_PATH`, empty for local runs), all of
+them `GET` (22) or `POST` (13); there is no `PUT`, `PATCH` or `DELETE` — that
+imports and calls the same `isaac_records` functions the CLI uses
+(`draft_validator`, `official`, `export`, `audit`); it adds no validation logic
+of its own.
+
+Those operations are organised into **14 documented tag groups** (`OPENAPI_TAGS`
+in `routes.py`): Health & Meta, Experiments, Drafts & Answers, Validation,
+Evidence, Export & Artifacts, Project Memory, Graph, Search, Assistant, Demo,
+Ingestion, Uploads, Schema & Vocabulary. Do not trust a hand-maintained list —
+the generated document is the source of truth: `GET /api/openapi`, or the in-app
+**Endpoint Explorer** (Settings & API → Endpoint Explorer), which browses that
+same document. The operation count and per-operation documentation are pinned in
+CI by `apps/api/tests/test_about_and_openapi.py`. `apps/api/README.md` covers the
+governance and memory-plane notes.
 
 ## Run the frontend
 
@@ -181,11 +205,27 @@ shows real results, nothing is staged client-side.
    immutable — re-exporting the same id returns `409` and the UI shows an
    immutability message, never an overwrite.
 
-Two additional nav destinations (**Governance & Safety**, **Settings**) are
-intentionally minimal placeholders in this first build — not wired to live
-data beyond static explanatory copy and the governance banner, and out of the
-critical demo path above. **Project Memory** is a third nav destination and,
-since Phase 24, is a real read-only surface — see the next section.
+The primary nav (`LeftNav`) has five destinations, in this order: **My
+Experiments**, **Project Memory**, **Governance & Safety**, **Statistics**,
+**Settings & API**. The first is the demo path's entry point above; the other
+four are separate surfaces, none of them a placeholder:
+
+- **Project Memory** (`/memory`) — a real read-only surface since Phase 24; see
+  the next section.
+- **Governance & Safety** (`/governance`) — three local page tabs: **Policy**
+  (the synthetic-only statement plus the governance banner), the standalone
+  **Validator** (`RecordValidator`), and the **Schema Reference** browser
+  (`SchemaBrowser` — Fields · Conditional Rules · Vocabulary).
+- **Statistics** (`/statistics`) — a cross-record summary derived from responses
+  the app already serves. **Not telemetry**: no request, visit, session, user,
+  latency or uptime figure, and no traffic or usage history — no such signal
+  exists to read.
+- **Settings & API** (`/settings` — the route is unchanged; only the visible
+  label was renamed from "Settings") — five local page tabs (Overview, Data &
+  Privacy, About, API Access, Endpoint Explorer) over live reads of
+  `GET /api/about`, `GET /api/openapi` and `GET /api/graph/status`, including an
+  Endpoint Explorer over the app's own generated OpenAPI document. Every tab is
+  informational — this build has no user-adjustable settings.
 
 ## Project Memory (Phase 24)
 
