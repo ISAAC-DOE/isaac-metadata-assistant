@@ -168,7 +168,7 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 | Capability | Baseline required | Current state | Owner | Blocking |
 |---|---|---|---|---|
 | Backend suite | **yes** | done — 1794 passing | orch | — |
-| Frontend suite | **yes** | done — 2145 / 93 files | orch | — |
+| Frontend suite | **yes** | done — 2145 / 93 files, but see F1 | orch | — |
 | TypeScript build | **yes** | done | orch | — |
 | Production build | **yes** | done | orch | — |
 | Docker build + smoke | **yes** | done (CI) | orch | — |
@@ -289,6 +289,34 @@ If drift cannot be classified within this boundary, that is a **hard stop** for 
 to widen the allowlist.
 
 ---
+
+## 3A. F1 — a pre-existing load-sensitive frontend flake
+
+Found while verifying B1, and **proven pre-existing** rather than assumed.
+
+`apps/web/src/__tests__/graph-real-artifact.test.tsx` reads the real 493,985-byte
+`memory-graph-detail.json` from disk (`:84`) and asserts DOM bounds under a 5 s default timeout. It
+fails intermittently when the machine is busy. Observed on the *same commit*, same code: 49 failures,
+then 39, then 17, monotonically decreasing as load average fell from 97 to 27 — every failure a
+`Test timed out in 5000ms`.
+
+**Proof it is not caused by B1**, in two independent ways:
+
+1. *By construction* — B1 changes zero `apps/web/` files, and `memory-graph-detail.json` is
+   byte-identical to `e8a02a1` (`git diff --stat e8a02a1 -- <artifact>` is empty). The test's entire
+   dependency closure is unchanged.
+2. *Empirically* — stashing all B1 changes and running the file on clean `e8a02a1` reproduces the
+   failure identically (`1 failed | 2 passed`).
+
+**Why it matters beyond the nuisance:** a suite that fails differently on each run cannot support the
+claim "the frontend suite passes", which is a baseline-required row. CI has not caught it because
+GitHub runners are lightly loaded — every CI run in this session was green. That makes it a latent
+false-green: the gate works only while the machine is quiet.
+
+**Not fixed here** — it is outside B1's authorized file set, and fixing it means either raising the
+timeout (hides the real cost) or shrinking the fixture (weakens a test that deliberately measures
+*real* payload size). Both are judgement calls that deserve their own slice. Recorded so the next
+frontend slice owns it, and so nobody reads an intermittent red as a regression.
 
 ## 4A. The three deferred correctness defects, defined
 

@@ -369,7 +369,6 @@ def _quote_ident(name: str) -> str:
 # --- redaction primitives ----------------------------------------------------
 
 
-@lru_cache(maxsize=4)
 def load_schema_vocabulary(repo_root: Path) -> tuple[frozenset[str], frozenset[str]]:
     """Read the vendored schema and return ``(declared_names, open_map_paths)``.
 
@@ -386,12 +385,33 @@ def load_schema_vocabulary(repo_root: Path) -> tuple[frozenset[str], frozenset[s
     are all identifier-shaped. This asks the only question that is actually
     sound — "does the public, vendored schema declare this name?" — so a key can
     be emitted only if it is already public information.
+
+    The cache lives in :func:`_schema_vocabulary_for`, keyed on the resolved
+    schema path plus its ``st_mtime_ns`` and ``st_size`` — parity with
+    ``official._checked_schema_text``, including parity in what it does NOT
+    guarantee: an edit that lands in the same nanosecond tick AND leaves the byte
+    length unchanged is still served stale. It is a heuristic, not content
+    identity. This wrapper keeps the public
+    ``(repo_root: Path) -> (frozenset, frozenset)`` contract callers and tests
+    depend on. The wrapper now costs a ``stat()`` per call (~0.09 us -> ~6 us);
+    it is called per record and per error, so the multiplier is large even though
+    the absolute cost stays trivial.
     """
     # Imported lazily, matching how this module reaches isaac_records elsewhere,
     # and resolved through official.schema_path so the path is never hardcoded.
     from isaac_records.official import schema_path as official_schema_path
 
-    schema = json.loads(official_schema_path(repo_root).read_bytes())
+    path = official_schema_path(repo_root)
+    stat = path.stat()
+    return _schema_vocabulary_for(str(path), stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=4)
+def _schema_vocabulary_for(
+    path_str: str, mtime_ns: int, size: int
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Cached body of :func:`load_schema_vocabulary`; see it for the policy."""
+    schema = json.loads(Path(path_str).read_bytes())
     declared: set[str] = set()
     open_maps: set[str] = set()
 
@@ -1693,7 +1713,27 @@ def run_recon(
 
     ``require_opt_in`` is forwarded to :func:`check_env_gates`; see that
     function for why the HTTP endpoint passes ``False`` and the CLI ``True``.
+
+    ``root`` must be the vendored :data:`REPO_ROOT`; see the gate below.
     """
+    # Fail closed on a divergent schema root. ``root`` is what per-record
+    # validation is anchored to, but every redaction call site in this module
+    # loads its vocabulary from the module-level REPO_ROOT. If the two could
+    # differ, one schema would decide which keys are emittable while a different
+    # one decided validity, and the report would be internally inconsistent
+    # while still presenting a single `schema_authority` fingerprint. No caller
+    # passes a non-default root today, so rather than plumb ``root`` through the
+    # five masking helpers for a caller that does not exist, the divergence is
+    # made impossible here — before this function touches the connection at all
+    # (note the HTTP route opens the socket in connect_psycopg2 before calling
+    # us, so this is "before any use", not "before any connection exists").
+    if Path(root).resolve() != Path(REPO_ROOT).resolve():
+        raise UsageError(
+            "schema_root",
+            "validation root must be the vendored REPO_ROOT; the redaction "
+            "vocabulary is anchored there",
+        )
+
     gates = dict(check_env_gates(env, require_opt_in=require_opt_in))
 
     # Defence in depth #1: ask the driver for a read-only session, if it can.

@@ -1611,3 +1611,84 @@ def test_report_does_not_claim_counts_only(recon):
     assert "not literally 'counts only'" in notes
     # the claim is now true of what the report actually contains
     assert report["connection"]["server_version"]  # a verbatim server string
+
+
+# --- the schema root the report is anchored to --------------------------------
+#
+# `run_recon(root=X)` forwards X to per-record validation, but every redaction
+# call site in the service loads its vocabulary from the module-level
+# REPO_ROOT. If those two could differ, one schema would decide which keys are
+# emittable while a different one decided validity, and the single
+# `schema_authority` fingerprint in the report would describe neither pair
+# honestly. No caller passes a non-default root, so the divergence is refused
+# rather than plumbed through the five masking helpers.
+
+
+def test_run_recon_refuses_a_schema_root_other_than_the_vendored_one(recon, tmp_path):
+    # A COMPLETE, valid copy of the vendored schema, so the refusal cannot be
+    # confused with "that root had no schema to read". Without the gate this
+    # root works: the run would validate against this copy while masking keys
+    # against the module-level REPO_ROOT copy, and say nothing about it.
+    schema_dir = tmp_path / "schema"
+    schema_dir.mkdir()
+    (schema_dir / "isaac_record_v1.json").write_bytes(
+        (REPO_ROOT / "schema" / "isaac_record_v1.json").read_bytes()
+    )
+
+    conn = FakeConnection(base_rows(recon))
+    with pytest.raises(recon.UsageError) as exc:
+        recon.run_recon(conn, env=GOOD_ENV, salt="s", root=tmp_path)
+    assert exc.value.gate == "schema_root"
+    assert exc.value.exit_code == 7
+    # Fail-closed means BEFORE the connection is touched: no session change,
+    # no cursor, no statement.
+    assert conn.readonly_requested is False
+    assert conn.log == []
+
+
+def test_run_recon_accepts_the_vendored_root_spelled_differently(recon):
+    """The gate compares resolved paths, so an equivalent spelling still runs."""
+    equivalent = REPO_ROOT / "src" / ".."
+    assert equivalent != recon.REPO_ROOT  # different spelling, same directory
+    assert equivalent.resolve() == recon.REPO_ROOT.resolve()
+    report = recon.run_recon(
+        FakeConnection(base_rows(recon)), env=GOOD_ENV, salt="s", root=equivalent
+    )
+    assert report["gates"]["no_mutation"] == "pass"
+
+
+def test_schema_vocabulary_is_reloaded_when_the_schema_file_changes(recon, tmp_path):
+    """The vocabulary cache is keyed on the schema file's mtime_ns and size.
+
+    Parity with `official._checked_schema_text`: an edited schema must not be
+    served from a stale vocabulary just because the path is unchanged.
+    """
+    import os
+
+    schema_dir = tmp_path / "schema"
+    schema_dir.mkdir()
+    target = schema_dir / "isaac_record_v1.json"
+    target.write_text(
+        json.dumps({"type": "object", "properties": {"alpha": {"type": "string"}}}),
+        encoding="utf-8",
+    )
+
+    declared, _ = recon.load_schema_vocabulary(tmp_path)
+    assert declared == frozenset({"alpha"})
+
+    target.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"alpha": {"type": "string"}, "beta": {"type": "string"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    later = target.stat().st_mtime_ns + 1_000_000_000
+    os.utime(target, ns=(later, later))
+
+    declared_again, _ = recon.load_schema_vocabulary(tmp_path)
+    assert declared_again == frozenset({"alpha", "beta"})
+    # the public contract is unchanged: same signature, frozenset results
+    assert isinstance(declared_again, frozenset)

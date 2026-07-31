@@ -53,12 +53,20 @@ and the report still advertised the full-schema fingerprint. A module-global
 now explicitly forbidden by tests, but the honest statement is "the enforced
 list above", not "incapable by construction".
 
-Relatedly, and pre-existing in :mod:`isaac_records.official`: the ``lru_cache``d
-validator holds a **mutable** schema dict. Any in-process code that mutates
-``load_official_validator(root).schema`` changes what both ``diagnose`` and
-``validate_official`` enforce, while :attr:`DiagnosticReport.schema_fingerprint`
-keeps reporting the pristine file. The fingerprint attests the bytes on disk —
-not the validator object that ran.
+Relatedly, in :mod:`isaac_records.official`: ``load_official_validator`` used to
+hand every caller the **same** ``lru_cache``d validator, so mutating
+``load_official_validator(root).schema`` in one place changed what both
+``diagnose`` and ``validate_official`` enforced everywhere else, while
+:attr:`DiagnosticReport.schema_fingerprint` kept reporting the pristine file.
+That cross-caller channel is closed: only the schema *text* is cached, and each
+call parses it afresh into a private validator. A caller can still mutate the
+object *it* was handed — Python cannot prevent that — but the mutation cannot
+reach another caller or a later validation.
+
+What the fingerprint attests is unchanged by that fix, and should not be
+overread: it is the sha256 of the bytes on disk, i.e. the document this report's
+validator was built from, not a proof that the in-memory object was never
+touched between construction and use.
 
 Every diagnostic is ``blocking``: each one is an official-schema hard failure.
 The soft-warning tier (``NO_LINKS``, ``MISSING_PH``, ...) is a different tier
@@ -198,12 +206,19 @@ class DiagnosticReport:
 
     #: Hex sha256 of the schema file's raw BYTES ON DISK.
     #:
-    #: It attests the *file*, not the validator object that ran. Pre-existing in
-    #: :mod:`isaac_records.official`: the ``lru_cache``d validator holds a
-    #: mutable schema dict, so in-process mutation of
-    #: ``load_official_validator(root).schema`` silently changes what both this
-    #: module and ``validate_official`` enforce while this value stays pristine.
-    #: Do not read it as a guarantee of what was checked.
+    #: It attests the *file on disk at report time*, re-read fresh here — NOT,
+    #: strictly, the document the validator was built from. Those are the same
+    #: document in every realistic case, but ``official`` serves the schema text
+    #: from a cache keyed on ``(path, st_mtime_ns, st_size)``, so a replacement
+    #: written in the same nanosecond tick at the same byte length would leave
+    #: the two disagreeing. Do not read this digest as proof of what ran.
+    #:
+    #: What DID improve: ``official.load_official_validator`` now parses the
+    #: schema afresh per call, so a mutation made through one caller's validator
+    #: can no longer change what this module or ``validate_official`` enforce for
+    #: anyone else. This value remains a digest of a document, not a certificate
+    #: that this report's own validator object went untouched between
+    #: construction and use.
     diagnostics: tuple[Diagnostic, ...]
     schema_version: str
     schema_fingerprint: str

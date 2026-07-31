@@ -2065,7 +2065,10 @@ def graph_status() -> dict:
         403: {
             "description": (
                 "The refusal, with the reason and the current synthetic-only flag. "
-                "This is the only outcome."
+                "The upload itself is never accepted; a request that reaches the "
+                "handler always lands here. When the deployment enables API-key "
+                "authentication, an unauthenticated request is rejected with the "
+                "`401` above before it reaches this refusal."
             )
         },
     },

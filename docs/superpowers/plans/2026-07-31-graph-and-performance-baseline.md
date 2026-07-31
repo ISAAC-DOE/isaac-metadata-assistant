@@ -89,6 +89,31 @@ user-local `graphify` binary — which CI cannot obtain. It does **not** require
 update` is manifest-based and model-free (§1.1). So this is a human-in-the-loop step, not an
 approval-blocked one.
 
+### 1.3a A second, sharper instance — demonstrated the next day
+
+§1.3 describes the cost as *invisibility of new material*. The B1 slice produced a stronger case:
+**staleness of renamed material.**
+
+B1 renamed `official._validator_for` to `_checked_schema_text`. After regenerating both artifacts:
+
+```
+_validator_for      in memory-graph-detail.json : 1     # a symbol that no longer exists
+_validator_for      in src/isaac_records/official.py : 0
+_checked_schema_text in memory-graph-detail.json : 0     # the real symbol is absent
+```
+
+**CI cannot catch this.** `--check` passed cleanly on both artifacts, because it compares the
+committed artifact against *what the generator produces from `graphify-out/graph.json`* — and the
+graph still holds the July-18 symbol table. The drift gate is **drift-vs-graph, not drift-vs-source**.
+That is a meaningful distinction the deployment doc's "two independent guarantees" section does not
+currently draw.
+
+So the memory plane can now actively *misdescribe* code, not merely omit it. This does not change the
+Option 4 decision — the memory plane is explicitly not a truth source (CLAUDE.md §2, §7), and a
+symbol-level lead that fails to resolve is self-correcting when a reader opens the file. But it
+raises the cost of staleness from "incomplete" to "occasionally wrong", and anyone relying on the
+deep graph for symbol navigation should know that.
+
 ### 1.4 What this decision does *not* license
 
 - It does not authorize sending repository content to an external model.
