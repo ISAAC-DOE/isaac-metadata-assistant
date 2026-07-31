@@ -10,8 +10,14 @@
  * Not a pixel snapshot. See `helpers/layout.ts` for why, and for the exact
  * definition of each probe. Known pre-existing defects are enumerated in
  * `layout-baseline.ts`; anything else fails.
+ *
+ * These probes measure rendered geometry, and there is no webfont, so two
+ * recorded clips exist only under the wider Linux system face. The baseline
+ * records an exact offender list per platform and this spec enforces the
+ * current one. **CI (Linux) is the authority.**
  */
 
+import { currentPlatform } from '../a11y-baseline';
 import { applicableLayoutFindings, isKnownLayoutFinding } from '../layout-baseline';
 import { expect, test } from '../fixtures';
 import {
@@ -29,6 +35,9 @@ for (const surface of SURFACES) {
   test(`@responsive layout: ${surface.name}`, async ({ page, app }, testInfo) => {
     await app.open(surface);
     const project = testInfo.project.name;
+    // Which column of `layout-baseline.ts` is in force. Throws with an
+    // explanation on a platform nobody has measured — see `resolvePlatform`.
+    const platform = currentPlatform();
 
     // 1. The page body must never scroll horizontally. Wide content (tables,
     //    code blocks, the graph canvas) must scroll inside its own container.
@@ -46,7 +55,9 @@ for (const surface of SURFACES) {
 
     // 2. Nothing is cut off with no way to read it.
     const clippedAll = await findClippedText(page);
-    const clipped = clippedAll.filter((o) => !isKnownLayoutFinding('clipped', o.selector, surface.id, project));
+    const clipped = clippedAll.filter(
+      (o) => !isKnownLayoutFinding('clipped', o.selector, surface.id, project, platform)
+    );
     const clippedKnown = clippedAll.length - clipped.length;
 
     // 3. Nothing is drawn over a control. Checked at two scroll offsets so the
@@ -56,13 +67,15 @@ for (const surface of SURFACES) {
     await scrollToBottom(page);
     const obscuredBottom = await findObscuredControls(page);
     const obscuredAll: Offender[] = [...obscuredTop, ...obscuredBottom];
-    const obscured = obscuredAll.filter((o) => !isKnownLayoutFinding('obscured', o.selector, surface.id, project));
+    const obscured = obscuredAll.filter(
+      (o) => !isKnownLayoutFinding('obscured', o.selector, surface.id, project, platform)
+    );
     const obscuredKnown = obscuredAll.length - obscured.length;
 
     testInfo.annotations.push({
       type: 'layout',
       description:
-        `${surface.id} @ ${project}: ${clippedKnown} known-clipped, ${obscuredKnown} known-occluded ` +
+        `${surface.id} @ ${project} on ${platform}: ${clippedKnown} known-clipped, ${obscuredKnown} known-occluded ` +
         `(see e2e/layout-baseline.ts); ${clipped.length} new clipped, ${obscured.length} new occluded.`,
     });
 
@@ -73,7 +86,7 @@ for (const surface of SURFACES) {
         (k) => [k]
       )
     );
-    const notFired = applicableLayoutFindings(surface.id, project).filter(
+    const notFired = applicableLayoutFindings(surface.id, project, platform).filter(
       (f) => ![...fired].some((k) => k.startsWith(`${f.kind}:`) && k.includes(f.selector))
     );
     if (notFired.length) {
@@ -88,14 +101,16 @@ for (const surface of SURFACES) {
     expect(
       clipped,
       clipped.length
-        ? `Clipped text on ${surface.path} @ ${project} (not in e2e/layout-baseline.ts):\n${render(clipped)}`
+        ? `Clipped text on ${surface.path} @ ${project} (not in the "${platform}" column of ` +
+          `e2e/layout-baseline.ts):\n${render(clipped)}`
         : undefined
     ).toEqual([]);
 
     expect(
       obscured,
       obscured.length
-        ? `Occluded interactive controls on ${surface.path} @ ${project} (not in e2e/layout-baseline.ts):\n${render(
+        ? `Occluded interactive controls on ${surface.path} @ ${project} (not in the "${platform}" ` +
+          `column of e2e/layout-baseline.ts):\n${render(
             obscured
           )}`
         : undefined

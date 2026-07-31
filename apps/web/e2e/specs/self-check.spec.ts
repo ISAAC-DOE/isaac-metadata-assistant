@@ -21,6 +21,9 @@
  *   * a11y baseline: a rule firing on a surface it was never recorded on
  *   * a11y baseline: one EXTRA node of a rule that IS recorded here
  *   * a11y baseline: the same node count with a NEW foreground colour
+ *   * a11y baseline: the PLATFORM column actually in force — that it is this
+ *     machine's, that tampering with it turns the audit red, and that
+ *     tampering with the OTHER platform's column does not
  *
  * NOT self-checked, and listed so the gap is visible rather than implied: the
  * heading-hierarchy and colour-only-status probes in `structure.spec.ts`, and
@@ -30,7 +33,17 @@
  * All mutations are browser-side only; nothing is written to the backend.
  */
 
-import { expectedNodeCount } from '../a11y-baseline';
+import {
+  BASELINE_PLATFORMS,
+  baselineEntryFor,
+  baselineKey,
+  currentPlatform,
+  expectedNodeCount,
+  resolvePlatform,
+  verdictForCounts,
+  type BaselinePlatform,
+  type PlatformCount,
+} from '../a11y-baseline';
 import { expect, test } from '../fixtures';
 import { activeElementFocusInfo } from '../helpers/focus';
 import { auditScan, scan } from '../helpers/axe';
@@ -303,4 +316,146 @@ test('@interaction the a11y baseline reports a NEW foreground colour at an uncha
     `an unrecorded foreground colour appeared with the node count unchanged and the audit stayed green. ` +
       `Audit returned: ${JSON.stringify(failures.map((f) => `${f.kind}:${f.rule}`))}`
   ).toContain('new-foreground');
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * PLATFORM RESOLUTION self-checks.
+ *
+ * Ten a11y counts and two layout clips are recorded per platform, because the
+ * app ships no webfont and text wraps differently under SF Pro and under the
+ * Linux system face. That mechanism has exactly the same silent-failure shape
+ * as the wildcard it replaced: if resolution picked the wrong column, or
+ * always picked the same one, or quietly tolerated either number, every test
+ * would still be green on ONE of the two platforms and nobody would know which
+ * one was being enforced. The two tests below make it observable.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+test('@interaction platform resolution is this machine\'s, is exact, and refuses an unmeasured platform', async () => {
+  // 1. The resolver maps each recorded platform to itself, and REFUSES anything
+  //    else rather than defaulting. A Windows contributor must get this message,
+  //    not a green run measured against somebody else's font.
+  expect(resolvePlatform('darwin')).toBe('darwin');
+  expect(resolvePlatform('linux')).toBe('linux');
+  for (const unmeasured of ['win32', 'freebsd', 'android', '']) {
+    expect(
+      () => resolvePlatform(unmeasured),
+      `resolvePlatform("${unmeasured}") must throw. Silently falling back to darwin or linux would ` +
+        `produce a suite that is green because it is comparing against the wrong font metrics.`
+    ).toThrow(/no measured numbers for platform/);
+  }
+  expect(() => resolvePlatform('win32')).toThrow(/win32/);
+
+  // 2. The column in force is THIS process's. Both recorded names are spelled
+  //    exactly as `process.platform` reports them, so this is a direct identity
+  //    check rather than a mapping the test could get wrong in the same way the
+  //    implementation might.
+  expect(BASELINE_PLATFORMS as readonly string[]).toContain(currentPlatform());
+  expect(
+    currentPlatform(),
+    `the enforced baseline column must be this machine's; process.platform is "${process.platform}"`
+  ).toBe(process.platform);
+
+  // 3. The default argument really does resolve to the current platform, proved
+  //    on a triple whose two columns DIFFER — on a triple where they agree the
+  //    assertion would pass under a broken resolver too.
+  const platform = currentPlatform();
+  const other = BASELINE_PLATFORMS.find((p) => p !== platform)!;
+  const differing = { rule: 'color-contrast', surface: 'validator', project: 'zoom-200' } as const;
+  const mine = expectedNodeCount(differing.rule, differing.surface, differing.project, platform);
+  const theirs = expectedNodeCount(differing.rule, differing.surface, differing.project, other);
+  expect(
+    mine !== theirs,
+    `this proof needs ${differing.surface}@${differing.project} to differ between platforms; ` +
+      `it currently reads ${mine} on both. Pick another differing triple, or — if the font gap ` +
+      `has genuinely closed — collapse the entry to a bare number.`
+  ).toBe(true);
+  expect(expectedNodeCount(differing.rule, differing.surface, differing.project)).toBe(mine);
+  expect(expectedNodeCount(differing.rule, differing.surface, differing.project)).not.toBe(theirs);
+
+  // 4. NO TOLERANCE. The other platform's number is one away from this one, and
+  //    one away must still be red. This is the assertion that would fail if
+  //    somebody "fixed" CI by allowing a range.
+  expect(
+    verdictForCounts(mine, theirs),
+    `the two platform columns differ by ${Math.abs(mine - theirs)} node(s) and the ratchet called ` +
+      `that "ok". A range or a tolerance re-opens exactly the hole per-instance counting closed.`
+  ).not.toBe('ok');
+});
+
+test('@interaction tampering with THIS platform\'s count fails the audit; tampering with the other does not', async ({
+  page,
+  app,
+}, testInfo) => {
+  await app.open(experiments);
+  const project = testInfo.project.name;
+  const platform = currentPlatform();
+  const other = BASELINE_PLATFORMS.find((p) => p !== platform)!;
+
+  // Repeated from the test above on purpose. `experiments` has the SAME count
+  // on both platforms — that is what makes it a clean tampering fixture — but
+  // it also means everything below would pass unchanged if resolution were
+  // hard-wired to the wrong column. Verified by sabotage: replacing
+  // `resolvePlatform(process.platform)` with `resolvePlatform('linux')` left
+  // this test green until this line was added.
+  expect(platform, `the tampering below only proves anything if the column is this machine's`).toBe(process.platform);
+
+  // One scan, reused for all three verdicts: the page is not touched between
+  // them, only the baseline is. That keeps the test to a single axe run and
+  // makes it unambiguous that the DIFFERENCE comes from the baseline edit.
+  const results = await scan(page);
+  expect(auditScan(results, experiments.id, project), 'the unmodified surface must audit clean').toEqual([]);
+
+  const entry = baselineEntryFor('color-contrast')!;
+  const key = baselineKey(experiments.id, project);
+  const recorded = expectedNodeCount('color-contrast', experiments.id, project, platform);
+  expect(recorded, 'this proof needs colour-contrast to be baselined here').toBeGreaterThan(0);
+
+  // Written as a per-platform pair with the CURRENT platform's slot named
+  // dynamically, so the test reads the same on macOS and on Linux.
+  const pair = (forThisPlatform: number, forTheOther: number): PlatformCount =>
+    ({ [platform]: forThisPlatform, [other]: forTheOther } as Record<BaselinePlatform, number>);
+
+  // `counts` is `readonly` to TypeScript only. Mutating it is safe here: each
+  // Playwright worker is its own process with its own module instance and runs
+  // one test at a time, and the original is restored in `finally`.
+  const counts = entry.counts as Record<string, PlatformCount>;
+  const original = counts[key];
+
+  try {
+    // (a) Corrupt the OTHER platform's number badly. Nothing may change —
+    //     otherwise the resolution is not selecting a column at all.
+    counts[key] = pair(recorded, recorded + 7);
+    expect(expectedNodeCount('color-contrast', experiments.id, project, other)).toBe(recorded + 7);
+    expect(
+      auditScan(results, experiments.id, project),
+      `a wrong number in the "${other}" column changed the verdict on "${platform}". The columns ` +
+        `must be independent: CI's numbers must not be able to fail a developer's machine, and a ` +
+        `developer's must not be able to pass CI.`
+    ).toEqual([]);
+
+    // (b) Corrupt THIS platform's number. The audit MUST go red — and must say
+    //     `improved`, because the baseline now claims more failing nodes than
+    //     the page actually has.
+    counts[key] = pair(recorded + 7, recorded);
+    const failures = auditScan(results, experiments.id, project);
+    const contrast = failures.find((f) => f.rule === 'color-contrast');
+    expect(
+      contrast?.kind,
+      `the "${platform}" count was moved from ${recorded} to ${recorded + 7} and the audit stayed ` +
+        `green. The enforced column is then not the one this machine runs on, and every count in ` +
+        `e2e/a11y-baseline.ts is decorative. Audit returned: ` +
+        `${JSON.stringify(failures.map((f) => `${f.kind}:${f.rule}`))}`
+    ).toBe('improved');
+    expect(contrast?.expected).toBe(recorded + 7);
+    expect(contrast?.actual).toBe(recorded);
+    expect(contrast?.platform, 'the failure must name the column it was judged against').toBe(platform);
+    expect(contrast?.message, 'and the message must name it too, or the number is unactionable').toContain(platform);
+  } finally {
+    counts[key] = original;
+  }
+
+  // Restored, and green again — so a failure above cannot be an artefact left
+  // behind for the next test in this worker.
+  expect(expectedNodeCount('color-contrast', experiments.id, project, platform)).toBe(recorded);
+  expect(auditScan(results, experiments.id, project), 'the baseline must be restored').toEqual([]);
 });

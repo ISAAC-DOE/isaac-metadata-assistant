@@ -17,7 +17,7 @@ a finding with a tracking entry, not fixed here.
 | Accessibility engine | [`@axe-core/playwright`](https://github.com/dequelabs/axe-core-npm) + `axe-core` |
 | Location | `apps/web/e2e/**`, config `apps/web/playwright.config.ts` |
 | Scope | 18 catalogued surfaces × 5 viewport/zoom dimensions, plus interaction specs |
-| Size | **568 tests** (567 run, 1 conditionally skipped), ~4 minutes locally with default workers |
+| Size | **580 tests** (579 run, 1 conditionally skipped), ~3 minutes locally with default workers |
 | Licences | Playwright Apache-2.0, axe-core and `@axe-core/playwright` MPL-2.0 — **devDependencies only** |
 
 The new packages are dev-only and are **not** in the shipped bundle. Proof:
@@ -242,8 +242,11 @@ Krish's to give.
   the realistic case of an element with a *resting* box-shadow that stops painting a ring, plus a
   positive control so the probe cannot pass by failing everything), and three checks on the axe
   baseline itself — a violation on a non-baselined surface, an extra node on a baselined one, and
-  a changed failing colour at an unchanged count. **Not** self-checked, and listed in the spec
-  header: heading-hierarchy and colour-only detection.
+  a changed failing colour at an unchanged count — and two on the **platform** mechanism (§6.1):
+  that the resolved column is this machine's and that an unmeasured platform is refused, and that
+  tampering with *this* platform's count turns the audit red while tampering with the *other*
+  platform's leaves it green. **Not** self-checked, and listed in the spec header:
+  heading-hierarchy and colour-only detection.
 
 ### Zoom-only (`@zoom`)
 
@@ -269,15 +272,102 @@ Anything the probes report that is **not** in those files fails the build — an
 recorded defect that **grows**. An earlier draft of this suite recorded `color-contrast` with a
 wildcard scope, which silently made it equivalent to disabling the rule outright; that was caught
 in review and is the reason the baseline is now count-based rather than rule-based. Each entry
-carries an exact per-`surface@project` node count (total **1,974**), plus an identity guard —
-`targetPattern` for structural rules, or the exact failing colour set for contrast — because an
-unchanged count is not proof of an unchanged defect. Five verdicts can fail a run: `new`, `grew`,
-`improved`, `new-target`, `new-foreground`. `improved` fails deliberately: when a defect is fixed
-you must lower the number, so the baseline cannot quietly drift out of date.
+carries an exact per-`surface@project` node count (total **1,974** on macOS / **1,980** on Linux
+— see §6.1), plus an identity guard — `targetPattern` for structural rules, or the exact failing
+colour set for contrast — because an unchanged count is not proof of an unchanged defect. Five
+verdicts can fail a run: `new`, `grew`, `improved`, `new-target`, `new-foreground`. `improved`
+fails deliberately: when a defect is fixed you must lower the number, so the baseline cannot
+quietly drift out of date.
 
 Two known gaps, stated rather than hidden: `dialogs.spec.ts` still consults the baseline at
 rule level (an open overlay legitimately changes counts, so page counts do not apply), and the
 layout baseline enforces exact-selector membership rather than counts.
+
+### 6.1 The baselines are platform-keyed, and **Linux/CI is authoritative**
+
+#### Why the numbers differ
+
+The app ships **no webfont**. `--font-ui` therefore resolves to whatever the operating system
+provides: **SF Pro** on macOS, a **DejaVu/Liberation** face on `ubuntu-latest`. The Linux faces
+are wider, so a line of prose wraps at a different word. That changes how many rendered text
+nodes exist, and therefore how many nodes axe measures — and it changes whether an element
+overflows its container by a pixel or two, which is exactly what the clipping probe reports.
+
+Measured, not assumed: **10 of the 149** recorded axe triples differ, every one of them by
+**exactly ±1** — the signature of a single wrap boundary, not of a different application. Eight
+gain a node on Linux; **two lose one**, which is worth noting because "Linux is always worse"
+would have been the wrong story and would have justified the wrong fix.
+
+| Rule | Surface @ project | macOS | Linux |
+|---|---|---:|---:|
+| `color-contrast` | `guided-completion@mobile-375x812` | 7 | **8** |
+| `color-contrast` | `record-detail@mobile-375x812` | 10 | **11** |
+| `color-contrast` | `memory-graph@zoom-200` | 32 | **33** |
+| `color-contrast` | `settings@zoom-200` | 13 | **14** |
+| `color-contrast` | `settings-about@zoom-200` | 12 | **13** |
+| `color-contrast` | `settings-explorer@zoom-200` | 55 | **56** |
+| `color-contrast` | `settings-privacy@zoom-200` | 5 | **6** |
+| `color-contrast` | `validator@zoom-200` | 6 | **7** |
+| `color-contrast` | `export-readiness-done@tablet-768x1024` | 12 | **11** |
+| `color-contrast` | `record-detail@tablet-768x1024` | 16 | **15** |
+| | **total tolerated nodes** | **1,974** | **1,980** |
+
+Two layout clips exist **only** under the Linux face. Both are **real application defects that
+macOS font metrics happened to hide**, not test artifacts — the chip is a couple of pixels from
+the card edge on macOS and a couple of pixels past it on Linux, and any user whose system font is
+a shade wider would see the truncated label:
+
+* `export-readiness-done@mobile-375x812` — `span.chip.chip-exported` in `div.record-context` runs
+  315→372 inside a container ending at 365 and the label "Exported" is cut. **This is the same
+  defect as LAYOUT-02** (`chip-draft` on Evidence), recorded as its second instance, and one CSS
+  fix in `.record-context` closes both.
+* `record-detail@tablet-768x1024` — a second StatusBar segment (`span.statusbar-pending`,
+  "— dry-run · 1 error") clips, where macOS clips only `span.statusbar-advisory`. Recorded under
+  **LAYOUT-01**.
+
+#### How it is encoded — exact on both platforms, no tolerance
+
+A count is written either as a bare number (identical on both platforms — 139 of 149) or as
+`{ darwin: n, linux: m }`. A layout instance list is written either as a bare array or as
+`{ darwin: [...], linux: [...] }`. `process.platform` selects the column, once, per run.
+
+There is deliberately **no range, no ±1 slack and no fuzzy matching.** Tolerance would re-open
+precisely the hole the wildcard scope opened: a defect that grew by one node would be
+indistinguishable from a wrap boundary that moved. Each platform's number is an exact ratchet in
+both directions, and `specs/a11y-axe.spec.ts` proves that for **both** columns — including the
+one the machine it is running on will never execute — so a typo in the Linux column fails on a
+developer's Mac rather than on CI.
+
+An **unmeasured platform is refused, not guessed.** `resolvePlatform('win32')` throws with an
+explanation. Falling back to one of the two would give a Windows contributor a green suite that
+was comparing their run against somebody else's font metrics.
+
+`specs/self-check.spec.ts` proves the mechanism the same way it proves every other probe here: it
+asserts the resolved column is this machine's, then **tampers with it** and requires the audit to
+go red — and tampers with the *other* platform's column and requires it to stay green, so the two
+columns are demonstrably independent.
+
+#### A green macOS run does not mean CI is green
+
+This is the practical consequence and it deserves to be blunt: running the suite locally
+exercises the **darwin** column only. It says nothing about the Linux numbers, and therefore
+nothing about whether the `browser-a11y` job will pass. Where they conflict, **CI wins** — it is
+the shared, reproducible environment and the one the gate runs in.
+
+#### Regenerating each platform's numbers
+
+You can only measure the platform you are on.
+
+* **macOS (darwin).** Run the suite locally (§2). Every failure names the surface, the project,
+  the rule, **the platform column it was judged against**, expected and actual, and prints the
+  exact key to edit. Transcribe into the `darwin` slot.
+* **Linux.** There is no way to measure this from a laptop and no attempt is made to guess it.
+  Push the branch, let the `browser-a11y` job run, read the same failure messages out of the job
+  log, and transcribe into the `linux` slot.
+* If a triple ends up identical on both, collapse it back to a bare number — the well-formedness
+  test rejects a per-platform pair whose two numbers are equal, so the file cannot accumulate
+  fake platform-specificity.
+* Never "fix" one platform by copying the other's number.
 
 ### Accessibility
 
@@ -294,8 +384,8 @@ layout baseline enforces exact-selector membership rather than counts.
 
 | ID | Where | What is wrong |
 |---|---|---|
-| **LAYOUT-01** | 8 measured `surface@project` pairs (not all 15 of the five record surfaces × three narrow projects — only 8 ever fire) | The record StatusBar footer does not reflow. At 375px its content measures **575px in a 353px box** with `overflow-x: visible`, so the phase / pending / advisory / coverage segments spill sideways and downwards and are then cut by `div.screen-card { overflow: hidden }`. Visually the segments overlap and read as garbled. Severity scales with width: severe at 375, ~11px of vertical clipping at 640 (200% zoom), ~1px at 768. Shared chrome, so it affects every record surface. |
-| **LAYOUT-02** | `evidence` at `mobile-375x812` | The TopBar record-context status chip (`span.chip.chip-draft` in `div.record-context`) runs 9px past the right edge of `div.screen-card` and is cut by its `overflow: hidden` — the label reads "Draf". |
+| **LAYOUT-01** | 8 measured `surface@project` pairs (not all 15 of the five record surfaces × three narrow projects — only 8 ever fire) | The record StatusBar footer does not reflow. At 375px its content measures **575px in a 353px box** with `overflow-x: visible`, so the phase / pending / advisory / coverage segments spill sideways and downwards and are then cut by `div.screen-card { overflow: hidden }`. Visually the segments overlap and read as garbled. Severity scales with width: severe at 375, ~11px of vertical clipping at 640 (200% zoom), ~1px at 768. Shared chrome, so it affects every record surface. On Linux a **second** segment (`span.statusbar-pending`, "— dry-run · 1 error") also clips on `record-detail` at 768 — see §6.1. |
+| **LAYOUT-02** | `evidence` at `mobile-375x812`; **plus, on Linux only, `export-readiness-done` at `mobile-375x812`** | The TopBar record-context status chip in `div.record-context` runs past the right edge of `div.screen-card` and is cut by its `overflow: hidden`. On Evidence it is `span.chip.chip-draft`, 9px over, and the label reads "Draf". The second instance is `span.chip.chip-exported`, 315→372 against a container ending at 365, label "Exported" — **a real application defect that macOS font metrics happen to hide**, not a test artifact (see §6.1). One fix in `.record-context` closes both. |
 
 ### Informational, not failing
 
@@ -320,15 +410,15 @@ Read this section before citing the suite as evidence of anything.
 * **The layout probes are load-sensitive.** Observed directly: running two Playwright suites
   concurrently produced one spurious `layout: Governance & Safety — Policy` failure at
   `tablet-768x1024` that passes in 1.5 s in isolation and does not recur on an idle machine
-  (575 passed, 1 skipped, 0 failed, twice). Measuring rendered geometry under contention is
+  (579 passed, 1 skipped, 0 failed, twice). Measuring rendered geometry under contention is
   inherently racy. Do not run the suite alongside another browser suite, and treat a single
   isolated layout failure as suspect until reproduced on a quiet machine. The same caveat already
   applies to the pre-existing `graph-real-artifact.test.tsx` vitest flake (finding **F1** in the
   Baseline Completion Matrix).
-* **Font metrics are platform-dependent.** There is no webfont; `--font-ui` resolves to SF Pro on
-  macOS and to a DejaVu/Liberation face on Linux CI. The clipping and horizontal-scroll probes
-  measure text, so a baseline calibrated on one platform can legitimately differ on the other.
-  CI is the authority.
+* **Font metrics are platform-dependent, and the baselines are keyed on that.** There is no
+  webfont; `--font-ui` resolves to SF Pro on macOS and to a DejaVu/Liberation face on Linux CI.
+  Ten axe counts and two layout clips genuinely differ. Both platforms carry **exact** numbers —
+  no tolerance — and **CI (Linux) is the authority**. See §6.1.
 * **It never touches a database.** No `PG*` variable is set anywhere; the backend runs with none.
 * **It is read-only against the workspace during the run** — with one deliberate exception at
   setup: `global-setup.ts` POSTs `/demo/run` once to seed synthetic records (an idempotent
@@ -382,6 +472,9 @@ configuration, `workers: 2`, and `retries: 1`.
 * **Fix a finding** → delete its entry from `e2e/a11y-baseline.ts` or `e2e/layout-baseline.ts`
   in the same change. If you fix `/load`'s missing `<h1>`, also drop `expectH1: false` from its
   surfaces entry — that assertion exists so closing the finding is *forced*, not optional.
+  A change to `apps/web/src` that adds or removes rendered text moves counts on **both**
+  platforms; you can only measure one of them locally, so expect a second commit transcribing the
+  Linux column out of the CI failure log (§6.1).
 * **Add a probe** → add a matching case to `e2e/specs/self-check.spec.ts` proving it can fail.
   A probe with no self-check is not evidence.
 * **Never** add `disableRules(...)`. Enumerate the defect instead.

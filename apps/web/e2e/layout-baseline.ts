@@ -27,7 +27,42 @@
  * Fixing the CSS makes the matching entry stop firing;
  * `layout-responsive.spec.ts` annotates entries that no longer fire so they can
  * be deleted rather than left to rot.
+ *
+ * ── Some instance lists are PER PLATFORM ────────────────────────────────────
+ *
+ * Same cause as in `a11y-baseline.ts`, and it belongs here even more directly:
+ * these probes measure rendered geometry. There is no webfont, so `--font-ui`
+ * is SF Pro on macOS and a DejaVu/Liberation face on `ubuntu-latest`. Two
+ * clips exist ONLY under the wider Linux face — they are real application
+ * defects that macOS font metrics happened to hide, not test artifacts.
+ *
+ * An instance list may therefore be written as `{ darwin: [...], linux: [...] }`
+ * and the CURRENT platform's list is the one enforced, exactly. A list is still
+ * exhaustive for its platform: an offender not in it fails. `darwin: []` means
+ * "measured on macOS, does not occur there" — it does not mean "unmeasured".
+ *
+ * **CI (Linux) is the authority.**
  */
+
+import { currentPlatform, type BaselinePlatform } from './a11y-baseline';
+
+/**
+ * The exact offender selectors measured on a `surfaceId@projectId` pair —
+ * identical on both platforms (a bare array) or measured separately because the
+ * system font moves a wrap boundary.
+ */
+export type PlatformInstances =
+  | readonly string[]
+  | Readonly<Record<BaselinePlatform, readonly string[]>>;
+
+/** Read one platform's offender list. */
+export function platformInstances(
+  instances: PlatformInstances | undefined,
+  platform: BaselinePlatform
+): readonly string[] {
+  if (instances === undefined) return [];
+  return Array.isArray(instances) ? instances : (instances as Record<BaselinePlatform, readonly string[]>)[platform];
+}
 
 export interface LayoutFinding {
   readonly id: string;
@@ -40,10 +75,11 @@ export interface LayoutFinding {
    */
   readonly selector: string;
   /**
-   * `surfaceId@projectId` → the exact offender selectors measured there.
+   * `surfaceId@projectId` → the exact offender selectors measured there, either
+   * for both platforms (a bare array) or per platform.
    * Exhaustive: a pair that is absent tolerates nothing.
    */
-  readonly instances: Readonly<Record<string, readonly string[]>>;
+  readonly instances: Readonly<Record<string, PlatformInstances>>;
   readonly note: string;
 }
 
@@ -67,13 +103,25 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       'by `div.screen-card { overflow: hidden }`. Visually the segments overlap and ' +
       'read as garbled ("dry-run · 1" over "not exported yet"). Severity scales with ' +
       'width: severe at 375, a single vertically-clipped segment at 640 (200% zoom) ' +
-      'and at 768, nothing at 1024 or 1280. It affects every record surface because ' +
+      'and at 768 on macOS — TWO at 768 on Linux, where the wider system font pushes ' +
+      'the pending segment over as well — nothing at 1024 or 1280. It affects every record surface because ' +
       'StatusBar is shared chrome, but WHICH segments clip depends on the record\'s ' +
       'own status text, so the lists below differ per surface. Fix belongs in ' +
       '`src/components/chrome.css` (.statusbar), not here.',
     instances: {
       'record-detail@mobile-375x812': [SB_PHASE, SB_PENDING, SB_ADVISORY, SB_EYEBROW, SB_RIGHT],
-      'record-detail@tablet-768x1024': [SB_ADVISORY],
+      // PLATFORM-DIFFERING. On Linux the wider system face makes the pending
+      // segment ("— dry-run · 1 error") overflow the 768px footer as well, so
+      // the same non-reflowing footer clips a second segment there. Evidenced
+      // by GitHub Actions run 30668917975, whose log excerpt named
+      // `span.statusbar-pending` / `span.statusbar-seg` / `footer.statusbar`
+      // and that text. The excerpt was TRUNCATED: SB_ADVISORY is carried over
+      // from the macOS measurement (the footer geometry that clips it there is
+      // if anything tighter under a wider font) and it is possible CI reports
+      // further segments at this pair. If it does, the failure names them
+      // exactly — add them here rather than widening the match. Nothing beyond
+      // SB_PENDING is claimed as Linux-measured.
+      'record-detail@tablet-768x1024': { darwin: [SB_ADVISORY], linux: [SB_ADVISORY, SB_PENDING] },
       'record-detail@zoom-200': [SB_PHASE, SB_PENDING, SB_ADVISORY],
       'guided-completion@mobile-375x812': [SB_PHASE, SB_NOTE],
       'evidence@mobile-375x812': [SB_NOTE],
@@ -87,14 +135,26 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
     kind: 'clipped',
     selector: 'record-context',
     note:
-      'At 375px the TopBar record-context status chip (`span.chip.chip-draft` inside ' +
-      '`div.record-context`) runs 9px past the right edge of `div.screen-card` and is ' +
-      'cut by its `overflow: hidden` — the label reads "Draf". The evidence surface is ' +
-      'where it shows because that TopBar variant carries the widest context row; the ' +
-      'underlying cause (record-context does not shrink at phone widths) is shared. ' +
-      'Fix belongs in `src/components/chrome.css` (.record-context / .topbar).',
+      'At 375px the TopBar record-context status chip inside `div.record-context` runs past ' +
+      'the right edge of `div.screen-card` and is cut by its `overflow: hidden`. On Evidence ' +
+      'it is `span.chip.chip-draft`, 9px over, and the label reads "Draf". ' +
+      'SECOND INSTANCE, Linux only: on Export Readiness (done) the `span.chip.chip-exported` ' +
+      'chip runs from 315 to 372 in a container that ends at 365 — 7px over — and the label ' +
+      '"Exported" is cut. That instance is the SAME APPLICATION DEFECT, not a test artifact: ' +
+      'macOS font metrics merely happen to fit the chip inside the card by a couple of pixels, ' +
+      'and the wider Linux system face does not. It would be visible to any user whose system ' +
+      'font is a shade wider, and it is genuinely broken on CI. The underlying cause ' +
+      '(record-context does not shrink at phone widths) is shared by both. ' +
+      'Fix belongs in `src/components/chrome.css` (.record-context / .topbar) and fixes both.',
     instances: {
       'evidence@mobile-375x812': ['span < span.chip.chip-draft < div.record-context'],
+      // Evidenced by GitHub Actions run 30668917975: el 315..372 vs container
+      // 10..365, clipped horizontally by `div.screen-card < div.app < div#root`,
+      // text "Exported". `darwin: []` is a measurement: it does not clip on macOS.
+      'export-readiness-done@mobile-375x812': {
+        darwin: [],
+        linux: ['span < span.chip.chip-exported < div.record-context'],
+      },
     },
   },
 ];
@@ -103,25 +163,46 @@ export const layoutKey = (surfaceId: string, projectId: string): string => `${su
 
 /**
  * True only for an EXACT recorded offender on an EXACT recorded
- * (surface, project) pair. No substrings, no wildcards.
+ * (surface, project) pair, ON THIS PLATFORM. No substrings, no wildcards, and
+ * no cross-platform borrowing: a clip recorded only for Linux does not excuse
+ * the same selector appearing on macOS.
  */
 export function isKnownLayoutFinding(
   kind: LayoutFinding['kind'],
   selector: string,
   surfaceId: string,
-  projectId: string
+  projectId: string,
+  platform: BaselinePlatform = currentPlatform()
 ): boolean {
   const key = layoutKey(surfaceId, projectId);
-  return LAYOUT_BASELINE.some((f) => f.kind === kind && (f.instances[key] ?? []).includes(selector));
+  return LAYOUT_BASELINE.some(
+    (f) => f.kind === kind && platformInstances(f.instances[key], platform).includes(selector)
+  );
 }
 
-export function applicableLayoutFindings(surfaceId: string, projectId: string): readonly LayoutFinding[] {
+export function applicableLayoutFindings(
+  surfaceId: string,
+  projectId: string,
+  platform: BaselinePlatform = currentPlatform()
+): readonly LayoutFinding[] {
   const key = layoutKey(surfaceId, projectId);
-  return LAYOUT_BASELINE.filter((f) => (f.instances[key] ?? []).length > 0);
+  return LAYOUT_BASELINE.filter((f) => platformInstances(f.instances[key], platform).length > 0);
 }
 
-/** Every offender this baseline tolerates, summed — the recorded layout debt. */
-export const LAYOUT_BASELINE_TOTAL_INSTANCES = LAYOUT_BASELINE.reduce(
-  (n, f) => n + Object.values(f.instances).reduce((m, list) => m + list.length, 0),
-  0
-);
+/**
+ * Every offender this baseline tolerates, summed PER PLATFORM — the recorded
+ * layout debt. Computed for both columns without resolving the current
+ * platform, so an unmeasured platform fails at the first lookup with
+ * `resolvePlatform`'s message rather than at module load with a stack trace.
+ */
+export const LAYOUT_BASELINE_TOTAL_INSTANCES: Readonly<Record<BaselinePlatform, number>> = {
+  darwin: totalInstancesOn('darwin'),
+  linux: totalInstancesOn('linux'),
+};
+
+function totalInstancesOn(platform: BaselinePlatform): number {
+  return LAYOUT_BASELINE.reduce(
+    (n, f) => n + Object.values(f.instances).reduce((m, list) => m + platformInstances(list, platform).length, 0),
+    0
+  );
+}

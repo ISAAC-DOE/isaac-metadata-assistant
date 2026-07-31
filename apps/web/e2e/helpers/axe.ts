@@ -19,7 +19,9 @@ import {
   A11Y_BASELINE,
   baselineEntryFor,
   baselineVerdict,
+  currentPlatform,
   expectedNodeCount,
+  type BaselinePlatform,
   type BaselineVerdict,
 } from '../a11y-baseline';
 
@@ -70,7 +72,9 @@ export interface BaselineFailure {
   readonly kind: FailureKind;
   readonly expected: number;
   readonly actual: number;
-  /** One line, naming surface, project, rule and the exact delta. */
+  /** The baseline column that produced `expected`. */
+  readonly platform: BaselinePlatform;
+  /** One line, naming surface, project, platform, rule and the exact delta. */
   readonly message: string;
 }
 
@@ -81,17 +85,31 @@ export interface BaselineFailure {
  * state exactly. Deliberately not a filter over `Result` objects: axe emits one
  * `Result` per rule with every node inside, so anything that drops a whole
  * `Result` silently drops every node of that rule.
+ *
+ * `platform` selects which baseline column is enforced and defaults to the
+ * current process's. It is named in every message, because "expected 6, got 7"
+ * is unactionable when the file holds a number for each of two platforms and
+ * the reader cannot see which one was consulted.
  */
-export function auditScan(results: AxeResults, surfaceId: string, projectId: string): BaselineFailure[] {
-  const where = `${surfaceId} @ ${projectId}`;
+export function auditScan(
+  results: AxeResults,
+  surfaceId: string,
+  projectId: string,
+  platform: BaselinePlatform = currentPlatform()
+): BaselineFailure[] {
+  const where = `${surfaceId} @ ${projectId} on ${platform}`;
   const failures: BaselineFailure[] = [];
   const fired = new Set<string>();
+  // How to write the corrected number back: bare for a triple that is the same
+  // on both platforms, `{ darwin: …, linux: … }` for one that is not.
+  const edit = (n: number) =>
+    `'${surfaceId}@${projectId}': ${n}  (or { …, ${platform}: ${n} } if the other platform differs)`;
 
   for (const v of results.violations) {
     fired.add(v.id);
     const actual = v.nodes.length;
-    const expected = expectedNodeCount(v.id, surfaceId, projectId);
-    const verdict = baselineVerdict(v.id, surfaceId, projectId, actual);
+    const expected = expectedNodeCount(v.id, surfaceId, projectId, platform);
+    const verdict = baselineVerdict(v.id, surfaceId, projectId, actual, platform);
 
     if (verdict === 'new') {
       failures.push({
@@ -99,10 +117,11 @@ export function auditScan(results: AxeResults, surfaceId: string, projectId: str
         kind: 'new',
         expected,
         actual,
+        platform,
         message:
           `NEW  ${where}: rule "${v.id}" is not baselined here at all, and fired on ${actual} node(s).\n` +
           `${formatViolation(v)}\n` +
-          `     → Fix apps/web/src, or add '${surfaceId}@${projectId}': ${actual} to the "${v.id}" ` +
+          `     → Fix apps/web/src, or add ${edit(actual)} to the "${v.id}" ` +
           `entry in e2e/a11y-baseline.ts with a note explaining the defect.`,
       });
       continue;
@@ -113,11 +132,14 @@ export function auditScan(results: AxeResults, surfaceId: string, projectId: str
         kind: 'grew',
         expected,
         actual,
+        platform,
         message:
-          `GREW ${where}: rule "${v.id}" grew from ${expected} to ${actual} node(s) (+${actual - expected}).\n` +
+          `GREW ${where}: rule "${v.id}" grew from ${expected} to ${actual} node(s) (+${actual - expected}) ` +
+          `against the ${platform} column.\n` +
           `${formatViolation(v)}\n` +
           `     → A regression: this surface got worse. Fix it, or — if the extra node(s) are ` +
-          `deliberate and understood — update the count in e2e/a11y-baseline.ts.`,
+          `deliberate and understood — update the ${platform} count in e2e/a11y-baseline.ts: ${edit(actual)}. ` +
+          `Do NOT change the other platform's number to match; it was measured separately.`,
       });
       continue;
     }
@@ -127,10 +149,12 @@ export function auditScan(results: AxeResults, surfaceId: string, projectId: str
         kind: 'improved',
         expected,
         actual,
+        platform,
         message:
           `IMPROVED ${where}: rule "${v.id}" fell from ${expected} to ${actual} node(s) ` +
-          `(-${expected - actual}). Not a bug — but the baseline is now wrong, and a stale ` +
-          `number would re-admit the defect. Lower it in e2e/a11y-baseline.ts.`,
+          `(-${expected - actual}) against the ${platform} column. Not a bug — but the baseline is ` +
+          `now wrong, and a stale number would re-admit the defect. Lower the ${platform} count in ` +
+          `e2e/a11y-baseline.ts: ${edit(actual)}.`,
       });
       continue;
     }
@@ -146,6 +170,7 @@ export function auditScan(results: AxeResults, surfaceId: string, projectId: str
           kind: 'new-target',
           expected,
           actual,
+          platform,
           message:
             `NEW TARGET ${where}: rule "${v.id}" still fails on ${actual} node(s), but ` +
             `${strays.length} of them are element(s) the baseline never recorded:\n` +
@@ -163,6 +188,7 @@ export function auditScan(results: AxeResults, surfaceId: string, projectId: str
           kind: 'new-foreground',
           expected,
           actual,
+          platform,
           message:
             `NEW COLOUR ${where}: rule "${v.id}" fails on ${actual} node(s) as recorded, but ` +
             `with foreground colour(s) the baseline never recorded: ${strays.join(', ')}.\n` +
@@ -176,17 +202,19 @@ export function auditScan(results: AxeResults, surfaceId: string, projectId: str
   // Rules the baseline expects here that did not fire at all: expected N, actual 0.
   for (const entry of A11Y_BASELINE) {
     if (fired.has(entry.rule)) continue;
-    const expected = expectedNodeCount(entry.rule, surfaceId, projectId);
+    const expected = expectedNodeCount(entry.rule, surfaceId, projectId, platform);
     if (expected === 0) continue;
     failures.push({
       rule: entry.rule,
       kind: 'improved',
       expected,
       actual: 0,
+      platform,
       message:
-        `FIXED? ${where}: rule "${entry.rule}" is baselined at ${expected} node(s) here but did ` +
-        `not fire at all. If it is fixed, delete '${surfaceId}@${projectId}' from that entry in ` +
-        `e2e/a11y-baseline.ts (and delete the whole entry once its last pair is gone).`,
+        `FIXED? ${where}: rule "${entry.rule}" is baselined at ${expected} node(s) here on ${platform} ` +
+        `but did not fire at all. If it is fixed, delete '${surfaceId}@${projectId}' from that entry in ` +
+        `e2e/a11y-baseline.ts (and delete the whole entry once its last pair is gone). If it is fixed ` +
+        `only on ${platform}, the pair becomes a per-platform count with the other column unchanged.`,
     });
   }
 

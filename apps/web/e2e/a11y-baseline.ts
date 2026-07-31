@@ -31,16 +31,41 @@
  *   * `foregrounds` — for `color-contrast`, the exact set of failing foreground
  *     colours. A new too-light token fails even if the node count is unmoved.
  *
+ * ── Why some counts are PER PLATFORM ────────────────────────────────────────
+ *
+ * The app ships no webfont. `--font-ui` therefore resolves to SF Pro on macOS
+ * and to a DejaVu/Liberation face on `ubuntu-latest`. Linux glyphs are wider,
+ * so a line of text wraps at a different word — which changes how many text
+ * nodes exist and which of them axe measures. Ten of the 149 recorded triples
+ * differ between the two platforms, every one of them by exactly ±1: the
+ * signature of a single wrap boundary, not of a different app.
+ *
+ * The response is NOT a tolerance. A range, a "±1 is fine" rule or a fuzzy
+ * match would re-open exactly the hole this file exists to close. Instead a
+ * count may be written as `{ darwin: n, linux: m }` and the ratchet is applied
+ * to the CURRENT platform's number, exactly. Both numbers are exact; both are
+ * one node away from red; the well-formedness test in `specs/a11y-axe.spec.ts`
+ * proves that for every platform, not just the one it happens to run on.
+ *
+ * **CI (Linux) is the authority.** A green run on a developer's macOS machine
+ * says the darwin column is right. It says nothing about the linux column, and
+ * therefore nothing about whether CI will be green.
+ *
  * ── How to regenerate the numbers ───────────────────────────────────────────
  *
  * They are measurements of THIS app in headless Chromium at the five projects
  * in `playwright.config.ts`, taken with the backend seeded by `global-setup.ts`.
- * Two consecutive full runs produced identical counts for all 149 triples.
- * When a fix lands, run the suite, read the exact numbers out of the failure
- * messages (each one names surface, project, rule, expected and actual) and
- * edit them here. Do not round, do not pad, and do not delete an entry that is
- * merely inconvenient — deleting an entry means the defect is GONE, and the
- * next run proves or disproves that.
+ * Two consecutive full runs produced identical counts for all 149 triples on
+ * one platform. When a fix lands, run the suite, read the exact numbers out of
+ * the failure messages (each one names surface, project, rule, PLATFORM,
+ * expected and actual) and edit them here. Do not round, do not pad, and do not
+ * delete an entry that is merely inconvenient — deleting an entry means the
+ * defect is GONE, and the next run proves or disproves that.
+ *
+ * You can only regenerate the column for the platform you are on. The other
+ * column comes from a CI run: push, read the failure output of the
+ * `browser-a11y` job, and transcribe. There is no way to measure Linux numbers
+ * from a laptop and no attempt is made to guess them.
  *
  * ── Known limitation, stated rather than hidden ─────────────────────────────
  *
@@ -65,6 +90,72 @@ export const PROJECT_IDS = [
 
 export type ProjectId = (typeof PROJECT_IDS)[number];
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * PLATFORM.
+ *
+ * These primitives live here, and `layout-baseline.ts` imports them, because
+ * the two baseline files are the only consumers and a third module for four
+ * declarations would be worse. They are deliberately not in `env.ts`: nothing
+ * here is configurable, and nothing here reads an environment variable.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The platforms this baseline has MEASURED numbers for. Not a list of platforms
+ * the suite "supports" in the aspirational sense — a list of platforms someone
+ * has actually run it on and transcribed the results from.
+ *
+ * `linux` is `ubuntu-latest` in `.github/workflows/ci.yml` and is AUTHORITATIVE.
+ * `darwin` exists so the suite is usable on a developer's machine.
+ */
+export const BASELINE_PLATFORMS = ['darwin', 'linux'] as const;
+
+export type BaselinePlatform = (typeof BASELINE_PLATFORMS)[number];
+
+/**
+ * A measurement that is identical on both platforms (a bare number — 139 of the
+ * 149 triples) or one that is not (an exact number for each).
+ *
+ * There is no third form. In particular there is no range, no tolerance and no
+ * "unknown"; a platform with no measurement is a platform this file cannot
+ * speak for, and `resolvePlatform` refuses to run there.
+ */
+export type PlatformCount = number | Readonly<Record<BaselinePlatform, number>>;
+
+/**
+ * `process.platform` → the baseline column to enforce, or a hard failure.
+ *
+ * Falling back to one of the two would be worse than failing: a Windows
+ * contributor would get a suite that is green because it is comparing their
+ * run against somebody else's font metrics. Exported separately from
+ * `currentPlatform()` so `specs/self-check.spec.ts` can prove the refusal
+ * without needing to run on Windows.
+ */
+export function resolvePlatform(nodePlatform: string): BaselinePlatform {
+  if ((BASELINE_PLATFORMS as readonly string[]).includes(nodePlatform)) {
+    return nodePlatform as BaselinePlatform;
+  }
+  throw new Error(
+    `This accessibility/layout baseline has no measured numbers for platform "${nodePlatform}". ` +
+      `Recorded platforms: ${BASELINE_PLATFORMS.join(', ')}. Text wraps at different words under ` +
+      `different system fonts (there is no webfont), so the node counts in e2e/a11y-baseline.ts and ` +
+      `the clip lists in e2e/layout-baseline.ts are platform-specific measurements — running them ` +
+      `against a third platform's font metrics would produce noise, not a verdict. Run the suite on ` +
+      `Linux (which is what CI runs, and what is authoritative) or on macOS, or measure "${nodePlatform}" ` +
+      `and add its column to both baseline files.`
+  );
+}
+
+/** The baseline column in force for THIS process. Throws on an unmeasured platform. */
+export function currentPlatform(): BaselinePlatform {
+  return resolvePlatform(process.platform);
+}
+
+/** Read one platform's number out of a `PlatformCount`. */
+export function platformCount(count: PlatformCount | undefined, platform: BaselinePlatform): number {
+  if (count === undefined) return 0;
+  return typeof count === 'number' ? count : count[platform];
+}
+
 /** `${surfaceId}@${projectId}`. */
 export type BaselineKey = string;
 
@@ -79,8 +170,13 @@ export interface BaselineEntry {
   /**
    * EXACT expected violating-node count per `surfaceId@projectId`. Exhaustive:
    * any pair not listed expects zero. There is no wildcard.
+   *
+   * A bare number means "measured identical on macOS and Linux".
+   * `{ darwin: n, linux: m }` means the two platforms were measured separately
+   * and genuinely differ — see the font-metrics note in the file header. Both
+   * numbers are exact and both are enforced as a one-node ratchet.
    */
-  readonly counts: Readonly<Record<BaselineKey, number>>;
+  readonly counts: Readonly<Record<BaselineKey, PlatformCount>>;
   /**
    * RegExp source; every failing node's axe target must match it. Optional
    * ONLY because `color-contrast` fails on 1,610 unrelated text nodes whose
@@ -142,7 +238,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       '#b3bbc4', // --text-quaternary @ opacity .72  (.upcoming-row)
       '#9b793d', // --advisory-text   @ opacity .85  (.advisory-nongating)
     ],
-    // 1610 nodes across 90 (surface, project) pairs.
+    // 1,610 nodes on darwin / 1,616 on linux, across 90 (surface, project)
+    // pairs. TEN of the 90 differ, all by exactly one node, all because the
+    // system font differs: SF Pro on macOS, a DejaVu/Liberation face on
+    // ubuntu-latest. Wider Linux glyphs move a wrap boundary, which adds or
+    // removes one rendered text node. Eight gain a node, two lose one — a
+    // one-directional "Linux is always worse" story would have been the wrong
+    // one. The linux column is transcribed from GitHub Actions run
+    // 30668917975; it is the authoritative one.
     counts: {
       'evidence@desktop-1280x800': 71,
       'evidence@laptop-1024x768': 71,
@@ -161,7 +264,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'export-readiness@zoom-200': 4,
       'export-readiness-done@desktop-1280x800': 13,
       'export-readiness-done@laptop-1024x768': 12,
-      'export-readiness-done@tablet-768x1024': 12,
+      // The two pairs where LINUX HAS FEWER nodes: the wider face pushes two
+      // fragments onto one line, so axe sees one text node instead of two.
+      'export-readiness-done@tablet-768x1024': { darwin: 12, linux: 11 },
       'export-readiness-done@mobile-375x812': 8,
       'export-readiness-done@zoom-200': 10,
       'governance@desktop-1280x800': 4,
@@ -172,7 +277,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'guided-completion@desktop-1280x800': 12,
       'guided-completion@laptop-1024x768': 11,
       'guided-completion@tablet-768x1024': 11,
-      'guided-completion@mobile-375x812': 7,
+      // Linux wraps the guided-completion prompt one word earlier.
+      'guided-completion@mobile-375x812': { darwin: 7, linux: 8 },
       'guided-completion@zoom-200': 9,
       'load@desktop-1280x800': 5,
       'load@laptop-1024x768': 5,
@@ -188,11 +294,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'memory-graph@laptop-1024x768': 42,
       'memory-graph@tablet-768x1024': 34,
       'memory-graph@mobile-375x812': 27,
-      'memory-graph@zoom-200': 32,
+      'memory-graph@zoom-200': { darwin: 32, linux: 33 },
       'record-detail@desktop-1280x800': 16,
       'record-detail@laptop-1024x768': 16,
-      'record-detail@tablet-768x1024': 16,
-      'record-detail@mobile-375x812': 10,
+      'record-detail@tablet-768x1024': { darwin: 16, linux: 15 },
+      'record-detail@mobile-375x812': { darwin: 10, linux: 11 },
       'record-detail@zoom-200': 13,
       'schema-reference@desktop-1280x800': 19,
       'schema-reference@laptop-1024x768': 19,
@@ -203,12 +309,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings@laptop-1024x768': 15,
       'settings@tablet-768x1024': 15,
       'settings@mobile-375x812': 14,
-      'settings@zoom-200': 13,
+      'settings@zoom-200': { darwin: 13, linux: 14 },
       'settings-about@desktop-1280x800': 14,
       'settings-about@laptop-1024x768': 14,
       'settings-about@tablet-768x1024': 14,
       'settings-about@mobile-375x812': 12,
-      'settings-about@zoom-200': 12,
+      'settings-about@zoom-200': { darwin: 12, linux: 13 },
       'settings-api@desktop-1280x800': 17,
       'settings-api@laptop-1024x768': 17,
       'settings-api@tablet-768x1024': 17,
@@ -218,12 +324,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-explorer@laptop-1024x768': 46,
       'settings-explorer@tablet-768x1024': 62,
       'settings-explorer@mobile-375x812': 55,
-      'settings-explorer@zoom-200': 55,
+      'settings-explorer@zoom-200': { darwin: 55, linux: 56 },
       'settings-privacy@desktop-1280x800': 7,
       'settings-privacy@laptop-1024x768': 7,
       'settings-privacy@tablet-768x1024': 7,
       'settings-privacy@mobile-375x812': 6,
-      'settings-privacy@zoom-200': 5,
+      'settings-privacy@zoom-200': { darwin: 5, linux: 6 },
       'statistics@desktop-1280x800': 10,
       'statistics@laptop-1024x768': 10,
       'statistics@tablet-768x1024': 10,
@@ -233,7 +339,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'validator@laptop-1024x768': 9,
       'validator@tablet-768x1024': 9,
       'validator@mobile-375x812': 8,
-      'validator@zoom-200': 6,
+      'validator@zoom-200': { darwin: 6, linux: 7 },
     },
   },
   {
@@ -369,16 +475,35 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
 ];
 
 /**
- * Every failing node this baseline tolerates, summed. One number a reviewer can
- * watch: it is the size of the app's recorded automated-a11y debt, and it can
- * only go down without an explicit edit here.
+ * Every failing node this baseline tolerates, summed, PER PLATFORM. One number
+ * a reviewer can watch: it is the size of the app's recorded automated-a11y
+ * debt, and it can only go down without an explicit edit here.
+ *
+ * The six-node gap is entirely the ten font-metric triples above (eight +1,
+ * two −1). It is not extra debt on Linux; it is the same debt counted under a
+ * wider font.
  */
-export const A11Y_BASELINE_TOTAL_NODES = 1974;
+export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number>> = {
+  darwin: 1974,
+  linux: 1980,
+};
 
-/** Exact tolerated node count for a (rule, surface, project) triple. 0 when unlisted. */
-export function expectedNodeCount(rule: string, surfaceId: string, projectId: string): number {
+/**
+ * Exact tolerated node count for a (rule, surface, project) triple on one
+ * platform. 0 when unlisted.
+ *
+ * `platform` defaults to the current process's — so every existing call site
+ * enforces the right column automatically — and is explicit only where a test
+ * needs to reason about the platform it is NOT running on.
+ */
+export function expectedNodeCount(
+  rule: string,
+  surfaceId: string,
+  projectId: string,
+  platform: BaselinePlatform = currentPlatform()
+): number {
   const entry = A11Y_BASELINE.find((e) => e.rule === rule);
-  return entry?.counts[baselineKey(surfaceId, projectId)] ?? 0;
+  return platformCount(entry?.counts[baselineKey(surfaceId, projectId)], platform);
 }
 
 export function baselineEntryFor(rule: string): BaselineEntry | undefined {
@@ -388,6 +513,18 @@ export function baselineEntryFor(rule: string): BaselineEntry | undefined {
 export type BaselineVerdict = 'ok' | 'new' | 'grew' | 'improved';
 
 /**
+ * The ratchet itself, over two plain numbers. Split out from
+ * `baselineVerdict` so `specs/self-check.spec.ts` can feed it a TAMPERED
+ * expectation and prove the comparison is exact — no range, no tolerance, no
+ * "±1 is fine".
+ */
+export function verdictForCounts(expected: number, actualNodeCount: number): BaselineVerdict {
+  if (actualNodeCount === expected) return 'ok';
+  if (expected === 0) return 'new';
+  return actualNodeCount > expected ? 'grew' : 'improved';
+}
+
+/**
  * The whole policy, as one pure function — so `specs/a11y-axe.spec.ts` cannot
  * quietly widen it and `specs/self-check.spec.ts` can prove it is not vacuous.
  */
@@ -395,18 +532,20 @@ export function baselineVerdict(
   rule: string,
   surfaceId: string,
   projectId: string,
-  actualNodeCount: number
+  actualNodeCount: number,
+  platform: BaselinePlatform = currentPlatform()
 ): BaselineVerdict {
-  const expected = expectedNodeCount(rule, surfaceId, projectId);
-  if (actualNodeCount === expected) return 'ok';
-  if (expected === 0) return 'new';
-  return actualNodeCount > expected ? 'grew' : 'improved';
+  return verdictForCounts(expectedNodeCount(rule, surfaceId, projectId, platform), actualNodeCount);
 }
 
 /** Baseline entries that expect at least one node on this surface+project. */
-export function applicableEntries(surfaceId: string, projectId: string): readonly BaselineEntry[] {
+export function applicableEntries(
+  surfaceId: string,
+  projectId: string,
+  platform: BaselinePlatform = currentPlatform()
+): readonly BaselineEntry[] {
   const key = baselineKey(surfaceId, projectId);
-  return A11Y_BASELINE.filter((e) => (e.counts[key] ?? 0) > 0);
+  return A11Y_BASELINE.filter((e) => platformCount(e.counts[key], platform) > 0);
 }
 
 /**
@@ -417,8 +556,13 @@ export function applicableEntries(surfaceId: string, projectId: string): readonl
  * changes node counts and the closed-page measurement does not apply. The
  * sweeping scan uses `baselineVerdict` instead. See the header note.
  */
-export function isBaselined(rule: string, surfaceId: string, projectId: string): boolean {
-  return expectedNodeCount(rule, surfaceId, projectId) > 0;
+export function isBaselined(
+  rule: string,
+  surfaceId: string,
+  projectId: string,
+  platform: BaselinePlatform = currentPlatform()
+): boolean {
+  return expectedNodeCount(rule, surfaceId, projectId, platform) > 0;
 }
 
 /** All (surface, project) pairs the suite scans — used by the well-formedness test. */
