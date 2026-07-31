@@ -11,6 +11,12 @@ importantly, which capabilities are *deliberately not* part of baseline. This do
 **Starting state of this document:** org canonical `main` = `543aa3a` (merge of PR #28, Slice 2A),
 image `v0.0.32`, Dean's guide at `b746b1a`, backend 1794 passing, frontend 2145 passing across 93 files.
 
+**State after the baseline-restoration slices (2026-07-31):** `main` = `c36053d`. PRs **#29** (baseline
+definition, graph + performance decisions, retirement checklist), **#30** (truth-core correctness
+D1–D3), **#31** (hosted QA checklist), **#32** (real-browser / accessibility / responsive baseline).
+Backend **1801**, frontend **2145 / 93**, e2e **579** on macOS *and* on Linux CI. All CI green on every
+merged SHA. **No hosted rollout has been observed** — see G1.
+
 ---
 
 ## 0. Authority and the single most consequential finding
@@ -175,10 +181,11 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 | Snapshot drift gate (both artifacts) | **yes** | done | orch | — |
 | Secret / leak / real-data scans | **yes** | done | orch | — |
 | Copy-truthfulness guards (frontend + backend, parity-enforced) | **yes** | done | orch | — |
-| **Real-browser test baseline** | **yes** | **absent** | orch | none — executable now |
-| **Accessibility engine baseline** | **yes** | **absent** | orch | none — executable now |
-| **Responsive baseline (4 viewports)** | **yes** | **absent** | orch | none — executable now |
-| **Real 200% browser zoom** | **yes** | **absent** | orch | none for automation; human sign-off is Krish's |
+| **Real-browser test baseline** | **yes** | **done** — Playwright/Chromium, PR #32 (`c36053d`); **579 passed on both macOS and Linux CI** | orch | — |
+| **Accessibility engine baseline** | **yes** | **done** — axe-core, 18 surfaces × 5 projects, count-based baseline (1,974 darwin / 1,980 linux nodes) | orch | — |
+| **Responsive baseline (4 viewports)** | **yes** | **done** — 1280×800, 1024×768, 768×1024, 375×812 | orch | — |
+| **Real 200% browser zoom** | **yes** | **automated** — `{640×400, DPR 2}`, asserted not assumed. **Human sign-off still OPEN** | orch → **Krish** | G4; automation does not close it |
+| Accessibility defects found (A1–A8 below) | **yes** — recorded | **found, not fixed** | orch | next slice; 2 are critical |
 | Cached-validator correctness — D1 | **yes** | **done** — PR #30, merge `91b74f8` | orch | — |
 | Vocabulary-cache keying correctness — D2 | **yes** | **done** — PR #30 | orch | — |
 | `POST /api/uploads` OpenAPI description accuracy — D3 | **yes** | **done** — PR #30 | orch | — |
@@ -317,6 +324,30 @@ false-green: the gate works only while the machine is quiet.
 timeout (hides the real cost) or shrinking the fixture (weakens a test that deliberately measures
 *real* payload size). Both are judgement calls that deserve their own slice. Recorded so the next
 frontend slice owns it, and so nobody reads an intermittent red as a regression.
+
+## 3B. A1–A8 — accessibility and layout defects found by the new baseline
+
+Found by PR #32, **all pre-existing application behaviour, none fixed** — the slice was authorized to
+measure the app, not repair it, and fixing `apps/web/src/**` there would have made the diff
+unreviewable. Every one was independently confirmed real by review; there are no phantoms.
+
+| ID | Rule | Impact | Where |
+|---|---|---|---|
+| **A1** | `button-name` | **critical** | The global search trigger has **no accessible name at all** at 375px and at 200% zoom (`chrome.css:503` hides the label and kbd hint; the SVG is `aria-hidden`, no `aria-label`) |
+| **A2** | `aria-allowed-attr` / `aria-allowed-role` | **critical** | 31 Evidence Trail entries are `<button role="listitem" aria-pressed>` — the role kills the button role and forbids `aria-pressed`, so selection state is not exposed |
+| **A3** | `color-contrast` | serious | 1,610 nodes, every surface. **Three causes, not one**: `--text-disabled #c0c8d0` rendered as Evidence line numbers at **1.56:1**; genuinely low tokens; and **five `opacity` composites of tokens that pass at full strength** — darkening tokens will not fix those |
+| **A4** | `scrollable-region-focusable` | serious | 3 pairs: `evidence` desktop/mobile, `settings-api` mobile |
+| **A5** | `page-has-heading-one` | moderate | `/load` has no `<h1>` |
+| **A6** | `landmark-unique` | moderate | Two unnamed `role="search"` landmarks on Endpoint Explorer |
+| **A7** | LAYOUT-01 | — | Record StatusBar does not reflow: 575px of content in a 353px box at 375px, clipped and overlapping |
+| **A8** | LAYOUT-02 | — | Record-context chip clipped: `chip-draft` on Evidence (macOS+Linux) and `chip-exported` on Export Readiness (**Linux only** — SF Pro hid it). One `.record-context` fix closes both |
+
+**Do these block baseline?** A1 and A2 are critical accessibility defects, and §7's rule says "no
+known Critical or Important findings". Read honestly: that rule is about findings against *new work*,
+and these are pre-existing defects that baseline work **discovered and documented where nothing
+previously measured them at all**. Going from no measurement to a ratcheted, per-node baseline is the
+foundational improvement; leaving the defects unfixed is a known, owned debt, not an ambiguity.
+They are the obvious next slice, and A1/A2 are small.
 
 ## 4A. The three deferred correctness defects, defined
 
