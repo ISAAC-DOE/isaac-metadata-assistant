@@ -1,0 +1,26 @@
+{
+  "//": [
+    "Standalone typecheck for the e2e suite.",
+    "It is deliberately NOT referenced from ../tsconfig.json: `npm run build` runs",
+    "`tsc -b` over tsconfig.app.json (include: ['src']) and tsconfig.node.json, and",
+    "the production build must not depend on Playwright types being installed.",
+    "Run it with `npm run typecheck:e2e`."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["**/*.ts", "../playwright.config.ts"]
+}
