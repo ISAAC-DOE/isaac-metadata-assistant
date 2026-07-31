@@ -1,8 +1,16 @@
-# Postgres test database guide
+# Postgres database guide
 
-A standalone Postgres test database is provisioned for isaac-metadata-assistant so the
-app can start testing reads and uploads of real ISAAC record data. This guide covers
-what exists, how to connect, and the conventions to follow when writing DB code.
+isaac-metadata-assistant has its own Postgres database on the in-cluster ISAAC
+CloudNativePG cluster. The app owns it: its schema, its rows, its reads and writes. It is
+isolated from the production ISAAC records database, and it is seeded with a sample of real
+record data so the app can work against the real thing.
+
+**You do not need Kubernetes access, a kubeconfig, or credentials to write code against
+it.** The deployment already carries the standard libpq environment variables, so the normal
+cycle -- push to `main`, GitHub Actions builds the image, Flux deploys it -- lands your code
+in a pod where the database is reachable. Write against the environment contract below and
+verify in the deployed app. The port-forward section near the end is an optional convenience
+for whoever already holds a SLAC cluster context; nothing else in this guide depends on it.
 
 ## What exists
 
@@ -15,9 +23,15 @@ what exists, how to connect, and the conventions to follow when writing DB code.
 - Seed data: the 30 earliest real records from production (by `created_at`), plus
   the full production `vocabulary_cache` contents so vocabulary validation can run
   against real terms.
-- This DB is fully isolated from production. The `metadata_assistant` role cannot
-  connect to the production records database at all. Everything here is disposable
-  test data: write, mutate, and drop freely.
+- The database is isolated from production. The `metadata_assistant` role's only pg_hba
+  grant is `hostssl metadata_assistant metadata_assistant ... scram-sha-256` -- it has no
+  grant into any other database on the cluster, so it cannot reach the production records
+  DB at all. Inside its own database it is the owner: read, write, add tables, migrate the
+  schema. Nothing done here can affect production.
+
+Two separate questions, worth not conflating: the app may **write** whatever it needs to,
+but the seeded rows are real production-derived records, so what the hosted app
+**displays** is a separate decision -- see [Displaying record content](#displaying-record-content).
 
 ## Connection
 
@@ -32,8 +46,21 @@ can rely on them being present in the pod:
 | `PGUSER` | from Secret `metadata-assistant-db-app` (value: `metadata_assistant`) |
 | `PGPASSWORD` | from Secret `metadata-assistant-db-app` |
 
-Auth is SCRAM-SHA-256 over TLS. Treat `PGHOST` being set as the feature switch
-(DB configured or not), so the app still runs in environments without a database.
+Auth is SCRAM-SHA-256 over TLS, enforced server-side by `hostssl`: a connection either gets
+TLS or is refused. Treat `PGHOST` being set as the feature switch (DB configured or not), so
+the app still runs in environments without a database.
+
+### The driver is not installed yet
+
+Add it to the `api` extra in `pyproject.toml`:
+
+```toml
+api = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27", "psycopg2-binary>=2.9"]
+```
+
+The Dockerfile's only install step is `pip install --no-cache-dir ".[api]"`, so a dependency
+that is not declared there is absent from the image regardless of what the code imports.
+This dependency is authorized -- add it in the same slice as the first DB code.
 
 Example connection (matching the conventions of the existing ISAAC portal code):
 
@@ -53,7 +80,10 @@ def get_db_connection():
     )
 ```
 
-### Local development
+### Optional: local port-forward
+
+Only relevant if you already have a SLAC cluster context. This is a convenience for poking
+at the database by hand, not a prerequisite for writing or verifying code.
 
 From a shell with cluster access:
 
@@ -81,10 +111,16 @@ CREATE TABLE records (
 Indexes exist on `record_id`, `record_type`, `record_domain`, `created_at`, and a GIN
 index on `data`.
 
-`data` holds the complete ISAAC AI-Ready Record v1.05 JSON document -- the same
-schema this repo already vendors and validates against (`schema/isaac_record_v1.json`).
-`record_id`, `record_type`, and `record_domain` are denormalized copies of the
-corresponding JSON fields, kept in sync on write.
+`data` holds the complete ISAAC AI-Ready Record JSON document, written by the
+isaac-ai-ready-record portal against v1.05 -- the same version this repo vendors as
+`schema/isaac_record_v1.json`. `record_id`, `record_type`, and `record_domain` are
+denormalized copies of the corresponding JSON fields, kept in sync on write.
+
+Whether every seeded record passes the vendored schema is expected but **unverified**: that
+schema is `additionalProperties: false` at the root and in dozens of nested places, so any
+drift in the portal's writers shows up as a validation failure rather than being tolerated.
+Finding drift is a useful result, not a problem with the database -- report it rather than
+working around it.
 
 Gotchas to code around:
 
@@ -109,3 +145,18 @@ extension is ever needed, ask the cluster admin to install it once.
 
 The role has a small connection limit (5). Open connections per request or use a
 small pool; do not hold many idle connections.
+
+## Displaying record content
+
+Writing to this database is unrestricted. Rendering its rows in the hosted app is not, because
+the seeded records are production-derived.
+
+Hosted display of per-record content is **closed by default** pending an explicit visibility
+decision. Aggregate output -- record counts, counts by type and domain, validation totals,
+schema version, database reachability -- is fine to build and show now. Per-record fields
+(titles, scientific values, evidence, full JSON) need the visibility decision first, so build
+any read path with that boundary in it rather than adding the gate afterwards.
+
+Note that `PGHOST` is already set in the deployed pod, so anything placed behind the
+"DB configured" switch goes live on the next image roll. Decide the boundary before shipping
+the read path, not after.
