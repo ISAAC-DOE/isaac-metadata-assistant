@@ -69,7 +69,8 @@ is broader than that list**, and this document originally claimed otherwise. Mea
 | `record_id_digest_count`, `vocabulary_term_count`, `expected_seed_rows`, `seed_count_matches` | not enumerated, but carry no record content |
 
 None of these emits a scientific value, a title, an id, or any record text — the masking in
-`safe_key_segment` (`db_recon.py:436-469`) holds. But three of them are **record-derived structural
+`safe_key_segment` (`db_recon.py:436-470`; note `:470` is the one branch that returns a key verbatim,
+reached only after the declared-name check) holds. But three of them are **record-derived structural
 facts that Dean did not enumerate**, and they are already merged and live in image `v0.0.32`. The
 judgement call was made in Slice 2A, not deferred to §4.
 
@@ -78,10 +79,13 @@ project as more conservative than it actually is, is the precise failure mode it
 These three fields are flagged for gate **G3** — not because they are believed unsafe, but because
 they were never explicitly authorized and the honest thing is to say so.
 
-Scope of this audit, stated so it is not over-read: it covers the `dataset` block. The response also
-carries `database` and `integrity` blocks (gate booleans, statement counts) that are likewise not on
-Dean's enumerated list. Those are facts about the *scan*, not about the records, so they are not a
-disclosure question — but the audit above is not a whole-response audit, and should not be cited as one.
+Scope of this audit, stated so it is not over-read: it covers the `dataset` block only. The response
+also carries `database` (gate booleans plus `server_version` / `server_version_major` /
+`expected_major_version_match`, `routes.py:3381-3396`) and `integrity` (`routes.py:3351-3375`, which
+includes `rows_before` / `rows_after` — those are **record counts**, not merely statement counts).
+Neither is a disclosure question: `rows_before`/`rows_after` duplicate `total_records`, which Dean
+explicitly authorized. But the audit above is a `dataset` audit, not a whole-response audit, and must
+not be cited as one.
 
 ---
 
@@ -234,9 +238,16 @@ result, not a problem with the database -- report it rather than working around 
 
 A drift **taxonomy** is not future work — it is merged and live in `v0.0.32`:
 
-- `by_rule_family` — counts per validator keyword, from `_FAMILY_PATTERNS` (`db_recon.py:901-921`):
-  `additional_properties`, `required`, `const`, `enum`, `type`, `pattern`, `format`, `any_of`,
-  `one_of`, `bounds`, `unique_items`, `dependency`.
+- `by_rule_family` — counts per validator keyword. **The label set depends on which engine ran, and
+  the deployed pod will not use the one it is tempting to quote.** `run_recon` prefers the diagnostics
+  enricher when it loads (`db_recon.py:1807-1811`, setting `engine = "diagnostics"`), and `src/` *is*
+  in the image (`Dockerfile:33`), so it will load. That engine labels a family with the raw jsonschema
+  keyword — `str(err.validator)`, `diagnostics.py:394` — which is an **open set** (`minItems`,
+  `maxLength`, `multipleOf`, `dependentRequired`, …). Only the fallback `official` engine uses the 12
+  normalized patterns in `_FAMILY_PATTERNS` (`db_recon.py:901-921`), plus `other` for no match
+  (`:942`). This is deliberate, not a bug: `db_recon.py:925-933` records that "the family label each
+  engine emits is NOT rewritten … renaming its taxonomy would misreport that." The report says which
+  engine produced it. **Do not predict the label set before the scan runs.**
 - `by_schema_path` — counts per path through the *schema*.
 - `by_instance_path` — counts per path through the *record*, every segment schema-masked.
 
@@ -353,8 +364,7 @@ is open, because an unverified deployment is precisely the foundational ambiguit
 to eliminate.
 
 **Attribution must be per-row, not a blanket sweep.** As of this writing every row in §2.1, §2.2 and
-§2.3 that is marked baseline-required reads `Runtime-verified: no` (the four not-required real-record
-rows read `—`, having nothing to verify), so a single wave of the hand at G1 would let "Complete With
+§2.3 that is marked baseline-required reads `Runtime-verified: no`, so a single wave of the hand at G1 would let "Complete With
 External Blockers" describe a state in which **nothing whatsoever has been observed running**. That
 label is generous enough already; it must not also be cheap. A row may be attributed to G1 only if
 G1's checklist actually covers that row. If the hosted checklist does not exercise a capability, the

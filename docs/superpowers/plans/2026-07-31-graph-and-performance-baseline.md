@@ -131,7 +131,8 @@ lab network. This is a real finding, not a theoretical one, but it is not a base
 
 **Finding:** the deep graph detail response is a large uncompressed payload — its source artifact is
 493,985 B — served without compression by the application (§2.3). It is **not** the largest: the JS
-bundle is 633.57 kB raw and, per §2.3, is also served uncompressed. Both transferred sizes are
+bundle is 633.57 kB raw and is likewise served without compression **by the application** (whether
+the ingress compresses either of them is unverifiable from this repo — §2.3). Both transferred sizes are
 inferred from on-disk sizes, not measured over the wire.
 
 ### 2.3 Compression

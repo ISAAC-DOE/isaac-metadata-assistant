@@ -613,7 +613,7 @@ lifted** — read the amended §2 for exactly what is and is not now permitted.
 | **1** — deterministic schema-truth-core diagnostics (`src/isaac_records/diagnostics.py`) | **authorized and done.** Contains **no database access** of any kind. |
 | **2 (design artifact)** — a safe, **unexecuted** read-only reconnaissance script (`scripts/db_recon.py`) | **authorized and done.** Satisfied §3's "read-only Postgres reconnaissance design" prerequisite. Superseded in place by Slice 2A: the logic moved into the app and this file is now a thin, still-unexecuted CLI wrapper that is deliberately **absent from the container image**. |
 | **2 (local execution)** — running that script from a laptop against the SLAC database | **NOT authorized, and architecturally impossible.** Per Dean's guide the DB is unreachable from outside the cluster. Do not request a kubeconfig, port-forward, or Secret. |
-| **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. |
+| **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. **Caveat below:** three shipped aggregates go beyond Dean's enumerated list — see the G3 note after this table. |
 | **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
@@ -628,8 +628,9 @@ Dean's authorization names a specific list — record counts, counts by type and
 totals, schema version, reachability. **Slice 2A already ships three aggregates beyond that list**:
 `by_instance_path`, `distinct_structural_signatures`, and the `total_link_count` /
 `dangling_link_count` pair. They are record-*derived* structural facts. None emits a scientific
-value, title, id, or record text — the masking in `db_recon.py:436-469` holds, and this has been
-independently verified twice — but they were never explicitly authorized, and they are live in
+value, title, id, or record text — the masking in `apps/api/isaac_api/db_recon.py:436-470`
+(`safe_key_segment`) holds under static review; note this is code review, **not** a runtime
+observation, and the scan has never run. They were never explicitly authorized, and they are live in
 `v0.0.32`. Raised as gate **G3**. Do not repeat "aggregate output is authorized" without this
 qualification.
 
@@ -646,8 +647,10 @@ session must not silently reverse:
   authorization, and the guide says so directly. The exact question Dean must answer is gate **G2**
   in the matrix.
 - **Schema drift is already classified, and the rule for anything further is narrow.** Slice 2A
-  ships the taxonomy — `by_rule_family` (12 families), `by_schema_path`, `by_instance_path`. Do not
-  rebuild it. For anything *new*, the rule is: *the schema may describe the data; the data may not
+  ships the taxonomy — `by_rule_family`, `by_schema_path`, `by_instance_path`. Do not rebuild it.
+  Do **not** quote a family count: the deployed pod prefers the diagnostics engine, whose labels are
+  raw jsonschema keywords (an open set), not the 12 normalized patterns in `_FAMILY_PATTERNS`. The
+  label set is unobserved until the scan runs — matrix §4.1 explains why. For anything *new*, the rule is: *the schema may describe the data; the data may not
   describe itself* — if an output string can only be produced by reading a record's value, it is
   per-record content and is closed. That rule alone is not sufficient, because per-record facts can
   be reconstructed by arithmetic; matrix §4.3 adds a minimum cell size, a cross-tabulation limit, and
