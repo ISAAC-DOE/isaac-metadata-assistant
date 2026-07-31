@@ -167,7 +167,7 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 
 | Capability | Baseline required | Current state | Owner | Blocking |
 |---|---|---|---|---|
-| Backend suite | **yes** | done — 1794 passing | orch | — |
+| Backend suite | **yes** | done — **1801** passing (1794 + 7 mutation tests, PR #30) | orch | — |
 | Frontend suite | **yes** | done — 2145 / 93 files, but see F1 | orch | — |
 | TypeScript build | **yes** | done | orch | — |
 | Production build | **yes** | done | orch | — |
@@ -179,9 +179,9 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 | **Accessibility engine baseline** | **yes** | **absent** | orch | none — executable now |
 | **Responsive baseline (4 viewports)** | **yes** | **absent** | orch | none — executable now |
 | **Real 200% browser zoom** | **yes** | **absent** | orch | none for automation; human sign-off is Krish's |
-| Cached-validator correctness — see D1 below | **yes** | **deferred defect** | orch | none — executable now |
-| Vocabulary-cache keying correctness — see D2 | **yes** | **deferred defect** | orch | none — executable now |
-| `POST /api/uploads` OpenAPI description accuracy — see D3 | **yes** | **deferred defect** | orch | none — executable now |
+| Cached-validator correctness — D1 | **yes** | **done** — PR #30, merge `91b74f8` | orch | — |
+| Vocabulary-cache keying correctness — D2 | **yes** | **done** — PR #30 | orch | — |
+| `POST /api/uploads` OpenAPI description accuracy — D3 | **yes** | **done** — PR #30 | orch | — |
 | Performance baseline (measured) | **yes** (measurement) | absent | orch | none |
 | Performance *improvements* | **no** | n/a | orch | only measured, low-risk ones |
 
@@ -351,16 +351,26 @@ a consistency/honesty defect, not a data-leak defect. The cache also lacks the m
 fail-closed; the *description* is the defect. Fixing it moves the OpenAPI character total, which is
 why it was deferred out of Slice 2A.
 
-None of D1–D3 changes exported-record behavior or official schema compliance.
+**All three were fixed in PR #30 (merge `91b74f8`).** Exported-record behavior and official schema
+compliance are unchanged, proven by identical validate / diagnose / export hashes — including the
+schema digest and the evidence sidecar — across every committed fixture, old implementation vs new.
+Seven mutation tests were each observed failing on revert, independently by implementer and reviewer.
+
+One correction worth carrying forward, because it was nearly shipped as a false guarantee: the new
+cache key `(path, st_mtime_ns, st_size)` is a **heuristic, not content identity**. A replacement
+written in the same nanosecond tick *and* at the same byte length is still served from the stale
+entry. It is strictly stronger than the float `st_mtime` it replaced, and closing the remaining gap
+would mean hashing the schema on every call — the exact cost the cache exists to avoid. The
+docstrings now state the limit rather than the guarantee.
 
 ## 5. External gates — exact questions
 
 | # | Gate | Owner | Exact question / action | Effect if unanswered |
 |---|---|---|---|---|
-| G1 | Hosted rollout + recon verification | **Krish** | Run the checklist in the slice report against `/krish` while signed in; paste back the sanitized JSON | Blocks Phase 1, Phase 2, and any claim that Slice 2A works |
+| G1 | Hosted rollout + recon verification | **Krish** | Run [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1 against `/krish` while signed in; paste back the sanitized JSON | Blocks Phase 1, Phase 2, and any claim that Slice 2A works |
 | G2 | Per-record visibility decision | **Dean** | "May the hosted app display per-record fields from `metadata_assistant` — titles, scientific values, evidence, full JSON — and if so to which audience and at what granularity?" | Real-record functionality stays absent; baseline can still complete without it |
 | G3 | Aggregates already shipped that Dean did not enumerate | **Dean** | "Slice 2A already returns `by_instance_path`, `distinct_structural_signatures`, and link counts. These are record-derived structural facts beyond your enumerated aggregate list, though none emits a value, title or id. Are they within what you intended, or should any be withdrawn?" | These stay live in `v0.0.32`; flagged, not hidden. Also covers any drift §4.1's taxonomy cannot classify |
-| G4 | Responsive / 200%-zoom human sign-off | **Krish** | Visual sign-off at 4 viewports + real 200% zoom | Quality row stays open |
+| G4 | Responsive / 200%-zoom human sign-off | **Krish** | [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 2 — 4 viewports + real 200% zoom. Automated coverage runs locally only and does NOT close this | Quality row stays open |
 | G5 | Personal-deploy retirement | **Krish** | Approve the disable-not-delete operation | Cosmetic; no functional effect |
 
 None of G1–G5 is resolvable by this agent. G1 and G4 require credentials the agent must not use; G2
