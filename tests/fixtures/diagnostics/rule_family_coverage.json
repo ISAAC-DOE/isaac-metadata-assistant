@@ -1,0 +1,361 @@
+{
+  "artifact": "isaac_records.diagnostics rule-family coverage",
+  "purpose": "Per-JSON-Schema-keyword record of how many times the AUTHORITATIVE schema uses it and whether tests/test_diagnostics.py covers it. Buckets partition every keyword the configured validator could act on, so coverage can neither be invented nor silently omitted.",
+  "authority": "The schema is the only authority. This file is a coverage ledger; it declares no rules and is never consulted at runtime.",
+  "gate": "tests/test_diagnostics.py::test_coverage_artifact_matches_the_authoritative_schema re-measures the schema on every run and fails on any drift, so this file cannot go stale silently. If the schema is refreshed from upstream, regenerate this file alongside schema/PROVENANCE.md.",
+  "schema": {
+    "path": "schema/isaac_record_v1.json",
+    "version": "1.05",
+    "bytes": 57293,
+    "sha256": "e80bb7a7d18f3fadc581601447d1b6a72e859e428a46871b27eb04ceb3e5e9a3",
+    "root_required_field_count": 6,
+    "root_required_fields": [
+      "isaac_record_version",
+      "record_id",
+      "record_type",
+      "record_domain",
+      "source_type",
+      "timestamps"
+    ]
+  },
+  "counting_method": "Recursive walk that descends only into positions where a subschema is expected, so a key is counted as a keyword only in keyword position. Field names are not keywords: the schema declares fields literally named `type`, `value` and `method`, so a naive key count inflates `type` from 297 to 300.",
+  "keyword_position_counts": {
+    "$dynamicRef": 0,
+    "$ref": 0,
+    "additionalProperties": 37,
+    "allOf": 2,
+    "anyOf": 0,
+    "const": 7,
+    "contains": 0,
+    "dependentRequired": 0,
+    "dependentSchemas": 0,
+    "description": 102,
+    "else": 0,
+    "enum": 37,
+    "exclusiveMaximum": 0,
+    "exclusiveMinimum": 0,
+    "format": 6,
+    "if": 7,
+    "items": 19,
+    "maxItems": 1,
+    "maxLength": 1,
+    "maxProperties": 0,
+    "maximum": 0,
+    "minItems": 1,
+    "minLength": 1,
+    "minProperties": 0,
+    "minimum": 0,
+    "multipleOf": 0,
+    "not": 1,
+    "oneOf": 1,
+    "pattern": 5,
+    "patternProperties": 0,
+    "prefixItems": 0,
+    "properties": 68,
+    "propertyNames": 0,
+    "required": 37,
+    "then": 7,
+    "title": 1,
+    "type": 297,
+    "unevaluatedItems": 0,
+    "unevaluatedProperties": 0,
+    "uniqueItems": 1
+  },
+  "rule_families_covered": {
+    "additionalProperties": {
+      "schema_occurrences": 37,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_additional_properties"
+      ]
+    },
+    "const": {
+      "schema_occurrences": 7,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_const"
+      ]
+    },
+    "enum": {
+      "schema_occurrences": 37,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_enum",
+        "test_empty_string_is_invalid_where_an_enum_constrains_it"
+      ]
+    },
+    "maxItems": {
+      "schema_occurrences": 1,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_max_items"
+      ]
+    },
+    "maxLength": {
+      "schema_occurrences": 1,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_max_length"
+      ]
+    },
+    "minItems": {
+      "schema_occurrences": 1,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_min_items",
+        "test_empty_array_is_invalid_where_min_items_constrains_it"
+      ]
+    },
+    "minLength": {
+      "schema_occurrences": 1,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_min_length"
+      ]
+    },
+    "not": {
+      "schema_occurrences": 1,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_not_is_the_schemas_only_not"
+      ]
+    },
+    "oneOf": {
+      "schema_occurrences": 1,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_one_of_is_the_schemas_only_one_of"
+      ]
+    },
+    "pattern": {
+      "schema_occurrences": 5,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_pattern_record_id_must_be_a_ulid",
+        "test_empty_string_is_invalid_where_a_pattern_constrains_it"
+      ]
+    },
+    "required": {
+      "schema_occurrences": 37,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_required",
+        "test_each_root_required_field_gets_its_own_pointer",
+        "test_nested_required_field_pointer",
+        "test_required_field_inside_array_item_has_index_aware_pointer",
+        "test_evidence_conditional_fires_when_descriptors_are_absent"
+      ]
+    },
+    "type": {
+      "schema_occurrences": 297,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_type",
+        "test_null_field_is_invalid_via_type_not_missing"
+      ]
+    },
+    "uniqueItems": {
+      "schema_occurrences": 1,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_unique_items"
+      ]
+    }
+  },
+  "present_but_not_enforceable": {
+    "format": {
+      "schema_occurrences": 6,
+      "covered": false,
+      "coverable": false,
+      "reason": "JSON Schema 2020-12 makes `format` an annotation. official.load_official_validator builds Draft202012Validator(schema) with no format_checker, so none of the 6 `format: date-time` declarations can produce an error. This layer must not add enforcement the truth path does not have.",
+      "covering_tests": [
+        "test_format_is_present_in_the_schema_but_not_enforced_by_this_validator"
+      ]
+    }
+  },
+  "applicators_never_a_rule_family": {
+    "properties": {
+      "schema_occurrences": 68,
+      "reported_as_rule_family": false,
+      "reason": "descends into named subschemas; errors are reported under the failing inner keyword"
+    },
+    "items": {
+      "schema_occurrences": 19,
+      "reported_as_rule_family": false,
+      "reason": "descends into array-item subschemas; errors are reported under the failing inner keyword"
+    },
+    "allOf": {
+      "schema_occurrences": 2,
+      "reported_as_rule_family": false,
+      "reason": "unconditional composition; errors are reported under the failing inner keyword and are NOT marked conditional"
+    },
+    "if": {
+      "schema_occurrences": 7,
+      "reported_as_rule_family": false,
+      "reason": "guard only; a failing `if` is suppressed, and `then`/`else` errors are reported under the failing inner keyword"
+    }
+  },
+  "conditional_keywords": {
+    "if": {
+      "schema_occurrences": 7,
+      "covered": true,
+      "coverable": true,
+      "covered_via": "Diagnostic.conditional",
+      "covering_tests": [
+        "test_evidence_conditional_fires_when_descriptors_are_absent",
+        "test_performance_galvanostatic_requires_current_setpoint",
+        "test_performance_domain_requires_control_mode",
+        "test_conditional_flag_matches_the_schema_pointer_for_every_diagnostic",
+        "test_allof_alone_is_not_conditional"
+      ]
+    },
+    "then": {
+      "schema_occurrences": 7,
+      "covered": true,
+      "coverable": true,
+      "covered_via": "Diagnostic.conditional / Diagnostic.schema_pointer",
+      "covering_tests": [
+        "test_plain_and_conditional_requirements_differ_only_in_schema_pointer",
+        "test_duplicate_conditional_branches_collapse_to_one_diagnostic",
+        "test_dropping_record_type_also_trips_the_evidence_conditional"
+      ]
+    },
+    "else": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "the authoritative schema declares no `else` branch",
+      "covering_tests": []
+    }
+  },
+  "absent_from_schema": {
+    "$dynamicRef": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "$ref": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "anyOf": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "contains": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "dependentRequired": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "dependentSchemas": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "exclusiveMaximum": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "exclusiveMinimum": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "maxProperties": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "maximum": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "minProperties": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "minimum": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "multipleOf": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "patternProperties": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "prefixItems": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "propertyNames": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "unevaluatedItems": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    },
+    "unevaluatedProperties": {
+      "schema_occurrences": 0,
+      "covered": false,
+      "coverable": false,
+      "reason": "absent from the authoritative schema; no record can trigger it"
+    }
+  },
+  "notes": [
+    "Three families the authorizing brief called out as empty are confirmed empty: anyOf=0, dependentRequired=0, minProperties=0. No coverage is claimed for them.",
+    "`else`=0 as well; the schema's 7 conditionals are all if/then with no else branch.",
+    "The schema measures 57293 bytes, not the 31372 stated in the authorizing brief. Every keyword count in that brief is confirmed correct.",
+    "The brief also stated the schema has no `title` anywhere; it has exactly one, the root schema's own title. No PROPERTY has a title, so label derivation still has nothing to reuse.",
+    "`format` is the one keyword present in the schema yet structurally unable to produce a diagnostic; see present_but_not_enforceable."
+  ]
+}

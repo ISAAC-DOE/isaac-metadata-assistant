@@ -45,6 +45,12 @@ Connect to **none** of these; implement none of them without an explicit, separa
   export-controlled) before a single real record is read, indexed, or sent anywhere.
 - **Read-only Postgres reconnaissance design** — a reviewed, read-only connection plan (schema/table
   inventory, compatibility report, no writes) before any migration rehearsal.
+  **Status 2026-07-30: this artifact now EXISTS and is UNEXECUTED** — `scripts/db_recon.py`, authored
+  under the authorized pre-Phase-37 readiness sequence (see `CLAUDE.md` §15). It is read-only with nine
+  fail-closed gates and has **never been run against any database**: this environment has no kubeconfig
+  and no `psycopg2`. Its existence satisfies this §3 prerequisite and does **not** breach the §2 gate
+  above, which blocks the *connection*, not the *design*. Execution remains gated on valid SLAC cluster
+  access and the §3 approvals, and **Phase 37 remains NOT STARTED.**
 - **API/DB contracts** — the real record schema/table contracts + how they map to the official ISAAC
   v1.05 record and the deterministic truth core (which must remain authoritative and LLM-free).
 - **Role mapping** — Authentik group/claim → app role (Researcher / Reviewer / Ontology-Editor /
