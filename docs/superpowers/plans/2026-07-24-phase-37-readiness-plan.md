@@ -65,10 +65,15 @@ Connect to **none** of these; implement none of them without an explicit, separa
   inventory, compatibility report, no writes) before any migration rehearsal.
   **Status 2026-07-30: this artifact now EXISTS and is UNEXECUTED** — `scripts/db_recon.py`, authored
   under the authorized pre-Phase-37 readiness sequence (see `CLAUDE.md` §15). It is read-only with nine
-  fail-closed gates and has **never been run against any database**: this environment has no kubeconfig
-  and no `psycopg2`. Its existence satisfies this §3 prerequisite and does **not** breach the §2 gate
-  above, which blocks the *connection*, not the *design*. Execution remains gated on valid SLAC cluster
-  access and the §3 approvals, and **Phase 37 remains NOT STARTED.**
+  fail-closed gates and has **never been run against any database**. *Amended 2026-07-31:* the
+  original wording — "this environment has no kubeconfig and no `psycopg2`" — is now **half stale**.
+  No kubeconfig, still true. But `psycopg2-binary>=2.9` **is** a declared dependency of the `api`
+  extra since Slice 2A (authorized by Dean's guide), and the recon logic itself moved into the image
+  at `apps/api/isaac_api/db_recon.py`; `scripts/db_recon.py` is now a thin CLI wrapper deliberately
+  excluded from the container. What has not changed: it has still never connected to anything, and
+  the driver is not installed in this local `.venv`. Its existence satisfies this §3 prerequisite and
+  does **not** breach the §2 gate above, which blocks the *connection*, not the *design*. Execution
+  from a laptop remains impossible by design, and **Phase 37 remains NOT STARTED.**
 - **API/DB contracts** — the real record schema/table contracts + how they map to the official ISAAC
   v1.05 record and the deterministic truth core (which must remain authoritative and LLM-free).
 - **Role mapping** — Authentik group/claim → app role (Researcher / Reviewer / Ontology-Editor /

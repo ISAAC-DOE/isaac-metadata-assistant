@@ -485,6 +485,23 @@ For each Phase 36 (and later) deployed slice, the report must additionally inclu
 
 This applies to all future phases.
 
+### Durable per-slice report contract (added 2026-07-31, baseline restoration)
+
+Every implementation slice — not only deployed ones, and not only at phase end — reports **all** of:
+
+slice name · starting SHA · ending SHA · files changed · what was implemented · **what was
+deliberately not implemented** · verification commands and their results · frontend test count ·
+backend test count · browser test result · accessibility test result · security and governance checks ·
+reviewer findings · fixes made · commit hash · PR · merge commit · image version · push status ·
+hosted rollout status · blockers · deferred items · recommendation for the next slice.
+
+Two rules that exist because they were violated before:
+
+- **Never report a count you did not just measure.** Quote the command.
+- **Never report an unobserved hosted rollout as verified.** `/krish` sits behind an Authentik edge
+  that this environment cannot authenticate to, and an agent must not enter credentials. The honest
+  status is `HOSTED QA PENDING (Krish)` plus an exact checklist.
+
 ---
 
 ## 13. Truth Path Protection
@@ -596,7 +613,7 @@ lifted** — read the amended §2 for exactly what is and is not now permitted.
 | **1** — deterministic schema-truth-core diagnostics (`src/isaac_records/diagnostics.py`) | **authorized and done.** Contains **no database access** of any kind. |
 | **2 (design artifact)** — a safe, **unexecuted** read-only reconnaissance script (`scripts/db_recon.py`) | **authorized and done.** Satisfied §3's "read-only Postgres reconnaissance design" prerequisite. Superseded in place by Slice 2A: the logic moved into the app and this file is now a thin, still-unexecuted CLI wrapper that is deliberately **absent from the container image**. |
 | **2 (local execution)** — running that script from a laptop against the SLAC database | **NOT authorized, and architecturally impossible.** Per Dean's guide the DB is unreachable from outside the cluster. Do not request a kubeconfig, port-forward, or Secret. |
-| **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. |
+| **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. **Caveat below:** three shipped aggregates go beyond Dean's enumerated list — see the G3 note after this table. |
 | **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
@@ -605,6 +622,53 @@ database is unrestricted (the app owns it), while **displaying** its rows is clo
 because the seeded rows are real production-derived records. Aggregate output is authorized now;
 per-record fields are not. (Not to be confused with §17's "two counts", which is the unrelated
 201-served-paths vs 200-manifest-entries distinction.)
+
+**But "aggregate output is authorized" is not the whole truth, and this file must not imply it is.**
+Dean's authorization names a specific list — record counts, counts by type and domain, validation
+totals, schema version, reachability. **Slice 2A already ships three aggregates beyond that list**:
+`by_instance_path`, `distinct_structural_signatures`, and the `total_link_count` /
+`dangling_link_count` pair. They are record-*derived* structural facts. None emits a scientific
+value, title, id, or record text — the masking in `apps/api/isaac_api/db_recon.py:436-470`
+(`safe_key_segment`) holds under static review; note this is code review, **not** a runtime
+observation, and the scan has never run. They were never explicitly authorized, and they are live in
+`v0.0.32`. Raised as gate **G3**. Do not repeat "aggregate output is authorized" without this
+qualification.
+
+**Baseline restoration (started 2026-07-31).** The authoritative definition of "baseline" — which
+capabilities are required, which are deliberately deferred, and who owns each external gate — is
+[`docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md`](docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md).
+Update it in the same PR as any slice that changes a row. Two determinations from it that a future
+session must not silently reverse:
+
+- **Real-record display is NOT authorized.** Dean's guide (`docs/postgres-test-db-guide.md:149-162`)
+  states hosted per-record display is "**closed by default** pending an explicit visibility decision".
+  A real-record adapter, list, detail, evidence view, or export is therefore out of scope — not
+  deferred by preference but withheld by the database owner. Database *reachability* is not display
+  authorization, and the guide says so directly. The exact question Dean must answer is gate **G2**
+  in the matrix.
+- **Schema drift is already classified, and the rule for anything further is narrow.** Slice 2A
+  ships the taxonomy — `by_rule_family`, `by_schema_path`, `by_instance_path`. Do not rebuild it.
+  Do **not** quote a family count: the deployed pod prefers the diagnostics engine, whose labels are
+  raw jsonschema keywords (an open set), not the 12 normalized patterns in `_FAMILY_PATTERNS`. The
+  label set is unobserved until the scan runs — matrix §4.1 explains why. For anything *new*, the rule is: *the schema may describe the data; the data may not
+  describe itself* — if an output string can only be produced by reading a record's value, it is
+  per-record content and is closed. That rule alone is not sufficient, because per-record facts can
+  be reconstructed by arithmetic; matrix §4.3 adds a minimum cell size, a cross-tabulation limit, and
+  an absolute prohibition on caller-parameterized aggregation. Note honestly that `by_instance_path`
+  is itself the boundary case (see the G3 note above) — it ships, and it is flagged, not endorsed.
+
+Graph freshness and the measured performance baseline are settled in
+[`docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md`](docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md):
+the graph stays **point-in-time, disclosed, and non-blocking**. Regeneration requires the user-local
+`graphify` binary, which CI cannot obtain — that, not the model, is the blocker. Note precisely, so
+this does not appear to contradict §7's "run `graphify update .`": `graphify update` is manifest-based
+and needs **no** model, and remains the correct routine step for a human to run. Only a *full
+clustering* run invokes an external model to name communities, and `graphify-out/cost.json` records
+that happening exactly once (2026-07-06), with labels cached since.
+Personal-deploy retirement facts and the approval-gated order live in
+[`docs/personal-deployment-retirement.md`](docs/personal-deployment-retirement.md); both personal
+deployments are still live, public, unauthenticated, and Railway is 77 commits stale with a
+**persistent volume** (so deleting destroys data that pausing preserves).
 
 Note also that the app's `mode: synthetic-only` describes the **workspace** — uploads refused, seeding
 from committed fixtures only. It has never meant "no real data exists anywhere in the process", and
