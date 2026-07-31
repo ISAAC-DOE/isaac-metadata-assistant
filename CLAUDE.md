@@ -576,6 +576,24 @@ Out of scope unless explicitly approved:
   enforcement, retiring the blue portal, deleting/archiving the personal repo or the Vercel/Railway
   projects, and any `isaac-k8` change
 
+**Pre-Phase-37 readiness sequence (authorized 2026-07-30).** An explicitly authorized, sequential
+readiness sequence runs *before* — and does not start — Phase 37. Phase 37 as a broad feature phase
+remains **unstarted and unauthorized**; the §2 hard gate in
+`docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md` (no in-cluster Postgres connection, even
+read-only) stands unchanged.
+
+| Slice | Status |
+|---|---|
+| **1** — deterministic schema-truth-core diagnostics (`src/isaac_records/diagnostics.py`) | **authorized and done.** Contains **no database access** of any kind. |
+| **2 (design artifact)** — a safe, **unexecuted** read-only reconnaissance script (`scripts/db_recon.py`) | **authorized.** This is the "read-only Postgres reconnaissance design" that §3 of the readiness plan *requires to exist* before a Phase 37 slice. Authoring it satisfies a prerequisite; it is not a connection. |
+| **2 (execution)** — running that script against the SLAC test database | **NOT authorized and not currently possible.** Requires valid SLAC cluster access plus the applicable authorization gates. |
+| **3+** — PostgreSQL repository integration, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. |
+| **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. |
+
+Read the two documents together as follows: §2 blocks the *connection*; §3 requires the read-only
+recon *design* to exist beforehand. An unexecuted, fail-closed script is the §3 artifact, not a §2
+violation. Do not relabel this readiness sequence as Phase 37.
+
 ---
 
 ## 16. Resume Protocol
