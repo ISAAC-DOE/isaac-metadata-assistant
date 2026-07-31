@@ -623,6 +623,16 @@ because the seeded rows are real production-derived records. Aggregate output is
 per-record fields are not. (Not to be confused with §17's "two counts", which is the unrelated
 201-served-paths vs 200-manifest-entries distinction.)
 
+**But "aggregate output is authorized" is not the whole truth, and this file must not imply it is.**
+Dean's authorization names a specific list — record counts, counts by type and domain, validation
+totals, schema version, reachability. **Slice 2A already ships three aggregates beyond that list**:
+`by_instance_path`, `distinct_structural_signatures`, and the `total_link_count` /
+`dangling_link_count` pair. They are record-*derived* structural facts. None emits a scientific
+value, title, id, or record text — the masking in `db_recon.py:436-469` holds, and this has been
+independently verified twice — but they were never explicitly authorized, and they are live in
+`v0.0.32`. Raised as gate **G3**. Do not repeat "aggregate output is authorized" without this
+qualification.
+
 **Baseline restoration (started 2026-07-31).** The authoritative definition of "baseline" — which
 capabilities are required, which are deliberately deferred, and who owns each external gate — is
 [`docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md`](docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md).
@@ -635,9 +645,14 @@ session must not silently reverse:
   deferred by preference but withheld by the database owner. Database *reachability* is not display
   authorization, and the guide says so directly. The exact question Dean must answer is gate **G2**
   in the matrix.
-- **Schema drift may be classified only by schema-derived aggregates.** The rule: *the schema may
-  describe the data; the data may not describe itself.* If an output string can only be produced by
-  reading a record's value, it is per-record content and is closed. See matrix §4.
+- **Schema drift is already classified, and the rule for anything further is narrow.** Slice 2A
+  ships the taxonomy — `by_rule_family` (12 families), `by_schema_path`, `by_instance_path`. Do not
+  rebuild it. For anything *new*, the rule is: *the schema may describe the data; the data may not
+  describe itself* — if an output string can only be produced by reading a record's value, it is
+  per-record content and is closed. That rule alone is not sufficient, because per-record facts can
+  be reconstructed by arithmetic; matrix §4.3 adds a minimum cell size, a cross-tabulation limit, and
+  an absolute prohibition on caller-parameterized aggregation. Note honestly that `by_instance_path`
+  is itself the boundary case (see the G3 note above) — it ships, and it is flagged, not endorsed.
 
 Graph freshness and the measured performance baseline are settled in
 [`docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md`](docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md):

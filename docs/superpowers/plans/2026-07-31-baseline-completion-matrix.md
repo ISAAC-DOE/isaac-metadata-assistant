@@ -40,9 +40,10 @@ Dean's guide, `docs/postgres-test-db-guide.md:149-162`, section *Displaying reco
 — a real-record list, a real-record detail view, real-record evidence, real-record export — is
 **NOT AUTHORIZED**. This is not an inference from silence; it is an explicit written default-closed
 decision by the database owner. Reachability of the database does not imply authorization to display
-its rows, and the guide says so directly at `:160-162`: "`PGHOST` is already set in the deployed pod,
-so anything placed behind the 'DB configured' switch goes live on the next image roll. Decide the
-boundary before shipping the read path, not after."
+its rows. The guide says so directly at `:151` — "Writing to this database is unrestricted. Rendering
+its rows in the hosted app is not, because the seeded records are production-derived" — and again at
+`:154`. It adds at `:160-162` that anything behind the "DB configured" switch "goes live on the next
+image roll. Decide the boundary before shipping the read path, not after."
 
 This resolves the authorizing prompt's Phase 3 decision as **Outcome B — Not Authorized**, which in
 turn makes Phases 4, 5, and 6 (real-record adapter, user-facing real-record parity, real-record
@@ -53,8 +54,8 @@ is recorded in §5.
 
 The guide's authorization of aggregate output names a specific list — "record counts, counts by type
 and domain, validation totals, schema version, database reachability". **The shipped Slice 2A report
-is broader than that list**, and this document originally claimed otherwise. Measured against
-`routes.py:3297-3345`, the `dataset` block contains:
+is broader than that list**, and this document originally claimed otherwise. Measured against the `dataset` literal at
+`routes.py:3296-3346`, it contains:
 
 | Shipped field | On Dean's enumerated list? |
 |---|---|
@@ -76,6 +77,11 @@ Stating this plainly is the point of this document. A governance record that des
 project as more conservative than it actually is, is the precise failure mode it exists to prevent.
 These three fields are flagged for gate **G3** — not because they are believed unsafe, but because
 they were never explicitly authorized and the honest thing is to say so.
+
+Scope of this audit, stated so it is not over-read: it covers the `dataset` block. The response also
+carries `database` and `integrity` blocks (gate booleans, statement counts) that are likewise not on
+Dean's enumerated list. Those are facts about the *scan*, not about the records, so they are not a
+disclosure question — but the audit above is not a whole-response audit, and should not be cited as one.
 
 ---
 
@@ -123,7 +129,8 @@ is the whole point of Phase 1 and must not be blurred.
 | Connection-limit respect (single-flight lock, limit 5) | guide | **yes** | done | read | no | Krish |
 | Aggregate reconnaissance report | guide "Displaying record content" | **yes** | done | read | **no** | Krish |
 | Full-schema validation of scanned records | guide "The records table" | **yes** | done | read | no | Krish |
-| Schema-drift **classification** (`by_rule_family`, `by_instance_path`, `by_schema_path`) | §4 below | **yes** | **done — shipped in Slice 2A** | read | **no** | Krish |
+| Schema-drift **classification** (`by_rule_family`, `by_schema_path`) | §4 below | **yes** | **done — shipped in Slice 2A** | read | **no** | Krish |
+| — its `by_instance_path` component | §0 / G3 | **no** — flagged, not endorsed | shipped | read | **no** | **Dean** (G3) |
 | Real-record adapter | — | **no** | absent | — | — | **Dean** |
 | Real-record listing / detail / evidence / export | guide `:154` | **no** | absent | — | — | **Dean** |
 | Hosted per-record display | guide `:154` | **no** | **closed by default** | — | — | **Dean** |
@@ -249,8 +256,10 @@ glossed over, and it is flagged for G3.
 
 Obeying §4.2 literally still permits per-record disclosure by arithmetic. These are binding:
 
-1. **Minimum cell size.** The table holds **30 records** (`_DB_RECON_EXPECTED_SEED_ROWS`). A count of
-   `1` at a specific path is a per-record fact wearing aggregate clothing. Any *new* aggregate must
+1. **Minimum cell size.** The *documented seed* is **30 rows** (`DOCUMENTED_SEED_ROWS`, `db_recon.py:133`);
+   the actual row count is **unobserved** — the scan has never run, which is exactly why the report
+   emits `seed_count_matches`. At that order of magnitude a count of `1` at a specific path is a
+   per-record fact wearing aggregate clothing. Any *new* aggregate must
    suppress or bucket cells below a stated threshold. (The shipped fields predate this rule; whether
    they need it is part of G3.)
 2. **No cross-tabulation that narrows to an individual.** Two coarse breakdowns can intersect to
@@ -343,8 +352,9 @@ named external owner in §5 with evidence. It may **never** be declared plain **
 is open, because an unverified deployment is precisely the foundational ambiguity this matrix exists
 to eliminate.
 
-**Attribution must be per-row, not a blanket sweep.** As of this writing *every* row in §2.1, §2.2
-and §2.3 reads `Runtime-verified: no`, so a single wave of the hand at G1 would let "Complete With
+**Attribution must be per-row, not a blanket sweep.** As of this writing every row in §2.1, §2.2 and
+§2.3 that is marked baseline-required reads `Runtime-verified: no` (the four not-required real-record
+rows read `—`, having nothing to verify), so a single wave of the hand at G1 would let "Complete With
 External Blockers" describe a state in which **nothing whatsoever has been observed running**. That
 label is generous enough already; it must not also be cheap. A row may be attributed to G1 only if
 G1's checklist actually covers that row. If the hosted checklist does not exercise a capability, the

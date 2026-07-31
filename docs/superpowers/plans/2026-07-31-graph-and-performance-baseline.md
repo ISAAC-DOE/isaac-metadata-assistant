@@ -129,9 +129,10 @@ lab network. This is a real finding, not a theoretical one, but it is not a base
 | It is **not re-read per request** | `get_memory_graph_detail` (`routes.py:2358`) calls `memory.get_default_detail_source()` at `routes.py:2365`, a memoized module-level reader with an mtime-keyed cache (`memory.py:1696-1706`) |
 | Artifact size (**not** a measured response) | `memory-graph-detail.json` = 493,985 B on disk. The over-the-wire size was not measured — that needs `curl -w '%{size_download}'` against a running instance |
 
-**Finding:** the largest single runtime payload is the deep graph detail response, whose source
-artifact is 493,985 B, served uncompressed by the application (§2.3). The transferred size is
-inferred from the artifact size, not measured.
+**Finding:** the deep graph detail response is a large uncompressed payload — its source artifact is
+493,985 B — served without compression by the application (§2.3). It is **not** the largest: the JS
+bundle is 633.57 kB raw and, per §2.3, is also served uncompressed. Both transferred sizes are
+inferred from on-disk sizes, not measured over the wire.
 
 ### 2.3 Compression
 
