@@ -525,7 +525,13 @@ describe('Settings — Overview', () => {
    * backend falsifies, so they are asserted here to keep the stronger, false
    * version from coming back:
    *   - persistence is a FILESYSTEM workspace, not process memory (Overview says
-   *     "no database", the filesystem detail lives in Data & Privacy);
+   *     the workspace is files rather than a database, and the filesystem detail
+   *     lives in Data & Privacy). Slice 2A (I5) sweep: the summary used to open
+   *     "No database —", a flat claim about the deployment that stopped being
+   *     true once an isolated SLAC test database could be configured for the
+   *     protected read-only diagnostic. The needle below pins the same
+   *     files-not-a-database point in the re-scoped wording — the guard is
+   *     unchanged in force, only the sentence it quotes moved;
    *   - `ApiKeyAuthMiddleware` is live in-application auth, so restriction is
    *     not necessarily external and this screen cannot tell either way;
    *   - there is NO real-vs-synthetic detector anywhere in the backend.
@@ -535,7 +541,9 @@ describe('Settings — Overview', () => {
     renderSettings();
     await screen.findByText('0.1.0');
 
-    expect(screen.getByText(/no database — the workspace is files on the server/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/the workspace is files on the server, not a database/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/gone when it restarts/i)).not.toBeInTheDocument();
     // The filesystem-lifetime detail is Data & Privacy's, and only its.
     expect(
@@ -652,8 +660,17 @@ describe('Settings — Data & Privacy', () => {
 
     const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
     expect(concepts.map((c) => c.heading)).toEqual([
-      'Synthetic Data Only',
-      'No Real Experiment Data',
+      // Slice 2A (I5) sweep: was 'Synthetic Data Only'. That heading is a flat
+      // scope claim about the whole build, and it rendered directly above the
+      // already-corrected 'No Real Experiment Data in the Workspace' card — one
+      // tab, two contradictory promises. The card is about the runtime MODE, so
+      // the heading now says so; the concept `id` is unchanged.
+      'Synthetic-Only Mode',
+      // Slice 2A (I5): was 'No Real Experiment Data'. That heading was a flat,
+      // whole-deployment promise, and the deployment may now run a protected
+      // read-only diagnostic over an isolated test database of
+      // production-derived records. The heading states the scope it can keep.
+      'No Real Experiment Data in the Workspace',
       'What Is Stored',
       'What Resets',
       'No Telemetry or Analytics',
@@ -679,8 +696,18 @@ describe('Settings — Data & Privacy', () => {
     openTab('Data & Privacy');
     await screen.findByText(/only the synthetic workspace/i);
 
-    expect(screen.getByText(/only unmistakably synthetic data is in scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/there is no database/i)).toBeInTheDocument();
+    // Slice 2A (I5) sweep. Both needles named copy that has been retired for
+    // being untrue of the deployment, and both are replaced by a needle from
+    // the SAME concept's new definition — not softened into a tautology:
+    //   · /only unmistakably synthetic data is in scope/ → the mode sentence
+    //     that replaced it. `synthetic-data-only` still owns a definition here.
+    //   · /there is no database/ → the workspace-scoped storage sentence.
+    // Each string is still asserted to be rendered on Data & Privacy exactly as
+    // `settingsContent.ts` authors it; only the wording being pinned moved.
+    expect(
+      screen.getByText(/this deployment runs in synthetic-only mode: file upload is refused/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/the workspace is not stored in a database/i)).toBeInTheDocument();
     expect(screen.getByText(/no analytics, no usage tracking/i)).toBeInTheDocument();
     // Was `/no accounts, no sign-in, and no user profiles/i`. That sentence read
     // as "this deployment is open", which is the opposite of how it is operated:

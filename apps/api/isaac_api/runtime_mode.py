@@ -1,10 +1,18 @@
 """Authoritative runtime-mode source for the ISAAC local UI backend.
 
-This module is the SINGLE source of truth for whether the deployment is the
-synthetic-only demo or a (currently unsupported) real-data deployment. Both the
-reset governance guard (via ``workspace.is_synthetic_only``) and the ``/health``
-``mode`` banner read from here, replacing the two independent hard-coded literals
-that previously drifted from one another.
+This module is the SINGLE source of truth for the WORKSPACE data mode — whether
+the workspace this app authors into is the synthetic-only demo workspace or a
+(currently unsupported) real-data workspace. Both the reset governance guard
+(via ``workspace.is_synthetic_only``) and the ``/health`` ``mode`` banner read
+from here, replacing the two independent hard-coded literals that previously
+drifted from one another.
+
+SCOPE LIMIT, stated because the earlier wording overreached: this is NOT a
+statement about the whole deployment. A deployment may be in ``synthetic-only``
+workspace mode and still have an application Postgres database attached that
+holds real production-derived records — see the ``database`` block on
+``/api/health`` and ``GET /api/runtime/database/recon``, which report that
+independently. Nothing here detects, gates, or describes database content.
 
 Semantics are deliberately FAIL-CLOSED — an accident must never grant real mode:
 

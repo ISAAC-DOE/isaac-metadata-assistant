@@ -1,14 +1,26 @@
-"""Safety tests for ``scripts/db_recon.py``.
+"""Safety tests for the shared reconnaissance service and its CLI wrapper.
+
+The reconnaissance logic now lives in ``apps/api/isaac_api/db_recon.py`` (it
+has to: the Dockerfile COPY allowlist does not ship ``scripts/db_recon.py``, and
+per ``docs/postgres-test-db-guide.md`` the database is reachable only from the
+deployed pod). ``scripts/db_recon.py`` is a thin CLI wrapper over it. These
+tests therefore target TWO objects:
+
+* the ``recon`` fixture — ``isaac_api.db_recon``, the service module, which owns
+  every gate, redaction primitive, SQL constant and aggregation;
+* the ``cli`` fixture — ``scripts/db_recon.py``, which owns only argument
+  parsing, ``--out`` path safety, exit codes and ``main()``.
 
 These tests run with NO database and NO ``psycopg2``. Everything is driven
 through a fake DBAPI connection/cursor, so what is under test is the part that
 actually matters: the fail-closed gates, the redaction guarantees, the
 read-only statement guard, and the determinism of the aggregation.
 
-The script is loaded via ``importlib.util.spec_from_file_location``, matching
-the convention already used by ``tests/test_graphify_freshness.py`` and
+The CLI is loaded via ``importlib.util.spec_from_file_location``, matching the
+convention already used by ``tests/test_graphify_freshness.py`` and
 ``apps/api/tests/test_committed_snapshot.py`` for repo scripts that are not
-importable packages.
+importable packages. The service module is a normal import (``pyproject.toml``
+puts ``apps/api`` on the pytest path).
 
 Deliberate isolation from work in flight: ``isaac_records.diagnostics`` may or
 may not exist (and may be mid-edit) in any given working tree, so no test here
@@ -28,10 +40,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "db_recon.py"
+SERVICE = REPO_ROOT / "apps" / "api" / "isaac_api" / "db_recon.py"
 
 
-def _load_module():
-    spec = importlib.util.spec_from_file_location("db_recon_under_test", SCRIPT)
+def _load_cli():
+    spec = importlib.util.spec_from_file_location("db_recon_cli_under_test", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -39,7 +52,16 @@ def _load_module():
 
 @pytest.fixture(scope="module")
 def recon():
-    return _load_module()
+    """The shared service module — where all reconnaissance logic lives."""
+    from isaac_api import db_recon
+
+    return db_recon
+
+
+@pytest.fixture(scope="module")
+def cli():
+    """The thin ``scripts/db_recon.py`` wrapper: argparse, --out, exit codes."""
+    return _load_cli()
 
 
 # --- fakes -------------------------------------------------------------------
@@ -711,8 +733,8 @@ def test_raw_ids_emitted_only_when_explicitly_requested(recon):
     assert FAKE_ULID_A in report["records"]["raw_record_ids"]
 
 
-def test_raw_id_flag_alone_is_refused_without_the_env_authorisation(recon, capsys):
-    code = recon.main(
+def test_raw_id_flag_alone_is_refused_without_the_env_authorisation(recon, capsys, cli):
+    code = cli.main(
         ["--emit-raw-record-ids"],
         env=dict(GOOD_ENV),
         connect=lambda env: FakeConnection(base_rows(recon)),
@@ -721,9 +743,9 @@ def test_raw_id_flag_alone_is_refused_without_the_env_authorisation(recon, capsy
     assert "raw_ids_not_authorized" in capsys.readouterr().err
 
 
-def test_raw_id_flag_with_env_authorisation_is_allowed(recon, capsys):
+def test_raw_id_flag_with_env_authorisation_is_allowed(recon, capsys, cli):
     env = dict(GOOD_ENV, ISAAC_DB_RECON_ALLOW_RAW_IDS="1")
-    code = recon.main(
+    code = cli.main(
         ["--emit-raw-record-ids", "--id-salt", "s", "--quiet"],
         env=env,
         connect=lambda e: FakeConnection(base_rows(recon)),
@@ -882,6 +904,59 @@ def test_additional_properties_drift_is_surfaced_without_naming_the_key(recon, m
     assert FAKE_DRIFT_KEY not in names
     assert recon.MASK_UNDECLARED_KEY in names
     assert validation["unexpected_properties"]["total_occurrences"] >= 1
+    # Under this engine the counters ARE an observation, and say so.
+    assert validation["unexpected_properties"]["names_computed"] is True
+    assert validation["unexpected_properties"]["not_computed_reason"] is None
+
+
+def test_drift_detail_says_not_computed_under_the_diagnostics_engine(recon, monkeypatch):
+    """M-3: a zero that means "not computed" must not read as "none found".
+
+    ``isaac_records.diagnostics`` reports the additionalProperties failure but
+    not the offending key names, so ``_diagnostics_findings`` emits an empty
+    name list and every counter in ``unexpected_properties`` stays 0 — while the
+    same records really do carry structural drift, which the official engine
+    counts (the test above). Presenting that 0 as an observation was the defect;
+    the block now states which of the two it is.
+    """
+
+    class Item:
+        rule_family = "additionalProperties"  # the raw jsonschema keyword
+        kind = "error"
+        pointer = "/descriptors/3/name"
+        schema_pointer = None
+        conditional = None
+
+    class Report:
+        diagnostics = [Item()]
+
+    monkeypatch.setattr(
+        recon, "load_diagnostics_enricher", lambda: (lambda rec, root: Report(), "fake.diagnose")
+    )
+    validation = run_ok(recon)["validation"]
+    assert validation["engine"] == "diagnostics"
+    unexpected = validation["unexpected_properties"]
+    assert unexpected["total_occurrences"] == 0
+    assert unexpected["names_computed"] is False
+    assert "not computed" in (unexpected["not_computed_reason"] or "")
+    # ...and the drift itself is still reported, under the engine's own label.
+    assert {f["family"] for f in validation["failure_rule_families"]} == {"additionalProperties"}
+
+
+def test_zero_drift_is_reported_as_an_observation_when_it_is_one(recon):
+    """The other side of the flag: no additionalProperties failure at all.
+
+    Nothing was withheld here, so the same zero is a real "none found" and must
+    not be labelled uncomputed — otherwise the flag would be a constant.
+    """
+    agg = recon.aggregate_validation(
+        [(False, [{"family": "required", "instance_path": "a", "unexpected_properties": []}])],
+        engine="official",
+        engine_detail="d",
+    )
+    assert agg["unexpected_properties"]["total_occurrences"] == 0
+    assert agg["unexpected_properties"]["names_computed"] is True
+    assert agg["unexpected_properties"]["not_computed_reason"] is None
 
 
 def test_official_engine_used_when_diagnostics_is_unavailable(recon, monkeypatch):
@@ -1104,29 +1179,31 @@ def test_leak_scan_issue_codes_never_contain_the_matched_text(recon):
     assert FAKE_ULID_A not in joined
 
 
-def test_main_aborts_and_writes_nothing_when_the_leak_scan_trips(recon, tmp_path, capsys):
+def test_main_aborts_and_writes_nothing_when_the_leak_scan_trips(recon, tmp_path, capsys, cli):
     out = tmp_path / "recon.json"
 
     def leaky_connect(env):
         return FakeConnection(base_rows(recon))
 
-    # force a leak by making the report echo the password
-    original = recon.run_recon
+    # force a leak by making the report echo the password. Patched on the CLI
+    # module: it imported ``run_recon`` by name from the service module, so the
+    # CLI's own binding is what its ``main()`` actually calls.
+    original = cli.run_recon
 
     def patched(*a, **k):
         report = original(*a, **k)
         report["oops"] = FAKE_PASSWORD
         return report
 
-    recon.run_recon = patched
+    cli.run_recon = patched
     try:
-        code = recon.main(
+        code = cli.main(
             ["--out", str(out), "--id-salt", "s", "--quiet"],
             env=dict(GOOD_ENV),
             connect=leaky_connect,
         )
     finally:
-        recon.run_recon = original
+        cli.run_recon = original
     assert code == recon.LeakDetected.exit_code
     assert not out.exists(), "no file may be written when the leak scan trips"
     captured = capsys.readouterr()
@@ -1138,35 +1215,35 @@ def test_main_aborts_and_writes_nothing_when_the_leak_scan_trips(recon, tmp_path
 # --- output path safety ------------------------------------------------------
 
 
-def test_out_path_outside_the_repo_is_allowed(recon, tmp_path):
+def test_out_path_outside_the_repo_is_allowed(recon, tmp_path, cli):
     target = tmp_path / "isaac-db-recon.json"
-    assert recon.validate_out_path(str(target)) == target.resolve()
+    assert cli.validate_out_path(str(target)) == target.resolve()
 
 
-def test_out_path_inside_the_repo_is_refused_when_not_gitignored(recon):
+def test_out_path_inside_the_repo_is_refused_when_not_gitignored(recon, cli):
     with pytest.raises(recon.UsageError) as exc:
-        recon.validate_out_path(str(REPO_ROOT / "scripts" / "leaky-recon.json"))
+        cli.validate_out_path(str(REPO_ROOT / "scripts" / "leaky-recon.json"))
     assert exc.value.gate == "out_path"
 
 
-def test_out_path_inside_the_repo_is_allowed_when_gitignored(recon):
+def test_out_path_inside_the_repo_is_allowed_when_gitignored(recon, cli):
     """``.gitignore`` covers ``examples/*``, so this target is safe."""
     target = REPO_ROOT / "examples" / "db-recon.json"
-    assert recon.validate_out_path(str(target)) == target.resolve()
+    assert cli.validate_out_path(str(target)) == target.resolve()
     assert not target.exists(), "validation must not create the file"
 
 
-def test_out_path_refused_when_git_cannot_prove_it_is_ignored(recon):
+def test_out_path_refused_when_git_cannot_prove_it_is_ignored(recon, cli):
     """No proof of ignoring -> refuse. Fail closed."""
     with pytest.raises(recon.UsageError):
-        recon.validate_out_path(
+        cli.validate_out_path(
             str(REPO_ROOT / "docs" / "x.json"), git_check=lambda root, rel: False
         )
 
 
-def test_main_writes_the_report_to_an_allowed_out_path(recon, tmp_path, capsys):
+def test_main_writes_the_report_to_an_allowed_out_path(recon, tmp_path, capsys, cli):
     out = tmp_path / "nested" / "recon.json"
-    code = recon.main(
+    code = cli.main(
         ["--out", str(out), "--id-salt", "s", "--quiet"],
         env=dict(GOOD_ENV),
         connect=lambda env: FakeConnection(base_rows(recon)),
@@ -1177,8 +1254,8 @@ def test_main_writes_the_report_to_an_allowed_out_path(recon, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out) == written
 
 
-def test_main_refuses_a_repo_out_path(recon, capsys):
-    code = recon.main(
+def test_main_refuses_a_repo_out_path(recon, capsys, cli):
+    code = cli.main(
         ["--out", str(REPO_ROOT / "scripts" / "nope.json"), "--quiet"],
         env=dict(GOOD_ENV),
         connect=lambda env: FakeConnection(base_rows(recon)),
@@ -1192,28 +1269,44 @@ def test_main_refuses_a_repo_out_path(recon, capsys):
 
 
 def test_missing_psycopg2_gives_an_actionable_error_not_a_traceback(recon):
-    """psycopg2 is intentionally absent from this project's dependencies."""
-    pytest.importorskip  # noqa: B018 - documentation of intent
+    """The driver import is lazy, so an absent driver is a refusal not a crash.
+
+    ``psycopg2-binary`` IS now a declared dependency (the ``api`` extra,
+    authorized by ``docs/postgres-test-db-guide.md`` line 58), so the message
+    must no longer tell the operator to keep it out of ``pyproject.toml``. It
+    must tell them this interpreter is simply missing the extra.
+    """
     try:
         import psycopg2  # noqa: F401
     except ImportError:
         pass
-    else:  # pragma: no cover - only if someone installs it
+    else:  # pragma: no cover - only when the api extra is installed here
         pytest.skip("psycopg2 is installed in this environment")
 
     with pytest.raises(recon.MissingDependency) as exc:
         recon.connect_psycopg2(GOOD_ENV)
     reason = exc.value.reason
-    assert "psycopg2 is not installed" in reason
-    assert "pyproject.toml" in reason  # tells the operator NOT to add it
+    assert "psycopg2 is not importable" in reason
+    assert "pyproject.toml" in reason
+    assert "api" in reason  # names the extra to install
+    # the retired, now-false instruction must be gone
+    assert "Do NOT add it to pyproject.toml" not in reason
+    assert "intentionally NOT a project" not in reason
     assert exc.value.exit_code == 5
 
 
-def test_main_reports_missing_psycopg2_as_json_refusal(recon, capsys):
+def test_psycopg2_binary_is_declared_in_the_api_extra():
+    """T1: the guide authorizes exactly this dependency, in exactly this extra."""
+    text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    api_line = next(l for l in text.splitlines() if l.strip().startswith("api = ["))
+    assert "psycopg2-binary>=2.9" in api_line
+
+
+def test_main_reports_missing_psycopg2_as_json_refusal(recon, capsys, cli):
     def boom(env):
         raise recon.MissingDependency("psycopg2 is not installed (test)")
 
-    code = recon.main(["--quiet"], env=dict(GOOD_ENV), connect=boom)
+    code = cli.main(["--quiet"], env=dict(GOOD_ENV), connect=boom)
     assert code == 5
     payload = json.loads(capsys.readouterr().err)
     assert payload == {
@@ -1223,14 +1316,18 @@ def test_main_reports_missing_psycopg2_as_json_refusal(recon, capsys):
     }
 
 
-def test_script_does_not_import_psycopg2_at_module_scope(recon):
+def test_neither_module_imports_psycopg2_at_module_scope(recon):
     """The lazy import is the whole reason this test file runs at all."""
-    source = SCRIPT.read_text(encoding="utf-8")
-    module_level = [
-        line for line in source.splitlines() if line.startswith(("import ", "from "))
-    ]
-    assert not any("psycopg2" in line for line in module_level)
-    assert "import psycopg2" in source  # it is imported, just not at module scope
+    for path in (SCRIPT, SERVICE):
+        source = path.read_text(encoding="utf-8")
+        module_level = [
+            line for line in source.splitlines() if line.startswith(("import ", "from "))
+        ]
+        assert not any("psycopg2" in line for line in module_level), path
+    service_source = SERVICE.read_text(encoding="utf-8")
+    # it IS imported, just not at module scope, and only in the service module
+    assert "import psycopg2" in service_source
+    assert "import psycopg2" not in SCRIPT.read_text(encoding="utf-8")
 
 
 def test_connect_refuses_when_libpq_env_is_incomplete(recon, monkeypatch):
@@ -1308,8 +1405,8 @@ def test_counted_buckets_is_deterministic_and_merges(recon):
     ]
 
 
-def test_main_rejects_a_zero_max_records(recon, capsys):
-    code = recon.main(
+def test_main_rejects_a_zero_max_records(recon, capsys, cli):
+    code = cli.main(
         ["--max-records", "0", "--quiet"],
         env=dict(GOOD_ENV),
         connect=lambda env: FakeConnection(base_rows(recon)),
@@ -1318,14 +1415,14 @@ def test_main_rejects_a_zero_max_records(recon, capsys):
     assert "max_records" in capsys.readouterr().err
 
 
-def test_main_opt_in_gate_runs_before_any_connection_attempt(recon, capsys):
+def test_main_opt_in_gate_runs_before_any_connection_attempt(recon, capsys, cli):
     attempted = []
 
     def connect(env):
         attempted.append(True)
         return FakeConnection(base_rows(recon))
 
-    code = recon.main(
+    code = cli.main(
         ["--quiet"],
         env={k: v for k, v in GOOD_ENV.items() if k != "ISAAC_RUN_SLAC_DB_RECON"},
         connect=connect,
@@ -1334,9 +1431,9 @@ def test_main_opt_in_gate_runs_before_any_connection_attempt(recon, capsys):
     assert attempted == [], "no socket may be opened before the env gates pass"
 
 
-def test_main_closes_the_connection(recon):
+def test_main_closes_the_connection(recon, cli):
     conn = FakeConnection(base_rows(recon))
-    recon.main(["--id-salt", "s", "--quiet"], env=dict(GOOD_ENV), connect=lambda env: conn)
+    cli.main(["--id-salt", "s", "--quiet"], env=dict(GOOD_ENV), connect=lambda env: conn)
     assert conn.closed is True
 
 
@@ -1353,14 +1450,14 @@ def test_report_documents_its_own_honest_limitations(recon):
 # behaviour, not the implementation.
 
 
-def test_unhandled_exception_never_leaks_its_message(recon):
+def test_unhandled_exception_never_leaks_its_message(recon, cli):
     """I3: anything not modelled as a refusal bypassed the leak scan entirely."""
 
     def boom(env):
         raise ValueError("CuO nanopowder 99.99% host=db.internal password=hunter2")
 
     err, out = io.StringIO(), io.StringIO()
-    code = recon.main(
+    code = cli.main(
         [],
         env={"ISAAC_RUN_SLAC_DB_RECON": "1", "PGDATABASE": "metadata_assistant"},
         connect=boom,
@@ -1406,9 +1503,9 @@ def test_trailing_newline_cannot_bypass_the_identifier_check(recon):
     assert recon._IDENTIFIER_RE.match("sample\n") is None
 
 
-def test_out_file_is_written_owner_only(recon, tmp_path):
+def test_out_file_is_written_owner_only(recon, tmp_path, cli):
     target = tmp_path / "recon.json"
-    code = recon.main(
+    code = cli.main(
         ["--out", str(target), "--id-salt", "test-salt"],
         env=dict(GOOD_ENV),
         connect=lambda env: FakeConnection(base_rows(recon)),

@@ -52,7 +52,15 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="ISAAC Metadata Assistant — local UI backend",
         version=__version__,
-        summary="Synthetic-only FastAPI wrapper over the deterministic isaac_records core.",
+        # Slice 2A: the old summary ("Synthetic-only FastAPI wrapper over the
+        # deterministic isaac_records core.") was a flat whole-API claim, and this
+        # API now also publishes a read-only database diagnostic. The synthetic
+        # guarantee is scoped to the workspace; the diagnostic is named, not denied.
+        summary=(
+            "FastAPI wrapper over the deterministic isaac_records core: a "
+            "synthetic-only workspace plus one read-only, aggregate-only "
+            "database diagnostic."
+        ),
         # Documentation metadata only (consumed when the OpenAPI document is
         # generated, never at request time): the group descriptions for the tags
         # the routes carry. Defined next to the routes so the names cannot drift.
@@ -78,7 +86,17 @@ def create_app() -> FastAPI:
             "always refused and the workspace is seeded only from committed "
             "synthetic fixtures. Two operations do parse text you supply in the "
             "request body — the CSV preview and the standalone record validator — "
-            "and neither stores what it reads."
+            "and neither stores what it reads.\n\n"
+            # Slice 2A: the paragraph above reads as an exhaustive account of what
+            # data this deployment touches, and it no longer is. Same wording the
+            # frontend's reviewed governance copy carries, so the two cannot drift.
+            "Separately, this deployment may run a protected, read-only diagnostic "
+            "against an isolated SLAC test database containing production-derived "
+            "records: those records are processed transiently in pod memory, only "
+            "sanitized aggregate results are returned, no record is modified, no "
+            "per-record content is displayed, and nothing is sent to any model. "
+            "Database-backed record display remains disabled pending an explicit "
+            "visibility decision."
         ),
     )
     # Order matters: Starlette treats the LAST-added middleware as outermost.

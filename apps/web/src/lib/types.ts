@@ -1046,11 +1046,48 @@ export interface ApiSearchResponse {
   memory: ApiMemorySearchGroup;
 }
 
+// Slice 2A — the outcome of the most recent read-only reconnaissance scan IN
+// THIS SERVER PROCESS (`_db_recon_last_summary` in apps/api/isaac_api/routes.py).
+// It is an in-process memo, NOT a live probe: `/api/health` performs zero I/O.
+// `at` mirrors the scan envelope's `generated_at`.
+export type ApiDbReconStatus = 'ok' | 'not_configured' | 'busy' | 'refused' | 'error';
+
+export interface ApiHealthLastRecon {
+  status: ApiDbReconStatus;
+  at: string | null;
+}
+
+/**
+ * Slice 2A — the `database` block on GET /api/health
+ * (apps/api/isaac_api/routes.py `health()`). Derived from CONFIGURATION ALONE:
+ * the handler never opens a connection, issues a query, or waits on one, so
+ * `configured: true` means "this deployment is set up to run the protected
+ * read-only diagnostic", NEVER "a database is currently reachable".
+ *
+ * The block deliberately carries no host, port, database name, user, or
+ * credential — `classification` is a fixed code constant
+ * ("isolated-app-postgres"), not an identifier of a real server. The UI must
+ * not render it verbatim either (see components/TopBar.tsx).
+ *
+ * Optional here because a build/deployment predating Slice 2A — and a health
+ * body the client failed to fetch — simply has no such block. Absent is read
+ * as "no database", never guessed.
+ */
+export interface ApiHealthDatabase {
+  configured: boolean;
+  classification: string | null;
+  contains_production_derived_records: true | null;
+  /** "closed" — hosted per-record display is closed pending a visibility decision. */
+  record_display: string;
+  last_recon: ApiHealthLastRecon | null;
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;
   core: string;
   version: string;
+  database?: ApiHealthDatabase;
 }
 
 // POST /api/demo/reset — the guarded synthetic-demo reset (DemoResetResponse in

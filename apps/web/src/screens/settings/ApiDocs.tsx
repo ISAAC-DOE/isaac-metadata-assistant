@@ -484,14 +484,14 @@ function ApiEndpointRow({
  * a remainder that long materially doubles the Purpose section, while one below it
  * costs more in `<details>` chrome — a summary row, a disclosure triangle and a
  * count chip — than the text it would conceal. Measured against the real
- * generated contract (35 operations, `GET /api/openapi`): lead paragraphs run
- * 78–594 characters and remainders 0–1,118, so this threshold separates the three
+ * generated contract (36 operations, `GET /api/openapi`): lead paragraphs run
+ * 78–594 characters and remainders 0–1,740, so this threshold separates the five
  * genuine docstrings from the 28 one-extra-sentence tails.
  *
  * The first version of this surface had NO threshold — any blank line produced a
- * disclosure. That collapsed 31 of 35 operations and hid 8,568 of 18,314
- * description characters (47%), including boundary copy this project requires to
- * stay visible. See {@link BOUNDARY_CAVEAT_MARKERS}.
+ * disclosure. That collapsed 31 of the then-35 operations and hid 8,568 of that
+ * contract's 18,314 description characters (47%), including boundary copy this
+ * project requires to stay visible. See {@link BOUNDARY_CAVEAT_MARKERS}.
  */
 export const PURPOSE_DISCLOSURE_MIN_CHARS = 400;
 
@@ -559,7 +559,7 @@ export function isBoundaryCaveat(paragraph: string): boolean {
  * A remainder is collapsed only when it is BOTH long enough to be a wall
  * ({@link PURPOSE_DISCLOSURE_MIN_CHARS}) AND free of boundary copy
  * ({@link BOUNDARY_CAVEAT_MARKERS}). Against the real contract that is currently
- * zero of 35 operations, which is the honest outcome: this API's descriptions are
+ * zero of 36 operations, which is the honest outcome: this API's descriptions are
  * short-to-medium and boundary-laden, so nothing about them needs hiding. The
  * disclosure remains for a future docstring that is genuinely long and carries no
  * caveat.

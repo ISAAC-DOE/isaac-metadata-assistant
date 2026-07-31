@@ -29,9 +29,27 @@ is **hard-gated** and staged.
 
 Connect to **none** of these; implement none of them without an explicit, separate approval:
 
-- Real / private SLAC/SSRL record data; leaving synthetic-only.
-- In-cluster Postgres connection (even read-only) — a real DB connection is a staged, security-reviewed
-  phase, never `emptyDir` → prod-writes directly.
+- Real / private SLAC/SSRL record data **entering the workspace, the UI, an exported artifact, a log, a
+  test fixture, the memory snapshot, or Graphify**; leaving synthetic-only in the data plane. Transient
+  in-memory validation for aggregate diagnostics is narrowly excepted below; *importing* real records
+  is not, and remains blocked.
+- ~~In-cluster Postgres connection (even read-only)~~ — **NARROWED 2026-07-30.** This gate was written
+  on 2026-07-24, before Dean documented the access model. It is superseded **only** for
+  deployment-mediated, read-only, aggregate-output reconnaissance, on this authority:
+
+  - Dean's `docs/postgres-test-db-guide.md` at commit `b746b1a` — the database owner's written
+    contract. It states the DB is reachable *only* from a deployed pod ("You do not need Kubernetes
+    access, a kubeconfig, or credentials… push to `main`, GitHub Actions builds the image, Flux deploys
+    it"), authorizes the driver ("This dependency is authorized — add it in the same slice as the first
+    DB code"), and authorizes aggregate output ("record counts, counts by type and domain, validation
+    totals, schema version, database reachability — is fine to build and show now").
+  - Krish's direct instruction of 2026-07-31 authorizing Slice 2A.
+
+  **Still blocked, unchanged:** any connection originating from a laptop or from CI; local kubeconfig,
+  port-forward, or Secret retrieval; writes of any kind (DML, DDL, `api_requests`, `portal_access_log`,
+  audit rows); a PostgreSQL-backed record repository; and per-record hosted display. A real DB
+  connection remains a staged, security-reviewed path — Slice 2A is the first stage, not the removal of
+  the staging.
 - Portal API keys, portal module code integration from screenshots, or any portal-dependent module
   (Discovery, Ontology Editor, System Overview real analytics, API Keys, record consolidation, roles).
 - Identity/role enforcement (app-level authZ) — mapped later from Authentik claims, no second login.

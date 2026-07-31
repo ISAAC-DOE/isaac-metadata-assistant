@@ -124,16 +124,43 @@ export function HelpPanel() {
             </section>
 
             <section className="help-section">
-              <h3>Synthetic mode</h3>
               {/* Was "This prototype runs on synthetic demo data only — no real
                   experiment data." — a flat guarantee the app cannot make: it
                   enforces the runtime MODE, and there is no real-vs-synthetic
-                  detector anywhere in the backend (`isaac_api/runtime_mode.py`). */}
+                  detector anywhere in the backend (`isaac_api/runtime_mode.py`).
+                  That correction stands: the first paragraph still says the app
+                  gates on mode, not on contents.
+
+                  Slice 2A (I5) added the second paragraph and retitled the
+                  section "Synthetic mode" → "Synthetic workspace". The mode
+                  claim was true but was being read as a claim about the whole
+                  deployment, which stopped being accurate once a protected,
+                  read-only diagnostic could run against an isolated test
+                  database of production-derived records. The heading now names
+                  what is actually synthetic — the workspace — matching the top-
+                  bar chip and components/GovernanceBanner.tsx, and the two
+                  paragraphs keep the claims apart.
+
+                  Same load-bearing wording constraints as GovernanceBanner.tsx
+                  and screens/GovernancePage.tsx: "may run", never "is running"
+                  (configuration is not reachability); an isolated SLAC test
+                  database, never the production database; and no claim that the
+                  app verified that isolation — the guarantee is an external
+                  pg_hba grant, not something this app can check. */}
+              <h3>Synthetic workspace</h3>
               <p>
-                This deployment is configured for synthetic-only operation, and real mode
-                intentionally refuses to start because the required ingestion and governance
-                guardrails do not exist yet. What the app enforces is that mode, not the contents of
-                what it is handed.
+                The records shown here are synthetic and uploads are disabled: this deployment is
+                configured for synthetic-only operation, and real mode intentionally refuses to
+                start because the required ingestion and governance guardrails do not exist yet.
+                What the app enforces is that mode, not the contents of what it is handed.
+              </p>
+              <p style={{ marginTop: 8 }}>
+                Separately, this deployment may run a protected, read-only diagnostic against an
+                isolated SLAC test database containing production-derived records: those records are
+                processed transiently in pod memory, only sanitized aggregate results are returned,
+                no record is modified, no per-record content is displayed, and nothing is sent to
+                any model. Database-backed record display remains disabled pending an explicit
+                visibility decision.
               </p>
             </section>
 

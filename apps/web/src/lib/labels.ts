@@ -148,7 +148,21 @@ export const LABELS = {
   chipExported: 'Exported',
   chipMentorReview: 'Mentor Review',
   chipDraft: 'Draft',
-  modeSynthetic: 'Synthetic',
+  // The mode chip's BASE label. "workspace" scopes the claim to what the reader
+  // is looking at: since Slice 2A the deployment may additionally run a
+  // protected read-only diagnostic over an isolated test database, so an
+  // unqualified "Synthetic" would over-claim about the whole deployment.
+  modeSynthetic: 'Synthetic workspace',
+  // Deliberate register exception (see the header: register 1 is Title Case).
+  // These two are QUALIFIERS appended after "·" to the base chip label above,
+  // not standalone labels — Title-Casing them ("Test DB Diagnostics") would read
+  // as the name of a feature the app does not have. "DB" is a generic word, not
+  // a database name; neither string names a host, database, user, or secret.
+  modeTestDbDiagnostics: 'test DB diagnostics',
+  // NOT "unavailable": /api/health does zero I/O, so this reflects the last
+  // diagnostic RUN recorded in the server process, which may be stale. See the
+  // reasoning comment in components/TopBar.tsx before changing this wording.
+  modeTestDbCheckFailed: 'test DB check failed',
 
   // Evidence-support classes (P28.5) — a separate axis from the status chips above.
   chipEvSupported: 'Supported',

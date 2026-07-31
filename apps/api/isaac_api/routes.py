@@ -7,12 +7,16 @@ boundary. It adds no validation logic and never mutates the truth path.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
+import hashlib
 import json
 import os
 import re
+import threading
+import time
 from datetime import datetime, timezone
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Mapping
 
 import logging
 
@@ -31,6 +35,7 @@ from isaac_records.portal_warnings import portal_warnings
 from . import __version__
 from . import assistant_query
 from . import csv_ingest
+from . import db_recon
 from . import dependencies
 from . import evidence_classify
 from . import memory
@@ -54,8 +59,13 @@ SCHEMA_LABEL = f"ISAAC v{EXPECTED_VERSION}"
 _UPLOAD_BLOCKED = {
     "blocked": True,
     "reason": (
+        # Slice 2A: was "…not enabled in this synthetic prototype." The refusal
+        # itself is unchanged and still true; only the adjectival label moved,
+        # because "this synthetic prototype" described the whole deployment
+        # while the fact being stated is upload-scoped. Matches the frontend's
+        # parallel fallback in `screens/LoadMaterials.tsx`.
         "Real or private data upload is approval-gated and not enabled in this "
-        "synthetic prototype."
+        "workspace."
     ),
 }
 
@@ -472,17 +482,39 @@ def _build_commit() -> str | None:
         "app calls in process, the app version, and the build commit when the "
         "deployment supplies one (otherwise `null` — it is never guessed). This "
         "is the one operation that stays reachable without credentials when the "
-        "deployment enables authentication. Read-only."
+        "deployment enables authentication. Read-only.\n\n"
+        "It also states whether this deployment has an application database "
+        "configured, how that database is classified, whether hosted display of "
+        "its per-record content is open, and the outcome of the most recent "
+        "reconnaissance scan in this process. That block is derived from "
+        "configuration alone: this operation never opens a database connection, "
+        "issues a query, or waits on one, so a database problem can never change "
+        "its result and can never fail a container probe."
     ),
     response_description="The liveness banner.",
 )
 def health() -> dict:
+    # The two helpers and two constants below are defined with the
+    # reconnaissance operation (section 22); they are resolved at call time.
+    # ZERO I/O in the database block. Reading the feature switch is an
+    # environment read and the last-scan summary is an in-process dict; nothing
+    # here connects, queries, or blocks. This operation is the container
+    # readiness-probe target, so a database that is down, slow, or misconfigured
+    # must not be able to influence its status code or its body's `status`.
+    configured = _db_recon_configured()
     return {
         "status": "ok",
         "mode": runtime_mode.runtime_mode(),
         "core": "isaac_records",
         "version": __version__,
         "commit": _build_commit(),
+        "database": {
+            "configured": configured,
+            "classification": _DB_RECON_CLASSIFICATION if configured else None,
+            "contains_production_derived_records": True if configured else None,
+            "record_display": _DB_RECON_RECORD_DISPLAY,
+            "last_recon": _db_recon_last_summary(),
+        },
     }
 
 
@@ -1837,10 +1869,14 @@ def get_source_preview(
             status_code=404,
             content={
                 "error": "source_not_allowed",
-                "message": (
-                    "Only the two committed synthetic fixtures may be previewed in this "
-                    "synthetic prototype."
-                ),
+                # Slice 2A: was "…may be previewed in this synthetic prototype."
+                # Same defect class as the `_UPLOAD_BLOCKED` reason above — the
+                # FACT is preview-scoped and still true, but the adjectival
+                # "in this synthetic prototype" labelled the whole deployment,
+                # which now also runs a read-only diagnostic over an isolated
+                # test database. This is the wording the operation's own
+                # description already carries, so the two cannot drift.
+                "message": "Only the two committed synthetic fixtures may be previewed.",
                 "allowed": list(ws.SOURCE_FILES),
             },
         )
@@ -2945,3 +2981,656 @@ def get_schema() -> dict:
         "schema": schema,
         "vocabularies": vocabularies,
     }
+
+
+# --- 22. read-only database reconnaissance (Slice 2A) --------------------------
+#
+# ONE operation, `GET /api/runtime/database/recon`, over the isolated app
+# Postgres database described in `docs/postgres-test-db-guide.md`.
+#
+# Why it exists here and not in `scripts/`: the guide (lines 8-13) states the
+# database is reachable ONLY from the deployed pod, and the Dockerfile COPY
+# allowlist ships exactly one file out of `scripts/`. Deployment is therefore
+# the delivery mechanism, so the shared logic lives in `isaac_api.db_recon` and
+# this route is the supported entry point. `scripts/db_recon.py` remains an
+# UNEXECUTED dev/design wrapper that is absent from the image.
+#
+# What it is NOT: it is not a record read path. The guide keeps hosted display
+# of per-record content CLOSED BY DEFAULT pending an explicit visibility
+# decision, and authorises aggregate output now. This operation therefore
+# projects a FROZEN, strictly narrower key set than the reconnaissance report:
+# no record id (not even a digest list), no title, no scientific value, no full
+# JSON, no structural path list, no vocabulary values, no host, port, user,
+# password, secret name, or connection string, and no driver text of any kind.
+#
+# It takes no query parameter, no body, no SQL, no record id, no schema path
+# and no filter. There is nothing for a caller to steer.
+
+#: Version of the SHAPE of this operation's response. Bump on a breaking change.
+_DB_RECON_REPORT_FORMAT_VERSION = 1
+
+#: The FROZEN top-level key allowlist. Every response this operation can return
+#: — ok, not_configured, busy, refused, error — carries exactly these keys and
+#: nothing else. The projection is built key-by-key from this tuple, so a field
+#: cannot be added to the payload by accident somewhere downstream.
+_DB_RECON_RESPONSE_KEYS: tuple[str, ...] = (
+    "status",
+    "report_format_version",
+    "app_commit",
+    "schema_version",
+    "schema_fingerprint",
+    "generated_at",
+    "database",
+    "dataset",
+    "integrity",
+    "limitations",
+)
+
+#: What the numbers above CANNOT establish, carried in every response.
+#:
+#: `db_recon.HONEST_NOTES` is scrupulous about the difference between a
+#: tripwire and a guarantee, but it is not projected: the served report would
+#: otherwise show a bare `gates: {not_production_shaped: true, tls: true}` from
+#: which a reader would reasonably conclude the app VERIFIED it is not talking
+#: to production. It cannot, and the code says so — so the caveats travel with
+#: the numbers they qualify.
+#:
+#: This is a FIXED tuple of code constants. Nothing is interpolated, nothing is
+#: derived from the database, the environment, or the report, so it adds no
+#: leak surface: the strings are byte-identical on every call.
+_DB_RECON_LIMITATIONS: tuple[str, ...] = (
+    "The production-isolation gate is a TRIPWIRE, not proof. It refuses on row "
+    "count, table owner and non-superuser status; a small production database "
+    "owned by a similarly named non-superuser role would pass it. The real "
+    # The role NAME is deliberately not spelled here: this string is carried
+    # by the failure shapes too, and those must never echo a configured
+    # connection value.
+    "guarantee is external — this app's database role is granted no access to "
+    "any other database on the cluster — and that grant cannot be verified "
+    "from inside a connection.",
+    # NB: the libpq parameter NAME is deliberately not spelled here. It is a
+    # connection-string token, and this response must never contain one — the
+    # endpoint's own tests forbid the substring, correctly.
+    "TLS is confirmed encrypted server-side via pg_stat_ssl, but the default "
+    "TLS mode ('require') encrypts WITHOUT verifying the server certificate. "
+    "Encrypted is not the same as authenticated; authenticated TLS needs "
+    "'verify-full' plus a CA bundle.",
+    "server_version is a server-controlled string. It is emitted only when it "
+    "matches a dotted-numeric shape and is replaced by a mask token otherwise; "
+    "server_version_major is the parsed integer and carries the useful signal.",
+    "No write is possible because the transaction is verified read-only "
+    "server-side and every statement passes a SELECT-only allowlist before it "
+    "is issued. rows_before/rows_after are compared as a CONCURRENCY CHECK, "
+    "not as a mutation proof: a row-count equality cannot detect an UPDATE and "
+    "cannot distinguish this scan's writes from a concurrent writer's. "
+    "rows_modified is therefore any writer's net delta over the scan window, "
+    "and is 0 by construction because an unequal count refuses the run before "
+    "a report is produced.",
+    "The statement counters observe every statement this service issues "
+    "through a cursor. They are not a wire-level record: the driver's own "
+    "transaction framing never passes through a cursor and is not counted.",
+    "This operation returns AGGREGATES ONLY. Hosted display of per-record "
+    "content is closed by default pending an explicit visibility decision, so "
+    "no record id, title, scientific value or stored document is reachable "
+    "here.",
+)
+
+#: The guide's documented classification of this database.
+_DB_RECON_CLASSIFICATION = "isolated-app-postgres"
+#: Hosted per-record display is closed by default (guide, "Displaying record
+#: content") until an explicit visibility decision is made.
+_DB_RECON_RECORD_DISPLAY = "closed"
+#: Documented seed size: "the 30 earliest real records from production".
+_DB_RECON_EXPECTED_SEED_ROWS = db_recon.DOCUMENTED_SEED_ROWS
+
+#: A repeat call inside this window is served from memory, so hammering the
+#: endpoint cannot hammer the database.
+_DB_RECON_CACHE_TTL_SECONDS = 60.0
+
+#: Fetch bound. One more than the production-shape refusal threshold, so any
+#: table this operation is willing to look at is scanned whole (which is what
+#: makes `dangling_link_count` derivable rather than approximated) while a
+#: surprise-huge table is refused by the gate before it is ever paged in.
+_DB_RECON_MAX_RECORDS = db_recon.MAX_PLAUSIBLE_RECORD_ROWS + 1
+
+#: Per-process salt for the record_id digests the recon computes internally.
+#: The digests are NOT projected into the response (only their count is), so
+#: this exists purely so no stable identifier-derived value is ever formed.
+_DB_RECON_SALT = hashlib.sha256(os.urandom(32)).hexdigest()
+
+#: Held NON-BLOCKING for the duration of a scan. At most one scan — and
+#: therefore at most ONE connection from this operation — exists at a time, so
+#: the role's connection limit of 5 cannot be approached from here even though
+#: sync endpoints run in a threadpool.
+_DB_RECON_SCAN_LOCK = threading.Lock()
+
+#: Guards the small mutable cache below.
+_DB_RECON_STATE_LOCK = threading.Lock()
+#: The last SUCCESSFUL projected payload, and the monotonic time it was made.
+_db_recon_cached_payload: dict | None = None
+_db_recon_cached_at: float | None = None
+#: `{status, at}` for the last scan of ANY outcome, surfaced by `/health`.
+_db_recon_last: dict | None = None
+
+
+def _db_recon_configured(env: Mapping[str, str] | None = None) -> bool:
+    """The guide's documented feature switch: `PGHOST` present. Reads env only."""
+    source = os.environ if env is None else env
+    return bool((source.get("PGHOST") or "").strip())
+
+
+def _db_recon_envelope(
+    *,
+    status: str,
+    database: dict,
+    dataset: dict | None = None,
+    integrity: dict | None = None,
+    schema_version: str | None = None,
+    schema_fingerprint: str | None = None,
+) -> dict:
+    """Build a response from the FROZEN key allowlist. Nothing else can get in."""
+    built = {
+        "status": status,
+        "report_format_version": _DB_RECON_REPORT_FORMAT_VERSION,
+        "app_commit": _build_commit(),
+        "schema_version": schema_version,
+        "schema_fingerprint": schema_fingerprint,
+        "generated_at": _now_iso(),
+        "database": database,
+        "dataset": dataset,
+        "integrity": integrity,
+        # Constant, in EVERY shape, so the key set stays frozen and uniform.
+        "limitations": list(_DB_RECON_LIMITATIONS),
+    }
+    return {key: built[key] for key in _DB_RECON_RESPONSE_KEYS}
+
+
+def _db_recon_database_block(
+    *,
+    configured: bool,
+    server_version: str | None = None,
+    server_version_major: int | None = None,
+    expected_major_version_match: bool | None = None,
+    gates: dict | None = None,
+    refusal_gate: str | None = None,
+    refusal_class: str | None = None,
+) -> dict:
+    """The `database` sub-object. NEVER carries host, port, user, or password."""
+    return {
+        "configured": configured,
+        "classification": _DB_RECON_CLASSIFICATION if configured else None,
+        # The guide is explicit that the seeded rows are real
+        # production-derived records, so this is stated, not inferred.
+        "contains_production_derived_records": True if configured else None,
+        "record_display": _DB_RECON_RECORD_DISPLAY,
+        "server_version": server_version,
+        "server_version_major": server_version_major,
+        "expected_major_version": db_recon.EXPECTED_SERVER_MAJOR_VERSION,
+        # Reported, NEVER gated: a cluster upgrade must not break this route.
+        "expected_major_version_match": expected_major_version_match,
+        "gates": gates
+        if gates is not None
+        else {
+            "database_identity": None,
+            "current_user": None,
+            "session_user": None,
+            "tls": None,
+            "records_table_present": None,
+            "transaction_read_only": None,
+            "not_production_shaped": None,
+        },
+        # A gate name and an exception CLASS name are code-level constants, so
+        # they are safe to name. No driver message, ever.
+        "refusal_gate": refusal_gate,
+        "refusal_class": refusal_class,
+    }
+
+
+def _db_recon_leak_guard(payload: dict, env: Mapping[str, str]) -> dict:
+    """The last line of defence, run over EVERY serialised response shape.
+
+    The success path always ran this. The `not_configured`, `refused`, `error`
+    and `busy` shapes did not, so the guarantee had a gap: they are safe by
+    construction today — every string in them is a code constant — but "last
+    line of defence" is worth nothing if it is conditional on the outcome. It
+    is now unconditional.
+
+    A tripped scan, or a payload that will not even serialise, collapses to a
+    directly-built sanitized envelope. That envelope is NOT re-scanned, which
+    is what keeps this from recursing.
+    """
+    try:
+        serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+        issues = db_recon.scan_for_leaks(serialized, env=env, allow_raw_ids=False)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as exc:  # noqa: BLE001 - the guard must never leak
+        _log.info("db_recon outcome=error gate=leak_scan type=%s", type(exc).__name__)
+        return _db_recon_envelope(
+            status="error",
+            database=_db_recon_database_block(
+                configured=True,
+                refusal_gate="leak_scan",
+                refusal_class=type(exc).__name__,
+            ),
+        )
+    if issues:
+        _log.info("db_recon outcome=refused gate=leak_scan codes=%s", ",".join(issues))
+        return _db_recon_envelope(
+            status="error",
+            database=_db_recon_database_block(
+                configured=True, refusal_gate="leak_scan", refusal_class=None
+            ),
+        )
+    return payload
+
+
+def _db_recon_not_configured(env: Mapping[str, str]) -> dict:
+    """No `PGHOST`: preserve today's no-database behaviour. Opens nothing."""
+    return _db_recon_leak_guard(
+        _db_recon_envelope(
+            status="not_configured",
+            database=_db_recon_database_block(configured=False),
+        ),
+        env,
+    )
+
+
+def _db_recon_failure(
+    *,
+    env: Mapping[str, str],
+    status: str,
+    gate: str | None,
+    exception_class: str | None,
+) -> dict:
+    """A sanitized refusal/error. Carries a gate name and a class name only."""
+    return _db_recon_leak_guard(
+        _db_recon_envelope(
+            status=status,
+            database=_db_recon_database_block(
+                configured=True, refusal_gate=gate, refusal_class=exception_class
+            ),
+        ),
+        env,
+    )
+
+
+def _db_recon_project(report: Mapping, authority: Mapping, statements: Mapping) -> dict:
+    """Project the reconnaissance report onto the FROZEN response allowlist.
+
+    Strictly narrower than the report. Deliberately EXCLUDED, and asserted so by
+    `apps/api/tests/test_db_recon_endpoint.py`:
+
+    * `structure.distinct_signatures[].paths` — the full structural path lists;
+    * `records.record_id_digests.digests` — only its count survives;
+    * raw record ids under any flag (the endpoint never sets one);
+    * `vocabulary_cache` grouped VALUES — counts only, because the module's own
+      notes concede a lowercase slug cannot be PROVEN to be a vocabulary term
+      rather than data.
+    """
+    connection = report.get("connection") or {}
+    gate_states = report.get("gates") or {}
+    records = report.get("records") or {}
+    validation = report.get("validation") or {}
+    mutation = report.get("mutation_check") or {}
+    links = records.get("links") or {}
+
+    analyzed = int(records.get("analyzed") or 0)
+    parse_failures = int(records.get("unreadable_payloads") or 0)
+    total = int(records.get("total") or 0)
+    families = list(validation.get("failure_rule_families") or [])
+
+    gates = {
+        "database_identity": gate_states.get("current_database") == "pass",
+        "current_user": gate_states.get("current_user") == "pass",
+        # `check_current_user` refuses a SET ROLE, so a pass IS the proof; this
+        # re-states the observation rather than assuming it.
+        "session_user": str(connection.get("session_user") or "")
+        == db_recon.EXPECTED_ROLE,
+        "tls": gate_states.get("tls") == "pass",
+        "records_table_present": gate_states.get("records_table") == "pass",
+        "transaction_read_only": gate_states.get("transaction_read_only") == "pass",
+        "not_production_shaped": gate_states.get("not_production_shaped") == "pass",
+    }
+
+    dataset = {
+        "total_records": total,
+        "expected_seed_rows": _DB_RECON_EXPECTED_SEED_ROWS,
+        "seed_count_matches": total == _DB_RECON_EXPECTED_SEED_ROWS,
+        "records_scanned": analyzed,
+        "records_parsed": analyzed - parse_failures,
+        "parse_failures": parse_failures,
+        "records_passing_full_schema": int(validation.get("passed") or 0),
+        "records_failing_full_schema": int(validation.get("failed") or 0),
+        "total_validation_issues": sum(int(f.get("error_count") or 0) for f in families),
+        "by_rule_family": [
+            {
+                "family": str(f.get("family")),
+                "records_affected": int(f.get("records_affected") or 0),
+                "error_count": int(f.get("error_count") or 0),
+            }
+            for f in families
+        ],
+        # Both path projections are masked against the vendored PUBLIC schema by
+        # `db_recon` before they get here: a segment survives only if the public
+        # schema already publishes that name.
+        "by_instance_path": [
+            {
+                "path": str(p.get("path")),
+                "family": str(p.get("family")),
+                "error_count": int(p.get("error_count") or 0),
+            }
+            for p in (validation.get("failing_instance_paths") or [])
+        ],
+        "by_schema_path": [
+            {
+                "schema_path": str(p.get("schema_path")),
+                "error_count": int(p.get("error_count") or 0),
+            }
+            for p in (validation.get("failing_schema_paths") or [])
+        ],
+        "by_record_type": list(records.get("by_record_type") or []),
+        "by_record_domain": list(records.get("by_record_domain") or []),
+        "record_id_digest_count": int(
+            (records.get("record_id_digests") or {}).get("count") or 0
+        ),
+        "vocabulary_term_count": (report.get("vocabulary_cache") or {}).get("row_count"),
+        "distinct_structural_signatures": int(
+            (report.get("structure") or {}).get("distinct_signature_count") or 0
+        ),
+        "total_link_count": int(links.get("total_link_count") or 0),
+    }
+    # Emitted ONLY when the whole table was scanned, so it is a fact rather than
+    # an approximation over a page. Omitted entirely otherwise.
+    if links.get("dangling_link_count") is not None:
+        dataset["dangling_link_count"] = int(links["dangling_link_count"])
+
+    rows_before = int(mutation.get("records_before") or 0)
+    rows_after = int(mutation.get("records_after") or 0)
+    counts = dict(statements or {})
+    integrity = {
+        "transaction_read_only": connection.get("transaction_read_only") == "on",
+        "rows_before": rows_before,
+        "rows_after": rows_after,
+        # ANY writer's net delta over the scan window, not necessarily ours —
+        # a row-count comparison cannot attribute a change. It is 0 by
+        # construction: `run_recon` raises `MutationDetected` on an unequal
+        # count, so no report reaches this projection with a non-zero delta.
+        "rows_modified": rows_after - rows_before,
+        "full_schema_fingerprint_match": bool(authority.get("stable")),
+        # A literal COUNT, as the name says: the number of validations run
+        # against a schema that was not the full vendored schema. It is always
+        # 0 because a partial schema refuses at the `full_schema_authority`
+        # gate in `_db_recon_scan`, before a single record is validated. The
+        # before/after fingerprint signal it used to smuggle now has its own
+        # boolean below, so neither field lies about its type.
+        "partial_schema_validation_runs": 0,
+        "schema_stable_across_run": bool(authority.get("stable")),
+        # OBSERVED from a statement-auditing proxy around the connection, not
+        # asserted about ourselves.
+        "dml_statements_issued": int(counts.get("dml", 0)),
+        "ddl_statements_issued": int(counts.get("ddl", 0)),
+        "read_statements_issued": int(counts.get("read", 0)),
+        "session_statements_issued": int(counts.get("session", 0)),
+    }
+
+    return _db_recon_envelope(
+        status="ok",
+        schema_version=EXPECTED_VERSION,
+        schema_fingerprint=str(authority.get("fingerprint") or ""),
+        database=_db_recon_database_block(
+            configured=True,
+            # `server_version` is a SERVER-CONTROLLED string: a 100,000-char
+            # value, or `18.0 (SUPER-SECRET) /etc/passwd`, would otherwise be
+            # projected verbatim and the leak scan cannot recognise arbitrary
+            # text. Masked through the same dotted-numeric guard the module
+            # already applies to `isaac_record_version`; anything else becomes
+            # `<unrecognized>`. Nothing that matters is lost —
+            # `server_version_major` is an int and carries the useful signal.
+            server_version=db_recon.safe_version_value(
+                connection.get("server_version")
+            ),
+            server_version_major=connection.get("server_version_major"),
+            expected_major_version_match=connection.get("expected_major_version_match"),
+            gates=gates,
+        ),
+        dataset=dataset,
+        integrity=integrity,
+    )
+
+
+def _db_recon_scan(env: Mapping[str, str]) -> dict:
+    """Open exactly ONE connection, run the recon, project, leak-scan, close.
+
+    Every exit path closes the cursor (inside `run_recon`) and the connection
+    (in the `finally` here), rolls back first, and returns a sanitized payload.
+    No driver exception, traceback, connection string, host, port, user or
+    password can escape: only an exception CLASS name and a fixed reason,
+    mirroring the CLI's `BaseException` handler.
+
+    ORDER MATTERS: the socket-free environment gates run BEFORE
+    `connect_psycopg2`, so `db_recon`'s own contract ("the env gates run before
+    any socket is opened") holds for this entry point too. It previously held
+    only for the CLI: the endpoint connected first and reached `check_env_gates`
+    inside `run_recon`, so a wrong `PGDATABASE` burned one of the role's five
+    connections before refusing.
+    """
+    before = db_recon.schema_authority(REPO_ROOT)
+    if not before.get("full_schema"):
+        # A trimmed or partial schema must never act as validator authority: it
+        # would report a false "everything passes" over real records.
+        _log.info("db_recon outcome=refused gate=full_schema_authority")
+        return _db_recon_failure(
+            env=env,
+            status="refused",
+            gate="full_schema_authority",
+            exception_class=None,
+        )
+
+    try:
+        # Socket-free gates first. `run_recon` runs them again (defence in
+        # depth); `check_env_gates` is pure and idempotent, so running it twice
+        # is free and removing either call would weaken the other entry point.
+        db_recon.check_env_gates(env, require_opt_in=False)
+    except db_recon.ReconRefusal as exc:
+        _log.info("db_recon outcome=refused gate=%s connected=no", exc.gate)
+        return _db_recon_failure(
+            env=env,
+            status="refused",
+            gate=exc.gate,
+            exception_class=type(exc).__name__,
+        )
+
+    connection = None
+    audited = None
+    try:
+        connection = db_recon.connect_psycopg2(env)
+        audited = db_recon.AuditedConnection(connection)
+        report = db_recon.run_recon(
+            audited,
+            env=env,
+            salt=_DB_RECON_SALT,
+            root=REPO_ROOT,
+            max_records=_DB_RECON_MAX_RECORDS,
+            emit_raw_record_ids=False,
+            require_opt_in=False,
+        )
+    except db_recon.ReconRefusal as exc:
+        _log.info("db_recon outcome=refused gate=%s", exc.gate)
+        return _db_recon_failure(
+            env=env,
+            status="refused",
+            gate=exc.gate,
+            exception_class=type(exc).__name__,
+        )
+    except (KeyboardInterrupt, SystemExit):
+        # Process-lifecycle signals are not scan outcomes. Converting them into
+        # a 200 `status: "error"` would swallow a shutdown or a Ctrl-C.
+        raise
+    except BaseException as exc:  # noqa: BLE001 - see docstring
+        _log.info("db_recon outcome=error type=%s", type(exc).__name__)
+        return _db_recon_failure(
+            env=env, status="error", gate=None, exception_class=type(exc).__name__
+        )
+    finally:
+        if connection is not None:
+            for method in ("rollback", "close"):
+                fn = getattr(connection, method, None)
+                if callable(fn):
+                    try:
+                        fn()
+                    except Exception:  # noqa: BLE001 - cleanup must never raise
+                        pass
+
+    # Re-read the vendored schema AFTER validating: proves the authority the
+    # records were judged against did not change under us mid-scan.
+    after = db_recon.schema_authority(REPO_ROOT)
+    authority = {
+        "fingerprint": before.get("fingerprint"),
+        "stable": bool(
+            after.get("full_schema") and after.get("fingerprint") == before.get("fingerprint")
+        ),
+    }
+    statements = audited.audit.as_dict() if audited is not None else {}
+
+    # The serialisation lives INSIDE the guard with the projection it feeds: a
+    # value the projection produced but `json.dumps` cannot encode would
+    # otherwise escape as a bare 500 instead of this sanitized envelope.
+    try:
+        payload = _db_recon_project(report, authority, statements)
+        serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as exc:  # noqa: BLE001 - projection must never leak
+        _log.info("db_recon outcome=error type=%s", type(exc).__name__)
+        return _db_recon_failure(
+            env=env,
+            status="error",
+            gate="projection",
+            exception_class=type(exc).__name__,
+        )
+
+    # Final backstop over the SERIALISED response, before it is returned.
+    issues = db_recon.scan_for_leaks(serialized, env=env, allow_raw_ids=False)
+    if issues:
+        _log.info("db_recon outcome=refused gate=leak_scan codes=%s", ",".join(issues))
+        return _db_recon_failure(
+            env=env, status="error", gate="leak_scan", exception_class=None
+        )
+
+    _log.info(
+        "db_recon outcome=ok records=%d scanned=%d passed=%d failed=%d dml=%d ddl=%d",
+        payload["dataset"]["total_records"],
+        payload["dataset"]["records_scanned"],
+        payload["dataset"]["records_passing_full_schema"],
+        payload["dataset"]["records_failing_full_schema"],
+        payload["integrity"]["dml_statements_issued"],
+        payload["integrity"]["ddl_statements_issued"],
+    )
+    return payload
+
+
+def _db_recon_cache_get() -> dict | None:
+    """The cached successful payload while it is inside the TTL, else None."""
+    with _DB_RECON_STATE_LOCK:
+        if _db_recon_cached_payload is None or _db_recon_cached_at is None:
+            return None
+        if (time.monotonic() - _db_recon_cached_at) > _DB_RECON_CACHE_TTL_SECONDS:
+            return None
+        return copy.deepcopy(_db_recon_cached_payload)
+
+
+def _db_recon_cache_put(payload: Mapping) -> None:
+    """Record the outcome; cache the payload only when the scan succeeded."""
+    global _db_recon_cached_payload, _db_recon_cached_at, _db_recon_last
+    with _DB_RECON_STATE_LOCK:
+        _db_recon_last = {"status": payload.get("status"), "at": payload.get("generated_at")}
+        if payload.get("status") == "ok":
+            _db_recon_cached_payload = copy.deepcopy(dict(payload))
+            _db_recon_cached_at = time.monotonic()
+
+
+def _db_recon_last_summary() -> dict | None:
+    """`{status, at}` for the last scan in THIS process, or None. Zero I/O."""
+    with _DB_RECON_STATE_LOCK:
+        return dict(_db_recon_last) if _db_recon_last is not None else None
+
+
+@router.get(
+    "/runtime/database/recon",
+    tags=[TAG_META],
+    summary="Report Read-Only Reconnaissance of the App Database",
+    description=(
+        "A sanitized, aggregate-only reconnaissance report over this "
+        "deployment's own application database. It answers one question — do "
+        "the stored records validate against the vendored official ISAAC "
+        "schema — and reports the answer as counts.\n\n"
+        "The scan is strictly read-only, and no write is possible: the "
+        "transaction is set AND verified read-only server-side, every "
+        "statement is checked against a SELECT-only allowlist before it is "
+        "issued, and values are always bound as parameters. The row count is "
+        "also compared before and after, but that is a concurrency check "
+        "rather than a mutation proof — a row-count equality cannot detect an "
+        "update and cannot distinguish this scan's writes from a concurrent "
+        "writer's, so it is the verified read-only transaction and the "
+        "allowlist that carry the guarantee. The statement counters report "
+        "every statement this service issues through a cursor; they are not a "
+        "wire-level record, because the driver's own transaction framing never "
+        "passes through one.\n\n"
+        "The response carries aggregates only: record totals, counts by type "
+        "and domain, validation totals by rule family and by schema path, and "
+        "the gate results. It never carries a record id, a title, a scientific "
+        "value, a stored document, a connection detail, or a credential; "
+        "per-record content stays closed. A serialized-output scan runs over "
+        "every response shape before it is returned and replaces it with a "
+        "sanitized failure if it trips. Every shape also carries a fixed "
+        "`limitations` list saying what the gates cannot establish — in "
+        "particular that the production-isolation gate is a tripwire rather "
+        "than proof, and that the confirmed transport encryption does not "
+        "verify the server certificate.\n\n"
+        "When the deployment has no database configured, the operation reports "
+        "that and connects to nothing. Repeat calls inside a short window are "
+        "served from memory, and a scan already in progress is reported as a "
+        "conflict rather than opening a second connection. The operation takes "
+        "no parameters and no body."
+    ),
+    response_description=(
+        "The sanitized aggregate reconnaissance report, or a sanitized "
+        "not-configured, refusal, or error report in the same shape."
+    ),
+    responses={
+        **_R_UNAUTHORIZED,
+        409: {
+            "description": (
+                "A reconnaissance scan is already running in this process. "
+                "Nothing was connected to and nothing was read."
+            )
+        },
+    },
+)
+def get_database_recon(response: Response) -> dict:
+    env = os.environ
+    if not _db_recon_configured(env):
+        _log.info("db_recon outcome=not_configured")
+        return _db_recon_not_configured(env)
+
+    cached = _db_recon_cache_get()
+    if cached is not None:
+        _log.info("db_recon outcome=cache_hit")
+        return cached
+
+    # NON-BLOCKING: a second caller is told the truth immediately rather than
+    # queueing behind a database round trip (and never opens a connection).
+    if not _DB_RECON_SCAN_LOCK.acquire(blocking=False):
+        _log.info("db_recon outcome=busy")
+        response.status_code = 409
+        return _db_recon_failure(
+            env=env, status="busy", gate="concurrent_scan", exception_class=None
+        )
+    try:
+        payload = _db_recon_scan(env)
+    finally:
+        _DB_RECON_SCAN_LOCK.release()
+
+    _db_recon_cache_put(payload)
+    return payload

@@ -26,8 +26,19 @@ type UploadPhase =
   | { name: 'down'; error: ApiError }; // backend unreachable — show BackendDown, never stand-in copy
 
 // Shown only when the server responded but its refusal body carried no reason.
+//
+// Slice 2A (I5): was "…not enabled in this synthetic prototype." The refusal
+// itself is true and unchanged, but "this synthetic prototype" labelled the
+// whole application as synthetic, which the deployment no longer is without
+// qualification — it may run a protected, read-only diagnostic over an isolated
+// test database of production-derived records. The upload gate is a property of
+// this workspace, so that is the scope stated. The SERVER's own reason
+// (`_UPLOAD_BLOCKED` in apps/api/isaac_api/routes.py) was corrected in the same
+// slice and now says "in this workspace" too, with `src/test/apiFixtures.ts`
+// pinning the corrected wording. The two are alternatives — this string renders
+// only when the server sends none — so they say the same thing on purpose.
 const UPLOADS_GATED_FALLBACK =
-  'Uploads are approval-gated and not enabled in this synthetic prototype.';
+  'Uploads are approval-gated and not enabled in this workspace.';
 
 /**
  * S2 · Load Materials — the on-ramp. Synthetic-first. Run Synthetic Demo calls

@@ -847,8 +847,8 @@ export const demoRunDraftOnly = {
 
 export const uploadsBlocked = {
   blocked: true,
-  reason:
-    'Real or private data upload is approval-gated and not enabled in this synthetic prototype.',
+  // Verbatim from `_UPLOAD_BLOCKED` in `apps/api/isaac_api/routes.py` (Slice 2A).
+  reason: 'Real or private data upload is approval-gated and not enabled in this workspace.',
 };
 
 // --- P26.0b guarded synthetic-demo reset fixtures ------------------------
@@ -1820,7 +1820,9 @@ export const openApiFixture = {
   info: {
     title: 'ISAAC Metadata Assistant — local UI backend',
     version: '0.1.0',
-    summary: 'Synthetic-only FastAPI wrapper over the deterministic isaac_records core.',
+    // Verbatim from `apps/api/isaac_api/app.py` (Slice 2A).
+    summary:
+      'FastAPI wrapper over the deterministic isaac_records core: a synthetic-only workspace plus one read-only, aggregate-only database diagnostic.',
   },
   // P36V PR3 slice C — the document now REGISTERS tags, and grouping is derived
   // from them (`lib/apiDocsModel.ts`). Four properties are covered on purpose:
@@ -2018,18 +2020,22 @@ export const openApiFixture = {
  * Explorer's `Full Description` disclosure never hides this API's own
  * boundary/honesty copy.
  *
- * Generated on 2026-07-27 with:
+ * Regenerated on 2026-07-31 with:
  *
  *   PYTHONPATH=apps/api .venv/bin/python -c \
  *     "from isaac_api.app import create_app; import json; \
  *      print(json.dumps(create_app().openapi()))"
  *
- * 35 operations · 18,314 description characters · 39 post-lead paragraphs · lead
- * paragraphs 78–594 characters · remainders 0–1,118. This is what caught the
- * defect: the first version of the disclosure had NO length threshold and so
- * collapsed 31 of these 35 operations, hiding 8,568 characters (47%) — including
- * the "There is no language model" refusal caveat, the graph structural-staleness
- * disclosure, and "never a correctness ruling. Read-only."
+ * 36 operations · 20,915 description characters · 43 post-lead paragraphs · lead
+ * paragraphs 78–594 characters · remainders 0–1,740. The 36th is
+ * `GET /api/runtime/database/recon`; `GET /api/health` also gained a paragraph
+ * about the database block it now reports, and this copy had gone stale on it.
+ *
+ * This fixture is what caught the original defect: the first version of the
+ * disclosure had NO length threshold and so collapsed 31 of the then-35
+ * operations, hiding 8,568 of that contract's 18,314 characters (47%) —
+ * including the "There is no language model" refusal caveat, the graph
+ * structural-staleness disclosure, and "never a correctness ruling. Read-only."
  *
  * `openApiFixture` above cannot substitute: it carries no multi-paragraph
  * description at all (`grep -c '\n\n'` → 0), which is precisely why every test in
@@ -2043,7 +2049,7 @@ export const openApiFixture = {
  * protects a description added later.
  */
 export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: string }[] = [
-  { op: "GET /api/health", description: "Liveness banner for platform and container probes: the service status, the runtime data mode, the name of the deterministic core package the app calls in process, the app version, and the build commit when the deployment supplies one (otherwise `null` — it is never guessed). This is the one operation that stays reachable without credentials when the deployment enables authentication. Read-only." },
+  { op: "GET /api/health", description: "Liveness banner for platform and container probes: the service status, the runtime data mode, the name of the deterministic core package the app calls in process, the app version, and the build commit when the deployment supplies one (otherwise `null` — it is never guessed). This is the one operation that stays reachable without credentials when the deployment enables authentication. Read-only.\n\nIt also states whether this deployment has an application database configured, how that database is classified, whether hosted display of its per-record content is open, and the outcome of the most recent reconnaissance scan in this process. That block is derived from configuration alone: this operation never opens a database connection, issues a query, or waits on one, so a database problem can never change its result and can never fail a container probe." },
   { op: "POST /api/demo/run", description: "Runs the committed synthetic demo pipeline and returns the ordered steps it executed together with the resulting experiment id and status. `mode: \"draft_only\"` (the default) extracts a draft from the committed fixtures and runs the no-guessing draft checks; `mode: \"full\"` additionally applies the committed simulated answers and exports an official record. It writes into one fixed canonical experiment id per mode, overwriting it in place, so re-running never adds a record and never increases the record count. It reads only the two committed synthetic fixtures and accepts no uploaded data.\n\nA body other than `draft_only` or `full` for `mode` is rejected and nothing runs." },
   { op: "POST /api/demo/reset", description: "Restores the workspace to exactly the canonical synthetic demo scenarios and reports the before/after counts, the removable set, and a state histogram. `mode: \"preview\"` classifies only and mutates nothing; `mode: \"execute\"` additionally requires the exact confirmation phrase and refuses without it. It accepts no caller-supplied ids or paths — any extra field is rejected — it removes only records it can classify as managed synthetic-demo records, and it refuses to remove anything at all if any record is ambiguous. No filesystem path appears in the response.\n\nThere is deliberately no general per-experiment delete operation." },
   { op: "GET /api/experiments", description: "One summary row per experiment currently in the workspace: its id, title, derived status, creation time, how many blocking questions are still open, how many fields carry evidence, whether it has been exported, and the exported record id when there is one. Rows for the five canonical synthetic seeds also carry a derived, never-stored `scenario` label naming which seeded fixture they are; it is null for any other record. Read-only, and it states no validity verdict." },
@@ -2078,6 +2084,7 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/about", description: "Non-sensitive identity and provenance for this deployment: the app version, the build commit when the deployment supplies one (otherwise `null` — it is never guessed), the official ISAAC record-schema version this build validates against, the runtime data mode, the persistence model, the data regime, and the name of the deterministic core package.\n\nEvery value is reused from the same authoritative source `GET /api/health` reads, so the two can never disagree. Read-only." },
   { op: "GET /api/openapi", description: "This application's own generated OpenAPI document — the same document served at the root `/openapi.json`, but reachable under the deployment's base path so a browser client can fetch it without knowing the root.\n\nIt is generated from the live routes, never hand-maintained, so it cannot drift from what a caller can actually reach. It describes route signatures and documentation only: no runtime state and no configuration values. Read-only." },
   { op: "GET /api/schema", description: "The vendored official ISAAC record schema verbatim, its title and the version this build validates against, plus every controlled vocabulary in the repository keyed by its filename stem.\n\nEvery field, type, required flag, enumeration, description and composition relationship a client renders comes straight from these two sources; the schema is loaded through the same path resolver the validator uses, never a hardcoded copy. This is a read-only reference view of the public canonical schema — there is no propose, review, approve, or edit affordance." },
+  { op: "GET /api/runtime/database/recon", description: "A sanitized, aggregate-only reconnaissance report over this deployment's own application database. It answers one question — do the stored records validate against the vendored official ISAAC schema — and reports the answer as counts.\n\nThe scan is strictly read-only, and no write is possible: the transaction is set AND verified read-only server-side, every statement is checked against a SELECT-only allowlist before it is issued, and values are always bound as parameters. The row count is also compared before and after, but that is a concurrency check rather than a mutation proof — a row-count equality cannot detect an update and cannot distinguish this scan's writes from a concurrent writer's, so it is the verified read-only transaction and the allowlist that carry the guarantee. The statement counters report every statement this service issues through a cursor; they are not a wire-level record, because the driver's own transaction framing never passes through one.\n\nThe response carries aggregates only: record totals, counts by type and domain, validation totals by rule family and by schema path, and the gate results. It never carries a record id, a title, a scientific value, a stored document, a connection detail, or a credential; per-record content stays closed. A serialized-output scan runs over every response shape before it is returned and replaces it with a sanitized failure if it trips. Every shape also carries a fixed `limitations` list saying what the gates cannot establish — in particular that the production-isolation gate is a tripwire rather than proof, and that the confirmed transport encryption does not verify the server certificate.\n\nWhen the deployment has no database configured, the operation reports that and connects to nothing. Repeat calls inside a short window are served from memory, and a scan already in progress is reported as a conflict rather than opening a second connection. The operation takes no parameters and no body." },
 ];
 
 // --- Statistics dashboard fixtures (the four page-level reads) ---------------
