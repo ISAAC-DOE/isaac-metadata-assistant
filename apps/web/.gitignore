@@ -20,3 +20,13 @@ dist-ssr/
 coverage/
 .vercel
 .env*
+
+# playwright (e2e browser/a11y baseline) — run artifacts only.
+# The specs, config and a11y baseline under e2e/ ARE committed; nothing below
+# is. These directories hold traces, videos, screenshots and downloaded browser
+# state, i.e. binaries that must never enter the repository.
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+playwright/.cache/
