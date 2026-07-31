@@ -15,18 +15,24 @@ explicit ownership decision (CLAUDE.md §17).
 
 | Item | Vercel | Railway |
 |---|---|---|
-| Account / scope | `kvlx`, team `krish2808` (personal) | Krish Verma · `krish.verma2808@gmail.com` (personal) |
+| Account / scope | `kvlx`, team `krish2808` (personal) | Krish's personal Railway account (identified in the dashboard; email deliberately omitted here — see note) |
 | Project / service | `isaac-demo-web` | `isaac-metadata-assistant` |
 | URL | `https://isaac-demo-web.vercel.app` | `https://isaac-metadata-assistant-production.up.railway.app` |
 | Status | live — `HTTP 200` | live, `● Online` — `HTTP 200` in 0.20 s |
 | Last updated | 8 days ago | deployment `8d18b32d-…`, service `14618664-…` |
 | Auth | **none** — public | **none** — public |
 | Data attached | none observed | **volume `isaac-metadata-assistant-volume`** (persistent) |
-| Serving commit | not probed (static SPA) | **`b3b76cd`** (2026-07-23) — **77 commits behind `main`** |
+| Serving commit | not probed (static SPA) | **`b3b76cd`** (2026-07-23) — **77 commits behind `origin/main`** |
 | Runtime mode | n/a | `synthetic-only` |
 
 Probe commands: `vercel whoami`, `vercel project ls`, `railway whoami`, `railway status`,
-`curl …/api/health`, `git rev-list --count b3b76cd..HEAD`.
+`curl …/api/health`, `git rev-list --count b3b76cd..origin/main` (→ 77; note `..HEAD` gives a
+different number on a feature branch, so the ref matters).
+
+**Why the email is omitted.** The accounts are unambiguously identified without it, and this file
+will enter the memory plane's served content the next time the graph is regenerated (see the graph
+doc §1.3) — at which point Project Memory and search could surface anything written here. Account
+identifiers are operationally necessary for a retirement checklist; a personal email address is not.
 
 ### Three findings worth Krish's attention before deciding
 

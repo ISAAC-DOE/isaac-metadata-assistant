@@ -40,19 +40,42 @@ Dean's guide, `docs/postgres-test-db-guide.md:149-162`, section *Displaying reco
 — a real-record list, a real-record detail view, real-record evidence, real-record export — is
 **NOT AUTHORIZED**. This is not an inference from silence; it is an explicit written default-closed
 decision by the database owner. Reachability of the database does not imply authorization to display
-its rows, and the guide says so directly ("Writing to this database is unrestricted. Rendering its
-rows in the hosted app is not").
+its rows, and the guide says so directly at `:160-162`: "`PGHOST` is already set in the deployed pod,
+so anything placed behind the 'DB configured' switch goes live on the next image roll. Decide the
+boundary before shipping the read path, not after."
 
 This resolves the authorizing prompt's Phase 3 decision as **Outcome B — Not Authorized**, which in
 turn makes Phases 4, 5, and 6 (real-record adapter, user-facing real-record parity, real-record
 validation/evidence/export surfaces) out of scope for baseline. The exact question Dean must answer
 is recorded in §5.
 
-A second, weaker but real point: the guide's authorization of aggregate output names a closed list —
-"record counts, counts by type and domain, validation totals, schema version, database reachability".
-Slice 2A's report stays inside that list. Any *new* aggregate not on that list (for example, a
-per-field missingness histogram) is a judgement call, and §4 treats it as such rather than assuming
-it is covered.
+### A second finding: Slice 2A already went past Dean's enumerated list
+
+The guide's authorization of aggregate output names a specific list — "record counts, counts by type
+and domain, validation totals, schema version, database reachability". **The shipped Slice 2A report
+is broader than that list**, and this document originally claimed otherwise. Measured against
+`routes.py:3297-3345`, the `dataset` block contains:
+
+| Shipped field | On Dean's enumerated list? |
+|---|---|
+| `total_records`, `records_scanned`, `records_parsed`, `parse_failures` | yes — record counts |
+| `by_record_type`, `by_record_domain` | yes — counts by type and domain |
+| `records_passing_full_schema`, `records_failing_full_schema`, `total_validation_issues` | yes — validation totals |
+| `by_rule_family`, `by_schema_path` | defensible — a breakdown of validation totals |
+| `by_instance_path` | **no** — paths through the actual record data, schema-masked but record-derived |
+| `distinct_structural_signatures` | **no** — a count of distinct record *shapes* |
+| `total_link_count`, `dangling_link_count` | **no** — derived from `data->'links'` |
+| `record_id_digest_count`, `vocabulary_term_count`, `expected_seed_rows`, `seed_count_matches` | not enumerated, but carry no record content |
+
+None of these emits a scientific value, a title, an id, or any record text — the masking in
+`safe_key_segment` (`db_recon.py:436-469`) holds. But three of them are **record-derived structural
+facts that Dean did not enumerate**, and they are already merged and live in image `v0.0.32`. The
+judgement call was made in Slice 2A, not deferred to §4.
+
+Stating this plainly is the point of this document. A governance record that describes its own
+project as more conservative than it actually is, is the precise failure mode it exists to prevent.
+These three fields are flagged for gate **G3** — not because they are believed unsafe, but because
+they were never explicitly authorized and the honest thing is to say so.
 
 ---
 
@@ -98,9 +121,9 @@ is the whole point of Phase 1 and must not be blurred.
 | Read-only transaction enforcement (server-verified) | Slice 2A | **yes** | done | read | no | Krish |
 | Mutation tripwire (`rows_before == rows_after`, `rows_modified == 0`) | Slice 2A | **yes** | done | read | no | Krish |
 | Connection-limit respect (single-flight lock, limit 5) | guide | **yes** | done | read | no | Krish |
-| Aggregate reconnaissance report | guide "Displaying record content" | **yes** | done | no | read | **no** | Krish |
+| Aggregate reconnaissance report | guide "Displaying record content" | **yes** | done | read | **no** | Krish |
 | Full-schema validation of scanned records | guide "The records table" | **yes** | done | read | no | Krish |
-| Schema-drift **classification** (beyond a raw failure count) | §4 below | conditional | absent | read | no | orch → Dean |
+| Schema-drift **classification** (`by_rule_family`, `by_instance_path`, `by_schema_path`) | §4 below | **yes** | **done — shipped in Slice 2A** | read | **no** | Krish |
 | Real-record adapter | — | **no** | absent | — | — | **Dean** |
 | Real-record listing / detail / evidence / export | guide `:154` | **no** | absent | — | — | **Dean** |
 | Hosted per-record display | guide `:154` | **no** | **closed by default** | — | — | **Dean** |
@@ -114,7 +137,7 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 
 | Capability | Baseline required | Current state | Runtime-verified | Notes |
 |---|---|---|---|---|
-| Record list / My Experiments | **yes** | done | no | 11 SPA routes, `App.tsx` |
+| Record list / My Experiments | **yes** | done | no | 10 route patterns (`routes.ts` `ROUTE_PATTERNS`) + `/` and `*` redirects = 12 `<Route>` elements in `App.tsx` |
 | Record detail (Record Workbench) | **yes** | done | no | |
 | Guided completion | **yes** | done | no | |
 | Evidence explorer + sidecar | **yes** | done | no | sidecar remains **advisory**, no formal schema |
@@ -145,9 +168,9 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 | **Accessibility engine baseline** | **yes** | **absent** | orch | none — executable now |
 | **Responsive baseline (4 viewports)** | **yes** | **absent** | orch | none — executable now |
 | **Real 200% browser zoom** | **yes** | **absent** | orch | none for automation; human sign-off is Krish's |
-| Cached-validator correctness | **yes** | **deferred defect** | orch | none — executable now |
-| Vocabulary-cache keying correctness | **yes** | **deferred defect** | orch | none — executable now |
-| `POST /api/uploads` OpenAPI description accuracy | **yes** | **deferred defect** | orch | none — executable now |
+| Cached-validator correctness — see D1 below | **yes** | **deferred defect** | orch | none — executable now |
+| Vocabulary-cache keying correctness — see D2 | **yes** | **deferred defect** | orch | none — executable now |
+| `POST /api/uploads` OpenAPI description accuracy — see D3 | **yes** | **deferred defect** | orch | none — executable now |
 | Performance baseline (measured) | **yes** (measurement) | absent | orch | none |
 | Performance *improvements* | **no** | n/a | orch | only measured, low-risk ones |
 
@@ -164,7 +187,7 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 
 | Capability | Baseline required | Current state | Owner |
 |---|---|---|---|
-| Docs accurately describe implemented / not implemented / blocked | **yes** | partial | orch |
+| Docs accurately describe implemented / not implemented / blocked | **yes** | partial — this slice fixed two false claims about shipped code (§0) and a stale `psycopg2` claim in the readiness plan §3; more may remain | orch |
 | Data-classification claims truthful | **yes** | done (Slice 2A sweep) | orch |
 | Deployment + rollback documented | **yes** | done | orch |
 | Baseline Completion Matrix (this file) maintained | **yes** | done | orch |
@@ -195,35 +218,92 @@ Recorded so that a later session cannot quietly promote these into scope:
 
 ---
 
-## 4. Schema-drift: what may be built without further authorization
+## 4. Schema-drift: what Slice 2A already emits, and where the boundary sits
 
-Slice 2A's report already includes a count of records failing full-schema validation. Dean's guide
-frames a non-zero count as *expected and useful* ("Finding drift is a useful result, not a problem
-with the database -- report it rather than working around it").
+Dean's guide frames a non-zero failure count as *expected and useful* ("Finding drift is a useful
+result, not a problem with the database -- report it rather than working around it").
 
-If the hosted scan reports drift, the next question is *what kind*. The authorized-aggregate list
-does not obviously cover a drift taxonomy, so the boundary is drawn conservatively:
+### 4.1 Already shipped (do not rebuild)
 
-**Buildable without asking (aggregate, no record content):**
-- Counts by `jsonschema` validator **keyword** (`required`, `additionalProperties`, `enum`, `type`,
-  `format`) — a structural category, not a value.
-- Counts by **schema path**, where each path segment is emitted only if it is a key defined in the
-  authoritative schema (already implemented as `safe_key_segment`), never a data value.
-- Counts by declared `schema_version` value in the record, masked through the schema's own vocabulary.
+A drift **taxonomy** is not future work — it is merged and live in `v0.0.32`:
 
-**Requires Dean's explicit approval:**
+- `by_rule_family` — counts per validator keyword, from `_FAMILY_PATTERNS` (`db_recon.py:901-921`):
+  `additional_properties`, `required`, `const`, `enum`, `type`, `pattern`, `format`, `any_of`,
+  `one_of`, `bounds`, `unique_items`, `dependency`.
+- `by_schema_path` — counts per path through the *schema*.
+- `by_instance_path` — counts per path through the *record*, every segment schema-masked.
+
+So the hosted scan should already answer "what kind of drift" without any new endpoint. Build nothing
+until the G1 report shows these are insufficient.
+
+### 4.2 The distinguishing rule
+
+**The schema may describe the data; the data may not describe itself.** If an output string can only
+be produced by reading a record's value, it is per-record content and is closed.
+
+`by_instance_path` is the deliberate boundary case: the *path* is schema-derived and masked, but the
+*fact that the path is populated* is record-derived. It ships today. It is named here rather than
+glossed over, and it is flagged for G3.
+
+### 4.3 Three constraints the rule does not imply on its own
+
+Obeying §4.2 literally still permits per-record disclosure by arithmetic. These are binding:
+
+1. **Minimum cell size.** The table holds **30 records** (`_DB_RECON_EXPECTED_SEED_ROWS`). A count of
+   `1` at a specific path is a per-record fact wearing aggregate clothing. Any *new* aggregate must
+   suppress or bucket cells below a stated threshold. (The shipped fields predate this rule; whether
+   they need it is part of G3.)
+2. **No cross-tabulation that narrows to an individual.** Two coarse breakdowns can intersect to
+   n=1. Adding a dimension to an existing breakdown is not a free extension of it.
+3. **No caller-parameterized aggregation, ever.** The endpoint takes no parameters and must not.
+   A filter such as `?record_type=…` lets a caller difference two responses to reconstruct
+   per-record facts while every individual response looks compliant.
+
+### 4.4 Requires Dean's explicit approval
+
 - Any example value, even truncated or hashed.
-- Any per-record row, even de-identified.
+- Any per-record row, even de-identified — including one reached by arithmetic (§4.3).
 - Any field whose content originates from the record rather than from the schema.
 
-The distinguishing rule, stated once: **the schema may describe the data; the data may not describe
-itself.** If an output string can only be produced by reading a record's value, it is per-record
-content and is closed.
-
-If drift cannot be classified within that boundary, that is a **hard stop** for Dean, not a licence
+If drift cannot be classified within this boundary, that is a **hard stop** for Dean, not a licence
 to widen the allowlist.
 
 ---
+
+## 4A. The three deferred correctness defects, defined
+
+Previously these were named in §2.4 with no definition anywhere in the repository, which made them
+unactionable and — under §7's verdict rule — a permanent baseline blocker. Defined here.
+
+**D1 — cached validator hands every caller the same mutable schema.**
+`src/isaac_records/official.py:30-39`. `_validator_for` is `@lru_cache`d and returns **one shared
+`Draft202012Validator`** whose `.schema` dict is mutable in place by any in-process caller.
+Reproduced: mutating the cached `record_type` enum makes `validate_official` return `ok: True` for a
+bogus value, while `schema_fingerprint` still reports the pristine on-disk digest — so
+`GET /api/runtime/database/recon` would report `authority.stable: true` and be wrong.
+**Latent, not live:** no current caller mutates it (`rg` over `src/`, `apps/api/`, `scripts/`,
+`tests/` finds no `.schema` mutation), and `GET /api/schema` (`routes.py:2972`) does a fresh
+`json.loads`, so it is not reachable over HTTP. Severity: high if ever triggered, in the truth core.
+`diagnostics.py:56-61` and `:199-206` currently document this as an accepted live caveat — that copy
+becomes false in the honest direction once fixed, and must be updated in the same slice.
+
+**D2 — recon vocabulary anchor can diverge from the validating schema.**
+`apps/api/isaac_api/db_recon.py:372-373`. The `lru_cache` **is** correctly keyed on its argument (the
+prior "M8" note mis-stated this). The real defect is that five internal call sites hardcode the
+module-level `REPO_ROOT` (`:460`, `:770`, `:841`, `:882`, `:964`) while `run_recon(root=X)` forwards
+`X` to validation — so `run_recon` with a non-default root would validate against schema X and mask
+with vocabulary from `REPO_ROOT`. **Unreachable today** (no caller passes a non-default root) and it
+**cannot leak a scientific value** — worst case is an internally inconsistent report. Severity: low;
+a consistency/honesty defect, not a data-leak defect. The cache also lacks the mtime component that
+`official.py` has.
+
+**D3 — `POST /api/uploads` 403 description overclaims exclusivity.**
+`apps/api/isaac_api/routes.py:2046-2078`. The 403 description asserts it is "the only outcome" while
+`_R_UNAUTHORIZED` also declares a 401 on the same operation. The endpoint itself is correctly
+fail-closed; the *description* is the defect. Fixing it moves the OpenAPI character total, which is
+why it was deferred out of Slice 2A.
+
+None of D1–D3 changes exported-record behavior or official schema compliance.
 
 ## 5. External gates — exact questions
 
@@ -231,7 +311,7 @@ to widen the allowlist.
 |---|---|---|---|---|
 | G1 | Hosted rollout + recon verification | **Krish** | Run the checklist in the slice report against `/krish` while signed in; paste back the sanitized JSON | Blocks Phase 1, Phase 2, and any claim that Slice 2A works |
 | G2 | Per-record visibility decision | **Dean** | "May the hosted app display per-record fields from `metadata_assistant` — titles, scientific values, evidence, full JSON — and if so to which audience and at what granularity?" | Real-record functionality stays absent; baseline can still complete without it |
-| G3 | Drift taxonomy beyond §4's boundary | **Dean** | Only if the hosted scan shows drift that §4's aggregates cannot classify | Drift stays partially unexplained; documented as such |
+| G3 | Aggregates already shipped that Dean did not enumerate | **Dean** | "Slice 2A already returns `by_instance_path`, `distinct_structural_signatures`, and link counts. These are record-derived structural facts beyond your enumerated aggregate list, though none emits a value, title or id. Are they within what you intended, or should any be withdrawn?" | These stay live in `v0.0.32`; flagged, not hidden. Also covers any drift §4.1's taxonomy cannot classify |
 | G4 | Responsive / 200%-zoom human sign-off | **Krish** | Visual sign-off at 4 viewports + real 200% zoom | Quality row stays open |
 | G5 | Personal-deploy retirement | **Krish** | Approve the disable-not-delete operation | Cosmetic; no functional effect |
 
@@ -262,3 +342,17 @@ Baseline may be declared **Complete With External Blockers** when every row mark
 named external owner in §5 with evidence. It may **never** be declared plain **Complete** while G1
 is open, because an unverified deployment is precisely the foundational ambiguity this matrix exists
 to eliminate.
+
+**Attribution must be per-row, not a blanket sweep.** As of this writing *every* row in §2.1, §2.2
+and §2.3 reads `Runtime-verified: no`, so a single wave of the hand at G1 would let "Complete With
+External Blockers" describe a state in which **nothing whatsoever has been observed running**. That
+label is generous enough already; it must not also be cheap. A row may be attributed to G1 only if
+G1's checklist actually covers that row. If the hosted checklist does not exercise a capability, the
+honest status is "not verified, and not covered by any open gate either" — which is a gap in this
+matrix, not a pass.
+
+A corollary worth stating because it is load-bearing: Dean's guide warns at `:160-162` that anything
+behind the "DB configured" switch **goes live on the next image roll**. Combined with §0's finding
+that Slice 2A already emits three aggregates Dean did not enumerate, the first hosted observation of
+`/api/runtime/database/recon` will be the first time *anyone* sees what those aggregates actually
+contain. G1 is not a formality.

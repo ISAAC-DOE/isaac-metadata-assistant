@@ -13,11 +13,13 @@ All numbers below are **measured**, with the command that produced them. Inferen
 | Fact | Evidence |
 |---|---|
 | `graphify-out/` is gitignored and local-only | `git check-ignore -v graphify-out` → `.gitignore:2:graphify-out/` |
-| Local contents ≈ 10.4 MB | `graph.json` 2.5 M, `graph.html` 2.4 M, `manifest.json` 44 K, `GRAPH_REPORT.md` 76 K, `cache/` 4.2 M |
+| Local contents **15 MB** (`du -sh graphify-out/`) | `graph.json` 2.5 M, `graph.html` 2.4 M, `manifest.json` 44 K, `GRAPH_REPORT.md` 76 K, `cache/` 4.2 M, plus dated run dirs `2026-07-08/11/16/18` |
 | Two committed artifacts | `memory-snapshot.json` 347,444 B · `memory-graph-detail.json` 493,985 B |
 | Generation requires `graphify-out/` | `scripts/build_memory_snapshot.py` reads `graph.json` via `LocalGraphArtifactSource`; raises `SnapshotError` if absent |
-| Graphify is a **user-local binary**, not a project dependency | `which graphify` → `/Users/krishverma/.local/bin/graphify` (v0.9.4, uv tool). No match in `pyproject.toml` or any `package.json` |
-| Regeneration **uses an external model** | `graphify-out/cost.json` records a real run: `input_tokens: 89405`, `files: 50`. `docs/graphify-workflow.md:110` and the P36 closure doc both state community naming is an LLM pass (`--no-label` skips it) |
+| Graphify is a **user-local binary**, not a project dependency | `which graphify` → `~/.local/bin/graphify` (v0.9.4, uv tool). No match in `pyproject.toml` or any `package.json` |
+| **Incremental** re-extraction needs **no** model | `docs/graphify-workflow.md:52` — "`graphify update <path>` … manifest-based, **no LLM needed**" |
+| **Full clustering** invokes an external model for community naming | `graphify --help` → `--no-label  keep 'Community N' placeholders (skip LLM community naming)`; `docs/superpowers/plans/2026-07-28-pre-dean-readiness-closure.md:143` |
+| That model call happened **once**, and is cached | `graphify-out/cost.json` has exactly **one** run, dated 2026-07-06: `input_tokens: 89405`, `output_tokens: 0`, `files: 50`. Yet `graph.json`, `GRAPH_REPORT.md` and `.graphify_labels.json` were last written **2026-07-18**, with run dirs at 07-08/11/16/18 — so at least four later builds recorded **no** model cost, consistent with labels being cached in `.graphify_labels.json` |
 | Both committed artifacts are **currently fresh** | `build_memory_snapshot.py … --check` → exit 0, "no drift" on both |
 
 ### 1.2 The decision
@@ -28,13 +30,16 @@ Of the five evidence-backed options in the authorizing prompt, the chosen one is
 
 **Reasoning, grounded rather than preferential:**
 
-1. **Option 1 (institution-approved Graphify path) is not available to decide here.** It requires an
-   institutional decision about sending repository content to an external model. That is precisely
-   the class of decision the project already routes to a human, and no approval exists.
-2. **Option 2 (`--no-label` deterministic generation) does not remove the blocker it appears to
-   remove.** `--no-label` skips only the LLM *community-naming* pass. The extraction still depends on
-   the user-local `graphify` v0.9.4 binary, which is not a declared dependency and cannot be installed
-   in CI. A "reproducible in CI" mechanism that requires a binary CI cannot obtain is not reproducible.
+1. **Option 1 (institution-approved Graphify path) is not available to decide here.** A *full*
+   clustering run invokes an external model for community naming, and approving that is an
+   institutional decision the project routes to a human. No approval exists.
+2. **Option 2 (`--no-label` deterministic generation) fails on the binary, not on the model.** Being
+   precise, because the distinction matters: `--no-label` — and `graphify update` generally — needs
+   **no model at all**, so the external-model objection does *not* apply to the routine path. The
+   blocker is different and unfixable here: extraction depends on the user-local `graphify` v0.9.4
+   binary, which is not a declared dependency in `pyproject.toml` or any `package.json` and cannot be
+   installed in CI. A "reproducible in CI" mechanism that requires a binary CI cannot obtain is not
+   reproducible.
 3. **Option 3 (in-house deterministic graph builder) is a feature, not a baseline repair.** It would
    be a substantial new subsystem built to solve a problem that is currently *disclosed and harmless*.
    Building it under a baseline-restoration mandate would be exactly the scope expansion the
@@ -58,8 +63,8 @@ a human, honestly reported at runtime, drift-gated in CI for the committed artif
 
 ### 1.3 A limitation discovered while writing this document
 
-Adding the three new documents in this slice changed the committed snapshot by **two lines** — only
-`CLAUDE.md`'s content hash. The new files did **not** enter the served set:
+Adding the three new documents in this slice changed the committed snapshot by **two lines** — `CLAUDE.md`'s content hash and the
+`served_manifest_fingerprint` that summarises it. The new files did **not** enter the served set:
 
 ```
 served paths:     201   (unchanged)
@@ -80,7 +85,9 @@ This is a limitation, not a defect — the snapshot never claimed to be exhausti
 already refuses to overstate freshness (§1.2 point 5). But it was undocumented, and it is the most
 concrete cost of the point-in-time decision: **the cost is invisibility of new material, not
 incorrectness of old material.** Regenerating the graph is the only fix, and that requires the
-user-local binary plus an unapproved external-model pass.
+user-local `graphify` binary — which CI cannot obtain. It does **not** require a model: `graphify
+update` is manifest-based and model-free (§1.1). So this is a human-in-the-loop step, not an
+approval-blocked one.
 
 ### 1.4 What this decision does *not* license
 
@@ -105,7 +112,7 @@ Measurement only. Per the authorizing prompt, only *measured, low-risk* improvem
 | `dist/assets/index-*.css` | 180.45 kB | 25.75 kB |
 | `dist/assets/index-*.js` | **633.57 kB** | **183.82 kB** |
 
-Total build wall time 4.891 s (Vite portion 4.07 s).
+Build wall time in one run: 4.891 s (Vite portion 4.07 s). Timings vary run to run — a second run gave 1.25 s for the Vite portion. Treat the **sizes** as the measurement here; the timing is indicative only.
 
 **Finding (measured):** there is **no route-level code splitting** — one JS chunk, one CSS chunk.
 Vite's own build output emits its >500 kB chunk warning. Every visitor downloads all of Assistant,
@@ -119,11 +126,12 @@ lab network. This is a real finding, not a theoretical one, but it is not a base
 | Fact | Evidence |
 |---|---|
 | The graph artifact is **not bundled** | `apps/web/src/lib/api.ts:585` fetches `/memory/graph/detail` from the API |
-| It is **not re-read per request** | `routes.py:2358` uses `memory.get_default_detail_source()`, a memoized module-level reader with an mtime-keyed cache |
-| Response size | ~494 kB uncompressed JSON |
+| It is **not re-read per request** | `get_memory_graph_detail` (`routes.py:2358`) calls `memory.get_default_detail_source()` at `routes.py:2365`, a memoized module-level reader with an mtime-keyed cache (`memory.py:1696-1706`) |
+| Artifact size (**not** a measured response) | `memory-graph-detail.json` = 493,985 B on disk. The over-the-wire size was not measured — that needs `curl -w '%{size_download}'` against a running instance |
 
-**Finding (measured):** the largest single runtime payload is the deep graph detail response at
-~494 kB, served uncompressed by the application.
+**Finding:** the largest single runtime payload is the deep graph detail response, whose source
+artifact is 493,985 B, served uncompressed by the application (§2.3). The transferred size is
+inferred from the artifact size, not measured.
 
 ### 2.3 Compression
 

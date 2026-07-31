@@ -641,8 +641,12 @@ session must not silently reverse:
 
 Graph freshness and the measured performance baseline are settled in
 [`docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md`](docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md):
-the graph stays **point-in-time, disclosed, and non-blocking** (regeneration needs a user-local
-`graphify` binary *and* an external-model labeling pass — neither is CI-reproducible nor approved).
+the graph stays **point-in-time, disclosed, and non-blocking**. Regeneration requires the user-local
+`graphify` binary, which CI cannot obtain — that, not the model, is the blocker. Note precisely, so
+this does not appear to contradict §7's "run `graphify update .`": `graphify update` is manifest-based
+and needs **no** model, and remains the correct routine step for a human to run. Only a *full
+clustering* run invokes an external model to name communities, and `graphify-out/cost.json` records
+that happening exactly once (2026-07-06), with labels cached since.
 Personal-deploy retirement facts and the approval-gated order live in
 [`docs/personal-deployment-retirement.md`](docs/personal-deployment-retirement.md); both personal
 deployments are still live, public, unauthenticated, and Railway is 77 commits stale with a
