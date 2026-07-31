@@ -192,7 +192,9 @@ def run_ok(recon, *, rows=None, env=None, **kwargs):
     return recon.run_recon(FakeConnection(rows), env=env, salt="test-salt", **kwargs)
 
 
-# --- the seven fail-closed gates ---------------------------------------------
+# --- the nine fail-closed gates -----------------------------------------------
+# opt_in · pgdatabase_env · current_database · current_user · tls ·
+# records_table · not_production_shaped · transaction_read_only · no_mutation
 
 
 def test_gate_opt_in_refuses_when_env_var_absent(recon):
@@ -1450,3 +1452,65 @@ def test_open_map_masking_survives_the_instance_pointer_path(recon):
     collapsed = recon.collapse_instance_path("sample.composition.CuO2_mass_fraction")
     assert "CuO2_mass_fraction" not in collapsed
     assert collapsed == f"sample/composition/{recon.MASK_OPEN_MAP_KEY}"
+
+
+def test_superuser_gate_fails_closed_on_absent_evidence(recon):
+    """I3: the gate accepted "" — what `_scalar` yields for no row or NULL.
+
+    That made it fail OPEN while the module's own posture section says
+    "absence of proof is treated as failure", and while `check_tls` three
+    functions above correctly refuses a missing row. The report then asserted
+    `is_superuser: false` as though it had been observed.
+    """
+    class _Cur:
+        def __init__(self, rows):
+            self._rows, self._last = rows, None
+
+        def execute(self, sql, params=None):
+            self._last = sql
+
+        def fetchall(self):
+            return list(self._rows.get(self._last, []))
+
+        def close(self):
+            pass
+
+    def _cursor(superuser_rows):
+        return _Cur(
+            {
+                recon.Q_RECORDS_TABLE_OWNER: [("metadata_assistant",)],
+                recon.Q_IS_SUPERUSER: superuser_rows,
+                recon.Q_RECORD_COUNT: [(30,)],
+            }
+        )
+
+    # absence of evidence must REFUSE, not pass
+    for label, rows in (("no row", []), ("NULL", [(None,)]), ("empty", [("",)])):
+        with pytest.raises(recon.ReconRefusal) as exc:
+            recon.check_not_production_shaped(_cursor(rows), 30)
+        assert exc.value.gate == "not_production_shaped", label
+
+    # an actual superuser still refuses
+    with pytest.raises(recon.ReconRefusal):
+        recon.check_not_production_shaped(_cursor([("on",)]), 30)
+
+    # and a positively-observed non-superuser passes, reporting what it SAW
+    result = recon.check_not_production_shaped(_cursor([("off",)]), 30)
+    assert result["is_superuser_observed"] == "off"
+
+
+def test_report_does_not_claim_unconditional_determinism(recon):
+    """I5: the default salt is random per run, so digests differ every time."""
+    notes = " ".join(run_ok(recon)["notes"])
+    assert "--id-salt" in notes and "random per run" in notes
+    # and the claim it replaced must be gone
+    assert "identical input yields byte-identical output (and no host" not in notes
+
+
+def test_report_does_not_claim_counts_only(recon):
+    """I4: verbatim server/TLS strings and vocabulary slugs ARE emitted."""
+    report = run_ok(recon)
+    notes = " ".join(report["notes"])
+    assert "not literally 'counts only'" in notes
+    # the claim is now true of what the report actually contains
+    assert report["connection"]["server_version"]  # a verbatim server string

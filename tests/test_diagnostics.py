@@ -5,9 +5,20 @@ Two classes of test live here:
 
 * **Behavioural** — the normalization is correct against the authoritative
   schema: pointers, conditional detection, ordering, missing-vs-invalid, labels.
-* **Structural** — the module is *incapable* of validating against a partial
-  schema. Those tests read `diagnostics.py`'s own AST/tokens, because a
-  behavioural test can only show that the full schema was used *this time*.
+* **Structural** — the module *as written* validates only against the complete
+  authoritative schema. Those tests read `diagnostics.py`'s own AST/tokens,
+  because a behavioural test can only show the full schema was used *this time*.
+
+  They are enforcement of specific properties, **not a proof that no bypass
+  exists** — and this docstring previously claimed the module was "incapable"
+  of using a partial schema, which two independent reviewers each refuted in a
+  single edit. The load-bearing guard is now
+  `test_diagnose_iterates_errors_only_on_the_official_validator`: errors must
+  come from exactly one `iter_errors` call whose receiver is `validator`, itself
+  pinned to `load_official_validator`. The surviving name blocklists are
+  defence in depth against known regression shapes, nothing more. Keep this
+  wording matched to `diagnostics.py`'s module docstring — the two drifting
+  apart is how the false claim survived a correction round.
 
 Every record here is a hand-built minimal dict or an in-memory mutation of the
 committed synthetic fixtures in `tests/fixtures/official/`. Nothing is real
@@ -336,6 +347,69 @@ def test_the_structural_assertions_are_falsifiable():
     assert "record_id" in view
     # ...and the docstring was still removed, so prose cannot trip them.
     assert "harmlessly" not in view
+
+
+def test_module_declares_no_string_to_string_mapping():
+    """Structural close of the label-catalog residual (review M1).
+
+    The literal blocklist catches a catalog keyed by the five names it lists; a
+    reviewer showed one keyed by `sample`/`instrument`/`provenance` still passed.
+    A label catalog has a SHAPE — a module-level dict whose keys and values are
+    all string literals — so forbid the shape rather than enumerating names.
+    """
+    offenders = []
+    for node in module_ast().body:
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Dict):
+            continue
+        d = node.value
+        if not d.keys:
+            continue
+        all_str = all(
+            isinstance(k, ast.Constant)
+            and isinstance(k.value, str)
+            and isinstance(v, ast.Constant)
+            and isinstance(v.value, str)
+            for k, v in zip(d.keys, d.values)
+        )
+        if all_str:
+            offenders.append(
+                [t.id for t in node.targets if isinstance(t, ast.Name)]
+            )
+    assert not offenders, (
+        f"module-level str->str mapping(s) {offenders}: labels must be derived "
+        "from the pointer, not catalogued"
+    )
+
+
+def test_diagnose_iterates_errors_only_on_the_official_validator():
+    """The load-bearing invariant, replacing three name blocklists.
+
+    A fresh independent reviewer defeated every name-based guard with
+    `_n = type(validator)(relaxed)` and `_e = _TEST_SEAM or validator`: neither
+    needs a new import, a file read, an identifier containing "Validator", nor
+    `evolve`/`descend`. Both passed the entire suite while `diagnose` returned
+    `ok=True` on a record `validate_official` rejects — with the report still
+    advertising the pristine full-schema fingerprint.
+
+    Blocklisting more names cannot fix that; the invariant is about the
+    RECEIVER. Errors must come from exactly one `iter_errors` call, made on the
+    name `validator`, which the test above pins to `load_official_validator`.
+    """
+    fn = next(
+        n
+        for n in ast.walk(module_ast())
+        if isinstance(n, ast.FunctionDef) and n.name == "diagnose"
+    )
+    receivers = [
+        node.func.value.id if isinstance(node.func.value, ast.Name) else ast.dump(node.func.value)
+        for node in ast.walk(fn)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "iter_errors"
+    ]
+    assert receivers == ["validator"], (
+        f"diagnose must call iter_errors exactly once, on `validator`; got {receivers}"
+    )
 
 
 def test_module_never_derives_a_narrowed_validator():

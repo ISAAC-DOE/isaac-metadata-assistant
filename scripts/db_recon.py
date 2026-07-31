@@ -66,6 +66,15 @@ Gates (all must pass; the two env gates run before any socket is opened)
 6. The environment does not look like the production records database
    (see :func:`check_not_production_shaped` — a backstop, not a guarantee).
 7. ``ISAAC_RUN_SLAC_DB_RECON=1`` is set, so this can never run by accident.
+8. The transaction is VERIFIED read-only server-side via
+   ``current_setting('transaction_read_only')`` — setting a flag is not the
+   same as confirming it.
+9. The record count is unchanged between the start and end of the run
+   (:class:`MutationDetected`), proving the run mutated nothing.
+
+Every gate fails CLOSED: absence of proof is treated as failure, never as a
+pass. Exit codes: 2 refusal · 3 leak detected · 4 mutation detected ·
+5 psycopg2 missing · 6 connect failed · 7 usage error · 8 unexpected error.
 
 Output
 ------
@@ -1040,17 +1049,27 @@ def check_not_production_shaped(cursor: Any, record_count: int) -> dict[str, Any
             f"'records' is owned by {owner!r}, not {EXPECTED_ROLE!r}; "
             "this is not the documented test database layout",
         )
+    # FAIL CLOSED, matching check_tls above and this module's stated posture
+    # ("absence of proof is treated as failure"). An empty string is what
+    # ``_scalar`` yields for a missing row or a NULL, so accepting "" here made
+    # the gate fail OPEN: no row, NULL and "" all passed, and the report then
+    # asserted is_superuser=false as though it had been observed.
     is_superuser = str(_scalar(cursor, Q_IS_SUPERUSER) or "").strip().lower()
-    if is_superuser not in {"off", "false", "f", "0", ""}:
+    if is_superuser not in {"off", "false", "f", "0"}:
         raise ReconRefusal(
             "not_production_shaped",
-            "session reports superuser privileges; the documented test role is NOSUPERUSER",
+            "could not confirm the session is non-superuser; the documented test "
+            "role is NOSUPERUSER and absence of proof is treated as failure",
         )
     return {
         "record_count_within_threshold": True,
         "threshold": MAX_PLAUSIBLE_RECORD_ROWS,
         "documented_seed_rows": DOCUMENTED_SEED_ROWS,
         "records_table_owner_is_expected_role": True,
+        # The value actually OBSERVED from pg_catalog, not a constant. It was
+        # hardcoded False, which reported an observation that — because the gate
+        # above used to accept "" — may never have been made.
+        "is_superuser_observed": is_superuser,
         "is_superuser": False,
         "heuristic_is_a_backstop_not_a_guarantee": True,
     }
@@ -1293,8 +1312,12 @@ def aggregate_structure(
         "width_truncated": width_truncated,
         "algorithm": (
             "sorted set of JSON paths with all values stripped; array indices "
-            "collapsed to '[]'; non-identifier object keys masked as "
-            f"'{MASK_NON_IDENTIFIER}'; signature = sha256(newline-joined paths)[:16]"
+            "collapsed to '[]'; object keys masked by THREE rules, in order: a "
+            f"key inside an additionalProperties-open location -> '{MASK_OPEN_MAP_KEY}'; "
+            f"a non-identifier-shaped key -> '{MASK_NON_IDENTIFIER}'; a key not "
+            f"declared anywhere in the vendored schema -> '{MASK_UNDECLARED_KEY}'. "
+            "masked_key_segments counts all three. "
+            "signature = sha256(newline-joined paths)[:16]"
         ),
     }
 
@@ -1361,7 +1384,14 @@ def collect_vocabulary_cache(cursor: Any) -> dict[str, Any]:
 HONEST_NOTES = (
     "READ-ONLY: only SELECT and read-only catalog introspection were issued; "
     "the transaction was set AND verified read-only server-side.",
-    "This report contains aggregate counts and value-stripped structure only. "
+    "This report contains aggregate counts and value-stripped RECORD structure. "
+    "It is not literally 'counts only': three classes of verbatim database "
+    "string are emitted by design — server_version, TLS version/cipher, and "
+    "allow-listed vocabulary-CATEGORY values that are lowercase slugs. Those "
+    "last are emitted by SHAPE, and nothing proves a lowercase slug is a "
+    "controlled-vocabulary term rather than data (see vocabulary_cache."
+    "value_policy). No record field value, title, identity or free-text field "
+    "is emitted. "
     "Record values are never read into a path, and every object KEY is checked "
     "against the set of property names the vendored public schema declares: a "
     "key survives verbatim only if the schema already publishes it, otherwise "
@@ -1372,7 +1402,8 @@ HONEST_NOTES = (
     "written.",
     "LIMIT OF THAT CLAIM, stated plainly: the key allowlist is the vendored "
     "schema, so if a real record used a declared schema property NAME as a map "
-    "key in an open location, that name would be emitted — but it is a public "
+    "key in an open location, the open-map branch masks it FIRST, so it is not "
+    "emitted; were it emitted at a non-open location it would be a public "
     "schema name, not a value. The leak scan detects ULIDs, environment values "
     "and credential shapes; it does not and cannot recognise arbitrary science, "
     "so the allowlist, not the scan, is what keeps values out.",
@@ -1390,8 +1421,10 @@ HONEST_NOTES = (
     "ULIDs are safe to publish is UNDECIDED by the project owner; raw emission "
     "requires both --emit-raw-record-ids and "
     f"{RAW_ID_ENV}=1.",
-    "No wall-clock timestamp is recorded, so identical input yields byte-"
-    "identical output (and no host metadata leaks).",
+    "No wall-clock timestamp is recorded, and no host metadata leaks. Output is "
+    "byte-identical across runs only when --id-salt is PINNED: the default salt "
+    "is random per run, so record_id digests differ on every invocation by "
+    "design. Determinism of everything else is unaffected.",
 )
 
 
@@ -1554,7 +1587,11 @@ def run_recon(
             "transaction_read_only": transaction_read_only,
             "driver_readonly_session_applied": session_readonly_applied,
             "tls": tls,
+            # Sourced from the gate's OBSERVED value; the gate refuses unless it
+            # positively read a non-superuser answer, so this is now an
+            # observation rather than an assumption.
             "is_superuser": False,
+            "is_superuser_observed": production_check.get("is_superuser_observed"),
         },
         "tables": {"count": len(tables), "names": sorted(tables)},
         "records": {
