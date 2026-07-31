@@ -485,6 +485,23 @@ For each Phase 36 (and later) deployed slice, the report must additionally inclu
 
 This applies to all future phases.
 
+### Durable per-slice report contract (added 2026-07-31, baseline restoration)
+
+Every implementation slice — not only deployed ones, and not only at phase end — reports **all** of:
+
+slice name · starting SHA · ending SHA · files changed · what was implemented · **what was
+deliberately not implemented** · verification commands and their results · frontend test count ·
+backend test count · browser test result · accessibility test result · security and governance checks ·
+reviewer findings · fixes made · commit hash · PR · merge commit · image version · push status ·
+hosted rollout status · blockers · deferred items · recommendation for the next slice.
+
+Two rules that exist because they were violated before:
+
+- **Never report a count you did not just measure.** Quote the command.
+- **Never report an unobserved hosted rollout as verified.** `/krish` sits behind an Authentik edge
+  that this environment cannot authenticate to, and an agent must not enter credentials. The honest
+  status is `HOSTED QA PENDING (Krish)` plus an exact checklist.
+
 ---
 
 ## 13. Truth Path Protection
@@ -605,6 +622,31 @@ database is unrestricted (the app owns it), while **displaying** its rows is clo
 because the seeded rows are real production-derived records. Aggregate output is authorized now;
 per-record fields are not. (Not to be confused with §17's "two counts", which is the unrelated
 201-served-paths vs 200-manifest-entries distinction.)
+
+**Baseline restoration (started 2026-07-31).** The authoritative definition of "baseline" — which
+capabilities are required, which are deliberately deferred, and who owns each external gate — is
+[`docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md`](docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md).
+Update it in the same PR as any slice that changes a row. Two determinations from it that a future
+session must not silently reverse:
+
+- **Real-record display is NOT authorized.** Dean's guide (`docs/postgres-test-db-guide.md:149-162`)
+  states hosted per-record display is "**closed by default** pending an explicit visibility decision".
+  A real-record adapter, list, detail, evidence view, or export is therefore out of scope — not
+  deferred by preference but withheld by the database owner. Database *reachability* is not display
+  authorization, and the guide says so directly. The exact question Dean must answer is gate **G2**
+  in the matrix.
+- **Schema drift may be classified only by schema-derived aggregates.** The rule: *the schema may
+  describe the data; the data may not describe itself.* If an output string can only be produced by
+  reading a record's value, it is per-record content and is closed. See matrix §4.
+
+Graph freshness and the measured performance baseline are settled in
+[`docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md`](docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md):
+the graph stays **point-in-time, disclosed, and non-blocking** (regeneration needs a user-local
+`graphify` binary *and* an external-model labeling pass — neither is CI-reproducible nor approved).
+Personal-deploy retirement facts and the approval-gated order live in
+[`docs/personal-deployment-retirement.md`](docs/personal-deployment-retirement.md); both personal
+deployments are still live, public, unauthenticated, and Railway is 77 commits stale with a
+**persistent volume** (so deleting destroys data that pausing preserves).
 
 Note also that the app's `mode: synthetic-only` describes the **workspace** — uploads refused, seeding
 from committed fixtures only. It has never meant "no real data exists anywhere in the process", and
