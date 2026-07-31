@@ -116,11 +116,31 @@ export function GovernancePage() {
           aria-labelledby={tabId('policy')}
           tabIndex={0}
         >
+          {/* Slice 2A (I5). The first sentence used to read "This prototype is
+              synthetic-only by default", which stopped being true of the
+              DEPLOYMENT once a protected read-only diagnostic could run against
+              an isolated test database of production-derived records. The two
+              paragraphs below keep the claims apart: what the reader SEES stays
+              synthetic; what the deployment MAY DO is bounded and stated. Same
+              wording constraints as components/GovernanceBanner.tsx — "may
+              run", never "is running"; an isolated SLAC test database, never
+              the production database; and no claim that the app itself verified
+              that isolation (the guarantee is an external pg_hba grant). */}
           <p>
-            This prototype is synthetic-only by default. Real SLAC/SSRL or private artifacts require
-            written data-governance approval before they can be read, indexed, or sent to any model.
-            Nothing is uploaded to a model or index without that approval: every file upload is
-            refused outright, whatever it contains, and no file is read, parsed, or inspected.
+            The visible workspace remains synthetic and uploads remain disabled. Real SLAC/SSRL or
+            private artifacts require written data-governance approval before they can be read,
+            indexed, or sent to any model. Nothing is uploaded to a model or index without that
+            approval: every file upload is refused outright, whatever it contains, and no file is
+            read, parsed, or inspected.
+          </p>
+          <p style={{ marginTop: 12 }}>
+            Separately, this deployment may run a protected, read-only diagnostic against an
+            isolated SLAC test database containing production-derived records. PostgreSQL is used
+            only by that diagnostic path: records are processed transiently in pod memory, only
+            sanitized aggregate results are returned, and no record is modified. No record ids,
+            titles, scientific values, evidence, full JSON, or per-record results are displayed, and
+            nothing is sent to any model. Database-backed record display remains disabled pending an
+            explicit visibility decision.
           </p>
           <div style={{ marginTop: 18 }}>
             <GovernanceBanner />

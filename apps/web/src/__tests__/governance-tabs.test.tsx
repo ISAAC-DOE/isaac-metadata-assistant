@@ -54,10 +54,15 @@ describe('Governance & Safety — tablist', () => {
 });
 
 describe('Governance & Safety — content routing', () => {
-  it('Policy shows the synthetic-only governance text (preserved verbatim)', () => {
+  // Slice 2A (I5) replaced the opening sentence "This prototype is
+  // synthetic-only by default" with the qualified wording, because the
+  // deployment may run a protected read-only diagnostic against an isolated
+  // test database. This case still proves the SAME thing — the Policy tab, and
+  // only the Policy tab, renders the governance text — against the new anchor.
+  it('Policy shows the governance text (routing unchanged)', () => {
     renderPage();
     expect(
-      screen.getByText(/This prototype is synthetic-only by default/i),
+      screen.getByText(/The visible workspace remains synthetic and uploads remain disabled/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Standalone Validator/i)).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Schema Reference', level: 2 })).toBeNull();
@@ -68,7 +73,9 @@ describe('Governance & Safety — content routing', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Validator' }));
     expect(screen.getByText('Standalone Validator')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Validator' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.queryByText(/This prototype is synthetic-only by default/i)).toBeNull();
+    expect(
+      screen.queryByText(/The visible workspace remains synthetic and uploads remain disabled/i),
+    ).toBeNull();
   });
 
   it('clicking Schema Reference reveals the browser', async () => {

@@ -25,6 +25,16 @@
  *    There is no real-vs-synthetic detector anywhere in the backend, so nothing
  *    here may imply that real data is recognised and turned away. That caveat
  *    stays in the always-visible `detail`, never behind a disclosure.
+ *  - since Slice 2A the deployment may additionally run a protected, read-only
+ *    diagnostic against an isolated SLAC test database containing
+ *    production-derived records. So NO string here may describe the whole
+ *    build, prototype, deployment or app as synthetic-only, or put real data
+ *    out of scope, without stating that: the scope a claim can keep is the
+ *    WORKSPACE. Whichever concept makes the capability statement ("may run …")
+ *    must state every bound of it on that same surface — naming the capability
+ *    without its bounds is the same over-claim in the other direction.
+ *    `__tests__/db-recon-truthfulness.test.tsx` enforces both halves per
+ *    concept, and re-scans every frontend source file for the same claim class.
  *  - `persistence: "ephemeral"` is a fixed literal about deployment intent, not
  *    a process-lifetime guarantee. Workspace state is written to files under a
  *    server-side working directory, so it outlives the process; only the
@@ -116,22 +126,79 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
 
   return [
     {
+      // Slice 2A (I5) — the fourth surface of the same defect, and the one that
+      // rendered DIRECTLY ABOVE the already-corrected `no-real-experiment-data`
+      // card on Data & Privacy, so the tab contradicted itself in one screenful.
+      //
+      // The heading was 'Synthetic Data Only' and the detail opened "Only
+      // unmistakably synthetic data is in scope, and this build runs in
+      // synthetic-only mode". The SCOPE half of that sentence was the false
+      // part: it is a flat claim about the whole build, and the deployment may
+      // now run a protected, read-only diagnostic over an isolated test
+      // database of production-derived records. The heading now names what the
+      // card is actually about — the runtime MODE — and the scope sentence is
+      // gone.
+      //
+      // The `id` is unchanged: `hosted-truthfulness.test.tsx` looks the concept
+      // up by it, and the concept itself did not change — only the accuracy of
+      // its claims.
+      //
+      // What must NOT be lost, and is asserted in
+      // `__tests__/db-recon-truthfulness.test.tsx` and
+      // `__tests__/hosted-truthfulness.test.tsx`: mode-not-content enforcement,
+      // "it cannot tell real data from synthetic", real mode refusing to start
+      // with its guardrail reason, and operator responsibility. All four are
+      // still in the always-visible `detail`, never behind a disclosure.
+      //
+      // The mode token `synthetic-only` is KEPT on purpose — it is the name
+      // `GET /api/health` reports and what the operator configured, exactly as
+      // the Help popover keeps it. The rule is not "never say synthetic-only",
+      // it is "never leave it standing as an unqualified whole-deployment
+      // claim", so every bound of the diagnostic is stated on this same surface.
+      //
+      // Same load-bearing wording constraints as components/GovernanceBanner.tsx
+      // and screens/GovernancePage.tsx: "may run", never "is running"
+      // (configuration is not reachability); an isolated SLAC test database,
+      // never the production database; and no claim that the app verified that
+      // isolation — the guarantee is an external pg_hba grant.
       id: 'synthetic-data-only',
-      heading: 'Synthetic Data Only',
+      heading: 'Synthetic-Only Mode',
       summary: syntheticOnly
         ? 'Synthetic-only mode — file upload is refused outright, and the app cannot tell real data from synthetic.'
         : `The backend reports the data regime as "${dataRegime}".`,
       detail: syntheticOnly
-        ? 'Only unmistakably synthetic data is in scope, and this build runs in synthetic-only mode: file upload is refused outright. Real mode intentionally refuses to start, because the ingestion and governance guardrails it would need do not exist yet. What the app enforces is that mode, not the contents of what it is handed — it cannot tell real data from synthetic, so keeping real artifacts out is a responsibility of whoever operates it, not a check the software performs.'
+        ? 'This deployment runs in synthetic-only mode: file upload is refused outright, and the records in this workspace are synthetic. Real mode intentionally refuses to start, because the ingestion and governance guardrails it would need do not exist yet. What the app enforces is that mode, not the contents of what it is handed — it cannot tell real data from synthetic, so keeping real artifacts out of the workspace is a responsibility of whoever operates it, not a check the software performs. Separately, this deployment may run a protected, read-only diagnostic against an isolated SLAC test database containing production-derived records: those records are processed transiently in pod memory, only sanitized aggregate results are returned, no record is modified, no per-record content is displayed, and nothing is sent to any model. Database-backed record display remains disabled pending an explicit visibility decision.'
         : `The backend reports the data regime as "${dataRegime}". This screen states only what the backend reports.`,
     },
     {
+      // Slice 2A (I5). The heading was "No Real Experiment Data" and the detail
+      // opened "Real or private facility artifacts are out of scope for this
+      // prototype" — both flat, whole-deployment claims that stopped being true
+      // once a protected, read-only diagnostic could run against an isolated
+      // test database of production-derived records. The scope is now stated as
+      // the WORKSPACE, and the diagnostic is named with its bounds rather than
+      // left to be inferred from a promise the deployment no longer keeps.
+      //
+      // The `id` is unchanged: `hosted-truthfulness.test.tsx` and
+      // `screens/statistics/StatisticsPage.tsx` refer to it, and nothing about
+      // the concept itself changed — only the accuracy of its claims.
+      //
+      // What must NOT be lost from the previous copy: the upload block is a MODE
+      // gate, not a content check, and the second half of `detail` still says so
+      // ("Nothing in the app inspects that text to judge whether it is real"),
+      // still in the always-visible text and never behind a disclosure.
+      //
+      // Same load-bearing wording constraints as components/GovernanceBanner.tsx
+      // and screens/GovernancePage.tsx: "may run", never "is running"
+      // (configuration is not reachability); an isolated SLAC test database,
+      // never the production database; and no claim that the app verified that
+      // isolation — the guarantee is an external pg_hba grant.
       id: 'no-real-experiment-data',
-      heading: 'No Real Experiment Data',
+      heading: 'No Real Experiment Data in the Workspace',
       summary:
-        'Out of scope for this prototype — and the upload block never checks whether what it blocked was real.',
+        'Kept out of the workspace — the upload block never checks whether what it blocked was real, and the separate read-only diagnostic displays no record.',
       detail:
-        'Real or private facility artifacts are out of scope for this prototype and require written data-governance approval before they could be read, indexed, or sent anywhere. What the code enforces is narrower than that policy: file upload is refused outright, with no file parsed at all, while the CSV preview and the record validator do read what you paste or pick — in memory, never stored, and logged only as an outcome, never as content. Nothing in the app inspects that text to judge whether it is real.',
+        'Real or private facility artifacts are out of scope for this workspace and require written data-governance approval before they could be read, indexed, or sent anywhere. What the code enforces is narrower than that policy: file upload is refused outright, with no file parsed at all, while the CSV preview and the record validator do read what you paste or pick — in memory, never stored, and logged only as an outcome, never as content. Nothing in the app inspects that text to judge whether it is real. Separately, this deployment may run a protected, read-only diagnostic against an isolated SLAC test database containing production-derived records: those records are processed transiently in pod memory, only sanitized aggregate results are returned, no record is modified, no per-record content is displayed, and nothing is sent to any model. Database-backed record display remains disabled pending an explicit visibility decision.',
     },
     {
       id: 'what-is-stored',
@@ -145,13 +212,30 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       },
     },
     {
+      // Slice 2A (I5). The summary opened "No database —" and the detail opened
+      // "There is no database." Both were flat claims about the DEPLOYMENT, and
+      // both stopped being true: the deployment may be configured with an
+      // isolated SLAC test database that a protected, read-only diagnostic
+      // reads. Rendered two cards below `no-real-experiment-data`, which names
+      // that database, "There is no database" was a visible self-contradiction
+      // on one tab.
+      //
+      // The claim is now scoped to what this card is about — where the WORKSPACE
+      // lives — and the test database is placed outside that scope explicitly,
+      // because "what resets" is exactly the question a reader would carry to it.
+      //
+      // This surface refers to the diagnostic; it does not make the CAPABILITY
+      // statement ("may run …"). The surfaces that make that statement must
+      // carry all of its bounds — see `__tests__/db-recon-truthfulness.test.tsx`,
+      // which enforces precisely that split. Here only the storage-relevant
+      // bounds are stated, and none of them is weaker than the full paragraph.
       id: 'what-resets',
       heading: 'What Resets',
       summary: ephemeral
-        ? "No database — the workspace is files on the server, discarded with the deployment's temporary storage."
+        ? "The workspace is files on the server, not a database — discarded with the deployment's temporary storage."
         : `The backend reports persistence as "${persistence}".`,
       detail: ephemeral
-        ? 'There is no database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it. The backend reports that storage as ephemeral: it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be.'
+        ? "The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it. The backend reports that storage as ephemeral: it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
         : `The backend reports persistence as "${persistence}". This screen states only what the backend reports.`,
       more: {
         // Was "they exist only in the open browser tab and are never written down or
@@ -280,8 +364,14 @@ export const REPO_DOCS_CAPTION = 'Tracked in the repository, not served as pages
  * BUILD does and does not have, which the contract cannot report about itself.
  */
 export const API_ACCESS_COPY = {
-  /** THE status, on the API Access banner. Nothing else restates the reason. */
-  statusHeading: 'API Key Management Is Not Available in This Synthetic Preview',
+  /** THE status, on the API Access banner. Nothing else restates the reason.
+   *
+   *  Slice 2A (I5): was "…in This Synthetic Preview". Nothing about API keys
+   *  turns on the data regime, so the word "Synthetic" was carrying no meaning
+   *  here — it was only labelling the whole build as synthetic, which is the
+   *  unqualified whole-application claim this slice removed everywhere else.
+   *  "This Build" states the same scope without the claim. */
+  statusHeading: 'API Key Management Is Not Available in This Build',
   statusBody:
     'This API has no operation that creates, lists, revokes, or rotates a credential, so no key can be issued from this screen — and there is never a key here to reveal, copy, or store. The Endpoint Explorer tab is the proof: it lists every operation this build has.',
   /** The disabled Create control's own reason — short, because the banner owns

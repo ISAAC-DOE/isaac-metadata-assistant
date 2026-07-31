@@ -4,8 +4,11 @@
  * on every navigation. This caches a SINGLE in-flight promise at module scope so
  * every consumer shares one request for the session. It never throws — a failed
  * health check resolves to `undefined`, and the chip degrades to the synthetic
- * indicator (this is a synthetic-only app; a missing health check must never
- * imply non-synthetic).
+ * indicator (the workspace is synthetic, so a missing health check must never
+ * imply non-synthetic). Slice 2A: this comment used to say "this is a
+ * synthetic-only app", which is no longer accurate about the DEPLOYMENT — see
+ * the chip reasoning in `components/TopBar.tsx`. On an absent health body the
+ * chip also drops the database qualifier entirely rather than guessing one.
  */
 
 import { useEffect, useState } from 'react';

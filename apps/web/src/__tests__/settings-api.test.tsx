@@ -1058,8 +1058,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 35 operations, 39 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(35);
+  it('describes the contract it claims to: 36 operations, 43 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(36);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1067,8 +1067,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // 18,314 -> 18,481: the captured copy of `GET /api/experiments` was refreshed to
     // match the backend description again (it had gone stale when that docstring
     // gained the derived `scenario` sentence), which is +167 characters.
-    expect(total).toBe(18481);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(39);
+    //
+    // 18,481 -> 20,915 and 35 -> 36 operations: the backend now publishes
+    // `GET /api/runtime/database/recon`. The hosted screen renders from the LIVE
+    // `/api/openapi`, so a caption still claiming 35 would be visibly false. The
+    // captured `GET /api/health` copy was refreshed in the same pass — it had gone
+    // stale when that docstring gained the database-block paragraph.
+    expect(total).toBe(20915);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(43);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

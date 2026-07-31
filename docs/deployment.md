@@ -87,6 +87,7 @@ a live graph (`graphify-out/` is gitignored and never shipped).
 | `PORT` | container | Listen port (default 8000) |
 | `ISAAC_BUILD_COMMIT` | Docker build arg (CI passes `github.sha`) | Build/commit identity on `GET {base}/api/health` |
 | `VITE_BASE_PATH` / `VITE_API_BASE` | Docker build (frontend stage) | Baked base path and same-origin API base (`/krish/`, `/krish/api`) |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` | k8s manifest + Secret `metadata-assistant-db-app` (Dean-owned) | libpq contract for the in-cluster `metadata_assistant` Postgres. **Already present in the pod.** `PGHOST` is the feature switch: unset (local dev, CI) means no database and today's synthetic behavior; set means the read-only reconnaissance path is live. See [`postgres-test-db-guide.md`](postgres-test-db-guide.md) |
 
 `ISAAC_UI_CORS_ORIGINS` values must be exact origins — scheme://host with no
 trailing slash and no path — because browsers match origins exactly and a
@@ -94,7 +95,23 @@ trailing slash silently breaks CORS.
 
 Local dev needs none of these — defaults reproduce the pre-hosting behavior
 exactly (localhost CORS, `/tmp/isaac-ui-workspace`, auth off, API at `/api`,
-no SPA serving; run the Vite dev server separately as always).
+no SPA serving; run the Vite dev server separately as always). Do **not** set the
+`PG*` variables locally: the database is unreachable from outside the cluster by
+design, and local runs and CI use fakes only.
+
+### Database status on `GET {base}/api/health`
+
+Health reports a `database` block derived from the environment alone — it opens
+**no connection**, because health is the Kubernetes readiness probe target and a
+database outage must never remove a pod from service. Reconnaissance runs only on
+an explicit request to `GET {base}/api/runtime/database/recon`, which uses one
+short-lived read-only connection, serialises concurrent scans, and returns
+sanitized aggregates only.
+
+Note that `mode: synthetic-only` on that same response describes the **workspace**
+— uploads refused, seeding from committed fixtures only. It does not mean the
+process never touches real data: since Slice 2A, production-derived records transit
+pod memory during a scan and are never persisted, logged, or returned.
 
 ## Auth model (honest scope)
 

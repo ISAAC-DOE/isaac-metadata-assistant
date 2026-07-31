@@ -142,6 +142,7 @@ def test_auth_rejects_near_miss_header_forms(tmp_path, monkeypatch):
 def test_health_commit_null_when_neither_env_set(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    monkeypatch.delenv("PGHOST", raising=False)
     client = _make_client(tmp_path, monkeypatch)
     body = client.get("/api/health").json()
     assert body == {
@@ -150,6 +151,13 @@ def test_health_commit_null_when_neither_env_set(tmp_path, monkeypatch):
         "core": "isaac_records",
         "version": body["version"],
         "commit": None,
+        "database": {
+            "configured": False,
+            "classification": None,
+            "contains_production_derived_records": None,
+            "record_display": "closed",
+            "last_recon": None,
+        },
     }
 
 

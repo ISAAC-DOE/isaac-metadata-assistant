@@ -571,28 +571,46 @@ Out of scope unless explicitly approved:
 - new slash commands
 - Graphify as truth layer
 - advisory AI review implementation beyond isolated placeholder
-- Phase 37 and its dependencies (NOT authorized): portal module integration, in-cluster Postgres /
-  durable persistence, portal or personal API keys, external model provider / LLM, identity/role
-  enforcement, retiring the blue portal, deleting/archiving the personal repo or the Vercel/Railway
-  projects, and any `isaac-k8` change
+- Phase 37 and its dependencies (NOT authorized): portal module integration, **durable persistence /
+  a PostgreSQL-backed record repository / any database write**, portal or personal API keys, external
+  model provider / LLM, identity/role enforcement, retiring the blue portal, deleting/archiving the
+  personal repo or the Vercel/Railway projects, and any `isaac-k8` change.
+  *Narrowed 2026-07-31:* deployment-mediated **read-only** in-cluster Postgres access that returns
+  sanitized **aggregate** output is authorized (Slice 2A, see the readiness table below). Reads from a
+  laptop or from CI, writes of any kind, and per-record hosted display remain out of scope.
 
-**Pre-Phase-37 readiness sequence (authorized 2026-07-30).** An explicitly authorized, sequential
-readiness sequence runs *before* — and does not start — Phase 37. Phase 37 as a broad feature phase
-remains **unstarted and unauthorized**; the §2 hard gate in
-`docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md` (no in-cluster Postgres connection, even
-read-only) stands unchanged.
+**Pre-Phase-37 readiness sequence (authorized 2026-07-30; Slice 2A authorized 2026-07-31).** An
+explicitly authorized, sequential readiness sequence runs *before* — and does not start — Phase 37.
+Phase 37 as a broad feature phase remains **unstarted and unauthorized**.
+
+**The access model changed on 2026-07-30.** Dean updated `docs/postgres-test-db-guide.md` (commit
+`b746b1a`) to document that the database is **not reachable from the laptop or from CI at all** — it
+becomes reachable only after push → GitHub Actions image build → GHCR → Flux → pod. The supported path
+is therefore *deployment-mediated*, and the earlier plan to obtain a kubeconfig, port-forward, or run
+recon locally is **obsolete**. The §2 hard gate in
+`docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md` has been **narrowed accordingly, not
+lifted** — read the amended §2 for exactly what is and is not now permitted.
 
 | Slice | Status |
 |---|---|
 | **1** — deterministic schema-truth-core diagnostics (`src/isaac_records/diagnostics.py`) | **authorized and done.** Contains **no database access** of any kind. |
-| **2 (design artifact)** — a safe, **unexecuted** read-only reconnaissance script (`scripts/db_recon.py`) | **authorized.** This is the "read-only Postgres reconnaissance design" that §3 of the readiness plan *requires to exist* before a Phase 37 slice. Authoring it satisfies a prerequisite; it is not a connection. |
-| **2 (execution)** — running that script against the SLAC test database | **NOT authorized and not currently possible.** Requires valid SLAC cluster access plus the applicable authorization gates. |
-| **3+** — PostgreSQL repository integration, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. |
-| **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. |
+| **2 (design artifact)** — a safe, **unexecuted** read-only reconnaissance script (`scripts/db_recon.py`) | **authorized and done.** Satisfied §3's "read-only Postgres reconnaissance design" prerequisite. Superseded in place by Slice 2A: the logic moved into the app and this file is now a thin, still-unexecuted CLI wrapper that is deliberately **absent from the container image**. |
+| **2 (local execution)** — running that script from a laptop against the SLAC database | **NOT authorized, and architecturally impossible.** Per Dean's guide the DB is unreachable from outside the cluster. Do not request a kubeconfig, port-forward, or Secret. |
+| **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. |
+| **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. |
+| **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
-Read the two documents together as follows: §2 blocks the *connection*; §3 requires the read-only
-recon *design* to exist beforehand. An unexecuted, fail-closed script is the §3 artifact, not a §2
-violation. Do not relabel this readiness sequence as Phase 37.
+Two separate **questions**, which Dean's guide is explicit about not conflating: **writing** to this
+database is unrestricted (the app owns it), while **displaying** its rows is closed by default,
+because the seeded rows are real production-derived records. Aggregate output is authorized now;
+per-record fields are not. (Not to be confused with §17's "two counts", which is the unrelated
+201-served-paths vs 200-manifest-entries distinction.)
+
+Note also that the app's `mode: synthetic-only` describes the **workspace** — uploads refused, seeding
+from committed fixtures only. It has never meant "no real data exists anywhere in the process", and
+since Slice 2A production-derived records transit pod memory during a scan. `runtime_mode.py` is
+unchanged and still refuses to boot in `real` mode; the honest DB status lives in the `database` block
+of `/api/health`, deliberately adjacent to `mode`.
 
 ---
 

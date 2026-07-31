@@ -97,8 +97,11 @@ describe('S2 · Load Materials', () => {
 
     expect(await findByText(/Blocked by governance\./)).toBeInTheDocument();
     expect(getByText(new RegExp(uploadsBlocked.reason))).toBeInTheDocument();
-    // the governance banner stays mounted alongside the blocked state
-    expect(getByText(/Synthetic mode\./)).toBeInTheDocument();
+    // the governance banner stays mounted alongside the blocked state.
+    // Slice 2A (I5) requalified its headline "Synthetic mode." → "Synthetic
+    // workspace." (the deployment may run a read-only test-DB diagnostic, so an
+    // unqualified mode claim over-stated it). Same assertion, new anchor.
+    expect(getByText(/Synthetic workspace\./)).toBeInTheDocument();
   });
 
   it('uploads with the backend down → Backend Not Running with the run command, never governance copy', async () => {

@@ -67,6 +67,7 @@ def _complete_seed(client, exp_id: str) -> dict:
 def test_health(client, monkeypatch):
     monkeypatch.delenv("ISAAC_BUILD_COMMIT", raising=False)
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    monkeypatch.delenv("PGHOST", raising=False)
     body = client.get("/api/health").json()
     assert body == {
         "status": "ok",
@@ -74,6 +75,14 @@ def test_health(client, monkeypatch):
         "core": "isaac_records",
         "version": body["version"],
         "commit": None,
+        # Derived from configuration alone; this operation opens no connection.
+        "database": {
+            "configured": False,
+            "classification": None,
+            "contains_production_derived_records": None,
+            "record_display": "closed",
+            "last_recon": None,
+        },
     }
     assert body["version"]
 
