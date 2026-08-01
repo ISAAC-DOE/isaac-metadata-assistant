@@ -66,8 +66,18 @@ export function platformInstances(
 
 export interface LayoutFinding {
   readonly id: string;
-  /** Which probe produced it. */
-  readonly kind: 'clipped' | 'obscured';
+  /**
+   * Which probe produced it.
+   *
+   * `'overflow'` was added when the probes were hardened (2026-08-01). It is
+   * reported by `findOverflowingRegions`, which did not exist before: the old
+   * `horizontalPageScroll` read ONLY `document.documentElement` and
+   * `document.body`, so a region that scrolled sideways INSIDE the page was
+   * invisible to the suite. That is not a hypothetical — at `/experiments`,
+   * 375px, the document measured a clean 375 == 375 while `main.screen-main.pad`
+   * measured scrollWidth 476 against clientWidth 353.
+   */
+  readonly kind: 'clipped' | 'obscured' | 'overflow';
   /**
    * Human-readable tag for this finding, used ONLY by the staleness annotation
    * in `layout-responsive.spec.ts` (which is outside this file's ownership and
@@ -147,7 +157,21 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       '(record-context does not shrink at phone widths) is shared by both. ' +
       'Fix belongs in `src/components/chrome.css` (.record-context / .topbar) and fixes both.',
     instances: {
-      'evidence@mobile-375x812': ['span < span.chip.chip-draft < div.record-context'],
+      // The macOS instance (`span < span.chip.chip-draft < div.record-context`
+      // at `evidence@mobile-375x812`, label reading "Draf") is DELETED as of
+      // 2026-08-01: the C1/I4 fix gave `.record-context` `overflow: hidden` at
+      // every width and moved the compact top-bar treatment into the ≤1024
+      // band, so the chip no longer runs past `div.screen-card`. Confirmed by
+      // this suite's own staleness signal — `layout-baseline-not-fired` named
+      // `evidence @ mobile-375x812: LAYOUT-02` — and by direct measurement.
+      //
+      // The Linux instance is KEPT, deliberately and conservatively. The fix
+      // addresses its stated shared cause, so it is EXPECTED to stop firing on
+      // CI too, but this environment cannot measure Linux font metrics and
+      // "expected" is not "measured". A stale entry only produces an
+      // annotation; deleting one that still fires produces a red build. If CI
+      // annotates it as not-fired, delete it then.
+      //
       // Evidenced by GitHub Actions run 30668917975: el 315..372 vs container
       // 10..365, clipped horizontally by `div.screen-card < div.app < div#root`,
       // text "Exported". `darwin: []` is a measurement: it does not clip on macOS.
@@ -155,6 +179,118 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
         darwin: [],
         linux: ['span < span.chip.chip-exported < div.record-context'],
       },
+    },
+  },
+  {
+    id: 'LAYOUT-03',
+    kind: 'obscured',
+    selector: 'statusbar-right',
+    note:
+      'The floating Assistant trigger (`button.assistant-drawer-trigger`: `position: fixed`, ' +
+      '`z-index: 45`, `bottom: 16px`, engaged by `@media (max-width: 1024px)`) is painted ' +
+      'directly over the right-hand end of the record StatusBar. The covered text is the ' +
+      'honesty statement "hosted preview · no telemetry" (rendered "local dev · no telemetry" ' +
+      'against a dev server), and the coverage is TOTAL, not partial: the probe reports a ' +
+      'visible-area ratio of 1.00 with 3 to 5 of 5 sampled points hitting the trigger, i.e. the ' +
+      'label is fully laid out and fully painted over. It survives `scrollIntoView`, so it is ' +
+      'not "scrolled away" — it is unreachable at any scroll offset. ' +
+      'PRE-EXISTING and NOT introduced by the 2026-08-01 remediation: it is a consequence of the ' +
+      'fixed trigger and the non-reflowing footer (LAYOUT-01), both of which predate it. It was ' +
+      'invisible until this slice, because the old `findObscuredControls` only ever examined ' +
+      'INTERACTIVE elements — a `<span>` label was outside the probe\'s universe entirely. ' +
+      'It is recorded rather than fixed because it falls outside the authorized defect list for ' +
+      'that slice (C1, I1-I5); recording it with exact selectors keeps the ratchet honest ' +
+      'instead of letting an annotation quietly absorb it. ' +
+      'Fix belongs in `src/components/chrome.css` (.statusbar / the trigger\'s offset), not here.',
+    instances: {
+      'record-detail@laptop-1024x768': [SB_RIGHT],
+      'guided-completion@laptop-1024x768': [SB_RIGHT],
+      'evidence@laptop-1024x768': [SB_RIGHT],
+      'export-readiness@laptop-1024x768': [SB_RIGHT],
+      'export-readiness-done@laptop-1024x768': [SB_RIGHT],
+      'record-detail@tablet-768x1024': [SB_RIGHT],
+      'guided-completion@tablet-768x1024': [SB_RIGHT],
+      'evidence@tablet-768x1024': [SB_RIGHT],
+      'export-readiness@tablet-768x1024': [SB_RIGHT],
+      'export-readiness-done@tablet-768x1024': [SB_RIGHT],
+      'guided-completion@mobile-375x812': [SB_RIGHT],
+      // Not SB_RIGHT here: at this pair the record's own status text is shorter,
+      // so a different segment lands under the trigger. Recorded as measured.
+      'export-readiness-done@mobile-375x812': [SB_EYEBROW],
+      'guided-completion@zoom-200': [SB_RIGHT],
+      'evidence@zoom-200': [SB_RIGHT],
+      'export-readiness@zoom-200': [SB_RIGHT],
+      'export-readiness-done@zoom-200': [SB_RIGHT],
+      // The width sweep (`layout-widths.spec.ts`) keys by WIDTH rather than by
+      // Playwright project, so its pairs are namespaced `@width-<n>`. Measured
+      // on darwin; Linux may differ and CI is the authority.
+      'export-readiness@width-1024': [SB_RIGHT],
+    },
+  },
+  {
+    id: 'LAYOUT-04',
+    kind: 'overflow',
+    selector: 'nested-horizontal-overflow',
+    note:
+      'NESTED horizontal overflow: regions that scroll or clip sideways INSIDE the page while ' +
+      'the document itself measures clean. Every instance below is PRE-EXISTING application ' +
+      'debt that no test could previously report, because the old probe only asked whether ' +
+      '`document.documentElement` / `document.body` overflowed. ' +
+      'Two distinct causes, deliberately recorded under one id because they share that history: ' +
+      '(a) `div.screen-card` inherits the non-reflowing StatusBar\'s width (LAYOUT-01: 575px of ' +
+      'content in a 353px box), so the shell overflows on record surfaces; (b) several `main` ' +
+      'regions and `section.preview` / `section.field-group` hold content whose min-content width ' +
+      'exceeds a phone viewport. ' +
+      'NOT the `/experiments` case that motivated the hardening — that one (`main.screen-main.pad`, ' +
+      'scrollWidth 476 vs clientWidth 353) was FIXED in the same slice by the I1 change and is ' +
+      'deliberately absent here; if it ever returns, it fails. ' +
+      'These are recorded, not fixed, because they fall outside the slice\'s authorized defect ' +
+      'list. Measured on darwin at the width sweep\'s own widths. **Linux is the authority and is ' +
+      'NOT yet measured** — the system font is wider there, so CI may report further instances; ' +
+      'when it does, add them exactly as named rather than widening the match.',
+    instances: {
+      'evidence@width-320': [
+        'div.screen-card < div.app < div#root',
+        'section.preview < main#main.screen-main < div.screen-body.evidence',
+      ],
+      'evidence@width-375': ['section.preview < main#main.screen-main < div.screen-body.evidence'],
+      'evidence@width-390': ['section.preview < main#main.screen-main < div.screen-body.evidence'],
+      'record-detail@width-320': [
+        'div.screen-card < div.app < div#root',
+        'section.field-group < main#main.screen-main.pad < div.screen-body.record',
+      ],
+      'record-detail@width-375': ['div.screen-card < div.app < div#root'],
+      'record-detail@width-390': ['div.screen-card < div.app < div#root'],
+      'export-readiness@width-320': ['div.screen-card < div.app < div#root'],
+      'export-readiness@width-375': ['div.screen-card < div.app < div#root'],
+      'export-readiness@width-390': ['div.screen-card < div.app < div#root'],
+      'export-readiness-done@width-320': [
+        'div.screen-card < div.app < div#root',
+        'main#main.screen-main.pad < div.screen-body.record < div.screen-card',
+      ],
+      'export-readiness-done@width-375': [
+        'div.screen-card < div.app < div#root',
+        'main#main.screen-main.pad < div.screen-body.record < div.screen-card',
+      ],
+      'export-readiness-done@width-390': ['div.screen-card < div.app < div#root'],
+      'guided-completion@width-320': [
+        'main#main.screen-main.centered < div.screen-body.record < div.screen-card',
+      ],
+      // PLATFORM-DIFFERING, and Linux is the one that is worse. MEASURED by CI
+      // run 30691557697 on `7e9a387`: the same region overflows at 375 as well
+      // under the wider Linux system face — scrollWidth 356 vs clientWidth 353,
+      // with `span.upcoming-path < div.upcoming-row < div.centered-col.narrow`
+      // as the widest overflowing child (right edge 367 vs 364). Three pixels,
+      // and therefore exactly the kind of thing macOS font metrics hide: it is a
+      // real application defect that any user with a slightly wider face sees.
+      // `darwin: []` is a measurement, not an omission — it does not fire there.
+      'guided-completion@width-375': {
+        darwin: [],
+        linux: ['main#main.screen-main.centered < div.screen-body.record < div.screen-card'],
+      },
+      'load@width-320': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],
+      'load@width-375': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],
+      'load@width-390': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],
     },
   },
 ];

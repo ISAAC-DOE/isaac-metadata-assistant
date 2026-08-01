@@ -200,6 +200,12 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  /* UNCONDITIONAL containment (C1). At 768px this box was measured at
+     clientWidth 350 against scrollWidth 455, and the overflow painted across the
+     bar. Whatever the width and whatever the crumb content, it is now clipped
+     inside its own box instead of over the controls beside it. Inert where the
+     content fits — at 1280 the box measures 825/825. */
+  overflow: hidden;
 }
 .record-title {
   font-size: 14px;
@@ -208,6 +214,16 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* A FLOOR, not a preference (I4). `overflow: hidden` makes this flex item's
+     automatic minimum size 0, so it is the shrink sink for the whole crumb: at
+     768 it was allotted clientWidth 0 against scrollWidth 395 and painted no
+     glyphs at all — not even the ellipsis. The floor keeps a readable fragment
+     at every width above the ≤1024 band (where the title gets its own row and
+     this is overridden). Measured inert at the widths it applies to, on the
+     narrowest of the four record surfaces (/evidence): the title is allotted
+     130px at 1025, 201px at 1100 and 330px at 1280 — so at 1025 the floor is
+     10px below the natural allocation, not driving it. */
+  min-width: 120px;
 }
 /* When the record title is an ancestor breadcrumb crumb it links back to Review
  * Record — keep it looking like the title (visual polish is a later slice). */
@@ -453,8 +469,15 @@
 
 /* ---- Responsive chrome (P33 S6 · RESP-1) ---------------------------- */
 /* Additive only: every rule below lives inside a max-width media query, so the
-   desktop layout (≥1024px) is byte-identical. Target = no horizontal PAGE
-   overflow + usable stacking/collapse, not a pixel-perfect mobile redesign. */
+   desktop layout is byte-identical ABOVE this band. Read the bound exactly:
+   `max-width: 1024px` includes 1024 itself, so "desktop" here means >1024px —
+   and since the record-breadcrumb treatment moved into this block, 1024 is a
+   width these rules genuinely change (the record title goes from 141px to the
+   full 966px row there). Two declarations outside every media query — the
+   `overflow` on `.record-context` and the `min-width` floor on `.record-title` —
+   do apply above the band; both measured inert at 1280 (context 825/825, title
+   330/395, unchanged). Target = no horizontal PAGE overflow + usable
+   stacking/collapse, not a pixel-perfect mobile redesign. */
 @media (max-width: 1024px) {
   .app { padding: 10px; }
   .screen-card { min-height: calc(100vh - 20px); }
@@ -485,6 +508,108 @@
     flex-direction: row;
     align-items: center;
   }
+
+  /* The bar wraps from here down: identity + controls keep row 1, the record
+     breadcrumb gets row 2 to itself (see `.record-context` below). `height` has
+     to become `min-height` for that second row to exist at all — a fixed 60px
+     box would simply overflow.
+
+     WHAT THIS COSTS A SCREEN WITH NO RECORD CONTEXT, measured on /experiments,
+     /memory, /settings, /governance, /statistics and /validator: the bar still
+     measures exactly 60px at 500, 640, 641, 700, 768, 1024 and 1280 — its
+     content fits one row, so the wrap never fires. It does NOT stay 60px all the
+     way down: at 390, 375 and 320 those same six surfaces measure 79.6px,
+     because the right-hand control group no longer fits beside the brand and
+     wraps below it. That is an improvement rather than a cost — before the wrap
+     existed the Help button was clipped off the right edge at 320 — but it is a
+     second row on every narrow screen, not only on record surfaces, and this
+     comment previously claimed otherwise. */
+  .topbar {
+    row-gap: 2px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    height: auto;
+    min-height: 60px;
+    flex-wrap: wrap;
+    align-content: center;
+  }
+
+  /* ---- C1 / I4 · the record breadcrumb owns row 2 --------------------
+   *
+   * THE BAND IS ≤1024px, NOT ≤640px — that was a real gap, measured. The bar is
+   * one row at 768 and the crumb does not fit it: on /evidence the title was
+   * allotted clientWidth 0 against scrollWidth 395 (the original I4 defect,
+   * intact), `.record-context` measured 350/455 (overflowing its own box, the C1
+   * mechanism) and `span.record-file` hung 105.3px past it. /complete was the
+   * same with a 26.8px file overhang, /export left the title at 28px — below the
+   * 40px critical-fragment threshold — and /record at 70px. One row cannot hold
+   * this crumb: the 350/455 above is 105px of overflow measured while the title
+   * was contributing ZERO width to the line, so restoring the title could only
+   * make the overflow worse.
+   *
+   * MEASURED defect at 375x812 (Chromium, /record/<id>/evidence):
+   *   · `.record-context` was squeezed to 69px — the whole width the topbar
+   *     had left after brand (82.6) + search (36) + mode chip (105.3) + gaps.
+   *     It is `overflow: visible`, so its children simply PAINTED OUTSIDE it:
+   *     `.record-surface` ran 143.6→302.9 and `span.chip.chip-draft` ran to
+   *     386.4 — past the 375px viewport. `document.elementFromPoint` across the
+   *     leaf crumb returned `.mode-chip` at 3 of 5 sample points, i.e. the
+   *     crumb text was genuinely painting over the mode chip.
+   *   · `.record-title` is a flex item with `overflow: hidden`, so its
+   *     `min-width: auto` resolved to 0 and it was allotted clientWidth 0
+   *     against scrollWidth 395. At clientWidth 0 Chromium paints no glyphs at
+   *     all, not even the ellipsis — the record title was invisible.
+   *
+   * WHY A SECOND ROW rather than "hide the leaf crumb and let the title take
+   * the freed width": there IS no freed width. 69px was the entire remainder,
+   * against a title whose measured natural width is 395px. And the leaf
+   * crumb is NOT a duplicate of a visible page heading — measured, the page's
+   * own <h1> on /evidence, /export and /record is `h1.sr-only` (clientWidth 1),
+   * so hiding the crumb would delete the surface name from every VISIBLE
+   * location. Giving the breadcrumb its own 329px row keeps all seven contract
+   * points: brand, search and mode chip stay whole on row 1; the title becomes
+   * visible for the first time; the leaf crumb and state chip stay readable.
+   *
+   * TRADE-OFF, recorded deliberately: `order: 1` moves the crumb visually below
+   * controls that follow it in the DOM, so Tab goes brand → record title →
+   * search, i.e. row 2 before the rest of row 1. The DOM/reading sequence is
+   * unchanged (it is the same order the single-row bar had), every control stays
+   * operable, and nothing is removed from the accessibility tree. */
+  .record-context {
+    order: 1;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    column-gap: 8px;
+    row-gap: 2px;
+    min-width: 0;
+    /* Belt-and-braces for C1: whatever the content, this box can no longer
+       paint over the controls beside it. */
+    overflow: hidden;
+  }
+  /* The two decorative (aria-hidden) chevrons separate nothing once the crumb is
+     stacked, and each one costs its measured 11.7px plus this band's 8px column
+     gap — 19.7px of a row that is 329px wide at 375. Direct children only, so
+     the state chip's own icon is untouched. */
+  .record-context > svg { display: none; }
+  /* The title takes the full row and finally has a width to ellipsize into. */
+  .record-title {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  /* `.record-context` now clips, so the 2px-offset focus ring would be clipped
+     with it — inset it instead of losing it. */
+  .record-title-link:focus-visible { outline-offset: -2px; }
+  /* The leaf crumb keeps its text but drops to a supporting rank below the
+     title, and truncates instead of overflowing. --text-secondary on --surface
+     is 8.07:1. */
+  .record-surface {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
 }
 
 @media (max-width: 640px) {
@@ -497,10 +622,23 @@
      lines up with the panels below it. */
   .main-inset { margin: 0 14px; }
 
-  .topbar { gap: 8px; padding: 0 12px; }
-  /* Trim the search trigger to its icon and drop the supplementary mono
-     filename so the topbar never overflows at phone widths. */
+  /* Phone widths tighten the bar's own gap and side padding; the wrap itself is
+     declared once, at ≤1024px, because the defect it fixes starts there. */
+  .topbar {
+    gap: 8px;
+    row-gap: 2px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  /* Trim the search trigger to its icon at phone widths. */
   .topbar-search-label,
   .topbar-search-kbd { display: none; }
+  /* PHONE ONLY: the supplementary mono filename is dropped. Between 641 and
+     1024px it stays visible — the crumb has its own row there and the filename
+     fits on it: at 768 that second row runs 29→485.4, i.e. 456.4px of a 710px
+     row, carrying the leaf crumb (141.7), the state chip (73.5) and the filename
+     (225.2). Below 640px it would push the leaf crumb and the state chip onto a
+     further line. */
   .record-file { display: none; }
 }
+

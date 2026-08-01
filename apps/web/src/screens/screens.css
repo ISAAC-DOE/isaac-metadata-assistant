@@ -2759,6 +2759,43 @@
 
   .page-header { flex-wrap: wrap; }
 
+  /* ---- I1 · the page actions could not fit any phone line -------------
+   * MEASURED at 375x812 on /experiments: `.page-header` already wrapped (it has
+   * `flex-wrap: wrap` + `min-width: 0` here), so the header was NOT the cause.
+   * `.page-actions` itself is `display: flex; flex: none` with computed
+   * `flex-wrap: nowrap` and `min-width: auto`, and its three buttons measured
+   * 125.3 + 174.8 + 127.6 + 20px of gaps = 447.7px inside a 297px header — so
+   * "New Record" ran x=359.1→486.7, ending 122px past the 364px content edge and
+   * 111.7px past the viewport. Identical geometry at 320x568.
+   * The fix is on `.page-actions`, not the header: let it wrap, and let each
+   * button own its line so the labels stay whole (they are `white-space: nowrap`
+   * and must not be squeezed to ellipsis). */
+  .page-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  .page-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* ---- I2 · the needs-attention banner column ------------------------
+   * MEASURED at 375x812 on /record/<partial>: the banner is a `row` flex with
+   * `.needsyou-icon { flex: none }`, `.needsyou-body { flex: 1 }` and
+   * `.needsyou-action { flex: none }`. The action button reserved 151.7px of a
+   * 297px banner, leaving `.needsyou-body` w=88.2 — an 88px column rendering a
+   * 465.2px-tall block (banner h=499.2). The row must break: the body keeps the
+   * line with the icon, and the action becomes a full-width control beneath it. */
+  .needsyou-banner { flex-wrap: wrap; }
+  .needsyou-body { flex: 1 1 180px; min-width: 0; }
+  .needsyou-action {
+    flex: 1 0 100%;
+    align-self: stretch;
+    justify-content: center;
+    margin-top: 4px;
+  }
+
   /* Two-up grids collapse to a single column so nothing is squeezed. */
   .signal-row,
   .artifact-row,
