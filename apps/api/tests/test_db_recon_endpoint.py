@@ -1064,37 +1064,56 @@ def test_structural_path_lists_are_excluded(client, monkeypatch):
     assert "distinct_signatures" not in dumped
     assert "path_presence" not in dumped
     assert "masked_key_segments" not in dumped
-    assert "signature" not in json.dumps(body["dataset"]["by_instance_path"])
-    # Only the aggregate count survives, never the path SET of any record. The
-    # per-record structural signature is what describes a document's shape.
-    assert isinstance(body["dataset"]["distinct_structural_signatures"], int)
-    # The failing-path projections that DO survive carry only names the public
-    # vendored schema already publishes — that is the whole redaction policy.
+    # The schema-side path projection that DOES survive carries only names the
+    # public vendored schema already publishes — that is the whole redaction
+    # policy — plus JSON Schema keywords and array indices.
     declared, _ = db_recon.load_schema_vocabulary(routes.REPO_ROOT)
-    allowed = declared | {
-        db_recon.ARRAY_SEGMENT,
-        db_recon.MASK_OPEN_MAP_KEY,
-        db_recon.MASK_UNDECLARED_KEY,
-        db_recon.MASK_NON_IDENTIFIER,
-        "$",
-    }
-    for entry in body["dataset"]["by_instance_path"]:
-        for segment in entry["path"].split("/"):
-            assert segment in allowed, segment
+    allowed = (
+        declared
+        | db_recon._SCHEMA_KEYWORDS
+        | {
+            db_recon.ARRAY_SEGMENT,
+            db_recon.MASK_OPEN_MAP_KEY,
+            db_recon.MASK_UNDECLARED_KEY,
+            db_recon.MASK_NON_IDENTIFIER,
+            "$",
+        }
+    )
+    for entry in body["dataset"]["by_schema_path"]:
+        for segment in entry["schema_path"].split("/"):
+            assert segment.isdigit() or segment in allowed, segment
 
 
-def test_vocabulary_values_are_excluded_and_only_the_count_survives(
+def test_vocabulary_values_are_excluded_and_so_is_the_row_count(
     client, monkeypatch
 ):
     """The service's own notes concede a lowercase slug cannot be PROVEN to be a
-    vocabulary term rather than data, so the endpoint emits counts only."""
+    vocabulary term rather than data, so no term value is emitted — and the row
+    COUNT is a cardinality of production-derived rows that the owner's guide
+    does not enumerate, so only presence survives (G3)."""
     configure_db(monkeypatch)
     ok_scan(monkeypatch)
     body = client.get(RECON_PATH).json()
     dumped = json.dumps(body)
     assert FAKE_VOCAB_TERM not in dumped
     assert "grouped" not in dumped
-    assert body["dataset"]["vocabulary_term_count"] == 1234
+    assert body["dataset"]["vocabulary_cache_present"] is True
+    assert "vocabulary_term_count" not in body["dataset"]
+    assert "1234" not in dumped
+
+
+def test_the_vocabulary_presence_flag_is_false_when_the_table_is_absent(
+    client, monkeypatch
+):
+    """Presence must be OBSERVED, not hardcoded — otherwise the coarser field
+    would be a constant wearing a reachability field's name."""
+    configure_db(monkeypatch)
+    rows = base_rows()
+    rows[db_recon.Q_VOCAB_TABLE_PRESENT] = [(0,)]
+    install_connection(monkeypatch, FakeConnection(rows))
+    body = client.get(RECON_PATH).json()
+    assert body["status"] == "ok"
+    assert body["dataset"]["vocabulary_cache_present"] is False
 
 
 def test_raw_record_ids_are_never_requested(client, monkeypatch):
@@ -1132,33 +1151,264 @@ def test_the_dataset_counts_are_the_documented_aggregates(client, monkeypatch):
     assert dataset["total_validation_issues"] >= 1  # the fixture is drifted
 
 
-def test_dangling_links_are_counted_without_naming_a_target(client, monkeypatch):
+def test_the_dataset_block_has_exactly_the_frozen_key_set(client, monkeypatch):
+    """The `dataset` block is where a record-derived aggregate would re-appear.
+
+    Freezing only the TOP-LEVEL keys left `dataset` open: four record-derived
+    aggregates shipped inside it in v0.0.32 without tripping a single contract
+    test. The block is now built key-by-key from `_DB_RECON_DATASET_KEYS`, and
+    this asserts the served set matches it exactly — no extra, none missing.
+    """
     configure_db(monkeypatch)
-    rows = base_rows(link_to=FAKE_ULID_MISSING)
+    ok_scan(monkeypatch)
+    dataset = client.get(RECON_PATH).json()["dataset"]
+    assert set(dataset) == set(routes._DB_RECON_DATASET_KEYS)
+    assert list(dataset) == list(routes._DB_RECON_DATASET_KEYS), "order is frozen too"
+    for withheld in routes._DB_RECON_WITHHELD_AGGREGATES:
+        assert withheld not in dataset
+
+
+def test_the_integrity_block_has_exactly_the_frozen_key_set(client, monkeypatch):
+    configure_db(monkeypatch)
+    ok_scan(monkeypatch)
+    integrity = client.get(RECON_PATH).json()["integrity"]
+    assert set(integrity) == set(routes._DB_RECON_INTEGRITY_KEYS)
+
+
+def test_the_database_block_has_exactly_the_frozen_key_set(client, monkeypatch):
+    """The THIRD nested block, closed for the same reason as the other two.
+
+    `dataset` and `integrity` were frozen by the G3 narrowing, but `database`
+    was left a hand-written dict literal — which is the *same* structural gap
+    that let five unauthorized aggregates ship inside `dataset` in v0.0.32,
+    merely relocated one block over. Nothing in `database` is record-derived
+    today; this asserts it stays that way by construction rather than by
+    everyone remembering.
+    """
+    configure_db(monkeypatch)
+    ok_scan(monkeypatch)
+    database = client.get(RECON_PATH).json()["database"]
+    assert set(database) == set(routes._DB_RECON_DATABASE_KEYS)
+    assert list(database) == list(routes._DB_RECON_DATABASE_KEYS), "order is frozen too"
+    assert set(database["gates"]) == set(routes._DB_RECON_GATE_KEYS)
+
+
+def test_an_unlisted_database_key_fails_closed_rather_than_being_served(
+    client, monkeypatch
+):
+    """Same contract as the `dataset` guard: REFUSE, never silently drop."""
+    configure_db(monkeypatch)
+    ok_scan(monkeypatch)
+    monkeypatch.setattr(
+        routes,
+        "_DB_RECON_DATABASE_KEYS",
+        tuple(k for k in routes._DB_RECON_DATABASE_KEYS if k != "configured"),
+    )
+    body = client.get(RECON_PATH).json()
+    assert body["status"] == "error"
+    assert body["dataset"] is None
+
+
+def test_an_unlisted_gate_name_fails_closed_rather_than_being_served(
+    client, monkeypatch
+):
+    """A gate name reaching the response unlisted must stop the report."""
+    configure_db(monkeypatch)
+    ok_scan(monkeypatch)
+    monkeypatch.setattr(
+        routes,
+        "_DB_RECON_GATE_KEYS",
+        tuple(k for k in routes._DB_RECON_GATE_KEYS if k != "tls"),
+    )
+    body = client.get(RECON_PATH).json()
+    assert body["status"] == "error"
+    assert body["dataset"] is None
+
+
+def test_the_withheld_list_is_a_constant_naming_every_withheld_aggregate(
+    client, monkeypatch
+):
+    """The narrowing must be VISIBLE. A silent projection change is
+    indistinguishable from a scan that found nothing."""
+    configure_db(monkeypatch)
+    ok_scan(monkeypatch)
+    dataset = client.get(RECON_PATH).json()["dataset"]
+    assert dataset["withheld_pending_visibility_decision"] == list(
+        routes._DB_RECON_WITHHELD_AGGREGATES
+    )
+    assert set(dataset["withheld_pending_visibility_decision"]) == {
+        "by_instance_path",
+        "distinct_structural_signatures",
+        "total_link_count",
+        "dangling_link_count",
+        "vocabulary_term_count",
+    }
+
+
+def test_the_limitations_name_the_narrowing_against_the_owners_list(
+    client, monkeypatch
+):
+    configure_db(monkeypatch)
+    ok_scan(monkeypatch)
+    text = " ".join(client.get(RECON_PATH).json()["limitations"])
+    assert "record counts, counts by type and domain, validation totals" in text
+    assert "withheld pending an explicit visibility decision" in text
+    assert "by_rule_family, by_schema_path" in text
+
+
+def test_an_unlisted_dataset_key_fails_closed_rather_than_being_served(
+    client, monkeypatch
+):
+    """Guards the guard: the allowlist must REFUSE, not silently drop.
+
+    A dropped key would let a future edit believe it had shipped a field while
+    callers never saw it; a served key would be the leak this exists to stop.
+    Neither: the projection raises, and `_db_recon_scan` converts that into the
+    sanitized `projection` failure envelope.
+    """
+    configure_db(monkeypatch)
+    ok_scan(monkeypatch)
+    monkeypatch.setattr(
+        routes,
+        "_DB_RECON_DATASET_KEYS",
+        tuple(k for k in routes._DB_RECON_DATASET_KEYS if k != "total_records"),
+    )
+    body = client.get(RECON_PATH).json()
+    assert body["status"] == "error"
+    assert body["database"]["refusal_gate"] == "projection"
+    assert body["dataset"] is None
+
+
+@pytest.mark.parametrize(
+    "link_to",
+    [None, FAKE_ULID_A, FAKE_ULID_MISSING],
+    ids=["no_links", "resolvable_link", "dangling_link"],
+)
+def test_link_derived_counts_are_never_projected(client, monkeypatch, link_to):
+    """G3: `total_link_count` / `dangling_link_count` are derived from
+    `data->'links'`, which means reading the stored documents.
+
+    The owner's guide authorises "record counts, counts by type and domain,
+    validation totals, schema version, database reachability". A link count is
+    none of those. The guide's only mention of dangling links sits under
+    "Gotchas to code around" — an instruction for CODE, not an authorization to
+    DISPLAY — so it must not be read as one.
+
+    This test FAILS against the shipped v0.0.32 projection, which emitted both.
+    """
+    configure_db(monkeypatch)
+    rows = base_rows(link_to=link_to)
     install_connection(monkeypatch, FakeConnection(rows))
     body = client.get(RECON_PATH).json()
-    assert body["dataset"]["total_link_count"] == 2
-    assert body["dataset"]["dangling_link_count"] == 2
+    assert body["status"] == "ok"
+    dataset = body["dataset"]
+    assert "total_link_count" not in dataset
+    assert "dangling_link_count" not in dataset
+    # The names appear ONLY in the withheld list, never as a served value.
+    served = {
+        k: v
+        for k, v in dataset.items()
+        if k != "withheld_pending_visibility_decision"
+    }
+    assert "link_count" not in json.dumps(served)
     assert FAKE_ULID_MISSING not in json.dumps(body)
+    # and the withholding is STATED rather than silent
+    assert "total_link_count" in dataset["withheld_pending_visibility_decision"]
+    assert "dangling_link_count" in dataset["withheld_pending_visibility_decision"]
 
 
-def test_a_resolvable_link_is_not_counted_as_dangling(client, monkeypatch):
+def test_instance_paths_are_never_projected(client, monkeypatch):
+    """G3: `by_instance_path` is a path through the stored RECORD.
+
+    Every segment is masked against the public schema, so nothing is *named*
+    that the schema does not already publish — but the fact that a path is
+    POPULATED can only be produced by reading a stored document, and with a
+    documented seed of 30 rows an `error_count` of 1 at a specific path is a
+    per-record fact wearing aggregate clothing. The schema-side counterpart
+    (`by_schema_path`) is retained; this one is not.
+
+    This test FAILS against the shipped v0.0.32 projection.
+    """
     configure_db(monkeypatch)
-    rows = base_rows(link_to=FAKE_ULID_A)
-    install_connection(monkeypatch, FakeConnection(rows))
+    ok_scan(monkeypatch)
     body = client.get(RECON_PATH).json()
-    assert body["dataset"]["dangling_link_count"] == 0
+    dataset = body["dataset"]
+    assert "by_instance_path" not in dataset
+    assert "failing_instance_paths" not in json.dumps(body)
+    assert "instance_path" not in json.dumps(
+        {k: v for k, v in dataset.items() if k != "withheld_pending_visibility_decision"}
+    )
+    assert "by_instance_path" in dataset["withheld_pending_visibility_decision"]
+    # the retained, schema-side breakdowns still carry the drift signal
+    assert isinstance(dataset["by_rule_family"], list)
+    assert isinstance(dataset["by_schema_path"], list)
 
 
-def test_dangling_count_is_omitted_rather_than_approximated(client, monkeypatch):
-    """If the page did not cover the table, 'dangling' would be a guess."""
+def test_distinct_structural_signature_count_is_never_projected(
+    client, monkeypatch
+):
+    """G3: a count of distinct record SHAPES is a record-derived structural
+    fact. It is an integer, which is exactly why it looked harmless: over a
+    30-row corpus it still reports how heterogeneous the stored documents are,
+    and the owner's guide enumerates no such aggregate.
+
+    This test FAILS against the shipped v0.0.32 projection.
+    """
     configure_db(monkeypatch)
-    rows = base_rows(link_to=FAKE_ULID_MISSING)
-    rows[db_recon.Q_RECORD_COUNT] = [(50,)]  # more rows exist than were paged
-    install_connection(monkeypatch, FakeConnection(rows))
+    ok_scan(monkeypatch)
     body = client.get(RECON_PATH).json()
-    assert "dangling_link_count" not in body["dataset"]
-    assert body["dataset"]["total_link_count"] == 2
+    dataset = body["dataset"]
+    assert "distinct_structural_signatures" not in dataset
+    assert "signature" not in json.dumps(
+        {k: v for k, v in dataset.items() if k != "withheld_pending_visibility_decision"}
+    )
+    assert (
+        "distinct_structural_signatures"
+        in dataset["withheld_pending_visibility_decision"]
+    )
+
+
+def test_the_service_still_computes_what_the_endpoint_withholds(monkeypatch):
+    """The narrowing is a PROJECTION boundary, not a deletion.
+
+    `run_recon` keeps computing the structure/link aggregates for
+    `scripts/db_recon.py`, which the Dockerfile COPY allowlist keeps out of the
+    image. If this ever stops being true the withholding has been implemented
+    by removing the capability instead of by bounding the response, and the
+    two entry points have silently diverged.
+    """
+    report = db_recon.run_recon(
+        FakeConnection(base_rows(link_to=FAKE_ULID_MISSING)),
+        env={"PGDATABASE": "metadata_assistant"},
+        salt="fixed-test-salt",
+        require_opt_in=False,
+    )
+    assert report["records"]["links"]["total_link_count"] == 2
+    assert report["records"]["links"]["dangling_link_count"] == 2
+    assert isinstance(report["structure"]["distinct_signature_count"], int)
+    assert report["validation"]["failing_instance_paths"] is not None
+    assert report["vocabulary_cache"]["row_count"] == 1234
+
+
+def test_the_cli_wrapper_is_absent_from_the_container_image():
+    """The wider report may exist only where no application route can reach it.
+
+    `scripts/db_recon.py` is the only consumer of the withheld aggregates. The
+    Dockerfile's COPY is an explicit ALLOWLIST and names exactly one file out of
+    `scripts/`, so the wrapper is not in the image and cannot be invoked in the
+    pod — which is the only place the database is reachable from at all.
+    """
+    dockerfile = (routes.REPO_ROOT / "Dockerfile").read_text("utf-8")
+    copied = [
+        line.strip()
+        for line in dockerfile.splitlines()
+        if line.strip().startswith("COPY") and "scripts/" in line
+    ]
+    assert copied == [
+        "COPY scripts/check_graphify_freshness.py scripts/check_graphify_freshness.py"
+    ], copied
+    assert "COPY scripts/db_recon.py" not in dockerfile
+    assert "COPY scripts/ " not in dockerfile and "COPY scripts/\n" not in dockerfile
 
 
 def test_the_response_is_deterministically_ordered(client, monkeypatch):

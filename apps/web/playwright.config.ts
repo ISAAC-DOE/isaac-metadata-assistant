@@ -12,7 +12,7 @@
  *   laptop-1024x768    the first sidebar/grid reflow
  *   tablet-768x1024    portrait tablet
  *   mobile-375x812     phone; crosses the `max-width: 640px` breakpoint
- *   zoom-200           REAL 200% browser zoom — see below
+ *   zoom-200           the LAYOUT-LEVEL EQUIVALENT of 200% browser zoom — see below
  *
  * ── How 200% zoom is emulated, exactly ──────────────────────────────────────
  *
@@ -27,7 +27,12 @@
  * That is genuinely distinct from the other projects: it is NOT the 375px phone
  * case (different breakpoint, different DPR) and it is NOT "a 640px window",
  * which would have DPR 1. `specs/zoom-200.spec.ts` asserts both numbers in the
- * live page, so the emulation is proved rather than assumed.
+ * live page, so the emulation's PARAMETERS are proved rather than assumed.
+ * (Proving the parameters is not the same as proving fidelity: DPR contributes
+ * nothing to CSS layout — 640x400@DPR2 and 640x400@DPR1 measure byte-identical
+ * innerWidth, clientWidth and media-query state. The reflow under test comes
+ * entirely from the 640px width; the DPR assertion is a fidelity guard against
+ * someone quietly dropping it, not a source of layout signal.)
  *
  * `document.body.style.zoom` is deliberately NOT used. It is a non-standard
  * rendering quirk that scales a subtree without changing the layout viewport,

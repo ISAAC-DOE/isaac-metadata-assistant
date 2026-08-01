@@ -3006,6 +3006,30 @@ def get_schema() -> dict:
 # JSON, no structural path list, no vocabulary values, no host, port, user,
 # password, secret name, or connection string, and no driver text of any kind.
 #
+# LEAST PRIVILEGE AGAINST THE OWNER'S ENUMERATED LIST (gate G3).
+# `docs/postgres-test-db-guide.md`, "Displaying record content", authorises a
+# NAMED list and nothing wider: "record counts, counts by type and domain,
+# validation totals, schema version, database reachability". Slice 2A shipped
+# four aggregates that are not on it and that are derived by reading the stored
+# documents themselves — `by_instance_path`, `distinct_structural_signatures`,
+# `total_link_count`/`dangling_link_count` — plus `vocabulary_term_count`, a
+# cardinality of production-derived vocabulary rows. They are withheld here.
+#
+# The rule that decides it: THE SCHEMA MAY DESCRIBE THE DATA; THE DATA MAY NOT
+# DESCRIBE ITSELF. `by_rule_family` (validator keywords) and `by_schema_path`
+# (pointers into the vendored PUBLIC schema) are produced by the schema and are
+# retained as a breakdown of the authorised "validation totals". A path through
+# a record INSTANCE, a count of distinct record SHAPES, and a count of
+# `data->'links'` entries can only be produced by reading the stored documents,
+# so they are per-record structure and stay closed until the owner says
+# otherwise. The withheld names are still stated in the response, as fixed
+# constants, so the narrowing is visible rather than silent.
+#
+# The full reconnaissance report still computes them: they are consumed only by
+# `scripts/db_recon.py`, which the Dockerfile COPY allowlist deliberately keeps
+# out of the image (only `scripts/check_graphify_freshness.py` is copied), so
+# there is no application route by which they can be reached.
+#
 # It takes no query parameter, no body, no SQL, no record id, no schema path
 # and no filter. There is nothing for a caller to steer.
 
@@ -3027,6 +3051,70 @@ _DB_RECON_RESPONSE_KEYS: tuple[str, ...] = (
     "dataset",
     "integrity",
     "limitations",
+)
+
+#: The FROZEN `dataset` key allowlist. Every one of these is either explicitly
+#: enumerated by `docs/postgres-test-db-guide.md` ("record counts, counts by
+#: type and domain, validation totals, schema version, database reachability"),
+#: a breakdown of "validation totals" produced by the PUBLIC schema rather than
+#: by the data, or a constant published in the guide itself.
+#:
+#: The block is built key-by-key FROM this tuple, so a record-derived aggregate
+#: cannot re-appear by an edit somewhere downstream: an unlisted key raises, and
+#: a missing one raises too.
+_DB_RECON_DATASET_KEYS: tuple[str, ...] = (
+    # record counts (enumerated)
+    "total_records",
+    "records_scanned",
+    "records_parsed",
+    "parse_failures",
+    "record_id_digest_count",
+    # the guide's own documented seed size, and the comparison against it
+    "expected_seed_rows",
+    "seed_count_matches",
+    # validation totals (enumerated)
+    "records_passing_full_schema",
+    "records_failing_full_schema",
+    "total_validation_issues",
+    # breakdowns of those totals, produced by the schema, never by a value
+    "by_rule_family",
+    "by_schema_path",
+    # counts by type and domain (enumerated)
+    "by_record_type",
+    "by_record_domain",
+    # reachability of the vocabulary table — presence, not cardinality
+    "vocabulary_cache_present",
+    # what this projection deliberately does NOT carry, named in the response
+    "withheld_pending_visibility_decision",
+)
+
+#: The FROZEN `integrity` key allowlist. Nothing here is derived from a record:
+#: every field is an operational property of the scan itself.
+_DB_RECON_INTEGRITY_KEYS: tuple[str, ...] = (
+    "transaction_read_only",
+    "rows_before",
+    "rows_after",
+    "rows_modified",
+    "full_schema_fingerprint_match",
+    "partial_schema_validation_runs",
+    "schema_stable_across_run",
+    "dml_statements_issued",
+    "ddl_statements_issued",
+    "read_statements_issued",
+    "session_statements_issued",
+)
+
+#: Aggregates the reconnaissance report computes and this operation WITHHOLDS,
+#: because the database owner's authorization does not name them and each is
+#: derived by reading the stored documents. Fixed code constants — nothing is
+#: interpolated, so this adds no leak surface. Naming them keeps the narrowing
+#: auditable instead of invisible.
+_DB_RECON_WITHHELD_AGGREGATES: tuple[str, ...] = (
+    "by_instance_path",
+    "distinct_structural_signatures",
+    "total_link_count",
+    "dangling_link_count",
+    "vocabulary_term_count",
 )
 
 #: What the numbers above CANNOT establish, carried in every response.
@@ -3076,6 +3164,15 @@ _DB_RECON_LIMITATIONS: tuple[str, ...] = (
     "content is closed by default pending an explicit visibility decision, so "
     "no record id, title, scientific value or stored document is reachable "
     "here.",
+    "Narrower than aggregates-in-general: the owner's authorization names "
+    "record counts, counts by type and domain, validation totals, schema "
+    "version and reachability. Aggregates outside that list which are derived "
+    "by reading the stored documents — paths through a record instance, a "
+    "count of distinct record shapes, link counts, and the vocabulary row "
+    "count — are withheld pending an explicit visibility decision, and are "
+    "named in dataset.withheld_pending_visibility_decision. The retained "
+    "breakdowns (by_rule_family, by_schema_path) are produced by the vendored "
+    "public schema, not by any stored value.",
 )
 
 #: The guide's documented classification of this database.
@@ -3091,9 +3188,11 @@ _DB_RECON_EXPECTED_SEED_ROWS = db_recon.DOCUMENTED_SEED_ROWS
 _DB_RECON_CACHE_TTL_SECONDS = 60.0
 
 #: Fetch bound. One more than the production-shape refusal threshold, so any
-#: table this operation is willing to look at is scanned whole (which is what
-#: makes `dangling_link_count` derivable rather than approximated) while a
+#: table this operation is willing to look at is scanned whole — the validation
+#: totals then cover every row rather than a page of them — while a
 #: surprise-huge table is refused by the gate before it is ever paged in.
+#: (It also used to be what made `dangling_link_count` a fact rather than an
+#: approximation; that aggregate is no longer projected — see G3 above.)
 _DB_RECON_MAX_RECORDS = db_recon.MAX_PLAUSIBLE_RECORD_ROWS + 1
 
 #: Per-process salt for the record_id digests the recon computes internally.
@@ -3148,6 +3247,42 @@ def _db_recon_envelope(
     return {key: built[key] for key in _DB_RECON_RESPONSE_KEYS}
 
 
+#: The FROZEN `database` key allowlist. Nothing here is derived from a record:
+#: every value is a code-level constant, a boolean, a masked version string, or
+#: a gate/exception NAME. It is frozen anyway, for the reason G3 exists — the
+#: `dataset` leak happened because only the TOP-LEVEL keys were frozen, so a
+#: record-derived value could be added to a nested block without tripping a
+#: single contract test. Two of the three nested blocks were closed by the G3
+#: narrowing; this closes the third, so the structural gap is gone rather than
+#: merely relocated.
+_DB_RECON_DATABASE_KEYS: tuple[str, ...] = (
+    "configured",
+    "classification",
+    "contains_production_derived_records",
+    "record_display",
+    "server_version",
+    "server_version_major",
+    "expected_major_version",
+    "expected_major_version_match",
+    "gates",
+    "refusal_gate",
+    "refusal_class",
+)
+
+#: The FROZEN gate-name allowlist for `database.gates`. Gate names are code
+#: constants, so this is belt-and-braces — but an unlisted gate name reaching
+#: the response is exactly the shape of mistake that must fail closed.
+_DB_RECON_GATE_KEYS: tuple[str, ...] = (
+    "database_identity",
+    "current_user",
+    "session_user",
+    "tls",
+    "records_table_present",
+    "transaction_read_only",
+    "not_production_shaped",
+)
+
+
 def _db_recon_database_block(
     *,
     configured: bool,
@@ -3157,9 +3292,23 @@ def _db_recon_database_block(
     gates: dict | None = None,
     refusal_gate: str | None = None,
     refusal_class: str | None = None,
+    strict: bool = False,
 ) -> dict:
-    """The `database` sub-object. NEVER carries host, port, user, or password."""
-    return {
+    """The `database` sub-object. NEVER carries host, port, user, or password.
+
+    Always PROJECTED through `_DB_RECON_DATABASE_KEYS` / `_DB_RECON_GATE_KEYS`,
+    so an unlisted key can never be served regardless of `strict`: a projection
+    onto a fixed allowlist cannot invent a key.
+
+    `strict` additionally RAISES when the builder produced a key the allowlist
+    does not have — a developer-error detector, so a new field cannot be added
+    and silently dropped. It is set on the success path only, and deliberately
+    NOT on the failure envelopes: those are what a raise degrades INTO, so if
+    they raised too, a broken allowlist would escape as an unhandled 500 with a
+    traceback instead of the sanitized envelope. Fail-closed has to include the
+    closing.
+    """
+    built = {
         "configured": configured,
         "classification": _DB_RECON_CLASSIFICATION if configured else None,
         # The guide is explicit that the seeded rows are real
@@ -3171,22 +3320,22 @@ def _db_recon_database_block(
         "expected_major_version": db_recon.EXPECTED_SERVER_MAJOR_VERSION,
         # Reported, NEVER gated: a cluster upgrade must not break this route.
         "expected_major_version_match": expected_major_version_match,
-        "gates": gates
-        if gates is not None
-        else {
-            "database_identity": None,
-            "current_user": None,
-            "session_user": None,
-            "tls": None,
-            "records_table_present": None,
-            "transaction_read_only": None,
-            "not_production_shaped": None,
-        },
+        "gates": gates if gates is not None else {key: None for key in _DB_RECON_GATE_KEYS},
         # A gate name and an exception CLASS name are code-level constants, so
         # they are safe to name. No driver message, ever.
         "refusal_gate": refusal_gate,
         "refusal_class": refusal_class,
     }
+    built_gates = built["gates"] or {}
+    if strict:
+        if set(built) - set(_DB_RECON_DATABASE_KEYS):
+            raise KeyError("db_recon database key not on the frozen allowlist")
+        if set(built_gates) - set(_DB_RECON_GATE_KEYS):
+            raise KeyError("db_recon gate key not on the frozen allowlist")
+    block = {key: built.get(key) for key in _DB_RECON_DATABASE_KEYS}
+    if "gates" in _DB_RECON_DATABASE_KEYS:
+        block["gates"] = {key: built_gates.get(key) for key in _DB_RECON_GATE_KEYS}
+    return block
 
 
 def _db_recon_leak_guard(payload: dict, env: Mapping[str, str]) -> dict:
@@ -3265,18 +3414,29 @@ def _db_recon_project(report: Mapping, authority: Mapping, statements: Mapping) 
     `apps/api/tests/test_db_recon_endpoint.py`:
 
     * `structure.distinct_signatures[].paths` — the full structural path lists;
+    * `structure.distinct_signature_count` — even the COUNT of distinct record
+      shapes, which is a record-derived structural fact the owner did not
+      enumerate (G3);
     * `records.record_id_digests.digests` — only its count survives;
     * raw record ids under any flag (the endpoint never sets one);
-    * `vocabulary_cache` grouped VALUES — counts only, because the module's own
-      notes concede a lowercase slug cannot be PROVEN to be a vocabulary term
-      rather than data.
+    * `validation.failing_instance_paths` — paths through a record INSTANCE.
+      Every segment is masked against the public schema, but the fact that a
+      path is populated is produced by reading the stored document (G3);
+    * `records.links.*` — `total_link_count` and `dangling_link_count` are
+      derived from `data->'links'` (G3). The guide mentions dangling links
+      under "Gotchas to code around", which is an instruction for CODE, not an
+      authorization to DISPLAY;
+    * `vocabulary_cache` grouped VALUES — because the module's own notes
+      concede a lowercase slug cannot be PROVEN to be a vocabulary term rather
+      than data — and its ROW COUNT too, which is a cardinality of
+      production-derived rows and is not on the owner's enumerated list. Only
+      presence survives.
     """
     connection = report.get("connection") or {}
     gate_states = report.get("gates") or {}
     records = report.get("records") or {}
     validation = report.get("validation") or {}
     mutation = report.get("mutation_check") or {}
-    links = records.get("links") or {}
 
     analyzed = int(records.get("analyzed") or 0)
     parse_failures = int(records.get("unreadable_payloads") or 0)
@@ -3296,7 +3456,7 @@ def _db_recon_project(report: Mapping, authority: Mapping, statements: Mapping) 
         "not_production_shaped": gate_states.get("not_production_shaped") == "pass",
     }
 
-    dataset = {
+    built_dataset = {
         "total_records": total,
         "expected_seed_rows": _DB_RECON_EXPECTED_SEED_ROWS,
         "seed_count_matches": total == _DB_RECON_EXPECTED_SEED_ROWS,
@@ -3314,17 +3474,11 @@ def _db_recon_project(report: Mapping, authority: Mapping, statements: Mapping) 
             }
             for f in families
         ],
-        # Both path projections are masked against the vendored PUBLIC schema by
-        # `db_recon` before they get here: a segment survives only if the public
-        # schema already publishes that name.
-        "by_instance_path": [
-            {
-                "path": str(p.get("path")),
-                "family": str(p.get("family")),
-                "error_count": int(p.get("error_count") or 0),
-            }
-            for p in (validation.get("failing_instance_paths") or [])
-        ],
+        # Pointers into the vendored PUBLIC schema, masked by `db_recon` before
+        # they get here: a segment survives only if the public schema already
+        # publishes that name. The schema describes the data; this is the
+        # schema side of that line, so it is retained. The INSTANCE-path
+        # counterpart is not — see the docstring and G3.
         "by_schema_path": [
             {
                 "schema_path": str(p.get("schema_path")),
@@ -3337,21 +3491,23 @@ def _db_recon_project(report: Mapping, authority: Mapping, statements: Mapping) 
         "record_id_digest_count": int(
             (records.get("record_id_digests") or {}).get("count") or 0
         ),
-        "vocabulary_term_count": (report.get("vocabulary_cache") or {}).get("row_count"),
-        "distinct_structural_signatures": int(
-            (report.get("structure") or {}).get("distinct_signature_count") or 0
+        # Reachability of the table, not the size of its contents.
+        "vocabulary_cache_present": bool(
+            (report.get("vocabulary_cache") or {}).get("present")
         ),
-        "total_link_count": int(links.get("total_link_count") or 0),
+        "withheld_pending_visibility_decision": list(_DB_RECON_WITHHELD_AGGREGATES),
     }
-    # Emitted ONLY when the whole table was scanned, so it is a fact rather than
-    # an approximation over a page. Omitted entirely otherwise.
-    if links.get("dangling_link_count") is not None:
-        dataset["dangling_link_count"] = int(links["dangling_link_count"])
+    # Built FROM the frozen allowlist: an unlisted key cannot ride along, and a
+    # dropped one raises here rather than silently vanishing from the contract.
+    dataset = {key: built_dataset[key] for key in _DB_RECON_DATASET_KEYS}
+    extra = set(built_dataset) - set(_DB_RECON_DATASET_KEYS)
+    if extra:
+        raise KeyError("dataset key not on the frozen allowlist")
 
     rows_before = int(mutation.get("records_before") or 0)
     rows_after = int(mutation.get("records_after") or 0)
     counts = dict(statements or {})
-    integrity = {
+    built_integrity = {
         "transaction_read_only": connection.get("transaction_read_only") == "on",
         "rows_before": rows_before,
         "rows_after": rows_after,
@@ -3376,6 +3532,9 @@ def _db_recon_project(report: Mapping, authority: Mapping, statements: Mapping) 
         "read_statements_issued": int(counts.get("read", 0)),
         "session_statements_issued": int(counts.get("session", 0)),
     }
+    integrity = {key: built_integrity[key] for key in _DB_RECON_INTEGRITY_KEYS}
+    if set(built_integrity) - set(_DB_RECON_INTEGRITY_KEYS):
+        raise KeyError("integrity key not on the frozen allowlist")
 
     return _db_recon_envelope(
         status="ok",
@@ -3396,6 +3555,9 @@ def _db_recon_project(report: Mapping, authority: Mapping, statements: Mapping) 
             server_version_major=connection.get("server_version_major"),
             expected_major_version_match=connection.get("expected_major_version_match"),
             gates=gates,
+            # Success path only — see the docstring: the failure envelopes this
+            # would degrade into must NOT raise, or fail-closed stops closing.
+            strict=True,
         ),
         dataset=dataset,
         integrity=integrity,

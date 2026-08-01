@@ -613,7 +613,7 @@ lifted** — read the amended §2 for exactly what is and is not now permitted.
 | **1** — deterministic schema-truth-core diagnostics (`src/isaac_records/diagnostics.py`) | **authorized and done.** Contains **no database access** of any kind. |
 | **2 (design artifact)** — a safe, **unexecuted** read-only reconnaissance script (`scripts/db_recon.py`) | **authorized and done.** Satisfied §3's "read-only Postgres reconnaissance design" prerequisite. Superseded in place by Slice 2A: the logic moved into the app and this file is now a thin, still-unexecuted CLI wrapper that is deliberately **absent from the container image**. |
 | **2 (local execution)** — running that script from a laptop against the SLAC database | **NOT authorized, and architecturally impossible.** Per Dean's guide the DB is unreachable from outside the cluster. Do not request a kubeconfig, port-forward, or Secret. |
-| **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. **Caveat below:** three shipped aggregates go beyond Dean's enumerated list — see the G3 note after this table. |
+| **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. **Caveat below:** five shipped aggregates went beyond Dean's enumerated list and have since been withheld from the response — see the G3 note after this table. |
 | **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
@@ -625,14 +625,36 @@ per-record fields are not. (Not to be confused with §17's "two counts", which i
 
 **But "aggregate output is authorized" is not the whole truth, and this file must not imply it is.**
 Dean's authorization names a specific list — record counts, counts by type and domain, validation
-totals, schema version, reachability. **Slice 2A already ships three aggregates beyond that list**:
-`by_instance_path`, `distinct_structural_signatures`, and the `total_link_count` /
-`dangling_link_count` pair. They are record-*derived* structural facts. None emits a scientific
-value, title, id, or record text — the masking in `apps/api/isaac_api/db_recon.py:436-470`
-(`safe_key_segment`) holds under static review; note this is code review, **not** a runtime
-observation, and the scan has never run. They were never explicitly authorized, and they are live in
-`v0.0.32`. Raised as gate **G3**. Do not repeat "aggregate output is authorized" without this
-qualification.
+totals, schema version, reachability. **Slice 2A shipped FIVE aggregates beyond that list** — not
+three, as an earlier revision of this note said: `by_instance_path`,
+`distinct_structural_signatures`, the `total_link_count` / `dangling_link_count` pair, and
+`vocabulary_term_count`. They are record-*derived* structural facts. None emitted a scientific value,
+title, id, or record text — the masking in `apps/api/isaac_api/db_recon.py` (`safe_key_segment`)
+holds under static review; note this is code review, **not** a runtime observation, and **the scan
+has still never run**.
+
+**They are no longer served.** The baseline-closure slice withheld all five from the HTTP response
+and names them in `dataset.withheld_pending_visibility_decision`; `vocabulary_term_count` is replaced
+by the boolean `vocabulary_cache_present`, which is reachability and *is* enumerated. The root cause
+is worth remembering: only the **top-level** response keys were frozen, so all five could ship inside
+`dataset` in `v0.0.32` without tripping a single contract test — four of them record-*derived*, the
+fifth (`vocabulary_term_count`) a production-table cardinality. The
+`dataset`, `integrity` **and `database`** blocks — all three nested blocks, so the gap is closed
+rather than relocated — are now built from frozen allowlists (`_DB_RECON_DATASET_KEYS`,
+`_DB_RECON_INTEGRITY_KEYS`, `_DB_RECON_DATABASE_KEYS`, `_DB_RECON_GATE_KEYS`). Every block is
+*projected* onto its allowlist, so an unlisted key can never be served; on the success path an
+unlisted key additionally **raises**, failing closed into a sanitized `projection` envelope. That
+raise is deliberately NOT armed on the failure envelopes: they are what a raise degrades *into*, so
+if they raised too, a broken allowlist would escape as an unhandled 500 with a traceback instead of
+the sanitized envelope — fail-closed has to include the closing. What remains is either explicitly enumerated by Dean, or a schema-side breakdown of
+"validation totals" (`by_rule_family`, `by_schema_path`) that obeys *the schema may describe the
+data; the data may not describe itself*. The wider report is still computed by `run_recon` for
+`scripts/db_recon.py`, which the Dockerfile COPY allowlist keeps out of the image — verified by test,
+so no application route reaches it.
+
+**G3 remains OPEN**, narrowed from a live exposure to a question: all five *were* served in
+`v0.0.32`, and only Dean can say whether they were within his intent. Do not restore any of them
+without his answer, and do not repeat "aggregate output is authorized" without this qualification.
 
 **Baseline restoration (started 2026-07-31).** The authoritative definition of "baseline" — which
 capabilities are required, which are deliberately deferred, and who owns each external gate — is
@@ -647,15 +669,17 @@ session must not silently reverse:
   authorization, and the guide says so directly. The exact question Dean must answer is gate **G2**
   in the matrix.
 - **Schema drift is already classified, and the rule for anything further is narrow.** Slice 2A
-  ships the taxonomy — `by_rule_family`, `by_schema_path`, `by_instance_path`. Do not rebuild it.
+  ships the taxonomy — `by_rule_family` and `by_schema_path` are served; `by_instance_path` is still
+  computed by `run_recon` but is **no longer projected** into the HTTP response. Do not rebuild it.
   Do **not** quote a family count: the deployed pod prefers the diagnostics engine, whose labels are
   raw jsonschema keywords (an open set), not the 12 normalized patterns in `_FAMILY_PATTERNS`. The
   label set is unobserved until the scan runs — matrix §4.1 explains why. For anything *new*, the rule is: *the schema may describe the data; the data may not
   describe itself* — if an output string can only be produced by reading a record's value, it is
   per-record content and is closed. That rule alone is not sufficient, because per-record facts can
   be reconstructed by arithmetic; matrix §4.3 adds a minimum cell size, a cross-tabulation limit, and
-  an absolute prohibition on caller-parameterized aggregation. Note honestly that `by_instance_path`
-  is itself the boundary case (see the G3 note above) — it ships, and it is flagged, not endorsed.
+  an absolute prohibition on caller-parameterized aggregation. `by_instance_path` was the boundary
+  case that proved the rule: over a 30-row seed an `error_count` of 1 at a path *is* a single-record
+  fact, which is why it is now withheld rather than merely flagged (see the G3 note above).
 
 Graph freshness and the measured performance baseline are settled in
 [`docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md`](docs/superpowers/plans/2026-07-31-graph-and-performance-baseline.md):

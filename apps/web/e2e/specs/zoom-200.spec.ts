@@ -1,6 +1,13 @@
 /**
- * 200% browser zoom — proof that the emulation is real, plus the WCAG 1.4.10
- * reflow criterion.
+ * 200% browser zoom — proof that the emulation reproduces the layout-relevant
+ * properties of real zoom, plus a WCAG-1.4.10-STYLE reflow sweep at the 200%
+ * step only. This is NOT WCAG 1.4.10 conformance: that criterion is defined at
+ * 400% / 320px, and the test below says so itself. Real Cmd/Ctrl-+ zoom has no
+ * automation surface in Chromium (verified: `Emulation.setPageScaleFactor`
+ * moves `visualViewport.scale` without reflowing, `setDeviceMetricsOverride`
+ * with only a `scale` does nothing, `--force-device-scale-factor` is overridden
+ * by Playwright's own metrics override, and CSS `zoom` doubles raw pixels
+ * without firing the breakpoint), so it stays a human QA gate.
  * @zoom
  *
  * This spec runs ONLY in the `zoom-200` project. Its first job is to make the

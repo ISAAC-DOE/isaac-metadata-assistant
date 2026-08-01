@@ -288,10 +288,27 @@ export function SearchDialog() {
 
   return (
     <div role="search" className="topbar-search-region">
+      {/*
+        FINDING A11Y-02 (A1) fix. The accessible name must NOT depend on CSS.
+        `chrome.css`'s `max-width: 640px` block hides `.topbar-search-label` and
+        `.topbar-search-kbd`, and the icon is `aria-hidden`, so below the
+        breakpoint (and at 200% browser zoom, which lays out at 640px) the
+        button computed NO accessible name at all.
+
+        `aria-label` rather than an extra visually-hidden span: aria-label
+        OVERRIDES the element's content, so the name is exactly "Search" at
+        every width instead of "Search Search ⌘K" wherever the visible label is
+        shown. It also holds if the stylesheet fails to load or the breakpoint
+        moves — a visually-hidden span would put the name back under CSS
+        control, which is the class of bug being fixed here. WCAG 2.5.3
+        (label in name) holds: the visible label reads "Search" and the
+        accessible name IS "Search".
+      */}
       <button
         type="button"
         ref={triggerRef}
         className="topbar-search"
+        aria-label="Search"
         aria-haspopup="dialog"
         onClick={openDialog}
       >

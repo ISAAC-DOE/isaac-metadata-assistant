@@ -231,8 +231,10 @@ test('@interaction the a11y baseline reports a rule firing where it was never re
   // on a page that was already failing.
   expect(auditScan(await scan(page), experiments.id, project), 'the unmodified surface must audit clean').toEqual([]);
 
-  // `aria-allowed-attr` is a recorded defect on the Evidence trail — and
-  // nowhere else. Reproduce that exact defect on My Experiments.
+  // `aria-allowed-attr` used to be a recorded defect on the Evidence trail
+  // (FINDING A11Y-03). It is fixed, so it is now baselined NOWHERE and every
+  // surface expects 0 — which is exactly the condition this proof needs.
+  // Reproduce the old defect verbatim on My Experiments.
   expect(expectedNodeCount('aria-allowed-attr', experiments.id, project)).toBe(0);
   await page.evaluate(() => {
     const b = document.createElement('button');
