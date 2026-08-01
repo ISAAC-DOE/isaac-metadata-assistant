@@ -81,7 +81,7 @@ jobs:
     #
     # What it does: boots the FastAPI backend with NO database and NO
     # credentials, seeds the committed synthetic fixtures through the
-    # idempotent /api/demo/run route, then runs the Playwright suite
+    # seeding read GET /api/experiments (ensure_seeded), then runs the Playwright suite
     # (Chromium only) across five viewport/zoom projects.
     #
     # What it deliberately does NOT do: contact any database (no PG* variable

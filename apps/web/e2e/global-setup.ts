@@ -8,9 +8,17 @@
  *      so if it is missing we fail here with the exact command to run instead
  *      of letting 200 specs quietly assert against the "Backend Not Running"
  *      screen.
- *   2. Seed the synthetic workspace ONCE, via `POST /api/demo/run`. That route
- *      is idempotent by construction — it upserts a FIXED canonical id rather
- *      than appending — so re-running never changes the record count.
+ *   2. Seed the synthetic workspace ONCE, via `GET /api/experiments`. That read
+ *      calls the same `ensure_seeded()` the demo route does, materialises every
+ *      missing canonical id, and CANNOT fail on a drifted workspace.
+ *
+ *      It used to POST `/api/demo/run`. Since the W1 fix that route REFUSES with
+ *      409 when a canonical target has been edited (it no longer overwrites your
+ *      work), so on a developer's persistent `/tmp/isaac-ui-workspace` a single
+ *      leftover manual edit would abort the entire suite. CI was never affected —
+ *      it sets a fresh `ISAAC_UI_WORKSPACE` — but a local run must not be hostage
+ *      to that. The 5-record assertion below is what actually proves seeding
+ *      worked, and it is unchanged.
  *
  * What it deliberately does NOT do: create records, delete records, reset the
  * workspace, upload anything, or touch a database. The whole suite is
@@ -61,15 +69,12 @@ export default async function globalSetup(): Promise<void> {
       );
     }
 
-    // Idempotent seed. `draft_only` overwrites exactly one canonical id in
-    // place; the other four canonical seeds are materialised by `ensure_seeded`
-    // inside the same call.
-    const seeded = await ctx.post(`${API_BASE}/demo/run`, {
-      data: { mode: 'draft_only' },
-      timeout: 60_000,
-    });
+    // Seed via a READ. `ensure_seeded()` runs inside `GET /api/experiments` and
+    // materialises every missing canonical id. Unlike `POST /demo/run` this can
+    // never 409 on a drifted workspace — see the header note.
+    const seeded = await ctx.get(`${API_BASE}/experiments`, { timeout: 60_000 });
     if (!seeded.ok()) {
-      throw new Error(`[e2e] POST ${API_BASE}/demo/run returned ${seeded.status()}.`);
+      throw new Error(`[e2e] GET ${API_BASE}/experiments returned ${seeded.status()}.`);
     }
 
     const list = await ctx.get(`${API_BASE}/experiments`, { timeout: 20_000 });

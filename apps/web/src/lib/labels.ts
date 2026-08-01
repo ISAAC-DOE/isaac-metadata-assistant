@@ -199,6 +199,24 @@ export const LABELS = {
   resetCountLegacy: 'Legacy Demo Records Removed',
   resetCountAmbiguous: 'Ambiguous Records',
   resetCountFinal: 'Final Experiments',
+
+  // The synthetic demo refused because its target scenario has been edited
+  // (POST /api/demo/run → 409 `demo_target_drifted`). The server protected the
+  // edits instead of overwriting them, so this copy states three things and
+  // guesses nothing further: the demo did NOT run, why, and that Reset Demo is
+  // the deliberate — and equally destructive — way back to the baseline. It must
+  // never read as a backend failure (the server answered, correctly) and must
+  // never imply anything was lost.
+  demoDriftedTitle: 'Demo not run — the scenario has been edited',
+  demoDriftedBody:
+    'The demo puts a fixed scenario in place from the committed fixtures. This one has ' +
+    'been edited since it was seeded, and re-seeding it would discard those edits — so the ' +
+    'server refused. Nothing ran and nothing changed.',
+  demoDriftedRemedy:
+    'To return to the baseline deliberately, use Reset Demo on My Experiments. That restores ' +
+    'all five scenarios and discards these edits with them.',
+  demoDriftedScenario: 'Edited scenario',
+  actionGoToExperiments: 'Go to My Experiments',
   actionReviewAnswer: 'Review & Answer',
   actionConfirm: 'Confirm',
   actionEdit: 'Edit',

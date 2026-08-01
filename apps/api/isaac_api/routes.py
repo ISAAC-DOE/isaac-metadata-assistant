@@ -521,6 +521,38 @@ def health() -> dict:
 # --- 2. demo run --------------------------------------------------------------
 
 
+def _demo_baseline(target_id: str) -> Experiment:
+    """The canonical seed baseline for a demo target, built IN MEMORY only.
+
+    This is the exact authoritative state ``ensure_seeded`` materialises for
+    ``target_id`` — the same ``_SeedSpec`` row, the same source, the same draft
+    function — reconstructed here purely so its authoritative signature can be
+    compared against what is actually on disk. It is NEVER saved, so building it
+    writes nothing and touches no ``rev``, ``generation`` or ``updated_utc``.
+
+    ``record_id`` matters and is easy to get wrong: an ``exported`` spec is
+    materialised through a real export keyed to the spec's own id, so disk
+    carries ``record_id == spec.id``. A freshly *constructed* ``Experiment``
+    carries ``record_id=None``, and ``record_id`` is inside
+    ``_authoritative_signature`` — so a baseline that omitted it would report a
+    spurious mismatch on every ``full``-mode run.
+
+    The private ``ws`` helpers are used deliberately: ``_seed_specs`` /
+    ``_seed_source`` are the single definition of the canonical baseline, and
+    re-deriving either of them here would create a second, silently divergent
+    copy of the seed's content.
+    """
+    spec = next(s for s in ws._seed_specs() if s.id == target_id)
+    return Experiment(
+        id=spec.id,
+        title=spec.title,
+        created_utc=spec.created_utc,
+        source=ws._seed_source(),
+        draft=spec.draft_fn(),
+        record_id=spec.id if spec.exported else None,
+    )
+
+
 @router.post(
     "/demo/run",
     tags=[TAG_DEMO],
@@ -531,15 +563,31 @@ def health() -> dict:
         "`mode: \"draft_only\"` (the default) extracts a draft from the committed "
         "fixtures and runs the no-guessing draft checks; `mode: \"full\"` "
         "additionally applies the committed simulated answers and exports an "
-        "official record. It writes into one fixed canonical experiment id per "
-        "mode, overwriting it in place, so re-running never adds a record and "
-        "never increases the record count. It reads only the two committed "
-        "synthetic fixtures and accepts no uploaded data.\n\n"
+        "official record. It targets one fixed canonical experiment id per mode, "
+        "so re-running never adds a record and never increases the record count. "
+        "It reads only the two committed synthetic fixtures and accepts no "
+        "uploaded data.\n\n"
+        "It never overwrites your work. The target must still hold exactly its "
+        "canonical seed content: when it does, running the pipeline would "
+        "reproduce that content byte for byte, so nothing at all is written and "
+        "the record's version is untouched. If the target has been changed — an "
+        "answer confirmed, a field edited, a record exported — the run is refused "
+        "with `409` and nothing is written.\n\n"
         "A body other than `draft_only` or `full` for `mode` is rejected and "
         "nothing runs."
     ),
     response_description="The experiment id, the ordered pipeline steps, and the resulting status.",
-    responses={**_R_UNAUTHORIZED},
+    responses={
+        **_R_UNAUTHORIZED,
+        409: {
+            "description": (
+                "Refused without writing anything: the canonical record this mode "
+                "targets no longer holds its seed content, so running the demo "
+                "over it would discard a real change. Restore the synthetic demo "
+                "with `POST /api/demo/reset` if you want the seed content back."
+            )
+        },
+    },
 )
 def demo_run(
     body: dict = Body(
@@ -560,12 +608,12 @@ def demo_run(
     steps: list[dict] = []
 
     # Idempotent: ensure the canonical five-scenario seed exists first, then run
-    # the requested pipeline against a FIXED canonical id, overwriting it in place
-    # (upsert) rather than appending a new random experiment. Re-running never
-    # increases the record count and preserves canonical identities.
+    # the requested pipeline against a FIXED canonical id rather than appending a
+    # new random experiment. Re-running never increases the record count and
+    # preserves canonical identities. It also never WRITES to that id — see the
+    # precondition below.
     ws.ensure_seeded()
     target_id = ws.SEED_DONE_ID if mode == "full" else ws.SEED_NEW_DRAFT_ID
-    created_utc, title = ws.SEED_META[target_id]
 
     # [1] build_draft — deterministic extraction from the synthetic fixtures.
     draft = build_draft(ws.CSV_PATH, ws.LISTING_PATH)
@@ -590,32 +638,68 @@ def demo_run(
         }
     )
 
-    # The persistence of the fixed canonical target id is serialised under the same
-    # per-record lock the /answers and /export mutations use, so a concurrent
-    # mutation on this id can never lose an update. ensure_seeded/build_draft/
-    # validate_draft above stay outside the lock (ensure_seeded only creates MISSING
-    # ids; neither racily mutates the target's persisted authoritative state).
+    # The read of the fixed canonical target id is serialised under the same
+    # per-record lock the /answers and /export mutations use, so the drift check
+    # below cannot observe a half-applied concurrent mutation. ensure_seeded/
+    # build_draft/validate_draft above stay outside the lock (ensure_seeded only
+    # creates MISSING ids; neither racily mutates the target's persisted state).
     with ws.record_lock(target_id):
-        exp = ws.create_experiment(
-            title=title,
-            source={
-                "description": "Synthetic XANES campaign (CuO, Cu K-edge) — committed demo fixtures",
-                "files": list(ws.SOURCE_FILES),
-            },
-            draft=draft,
-            id=target_id,
-            created_utc=created_utc,
-        )
+        # PRECONDITION — refuse, and never write (W1).
+        #
+        # This operation targets a fixed canonical id derived server-side from
+        # `mode`, so the caller structurally cannot supply an If-Match for it, and
+        # `ensure_seeded()` above guarantees the record exists, which makes
+        # `If-Match: *` vacuous. Its precondition is therefore expressed against
+        # content, not against a token: the target must still hold exactly the
+        # canonical seed state.
+        #
+        # When it does, running the pipeline would rewrite byte-identical content,
+        # so the write is provably redundant and is SKIPPED ENTIRELY — no
+        # create_experiment, no _write_record, no save(). That is what protects
+        # `rev`, `generation`, `updated_utc` and `answer_log`: a write that never
+        # happens cannot reset them, cannot drop an audit entry, and cannot mint
+        # the same token over different content (the ABA the generation nonce
+        # exists to prevent).
+        #
+        # When it does not, a real user change is present. Overwriting it would
+        # destroy a confirmed edit and its audit trail, so the run is refused.
+        #
+        # ONE read, not two: the signature is computed from the record already
+        # loaded here rather than re-parsing the state file through
+        # ``_persisted_sig_and_rev``. That matters for honesty as much as cost —
+        # the two disagree on a corrupt file (one swallows JSONDecodeError and
+        # returns None, the other raises), and only one answer can be right.
+        #
+        # An ABSENT record refuses (defence in depth: ``ensure_seeded`` above
+        # already heals a missing id before the lock, so this arm is not expected
+        # to fire — it is not, as an earlier note claimed, protection against a
+        # concurrent ``demo_reset``, which takes the SAME per-record lock for every
+        # canonical id). A CORRUPT state file surfaces as a 500 from
+        # ``load_experiment``, exactly as it already does on every read path; it is
+        # not silently treated as drift.
+        baseline = _demo_baseline(target_id)
+        exp = ws.load_experiment(target_id)
+        if exp is None or ws._authoritative_signature(exp) != ws._authoritative_signature(baseline):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "demo_target_drifted",
+                    "experiment_id": target_id,
+                    "message": (
+                        "This record has changed since it was seeded, so the "
+                        "synthetic demo will not run over it — nothing was "
+                        "written and your work is intact. Use "
+                        "POST /api/demo/reset to restore the synthetic demo."
+                    ),
+                },
+            )
 
         if mode == "full":
             # [3] apply_answers — the committed SIMULATED human answers, verbatim, so the
-            #     completion path matches run_synthetic_demo.py exactly.
+            #     completion path matches run_synthetic_demo.py exactly. Pure: it
+            #     returns a completed draft and persists nothing.
             answers = ws.load_demo_answers()
             completed = apply_answers(draft, answers)
-            exp.draft = completed
-            exp.answer_log.append(
-                {"kind": "demo_fixture", "label": "Demo answers (synthetic)", "at": _now_iso()}
-            )
             steps.append(
                 {
                     "name": "apply_answers",
@@ -627,11 +711,11 @@ def demo_run(
                 }
             )
 
-            # [4] export_draft — schema-gated transform, then write into the workspace.
-            result = export_draft(completed, REPO_ROOT, record_id=exp.id)
-            if result.ok:
-                _write_record(exp, result)
-            exp.save()
+            # [4] export_draft — the schema-gated transform, run as a DRY RUN so the
+            #     reported verdict is real. `_write_record` is deliberately not
+            #     called: the seeded record and sidecar already on disk are the
+            #     output of this same transform over this same draft.
+            result = export_draft(completed, REPO_ROOT, record_id=target_id)
             steps.append(
                 {
                     "name": "export_draft",
@@ -642,8 +726,6 @@ def demo_run(
                     "ok": result.ok,
                 }
             )
-        else:
-            exp.save()
 
     return {"experiment_id": exp.id, "steps": steps, "status": exp.status()}
 
