@@ -885,6 +885,13 @@ button.assistant-source-chip-nav:focus-visible {
   bottom: calc(100% + 6px);
   z-index: 2;
   min-width: 0;
+  /* NARROW/DRAWER DEFAULT — deliberately unchanged at 34vh. Measured across 18
+   * viewports (320x480 … 1920x1080, both the record rail and Project Memory),
+   * the popover's bottom edge sits between 38.7% and 76.5% of the viewport
+   * height, and EVERY case where a larger cap clipped past the top edge was a
+   * drawer mount at width <= 768 (worst: 320x568, where only 219.8px exists
+   * above the panel). Clipping there is unrecoverable — the top edge is outside
+   * this popover's own scrollport — so the narrow cap stays where it is. */
   max-height: 34vh;
   overflow-y: auto;
   overflow-x: hidden;
@@ -899,6 +906,30 @@ button.assistant-source-chip-nav:focus-visible {
   box-shadow: var(--shadow-screen);
 }
 .assistant-capabilities-panel:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
+/* I5 — DESKTOP RAIL ONLY (the assistant collapses into the slide-over drawer at
+ * `max-width: 1024px`, so 1025px is exactly where the rail layout starts).
+ *
+ * MEASURED defect at 1280x800 on /record/<id>: the popover was 270px tall and
+ * its catalog scrollport only 114px against a 475px scrollHeight, while 424.5px
+ * of viewport sat free above it. The fold landed between the "Missing Fields and
+ * Confirmations" heading and that category's first example, so a POPULATED
+ * category read as empty.
+ *
+ * `min(42vh, 420px)` is measured, not guessed. Across the rail widths swept
+ * (1280x500/600/720/800, 1366x768, 1440x900, 1920x1080) the space above the
+ * popover is 42.5%–53.1% of the viewport: the vh term binds below ~954px of
+ * viewport height, where the smallest measured headroom is 47.4%, and the px
+ * term binds above it, where the headroom stops growing with the viewport
+ * (it plateaus at 458.5px). Every one of those cases stays inside the viewport
+ * with the trigger and Close reachable. The list stays the one scroll region.
+ *
+ * NOTE for anyone re-reading `assistant-capabilities.test.tsx`: its `max-height`
+ * guard regexes the FIRST `.assistant-capabilities-panel { … }` rule, i.e. the
+ * narrow default above — it does not see this override. The override is pinned
+ * separately in `assistant-capabilities-panel-height.test.tsx`. */
+@media (min-width: 1025px) {
+  .assistant-capabilities-panel { max-height: min(42vh, 420px); }
+}
 /* The catalog is the ONE scroll region; `min-height: 0` is what lets it shrink
  * inside the flex column instead of pushing the sentences below it out. */
 .assistant-capabilities-list {
@@ -911,6 +942,23 @@ button.assistant-source-chip-nav:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* CONTINUATION CUE. Height alone cannot guarantee the fold never lands in the
+   * 5px gap between a heading and its first example: the scrollport height is a
+   * function of the viewport, so for some viewport heights a fully visible
+   * heading still has zero pixels of its first example below it. This is the
+   * classic local-background scroll shadow (no script, no animation, nothing
+   * added to the DOM): the two `local` gradients scroll WITH the content and mask
+   * the shadow at the extremes, so the bottom shadow is painted only while there
+   * is more content below — never at the end of the list, and never when the
+   * catalog fits. It sits BEHIND the content, so it shows exactly in the gaps and
+   * over the transparent heading — which is precisely the failure case. */
+  background:
+    linear-gradient(#ffffff 42%, rgba(255, 255, 255, 0)) top / 100% 14px local no-repeat,
+    linear-gradient(rgba(255, 255, 255, 0), #ffffff 58%) bottom / 100% 14px local no-repeat,
+    radial-gradient(farthest-side at 50% 0, rgba(20, 26, 33, 0.22), rgba(20, 26, 33, 0)) top /
+      100% 7px scroll no-repeat,
+    radial-gradient(farthest-side at 50% 100%, rgba(20, 26, 33, 0.22), rgba(20, 26, 33, 0)) bottom /
+      100% 7px scroll no-repeat;
 }
 .assistant-capabilities-note {
   flex: none;

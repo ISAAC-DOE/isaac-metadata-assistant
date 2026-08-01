@@ -249,7 +249,17 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
     counts: {
       'evidence@desktop-1280x800': 71,
       'evidence@laptop-1024x768': 71,
-      'evidence@tablet-768x1024': 70,
+      // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
+      // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
+      // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
+      // OUTSIDE `.record-context`, and axe cannot resolve a background colour
+      // for an element painting over unknown ancestors, so it declined to
+      // judge it. Containing the crumb made it measurable — and it fails.
+      // Proven by an A/B run with only the four CSS files reverted: incomplete
+      // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
+      // `.record-file`. The element was always painted; only measurement
+      // changed. Linux is the authority and may differ.
+      'evidence@tablet-768x1024': 71,
       'evidence@mobile-375x812': 68,
       'evidence@zoom-200': 69,
       'experiments@desktop-1280x800': 10,
@@ -277,8 +287,21 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'guided-completion@desktop-1280x800': 12,
       'guided-completion@laptop-1024x768': 11,
       'guided-completion@tablet-768x1024': 11,
-      // Linux wraps the guided-completion prompt one word earlier.
-      'guided-completion@mobile-375x812': { darwin: 7, linux: 8 },
+      // Was `{ darwin: 7, linux: 8 }`; darwin caught up to Linux on 2026-08-01
+      // and the split is no longer needed. `.guided-suggestion-not` moved from
+      // axe's `incomplete` bucket into `violations` after the C1/I4 fix removed
+      // the overlaps that made its background unresolvable. The element itself
+      // is untouched by that fix — an A/B run with only the four CSS files
+      // reverted measured identical geometry (102.5x35.6) and identical colour
+      // (rgb(120,131,143)), while `incomplete` fell 6 -> 3 and both
+      // `.record-surface` and `.guided-suggestion-head` became resolvable AND
+      // PASSING. That Linux ALREADY counted 8 is the corroboration: the wider
+      // Linux face had made the same node measurable long before this slice, so
+      // this is a pre-existing failure of the `--text-tertiary` token (#78838f
+      // at 3.64:1, the same token as four already-baselined nodes on this
+      // surface), not a regression. Fixing the token is a separate, wider
+      // change: it would move counts on many surfaces at once.
+      'guided-completion@mobile-375x812': 8,
       'guided-completion@zoom-200': 9,
       'load@desktop-1280x800': 5,
       'load@laptop-1024x768': 5,
@@ -323,7 +346,10 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-explorer@desktop-1280x800': 46,
       'settings-explorer@laptop-1024x768': 46,
       'settings-explorer@tablet-768x1024': 62,
-      'settings-explorer@mobile-375x812': 55,
+      // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
+      // stale. The suite's own message is the reason to bother — "a stale
+      // number would re-admit the defect". Linux is the authority.
+      'settings-explorer@mobile-375x812': 54,
       'settings-explorer@zoom-200': { darwin: 55, linux: 56 },
       'settings-privacy@desktop-1280x800': 7,
       'settings-privacy@laptop-1024x768': 7,
@@ -438,7 +464,18 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
  * with a number in this file, correct THE NUMBER, never loosen the assertion.
  */
 export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number>> = {
-  darwin: 1628,
+  // 2026-08-01, responsive remediation slice. darwin 1628 -> 1629: the net of
+  // three MEASURED per-surface changes, +1 `evidence@tablet-768x1024`,
+  // +1 `guided-completion@mobile-375x812`, -1 `settings-explorer@mobile-375x812`.
+  // Two of those are pre-existing failures becoming measurable (see the notes on
+  // each entry), one is a real improvement.
+  //
+  // linux stays 1634 and that is a DERIVATION, not a measurement, so treat it as
+  // provisional: this environment cannot run the Linux face. Of the three
+  // changes, `guided-completion@mobile-375x812` was ALREADY 8 on linux, so it
+  // contributes 0 there, and the other two (+1, -1) cancel. If CI disagrees,
+  // correct THE NUMBER from the CI output — never loosen the assertion.
+  darwin: 1629,
   linux: 1634,
 };
 

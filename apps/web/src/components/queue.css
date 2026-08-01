@@ -34,10 +34,39 @@
   flex-direction: column;
   gap: 10px;
 }
+/* M1 — the row breaks its line instead of starving its own text.
+ *
+ * MEASURED defect (Chromium, production build, /experiments). `.exp-trailing` is
+ * `flex: none` and measures 180.4px at EVERY width — it never shrinks, because
+ * its "N Fields Need You" chip is 150.4px of nowrap text. `.exp-main` is
+ * `flex: 1` (i.e. flex-basis 0) with `min-width: 0`, so it is handed only what
+ * is left: rowContent − 196.4. On the two rows that carry that chip:
+ *     640px  main 332  · title one line (h22.5)      — fine
+ *     390px  main  82  · title 82/82 h89.9, scenario 65/65 h62.1
+ *     375px  main  67  · title 67/67 h89.9, scenario 50/50 h77.6
+ *     320px  main  12  · title 12/67 h157.3, scenario 0/8 h481, ROW 767.4px TALL
+ * That is not truncation — the text wrapped into a 12px column, one character
+ * per line. The three rows WITHOUT the chip were never affected (174px at 320).
+ *
+ * THE FIX IS A FLOOR PLUS A WRAP, AND DELIBERATELY NOT A MEDIA QUERY. A
+ * breakpoint would have to guess which rows carry a wide trailing chip; the row
+ * can work it out itself. `min-width: 160px` raises `.exp-main`'s hypothetical
+ * size from 0 to 160, so flexbox breaks the line exactly when main + gap +
+ * trailing no longer fits — which is true for a chip row below ~466px of
+ * viewport and false for a chevron-only row down to 320px. Measured: 640, 768,
+ * 1024 and 1280 do not wrap at all and are unchanged.
+ *
+ * The floor is 160 and not more because a chevron-only row must NOT wrap at
+ * 320: 160 + 16 + 18 = 194 against 210px of row content. Every term there is a
+ * fixed pixel value (padding, gap, an 18px icon), so that margin does not move
+ * with the system font. */
 .exp-row {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
+  /* Inert unless the row actually wraps; `gap`'s 16px would be loose here. */
+  row-gap: 10px;
   padding: 14px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -64,7 +93,13 @@
 }
 .exp-main {
   flex: 1;
-  min-width: 0;
+  /* NOT `min-width: 0` (see `.exp-row`). Zero is what let this column be handed
+   * 12px and wrap the record title one character per line; it is also what makes
+   * the row's hypothetical size 0, so the line never broke however little was
+   * left. The floor does both jobs: it stops the collapse, and it is what tells
+   * flexbox to wrap. The children below still carry their own `min-width: 0` /
+   * `overflow-wrap`, so long unbroken tokens stay inside this column. */
+  min-width: 160px;
 }
 .exp-title {
   font-size: 14.5px;
