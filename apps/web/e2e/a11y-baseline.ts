@@ -36,7 +36,7 @@
  * The app ships no webfont. `--font-ui` therefore resolves to SF Pro on macOS
  * and to a DejaVu/Liberation face on `ubuntu-latest`. Linux glyphs are wider,
  * so a line of text wraps at a different word — which changes how many text
- * nodes exist and which of them axe measures. Ten of the 149 recorded triples
+ * nodes exist and which of them axe measures. Ten of the 103 recorded triples
  * differ between the two platforms, every one of them by exactly ±1: the
  * signature of a single wrap boundary, not of a different app.
  *
@@ -55,7 +55,7 @@
  *
  * They are measurements of THIS app in headless Chromium at the five projects
  * in `playwright.config.ts`, taken with the backend seeded by `global-setup.ts`.
- * Two consecutive full runs produced identical counts for all 149 triples on
+ * Two consecutive full runs produced identical counts for all recorded triples on
  * one platform. When a fix lands, run the suite, read the exact numbers out of
  * the failure messages (each one names surface, project, rule, PLATFORM,
  * expected and actual) and edit them here. Do not round, do not pad, and do not
@@ -112,8 +112,8 @@ export const BASELINE_PLATFORMS = ['darwin', 'linux'] as const;
 export type BaselinePlatform = (typeof BASELINE_PLATFORMS)[number];
 
 /**
- * A measurement that is identical on both platforms (a bare number — 139 of the
- * 149 triples) or one that is not (an exact number for each).
+ * A measurement that is identical on both platforms (a bare number — 93 of the
+ * 103 triples) or one that is not (an exact number for each).
  *
  * There is no third form. In particular there is no range, no tolerance and no
  * "unknown"; a platform with no measurement is a platform this file cannot
@@ -342,84 +342,24 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'validator@zoom-200': { darwin: 6, linux: 7 },
     },
   },
-  {
-    rule: 'button-name',
-    impact: 'critical',
-    note:
-      'FINDING A11Y-02. Below the 640px breakpoint, `chrome.css:503` sets ' +
-      '`.topbar-search-label, .topbar-search-kbd { display: none }`. The only other ' +
-      'content of `<button class="topbar-search">` is an `aria-hidden` SVG, and the ' +
-      'button carries no `aria-label`, so the global search trigger has NO accessible ' +
-      'name at phone widths and at 200% browser zoom. Exactly one node on each of the ' +
-      '18 surfaces (it lives in the shared TopBar) at exactly the two narrow projects — ' +
-      'never at 768px or wider, which is why the desktop pairs are absent below.',
-    targetPattern: '^\\.topbar-search$',
-    // 36 nodes across 36 (surface, project) pairs.
-    counts: {
-      'evidence@mobile-375x812': 1, 'evidence@zoom-200': 1,
-      'experiments@mobile-375x812': 1, 'experiments@zoom-200': 1,
-      'export-readiness@mobile-375x812': 1, 'export-readiness@zoom-200': 1,
-      'export-readiness-done@mobile-375x812': 1, 'export-readiness-done@zoom-200': 1,
-      'governance@mobile-375x812': 1, 'governance@zoom-200': 1,
-      'guided-completion@mobile-375x812': 1, 'guided-completion@zoom-200': 1,
-      'load@mobile-375x812': 1, 'load@zoom-200': 1,
-      'memory@mobile-375x812': 1, 'memory@zoom-200': 1,
-      'memory-graph@mobile-375x812': 1, 'memory-graph@zoom-200': 1,
-      'record-detail@mobile-375x812': 1, 'record-detail@zoom-200': 1,
-      'schema-reference@mobile-375x812': 1, 'schema-reference@zoom-200': 1,
-      'settings@mobile-375x812': 1, 'settings@zoom-200': 1,
-      'settings-about@mobile-375x812': 1, 'settings-about@zoom-200': 1,
-      'settings-api@mobile-375x812': 1, 'settings-api@zoom-200': 1,
-      'settings-explorer@mobile-375x812': 1, 'settings-explorer@zoom-200': 1,
-      'settings-privacy@mobile-375x812': 1, 'settings-privacy@zoom-200': 1,
-      'statistics@mobile-375x812': 1, 'statistics@zoom-200': 1,
-      'validator@mobile-375x812': 1, 'validator@zoom-200': 1,
-    },
-  },
-  {
-    rule: 'aria-allowed-attr',
-    impact: 'critical',
-    note:
-      'FINDING A11Y-03. The 31 Evidence Trail entries render as ' +
-      '`<button role="listitem" aria-pressed="true|false">`. `role="listitem"` ' +
-      'overrides the implicit button role, and `aria-pressed` is not allowed on ' +
-      'listitem — so the selected/unselected state is not exposed at all. 31 nodes, ' +
-      'identical at every viewport: the trail length is fixed by the synthetic seed.',
-    // axe qualifies a target with its parent only when the bare selector is
-    // ambiguous, so both forms occur among the same 31 buttons.
-    targetPattern:
-      '^(\\.selected|(div\\[role="list"\\]:nth-child\\(\\d+\\) > )?' +
-      '\\.trail-entry\\[role="listitem"\\]\\[type="button"\\](:nth-child\\(\\d+\\))?)$',
-    // 155 nodes across 5 (surface, project) pairs.
-    counts: {
-      'evidence@desktop-1280x800': 31,
-      'evidence@laptop-1024x768': 31,
-      'evidence@tablet-768x1024': 31,
-      'evidence@mobile-375x812': 31,
-      'evidence@zoom-200': 31,
-    },
-  },
-  {
-    rule: 'aria-allowed-role',
-    impact: 'minor',
-    note:
-      'FINDING A11Y-03 (same 31 nodes as above). `role="listitem"` is not an allowed ' +
-      'role for `<button>`. The intent (a list of selectable evidence entries) is ' +
-      'expressible as `<ul role="list"><li><button aria-pressed=…>`.',
-    // axe qualifies a target with its parent only when the bare selector is
-    // ambiguous, so both forms occur among the same 31 buttons.
-    targetPattern:
-      '^(\\.selected|(div\\[role="list"\\]:nth-child\\(\\d+\\) > )?' +
-      '\\.trail-entry\\[role="listitem"\\]\\[type="button"\\](:nth-child\\(\\d+\\))?)$',
-    // 155 nodes across 5 (surface, project) pairs.
-    counts: {
-      'evidence@desktop-1280x800': 31,
-      'evidence@laptop-1024x768': 31,
-      'evidence@tablet-768x1024': 31,
-      'evidence@mobile-375x812': 31,
-      'evidence@zoom-200': 31,
-    },
-  },
+  /*
+   * DELETED, because the defects are GONE — not because they were inconvenient.
+   *
+   *   * `button-name` (FINDING A11Y-02, 36 nodes across 36 pairs). The global
+   *     search trigger now carries `aria-label="Search"`
+   *     (`src/components/SearchDialog.tsx`), so its accessible name no longer
+   *     depends on `chrome.css` leaving `.topbar-search-label` visible.
+   *   * `aria-allowed-attr` / `aria-allowed-role` (FINDING A11Y-03, 31 nodes
+   *     each at all five projects, 310 in total). Evidence Trail entries are no
+   *     longer `<button role="listitem" aria-pressed>`; the `role="listitem"`
+   *     moved to a wrapper `<div>` and the button keeps its implicit role and a
+   *     now-valid `aria-pressed` (`src/components/EvidenceTrailPanel.tsx`).
+   *
+   * An absent entry expects ZERO nodes everywhere, so a regression on either
+   * rule reads as `new` and fails the sweep. That is the point of deleting
+   * rather than zeroing: 346 nodes of recorded debt came off the total below,
+   * and the suite now proves the fix on every run.
+   */
   {
     rule: 'scrollable-region-focusable',
     impact: 'serious',
@@ -482,10 +422,24 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
  * The six-node gap is entirely the ten font-metric triples above (eight +1,
  * two −1). It is not extra debt on Linux; it is the same debt counted under a
  * wider font.
+ *
+ * It went down by 346 when the two CRITICAL findings A11Y-02 (`button-name`,
+ * 36) and A11Y-03 (`aria-allowed-attr` + `aria-allowed-role`, 310) were fixed
+ * and their entries deleted: 1974 → 1628 (darwin), 1980 → 1634 (linux).
+ *
+ * The post-fix `linux` total 1634 was DERIVED (1980 − 346) when first written,
+ * because a laptop cannot run the Linux baseline. **Linux CI has since measured
+ * it** — run 30677607861 on `a911b8c`, 579 passed / 1 skipped: the three
+ * deleted entries assert ZERO nodes and passed, and every surviving entry was
+ * checked against real axe output under Linux font metrics. So 1634 is now the
+ * sum of validated per-entry measurements, not arithmetic.
+ *
+ * The rule that got it there still stands for next time: if CI ever disagrees
+ * with a number in this file, correct THE NUMBER, never loosen the assertion.
  */
 export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number>> = {
-  darwin: 1974,
-  linux: 1980,
+  darwin: 1628,
+  linux: 1634,
 };
 
 /**

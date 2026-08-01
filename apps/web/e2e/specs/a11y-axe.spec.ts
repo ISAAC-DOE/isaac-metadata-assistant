@@ -14,7 +14,7 @@
  * ever exempted — see `../a11y-baseline.ts` for why the first version of this
  * file effectively did exempt one, and what replaced it.
  *
- * Ten of the 149 recorded triples hold a separate exact number for macOS and
+ * Ten of the 103 recorded triples hold a separate exact number for macOS and
  * for Linux, because there is no webfont and the system face changes where text
  * wraps. The scan enforces the CURRENT platform's number, exactly; the
  * well-formedness test below checks BOTH columns. **CI (Linux) is the

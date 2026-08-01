@@ -80,6 +80,33 @@ export function EvidenceTrailPanel({
   );
 }
 
+/**
+ * FINDING A11Y-03 (A2) fix. This row used to be a single
+ * `<button role="listitem" aria-pressed>`. `role="listitem"` OVERRODE the
+ * button's implicit role, so the control stopped being a button to assistive
+ * technology, and `aria-pressed` is not an allowed attribute on `listitem` —
+ * which meant the selected/unselected state was exposed to nobody.
+ *
+ * The list semantics and the button semantics now live on separate elements:
+ * the `role="listitem"` wrapper is the child of the `role="list"` container,
+ * and the interactive element is a plain `<button>` that keeps its implicit
+ * role and its valid `aria-pressed` state.
+ *
+ * `aria-pressed` is kept rather than switched to `aria-current`: exactly one
+ * entry is selected at all times (`EvidenceExplorer` falls back to
+ * `entries[0]`), and `aria-pressed` announces BOTH states, so a keyboard user
+ * tabbing the trail hears "not pressed" on the other entries. `aria-current`
+ * is simply absent on the unselected ones, which would leave the very state
+ * A11Y-03 says is missing still missing for 30 of the 31 rows.
+ *
+ * Keyboard behaviour is deliberately the native one — Tab reaches each entry,
+ * Enter and Space activate it. A `listbox`/`option` pattern with
+ * `aria-selected` was considered and rejected: the trail is TWO lists (Direct
+ * Fields and Namespaced) sharing ONE selection, so it would have to become two
+ * listboxes, one of which would always claim to have no selection, and it
+ * would require a roving tabindex and arrow-key handling that this surface
+ * does not have today.
+ */
 function TrailEntryRow({
   entry,
   selected,
@@ -91,24 +118,25 @@ function TrailEntryRow({
 }) {
   const LeadIcon = SOURCE_ICON[entry.sourceTypes[0] ?? 'file_listing'];
   return (
-    <button
-      type="button"
-      role="listitem"
-      className={`trail-entry${selected ? ' selected' : ''}`}
-      aria-pressed={selected}
-      onClick={() => onSelect(entry.key)}
-    >
-      <LeadIcon size={14} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--text-tertiary)', flex: 'none' }} />
-      <span className="trail-key">{entry.key}</span>
-      {entry.namespaced ? (
-        <span className="trail-dots" aria-hidden="true">
-          {entry.sourceTypes.map((st) => (
-            <span key={st} className={`trail-dot ${st}`} />
-          ))}
-        </span>
-      ) : (
-        entry.resolved && <Check className="trail-resolved" size={14} strokeWidth={2.4} aria-label="resolved" />
-      )}
-    </button>
+    <div role="listitem" className="trail-item">
+      <button
+        type="button"
+        className={`trail-entry${selected ? ' selected' : ''}`}
+        aria-pressed={selected}
+        onClick={() => onSelect(entry.key)}
+      >
+        <LeadIcon size={14} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--text-tertiary)', flex: 'none' }} />
+        <span className="trail-key">{entry.key}</span>
+        {entry.namespaced ? (
+          <span className="trail-dots" aria-hidden="true">
+            {entry.sourceTypes.map((st) => (
+              <span key={st} className={`trail-dot ${st}`} />
+            ))}
+          </span>
+        ) : (
+          entry.resolved && <Check className="trail-resolved" size={14} strokeWidth={2.4} aria-label="resolved" />
+        )}
+      </button>
+    </div>
   );
 }

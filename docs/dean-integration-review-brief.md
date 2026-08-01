@@ -88,7 +88,7 @@ the two surfaces where the clean scientific title is the point, and **does not s
   *"Summarize this record."* on scenario 1 returns `This record 'Synthetic XANES — CuO (Cu K-edge) ·
   New Draft' is currently needs attention, …` — verified by calling the route. ⌘K Search carries it
   the same way, as the owning-record context (`apps/api/isaac_api/search.py:276-287`;
-  `apps/web/src/components/SearchDialog.tsx:539-541`).
+  `apps/web/src/components/SearchDialog.tsx:556-558`).
 
 None of that makes the suffix load-bearing: it is display text on a synthetic seed title, it is never
 a source of state, and no code parses it back out. But it is **not** invisible, so nothing in a demo

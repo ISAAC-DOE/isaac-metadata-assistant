@@ -4,8 +4,15 @@ This document describes the real-browser test baseline for the ISAAC Metadata As
 what it runs, how to run it, exactly how 200% zoom is emulated and where that emulation stops
 being faithful, what it found, and — importantly — what it does **not** and **cannot** cover.
 
-It is a *test* baseline. It changes no application source. Every defect it found is recorded as
-a finding with a tracking entry, not fixed here.
+It is a *test* baseline. The slice that created it (PR #32) changed no application source; every
+defect it found was recorded as a finding with a tracking entry rather than fixed.
+
+**A later closure slice fixed the two critical accessibility findings** — **A11Y-02**
+(`button-name`) and **A11Y-03** (`aria-allowed-attr` / `aria-allowed-role`) — in
+`apps/web/src/components/SearchDialog.tsx` and `apps/web/src/components/EvidenceTrailPanel.tsx`,
+and **deleted** their baseline entries so the suite now proves the fix on every run (§6). The
+remaining findings — A11Y-01, A11Y-04, A11Y-05, A11Y-06, LAYOUT-01, LAYOUT-02 — are **still open
+and still baselined**, deliberately: see §6 and the Baseline Completion Matrix §3B.
 
 ---
 
@@ -162,14 +169,36 @@ DPR 1. `e2e/specs/zoom-200.spec.ts` asserts all of it in the live page —
 so if somebody later "simplifies" the config by dropping `deviceScaleFactor`, the suite fails
 loudly instead of quietly degrading into a narrow-viewport test.
 
-### What was rejected, and why
+**Which half of that pair actually does the work — measured, not assumed.** A direct probe ran the
+same page at `640×400 @ DPR 2` and at `640×400 @ DPR 1` and compared `window.innerWidth`,
+`document.documentElement.clientWidth`, computed element widths and media-query state: the two runs
+were **byte-identical**. `deviceScaleFactor` changes **rasterisation only**; it contributes **nothing**
+to CSS layout. The reflow this project exercises comes entirely from the 640px width. The DPR
+assertions are therefore a **fidelity guard** — they keep the project honestly distinct from a plain
+narrow-viewport run and stop a silent config drift — not a second layout dimension. Do not cite
+DPR 2 as if it were producing layout signal.
+
+### What was rejected, and why — each one probed in a real Chromium, not reasoned about
 
 * **`document.body.style.zoom`** — not used. It is a non-standard rendering quirk that scales a
-  subtree *without changing the layout viewport*, so media queries never fire. That is the
-  opposite of what browser zoom does.
-* **CDP `Emulation.setPageScaleFactor`** — evaluated and rejected. It is **pinch** zoom: a
-  visual-viewport transform that magnifies without reflowing and without changing
-  `devicePixelRatio`. It would test even less than the `zoom` property.
+  subtree *without changing the layout viewport*. Observed: `body.style.zoom = 2` doubled raw pixel
+  measurements to 2560 while `window.innerWidth` stayed 1280 and the `max-width: 640px` breakpoint
+  **never fired**. That is the opposite of what browser zoom does.
+* **CDP `Emulation.setPageScaleFactor(2)`** — evaluated and rejected. Observed:
+  `visualViewport.scale` became 2, but `innerWidth` stayed 1280, `devicePixelRatio` stayed 1, and
+  the breakpoint did **not** fire. It is **pinch** zoom — a visual-viewport transform that
+  magnifies without reflowing. It would test even less than the `zoom` property.
+* **CDP `Emulation.setDeviceMetricsOverride({ scale: 2 })`** — observed to have **zero effect** on
+  any measured value.
+* **The Chromium launch flag `--force-device-scale-factor=2`** — observed to be **overridden by
+  Playwright's own metrics override**; `devicePixelRatio` stayed 1.
+
+**Conclusion, stated so nobody re-litigates it from first principles.** There is **no CDP method, no
+launch flag and no Playwright API that triggers real Chrome page zoom** (the browser-chrome
+<kbd>Cmd</kbd>/<kbd>Ctrl</kbd>-<kbd>+</kbd> control). Viewport-halving is therefore not a shortcut
+chosen for convenience — it is the correct and the *only available* model of 200% zoom's effect on
+layout. And because it is a model, real zoom **remains an open human QA gate** (G4); automation
+does not close it.
 
 ### Honest limits of the emulation
 
@@ -257,9 +286,21 @@ surfaces, chrome operability, and a check that CSS text sizes are not clamped by
 
 ## 6. Findings
 
-Every defect below is **pre-existing application behaviour**, found by this suite and *not*
-fixed by it — fixing `apps/web/src/**` was out of scope for the baseline slice and would have
+Every defect below is **pre-existing application behaviour** found by this suite. The baseline
+slice (PR #32) fixed none of them — fixing `apps/web/src/**` was out of scope there and would have
 made the diff unreviewable.
+
+**Two have since been fixed and their baseline entries deleted**: **A11Y-02** (`button-name`) and
+**A11Y-03** (`aria-allowed-attr` / `aria-allowed-role`). Deleting rather than zeroing is deliberate:
+an absent entry expects **zero** nodes everywhere, so a regression on either rule reads as `new` and
+fails the sweep. **The ratchet tightened by 346 nodes** as a result — see the totals below. The
+other six findings remain open and remain baselined.
+
+The two fixes also carry a **jsdom-level** guard that does not need a browser:
+`apps/web/src/__tests__/a11y-critical-fixes.test.tsx`, 11 tests. Eight of them were **observed
+failing against the pre-fix components** (verified by reverting the two source files and re-running),
+so they are proven to be capable of failing rather than merely green. They are unit tests over the
+rendered DOM, not an axe scan; the e2e baseline above remains the authority on node counts.
 
 Nothing is suppressed. No axe rule is disabled anywhere in the suite (`AxeBuilder.disableRules`
 is never called). Instead each known defect is enumerated per rule, per surface, per viewport
@@ -272,8 +313,8 @@ Anything the probes report that is **not** in those files fails the build — an
 recorded defect that **grows**. An earlier draft of this suite recorded `color-contrast` with a
 wildcard scope, which silently made it equivalent to disabling the rule outright; that was caught
 in review and is the reason the baseline is now count-based rather than rule-based. Each entry
-carries an exact per-`surface@project` node count (total **1,974** on macOS / **1,980** on Linux
-— see §6.1), plus an identity guard — `targetPattern` for structural rules, or the exact failing
+carries an exact per-`surface@project` node count (total **1,628** on macOS / **1,634** on Linux,
+down from 1,974 / 1,980 when A11Y-02 and A11Y-03 were fixed — see §6.1), plus an identity guard — `targetPattern` for structural rules, or the exact failing
 colour set for contrast — because an unchanged count is not proof of an unchanged defect. Five
 verdicts can fail a run: `new`, `grew`, `improved`, `new-target`, `new-foreground`. `improved`
 fails deliberately: when a defect is fixed you must lower the number, so the baseline cannot
@@ -293,7 +334,7 @@ are wider, so a line of prose wraps at a different word. That changes how many r
 nodes exist, and therefore how many nodes axe measures — and it changes whether an element
 overflows its container by a pixel or two, which is exactly what the clipping probe reports.
 
-Measured, not assumed: **10 of the 149** recorded axe triples differ, every one of them by
+Measured, not assumed: **10 of the 103** recorded axe triples differ, every one of them by
 **exactly ±1** — the signature of a single wrap boundary, not of a different application. Eight
 gain a node on Linux; **two lose one**, which is worth noting because "Linux is always worse"
 would have been the wrong story and would have justified the wrong fix.
@@ -310,7 +351,18 @@ would have been the wrong story and would have justified the wrong fix.
 | `color-contrast` | `validator@zoom-200` | 6 | **7** |
 | `color-contrast` | `export-readiness-done@tablet-768x1024` | 12 | **11** |
 | `color-contrast` | `record-detail@tablet-768x1024` | 16 | **15** |
-| | **total tolerated nodes** | **1,974** | **1,980** |
+| | **total tolerated nodes** | **1,628** | **1,634** |
+
+> **How each of those two totals is known, stated separately because they are not known the same
+> way.** The **darwin** total was **measured** — the suite was run locally after the A11Y-02 /
+> A11Y-03 fixes (`cd apps/web && npx playwright test` → 579 passed, 1 skipped). The **linux**
+> total was **not measured**; it was **reduced by construction**, by subtracting the same 346
+> deleted nodes (36 + 155 + 155) from the previously recorded 1,980. That arithmetic is sound only
+> if the two fixes remove exactly the same node counts under the Linux font face — which is very
+> likely (neither defect is text-wrap-dependent: one is a missing `aria-label`, the other a role on
+> a fixed set of 31 entries) but is **UNVERIFIED locally and cannot be verified from a laptop**.
+> **CI is the authority.** If the `browser-a11y` job disagrees, transcribe CI's number into the
+> `linux` slot — do not adjust it to match macOS.
 
 Two layout clips exist **only** under the Linux face. Both are **real application defects that
 macOS font metrics happened to hide**, not test artifacts — the chip is a couple of pixels from
@@ -327,7 +379,7 @@ a shade wider would see the truncated label:
 
 #### How it is encoded — exact on both platforms, no tolerance
 
-A count is written either as a bare number (identical on both platforms — 139 of 149) or as
+A count is written either as a bare number (identical on both platforms — 93 of 103) or as
 `{ darwin: n, linux: m }`. A layout instance list is written either as a bare array or as
 `{ darwin: [...], linux: [...] }`. `process.platform` selects the column, once, per run.
 
@@ -371,16 +423,21 @@ You can only measure the platform you are on.
 
 ### Accessibility
 
-| ID | Rule | Impact | Where | What is wrong |
-|---|---|---|---|---|
-| **A11Y-01** | `color-contrast` | serious | every surface, every viewport — **1,610 nodes** | **Not one palette decision — three distinct causes**, measured across 43 (foreground, background, size) combinations spanning **1.56:1 – 4.25:1** and **11** distinct rendered foregrounds. (1) `--text-disabled #c0c8d0`, which `tokens.css:34` intends for disabled chevrons, is rendered as *text* by `evidence.css:239` for preview line numbers at 11.5px → **1.56:1**, the worst in the app. (2) Genuinely low tokens: `#78838f`, `#9aa4af`, `#2f7d78` on the `#e6f1f0` chip tint. (3) **Five failures are `opacity` composites of tokens that pass at full strength** — e.g. `--text-muted #5b6570` is 5.93:1 but composites to `#777f89` under `queue.css:63 .exp-row.done { opacity: .82 }`; `--advisory-text #8a6420` was deliberately darkened for AA in P23C and still composites to `#9b793d`. **Darkening tokens will not fix group (3); the `opacity` has to go.** `#8e98a2`, named in an earlier draft of this table as a token, appears nowhere in `apps/web/src` — it is one of these composites. |
-| **A11Y-02** | `button-name` | **critical** | every surface, at `mobile-375x812` and `zoom-200` | Below the 640px breakpoint `chrome.css:503` sets `.topbar-search-label, .topbar-search-kbd { display: none }`. The only remaining content of `<button class="topbar-search">` is an `aria-hidden` SVG and there is no `aria-label`, so **the global search trigger has no accessible name at all at phone widths and at 200% zoom**. |
-| **A11Y-03** | `aria-allowed-attr` / `aria-allowed-role` | **critical** / minor | `evidence`, all viewports | The 31 Evidence Trail entries render as `<button role="listitem" aria-pressed="…">`. `role="listitem"` overrides the implicit button role, and `aria-pressed` is not allowed on `listitem` — so the selected/unselected state is not exposed at all. |
-| **A11Y-04** | `scrollable-region-focusable` | serious | 3 pairs only: `evidence` at desktop and mobile, `settings-api` at mobile | `div.preview-lines.scroll-x` (source-file preview) and, at narrow widths, a code sample on API Access scroll horizontally but are not keyboard focusable. |
-| **A11Y-05** | `page-has-heading-one` | moderate | `load` | `/load` renders no `<h1>`. Every other routed surface has one. |
-| **A11Y-06** | `landmark-unique` | moderate | `settings-explorer` | Two `role="search"` landmarks with no distinguishing accessible name: the TopBar trigger (`SearchDialog.tsx:290`) and the endpoint filter (`settings/ApiDocs.tsx:333`). |
+Status column: **OPEN** means the defect is still in the app and still baselined. **FIXED** means the
+defect is gone *and* its baseline entry was deleted, so a regression fails the sweep as `new`.
+
+| ID | Rule | Impact | Status | Where | What is wrong |
+|---|---|---|---|---|---|
+| **A11Y-01** | `color-contrast` | serious | **OPEN** | every surface, every viewport — **1,610 nodes** | **Not one palette decision — three distinct causes**, measured across 43 (foreground, background, size) combinations spanning **1.56:1 – 4.25:1** and **11** distinct rendered foregrounds. (1) `--text-disabled #c0c8d0`, which `tokens.css:34` intends for disabled chevrons, is rendered as *text* by `evidence.css:239` for preview line numbers at 11.5px → **1.56:1**, the worst in the app. (2) Genuinely low tokens: `#78838f`, `#9aa4af`, `#2f7d78` on the `#e6f1f0` chip tint. (3) **Five failures are `opacity` composites of tokens that pass at full strength** — e.g. `--text-muted #5b6570` is 5.93:1 but composites to `#777f89` under `queue.css:63 .exp-row.done { opacity: .82 }`; `--advisory-text #8a6420` was deliberately darkened for AA in P23C and still composites to `#9b793d`. **Darkening tokens will not fix group (3); the `opacity` has to go.** `#8e98a2`, named in an earlier draft of this table as a token, appears nowhere in `apps/web/src` — it is one of these composites. |
+| **A11Y-02** | `button-name` | **critical** | **FIXED** | was: every surface, at `mobile-375x812` and `zoom-200` — **36 nodes** | Below the 640px breakpoint `chrome.css:503` sets `.topbar-search-label, .topbar-search-kbd { display: none }`. The only remaining content of `<button class="topbar-search">` was an `aria-hidden` SVG and there was no `aria-label`, so the global search trigger had **no accessible name at all** at phone widths and at 200% zoom. **Fix:** `aria-label="Search"` on the trigger in `apps/web/src/components/SearchDialog.tsx`. **No CSS changed** — the name no longer depends on `chrome.css` leaving the label visible, which is why the fix holds at every width rather than only at the two that failed. |
+| **A11Y-03** | `aria-allowed-attr` / `aria-allowed-role` | **critical** / minor | **FIXED** | was: `evidence`, all viewports — 31 nodes per rule per project, **310 nodes** | The 31 Evidence Trail entries rendered as `<button role="listitem" aria-pressed="…">`. `role="listitem"` overrode the implicit button role, and `aria-pressed` is not allowed on `listitem` — so the selected/unselected state was not exposed at all. **Fix:** in `apps/web/src/components/EvidenceTrailPanel.tsx` the `role="listitem"` moved onto a wrapper `<div class="trail-item">`, leaving a plain `<button>` with its implicit role and a now-valid `aria-pressed`. |
+| **A11Y-04** | `scrollable-region-focusable` | serious | **OPEN** | 3 pairs only: `evidence` at desktop and mobile, `settings-api` at mobile | `div.preview-lines.scroll-x` (source-file preview) and, at narrow widths, a code sample on API Access scroll horizontally but are not keyboard focusable. |
+| **A11Y-05** | `page-has-heading-one` | moderate | **OPEN** | `load` | `/load` renders no `<h1>`. Every other routed surface has one. |
+| **A11Y-06** | `landmark-unique` | moderate | **OPEN — and explicitly *not* closed by the A11Y-02 fix** | `settings-explorer` | Two `role="search"` landmarks with no distinguishing accessible name: the TopBar trigger (`SearchDialog.tsx:290`) and the endpoint filter (`settings/ApiDocs.tsx:333`). **The `aria-label="Search"` added for A11Y-02 sits on the `<button>`, not on the `role="search"` wrapper `<div>`, so it does not name the landmark.** Naming a landmark needs `aria-label`/`aria-labelledby` on the landmark element itself. This finding is untouched and its baseline entry (10 nodes) is unchanged. |
 
 ### Responsive layout
+
+Both are **OPEN**. Neither has been fixed and both entries remain in `e2e/layout-baseline.ts`.
 
 | ID | Where | What is wrong |
 |---|---|---|
@@ -431,14 +488,24 @@ Read this section before citing the suite as evidence of anything.
   `/tmp/isaac-e2e-workspace`; do the same locally.
 * **Chromium only.** No Firefox, no WebKit, no Safari, no real mobile browser.
 * **No screen-reader testing.** axe checks the accessibility *tree*; it does not tell you what
-  VoiceOver, NVDA or JAWS actually announce. Several of the findings above (A11Y-02, A11Y-03)
-  are precisely the kind that a screen-reader pass would surface more vividly.
+  VoiceOver, NVDA or JAWS actually announce. This cuts both ways, and the second half matters more
+  now that two findings are closed: A11Y-02 and A11Y-03 were exactly the kind a screen-reader pass
+  would have surfaced more vividly — **and their fixes are verified only in the accessibility tree
+  too.** A green `button-name` and a valid `aria-pressed` do not prove VoiceOver announces "Search,
+  button" or the pressed state audibly. A11Y-06 (unnamed `role="search"` landmarks) is still open
+  and is another of the same kind.
 * **Automated contrast only.** axe measures computed foreground/background pairs. It cannot judge
   text over images or gradients, and it cannot tell you whether "red means bad" is comprehensible
   — the colour-only check here is explicitly best-effort (it verifies that status-like elements
   carry text or a name, nothing more).
+* **No *real* browser zoom, at any level.** The `zoom-200` project models 200% zoom by halving the
+  viewport, because — probed directly, see §4 — no CDP method, launch flag or Playwright API can
+  drive Chrome's own zoom control. The model is faithful for **layout**, which is what it is used
+  for; it is not the thing itself. Real <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>-<kbd>+</kbd> sign-off stays
+  a human gate (G4).
 * **No 400% zoom / 320px reflow**, no OS text scaling, no forced-colors / high-contrast mode, no
-  `prefers-contrast`, no dark mode (the app declares light only).
+  `prefers-contrast`, no dark mode (the app declares light only). WCAG 1.4.10 (Reflow) is defined
+  at 400% / 320px; nothing here establishes conformance with it.
 * **No performance, no visual-regression pixel diffing.** Whole-page screenshot diffs were
   deliberately not used: on five viewports they fail on every legitimate copy change and tell a
   reviewer nothing about *why*. The probes name the offending element instead.
@@ -474,7 +541,10 @@ configuration, `workers: 2`, and `retries: 1`.
   surfaces entry — that assertion exists so closing the finding is *forced*, not optional.
   A change to `apps/web/src` that adds or removes rendered text moves counts on **both**
   platforms; you can only measure one of them locally, so expect a second commit transcribing the
-  Linux column out of the CI failure log (§6.1).
+  Linux column out of the CI failure log (§6.1). **Worked example:** the A11Y-02 / A11Y-03 closure —
+  fix the component, delete the entry, lower `A11Y_BASELINE_TOTAL_NODES` for both platforms, and
+  update the `self-check.spec.ts` case that assumed the rule was baselined *somewhere* (it now
+  relies on the rule being baselined **nowhere**, which is a stronger starting condition).
 * **Add a probe** → add a matching case to `e2e/specs/self-check.spec.ts` proving it can fail.
   A probe with no self-check is not evidence.
 * **Never** add `disableRules(...)`. Enumerate the defect instead.
