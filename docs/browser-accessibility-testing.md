@@ -77,7 +77,8 @@ npm run typecheck:e2e        # tsc over e2e/ (NOT part of `npm run build`)
 
 `global-setup.ts` asserts the backend is up, refuses to run unless it reports
 `mode: "synthetic-only"`, and seeds the synthetic workspace **once** through
-`POST /api/demo/run` — which is idempotent by construction (it upserts a fixed canonical id
+`GET /api/experiments` — whose `ensure_seeded()` materialises every missing canonical id
+(it targets fixed canonical ids
 rather than appending, so re-running never changes the record count). If the backend is
 missing you get the exact command to run, not 500 browser timeouts.
 

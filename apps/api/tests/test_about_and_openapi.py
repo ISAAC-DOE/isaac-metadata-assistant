@@ -450,7 +450,7 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/about", "get"): ["200", "401"],
     ("/api/assistant/memory/query", "post"): ["200", "400", "401", "422"],
     ("/api/demo/reset", "post"): ["200", "401", "403", "409", "422"],
-    ("/api/demo/run", "post"): ["200", "401", "422"],
+    ("/api/demo/run", "post"): ["200", "401", "409", "422"],
     ("/api/experiments", "get"): ["200", "401"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422"],
     ("/api/experiments/{experiment_id}/answers", "post"): [

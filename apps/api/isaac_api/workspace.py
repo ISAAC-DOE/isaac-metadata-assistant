@@ -203,7 +203,10 @@ def _existing_generation(rid: str) -> str | None:
     non-empty ``generation`` string if the file exists and parses; otherwise
     ``None`` (an ad-hoc new id has no prior file -> a fresh generation is minted).
     Preserving the on-disk generation for an explicit existing id keeps a no-op
-    upsert (the idempotent demo) from churning the token.
+    upsert from churning the token. NOTE (W1, 2026-08-01): `POST /api/demo/run` no
+    longer performs this upsert at all — it writes nothing on a pristine target and
+    refuses on a drifted one — so the demo is no longer a live caller of this path.
+    The behaviour is retained because `create_experiment` still exposes it.
     """
     state_path = workspace_root() / rid / "experiment.json"
     try:
@@ -447,12 +450,12 @@ def create_experiment(
     """Create (or upsert, given an explicit ``id``) and persist an experiment.
 
     ``id`` / ``created_utc`` default to a random ULID + wall-clock timestamp for
-    ad hoc use; the canonical seed and the idempotent demo pass EXPLICIT fixed
+    ad hoc use; the canonical seed passes EXPLICIT fixed
     values so identities/order are stable across restarts and fresh workspaces.
 
     Generation minting: an ad-hoc new record (random id) has no prior on-disk file
-    -> a FRESH generation is minted. An explicit existing id (the idempotent demo
-    upsert) PRESERVES the on-disk generation so repeated no-op runs never churn the
+    -> a FRESH generation is minted. An explicit existing id PRESERVES the on-disk
+    generation so repeated no-op runs never churn the
     token.
     """
     rid = id or new_record_id()
@@ -582,7 +585,7 @@ def _seed_specs() -> list["_SeedSpec"]:
     ]
 
 
-#: (created_utc, title) for the canonical ids the idempotent demo overwrites in
+#: (created_utc, title) for the canonical ids the demo route targets in
 #: place, so demo-run reuses the scenario's stable identity instead of appending.
 SEED_META = {s.id: (s.created_utc, s.title) for s in _seed_specs()}
 

@@ -17,6 +17,9 @@ import type { ApiDemoRunResponse } from '../lib/types';
 type RunPhase =
   | { name: 'idle' }
   | { name: 'running' }
+  // The server refused to re-seed an edited scenario (409 `demo_target_drifted`).
+  // A refusal is NOT an error: the backend answered, and answered correctly.
+  | { name: 'drifted'; experimentId?: string }
   | { name: 'error'; error: ApiError }
   | { name: 'done'; result: ApiDemoRunResponse };
 
@@ -40,6 +43,30 @@ type UploadPhase =
 const UPLOADS_GATED_FALLBACK =
   'Uploads are approval-gated and not enabled in this workspace.';
 
+/** The `error` discriminator the backend sends with its 409 demo-run refusal. */
+const DEMO_TARGET_DRIFTED = 'demo_target_drifted';
+
+/**
+ * Recognise the ONE refusal this screen states differently: `POST /api/demo/run`
+ * answering 409 `demo_target_drifted` because the canonical scenario has been
+ * edited and re-seeding would discard that work.
+ *
+ * Narrow on purpose. Anything else — a different 409, a missing/garbled body, an
+ * edge sign-in page, an unreachable backend — falls through to the existing
+ * error state, because claiming "your scenario was protected" about a failure we
+ * did not observe would be exactly the same class of lie as the `BackendDown`
+ * this branch replaces. Returns the refusal's scenario id when the body carries
+ * one; the id is optional, its absence must not suppress the refusal.
+ */
+function driftRefusal(error: ApiError): { experimentId?: string } | null {
+  if (error.status !== 409 || error.htmlIntercept) return null;
+  const body = error.body;
+  if (typeof body !== 'object' || body === null) return null;
+  const { error: code, experiment_id: id } = body as Record<string, unknown>;
+  if (code !== DEMO_TARGET_DRIFTED) return null;
+  return { experimentId: typeof id === 'string' && id !== '' ? id : undefined };
+}
+
 /**
  * S2 · Load Materials — the on-ramp. Synthetic-first. Run Synthetic Demo calls
  * `POST /api/demo/run` (draft_only) and renders the returned pipeline steps —
@@ -57,7 +84,14 @@ export function LoadMaterials() {
     api
       .runDemo('draft_only')
       .then((result) => setRun({ name: 'done', result }))
-      .catch((error: ApiError) => setRun({ name: 'error', error }));
+      .catch((error: ApiError) => {
+        const refusal = driftRefusal(error);
+        setRun(
+          refusal
+            ? { name: 'drifted', experimentId: refusal.experimentId }
+            : { name: 'error', error },
+        );
+      });
   };
 
   const tryLocalFiles = () => {
@@ -160,6 +194,44 @@ export function LoadMaterials() {
             <span className="dot dot-processing" aria-hidden="true" />
             <span className="runner-status-label">Synthetic Demo — Running</span>
             <span className="runner-status-note">calling the deterministic pipeline…</span>
+          </div>
+        )}
+
+        {/*
+         * The protective refusal. `role="alert"` matches how this screen (and
+         * the export conflict on S6) announces a state that appears in answer to
+         * a click; the visual treatment is the same protective slate as the
+         * governance refusal above, never the red error treatment — the backend
+         * is healthy and has just done the right thing. Focus deliberately stays
+         * on Run Demo: the alert announces itself, and the remedy button follows
+         * in DOM order.
+         */}
+        {run.name === 'drifted' && (
+          <div
+            className="upload-blocked demo-refused"
+            role="alert"
+            aria-labelledby="demo-refused-title"
+          >
+            <ShieldCheck size={14} strokeWidth={2.1} aria-hidden="true" />
+            <div>
+              <p id="demo-refused-title" className="demo-refused-title">
+                <strong>{LABELS.demoDriftedTitle}</strong>
+              </p>
+              <p>{LABELS.demoDriftedBody}</p>
+              <p>{LABELS.demoDriftedRemedy}</p>
+              {run.experimentId && (
+                <p className="demo-refused-id">
+                  {LABELS.demoDriftedScenario} <span className="mono">{run.experimentId}</span>
+                </p>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate(ROUTES.experiments)}
+              >
+                {LABELS.actionGoToExperiments}
+              </button>
+            </div>
           </div>
         )}
 

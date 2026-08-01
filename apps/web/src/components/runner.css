@@ -184,6 +184,15 @@
 }
 .upload-blocked svg { flex: none; margin-top: 1px; color: var(--text-slate); }
 .upload-blocked strong { color: var(--text-strong); }
+/* The 409 `demo_target_drifted` refusal: the server protected an edited
+   scenario instead of re-seeding over it. Borrows `.upload-blocked`'s
+   protective slate — this is a refusal, not a failure — and only adds the
+   block rhythm that panel never needed. */
+.demo-refused p { margin: 0; }
+.demo-refused p + p { margin-top: 6px; }
+.demo-refused-title { color: var(--text-strong); }
+.demo-refused-id { color: var(--text-tertiary); font-size: 11.5px; }
+.demo-refused .btn { margin-top: 12px; width: auto; }
 /* Post-run CTA into the new record's workbench. */
 .runner-open {
   display: flex;

@@ -1058,7 +1058,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 36 operations, 43 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 36 operations, 44 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(36);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1073,8 +1073,15 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `/api/openapi`, so a caption still claiming 35 would be visibly false. The
     // captured `GET /api/health` copy was refreshed in the same pass — it had gone
     // stale when that docstring gained the database-block paragraph.
-    expect(total).toBe(20915);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(43);
+    //
+    // 20,915 -> 21,270 and 43 -> 44 paragraphs: `POST /api/demo/run` gained a
+    // paragraph stating that it never overwrites your work — it refuses with 409
+    // when the canonical target has drifted, rather than silently discarding a
+    // confirmed edit (W1). The old description asserted the opposite ("overwriting
+    // it in place"), so leaving this pinned at 20,915 would have kept a caption
+    // describing behaviour the API no longer has.
+    expect(total).toBe(21270);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(44);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

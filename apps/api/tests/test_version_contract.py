@@ -220,6 +220,172 @@ def test_noop_demo_run_does_not_churn_the_token(client):
     assert token1 == token2, "a no-op demo re-run must not churn the token"
 
 
+# --- 2b. the demo run is precondition-gated on content (W1) -------------------
+#
+# ``POST /api/demo/run`` targets a FIXED canonical id derived server-side from
+# ``mode``, so a caller structurally cannot send an If-Match for it and
+# ``ensure_seeded`` makes ``If-Match: *`` vacuous. Its precondition is therefore
+# content-shaped: the target must still hold exactly its canonical seed state.
+# Matching -> the write would be byte-identical, so NOTHING is written. Drifted ->
+# 409, and still nothing is written. Either way the demo can never overwrite a
+# confirmed edit, drop an audit entry, or mint the same token over new content.
+
+
+def _state_of(exp_id):
+    """``(rev, version, updated_utc)`` read straight off disk, bypassing HTTP."""
+    exp = ws.load_experiment(exp_id)
+    assert exp is not None, exp_id
+    return exp.rev, exp.version_token(), exp.updated_utc
+
+
+def _state_file_identity(exp_id):
+    """Proof that ``experiment.json`` was not REWRITTEN, not merely that its
+    content came out the same.
+
+    ``atomic_write_text`` creates a uniquely-named temp file and ``os.replace``s
+    it over the target, so any write — even one producing byte-identical content —
+    necessarily lands a DIFFERENT inode. The temp file exists before the target is
+    replaced, so the new inode can never be the old one; this is deterministic,
+    not a timing race. Version fields alone cannot see such a write: a pristine
+    rebuild preserves the generation, resets ``rev`` to 0 (already 0) and re-derives
+    ``updated_utc`` from the fixed seed ``created_utc``, so every one of them comes
+    out unchanged while the file was in fact rewritten.
+    """
+    st = (ws.workspace_root() / exp_id / "experiment.json").stat()
+    return st.st_ino, st.st_mtime_ns
+
+
+def test_demo_run_cannot_destroy_a_confirmed_edit_or_replay_a_token(client):
+    """A demo run over a record the user has actually changed is refused 409, and
+    the refusal is total: the token does not move, so the pre-edit token stays
+    stale and a replay of it is still rejected 412.
+
+    Without the precondition the demo rebuilt the record from scratch, resetting
+    ``rev`` to 0 while PRESERVING the on-disk generation — so the pre-edit token
+    became valid again over different content (an ABA the generation nonce exists
+    to prevent) and the confirmed edit was silently gone.
+    """
+    pre_edit_token = _token_of(client, ws.SEED_NEW_DRAFT_ID)
+
+    r = client.post(
+        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
+        json=_real_answers_payload(),
+        headers={"If-Match": _quote(pre_edit_token)},
+    )
+    assert r.status_code == 200, r.text
+    edited_token = _token_of(client, ws.SEED_NEW_DRAFT_ID)
+    assert edited_token != pre_edit_token, "the confirmed edit must advance the token"
+
+    r = client.post("/api/demo/run", json={"mode": "draft_only"})
+    assert r.status_code == 409, r.text
+    body = r.json()
+    assert body["error"] == "demo_target_drifted", body
+    assert body["experiment_id"] == ws.SEED_NEW_DRAFT_ID, body
+    assert "/api/demo/reset" in body["message"], body
+    # No filesystem path ever leaks out of a refusal.
+    assert str(ws.workspace_root()) not in json.dumps(body), body
+
+    assert _token_of(client, ws.SEED_NEW_DRAFT_ID) == edited_token, (
+        "a refused demo run must not move the token"
+    )
+
+    r = client.post(
+        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
+        json=_real_answers_payload(),
+        headers={"If-Match": _quote(pre_edit_token)},
+    )
+    assert r.status_code == 412, r.text
+    assert r.json()["error"] == "stale_write"
+
+
+@pytest.mark.parametrize(
+    "mode,target",
+    [("draft_only", ws.SEED_NEW_DRAFT_ID), ("full", ws.SEED_DONE_ID)],
+)
+def test_pristine_demo_run_mutates_nothing_at_all(client, mode, target):
+    """On a pristine seed the demo run's write is provably redundant, so it does
+    not happen: ``rev``, the version token and ``updated_utc`` are unchanged AND
+    the state file was never rewritten.
+
+    The version fields alone are NOT sufficient and this test would be worthless
+    without the file-identity check — a pristine rebuild reproduces all three
+    exactly (see ``_state_file_identity``). The inode is what distinguishes "the
+    write was skipped" from "the write happened and landed the same bytes", and
+    only the former protects the drifted case.
+    """
+    before, before_file = _state_of(target), _state_file_identity(target)
+    r = client.post("/api/demo/run", json={"mode": mode})
+    assert r.status_code == 200, r.text
+    assert r.json()["experiment_id"] == target, r.text
+    assert _state_of(target) == before, "a pristine demo run must not move the version"
+    assert _state_file_identity(target) == before_file, (
+        "a pristine demo run must not rewrite the state file at all"
+    )
+
+
+def test_refused_demo_run_preserves_the_answer_log(client):
+    """The audit trail survives a refused run. The old rebuild reset ``answer_log``
+    to ``[]``, discarding the record of the user's confirmation along with it."""
+    token = _token_of(client, ws.SEED_NEW_DRAFT_ID)
+    r = client.post(
+        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
+        json=_real_answers_payload(),
+        headers={"If-Match": _quote(token)},
+    )
+    assert r.status_code == 200, r.text
+    before = copy.deepcopy(ws.load_experiment(ws.SEED_NEW_DRAFT_ID).answer_log)
+    assert before, "the confirmed edit must have left an audit entry to preserve"
+
+    r = client.post("/api/demo/run", json={"mode": "draft_only"})
+    assert r.status_code == 409, r.text
+    assert ws.load_experiment(ws.SEED_NEW_DRAFT_ID).answer_log == before
+
+
+def test_refused_demo_run_does_not_rewrite_the_state_file(client):
+    """A REFUSAL writes nothing either — pinned on the inode, not on field values.
+
+    The pristine no-op is already pinned this way; the refusal path was not, so a
+    wrong fix that returned 409 *after* rewriting the file would have passed the
+    suite. ``_state_file_identity`` is what distinguishes "not rewritten" from
+    "rewritten to the same bytes".
+    """
+    token = _token_of(client, ws.SEED_NEW_DRAFT_ID)
+    r = client.post(
+        f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
+        json=_real_answers_payload(),
+        headers={"If-Match": _quote(token)},
+    )
+    assert r.status_code == 200, r.text
+    before_file = _state_file_identity(ws.SEED_NEW_DRAFT_ID)
+
+    r = client.post("/api/demo/run", json={"mode": "draft_only"})
+    assert r.status_code == 409, r.text
+    assert _state_file_identity(ws.SEED_NEW_DRAFT_ID) == before_file, (
+        "the refused run must not touch experiment.json at all"
+    )
+
+
+def test_full_mode_demo_run_refuses_on_drift(client):
+    """Drift detection covers ``full`` mode too, not only ``draft_only``.
+
+    ``full`` targets the EXPORTED seed, whose baseline carries a non-null
+    ``record_id`` — the one field that makes its signature differ from a freshly
+    built experiment. A fix that got that wrong would either refuse every pristine
+    full run or never refuse a drifted one; only a drift test for this mode pins it.
+    """
+    target = ws.SEED_DONE_ID
+    exp = ws.load_experiment(target)
+    exp.title = f"{exp.title} (edited)"
+    exp.save_versioned()
+    before_file = _state_file_identity(target)
+
+    r = client.post("/api/demo/run", json={"mode": "full"})
+    assert r.status_code == 409, r.text
+    assert r.json()["error"] == "demo_target_drifted"
+    assert r.json()["experiment_id"] == target
+    assert _state_file_identity(target) == before_file
+
+
 def test_reset_mints_fresh_token_for_canonical(client):
     """Reset re-materialises EVERY canonical record to its deterministic seed
     baseline (P27.6-reset), minting a fresh generation per id. A present-but-drifted

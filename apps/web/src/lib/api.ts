@@ -634,8 +634,29 @@ export const api = {
   },
 
   // S2 — run the synthetic pipeline; `draft_only` stops at the blockers.
-  runDemo(mode: 'draft_only' | 'full' = 'draft_only'): Promise<ApiDemoRunResponse> {
-    return postJson<ApiDemoRunResponse>('/demo/run', { mode });
+  //
+  // The backend now REFUSES (409 `demo_target_drifted`) rather than re-seeding
+  // over a canonical scenario a user has edited, and its refusal body names the
+  // reason and the scenario. `postJson` would have discarded that body —
+  // `httpError` never reads one — leaving the screen with a bare "Request failed
+  // (409)." and no way to tell a protective refusal from a broken backend. So
+  // the 409 body is attached to the thrown ApiError, exactly as `mutationError`
+  // does for the 412 stale-write payload; `mutationError` itself is deliberately
+  // untouched, since its 409 (export immutability) callers expect the plain
+  // shape. An HTML intercept is excluded: an edge sign-in page carries no
+  // refusal payload. Every other status keeps the previous behaviour.
+  async runDemo(mode: 'draft_only' | 'full' = 'draft_only'): Promise<ApiDemoRunResponse> {
+    const path = '/demo/run';
+    const res = await request(path, { method: 'POST', body: JSON.stringify({ mode }) });
+    if (res.ok) return readJson<ApiDemoRunResponse>(res, path);
+    const err = httpError(res, path);
+    if (err.htmlIntercept || res.status !== 409) throw err;
+    throw new ApiError(err.message, {
+      status: res.status,
+      path,
+      contentType: err.contentType,
+      body: await res.json().catch(() => undefined),
+    });
   },
 
   // P26.0b — the guarded synthetic-demo reset. Preview (200) and both safe
