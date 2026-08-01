@@ -276,6 +276,18 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       'guided-completion@width-320': [
         'main#main.screen-main.centered < div.screen-body.record < div.screen-card',
       ],
+      // PLATFORM-DIFFERING, and Linux is the one that is worse. MEASURED by CI
+      // run 30691557697 on `7e9a387`: the same region overflows at 375 as well
+      // under the wider Linux system face — scrollWidth 356 vs clientWidth 353,
+      // with `span.upcoming-path < div.upcoming-row < div.centered-col.narrow`
+      // as the widest overflowing child (right edge 367 vs 364). Three pixels,
+      // and therefore exactly the kind of thing macOS font metrics hide: it is a
+      // real application defect that any user with a slightly wider face sees.
+      // `darwin: []` is a measurement, not an omission — it does not fire there.
+      'guided-completion@width-375': {
+        darwin: [],
+        linux: ['main#main.screen-main.centered < div.screen-body.record < div.screen-card'],
+      },
       'load@width-320': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],
       'load@width-375': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],
       'load@width-390': ['main#main.screen-main.centered < div.screen-body.full < div.screen-card'],

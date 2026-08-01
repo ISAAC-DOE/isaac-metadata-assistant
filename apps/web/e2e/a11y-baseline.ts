@@ -276,7 +276,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'export-readiness-done@laptop-1024x768': 12,
       // The two pairs where LINUX HAS FEWER nodes: the wider face pushes two
       // fragments onto one line, so axe sees one text node instead of two.
-      'export-readiness-done@tablet-768x1024': { darwin: 12, linux: 11 },
+      // Linux 11 -> 12, MEASURED by CI run 30691557697 on `7e9a387`; the split
+      // is no longer needed. Same mechanism as the two darwin increases in this
+      // slice: containing the top-bar crumb let axe resolve a background it
+      // previously could not, so a pre-existing failure moved from `incomplete`
+      // into `violations`. Linux only, because 768 is inside the band the
+      // compact treatment moved into and the wider Linux face changes what fits.
+      'export-readiness-done@tablet-768x1024': 12,
       'export-readiness-done@mobile-375x812': 8,
       'export-readiness-done@zoom-200': 10,
       'governance@desktop-1280x800': 4,
@@ -286,7 +292,10 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'governance@zoom-200': 3,
       'guided-completion@desktop-1280x800': 12,
       'guided-completion@laptop-1024x768': 11,
-      'guided-completion@tablet-768x1024': 11,
+      // Linux 11 -> 10, MEASURED by CI run 30691557697 on `7e9a387`: a genuine
+      // IMPROVEMENT on Linux only, lowered rather than left stale. darwin stays
+      // 11 (measured locally, unchanged), so the entry splits.
+      'guided-completion@tablet-768x1024': { darwin: 11, linux: 10 },
       // Was `{ darwin: 7, linux: 8 }`; darwin caught up to Linux on 2026-08-01
       // and the split is no longer needed. `.guided-suggestion-not` moved from
       // axe's `incomplete` bucket into `violations` after the C1/I4 fix removed
@@ -470,11 +479,16 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Two of those are pre-existing failures becoming measurable (see the notes on
   // each entry), one is a real improvement.
   //
-  // linux stays 1634 and that is a DERIVATION, not a measurement, so treat it as
-  // provisional: this environment cannot run the Linux face. Of the three
-  // changes, `guided-completion@mobile-375x812` was ALREADY 8 on linux, so it
-  // contributes 0 there, and the other two (+1, -1) cancel. If CI disagrees,
-  // correct THE NUMBER from the CI output — never loosen the assertion.
+  // linux stays 1634, and that is now MEASURED rather than derived. It was
+  // first written as a derivation (this environment cannot run the Linux face);
+  // CI run 30691557697 on `7e9a387` then reported exactly two Linux-only
+  // changes, `export-readiness-done@tablet-768x1024` 11 -> 12 and
+  // `guided-completion@tablet-768x1024` 11 -> 10, which cancel. The three
+  // darwin-side changes contribute 0 on Linux: two are at surfaces Linux did
+  // not move, and `guided-completion@mobile-375x812` was ALREADY 8 there.
+  // Same total, different arithmetic — and the rule that got it here stands:
+  // if CI disagrees with a number in this file, correct THE NUMBER from the CI
+  // output, never loosen the assertion.
   darwin: 1629,
   linux: 1634,
 };
