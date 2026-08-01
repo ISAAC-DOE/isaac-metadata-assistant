@@ -5,13 +5,27 @@ ISAAC. Update it in the same PR as any slice that changes a row.
 
 > ## Verdict: **Baseline Code-Complete, Runtime Unverified**
 >
-> Defined in **§7.1**, justified line by line in **§7.2**. In short: every baseline-required row is
-> `done` in the repository and green under this project's own verification, and **nothing in the
-> deployed system has been observed** — the hosted SHA is unknown, the final runtime code is not yet
-> in any published image, G3 is open, the real database has never been contacted, and real 200%
-> browser-zoom sign-off is open. Plain **Baseline Complete** and **Complete With External Blockers**
-> are both unavailable, for the reasons enumerated in §7.2. This verdict makes **no claim of any
-> kind** about `/krish`.
+> Defined in **§7.1**, justified line by line in **§7.2**.
+>
+> **Three of the original reasons for this verdict have since been falsified, and are corrected here
+> rather than quietly dropped.** As first written it said "the hosted SHA is unknown, the final
+> runtime code is not yet in any published image, … the real database has never been contacted".
+> All three were true when written and **all three are now false**: merge `ceea656` was published as
+> image `v0.0.38` (source metadata resolving to that commit), Flux rolled it, hosted
+> `/krish/api/health` was observed reporting `ceea656`, and the Slice 2A reconnaissance has run
+> against the real database — its returned aggregates were re-scanned with the repo's own
+> `db_recon.scan_for_leaks` (**no leaks**), all four frozen allowlists matched exactly, and it
+> reported zero schema drift (30/30). Preserved rather than erased, because a verdict whose stated
+> grounds silently change is not checkable.
+>
+> **The verdict itself still stands, for reasons that are current.** The 2026-08-01 responsive
+> remediation (§3C) closed one Critical and five Important defects that were live in the deployed
+> `ceea656` build, so the deployed runtime is now known to be **behind** the repository; that code
+> is not yet in any published image. **G3** is open, and real **200% browser-zoom sign-off** is open
+> and is not automatable — §3C's `zoom-200` project is the layout-level *equivalent* of 200%, never
+> the browser's own zoom command. Plain **Baseline Complete** and **Complete With External Blockers**
+> remain unavailable, for the reasons enumerated in §7.2. This verdict makes **no claim of any kind**
+> about the current state of `/krish`.
 
 **Purpose.** Define exactly which capabilities must exist, be tested, be deployed, and be
 runtime-verified before ISAAC is a stable foundation for new product feature work — and, just as
@@ -454,6 +468,111 @@ measured them at all**. Going from no measurement to a ratcheted, per-node basel
 foundational improvement; leaving A3–A8 open is a known, owned, bounded debt with a named next slice
 — not a foundational ambiguity. They do **not** block the verdict in §7. What blocks it is stated
 there, and it is not this.
+
+## 3C. C1 and I1–I5 — the responsive defect set, and the probes that hid it
+
+Found by the Local Production UI Verification (2026-07-31) against the deployed merge `ceea656`, and
+closed by the Responsive Baseline Remediation slice (PR **#35**, branch
+`fix/responsive-baseline-remediation`). All were **pre-existing**; all were present through every
+green run of the 579-test suite.
+
+### The single most consequential finding of this slice
+
+**"579 tests green" and "the UI is sound at 375px" were never the same claim, and `ceea656` was a
+concrete counterexample.** Three probes were each blind in a different, specific way — their
+assertions were weaker than their names implied:
+
+| Probe | The hole | The proof |
+|---|---|---|
+| `horizontalPageScroll` | read only `document.documentElement` and `document.body` | `/experiments`@375 reported a clean `375 == 375` while `main.screen-main.pad` measured **scrollWidth 476 vs clientWidth 353** |
+| `findClippedText` | exempted **every** `text-overflow: ellipsis` element regardless of magnitude, **and** skipped zero-width elements before inspecting them | `.record-title` — clientWidth **0**, scrollWidth **395**, i.e. 100% content loss with not even an ellipsis glyph painted — was **doubly** exempt |
+| `findObscuredControls` | scanned only **interactive** elements, and hit-tested the centre of the **visible intersection** | a non-interactive `<span>` painting across the search button was outside its universe entirely; a **4.9px** visible sliver of a 128px button hit-tested to itself and passed |
+
+Anyone citing a green e2e count as evidence of responsive correctness should read this table first.
+**Do not write, anywhere, that the 579-test baseline proved the 375px UI sound.** It proved the
+assertions it actually made, and those are now enumerated above.
+
+### Defects closed
+
+Measured on the production build at 375×812 unless noted; before → after.
+
+| ID | Sev | Root cause | Before → After |
+|---|---|---|---|
+| **C1** | **Critical** | `.record-context` was shrunk to the top bar's whole remainder (69px at 375, 14px at 320) while `overflow: visible`, so its `nowrap` children painted across the search button and mode chip | `elementFromPoint` at 5 points across `.record-surface`: **3 of 5 foreign → 0 of 5**, verified on 5 record routes × 7 widths (320/375/390/640/768/1024/1280) |
+| **I4** | Important | `.record-title` is a flex item with `overflow: hidden`, so `min-width: auto` resolved to 0 | `0/395` at 375 **and at 768** → `329/395` and `710/710`. It had been visible **nowhere**: the page `<h1>` on these routes is `sr-only` |
+| **I1** | Important | `.page-actions` was `flex: none` + `nowrap` at **447.7px** in a 353px box. `.page-header` **already** wrapped — it was never the cause, and a test now guards that | `39..486.7` (122.7px past the content edge) → `39..336`, hit-testable at 320 and 375 |
+| **I2** | Important | row flex with a `flex: none` 151.7px action squeezing a `flex: 1` body | body `88.2×465.2` → `227×187.6`; action on its own line |
+| **I3** | Important | selection differed **only** by background and border colour | fails SC 1.4.11 at **1.03:1 / 1.31:1** → 6×6 `::before` status dot at **5.23:1 / 5.38:1**, zero layout shift, `aria-pressed` untouched |
+| **I5** | Important | one global `max-height: 34vh` sized for the narrow drawer, applied to the desktop rail with 424.5px free above | list `114` of `475` scrollHeight → `178`; 0 orphan headings at 1280×800/600, 1440×900, 1920×1080 |
+| **M1** | Minor | `.exp-trailing` is `flex: none` at 180.4px; `.exp-main` had `min-width: 0`, so it took `rowContent − 196.4` **and** the row could never break | `.exp-title`@320 `12/67` → `208/208`; `.exp-scenario-text` `0/8` → `191/191` |
+| **M3** | Minor | — | **still open, retained as debt.** Recorded as `LAYOUT-02`; its darwin instance is now fixed by C1 and was deleted, its **Linux** instance is retained because Linux font metrics cannot be measured from this environment |
+
+Two design notes worth keeping, because both were arrived at by rejecting the obvious fix:
+
+- **C1 was not closed by hiding the leaf crumb.** That was the proposed approach; measurement refuted
+  it — there was no freed width to reclaim (69px *was* the whole remainder), and the crumb does not
+  duplicate a visible heading, because the page `<h1>` is `sr-only`. Hiding it would have deleted the
+  surface name from every visible location. The bar wraps to two rows at ≤1024 on record surfaces
+  instead.
+- **I3 was not closed with a leading border.** `design-handoff/05-design-system/no-vertical-rail-rule.md`
+  forbids it and names the selected evidence row as its own case 4; the repo's `no-vertical-rail.test.ts`
+  caught the attempt. The approved status-dot pattern was used instead. *(That design doc is
+  **gitignored**, so the correction recording the dot could not be committed; the committed
+  enforcement is the test plus the CSS comments.)*
+
+### The strengthened responsive-test contract
+
+Binding on every future slice:
+
+1. **Nested overflow** — `findOverflowingRegions` reports any element with `scrollWidth > clientWidth + 1`
+   whose computed `overflow-x` actually clips or scrolls, naming the culprit. Document-level checking
+   alone is not sufficient and never was.
+2. **Content loss is magnitude-aware** — `text-overflow: ellipsis` no longer excuses a clip on its own,
+   and zero-width elements are no longer skipped. Truncation is tolerated only while a meaningful
+   fragment survives (24px, or 40px for critical labels, or ≥20% of the string).
+3. **Occlusion covers critical non-interactive labels** through an enumerated selector set, tests
+   usable width and the **intended** box rather than the visible intersection, and treats a sliver as
+   unusable.
+4. **Exemptions are narrow and cite intent.** `e2e/layout-allowlist.ts` requires a **class** selector
+   (tag, universal and subtree selectors are forbidden), an exhaustive surface list, and a citation of
+   the `src/**` line that declares the behaviour deliberate. **Geometric exemption is forbidden** — a
+   "clientWidth ≤ 1 is fine" rule would have swallowed the zero-width `record-title`, which is the
+   whole reason the file exists.
+5. **Known defects go in `layout-baseline.ts` with exact per-instance selectors**, never a substring or
+   a wildcard, and never an annotation used to make a failure disappear.
+
+### Debt this slice recorded rather than fixed, deliberately
+
+- **LAYOUT-03** — the floating Assistant trigger (`position: fixed`, `z-index: 45`, ≤1024px) paints
+  **completely** over the StatusBar's honesty statement "hosted preview · no telemetry" (visible-area
+  ratio 1.00, survives `scrollIntoView`). 17 instances. Pre-existence proven by re-running the probe
+  against the stashed CSS. Outside this slice's authorized defect list.
+- **LAYOUT-04** — nested horizontal overflow, 16 keys / **20 instances**, across `evidence`,
+  `record-detail`, `export-readiness`, `export-readiness-done`, `guided-completion`, `load`. Two causes:
+  `div.screen-card` inheriting the non-reflowing StatusBar's width, and `main` regions whose min-content
+  exceeds a phone viewport. The `/experiments` case that motivated the hardening is **absent** — it was
+  fixed by I1, so it fails if it returns.
+- **The width sweep probes occlusion at one scroll offset**, and is therefore blind to 17 occlusion
+  instances visible only at the bottom offset — all of them the LAYOUT-03 class. Measured, and
+  **disclosed in the spec itself** rather than left implicit. Fixing it is a baseline-authoring
+  decision (17 new `@width-<n>` instances), not a probe defect.
+
+### Accessibility baseline movement, and why it is not a weakened test
+
+darwin total **1628 → 1629**, from three measured per-surface changes. Two are **increases**, and both
+are pre-existing failures moving from axe's `incomplete` bucket into `violations` because removing the
+overlaps let axe **resolve backgrounds it previously could not**:
+
+- `.guided-suggestion-not` (`guided-completion@mobile-375x812`, 7 → 8). A/B with only the CSS reverted:
+  identical geometry (102.5×35.6) and identical colour (`rgb(120,131,143)`), while `incomplete` fell
+  6 → 3 and `.record-surface` and `.guided-suggestion-head` became resolvable **and passing**.
+  Corroboration: **Linux already counted 8** — the wider Linux face had made the same node measurable
+  long before this slice.
+- `.record-file` (`evidence@tablet-768x1024`, 70 → 71). It previously hung **105.3px outside**
+  `.record-context`; containing it made it measurable, and it fails.
+
+The third, `settings-explorer@mobile-375x812` 55 → 54, is a genuine improvement, **lowered** rather
+than left stale — a stale number would re-admit the defect.
 
 ## 4A. The three deferred correctness defects, defined
 
