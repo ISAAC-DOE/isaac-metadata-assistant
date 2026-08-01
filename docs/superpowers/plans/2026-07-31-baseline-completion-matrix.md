@@ -36,7 +36,7 @@ that produced it:
 |---|---|---|
 | Frontend | **2156 passed, 94 files** (was 2145 / 93 — the new `a11y-critical-fixes.test.tsx` adds 11) | `cd apps/web && npm test` |
 | TypeScript | exit 0 | `cd apps/web && npx tsc -b` |
-| End-to-end / a11y | **579 passed, 1 skipped** (macOS only) | `cd apps/web && npx playwright test` |
+| End-to-end / a11y | **579 passed, 1 skipped** on macOS **and on Linux CI** (run `30677607861`, `a911b8c`) | `cd apps/web && npx playwright test` |
 | Backend | **1814 passed, 0 failed** | `.venv/bin/pytest -q -p no:cacheprovider` |
 | Recon endpoint | **130 passed** | `.venv/bin/pytest apps/api/tests/test_db_recon_endpoint.py -q` |
 | Snapshot drift | **ok, no drift** (both artifacts) | `build_memory_snapshot.py … --detail-out --check` |
@@ -244,7 +244,7 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 | Secret / leak / real-data scans | **yes** | done | orch | — |
 | Copy-truthfulness guards (frontend + backend, parity-enforced) | **yes** | done | orch | — |
 | **Real-browser test baseline** | **yes** | **done** — Playwright/Chromium, PR #32 (`c36053d`); **579 passed, 1 skipped** locally on macOS after the closure fixes; Linux CI is the authority | orch | — |
-| **Accessibility engine baseline** | **yes** | **done** — axe-core, 18 surfaces × 5 projects, count-based baseline. **Tightened to 1,628 darwin / 1,634 linux** (from 1,974 / 1,980) when A1 and A2 were fixed and their entries deleted. **darwin measured; linux reduced by construction (−346) and UNVERIFIED locally — CI decides** | orch | — |
+| **Accessibility engine baseline** | **yes** | **done** — axe-core, 18 surfaces × 5 projects, count-based baseline. **Tightened to 1,628 darwin / 1,634 linux** (from 1,974 / 1,980) when A1 and A2 were fixed and their entries deleted. **darwin measured locally; linux MEASURED by CI** (run `30677607861` on `a911b8c` — the three deleted entries assert ZERO nodes and passed under Linux font metrics), so 1,634 is validated, not arithmetic | orch | — |
 | **Responsive baseline (4 viewports)** | **yes** | **done** — 1280×800, 1024×768, 768×1024, 375×812 | orch | — |
 | **200% zoom — layout-level model, automated** | **yes** | **done as a model, not as the thing.** The `zoom-200` project is `{640×400, DPR 2}`, asserted not assumed. Probed directly: DPR contributes **nothing** to CSS layout (DPR 2 and DPR 1 measured byte-identically), and **no CDP method, launch flag or Playwright API can drive Chrome's own zoom control** — so viewport-halving is the correct *and only available* model | orch | — |
 | **Real browser zoom at 200% (`Cmd`/`Ctrl`-`+`)** | **yes** | **OPEN — human only.** Not automatable in Chromium at all; not a deferral of effort | **Krish** | **G4**; automation cannot close it |

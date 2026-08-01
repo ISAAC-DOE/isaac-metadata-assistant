@@ -176,10 +176,10 @@ If **any** of these appears, stop and send it to me before sharing the response 
 - [ ] Browser console: no errors
 
 Two accessibility fixes ship in this build. They are verified **locally on macOS** against the
-accessibility *tree* (`npx playwright test` → 579 passed, 1 skipped, run against the tightened
-ratchet) plus 11 jsdom tests running the real axe engine. **Linux CI has not yet run this code** —
-the closure PR is where that first happens, and the linux node totals are derived arithmetic until
-it does. What no automated check can tell you is whether a screen reader actually *says* the right
+accessibility *tree*, on macOS locally **and on Linux CI** (run `30677607861` on `a911b8c`: 579
+passed, 1 skipped against the tightened ratchet, where the three deleted entries assert ZERO nodes),
+plus 11 jsdom tests running the real axe engine. What no automated check can tell you is whether a
+screen reader actually *says* the right
 thing, so if you have VoiceOver to hand these are the two worth ten seconds each:
 
 - [ ] Narrow the window below 640px (or zoom to 200%): the top-bar **search** control still

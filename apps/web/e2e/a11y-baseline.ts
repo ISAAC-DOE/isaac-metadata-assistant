@@ -427,14 +427,15 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
  * 36) and A11Y-03 (`aria-allowed-attr` + `aria-allowed-role`, 310) were fixed
  * and their entries deleted: 1974 → 1628 (darwin), 1980 → 1634 (linux).
  *
- * ONE HONEST EXCEPTION to "every number here was measured": the post-fix
- * `linux` total 1634 is DERIVED (1980 − 346), not re-measured — a laptop cannot
- * run the Linux baseline. The surviving per-triple linux counts ARE prior
- * measurements and they do sum to 1634; what is unproven is that the two fixes
- * remove exactly 346 nodes under Linux font metrics too. Neither fix is
- * text-wrap-dependent, so it should hold, but CI is the authority and its first
- * run on this code decides. If CI disagrees, correct THIS number rather than
- * loosening the assertion.
+ * The post-fix `linux` total 1634 was DERIVED (1980 − 346) when first written,
+ * because a laptop cannot run the Linux baseline. **Linux CI has since measured
+ * it** — run 30677607861 on `a911b8c`, 579 passed / 1 skipped: the three
+ * deleted entries assert ZERO nodes and passed, and every surviving entry was
+ * checked against real axe output under Linux font metrics. So 1634 is now the
+ * sum of validated per-entry measurements, not arithmetic.
+ *
+ * The rule that got it there still stands for next time: if CI ever disagrees
+ * with a number in this file, correct THE NUMBER, never loosen the assertion.
  */
 export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number>> = {
   darwin: 1628,
