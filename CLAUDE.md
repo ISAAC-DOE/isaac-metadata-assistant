@@ -691,7 +691,7 @@ clustering* run invokes an external model to name communities, and `graphify-out
 that happening exactly once (2026-07-06), with labels cached since.
 Personal-deploy retirement facts and the approval-gated order live in
 [`docs/personal-deployment-retirement.md`](docs/personal-deployment-retirement.md); both personal
-deployments are still live, public, unauthenticated, and Railway is 77 commits stale with a
+deployments are still live, public, unauthenticated, and Railway is 98 commits stale (re-measured 2026-08-01 at `d7010f9`) with a
 **persistent volume** (so deleting destroys data that pausing preserves).
 
 Note also that the app's `mode: synthetic-only` describes the **workspace** — uploads refused, seeding

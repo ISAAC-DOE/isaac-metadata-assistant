@@ -190,9 +190,15 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       '`z-index: 45`, `bottom: 16px`, engaged by `@media (max-width: 1024px)`) is painted ' +
       'directly over the right-hand end of the record StatusBar. The covered text is the ' +
       'honesty statement "hosted preview · no telemetry" (rendered "local dev · no telemetry" ' +
-      'against a dev server), and the coverage is TOTAL, not partial: the probe reports a ' +
-      'visible-area ratio of 1.00 with 3 to 5 of 5 sampled points hitting the trigger, i.e. the ' +
-      'label is fully laid out and fully painted over. It survives `scrollIntoView`, so it is ' +
+      'against a dev server). CORRECTED 2026-08-01: an earlier revision of this note called the ' +
+      'coverage "TOTAL, not partial", citing a visible-area ratio of 1.00. That inference was ' +
+      'wrong. `ratio` is `visibleRect(el) / getBoundingClientRect()` and `visibleRect` intersects ' +
+      'ONLY with clipping/scrolling ancestors and the viewport (helpers/layout.ts:821-843) — it ' +
+      'has no knowledge of overlays, so 1.00 means "fully laid out and unclipped", NOT ' +
+      '"fully occluded". The occlusion measure is the 5-point hit test, and its own figure is ' +
+      '3 TO 5 of 5 — a 3-of-5 instance is partial. Coverage is partial-to-total by surface, and ' +
+      'the reliably-lost part is the TRAILING half, which carries the telemetry claim. ' +
+      'It survives `scrollIntoView`, so it is ' +
       'not "scrolled away" — it is unreachable at any scroll offset. ' +
       'PRE-EXISTING and NOT introduced by the 2026-08-01 remediation: it is a consequence of the ' +
       'fixed trigger and the non-reflowing footer (LAYOUT-01), both of which predate it. It was ' +

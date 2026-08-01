@@ -24,7 +24,7 @@ and still baselined**, deliberately: see §6 and the Baseline Completion Matrix 
 | Accessibility engine | [`@axe-core/playwright`](https://github.com/dequelabs/axe-core-npm) + `axe-core` |
 | Location | `apps/web/e2e/**`, config `apps/web/playwright.config.ts` |
 | Scope | 18 catalogued surfaces × 5 viewport/zoom dimensions, plus interaction specs |
-| Size | **580 tests** (579 run, 1 conditionally skipped), ~3 minutes locally with default workers |
+| Size | **640 tests in 11 files** — 591 run, 49 conditionally skipped (Linux CI `30692848942` @ `d7010f9`), ~3 minutes locally with default workers |
 | Licences | Playwright Apache-2.0, axe-core and `@axe-core/playwright` MPL-2.0 — **devDependencies only** |
 
 The new packages are dev-only and are **not** in the shipped bundle. Proof:
@@ -467,7 +467,8 @@ Read this section before citing the suite as evidence of anything.
 * **The layout probes are load-sensitive.** Observed directly: running two Playwright suites
   concurrently produced one spurious `layout: Governance & Safety — Policy` failure at
   `tablet-768x1024` that passes in 1.5 s in isolation and does not recur on an idle machine
-  (579 passed, 1 skipped, 0 failed, twice). Measuring rendered geometry under contention is
+  (579 passed, 1 skipped, 0 failed, twice — a **dated 2026-07-31 observation** at `610540e`; the suite
+  is 640/591/49 at `d7010f9`, see the Size row above). Measuring rendered geometry under contention is
   inherently racy. Do not run the suite alongside another browser suite, and treat a single
   isolated layout failure as suspect until reproduced on a quiet machine. The same caveat already
   applies to the pre-existing `graph-real-artifact.test.tsx` vitest flake (finding **F1** in the
