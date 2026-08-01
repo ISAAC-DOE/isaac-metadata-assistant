@@ -7,25 +7,38 @@ ISAAC. Update it in the same PR as any slice that changes a row.
 >
 > Defined in **§7.1**, justified line by line in **§7.2**.
 >
-> **Three of the original reasons for this verdict have since been falsified, and are corrected here
-> rather than quietly dropped.** As first written it said "the hosted SHA is unknown, the final
-> runtime code is not yet in any published image, … the real database has never been contacted".
-> All three were true when written and **all three are now false**: merge `ceea656` was published as
-> image `v0.0.38` (source metadata resolving to that commit), Flux rolled it, hosted
-> `/krish/api/health` was observed reporting `ceea656`, and the Slice 2A reconnaissance has run
-> against the real database — its returned aggregates were re-scanned with the repo's own
-> `db_recon.scan_for_leaks` (**no leaks**), all four frozen allowlists matched exactly, and it
-> reported zero schema drift (30/30). Preserved rather than erased, because a verdict whose stated
-> grounds silently change is not checkable.
+> ### Correction, 2026-08-01: an earlier revision of this block over-claimed. Reconciled DOWN.
 >
-> **The verdict itself still stands, for reasons that are current.** The 2026-08-01 responsive
-> remediation (§3C) closed one Critical and five Important defects that were live in the deployed
-> `ceea656` build, so the deployed runtime is now known to be **behind** the repository; that code
-> is not yet in any published image. **G3** is open, and real **200% browser-zoom sign-off** is open
-> and is not automatable — §3C's `zoom-200` project is the layout-level *equivalent* of 200%, never
-> the browser's own zoom command. Plain **Baseline Complete** and **Complete With External Blockers**
-> remain unavailable, for the reasons enumerated in §7.2. This verdict makes **no claim of any kind**
-> about the current state of `/krish`.
+> A previous revision of this callout (added by docs-only commit `7e9a387`, 1 file, +126/−7, **no data
+> artifact**) asserted that three original grounds for the verdict were "now false" — that hosted
+> `/krish/api/health` **was observed** reporting `ceea656`, and that the Slice 2A reconnaissance **has
+> run** against the real database, reporting no leaks and zero schema drift (**30/30**).
+>
+> **Only one of those three legs survives scrutiny. The other two are WITHDRAWN as unsupported.**
+> The correction is recorded rather than silently applied, because a verdict whose stated grounds
+> change without notice is not checkable — and that principle cuts in both directions.
+>
+> | Sub-claim | Status |
+> |---|---|
+> | `ceea656` → image `v0.0.38`; `d7010f9` (HEAD) → image `v0.0.39` | **VERIFIED.** `git rev-list -n1` on each tag; both tagged by `github-actions`; `Build and Push to GHCR` run `30692848940` on `d7010f9` succeeded. This is CI's record of what it pushed, **not** a registry read |
+> | "the final runtime code is not yet in any published image" | **FALSE, and now struck.** The responsive remediation is in `v0.0.39` |
+> | "hosted `/krish/api/health` was observed reporting `ceea656`" | **WITHDRAWN — unsupported.** No evidence artifact exists, and this file contradicts it in the §"State after the baseline-restoration slices" block, in §7.2 items 3 and 5, and in §7.2's closing *"What this verdict does NOT say"* |
+> | "the reconnaissance has run … 30/30, no leaks" | **WITHDRAWN — unsupported.** Contradicted in six places across three files, including the module's own docstring (`db_recon.py:19-21`). The endpoint holds results in **process memory only** — a deepcopy under a TTL lock (`routes.py:3698-3721`), discarded on pod restart — so no artifact was ever capable of being produced without someone pasting it back |
+>
+> The evidence runs **8 statements to 1** against the two withdrawn claims — **6** specific to the
+> recon having run, and **2** to the hosted rollout having been observed. (`where-the-30-records-are.md`
+> enumerates the same 8; the two documents count the same set.) **Do not repeat the 30/30 figure.**
+> If the scan genuinely ran, the sanitized JSON should be pasted back per
+> [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1 — which is now runnable, its
+> `<CLOSURE_MERGE_SHA>` placeholder having been filled on 2026-08-01 — and all **eight** statements
+> reconciled in one pass at that point. **G1 remains OPEN.**
+>
+> **The verdict itself stands, and its grounds are now simpler.** The database has never been observed
+> being contacted; the hosted SHA is unobserved; **G3** is open; and real **200% browser-zoom
+> sign-off** is open and is not automatable — §3C's `zoom-200` project is the layout-level *equivalent*
+> of 200%, never the browser's own zoom command. Plain **Baseline Complete** and **Complete With
+> External Blockers** remain unavailable, for the reasons enumerated in §7.2. This verdict makes **no
+> claim of any kind** about the current state of `/krish`.
 
 **Purpose.** Define exactly which capabilities must exist, be tested, be deployed, and be
 runtime-verified before ISAAC is a stable foundation for new product feature work — and, just as
@@ -61,6 +74,23 @@ because `routes.py` and `EvidenceTrailPanel.tsx` are both served-content manifes
 (CLAUDE.md §17). The orchestrator regenerated both committed artifacts once after the tree settled,
 and the suite then measured **1814 passed, 0 failed** with the drift check clean. Both numbers are
 kept here because reporting only the final one would hide that the gate fired and was answered.
+
+**State at `d7010f9` (2026-08-01).** The block above is a **dated historical** measurement at
+`610540e` and is deliberately left intact. These are the current numbers, each re-measured in this
+session with the command quoted. Note the platform split — it is real, not a discrepancy:
+
+| Suite | Result | Command / source |
+|---|---|---|
+| Frontend | **2206 passed, 99 files** | `cd apps/web && npm test` (local) — identical on Linux CI run `30692848942` |
+| TypeScript | exit 0 | `cd apps/web && npx tsc -b` |
+| End-to-end / a11y | **591 passed, 49 skipped** of **640 tests in 11 files** | Linux CI run `30692848942`, job *browser accessibility and responsive baseline*; `npx playwright test --list` for the total |
+| Backend | **1811 passed, 3 skipped** on **Linux CI**; **1814 passed** locally on **macOS** | CI run `30692848942` / `.venv/bin/pytest -q -p no:cacheprovider` |
+| Snapshot drift | **ok, no drift** (both artifacts) | `build_memory_snapshot.py … --detail-out --check` |
+| CI on `d7010f9` | all three jobs **success**; `Build and Push to GHCR` (`30692848940`) **success** → `v0.0.39` | `gh run view` |
+
+The backend split (1811 Linux / 1814 macOS) is **three platform-skipped tests**, not three failures.
+Quote the platform whenever quoting the number; a bare "1814" is a macOS figure and CI will disagree
+with it.
 
 **A correction to a claim made earlier in this effort.** An earlier report stated that *no image
 newer than `v0.0.32` was published*. **That was false.** `.github/workflows/build-push.yaml` has no
@@ -192,7 +222,7 @@ Where a row says an external party owns it, that is a genuine gate, not a deferr
 | Deployment health (`GET {base}/api/health`) | repo + `docs/deployment.md` | **yes** | done | indirect (chip) | read | **no** | Krish | Authentik edge — not reachable from this environment |
 | Runtime mode (`synthetic-only`, fail-closed at boot) | `runtime_mode.py` | **yes** | done | yes | read | no | Krish | same |
 | `/krish` base-path correctness | `docs/deployment.md` | **yes** | done | yes | read | no | Krish | same |
-| Image publication (every push to `main`) | `.github/workflows/build-push.yaml` | **yes** | done — `v0.0.33`–`v0.0.37` all built and pushed by successful CI runs; no path filters, so docs-only merges publish too | no | n/a | **no** — CI's record of what it pushed, **not** a registry read (`ghcr.io` anon token failed; `gh api /orgs/ISAAC-DOE/packages` → 403) | orch | — |
+| Image publication (every push to `main`) | `.github/workflows/build-push.yaml` | **yes** | done — `v0.0.33`–`v0.0.39` all built and pushed by successful CI runs (`v0.0.38`→`ceea656`, `v0.0.39`→`d7010f9`); no path filters, so docs-only merges publish too | no | n/a | **no** — CI's record of what it pushed, **not** a registry read (`ghcr.io` anon token failed; `gh api /orgs/ISAAC-DOE/packages` → 403) | orch | — |
 | Flux rollout onto `/krish` | `isaac-k8` (not in this repo) | **yes** | **UNDETERMINED** — no `ImagePolicy` / `ImageUpdateAutomation` manifest exists here, so which tag the cluster selects is unknown and is not guessed | no | n/a | **no** | Krish / Dean | hosted `/krish/api/health` returned **HTTP 302** (Authentik edge); running image UNKNOWN |
 | Authentik edge behavior | Dean | **yes** | done (external) | yes | n/a | no | Krish | credentials are Krish's; agent must not authenticate |
 | Session-expiration behavior | — | no | absent | yes | n/a | no | Krish | edge-owned; not an app defect |
@@ -249,15 +279,15 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 
 | Capability | Baseline required | Current state | Owner | Blocking |
 |---|---|---|---|---|
-| Backend suite | **yes** | done — **1814 passed, 0 failed** (`.venv/bin/pytest -q -p no:cacheprovider`), after the snapshot regeneration that the first run (1810 passed / 1 failed, expected manifest drift) correctly demanded | orch | — |
-| Frontend suite | **yes** | done — **2156 / 94 files** (`cd apps/web && npm test`), but see F1 | orch | — |
+| Backend suite | **yes** | done — **1811 passed, 3 skipped** on Linux CI (`30692848942`); **1814 passed** locally on macOS. The split is three platform-skipped tests, not failures — always quote the platform | orch | — |
+| Frontend suite | **yes** | done — **2206 passed / 99 files** (`cd apps/web && npm test`), same on Linux CI, but see F1 | orch | — |
 | TypeScript build | **yes** | done | orch | — |
 | Production build | **yes** | done | orch | — |
 | Docker build + smoke | **yes** | done (CI) | orch | — |
 | Snapshot drift gate (both artifacts) | **yes** | done | orch | — |
 | Secret / leak / real-data scans | **yes** | done | orch | — |
 | Copy-truthfulness guards (frontend + backend, parity-enforced) | **yes** | done | orch | — |
-| **Real-browser test baseline** | **yes** | **done** — Playwright/Chromium, PR #32 (`c36053d`); **579 passed, 1 skipped** locally on macOS after the closure fixes; Linux CI is the authority | orch | — |
+| **Real-browser test baseline** | **yes** | **done** — Playwright/Chromium, PR #32 (`c36053d`); **591 passed, 49 skipped** of 640 tests in 11 files on **Linux CI** (`30692848942`, `d7010f9`); Linux CI is the authority | orch | — |
 | **Accessibility engine baseline** | **yes** | **done** — axe-core, 18 surfaces × 5 projects, count-based baseline. **Tightened to 1,628 darwin / 1,634 linux** (from 1,974 / 1,980) when A1 and A2 were fixed and their entries deleted. **darwin measured locally; linux MEASURED by CI** (run `30677607861` on `a911b8c` — the three deleted entries assert ZERO nodes and passed under Linux font metrics), so 1,634 is validated, not arithmetic | orch | — |
 | **Responsive baseline (4 viewports)** | **yes** | **done** — 1280×800, 1024×768, 768×1024, 375×812 | orch | — |
 | **200% zoom — layout-level model, automated** | **yes** | **done as a model, not as the thing.** The `zoom-200` project is `{640×400, DPR 2}`, asserted not assumed. Probed directly: DPR contributes **nothing** to CSS layout (DPR 2 and DPR 1 measured byte-identically), and **no CDP method, launch flag or Playwright API can drive Chrome's own zoom control** — so viewport-halving is the correct *and only available* model | orch | — |
@@ -266,7 +296,7 @@ is unrestricted by Dean, yet it remains out of baseline scope because nothing in
 | Cached-validator correctness — D1 | **yes** | **done** — PR #30, merge `91b74f8` | orch | — |
 | Vocabulary-cache keying correctness — D2 | **yes** | **done** — PR #30 | orch | — |
 | `POST /api/uploads` OpenAPI description accuracy — D3 | **yes** | **done** — PR #30 | orch | — |
-| Performance baseline (measured) | **yes** (measurement) | absent | orch | none |
+| Performance baseline (measured) | **yes** (measurement) | **done** — measured and recorded in [`2026-07-31-graph-and-performance-baseline.md`](2026-07-31-graph-and-performance-baseline.md) Part 2 (§2.1–2.5). This row read `absent` while its own companion document held the measurement | orch | — |
 | Performance *improvements* | **no** | n/a | orch | only measured, low-risk ones |
 
 ### 2.5 Memory plane / graph
@@ -397,6 +427,32 @@ Found while verifying B1, and **proven pre-existing** rather than assumed.
 fails intermittently when the machine is busy. Observed on the *same commit*, same code: 49 failures,
 then 39, then 17, monotonically decreasing as load average fell from 97 to 27 — every failure a
 `Test timed out in 5000ms`.
+
+**REFRAMED 2026-08-01 — F1 is not a flaky test file. It is a suite-wide load sensitivity.**
+The framing above invites someone to "fix" one file and declare the class closed. It cannot be one
+file: `graph-real-artifact.test.tsx` contains **three** tests, so 49 failures were necessarily
+suite-wide. The cause was isolated by elimination, with measurements:
+
+- **Artifact loading cost is excluded.** One-off timing of the real file: 493,745 chars,
+  `readFileSync` **0.858 ms**, `JSON.parse` **1.853 ms** — **2.7 ms of a 5,000 ms budget (0.05%)**.
+- **Shared state is excluded** — `setup.ts:6-16` runs `cleanup()`, `clearAllSessions()` and
+  `sessionStorage.clear()` after every test; the file adds `vi.unstubAllGlobals()`.
+- **Product and test nondeterminism are excluded** — `selectDenseFile` sorts `(-count, path)`, the
+  layout is seeded, and every assertion is a bound or a count derived from the artifact.
+- **The actual cause is process scheduling under contention.** The expensive test is a *serial chain*
+  of ~10 render-then-poll steps, each `waitFor` polling at 50 ms. Four isolated runs on a moderately
+  loaded machine (load 8–13) measured it at **1406–1587 ms** — ~31% of budget, ≈3.2× headroom. At the
+  load average 97 recorded above, that headroom is gone. `vite.config.ts` sets no `testTimeout` and no
+  `pool`, so **every** frontend test shares one undifferentiated 5 s wall clock across 10 forks.
+
+**No code fix is recommended, and raising the timeout is explicitly not one.** Splitting the loop into
+its own `it()` is a timeout raise in disguise; sharing the render via `beforeAll` breaks the isolation
+`setup.ts` deliberately enforces; shrinking the fixture defeats the test's stated purpose. Containment
+instead: never run vitest alongside the Playwright suite; treat a lone `Test timed out in 5000ms` as
+suspect until reproduced in isolation on a quiet machine; **CI is the authority** for the frontend
+count and is green at `d7010f9` (2206 / 99); and if the class ever reaches CI, reduce fork concurrency
+rather than raising a timeout. The same class is already documented for the Playwright probes at
+`docs/browser-accessibility-testing.md:466-476`.
 
 **Proof it is not caused by B1**, in two independent ways:
 
@@ -544,14 +600,59 @@ Binding on every future slice:
 ### Debt this slice recorded rather than fixed, deliberately
 
 - **LAYOUT-03** — the floating Assistant trigger (`position: fixed`, `z-index: 45`, ≤1024px) paints
-  **completely** over the StatusBar's honesty statement "hosted preview · no telemetry" (visible-area
-  ratio 1.00, survives `scrollIntoView`). 17 instances. Pre-existence proven by re-running the probe
-  against the stashed CSS. Outside this slice's authorized defect list.
-- **LAYOUT-04** — nested horizontal overflow, 16 keys / **20 instances**, across `evidence`,
-  `record-detail`, `export-readiness`, `export-readiness-done`, `guided-completion`, `load`. Two causes:
-  `div.screen-card` inheriting the non-reflowing StatusBar's width, and `main` regions whose min-content
-  exceeds a phone viewport. The `/experiments` case that motivated the hardening is **absent** — it was
-  fixed by I1, so it fails if it returns.
+  over the StatusBar's honesty statement "hosted preview · no telemetry". 17 instances, on the four
+  record routes only (`/record/:id`, `/complete`, `/evidence`, `/export` — Project Memory mounts the
+  drawer but no StatusBar). Present **at rest**, no scrolling required: `.screen-card` is
+  `min-height: calc(100vh - 32px)` so the 52px footer is pinned to the viewport bottom at every
+  scroll offset, and the trigger sits at `bottom: 16px`. Survives `scrollIntoView`.
+  **CORRECTED 2026-08-01:** an earlier revision said the trigger paints "**completely**" over the
+  label, citing "visible-area ratio 1.00". That inference was wrong — `ratio` compares `visibleRect`
+  to `getBoundingClientRect`, and `visibleRect` intersects only clipping/scrolling ancestors and the
+  viewport (`helpers/layout.ts:821-843`), so it measures **clipping, not occlusion**. 1.00 means
+  "fully laid out and unclipped". The occlusion measure is the 5-point hit test, whose own figure is
+  "**3 to 5** of 5". Coverage is therefore **partial-to-total depending on surface**; the reliably
+  lost part is the *trailing* half — the words carrying the telemetry claim.
+  **No interactive control is blocked** — a measured negative, not an assumption: `SEL_INTERACTIVE`
+  is scanned on every surface and the e2e suite is green at `d7010f9` (591 passed), and the StatusBar
+  contains zero focusable elements. **No keyboard impact at rest** — the drawer's focus trap is
+  guarded by `if (!open) return`. The disclosure's *environment* half is duplicated in persistent
+  chrome (`LeftNav.tsx:46`), but the *telemetry* half exists only on Settings → Data & Privacy and
+  the Statistics `NoAnalytics` block — so the badge is the only always-on carrier of "no telemetry".
+  **Severity: Important**, because the repo's own probe lists `.statusbar-right` in
+  `SEL_CRITICAL_LABELS` as a label "whose disappearance changes what the user believes about the
+  system". Pre-existence proven by re-running the probe against the stashed CSS.
+  **Disposition: fold into one "record chrome reflow" slice with A7/LAYOUT-01, A8/LAYOUT-02 and
+  LAYOUT-04 Cause A** — all four name `src/components/chrome.css` as their fix address, and fixing
+  the trigger offset alone treats the symptom of the non-reflowing footer. Not fix-now: it moves
+  overlap geometry, which §3C shows moves axe counts on **both** platforms, and Linux is the
+  authority and is unmeasurable from a laptop.
+- **LAYOUT-04** — nested horizontal overflow, 16 keys / **20 instances** (darwin), across `evidence`,
+  `record-detail`, `export-readiness`, `export-readiness-done`, `guided-completion`, `load`. The
+  `/experiments` case that motivated the hardening is **absent** — it was fixed by I1, so it fails if
+  it returns.
+
+  **CORRECTED 2026-08-01: there are FOUR distinct root causes, not two.** Treating all 20 instances as
+  one issue is what made this look unschedulable. Triaged:
+
+  | Cause | Instances | Selector | Overflow behaviour | Severity | Disposition |
+  |---|---|---|---|---|---|
+  | **A** — `div.screen-card` inheriting the non-reflowing StatusBar | 10 — `record-detail`, `export-readiness`, `export-readiness-done` @320/375/390, `evidence`@320 | `div.screen-card < div.app` | `overflow: hidden` — **clips**, right ~222px of the footer lost with no ellipsis (`scrollWidth 575 vs clientWidth 353`) | **Important** | **Not independently fixable** — it *is* LAYOUT-01 seen from the overflow side. Ship with A7 |
+  | **B** — a `main` region whose descendant exceeds the phone viewport | 6 — `export-readiness-done`@320/375 (B1), `guided-completion`@320 darwin / @375 **linux-only** (B2), `load`@320/375/390 (B3) | `main#main.screen-main.*` | `auto` — **scrolls**; content reachable but the page acquires a sideways gesture inside `main` | Minor | **B2 culprit known** (`span.upcoming-path`, 367 vs 364 — 3px, a font-metric boundary case; fix `.upcoming-label { min-width: 0; overflow-wrap: anywhere }` at `assistant.css:1598-1620`). **B1 and B3 have no recorded culprit** — see B-ANNOT |
+  | **C** — an inner `section` that is itself a scroll container | 3 — `evidence`@320/375/390 | `section.preview` | `auto` — accidental two-axis scroller | Minor | **Smallest well-scoped item in the set.** Culprit recorded in the probe source: `h2.preview-prov-title` at 418, an `inline-flex` heading whose children cannot shrink (`evidence.css:198-205`). Fix: `flex-wrap: wrap` + `min-width: 0` |
+  | **D** — `section.field-group` | 1 — `record-detail`@width-320 | `section.field-group` | `overflow: hidden` — **clips**. No scroll affordance, no ellipsis | Minor exposure, **Important failure mode** | Culprit not recorded. **Do not close LAYOUT-04 without knowing what this one loses** |
+
+  **A mechanism this record previously omitted, and which changes the fix.** Per CSS Overflow, when one
+  axis is non-`visible` the other computes to `auto`. `.screen-main { overflow-y: auto }` and
+  `.preview { overflow-y: auto }` are therefore both silently **two-axis** scrollers, which is why
+  `findOverflowingRegions` attributes findings to `main` rather than to the wide child.
+  **Consequence: clamping the axis is the wrong repair** — `overflow-x: clip` would convert an
+  unintended scroller into silent content loss. Fix the child's `min-width`/wrapping instead.
+
+  **No allowance is proposed for any of A–D.** `layout-allowlist.ts:15-31` forbids tag, universal and
+  subtree selectors and requires a class selector, an exhaustive surface list, a citation of the
+  `src/**` line declaring the intent, and a statement of what the user can still do. An accidental
+  two-axis scroller and an `overflow: hidden` clip are not "correct by design"; all four stay in
+  `layout-baseline.ts` until fixed, which is where they already are.
 - **The width sweep probes occlusion at one scroll offset**, and is therefore blind to 17 occlusion
   instances visible only at the bottom offset — all of them the LAYOUT-03 class. Measured, and
   **disclosed in the spec itself** rather than left implicit. Fixing it is a baseline-authoring
@@ -625,12 +726,59 @@ docstrings now state the limit rather than the guarantee.
 |---|---|---|---|---|
 | G1 | Hosted rollout + recon verification | **Krish** | Run [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1 against `/krish` while signed in; paste back the sanitized JSON | Blocks Phase 1, Phase 2, and any claim that Slice 2A works |
 | G2 | Per-record visibility decision | **Dean** | "May the hosted app display per-record fields from `metadata_assistant` — titles, scientific values, evidence, full JSON — and if so to which audience and at what granularity?" | Real-record functionality stays absent; baseline can still complete without it |
-| G3 | Aggregates shipped in `v0.0.32` that Dean did not enumerate — **now withdrawn** | **Dean** | "Image `v0.0.32` returned **five** aggregates beyond your enumerated list: `by_instance_path`, `distinct_structural_signatures`, `total_link_count`, `dangling_link_count`, `vocabulary_term_count`. They are record-derived structural facts; none emits a value, title or id. **All five have been withdrawn** from the response and are named in `dataset.withheld_pending_visibility_decision`. Were any within what you intended, and may they be restored? Separately: `by_rule_family` and `by_schema_path` are **retained** because the public vendored schema produces them — do you agree, given either can report a count of 1 against a ~30-row table?" | Nothing further is served; the withdrawal stands. The five **were** live in `v0.0.32` and that is not undone. Also covers any drift §4.1's retained taxonomy cannot classify |
+| G3 | Aggregates shipped in `v0.0.32` that Dean did not enumerate — **now withdrawn** | **Dean** | "Image `v0.0.32` returned **five** aggregates beyond your enumerated list: `by_instance_path`, `distinct_structural_signatures`, `total_link_count`, `dangling_link_count`, `vocabulary_term_count`. They are record-derived structural facts; none emits a value, title or id. **All five have been withdrawn** from the response and are named in `dataset.withheld_pending_visibility_decision`. Were any within what you intended, and may they be restored? Separately: `by_rule_family` and `by_schema_path` are **retained** because the public vendored schema produces them. Sharpened 2026-08-01: there is **no minimum-cell-size suppression anywhere in the codebase** (`rg 'MIN_CELL|suppress'` over `db_recon.py` and `routes.py` → 0 matches), so both can report a count of 1 against a ~30-row table. And `by_rule_family` carries **two** measures per family, not one: `records_affected: 1` is strictly stronger than `error_count: 1` — it states that a *single* record accounts for every error in that family, and two such families can be differenced into a per-record failure *profile*. Do you accept both as-is, or should a floor apply?" | Nothing further is served; the withdrawal stands. The five **were** live in `v0.0.32` and that is not undone. Also covers any drift §4.1's retained taxonomy cannot classify |
 | G4 | Responsive / 200%-zoom human sign-off | **Krish** | [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 2 — 4 viewports + real 200% zoom. Automated coverage runs locally only, **and for 200% it is a viewport-halving model of zoom rather than zoom itself** — probed directly, Chromium exposes no automation surface for its own zoom control at all. This gate is not closable by any amount of further automation | Quality row stays open |
 | G5 | Personal-deploy retirement | **Krish** | Approve the disable-not-delete operation | Cosmetic; no functional effect |
+| **G6** | **Personal data in the seeded records** *(new, 2026-08-01)* | **Dean** | "Do the 30 seeded records contain real personal identifiers in `data->'attribution'` — `uploaded_by`, `contributors[].email`, `contributors[].orcid`, `contributors[].name` — and does the G2 visibility decision cover **personal data** as distinct from scientific content?" | G2 as worded would not surface it. Nothing is currently exposed — the `dataset` projection is aggregate-only and `by_schema_path` reports *schema* locations, never instance values — so this is a gap in the **question**, not a live leak |
+| **G7** | **Identity trust boundary** *(new, 2026-08-01)* | **Dean** | The 15 questions in [`docs/identity-trust-contract.md`](../../identity-trust-contract.md) §7. The four that gate everything else: which header names the Authentik outpost injects; which reach the app via `auth-response-headers`; whether the ingress strips client-supplied copies; and whether anything in-cluster can reach the Service directly, bypassing Authentik | **Blocks all of users, groups, memberships, roles, authorization and per-actor attribution.** Not a scheduling preference — building an identity reader before the trust boundary is known would be unsafe, not merely premature |
 
-None of G1–G5 is resolvable by this agent. G1 and G4 require credentials the agent must not use; G2
-and G3 require the database owner's decision; G5 requires account access the agent must not exercise.
+**Why G6 exists, stated so it is not read as alarm.** Chaining three documented facts: the seed is
+*"the 30 earliest **real** records from production"* (guide `:23-24`); `data` holds the complete record
+JSON *"written by the isaac-ai-ready-record portal against v1.05"* (`:114-116`); and v1.05's
+`attribution.uploaded_by` is *"SERVER-STAMPED from the authenticated identity"*, with `contributors[]`
+carrying `email`, `orcid`, `affiliation`, `name`. So those rows plausibly carry real SLAC personal
+identifiers, and `Q_RECORDS_PAGE` pulls the whole `data` column into pod memory on every scan.
+
+The dimension had never been named anywhere. Measured 2026-08-01, and **scoped precisely, because an
+earlier draft of this paragraph over-claimed**: the search covers the three files that could have
+named it, and deliberately **excludes this file**, which now discusses personal data in this very
+entry and would otherwise self-falsify the command:
+
+```
+$ rg -n -i -e 'PII' -e 'personal data' -e 'personally identifiable' -e 'email' -e 'username' \
+    apps/api/isaac_api/db_recon.py apps/api/isaac_api/routes.py docs/postgres-test-db-guide.md
+(no output — 0 matches)
+```
+
+G2 is worded entirely around *"titles, scientific values, evidence, full JSON"*.
+
+None of G1–G7 is resolvable by this agent. G1 and G4 require credentials the agent must not use; G2
+and G3 require the database owner's decision; G5 requires account access the agent must not exercise;
+G6 and G7 require the database owner and the infrastructure owner respectively.
+
+**On G3-B, a position rather than a shrug.** No bucketing has been applied and none should be applied
+unilaterally, for four reasons. (1) Bucketing destroys the signal Dean explicitly called useful —
+*"Finding drift is a useful result … report it rather than working around it"*; over a 30-row seed a
+floor of 3 or 5 collapses most of the taxonomy to `<5`, which is operationally indistinguishable from
+"we did not classify it". (2) **The argument that justified withdrawing `by_instance_path` does not
+transfer.** §4.3.1 says a count of 1 *"at a specific path"* is a per-record fact — and "path" there
+means an **instance** path, which reveals that a specific *field* of a record is populated and wrong.
+A schema path and a jsonschema keyword are facts about the **public vendored schema**; `error_count: 1`
+at `properties/record_type/enum` names no field value, no title and no id, and no stored document had
+to be read to produce the string. §4.2 is satisfied on its face. (3) §4.3's other two constraints are
+already structurally satisfied — the operation takes no parameter, body or filter, and the two
+breakdowns are independent 1-D lists never crossed with each other or with
+`by_record_type`/`by_record_domain`. (4) Deciding it unilaterally would repeat the exact error G3
+exists to record: `v0.0.32` shipped five aggregates by assuming intent one way; quietly coarsening two
+schema-derived breakdowns would assume it the other way — and worse, would degrade the very output
+Dean must look at in order to rule.
+
+**Where the objection genuinely bites, conceded:** the `records_affected` × `error_count` pair is
+reconstructible by arithmetic in a way a single measure is not, which is precisely §4.3's warning. The
+G3 text now asks about that explicitly. **If Dean rules that a floor is required,** implement it at
+*projection* time in `routes.py` only — never in `run_recon`, which must keep exact figures for the
+out-of-image script — and emit a `suppressed_below` marker so the coarsening is auditable, mirroring
+`withheld_pending_visibility_decision`.
 
 ---
 
@@ -648,6 +796,121 @@ obligation baseline work carries is *not to foreclose it*. The seams that matter
 | Workflow state | `derive_workflow` is **fully derived** from record state with no human-review step. Do not add a stored, mutable workflow status — that is the seam a review/approval feature would occupy. |
 
 Recording these is the entire deliverable. Implementing any of them is out of scope.
+
+### 6.1 What the 2026-08-01 collaboration investigation established
+
+A read-only discovery pass (three parallel workstreams) was run against `d7010f9` to scope an
+experiment-centered groups-and-collaboration phase. **No collaboration code was written.** Five facts
+that change the shape of that phase, recorded here so they are not re-derived:
+
+1. **Optimistic concurrency is already shipped — the seam is occupied, correctly.** `version_contract.py`
+   surfaces `{rev, updated_utc, version}`; `If-Match` is **mandatory** (428 when absent, the
+   one-release grace retired); a mismatch returns **412 `stale_write`** echoing `current_version` so the
+   client refreshes in one hop; a per-record `RLock` serialises `load → precondition → mutate → save`
+   (`routes.py:230-348`, `:969-1225`); the frontend consumes the conflict payload (`api.ts:268-358`) and
+   the Assistant explicitly **refuses to merge or retry** on 412 (`AssistantPanel.tsx:657-677`). What a
+   collaboration phase would add is **attribution and audit**, not concurrency.
+2. **There is no per-user dimension anywhere, so "My Experiments" is a misnomer.** The store is
+   `workspace_root() / <experiment_id>` (`workspace.py:275`, `:678`, `:702`) with no user segment, and
+   `list_experiments()` returns every directory. Combined with `emptyDir` (`docs/deployment.md:29`),
+   every authenticated user today shares one experiment list that dies with the pod. Personal-vs-group
+   scoping is not an extension of an existing per-user model — **there is no per-user model.**
+3. **Persistence is therefore the gate on nearly all of it.** Group-scoped experiments cannot live in an
+   `emptyDir`. Dean's guide removes the **technical and role-level** objection to storage location and
+   schema ownership — *"adding app-specific tables next to the mirrored schema is fine"* (guide
+   `:138-140`), and the role owns its own database and `public` schema (`:136-138`).
+   **That is not project authorization, and this row must not be read as one.** Three reasons, set out
+   in full in the collaboration decision record §1.3: two of the supporting quotes describe a *Postgres
+   role's grants* rather than a grant of project authority; guide `:151` (*"Writing to this database is
+   unrestricted"*) sits under *"Displaying record content"* and exists to set up its own next clause, so
+   lifting it as standalone migration approval is the move its structure guards against; and this
+   repository **independently** blocks the work — `2026-07-24-phase-37-readiness-plan.md:48-52` bars
+   *"writes of any kind (DML, **DDL**, …); a PostgreSQL-backed record repository"*, and `CLAUDE.md` §15
+   lists durable persistence as NOT authorized. Storage location is additionally **contingent on Q12**
+   (does a portal identity service already own users and groups?). Migration process, backup/retention,
+   identity source and group administration policy are untouched.
+4. **The schema already owns record attribution, and the app has never used it.** `/attribution/uploaded_by`
+   is described in v1.05 as *"SERVER-STAMPED from the authenticated identity at ingestion … Decided by
+   D. Sokaras 2026-06-15"*, and `/attribution/contributors[]` carries `name|role|affiliation|orcid|email`.
+   `rg "uploaded_by" src/ apps/ tests/ scripts/` → **zero**. So attribution does **not** need a home
+   outside the record. But `contributors[].role` is `data_owner|performed_measurement|performed_analysis|curated_record`
+   — a **scientific contribution** enum. It **cannot** double as an authorization role.
+5. **Identity is absent and its trust boundary is unproven** — the full evidence is in
+   [`docs/identity-trust-contract.md`](../../identity-trust-contract.md), and the gate is **G7**.
+
+**The seam table above remains binding, and item 1 does not weaken it.** In particular the
+"Authorship / actor" row stands: the existence of a conflict contract is not permission to populate it
+with an actor.
+
+### 6.2 W1 — an unversioned mutation path, found by the collaboration investigation
+
+**The one defect the investigation found that is fixable today, and needs no identity.**
+
+`POST /api/demo/run` (`routes.py:524`) mutates persisted record state with **no `If-Match`** — the four
+precondition sites are `routes.py:969`, `:1091`, `:1211`, `:1383`, and this is not among them. It calls
+`ws.create_experiment(..., id=target_id)`, which builds a fresh `Experiment` and `save()`s it over the
+existing one, while **preserving the on-disk `generation`** (`workspace.py:459`) so that repeated no-op
+demo runs do not churn ETags — the P36.8 idempotence guarantee. Since `version_token()` is
+`f"{generation}.{rev}"` (`:285-287`), a **content replacement can leave the token unchanged**. Observed:
+byte-identical `"194b1839e67a2321.0"` across a second demo run.
+
+**Consequence.** A client that read a canonical demo id at `rev 0` and writes after a concurrent
+`demo/run` has its write accepted against content it never observed — the exact failure the 412 path
+prevents everywhere else. A client that had already edited (`rev ≥ 1`) *is* caught, because the reset
+to `rev 0` changes the token. Because §6.1 item 2 establishes that all users share one workspace, the
+"two clients" are two real people on `/krish`, not a hypothetical.
+
+**REPRODUCED 2026-08-01. An earlier revision of this entry hedged that an end-to-end lost update was
+"NOT demonstrated" and "must not be cited as one". That hedge was wrong and is withdrawn.** An
+independent review constructed the sequence with the repo's own `test_strict_precondition.py` fixture,
+and it was re-run independently by the orchestrator. Measured:
+
+```
+B0 seed:            version='79501e36e523dfb4.0'  content=326cb676ccea7231
+B1 POST /answers with a matching If-Match          -> 200   (a real, confirmed user edit)
+   after edit:      version='79501e36e523dfb4.1'  content=22084ee213d398ab
+B2 POST /api/demo/run   (no precondition sent or accepted) -> 200
+   after demo/run:  version='79501e36e523dfb4.0'  content=326cb676ccea7231
+   token returned to the pre-edit value?  True
+   the user's edit was destroyed?         True
+B3 POST /answers with the ORIGINAL pre-edit token   -> 200 ACCEPTED
+```
+
+**Two demonstrated failures, not one.** (a) `demo/run` **silently destroyed a committed user edit** —
+confirmed answers, applied through the version-gated path, gone with no precondition and no signal.
+(b) The token **ABA'd back to a previously-issued value**, so a precondition that must return 412
+returned **200**. That defeats the stated purpose of the `generation` nonce, which `workspace.py:255-258`
+says exists precisely so tokens *"differ across a delete->recreate even when `rev` returns to 0
+(ABA-safe)"*.
+
+**Why the first probes missed it, recorded because it explains the earlier wrong hedge.** The
+illustration originally chosen — read at `rev 0`, demo replaces content, write accepted — *cannot* fire:
+on a pristine seed `demo/run` reproduces byte-identical content on both canonical ids (measured; token
+same, content same). There is no unobserved content **without an intervening edit**. The reachable path
+is one step further along, and it is trivial.
+
+**Severity: CRITICAL** (upgraded from Important once reproduced — silent destruction of confirmed
+scientific answers, one button click, on a workspace §6.1 item 2 shows every authenticated user shares)
+**· Owner: orch · Fix-now eligible on every criterion** (application-owned,
+bounded, testable, no identity, no persistence, no infrastructure, no real-record visibility).
+**Deliberately not fixed in the documentation slice that found it**, because the repair is a backend
+contract change with a frontend counterpart — the demo button would have to send a precondition — and
+that deserves its own slice with its own review. Candidate approaches, to be decided in that slice:
+require `If-Match` on `demo/run`; or mint a fresh `generation` whenever the upsert actually changes
+content (preserving idempotence only for true no-ops); or refuse the run when the target's authoritative
+signature differs from the seed. The second is the smallest and preserves P36.8's guarantee exactly — measured: on a true no-op the
+content hash is identical, so the generation is preserved and the ETag never churns; on the changed
+-content case it mints `G' != G`, turning B3's 200 into a 412. The primitive already exists —
+`Experiment._persisted_sig_and_rev()` (`workspace.py:319-329`) is the on-disk authoritative signature
+`save_versioned()` already compares.
+
+**But note precisely what each approach closes, so the follow-up slice does not close W1 believing both
+failures are gone.** Approach (2) fixes the **token**, not the **path**: after it, B2 still destroys the
+edit — the ETag merely stops lying about it afterwards, so the next writer gets an honest 412 instead of
+a silent 200. Only (1) and (3) prevent the destructive overwrite itself. A complete fix is (2) **plus**
+one of (1) or (3). Approach (1) is also larger than it looks: the route calls `ensure_seeded()` first,
+which may *create* the target, so a precondition against a not-yet-existing record needs defined
+semantics.
 
 ## 7. Baseline verdict rule
 
@@ -703,13 +966,16 @@ has to re-derive it:
 
 **Why not "Complete With External Blockers":**
 
-2. **The final runtime code is not in any published image.** The closure slice — the A1/A2
-   accessibility fixes and the G3 narrowing of the `dataset` block — is **not merged** at the time of
-   writing. Every image that exists (`v0.0.32`–`v0.0.37`) predates it. A label whose remaining work
-   is "external only" cannot be applied while an un-merged, un-published change is load-bearing for
-   the claim.
+2. ~~**The final runtime code is not in any published image.**~~ **RESOLVED 2026-08-01 — this item no
+   longer applies and is retained struck through rather than deleted, so the verdict's history stays
+   checkable.** When written, the closure slice was unmerged. It merged as `ceea656` and was published
+   as `v0.0.38`; the subsequent responsive remediation merged as `d7010f9` and was published as
+   `v0.0.39`. Both tags verified by `git rev-list -n1` and both created by `github-actions`. **No
+   un-merged change is load-bearing for the claim any more.**
 3. **The hosted SHA is unknown.** `GET /krish/api/health` returned **HTTP 302** to the Authentik
-   edge. Which image is running was not observed. Worse for attribution: the cluster's
+   edge — re-observed **2026-08-01**, redirecting to `/outpost.goauthentik.io/start`. Treat that as a
+   point-in-time probe, not a standing fact. Which image is running was not observed. Worse for
+   attribution: the cluster's
    image-selection policy is **UNDETERMINED** — no Flux `ImagePolicy`/`ImageUpdateAutomation`
    manifest exists in this repository — so it cannot even be *inferred* which tag would be selected.
    That is not a per-row attribution to a named owner; it is an unknown.
@@ -724,16 +990,20 @@ has to re-derive it:
    surface in Chromium at all. It is a genuine external gate and *is* correctly attributable — it is
    listed here for completeness, not as an argument against the label.
 
-Items 2, 3 and 5 are the decisive ones: 2 is work **we** still owe, and 3 and 5 are simply unknowns.
-Only items 4 and 6 are clean external attributions.
+**Items 3 and 5 are now the decisive ones**, and both are simply unknowns (item 2, the one piece of
+work *we* owed, is resolved). Only items 4 and 6 are clean external attributions. Note what this
+changes and what it does not: the project no longer owes a publication step, so the remaining distance
+to "Complete With External Blockers" is entirely **observation** — one signed-in run of the hosted
+checklist. It is nonetheless still distance, and the label stays unavailable until that run happens.
 
 **What this verdict does NOT say.** It does not say the deployment is healthy, degraded, rolled,
 stale, or anything else. **No hosted rollout has been observed by this project at any point.** Any
 future sentence combining "baseline" with a claim about `/krish` requires the G1 report as its
 evidence, and must cite it.
 
-**What would move this to "Complete With External Blockers":** merge and publish the closure image;
-Krish runs [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1 and confirms `commit`
+**What would move this to "Complete With External Blockers":** ~~merge and publish the closure image~~
+(**done** — `v0.0.38`/`v0.0.39`); Krish runs
+[`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1 and confirms `commit`
 matches the closure merge SHA; the recon endpoint returns a report (`ok` **or** a named refusal —
 both are results); §2.2 rows are then attributed **per-row** to what that report actually exercised,
 and any row it does not exercise is recorded as "not verified, and not covered by any open gate

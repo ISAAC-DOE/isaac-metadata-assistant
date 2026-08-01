@@ -39,18 +39,29 @@ Sign in to `https://isaac.slac.stanford.edu/krish` first, so the session cookie 
 
 > **Which SHA to compare against.**
 >
-> **`<CLOSURE_MERGE_SHA>` — PLACEHOLDER, to be filled in by the orchestrator when the closure PR is
-> merged. It does not exist yet.** Do not substitute an earlier SHA to make this step pass. The
-> point of the step is that the *final* code — the A11Y-02/A11Y-03 fixes and the G3 narrowing of the
-> `dataset` block — is what is actually running. An older SHA here means you would be QA-ing the
-> wrong build, and in particular you would be looking at a `dataset` block that still serves the
-> five withheld aggregates.
+> **Resolved 2026-08-01 — the placeholder is filled.** Two SHAs are acceptable, and which one you see
+> tells you something useful:
+>
+> | `commit` reads | Meaning | Proceed? |
+> |---|---|---|
+> | **`d7010f9`** | current `main` HEAD, image **`v0.0.39`** (PR #35, the responsive remediation). Fully rolled. | **yes** |
+> | **`ceea656`** | image **`v0.0.38`** (PR #34, the closure slice). Flux has not yet rolled `v0.0.39`. | **yes** — §1.2 is unaffected; the `dataset` shape is identical in both, and the difference between them is CSS and e2e only |
+> | anything **older than `ceea656`** | you would be QA-ing the wrong build | **no** — see below |
+>
+> Both SHAs are verified: `git rev-list -n1 v0.0.38` → `ceea656…`, `git rev-list -n1 v0.0.39` →
+> `d7010f97cd3bf3af187782114db9c59f0a2381f3`; both tags were created by `github-actions`, and the
+> `Build and Push to GHCR` run on `d7010f9` (`30692848940`) succeeded.
+>
+> Do not substitute anything older to make this step pass. The point of the step is that the code
+> carrying the A1/A2 accessibility fixes **and the G3 narrowing of the `dataset` block** is what is
+> actually running. Before `v0.0.38` the `dataset` block still served the five withheld aggregates, so
+> an older SHA means you would be looking at a response shape this checklist no longer describes.
 >
 > **Two things about the image chain that are honestly unknown from this repository**, so that
 > "`commit` is not what I expected" does not get misdiagnosed:
 >
 > * Every push to `main` publishes an image — `.github/workflows/build-push.yaml` has **no path
->   filters**, so even a docs-only merge builds and tags one. Images `v0.0.33` through `v0.0.37`
+>   filters**, so even a docs-only merge builds and tags one. Images `v0.0.33` through `v0.0.39`
 >   were all built and pushed by successful CI runs. Those digests are **CI's record of what it
 >   pushed**, read out of the workflow logs; **no registry-side confirmation was possible** from the
 >   agent's environment (anonymous `ghcr.io` token failed, and `gh api /orgs/ISAAC-DOE/packages`
@@ -65,7 +76,7 @@ Sign in to `https://isaac.slac.stanford.edu/krish` first, so the session cookie 
 
 | Field | Expected | Meaning if different |
 |---|---|---|
-| `commit` | **`<CLOSURE_MERGE_SHA>`** (placeholder — see the box above) | Flux has not rolled yet, or the cluster's image-selection policy does not pick this tag. Wait and re-check; if it persists, ask Dean. Do not chase it, and do not proceed with §1.2 against an older commit — the `dataset` shape differs |
+| `commit` | **`d7010f9`** (`v0.0.39`), or **`ceea656`** (`v0.0.38`) — both acceptable, see the box above | Anything older: Flux has not rolled, or the cluster's image-selection policy does not pick these tags. Wait and re-check; if it persists, ask Dean. Do not chase it, and do not proceed with §1.2 against a commit older than `ceea656` — the `dataset` shape differs |
 | `mode` | `synthetic-only` | correct and expected; it describes the **workspace**, not the database |
 | `database.configured` | `true` | `false` means `PGHOST` is not reaching the pod → Dean |
 | `database.classification` | `isolated-app-postgres` | — |
@@ -197,6 +208,16 @@ real output.
 
 ## Part 2 — Responsive and 200% zoom sign-off (G4)
 
+> **Part 2 requires `commit` = `d7010f9` (`v0.0.39`) or later.** Unlike Part 1, `ceea656` (`v0.0.38`)
+> is **NOT** acceptable here. The two builds differ only in CSS, e2e and docs — which is exactly why
+> Part 1 accepts either (the `dataset` shape is identical) and exactly why Part 2 does not: the CSS
+> *is* the responsive remediation this section signs off — `git diff --numstat ceea656 d7010f9` gives
+> `chrome.css` +143/−5, `assistant.css` +48/−0, `evidence.css` +38/−0, plus `queue.css` and
+> `screens.css`. (The full delta between the two builds is CSS, e2e, five vitest files and docs; no
+> `apps/api/`, no `schema/` — which is why Part 1 accepts either.) Signing off G4 against `v0.0.38`
+> would certify pre-fix layout.
+> Check `commit` on the About page or `/api/health` before starting.
+
 Still open from Phase 33/34, and still yours. Automated coverage from the browser/accessibility
 slice, where it exists, runs against a **local** instance only — it can never run against `/krish`,
 because of the Authentik edge. Automation does not close this gate.
@@ -228,7 +249,7 @@ dismissable with Escape.
 
 ## Part 3 — Two things that need your decision, not your testing
 
-- **Personal deployments** are still live, public and unauthenticated; Railway is 77 commits stale
+- **Personal deployments** are still live, public and unauthenticated; Railway is **98** commits stale (re-measured 2026-08-01 at `d7010f9`)
   and has a **persistent volume**, so deleting destroys data that pausing preserves. Facts and an
   approval-gated order are in [`personal-deployment-retirement.md`](personal-deployment-retirement.md).
   Recommendation: do nothing until G1 closes.

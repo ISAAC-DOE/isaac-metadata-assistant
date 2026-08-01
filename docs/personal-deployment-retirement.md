@@ -22,7 +22,7 @@ explicit ownership decision (CLAUDE.md §17).
 | Last updated | 8 days ago | deployment `8d18b32d-…`, service `14618664-…` |
 | Auth | **none** — public | **none** — public |
 | Data attached | none observed | **volume `isaac-metadata-assistant-volume`** (persistent) |
-| Serving commit | not probed (static SPA) | **`b3b76cd`** (2026-07-23) — **77 commits behind `origin/main`** |
+| Serving commit | not probed (static SPA) | **`b3b76cd`** (2026-07-23) — **98 commits behind `origin/main`** (re-measured 2026-08-01 at `d7010f9`; was 77 when first recorded) |
 | Runtime mode | n/a | `synthetic-only` |
 
 Probe commands: `vercel whoami`, `vercel project ls`, `railway whoami`, `railway status`,
@@ -39,7 +39,7 @@ identifiers are operationally necessary for a retirement checklist; a personal e
 1. **Both are publicly reachable with no authentication.** The SLAC deployment is Authentik-gated;
    these are not. What they serve is synthetic-only, so this is not a data-exposure incident — but it
    is an unauthenticated public instance carrying the ISAAC name.
-2. **Railway is 77 commits stale.** Its `/api/health` returns no `database` block, confirming it
+2. **Railway is 98 commits stale.** Its `/api/health` returns no `database` block, confirming it
    predates Slice 2A. Anyone who finds it sees a materially older product than `/krish`.
 3. **Railway has a persistent volume.** It is not an `emptyDir` like the k8s deployment. Whatever
    synthetic workspace state accumulated there survives restarts, so **deletion destroys data that
