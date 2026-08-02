@@ -354,11 +354,28 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-api@zoom-200': 16,
       'settings-explorer@desktop-1280x800': 46,
       'settings-explorer@laptop-1024x768': 46,
-      'settings-explorer@tablet-768x1024': 62,
+      // 62 -> 61 on 2026-08-02, identity-probe slice. See the mobile note below;
+      // both viewports moved by exactly -1 and both platforms agree.
+      'settings-explorer@tablet-768x1024': 61,
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
-      'settings-explorer@mobile-375x812': 54,
+      //
+      // 54 -> 53 on 2026-08-02, identity-probe slice. The Endpoint Explorer now
+      // renders 37 operations instead of 36 (the temporary
+      // `POST /api/runtime/identity/probe` is published rather than hidden), and
+      // the measured contrast-node count fell by one at this viewport and at
+      // tablet. MEASURED on BOTH platforms, not derived: Linux CI run
+      // 30733831293 on `d1af5f0` reported 62->61 and 54->53, and a local darwin
+      // run of the whole a11y spec reported exactly the same two changes and
+      // nothing else. Because the two columns agree, these stay plain numbers
+      // rather than becoming `{ darwin, linux }`.
+      //
+      // The exact layout mechanism behind the -1 is NOT claimed here — only the
+      // measurement is. **Expect these to return to 62 / 54 when the probe is
+      // removed** (`docs/identity-probe.md` §7); if they do not, something other
+      // than the probe changed.
+      'settings-explorer@mobile-375x812': 53,
       'settings-explorer@zoom-200': { darwin: 55, linux: 56 },
       'settings-privacy@desktop-1280x800': 7,
       'settings-privacy@laptop-1024x768': 7,
@@ -489,8 +506,20 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Same total, different arithmetic — and the rule that got it here stands:
   // if CI disagrees with a number in this file, correct THE NUMBER from the CI
   // output, never loosen the assertion.
-  darwin: 1629,
-  linux: 1634,
+  //
+  // 2026-08-02, identity-probe slice: darwin 1629 -> 1627, linux 1634 -> 1632.
+  // BOTH columns fall by exactly 2, and for once both are measured rather than
+  // one being derived from the other. The two contributing changes are the same
+  // on each platform — `settings-explorer@tablet-768x1024` 62 -> 61 and
+  // `settings-explorer@mobile-375x812` 54 -> 53 — because the cause is a
+  // content change (the Endpoint Explorer renders a 37th operation), not a font
+  // metric. Linux: CI run 30733831293 on `d1af5f0`, which reported those two
+  // and no others across every project. Darwin: a local run of the full a11y
+  // spec, 93 passed / 2 failed, reporting the same two and no others.
+  //
+  // Both should return to 1629 / 1634 when the probe is removed.
+  darwin: 1627,
+  linux: 1632,
 };
 
 /**
