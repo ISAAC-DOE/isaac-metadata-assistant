@@ -17,46 +17,59 @@ observed runtime evidence; the vendored ISAAC v1.05 schema; tests.
 
 ## 1. What the application actually receives
 
-### 1.1 Identity headers in this repository: zero
+### 1.1 Identity headers in this repository: confined to two documentation files
 
-**Amended 2026-08-01 — this guard no longer expects zero matches tree-wide, and pretending otherwise
-would have made it fire on the very slice it was written to supervise.** The temporary identity probe
-legitimately names these headers. The invariant is therefore restated as a *permitted set*: exactly
-four files may mention an identity-forwarding header, and no others.
+**The invariant is a PERMITTED SET, not zero.** This document names these headers, and so does
+`CLAUDE.md` §11 where it records the observation, so a tree-wide `0 matches` check would fire on the
+very documents written to reason about the boundary.
+
+> **Identity-forwarding header names appear in exactly two files, both documentation, and no
+> application code path consumes any of them.** `X-Forwarded-For` and `X-Forwarded-Proto` are absent
+> from code, config, tests and fixtures — the only occurrences tree-wide are the two in this sentence.
+> *(It previously claimed "zero matches … in code, config, **docs**, tests or fixtures", which its own
+> text falsified. Left visible: it is the trap this section names forty lines below — a document
+> discussing the guard is itself a match.)*
 
 ```
 $ rg --hidden -g '!.git' -g '!node_modules' -g '!.venv' -g '!.claude/worktrees' \
-    -i "x-forwarded|x-auth-request|remote-user|remote-groups|x-real-ip|x-authentik" \
+    -i "x-forwarded|x-auth-request|remote-user|remote-groups|x-real-ip|x-authentik|x-isaac-edge" \
     --files-with-matches
-apps/api/isaac_api/identity_probe.py     # the probe's frozen candidate tuple
-apps/api/tests/test_identity_probe.py    # its tests, synthetic values only
-docs/identity-probe.md                   # its contract + removal plan
+CLAUDE.md                                # §11, which records the observation
 docs/identity-trust-contract.md          # this file, which discusses the names
 ```
 
-Measured 2026-08-01: **61 matches across exactly those 4 files**, 504 files searched (501 tracked by
-`git ls-files | wc -l`, plus the three then-untracked probe files).
+**What the signal is.** A **third** file, and above all a match inside `apps/api/isaac_api/` or
+`apps/web/src/`, means someone has started *consuming* a claim — which §8 forbids until Q4 and Q6 are
+answered, and which §6A.2 forbids permanently for two of the seven regardless of how Q4 and Q6 come
+out. Note that neither permitted file is code: `routes.py` contains no identity header name at all, and
+did not even while the probe existed, because the candidate tuple lived in the probe module.
 
-**Any fifth file is the signal.** That is a stronger guard than the old `0 matches`, not a weaker one:
-before, the check could only say "nobody mentions these"; now it says "only the measurement instrument
-mentions these, and nothing consumes them". Note in particular that **`routes.py` is not in the list** —
-the probe's candidate names live in `identity_probe.py`, so the route module still contains no identity
-header name at all.
+This is a **stronger** guard than the original `0 matches`, not a weaker one. `0 matches` could only
+say "nobody mentions these"; the permitted set says "only the documents that reason about them mention
+them, and nothing consumes them".
 
-**When the probe is removed, this reverts to a three-file list** (the doc set), and eventually to the
-original `0 matches` once `docs/identity-probe.md` goes too. A removal PR that leaves any probe file
-matching here has not finished. The *file count* tracks tree size and will drift; only the **set of
-matching files** is the signal.
+**Three corrections are recorded here rather than silently applied**, because this section's whole job
+is accuracy and it has now failed at it repeatedly — twice on the invariant itself (corrections 1 and
+2; correction 3 is a gap in the pattern rather than a false statement), and three times on the count:
 
-**Restated 2026-08-01 to match the amendment above; the previous sentence is now false and is not
-kept.** It read *"No identity-forwarding header name appears anywhere — not in code, config, docs,
-tests, or fixtures"* — written when that was true, and left standing three lines below the block that
-lists two code files naming these headers. The accurate statement is the permitted set:
+1. **The original sentence** — *"No identity-forwarding header name appears anywhere — not in code,
+   config, docs, tests, or fixtures"* — became false when the probe landed and was left standing three
+   lines below a block that listed two code files naming these headers.
+2. **The four-file form** (`identity_probe.py`, `test_identity_probe.py`, `docs/identity-probe.md`,
+   this file) was correct only while the probe existed. All three probe files were deleted 2026-08-02;
+   a stale "exactly four files" survived a dedicated review round before being caught.
+3. **`x-isaac-edge` was missing from the pattern** until 2026-08-02, and its absence was a real hole:
+   §6A.2 establishes that `X-Isaac-Edge` is the header **any client can set freely**, which makes
+   "read `X-Isaac-Edge` to check the request came through the edge" the single most tempting misuse in
+   the set — and exactly the one the guard could not see.
 
-**Identity-forwarding header names appear in exactly four files, all of them measurement apparatus or
-documentation, and no application code path consumes any of them.** `X-Forwarded-For` and
-`X-Forwarded-Proto` are absent entirely — zero matches, no permitted set, in code, config, docs, tests
-or fixtures.
+**The match COUNT is deliberately not recorded, and that is a fix rather than an omission.** It was
+stated three times in two days — 61, then 24, then 33 — and was wrong within hours each time, because
+*this document discussing the guard is itself a match*, so every edit explaining the guard invalidates
+the guard's own number. **Compare the file list, never a total.**
+
+**Nothing enforces any of this automatically** — no test, no CI job, and none for the dead-link risk in
+this document either. It is a manual check, and saying so beats implying a tripwire that does not exist.
 
 ### 1.2 Every request header the backend reads — four, none of them identity
 
@@ -383,6 +396,150 @@ and `by_schema_path` reports jsonschema *schema* locations, never instance value
 
 ---
 
+## 6A. THE OBSERVATION — reported 2026-08-02 against hosted commit `d521dd7`
+
+The temporary probe ran once, in an authenticated session, against hosted commit
+**`d521dd70890101d4661ac7d8bed3d419c857fe3f`** (image `v0.0.42`). **Q1, Q2 and Q3 are answered for
+the tested path.** The probe has been removed; this section is the durable record of what it saw.
+
+> **This is OPERATOR TESTIMONY, not a captured artifact.** The probe kept nothing — it wrote no file
+> and held no state by design — and the response body was not committed. This section is a summary
+> table, where the (now-deleted) operating procedure asked for the response *verbatim*.
+>
+> It additionally rests on two premises that only the operator can confirm: that the canary was planted
+> in **all seven** candidate headers, and that it was **distinctive and separator-free**. The procedure
+> warned that violating either yields a wrong answer — a canary containing `,` or `|` defeats segment
+> matching, and a canary equal to a value the edge genuinely injects produces a false `survived: true`.
+> **Neither premise is re-checkable from this repository.**
+>
+> This is the same standing the DB-recon run has (`CLAUDE.md` §15, and §11 of this file's companion
+> note): dated, release-tagged and accepted, but not a re-checkable record. Recorded explicitly because
+> this repository has twice had to retract a claim that was stated more firmly than its evidence.
+
+**No identity value was recorded, and none exists to record** — the probe is structurally incapable of
+emitting one. What follows is presence, shape, consumption and canary survival, which is the whole of
+what it returns. (`consumed_by_isaac` is a code constant from the frozen candidate tuple echoed back,
+**not a measurement**. The claim is independently true and re-checkable by grep — §1.2 — which is
+better evidence than a single request; it is flagged only so no reader credits the observation for it.)
+
+| Claim | Header | Present | Shape | Consumed by ISAAC | Client canary survived |
+|---|---|---|---|---|---|
+| Username | `X-authentik-username` | yes | scalar | **no** | **no** |
+| UID | `X-authentik-uid` | yes | scalar | **no** | **no** |
+| Email | `X-authentik-email` | yes | scalar | **no** | **no** |
+| Display name | `X-authentik-name` | yes | scalar | **no** | **no** |
+| Groups | `X-authentik-groups` | yes | **list** | **no** | **no** |
+| Entitlements | `X-authentik-entitlements` | yes | scalar | **no** | **YES** |
+| Edge marker | `X-Isaac-Edge` | yes | scalar | **no** | **YES** |
+
+### 6A.1 What the five core claims prove — and it is stronger than "the canary did not survive"
+
+For `username`, `uid`, `email`, `name` and `groups` the canary was planted by the client and did **not**
+come back. The shape column makes that result sharper than a bare "stripped or overwritten", because
+`classify_shape` reports `duplicate` whenever a header arrives **more than once**
+(`identity_probe.py`, `len(values) > 1`). Every one of these five came back as `scalar` or `list` —
+i.e. **exactly one value** — and that value was not the canary.
+
+> **On this path the edge supplied the value, and it did not APPEND.** The client's canary did not
+> arrive as a whole value, nor as a `,`/`|`-delimited segment, and only one value arrived — so the
+> edge did not add a second header line, and did not coalesce on either separator.
+
+That matters because *append* is the dangerous outcome: the injected value and the forged value both
+arrive, and any consumer that reads the first (or the last, or joins them) can be fed the client's
+string. Append was specifically looked for and **did not occur** on this path.
+
+> **It does NOT follow that the client's copy was removed, and an earlier draft of this section said
+> it did.** `_split_segments` compared only `,` and `|`. Two non-replacement scenarios produce the
+> identical observed signature `present ∧ scalar|list ∧ ¬survived`: an intermediary joining the client's
+> copy with the injected value using a **separator outside `{",", "|"}`** (a space, a semicolon), or the
+> client's copy **passing through transformed** — truncated, re-encoded, case-folded, or quoted. In the
+> second case the client *did* influence the header, which is precisely the outcome this paragraph
+> claims to exclude. The probe's own limitations said so: `false` means "not found in either compared
+> form", **never "provably stripped"**.
+
+**A point worth stating because the intuition runs the other way: `groups` is the STRONGEST case here,
+not the weakest.** `list` means one value containing `,` or `|`, and segment matching compared every
+segment — so the coalescing attack is *directly* excluded for `groups` in a way it is not for the four
+scalars. The transformation hole above applies equally to all five. Note also that the
+`groups` result is trustworthy only because of the coalescing fix shipped in this same release: before
+it, a canary joined into the list by an intermediary would have been reported `false` — the wrong
+answer in the unsafe direction. `false` for `groups` now means the canary is in **no segment** of the
+value, not merely that it is not the whole value.
+
+**What it still does not prove.** One request, one path, one moment. It does not establish that every
+path strips forged copies, and it says nothing about a caller who reaches the pod's Service directly
+(§2, Q4). The probe could not prove the caller was authenticated, and did not claim to.
+
+### 6A.2 Entitlements and the edge marker — the finding, stated more precisely than "influenceable"
+
+`X-authentik-entitlements` and `X-Isaac-Edge` came back **present, `scalar`, and carrying the client's
+own canary**. Read the three together:
+
+- `scalar` means **exactly one value arrived**.
+- `client_canary_survived: true` means that value **was identical to the canary, up to surrounding
+  whitespace** (the comparison stripped each candidate segment).
+
+> **So the one value present was the client's own. The edge contributed nothing to these two headers
+> on this path — it did not inject, did not overwrite, and did not strip.**
+
+**This is a correction to a natural but unsupported reading of the same table**, and it is recorded
+because the weaker reading was proposed: it is *not* established that "Authentik forwards entitlements
+and the edge marker". Their `present: true` is **entirely explained by the client's own request**. Had
+the edge also injected a value, the shape would have been `duplicate` (two values) or `list` (coalesced)
+— it was neither. On this evidence the honest statement is: **the edge was not observed to supply these
+two headers at all, and a client can set them freely.**
+
+Either way the operational conclusion is the same and is **permanent unless infrastructure changes and
+is independently re-verified**:
+
+> `X-authentik-entitlements` and `X-Isaac-Edge` are **DISQUALIFIED** from every security decision:
+> authentication, authorization, role assignment, proof that Authentik was traversed, and proof that
+> the caller is an institutional user. `X-Isaac-Edge` is disqualified from the *one job its name
+> implies* — it cannot witness that a request came through the edge, because any client can set it.
+
+**This is a constraint on future implementation, not a live vulnerability.** ISAAC consumes none of the
+seven (`consumed_by_isaac: false` throughout, and the backend still reads only `authorization`,
+`If-None-Match`, `If-Match`, `X-Filename` — §1.2). Nothing can be spoofed into a decision that nothing
+makes.
+
+### 6A.3 UID is now a real candidate, and the §9.1 recommendation is narrowed rather than reversed
+
+`X-authentik-uid` **is present**, which §9.1 could not assume — it was written when no `sub`-style
+opaque claim was known to reach the pod at all. So the choice is now live:
+
+- **UID** — likely opaque and provider-owned, the better *lifecycle* candidate in the abstract.
+- **Username** — the required **compatibility key**, because every existing upstream ownership, ACL and
+  audit row is keyed to it (§5.1). That has not changed and is not a preference.
+
+**Neither is confirmed.** UID permanence and username non-reassignability are both institutional
+lifecycle facts that no amount of observation can establish — presence in a header says nothing about
+what happens at rename, departure, deactivation or rehire. The likely end state keeps **both**: UID as
+the canonical internal key, username as the compatibility alias. **Adopt neither as authoritative until
+Q5 and the new Q17 are answered**, and if UID is adopted it must arrive as a migration with a mapping
+and an overlap rule, never as a field added because it looks cleaner (§9.1).
+
+### 6A.4 Groups
+
+`X-authentik-groups` arrives as a **list**, consistent with §5.3's finding from upstream source that the
+vocabulary is the two coarse deployment-access groups.
+
+> **Recorded knowingly: `list` is a multiplicity signal.** Per `classify_shape` it means one value
+> containing a separator — i.e. **at least two segments**. Read against the admission vocabulary this
+> repository already publishes (`admin`, `researcher` — `docs/deployment.md`, §5.3), that narrows the
+> observing caller toward holding both. This is exactly the *"presence is itself a claim about a
+> person"* risk §8 named, now committed durably rather than transiently observed. Three mitigating
+> facts, none of which makes it disappear: no group **name** is emitted; the subject is this
+> repository's own author; and the complete Authentik group set reaching the pod is unknown (Q7), so
+> the inference is not tight.
+
+**Nothing here changes §5.3's verdict:** these
+answer *may this person use the deployment*, not *who collaborates with whom*. **ISAAC must not turn a
+broad `researcher`-style access group into a shared experiment group** — that would share every
+experiment with every researcher. Upstream itself never uses groups for sharing; it uses per-resource
+ACL rows.
+
+---
+
 ## 7. Decisions only Dean can make
 
 `ISAAC-DOE/isaac-k8` — which holds every Kubernetes, ingress, and Authentik manifest — **is not in this
@@ -392,9 +549,9 @@ workflows. Dean is therefore the only person who can answer Q1–Q4.
 
 | # | Question |
 |---|---|
-| Q1 | What is the exact, complete list of HTTP header names the Authentik outpost injects into requests reaching the `metadata-assistant` pod? |
-| Q2 | Which of those are listed in the ingress's `nginx.ingress.kubernetes.io/auth-response-headers` annotation, and therefore actually reach the app? |
-| Q3 | Does the ingress strip or overwrite client-supplied copies of those headers, so a forged header cannot reach the pod? |
+| **Q1** | **PARTIALLY ANSWERED — deliberately not struck through.** The question asks for the *exact, complete* list of header names the outpost injects. §6A (hosted `d521dd7`) establishes that `username`, `uid`, `email`, `name` and `groups` arrive with edge-supplied values — but the probe tested a **fixed seven-name allowlist**, so what is answered is "which of these seven arrive", never "the complete list". **A header arriving under a name not on that list remains entirely unknown**, and no observation this repository can make will close that gap. Ask Dean only if the complete set matters for a specific design decision. |
+| ~~Q2~~ | ~~Which are listed in the ingress `auth-response-headers` annotation and therefore actually reach the app~~ **ANSWERED empirically** — observation at the pod supersedes the annotation question for these five. The annotation's contents remain unread, but the outcome it controls has been measured. |
+| ~~Q3~~ | ~~Does the ingress strip or overwrite client-supplied copies?~~ **ANSWERED for the tested path — the edge supplied the value and did NOT append** (§6A.1). Every core claim arrived as a single value that was not the planted canary, and `duplicate` was looked for and did not occur. **It does not follow that the client's copy was removed:** a copy joined on a separator outside `{",", "|"}`, or passed through truncated/re-encoded/case-folded/quoted, yields the same signature. **Scope: one request, one path, one moment**, and it says nothing about Q4. |
 | Q4 | Can any workload in the cluster reach the `metadata-assistant` Service directly, bypassing the ingress and therefore Authentik? |
 | Q5 | **Sharpened 2026-08-01.** ISAAC's provisional principal is the **Authentik username**, because all existing portal ownership/ACL/audit rows are keyed to it (§5.1, §9.1). The question is therefore no longer "which claim?" but: **is an Authentik/SLAC username non-reassignable across rename, departure, and rehire?** If it is not, what mapping should ISAAC hold, and does any `sub`-style opaque claim reach the pod at all? |
 | Q6 | Are forwarded group claims authoritative for in-app authorization, or descriptive only? |
@@ -406,8 +563,11 @@ workflows. Dean is therefore the only person who can answer Q1–Q4.
 | ~~Q12~~ | ~~Does the ISAAC portal have a users/groups/memberships model in Postgres that this repository has not been told about?~~ **ANSWERED for the SERVICE — No** (2026-08-01, direct audit of the public upstream source; §5.1). The portal's source creates **22** tables across its two databases, none of them a users/accounts/identities/groups/memberships/roles/permissions/teams/organizations table; identity is a bare `TEXT` Authentik username written onto rows; and there is no `/me`, no group endpoint and no membership API among ~60 routes. **So there is no upstream identity *service* to inherit — that is the part that load-bears, and it rests on the API surface, which the source does establish.** *Precision added after review:* Q12 as originally worded asked about **Postgres**, and this evidence enumerates what the portal's **source** creates. Whether the mirrored database also carries a table `database.py` does not create is **unverified** — the same class of guide-vs-code divergence as **Q16**, which proves that class is live in this very schema. Retained struck-through rather than deleted so the resolution stays visible. |
 | Q13 | May the app issue a metadata-only `information_schema.columns` query against those three tables — column names and types, no rows? |
 | **Q14 (G6)** | **Do the 30 seeded records contain real personal identifiers in `data->'attribution'`, and does the G2 visibility decision cover personal data as distinct from scientific content?** |
-| **Q15** | May the deployment temporarily enable a presence-only identity probe so the header contract can be observed once and recorded? **⚠ The code has pre-empted this question and you are entitled to object.** The probe shipped **active by default** on 2026-08-01 (`docs/identity-probe.md` §5), because a default-OFF switch could only be turned on by editing `isaac-k8`, which you own. With `ISAAC_UI_API_KEY` unset in production it is therefore live and app-unauthenticated from its first image roll, before this answer. **A "no" means set `ISAAC_IDENTITY_PROBE=0` and remove the endpoint — not merely "do not enable it".** |
+| ~~Q15~~ | ~~May the deployment temporarily enable a presence-only identity probe?~~ **MOOT — the probe has been REMOVED** (2026-08-02). It ran once against hosted `d521dd7`, recorded §6A, and was deleted in a reviewed cleanup PR: the route now returns 404 and a test pins that. **The objection this row invited is preserved rather than erased**, because the sequence was real: the probe shipped *active by default* before you answered, which pre-empted a question that asked your permission. It is recorded so the pattern is visible, not repeated. Nothing is owed on this row now except, if you wish, an objection to how it was done. |
 | **Q16** | **`record_acl` is absent from the 8-table list in `postgres-test-db-guide.md:20-22`, yet the portal has created it since 2026-06-30 (upstream `dc5da9c`, PR #169). Does the seeded mirror actually omit it, or is the guide's list incomplete?** (§5) |
+| **Q17** | **Is `X-authentik-uid` permanent and non-reassignable across rename, departure, deactivation and rehire?** Raised 2026-08-02: the UID claim is now known to reach the pod (§6A), so it is a live alternative to the username as ISAAC's canonical internal key. Presence is observable; **lifecycle is not** — no request can reveal what happens to a UID when a person leaves and returns. Pairs with **Q5** (the same question for the username); ISAAC likely needs *both* answers, since the probable design keeps UID as the internal key and username as the compatibility alias. |
+| **Q18** | **Will the infrastructure strip client-supplied `X-authentik-entitlements` and `X-Isaac-Edge`, or should ISAAC treat them as permanently untrusted?** On the tested path the edge supplied neither and the client's own values arrived untouched (§6A.2) — so `X-Isaac-Edge` cannot currently witness that a request traversed the edge, which is the one job its name implies. ISAAC's position is already "permanently disqualified from security decisions"; this asks whether that is also *your* intent, or whether the annotation is meant to cover them and does not. |
+| **Q19** | **May the deployed ISAAC backend read each of the 30 production-derived records through the existing read-only path, clone each record only in memory, apply controlled field removals or schema-invalid mutations, run ISAAC's deterministic workflow, discard every copy, and return only aggregate pass/fail conclusions with no values, identifiers, per-record output, or database writes?** Raised 2026-08-02 for the corpus-validation phase. See the authorization audit recorded with that phase for why this is asked rather than assumed. |
 
 ---
 
@@ -436,6 +596,19 @@ by symbol rather than trusting them.)*
    reader before he sets the config buys nothing that waiting does not.
 
 **Decision:** do not build a live identity seam. Wire nothing until Q1–Q4 and Q6 are answered.
+
+> **⚠ HISTORICAL — READ THIS FIRST (added 2026-08-02). The probe described below is GONE.** It was
+> removed the day after this block was written; the route returns 404 and a test pins that. Everything
+> from here to the end of §8 is written in the present tense about a deployment state **that no longer
+> exists**, and is kept because the reasoning — why an identity *seam* is still forbidden, and why a
+> measurement instrument was not an exception to that — is still the governing decision. **The
+> "residual risk … carried knowingly" paragraph below is discharged: that risk ended with the
+> endpoint.** References below to `docs/identity-probe.md` point at a deleted file; its removal
+> checklist was executed in full, and what the observation found is §6A of this document.
+>
+> **The decision itself is unchanged and still binds: do not build an identity seam.** §6A answers
+> Q1–Q3 for one path; Q4 and Q6 remain open, and §6A.2 adds a permanent disqualification that no
+> answer to Q4 or Q6 will lift.
 
 > **Reconciliation, 2026-08-01 — this decision STANDS, and a probe is not an exception to it.**
 >
@@ -467,7 +640,8 @@ by symbol rather than trusting them.)*
 > kind** — its maximum disclosure is a boolean vector over a fixed tuple of header names that is
 > already public in this repository's source and documentation; **ISAAC consumes none of those
 > headers**, so a forged one currently accomplishes nothing; and removal is a committed follow-up,
-> not an aspiration (see `docs/identity-probe.md`).
+> not an aspiration (`docs/identity-probe.md` — **deleted 2026-08-02 with the probe; the removal was
+> carried out in full**).
 >
 > The residual risk below is **not** neutralised by those controls and is carried knowingly: the
 > probe is an ingress-configuration oracle for a caller who holds **both** an authenticated edge
@@ -487,11 +661,14 @@ an **unlisted** header name (projection, never a filter — a filter can leak a 
 cannot); any **count** of headers received (that number fingerprints the ingress config); any echo of
 `Authorization`, `Cookie`, or `X-Filename`; any logging of the probe's inputs.
 
-Safety requirements: env-flag gated **default off** (`ISAAC_IDENTITY_PROBE`) **[SUPERSEDED — the
-shipped probe inverts this to a kill switch, default ON; see the reconciliation block above and
-`docs/identity-probe.md` §5]**, checked before the
-request object is touched; the `strict=True` raise on the success path only (`routes.py:3643`, `:4041`;
-the comment above `_DB_RECON_DATABASE_KEYS` explains why the failure envelope must *not* raise); the
+Safety requirements: env-flag gated **default off** (`ISAAC_IDENTITY_PROBE`) **[SUPERSEDED, then MOOT —
+the probe that shipped inverted this to a kill switch, default ON; it has since been removed entirely.
+See the historical banner at the head of this block.]**, checked before the
+request object is touched; the `strict=True` raise on the success path only (re-derive the surviving
+example with `rg -n '_DB_RECON_DATABASE_KEYS' apps/api/isaac_api/routes.py` rather than by line number —
+the two line citations that stood here, `:3643` and `:4041`, are **dead**: the probe's removal shortened
+`routes.py` and `:4041` no longer exists; the comment above `_DB_RECON_DATABASE_KEYS` explains why the
+failure envelope must *not* raise); the
 existing unconditional leak guard; contract
 tests asserting the exact key set, including that an unlisted header produces no observable difference
 in the response bytes; and **time-bounded use** — enable, observe once, disable. It is a measurement
@@ -585,7 +762,7 @@ authored by a human, not an access-control list.
 
 | PROVEN (this repo) | NOT PRESENT IN THIS REPO | UNKNOWN — REQUIRES DEAN |
 |---|---|---|
-| Identity header names confined to **4 files** — 61 matches, all measurement apparatus or documentation, **none consumed by any code path** (§1.1). ~~"Zero identity headers anywhere (0 matches …, excluding the two docs that name them)"~~ — the file count in this cell was refreshed 498→501 on 2026-08-01 while the false "0 matches" and "two docs" beside it were left intact; corrected here | Any k8s / ingress / Authentik manifest | The header names the outpost injects (Q1) |
+| Identity header names confined to **2 files, both documentation** — **none consumed by any code path** (§1.1). **No match total is quoted**; §1.1 records why. ~~"Zero identity headers anywhere (0 matches …, excluding the two docs that name them)"~~ and ~~"4 files — 61 matches, all measurement apparatus or documentation"~~ — both superseded. Note what happened to this cell, since it is a correction record that then repeated the failure it recorded: the first version survived a count refresh (498→501) that fixed the number beside it and left the false claim standing; the second outlived the probe by a day and this cell by two. **That is why the total is now omitted rather than maintained.** | Any k8s / ingress / Authentik manifest | The header names the outpost injects (Q1) |
 | Backend reads exactly 4 headers, none identity | Any users / roles / groups / permissions model | Whether the ingress strips client copies (Q3) |
 | `ApiKeyAuthMiddleware` = one shared secret, fail-open, **unset in prod** | Any logout, session, or expiry logic | Whether the pod is reachable bypassing the ingress (Q4) |
 | No trusted-proxy config, no header-stripping middleware | Any record ownership or actor attribution | The intended subject-identifier claim (Q5) |

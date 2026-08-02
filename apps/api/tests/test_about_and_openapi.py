@@ -309,12 +309,7 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
             f"{auto!r} (from `{function_name}`)"
         )
         checked += 1
-    # 36 -> 37: `POST /api/runtime/identity/probe`, the TEMPORARY identity
-    # observation probe. It is published deliberately rather than hidden with
-    # `include_in_schema=False` — an unadvertised diagnostic endpoint is the kind
-    # that never gets removed. Expect this number to return to 36 in the removal
-    # PR; a drop back is the intended outcome, not a regression.
-    assert checked == 37, f"expected 37 documented operations, found {checked}"
+    assert checked == 36, f"expected 36 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -504,11 +499,6 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/search", "get"): ["200", "401", "422"],
     ("/api/uploads", "post"): ["200", "401", "403"],
     ("/api/validate/record", "post"): ["200", "401", "413", "422"],
-    # TEMPORARY — removed with the identity probe. 400 is the probe's own
-    # fixed-text rejection of an over-long canary, deliberately raised in the
-    # handler instead of via Pydantic `max_length`, because FastAPI's 422 body
-    # echoes the offending input back in `detail[].input`.
-    ("/api/runtime/identity/probe", "post"): ["200", "400", "401", "422"],
 }
 
 
@@ -542,10 +532,6 @@ EXPECTED_COMPONENT_SCHEMAS: dict[str, dict] = {
     },
     "DemoResetRequest": {"properties": ["confirmation", "mode"], "required": ["mode"]},
     "HTTPValidationError": {"properties": ["detail"], "required": []},
-    # TEMPORARY — removed with the identity probe. ONE optional field. If a
-    # second ever appears here, the probe has grown a caller-steerable surface,
-    # which it must not have.
-    "IdentityProbeRequest": {"properties": ["canary"], "required": []},
     "ValidationError": {
         "properties": ["ctx", "input", "loc", "msg", "type"],
         "required": ["loc", "msg", "type"],
@@ -581,3 +567,59 @@ def test_operations_with_parameters_keep_the_validation_error_schema(client):
         assert ref == "#/components/schemas/HTTPValidationError", (
             f"{method.upper()} {path} 422 no longer references HTTPValidationError"
         )
+
+
+# --- the removed temporary identity probe stays removed -------------------------
+#
+# `POST /api/runtime/identity/probe` was a TEMPORARY identity-observation probe
+# (Workstream B, 2026-08-01). It was observed once against hosted commit `d521dd7`
+# / image `v0.0.42` and then deleted, together with `isaac_api/identity_probe.py`,
+# its test module, and `docs/identity-probe.md`.
+#
+# This lives beside the three pinned contracts above deliberately: those pins say
+# what the generated document DOES contain, and they were each edited by the
+# removal. This one says what it must NOT contain, which no count can express — a
+# future edit could re-add the route and simply bump `36` back to `37`, and every
+# pin above would still pass. The route was an ingress-configuration oracle and,
+# after segment matching landed, a containment oracle over all seven candidate
+# headers; re-introducing it silently is the failure mode worth a dedicated test.
+#
+# Deliberately asserts 404, NOT 405: 405 would mean the path still exists with a
+# different method allowlist, i.e. a partial removal.
+
+_REMOVED_PROBE_PATH = "/api/runtime/identity/probe"
+
+
+def test_removed_identity_probe_route_is_not_reachable(client):
+    posted = client.post(_REMOVED_PROBE_PATH, json={})
+    assert posted.status_code == 404, (
+        f"POST {_REMOVED_PROBE_PATH} returned {posted.status_code}, not 404 — the "
+        "temporary identity probe is back, or was only partly removed "
+        "(405 would mean the path still exists)"
+    )
+    # No method survives either: a bare path with no handlers is 404 for all verbs.
+    assert client.get(_REMOVED_PROBE_PATH).status_code == 404
+
+
+def test_removed_identity_probe_is_absent_from_the_generated_contract(client):
+    schema = client.get("/api/openapi").json()
+    assert _REMOVED_PROBE_PATH not in schema["paths"]
+    assert "IdentityProbeRequest" not in schema["components"]["schemas"]
+    # Substring sweep over the whole serialized document, so a rename, a $ref, a
+    # tag, or prose mentioning the probe is caught as well as the path key.
+    document = json.dumps(schema)
+    for needle in ("identity/probe", "IdentityProbeRequest", "ISAAC_IDENTITY_PROBE"):
+        assert needle not in document, (
+            f"{needle!r} is still published in the generated OpenAPI document"
+        )
+
+
+def test_the_removed_probe_route_table_is_clean(client):
+    """Checked at the route table rather than the document, because a
+    re-introduction carrying `include_in_schema=False` would be invisible to the
+    generated schema — which is exactly how the probe was nearly shipped the
+    first time. Uses `_walk_api_routes`: `include_router` nests the routes, so a
+    flat pass over `app.routes` finds none of them and would pass vacuously."""
+    paths = {route.path for route in _walk_api_routes(client.app)}
+    assert paths, "the route walk found nothing — this check would pass vacuously"
+    assert _REMOVED_PROBE_PATH not in paths

@@ -502,6 +502,16 @@ Two rules that exist because they were violated before:
   that this environment cannot authenticate to, and an agent must not enter credentials. The honest
   status is `HOSTED QA PENDING (Krish)` plus an exact checklist.
 
+**Extended 2026-08-02 (corpus-validation phase).** Two fields are added to the list above, because a
+slice that touches production-derived content cannot be judged from test counts alone:
+
+- **Authorization basis** — the specific committed sentence, with `file:line`, that permits what the
+  slice did. "It seemed covered" is not an authorization basis. If the basis is a Dean answer that has
+  not arrived, the slice does not run against real data; it runs against synthetic fixtures and says so.
+- **Data boundary** — what production-derived content the slice touched, where it lived, how long it
+  lived, and what left the process. For a slice that touches none, the honest entry is "none", which is
+  a stronger claim than silence and should be stated explicitly.
+
 ---
 
 ## 13. Truth Path Protection
@@ -683,25 +693,40 @@ so no application route reaches it.
 `v0.0.32`, and only Dean can say whether they were within his intent. Do not restore any of them
 without his answer, and do not repeat "aggregate output is authorized" without this qualification.
 
-**A TEMPORARY, DEFAULT-ON diagnostic endpoint is live in production (added 2026-08-01).**
-`POST {base}/api/runtime/identity/probe` observes which of seven allowlisted candidate identity headers
-reach the pod, and whether a client-planted canary survived the Authentik edge. It exists because
-`docs/identity-trust-contract.md` Q1–Q3 cannot be answered by reading code — the ingress and the
-Authentik provider are configured in `ISAAC-DOE/isaac-k8`, which this working tree cannot see. It
-returns **no header value and nothing derived from one**; every string in its response is a
-compile-time constant, mechanically enforced.
+**The Authentik header contract has been OBSERVED, and the probe that observed it is GONE
+(2026-08-02).** A temporary endpoint `POST {base}/api/runtime/identity/probe` shipped in `v0.0.42`
+(`d521dd7`), ran once in an authenticated session — **operator testimony, not a captured artifact; see
+§6A** — and was removed in a reviewed cleanup PR: the route now returns 404 and a test pins that. **Do not re-add it**; the observation is recorded and re-running
+it would re-open an ingress-configuration oracle for no new information.
 
-**It is not authorized so much as pre-empted, and that is recorded rather than smoothed over.** Q15
-asks Dean's permission to enable exactly this, and is **unanswered**; the probe nevertheless ships
-*active*, gated only by a kill switch (`ISAAC_IDENTITY_PROBE`, default ON), because a default-OFF
-switch could only be turned on by editing `isaac-k8`. With `ISAAC_UI_API_KEY` unset in production it is
-therefore live and app-unauthenticated. **If Dean answers "no", the response is to set
-`ISAAC_IDENTITY_PROBE=0` and remove the endpoint — not merely to leave it unenabled.**
+**The durable record is [`docs/identity-trust-contract.md`](docs/identity-trust-contract.md) §6A.** In
+brief, and none of it is a value: all seven candidate headers arrived; **ISAAC consumes none of them**;
+for `username`, `uid`, `email`, `name` and `groups` the edge **supplied the value and did not append**
+the client's planted canary — no second header line, no coalescing on `,` or `|`. **It does NOT follow
+that the client's copy was removed**; §6A.1 names two scenarios producing the same signature, one of
+which means the client *did* influence the header. And for **`X-authentik-entitlements` and
+`X-Isaac-Edge` the client's own value arrived untouched**, so the edge was not observed to supply them
+at all.
 
-**Removal is the plan, not an aspiration.** The trigger is: the Q1–Q3 answers are recorded, *or* Dean
-declines Q15. The exact nine-item removal checklist — including five contract pins that must revert to
-21,270 / 36 / 44 — is [`docs/identity-probe.md`](docs/identity-probe.md) §7. **If you are reading this
-line and the endpoint is still deployed, check that checklist before doing anything else.**
+*(That "does not follow" sentence is load-bearing. An earlier revision of this summary said the edge
+"replaced" the client's copy and called it "the safest of the possible outcomes" — stating the
+conclusion more firmly than §6A supports, in the file that is read at the start of every session while
+§6A is opened rarely. That inversion is the exact failure §6A's testimony block exists to prevent.)*
+
+**Two rules that follow, and that a future slice must not quietly drop:**
+
+- **`X-authentik-entitlements` and `X-Isaac-Edge` are permanently disqualified** from authentication,
+  authorization, role assignment, proof that Authentik was traversed, and proof that the caller is an
+  institutional user — unless infrastructure changes and is independently re-verified. `X-Isaac-Edge`
+  cannot witness edge traversal, which is the one job its name implies.
+- **Q1–Q3 are answered for the tested path only.** Q4 (can an in-cluster caller reach the Service
+  bypassing Authentik?) is untouched by this and remains Dean's. Nothing observed proves the caller was
+  authenticated.
+
+**`X-authentik-uid` is present**, so it is now a live candidate for ISAAC's canonical internal key
+alongside the username, which remains the required compatibility key for upstream ownership/ACL rows.
+**Neither is confirmed** — UID permanence is **Q17**, username non-reassignability is **Q5**, and both
+are institutional lifecycle facts no observation can settle.
 
 **Baseline restoration (started 2026-07-31).** The authoritative definition of "baseline" — which
 capabilities are required, which are deliberately deferred, and who owns each external gate — is
