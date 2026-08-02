@@ -309,7 +309,12 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
             f"{auto!r} (from `{function_name}`)"
         )
         checked += 1
-    assert checked == 36, f"expected 36 documented operations, found {checked}"
+    # 36 -> 37: `POST /api/runtime/identity/probe`, the TEMPORARY identity
+    # observation probe. It is published deliberately rather than hidden with
+    # `include_in_schema=False` — an unadvertised diagnostic endpoint is the kind
+    # that never gets removed. Expect this number to return to 36 in the removal
+    # PR; a drop back is the intended outcome, not a regression.
+    assert checked == 37, f"expected 37 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -499,6 +504,11 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/search", "get"): ["200", "401", "422"],
     ("/api/uploads", "post"): ["200", "401", "403"],
     ("/api/validate/record", "post"): ["200", "401", "413", "422"],
+    # TEMPORARY — removed with the identity probe. 400 is the probe's own
+    # fixed-text rejection of an over-long canary, deliberately raised in the
+    # handler instead of via Pydantic `max_length`, because FastAPI's 422 body
+    # echoes the offending input back in `detail[].input`.
+    ("/api/runtime/identity/probe", "post"): ["200", "400", "401", "422"],
 }
 
 
@@ -532,6 +542,10 @@ EXPECTED_COMPONENT_SCHEMAS: dict[str, dict] = {
     },
     "DemoResetRequest": {"properties": ["confirmation", "mode"], "required": ["mode"]},
     "HTTPValidationError": {"properties": ["detail"], "required": []},
+    # TEMPORARY — removed with the identity probe. ONE optional field. If a
+    # second ever appears here, the probe has grown a caller-steerable surface,
+    # which it must not have.
+    "IdentityProbeRequest": {"properties": ["canary"], "required": []},
     "ValidationError": {
         "properties": ["ctx", "input", "loc", "msg", "type"],
         "required": ["loc", "msg", "type"],

@@ -1058,8 +1058,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 36 operations, 44 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(36);
+  it('describes the contract it claims to: 37 operations, 48 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(37);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1080,8 +1080,16 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // confirmed edit (W1). The old description asserted the opposite ("overwriting
     // it in place"), so leaving this pinned at 20,915 would have kept a caption
     // describing behaviour the API no longer has.
-    expect(total).toBe(21270);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(44);
+    //
+    // 21,270 -> 22,751, 36 -> 37 operations and 44 -> 48 paragraphs: the
+    // TEMPORARY `POST /api/runtime/identity/probe`. It is published in the
+    // contract rather than hidden behind `include_in_schema=False`, because an
+    // unadvertised diagnostic endpoint is the kind nobody remembers to delete.
+    // EXPECT THESE THREE NUMBERS TO GO BACK DOWN. The removal PR should return
+    // them to 21,270 / 36 / 44 exactly; if it does not, something other than the
+    // probe was removed with it.
+    expect(total).toBe(22751);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(48);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

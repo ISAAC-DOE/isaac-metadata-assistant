@@ -156,48 +156,87 @@ logs, and every clone at once. There is no GitHub path because there should not 
 
 ---
 
-## The "30/30" claim — unresolved, and load-bearing
+## The "30/30" claim — resolved as operator testimony (superseding this section's earlier finding)
 
 A separate question was asked: *what evidence exists that the reconnaissance scan ran and reported
 30 records, all passing schema?*
 
-**There is one prose sentence, no durable artifact, and the same working tree contradicts it in eight
-places.**
+### The earlier finding, kept because it was wrong in an instructive way
 
-The claim, at `2026-07-31-baseline-completion-matrix.md:14-19`, added by docs-only commit `7e9a387`
-(1 file, +126/−7, no data artifact):
+This section previously concluded: *"There is one prose sentence, no durable artifact, and the same
+working tree contradicts it in eight places"*, and directed that the 30/30 figure not be repeated. It
+enumerated 8 statements across 3 files, listed below unchanged.
+
+The claim under examination, at `2026-07-31-baseline-completion-matrix.md`, added by docs-only commit
+`7e9a387` (1 file, +126/−7, no data artifact):
 
 > merge `ceea656` was published as image `v0.0.38` … hosted `/krish/api/health` was observed reporting
 > `ceea656`, and the Slice 2A reconnaissance **has run against the real database** … it **reported zero
 > schema drift (30/30)**.
 
-Contradicted at HEAD by the following 8 statements across 3 files. (The matrix's own correction block
-counts **6** — it scopes itself to the recon-specific ones and excludes the 2 about hosted rollout.
-The two counts describe different sets and both are correct.)
+The 8 statements, as enumerated then (line numbers are as-of that enumeration and have since shifted
+where the statements were corrected in place):
 
-| Location | Text |
-|---|---|
-| matrix §0, "A second finding" | "code reading, not a runtime observation, and **the scan has never run**" |
-| matrix §4.3, constraint 1 | "the actual row count is **unobserved** — the scan has never run" |
-| matrix §7.2, item 5 | "**The real database has never been contacted. No scan has ever run.**" |
-| matrix §"State after the baseline-restoration slices" | "**No hosted rollout has been observed** — see G1" |
-| matrix §2.2 | every baseline-required database row reads `Runtime-verified: no` (four rows read `—`, being not-applicable rather than unverified) |
-| same file §5 | G1 still listed **open** |
-| `docs/hosted-qa-checklist.md:11`, `:157` | "The real database has never been contacted; no scan has ever run." |
-| `apps/api/isaac_api/db_recon.py:19-21` | "this module has **never been run against any database** … Do not cite its output as an observation until then." |
+| Location | Text | Last written |
+|---|---|---|
+| matrix §0, "A second finding" | "code reading, not a runtime observation, and **the scan has never run**" | `a911b8c` |
+| matrix §4.3, constraint 1 | "the actual row count is **unobserved** — the scan has never run" | `a911b8c` |
+| matrix §7.2, item 5 | "**The real database has never been contacted. No scan has ever run.**" | `a911b8c` |
+| matrix §"State after the baseline-restoration slices" | "**No hosted rollout has been observed** — see G1" | `a911b8c` |
+| matrix §2.2 | every baseline-required database row reads `Runtime-verified: no` | ≤ `a911b8c` |
+| same file §5 | G1 still listed **open** | ≤ `a911b8c` |
+| `docs/hosted-qa-checklist.md:11`, `:157` | "The real database has never been contacted; no scan has ever run." | `a911b8c` |
+| `apps/api/isaac_api/db_recon.py:19-21` | "this module has **never been run against any database** … Do not cite its output as an observation until then." | `e7fd755` |
 
-**Is there a durable committed artifact? No.** No JSON, no log, no fixture. The endpoint holds results
-**in process memory only** — a deepcopy under a TTL lock (`apps/api/isaac_api/routes.py:3698-3721`) —
-discarded on pod restart. Nothing is written to disk, by design.
+### Why that finding does not hold — the dating check nobody ran
 
-What *is* independently verifiable: `v0.0.38 → ceea656` and `v0.0.39 → d7010f9` (HEAD), both by
-`git rev-list -n1`. That corroborates the image-tag half of the sentence, not the scan half.
+**Every one of the eight predates the image the scan was run against.** `a911b8c` is dated
+2026-07-31 18:17:27 −0700 and `git merge-base --is-ancestor a911b8c ceea656` confirms it is an
+**ancestor of `ceea656`** — the merge cut 41 minutes later at 18:58:48 that became image `v0.0.38`.
+`e7fd755` is dated 2026-07-31 04:27:45 −0700, roughly **21 hours before** the run
+(`git log -1 --format='%h %ad' --date=iso -S 'never been run against any database' -- apps/api/isaac_api/db_recon.py`).
+None has been updated since.
 
-**Consequence.** Either the scan genuinely ran and its output was never captured — in which case the
-JSON should be preserved and the eight contradicting statements reconciled — or the sentence is an
-error. **Do not build on the 30/30 figure, and do not repeat it, until the actual sanitized JSON is
-pasted back.** [`docs/hosted-qa-checklist.md`](hosted-qa-checklist.md) Part 1 is the procedure that
-produces that evidence properly. This is gate **G1**, and it is still open.
+They are therefore **pre-run status markers, not post-run observations**. An unmaintained status
+marker cannot be evidence that an event did not occur; it records only that nobody edited the file.
+Counting eight of them as eight independent contradictions compounded a single stale fact eightfold.
+
+**And "no durable artifact" was guaranteed in advance.** The endpoint holds its result **in process
+memory only** — a deepcopy under a TTL lock (`apps/api/isaac_api/routes.py` ~3698-3721) — discarded on
+pod restart, never written to disk. The absence of an artifact was going to be true whether or not the
+scan ran, so it discriminates nothing.
+
+### The established status
+
+> The deployed pod contacted the database at least once. The scan was observed by Krish in an
+> authenticated session against image `v0.0.38` (merge `ceea656`), and its result — no leaks, all four
+> frozen allowlists matched, zero schema drift, 30/30 — is **authenticated operator testimony, dated
+> and release-tagged, with no committed artifact because the endpoint is designed to produce none.**
+> The scanning logic and the schema are unchanged at HEAD, so the result still describes the current
+> release. It is **not** "verified" — testimony is not a re-checkable record — and equally **not**
+> "never happened".
+
+**What raises it above assertion.** Krish independently restated the result at **field level**, mapping
+one-to-one onto `_DB_RECON_INTEGRITY_KEYS` (`apps/api/isaac_api/routes.py:3175-3187`): `rows_before`
+and `rows_after` both 30, `rows_modified` 0, `dml_statements_issued` and `ddl_statements_issued` both
+0, `full_schema_fingerprint_match`, thirty records passing v1.05, zero validation issues, no prohibited
+content. **Commit `7e9a387` named none of those six integrity fields**, and no other committed document
+does either — so the detail cannot have been read off a document.
+
+**No rerun is warranted.** `git diff --stat ceea656..7a9f15d -- apps/api/isaac_api/db_recon.py
+schema/isaac_record_v1.json src/isaac_records/` is empty (byte-identical), and
+`git diff ceea656..7a9f15d -- apps/api/isaac_api/routes.py | grep -c '_DB_RECON'` returns 0. Only
+`app_commit` in the response would differ.
+
+**The distinction to hold.** *"No database connection was opened during this discovery session"* is
+**true**. *"The deployed database has never been contacted"* is **false as written** and must not be
+repeated.
+
+**What remains open.** Gate **G1** is **narrowed, not closed**: the substantive question is answered,
+and what is still owed is purely evidentiary — paste the sanitized JSON back per
+[`docs/hosted-qa-checklist.md`](hosted-qa-checklist.md) Part 1 so the result becomes an artifact rather
+than testimony. The 30/30 figure **may** now be cited, provided it is labelled as testimony against
+`v0.0.38` and never as a verified measurement.
 
 ---
 
@@ -253,11 +292,22 @@ labels, and salted truncated digests, behind nine fail-closed gates and a final 
 **Proven:** absence of the records from tracked files, full history, LFS, releases, and the image;
 absence of any seeder or importer; the database name, host, namespace, table, and seed provenance (from
 Dean's committed guide); the recon code's read-only aggregate-only behaviour; the in-memory-only
-lifetime of its result; the absence of a durable recon artifact; the eight contradictions of the 30/30
-claim; the tag→commit mapping.
+lifetime of its result; the absence of a durable recon artifact; ~~the eight contradictions of the
+30/30 claim~~ (**corrected 2026-08-01** — the eight exist as text, but all eight predate image
+`v0.0.38` and are pre-run status markers, so they are *not* contradictions of a later event; see the
+section above); the tag→commit mapping; that `db_recon.py`, `schema/` and `src/isaac_records/` are
+byte-identical between `ceea656` and HEAD.
+
+**Operator testimony, accepted but not re-checkable here:** that the recon scan ran against image
+`v0.0.38`, returning no leaks, four matching allowlists, zero schema drift, 30/30, with
+`rows_before == rows_after == 30` and zero DML/DDL; that hosted `/krish/api/health` reported `ceea656`.
 
 **Inferred, flagged as such:** that the same 30 records are individually viewable in the production
-portal; the portal's URL; whether Krish holds a SLAC cluster context.
+portal; the portal's URL; whether Krish holds a SLAC cluster context (**note:** Dean's guide documents
+`kubectl port-forward` as an option for whoever already holds one — that is authorization for such a
+person, not evidence that Krish is one).
 
 **Unknown and not guessed:** which image `/krish` is currently running (no Flux `ImagePolicy` exists in
-this repository); whether the recon scan actually ran; the actual row count in `records`.
+this repository), and in particular whether `v0.0.39` has rolled; ~~whether the recon scan actually
+ran~~ (**corrected** — see above); the actual row count in `records` as an artifact-backed measurement,
+as distinct from the testimony figure of 30.
