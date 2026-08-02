@@ -601,18 +601,38 @@ explicitly authorized, sequential readiness sequence runs *before* — and does 
 Phase 37 as a broad feature phase remains **unstarted and unauthorized**.
 
 **The access model changed on 2026-07-30.** Dean updated `docs/postgres-test-db-guide.md` (commit
-`b746b1a`) to document that the database is **not reachable from the laptop or from CI at all** — it
-becomes reachable only after push → GitHub Actions image build → GHCR → Flux → pod. The supported path
-is therefore *deployment-mediated*, and the earlier plan to obtain a kubeconfig, port-forward, or run
-recon locally is **obsolete**. The §2 hard gate in
-`docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md` has been **narrowed accordingly, not
-lifted** — read the amended §2 for exactly what is and is not now permitted.
+`b746b1a`) to document that the **supported** development path is *deployment-mediated*: push → GitHub
+Actions image build → GHCR → Flux → pod, where the standard libpq environment variables are already
+set. Write against the environment contract and verify in the deployed app.
+
+**Corrected 2026-08-01 — this paragraph previously misstated Dean's guide, and the misstatement is
+recorded rather than silently replaced.** It said the database is *"not reachable from the laptop or
+from CI at all"* and that local execution is *"architecturally impossible … the DB is unreachable from
+outside the cluster."* **The guide does not say that.** It says (`docs/postgres-test-db-guide.md:8-13`)
+*"**You do not need Kubernetes access, a kubeconfig, or credentials to write code against it**"* and
+that *"the port-forward section near the end is an optional convenience for whoever already holds a
+SLAC cluster context"* — and it then documents that convenience as working
+(`:83-96`): `kubectl port-forward -n isaac-psql svc/isaac-psql-rw 5432:5432`, plus the five `PG*`
+variables pointing at `localhost`, with the password from the `metadata-assistant-db-app` Secret. So
+"you do not need cluster access" was read as "cluster access does not exist". Not needed ≠ impossible.
+
+**The real constraint is unchanged, and is a project rule binding the agent — not a fact about the
+network.** `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md:48-52` blocks *"any connection
+originating from a laptop or from CI; local kubeconfig, port-forward, or Secret retrieval"*. Do not
+request a kubeconfig, a port-forward, or a Secret; do not run recon locally. That prohibition stands on
+its own authority and does not need the false impossibility claim to prop it up.
+
+Two further precisions. The port-forward is **authorized for someone who already holds a SLAC cluster
+context** — it is not universally available, and **this repository contains no evidence that Krish
+holds such a context** (`docs/where-the-30-records-are.md` §"Proven vs. inferred" lists it as
+inferred/unknown). And the §2 hard gate in the readiness plan is **narrowed, not lifted** — read the
+amended §2 for exactly what is and is not permitted.
 
 | Slice | Status |
 |---|---|
 | **1** — deterministic schema-truth-core diagnostics (`src/isaac_records/diagnostics.py`) | **authorized and done.** Contains **no database access** of any kind. |
 | **2 (design artifact)** — a safe, **unexecuted** read-only reconnaissance script (`scripts/db_recon.py`) | **authorized and done.** Satisfied §3's "read-only Postgres reconnaissance design" prerequisite. Superseded in place by Slice 2A: the logic moved into the app and this file is now a thin, still-unexecuted CLI wrapper that is deliberately **absent from the container image**. |
-| **2 (local execution)** — running that script from a laptop against the SLAC database | **NOT authorized, and architecturally impossible.** Per Dean's guide the DB is unreachable from outside the cluster. Do not request a kubeconfig, port-forward, or Secret. |
+| **2 (local execution)** — running that script from a laptop against the SLAC database | **NOT authorized.** Do not request a kubeconfig, port-forward, or Secret; do not run recon locally. The prohibition is the project rule at `2026-07-24-phase-37-readiness-plan.md:48-52`. ~~"and architecturally impossible … the DB is unreachable from outside the cluster"~~ — **corrected 2026-08-01**: Dean's guide says the opposite, documenting `kubectl port-forward -n isaac-psql svc/isaac-psql-rw 5432:5432` as a working optional convenience for anyone who already holds a SLAC cluster context (`:8-13`, `:83-96`). The rule binds regardless; it never depended on impossibility. |
 | **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. **Caveat below:** five shipped aggregates went beyond Dean's enumerated list and have since been withheld from the response — see the G3 note after this table. |
 | **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
@@ -630,8 +650,15 @@ three, as an earlier revision of this note said: `by_instance_path`,
 `distinct_structural_signatures`, the `total_link_count` / `dangling_link_count` pair, and
 `vocabulary_term_count`. They are record-*derived* structural facts. None emitted a scientific value,
 title, id, or record text — the masking in `apps/api/isaac_api/db_recon.py` (`safe_key_segment`)
-holds under static review; note this is code review, **not** a runtime observation, and **the scan
-has still never run**.
+holds under static review; note this is code review, **not** a runtime observation. ~~and **the scan
+has still never run**~~ — **corrected 2026-08-01:** the scan **has** run, once, against image
+`v0.0.38` (`ceea656`), observed by Krish in an authenticated session and reported as no leaks, four
+matching allowlists, zero schema drift, 30/30. That is **operator testimony, not a captured artifact**
+(the endpoint keeps its result in process memory only, by design), so the masking claim above is still
+backed by code review rather than by an inspected response body — the caveat stands, its reason
+changes. See `docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md` §0, Entry 2. **Never
+write "the deployed database has never been contacted"**; the accurate form is "no database connection
+was opened during this session".
 
 **They are no longer served.** The baseline-closure slice withheld all five from the HTTP response
 and names them in `dataset.withheld_pending_visibility_decision`; `vocabulary_term_count` is replaced
@@ -655,6 +682,26 @@ so no application route reaches it.
 **G3 remains OPEN**, narrowed from a live exposure to a question: all five *were* served in
 `v0.0.32`, and only Dean can say whether they were within his intent. Do not restore any of them
 without his answer, and do not repeat "aggregate output is authorized" without this qualification.
+
+**A TEMPORARY, DEFAULT-ON diagnostic endpoint is live in production (added 2026-08-01).**
+`POST {base}/api/runtime/identity/probe` observes which of seven allowlisted candidate identity headers
+reach the pod, and whether a client-planted canary survived the Authentik edge. It exists because
+`docs/identity-trust-contract.md` Q1–Q3 cannot be answered by reading code — the ingress and the
+Authentik provider are configured in `ISAAC-DOE/isaac-k8`, which this working tree cannot see. It
+returns **no header value and nothing derived from one**; every string in its response is a
+compile-time constant, mechanically enforced.
+
+**It is not authorized so much as pre-empted, and that is recorded rather than smoothed over.** Q15
+asks Dean's permission to enable exactly this, and is **unanswered**; the probe nevertheless ships
+*active*, gated only by a kill switch (`ISAAC_IDENTITY_PROBE`, default ON), because a default-OFF
+switch could only be turned on by editing `isaac-k8`. With `ISAAC_UI_API_KEY` unset in production it is
+therefore live and app-unauthenticated. **If Dean answers "no", the response is to set
+`ISAAC_IDENTITY_PROBE=0` and remove the endpoint — not merely to leave it unenabled.**
+
+**Removal is the plan, not an aspiration.** The trigger is: the Q1–Q3 answers are recorded, *or* Dean
+declines Q15. The exact nine-item removal checklist — including five contract pins that must revert to
+21,270 / 36 / 44 — is [`docs/identity-probe.md`](docs/identity-probe.md) §7. **If you are reading this
+line and the endpoint is still deployed, check that checklist before doing anything else.**
 
 **Baseline restoration (started 2026-07-31).** The authoritative definition of "baseline" — which
 capabilities are required, which are deliberately deferred, and who owns each external gate — is

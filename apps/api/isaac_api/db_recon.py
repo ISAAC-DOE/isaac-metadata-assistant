@@ -16,9 +16,24 @@ Two callers, one implementation:
 * ``scripts/db_recon.py`` — a thin, UNEXECUTED CLI wrapper kept as a design/dev
   artifact. It passes ``require_opt_in=True``.
 
-EXECUTION STATUS: this module has **never been run against any database**. Every
-number it can report is UNKNOWN until it runs in the pod. Do not cite its output
-as an observation until then.
+EXECUTION STATUS (corrected 2026-08-01). This docstring previously read "this
+module has **never been run against any database**". That was written on
+2026-07-31 at 04:27 (``e7fd755``), when it was true, and was never updated. It
+has since been run: the deployed pod contacted the database through
+``GET /api/runtime/database/recon`` on image ``v0.0.38`` (``ceea656``), observed
+by the operator in an authenticated session.
+
+Treat that result as dated operator TESTIMONY, not as a re-checkable artifact —
+the route holds its report in process memory only, under a TTL lock, so no
+artifact was ever capable of being produced. The scan logic, the vendored schema
+and the response projection are byte-identical at ``7a9f15d``, so the result
+still describes the current release; only ``app_commit`` would differ.
+
+The distinction that matters, and the reason this marker caused a false
+retraction once already: "no connection was opened during THIS session" is not
+"the database has never been contacted". Do not restate the second. If you need
+a citable artifact rather than testimony, capture one per
+``docs/hosted-qa-checklist.md`` Part 1 — do not infer from this docstring.
 
 Purpose
 -------

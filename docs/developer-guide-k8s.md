@@ -55,9 +55,21 @@ still serves `/api/*`. The `/krish` prefix exists only in the deployed image.
 
 ## 4. Auth is at the edge now
 
-Every request to `/krish/*` goes through Authentik (SLAC SSO) and requires
+Every request to `/krish/*` goes through **Authentik** and requires
 membership in the `admin` or `researcher` group — same policy as the ISAAC
 portal. Consequences:
+
+> **Corrected 2026-08-01.** This line previously read "Authentik (SLAC SSO)". That parenthetical is not
+> supported by anything observed. An **unauthenticated** observation on 2026-08-01 of
+> `https://isaac.slac.stanford.edu/if/flow/default-authentication-flow/` found the
+> identification stage presenting **only** an "Email or Username" field, an **ORCID** federated-login
+> button, and "Sign up with ORCID" — **no SLAC SSO button is offered at that stage**. Whether a SLAC
+> IdP appears later in the flow, or is reachable by another path, is **UNOBSERVED** — this is not a
+> claim that SLAC SSO is absent, only that it is not what the login page presents. Authentik is the
+> identity provider at the edge; which upstream sources it federates is Dean's configuration in
+> `isaac-k8`, which this repository cannot see (Q1). Note also that ORCID being an **authentication**
+> method here confers no authorization: `attribution.contributors[].orcid` is scientific-credit
+> metadata and must never be used as an authorization principal.
 
 - `ISAAC_UI_API_KEY` / `VITE_API_KEY` are unset in this deployment; the
   bearer-key seam still exists in code for other environments but is redundant

@@ -7,38 +7,87 @@ ISAAC. Update it in the same PR as any slice that changes a row.
 >
 > Defined in **§7.1**, justified line by line in **§7.2**.
 >
-> ### Correction, 2026-08-01: an earlier revision of this block over-claimed. Reconciled DOWN.
+> ### Correction history for this block — read both entries; the second supersedes the first
 >
-> A previous revision of this callout (added by docs-only commit `7e9a387`, 1 file, +126/−7, **no data
-> artifact**) asserted that three original grounds for the verdict were "now false" — that hosted
-> `/krish/api/health` **was observed** reporting `ceea656`, and that the Slice 2A reconnaissance **has
-> run** against the real database, reporting no leaks and zero schema drift (**30/30**).
+> This callout has been corrected twice in one day, in opposite directions. Both entries are kept,
+> because a verdict whose stated grounds change without notice is not checkable — and that principle
+> cuts in both directions, including against a correction that over-corrects.
 >
-> **Only one of those three legs survives scrutiny. The other two are WITHDRAWN as unsupported.**
-> The correction is recorded rather than silently applied, because a verdict whose stated grounds
-> change without notice is not checkable — and that principle cuts in both directions.
+> #### Entry 1 (2026-08-01, earlier): reconciled DOWN — **now itself superseded**
+>
+> A revision added by docs-only commit `7e9a387` (1 file, +126/−7, **no data artifact**) asserted that
+> three original grounds for the verdict were "now false" — that hosted `/krish/api/health` **was
+> observed** reporting `ceea656`, and that the Slice 2A reconnaissance **has run** against the real
+> database, reporting no leaks and zero schema drift (**30/30**).
+>
+> A later revision **WITHDREW** the second and third of those as "unsupported", on the grounds that no
+> artifact existed and that "the evidence runs **8 statements to 1**" against them.
+>
+> **That withdrawal was methodologically wrong, and is itself now withdrawn.** Its two arguments do not
+> survive the dating check that was never performed on them:
+>
+> - **The "8 statements" were pre-run status markers, not post-run observations.** Every one of them
+>   was last written at or before `a911b8c` (2026-07-31 18:17:27 −0700), which `git merge-base
+>   --is-ancestor a911b8c ceea656` confirms is an **ancestor of `ceea656`** — the merge that became the
+>   very image `v0.0.38` the scan was run against, cut 41 minutes later at 18:58:48. Not one of them has
+>   been updated since. The most-cited, the `db_recon.py:19-21` docstring *"this module has **never been
+>   run against any database**"*, was written in `e7fd755` at 2026-07-31 04:27:45 −0700 — about **21
+>   hours before** the run (`git log -1 --format='%h %ad' --date=iso -S 'never been run against any
+>   database' -- apps/api/isaac_api/db_recon.py`). Citing an unmaintained pre-run status marker as
+>   evidence that the run did not happen is circular: it says only that nobody had edited the file.
+> - **"No artifact" was guaranteed in advance by the design, so it discriminates nothing.** The endpoint
+>   holds its result in **process memory only** — a deepcopy under a TTL lock (`routes.py` ~3698-3721),
+>   discarded on pod restart, never written to disk. "No artifact exists" was going to be true whether
+>   or not the scan ran. Treating a designed-in absence as counter-evidence inverts it.
+>
+> #### Entry 2 (2026-08-01, current): the established status
 >
 > | Sub-claim | Status |
 > |---|---|
-> | `ceea656` → image `v0.0.38`; `d7010f9` (HEAD) → image `v0.0.39` | **VERIFIED.** `git rev-list -n1` on each tag; both tagged by `github-actions`; `Build and Push to GHCR` run `30692848940` on `d7010f9` succeeded. This is CI's record of what it pushed, **not** a registry read |
-> | "the final runtime code is not yet in any published image" | **FALSE, and now struck.** The responsive remediation is in `v0.0.39` |
-> | "hosted `/krish/api/health` was observed reporting `ceea656`" | **WITHDRAWN — unsupported.** No evidence artifact exists, and this file contradicts it in the §"State after the baseline-restoration slices" block, in §7.2 items 3 and 5, and in §7.2's closing *"What this verdict does NOT say"* |
-> | "the reconnaissance has run … 30/30, no leaks" | **WITHDRAWN — unsupported.** Contradicted in six places across three files, including the module's own docstring (`db_recon.py:19-21`). The endpoint holds results in **process memory only** — a deepcopy under a TTL lock (`routes.py:3698-3721`), discarded on pod restart — so no artifact was ever capable of being produced without someone pasting it back |
+> | `ceea656` → image `v0.0.38`; `d7010f9` → image `v0.0.39` | **VERIFIED.** `git rev-list -n1` on each tag; both tagged by `github-actions`; `Build and Push to GHCR` run `30692848940` on `d7010f9` succeeded. This is CI's record of what it pushed, **not** a registry read |
+> | "the final runtime code is not yet in any published image" | **FALSE, and struck.** The responsive remediation is in `v0.0.39` |
+> | "hosted `/krish/api/health` was observed reporting `ceea656`" | **OPERATOR TESTIMONY — accepted, not independently re-checkable.** Recorded in `7e9a387`; the hosted edge is not reachable from this environment, so no agent can confirm or refute it |
+> | "the reconnaissance has run … 30/30, no leaks" | **OPERATOR TESTIMONY — accepted, not independently re-checkable.** See the field-level corroboration below |
 >
-> The evidence runs **8 statements to 1** against the two withdrawn claims — **6** specific to the
-> recon having run, and **2** to the hosted rollout having been observed. (`where-the-30-records-are.md`
-> enumerates the same 8; the two documents count the same set.) **Do not repeat the 30/30 figure.**
-> If the scan genuinely ran, the sanitized JSON should be pasted back per
-> [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1 — which is now runnable, its
-> `<CLOSURE_MERGE_SHA>` placeholder having been filled on 2026-08-01 — and all **eight** statements
-> reconciled in one pass at that point. **G1 remains OPEN.**
+> **The status, stated once and to be reproduced verbatim wherever this comes up:**
 >
-> **The verdict itself stands, and its grounds are now simpler.** The database has never been observed
-> being contacted; the hosted SHA is unobserved; **G3** is open; and real **200% browser-zoom
-> sign-off** is open and is not automatable — §3C's `zoom-200` project is the layout-level *equivalent*
-> of 200%, never the browser's own zoom command. Plain **Baseline Complete** and **Complete With
-> External Blockers** remain unavailable, for the reasons enumerated in §7.2. This verdict makes **no
-> claim of any kind** about the current state of `/krish`.
+> > The deployed pod contacted the database at least once. The scan was observed by Krish in an
+> > authenticated session against image `v0.0.38` (merge `ceea656`), and its result — no leaks, all four
+> > frozen allowlists matched, zero schema drift, 30/30 — is **authenticated operator testimony, dated
+> > and release-tagged, with no committed artifact because the endpoint is designed to produce none.**
+> > The scanning logic and the schema are unchanged at HEAD, so the result still describes the current
+> > release. It is **not** "verified": it is testimony, not a re-checkable record. It is equally **not**
+> > "never happened".
+>
+> **What raises this above a bare assertion.** Krish has since independently restated the result at
+> **field level**, and the fields map one-to-one onto `_DB_RECON_INTEGRITY_KEYS`
+> (`apps/api/isaac_api/routes.py:3175-3187`): thirty rows before and after (`rows_before` /
+> `rows_after`), zero rows modified (`rows_modified`), zero DML and zero DDL statements issued
+> (`dml_statements_issued` / `ddl_statements_issued`), a full-schema fingerprint match
+> (`full_schema_fingerprint_match`), thirty records passing schema v1.05, zero validation issues, and no
+> prohibited response content. **Commit `7e9a387` recorded none of those six integrity field names** —
+> `git show 7e9a387 | grep -E 'rows_before|rows_after|rows_modified|full_schema_fingerprint_match|dml_statements_issued|ddl_statements_issued'`
+> returns nothing — and they appear in no other committed document. Detail that exists in no document
+> can only come from having seen a response body.
+>
+> **No rerun is warranted, and the earlier result is not stale.**
+> `git diff --stat ceea656..7a9f15d -- apps/api/isaac_api/db_recon.py schema/isaac_record_v1.json src/isaac_records/`
+> is **empty** — those paths are byte-identical — and
+> `git diff ceea656..7a9f15d -- apps/api/isaac_api/routes.py | grep -c '_DB_RECON'` returns **0**. The
+> scanning logic, the schema it validates against, and the response projection are all unchanged; only
+> `app_commit` in the response would differ.
+>
+> **The distinction to hold, everywhere.** *"No database connection was opened during this discovery
+> session"* is **true** and must be preserved. *"The deployed database has never been contacted"* is
+> **false as written** and must not be repeated.
+>
+> **The verdict itself stands, on these grounds.** The scan result is testimony rather than a
+> re-checkable artifact, and the hosted state is unobserved *from here*; **G3** is open; and real
+> **200% browser-zoom sign-off** is open and is not automatable — §3C's `zoom-200` project is the
+> layout-level *equivalent* of 200%, never the browser's own zoom command. Plain **Baseline Complete**
+> and **Complete With External Blockers** remain unavailable, for the reasons in §7.2. This verdict
+> makes **no claim** about the *current* state of `/krish`; the testimony is point-in-time and
+> release-tagged to `v0.0.38`. **G1 is narrowed, not closed — see §5.**
 
 **Purpose.** Define exactly which capabilities must exist, be tested, be deployed, and be
 runtime-verified before ISAAC is a stable foundation for new product feature work — and, just as
@@ -52,7 +101,10 @@ image `v0.0.32`, Dean's guide at `b746b1a`, backend 1794 passing, frontend 2145 
 definition, graph + performance decisions, retirement checklist), **#30** (truth-core correctness
 D1–D3), **#31** (hosted QA checklist), **#32** (real-browser / accessibility / responsive baseline).
 Backend **1801**, frontend **2145 / 93**, e2e **579** on macOS *and* on Linux CI. All CI green on every
-merged SHA. **No hosted rollout has been observed** — see G1.
+merged SHA. **No hosted rollout had been observed at the time this paragraph was written** (last
+edited `a911b8c`, 2026-07-31 18:17:27 −0700). Superseded 2026-08-01: a rollout of `v0.0.38` and a
+reconnaissance run against it were subsequently observed by Krish in an authenticated session and are
+recorded as operator testimony in §0, Entry 2. Kept as written so the timeline stays legible — see G1.
 
 **State after the closure slice (2026-07-31).** `origin/main` = `610540e255d78818d897f9872aee8cf7ad248a03`
 (PR **#33**, docs); local `main` clean, 0 ahead / 0 behind. The closure slice itself is **not yet
@@ -167,7 +219,10 @@ undercounted the overage as *three*. It was **five**:
 None of these emits a scientific value, a title, an id, or any record text — the masking in
 `safe_key_segment` (`db_recon.py:436-470`; note `:470` is the one branch that returns a key verbatim,
 reached only after the declared-name check) holds under static review. Say "static review" and mean
-it: that is **code reading, not a runtime observation**, and the scan has never run.
+it: that is **code reading, not a runtime observation**. (Written when the scan had not yet run.
+Corrected 2026-08-01: it has since run once — §0, Entry 2 — but the result was **testimony, not a
+captured body**, so the masking still has no runtime observation behind it and this caveat stands
+unchanged in substance.)
 
 **What changed, and what did not.** All five are now removed from the HTTP response and **named** in
 `dataset.withheld_pending_visibility_decision`, so the narrowing is auditable instead of invisible.
@@ -394,9 +449,12 @@ is what produces them. G3 asks whether any may come back.
 
 Obeying §4.2 literally still permits per-record disclosure by arithmetic. These are binding:
 
-1. **Minimum cell size.** The *documented seed* is **30 rows** (`DOCUMENTED_SEED_ROWS`, `db_recon.py:133`);
-   the actual row count is **unobserved** — the scan has never run, which is exactly why the report
-   emits `seed_count_matches`. At that order of magnitude a count of `1` at a specific path is a
+1. **Minimum cell size.** The *documented seed* is **30 rows** (`DOCUMENTED_SEED_ROWS`, `db_recon.py:133`).
+   ~~the actual row count is **unobserved** — the scan has never run~~ **Corrected 2026-08-01:** the
+   scan has run once and Krish's testimony reports `rows_before` and `rows_after` both **30**, matching
+   the documented seed (§0, Entry 2). Treat that as testimony, not a measurement this document can
+   re-check; `seed_count_matches` exists precisely so the comparison is made in-pod either way. At that
+   order of magnitude a count of `1` at a specific path is a
    per-record fact wearing aggregate clothing. Any *new* aggregate must
    suppress or bucket cells below a stated threshold. (The withdrawn fields predated this rule.
    Whether the two **retained** breakdowns need it — `by_rule_family` and `by_schema_path` can both
@@ -724,7 +782,7 @@ docstrings now state the limit rather than the guarantee.
 
 | # | Gate | Owner | Exact question / action | Effect if unanswered |
 |---|---|---|---|---|
-| G1 | Hosted rollout + recon verification | **Krish** | Run [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1 against `/krish` while signed in; paste back the sanitized JSON | Blocks Phase 1, Phase 2, and any claim that Slice 2A works |
+| G1 | Hosted rollout + recon verification — **NARROWED 2026-08-01, not closed** | **Krish** | The substantive question is **answered by operator testimony** (§0, Entry 2): the scan ran against image `v0.0.38` (`ceea656`) with no leaks, all four frozen allowlists matched, zero schema drift, 30/30, and field-level integrity values that map one-to-one onto `_DB_RECON_INTEGRITY_KEYS`. **Slice 2A is therefore no longer unproven.** What G1 still requires is narrower and purely evidentiary: **paste the sanitized JSON back** so the result becomes a re-checkable artifact rather than testimony, per [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1. A rerun is **not** required for correctness — `db_recon.py`, `schema/isaac_record_v1.json` and `src/isaac_records/` are byte-identical between `ceea656` and HEAD, and zero `_DB_RECON` lines changed in `routes.py` — so re-running merely re-obtains a body that can be captured. | Blocks any claim that a §2.2 row is **runtime-verified in the artifact sense**, and blocks the per-row attribution in §7.2. Does **not** any longer block the claim that Slice 2A works |
 | G2 | Per-record visibility decision | **Dean** | "May the hosted app display per-record fields from `metadata_assistant` — titles, scientific values, evidence, full JSON — and if so to which audience and at what granularity?" | Real-record functionality stays absent; baseline can still complete without it |
 | G3 | Aggregates shipped in `v0.0.32` that Dean did not enumerate — **now withdrawn** | **Dean** | "Image `v0.0.32` returned **five** aggregates beyond your enumerated list: `by_instance_path`, `distinct_structural_signatures`, `total_link_count`, `dangling_link_count`, `vocabulary_term_count`. They are record-derived structural facts; none emits a value, title or id. **All five have been withdrawn** from the response and are named in `dataset.withheld_pending_visibility_decision`. Were any within what you intended, and may they be restored? Separately: `by_rule_family` and `by_schema_path` are **retained** because the public vendored schema produces them. Sharpened 2026-08-01: there is **no minimum-cell-size suppression anywhere in the codebase** (`rg 'MIN_CELL|suppress'` over `db_recon.py` and `routes.py` → 0 matches), so both can report a count of 1 against a ~30-row table. And `by_rule_family` carries **two** measures per family, not one: `records_affected: 1` is strictly stronger than `error_count: 1` — it states that a *single* record accounts for every error in that family, and two such families can be differenced into a per-record failure *profile*. Do you accept both as-is, or should a floor apply?" | Nothing further is served; the withdrawal stands. The five **were** live in `v0.0.32` and that is not undone. Also covers any drift §4.1's retained taxonomy cannot classify |
 | G4 | Responsive / 200%-zoom human sign-off | **Krish** | [`docs/hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 2 — 4 viewports + real 200% zoom. Automated coverage runs locally only, **and for 200% it is a viewport-halving model of zoom rather than zoom itself** — probed directly, Chromium exposes no automation surface for its own zoom control at all. This gate is not closable by any amount of further automation | Quality row stays open |
@@ -961,8 +1019,10 @@ has to re-derive it:
 
 **Why not plain "Baseline Complete":**
 
-1. **G1 is open.** No `Baseline required: yes` row anywhere in §2.1, §2.2 or §2.3 is
-   runtime-verified. The rule in §7 forbids plain Complete while G1 is open, without exception.
+1. **G1 is open — narrowed 2026-08-01, but open.** No `Baseline required: yes` row anywhere in §2.1,
+   §2.2 or §2.3 is runtime-verified **in the artifact sense**. The one real execution (§0, Entry 2) is
+   operator testimony and was not captured, so no row can be attributed to it per-row. The rule in §7
+   forbids plain Complete while G1 is open, without exception.
 
 **Why not "Complete With External Blockers":**
 
@@ -972,9 +1032,12 @@ has to re-derive it:
    as `v0.0.38`; the subsequent responsive remediation merged as `d7010f9` and was published as
    `v0.0.39`. Both tags verified by `git rev-list -n1` and both created by `github-actions`. **No
    un-merged change is load-bearing for the claim any more.**
-3. **The hosted SHA is unknown.** `GET /krish/api/health` returned **HTTP 302** to the Authentik
-   edge — re-observed **2026-08-01**, redirecting to `/outpost.goauthentik.io/start`. Treat that as a
-   point-in-time probe, not a standing fact. Which image is running was not observed. Worse for
+3. **The hosted SHA is unknown *from here*, and unobserved *since* `v0.0.38`.** `GET
+   /krish/api/health` returned **HTTP 302** to the Authentik edge — re-observed **2026-08-01**,
+   redirecting to `/outpost.goauthentik.io/start`. Treat that as a point-in-time probe, not a standing
+   fact. Krish observed the endpoint reporting `ceea656` (image `v0.0.38`) in an authenticated session
+   (§0, Entry 2), so the SHA is not wholly unobserved — but that was testimony, point-in-time, and
+   predates `v0.0.39`. Which image is running **now** was not observed. Worse for
    attribution: the cluster's
    image-selection policy is **UNDETERMINED** — no Flux `ImagePolicy`/`ImageUpdateAutomation`
    manifest exists in this repository — so it cannot even be *inferred* which tag would be selected.
@@ -982,10 +1045,15 @@ has to re-derive it:
 4. **G3 is open.** The five aggregates were withdrawn, but the question to Dean is unanswered, and
    five of them **were served in a published image**. Withdrawal narrows the exposure; it does not
    resolve the gate.
-5. **The real database has never been contacted. No scan has ever run.** Every §2.2 row — every gate,
-   every tripwire, every aggregate — is verified by tests against fakes and by static reading of the
-   code. Not one has executed against the actual database even once. Attributing all of §2.2 to G1
-   is exactly the "single wave of the hand" §7 prohibits.
+5. ~~**The real database has never been contacted. No scan has ever run.**~~ **Corrected 2026-08-01
+   — this sentence is false as written and must not be repeated.** It was accurate when written
+   (`a911b8c`, 2026-07-31 18:17:27 −0700), 41 minutes before the `ceea656` merge whose image the scan
+   was later run against; it was never updated. **The deployed pod contacted the database at least
+   once** (§0, Entry 2 — operator testimony against image `v0.0.38`). The surviving, narrower point:
+   every §2.2 row is *documented here* only by tests against fakes and by static reading of the code,
+   and the one real execution produced **no captured artifact**, so no row can be cited as
+   runtime-verified *in the artifact sense* until the JSON is pasted back. Attributing all of §2.2 to
+   G1 is still exactly the "single wave of the hand" §7 prohibits.
 6. **G4 is open, and it is not automatable.** Real `Cmd`/`Ctrl`-`+` zoom sign-off has no automation
    surface in Chromium at all. It is a genuine external gate and *is* correctly attributable — it is
    listed here for completeness, not as an argument against the label.
@@ -996,10 +1064,14 @@ changes and what it does not: the project no longer owes a publication step, so 
 to "Complete With External Blockers" is entirely **observation** — one signed-in run of the hosted
 checklist. It is nonetheless still distance, and the label stays unavailable until that run happens.
 
-**What this verdict does NOT say.** It does not say the deployment is healthy, degraded, rolled,
-stale, or anything else. **No hosted rollout has been observed by this project at any point.** Any
-future sentence combining "baseline" with a claim about `/krish` requires the G1 report as its
-evidence, and must cite it.
+**What this verdict does NOT say.** It does not say the deployment is *currently* healthy, degraded,
+rolled, or stale. ~~**No hosted rollout has been observed by this project at any point.**~~ **Corrected
+2026-08-01:** one has — `v0.0.38` (`ceea656`), observed by Krish in an authenticated session and
+recorded as operator testimony in §0, Entry 2. What remains true is that **no hosted state has ever
+been observed from an agent session**, that the observation is point-in-time and release-tagged rather
+than a standing fact, and that it produced no artifact. Any future sentence combining "baseline" with a
+claim about `/krish` must cite its evidence and must say whether that evidence is an **artifact** or
+**testimony**.
 
 **What would move this to "Complete With External Blockers":** ~~merge and publish the closure image~~
 (**done** — `v0.0.38`/`v0.0.39`); Krish runs

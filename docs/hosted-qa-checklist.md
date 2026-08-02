@@ -6,10 +6,27 @@
 **Why this is yours and not the agent's.** `/krish` sits behind an Authentik forward-auth edge.
 Reaching it requires signing in, and an agent must not enter credentials or handle your session.
 This has been attempted and stopped at the login flow — most recently `GET /krish/api/health`
-returned **HTTP 302** to the Authentik edge, so **which image is running is UNKNOWN**. No rollout,
-gate, or reconnaissance result has ever been observed from the agent's side, and none is claimed.
-**The real database has never been contacted; no scan has ever run.** Everything below is unverified
-until you run it.
+returned **HTTP 302** to the Authentik edge, so **which image is running is UNKNOWN from here**. No
+rollout, gate, or reconnaissance result has ever been observed from the agent's side, and none is
+claimed.
+
+~~**The real database has never been contacted; no scan has ever run.**~~ **Corrected 2026-08-01 —
+false as written; do not repeat it.** It was accurate when written (`a911b8c`, 2026-07-31 18:17:27
+−0700), 41 minutes before the `ceea656` merge whose image the scan was later run against, and was
+never updated. **You contacted the database at least once**: you ran this scan in an authenticated
+session against image `v0.0.38` (`ceea656`) and reported no leaks, four matching allowlists, zero
+schema drift, 30/30, `rows_before == rows_after == 30`, zero DML and zero DDL. That is recorded as
+**operator testimony** in
+[the baseline matrix](superpowers/plans/2026-07-31-baseline-completion-matrix.md) §0, Entry 2 — dated,
+release-tagged, and accepted, but with **no captured response body**, because this endpoint is designed
+to keep its result in process memory only and write nothing to disk.
+
+**So what this checklist is now for is narrower than it was: capture, not discovery.** The substantive
+question is answered; what is missing is a re-checkable artifact. Running Part 1 again and pasting the
+sanitized JSON back converts testimony into evidence and closes **G1**. A rerun is not needed for
+correctness — `db_recon.py`, `schema/isaac_record_v1.json` and `src/isaac_records/` are byte-identical
+between `ceea656` and HEAD, and zero `_DB_RECON` lines changed in `routes.py` — so expect the same
+result with a newer `app_commit`. Everything below is still unverified *as an artifact* until you do.
 
 **Three expectations to set before you start, so a correct result does not look like a failure:**
 
@@ -20,9 +37,13 @@ until you run it.
    wrong **inside** the app (including the projection allowlist and the final leak scan failing
    closed) and the report was replaced by a sanitized envelope rather than served. Both are complete,
    honest answers and both should be sent as-is.
-2. **`records_failing_full_schema > 0` is likely and is a useful result.** Dean's guide says schema
-   conformance is "expected but **unverified**" and that "finding drift is a useful result, not a
-   problem with the database". Do not treat drift as a bug to be worked around.
+2. **`records_failing_full_schema > 0` is a useful result if you see it — but expect `0`.** Dean's
+   guide says schema conformance is "expected but **unverified**" and that "finding drift is a useful
+   result, not a problem with the database", so drift is never a bug to work around. **Amended
+   2026-08-01:** this expectation originally read *"is likely"*, written before the scan had run. The
+   one run reported **zero** validation issues and 30/30 passing, so `0` is now the expected value and
+   a **non-zero** count would be the surprise — worth reporting prominently, since it would mean either
+   drift appeared or the two runs disagree.
 3. **The `dataset` block is deliberately narrower than it was in `v0.0.32`.** Five aggregates that
    image served — `by_instance_path`, `distinct_structural_signatures`, `total_link_count`,
    `dangling_link_count`, `vocabulary_term_count` — are **withheld** pending Dean's answer to G3,
@@ -154,7 +175,10 @@ then the *only* breakdown carrying signal. An empty `by_schema_path` alongside a
 has no schema location". The report names which engine produced it — include that field when you
 send the JSON back. Relatedly: **do not expect a particular set of `family` labels.** The two
 engines label families differently and the deployed engine's label set is an open set of raw
-jsonschema keywords. Nobody has seen it, because the scan has never run.
+jsonschema keywords. ~~Nobody has seen it, because the scan has never run.~~ **Corrected 2026-08-01:**
+the scan has run once (see the note at the top of this file), and it reported **zero validation
+issues** — so with no drift to classify, the family label set was never exercised and remains
+**unobserved**. The caution stands; only its reason changes.
 
 #### Check integrity
 

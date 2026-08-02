@@ -145,9 +145,12 @@ reasons:
 
 **So: of the six approvals this document proposes as a pre-migration checklist (§4), Dean's guide
 removes the technical objection to two — storage location and schema ownership — and *no* project-level
-gate is cleared by it.** Storage location is additionally **contingent on Q12** (§4 option C): if a
-portal identity service already owns users and groups, option A is the wrong target entirely.
-Migration process, backup/retention, identity source, and group administration policy are untouched.
+gate is cleared by it.** ~~Storage location is additionally **contingent on Q12** (§4 option C): if a
+portal identity service already owns users and groups, option A is the wrong target entirely.~~
+**Resolved 2026-08-01: Q12 is answered "No"** — direct audit of the public upstream source found no
+users/groups/memberships model anywhere (trust contract §5.1), so option A is the right target and this
+contingency is discharged. Migration process, backup/retention, identity source, and group
+administration policy are untouched.
 
 The practical guidance, stated without the earlier overreach: **do not present Dean's guide as
 migration approval, and do not re-ask him whether the role may create tables — he has answered that.**
@@ -219,14 +222,35 @@ below, and none is a hidden dependency of anything below.
 
 ### 3.1 Entities
 
-**User** — an authenticated institutional person. Identified by an **opaque, immutable,
-non-reassignable subject claim** (Q5). Never by email (trust contract §9). Fields: internal id;
-external IdP; stable external subject; display name; email *only if a product requirement forces it*;
-active state; created / last-seen.
+**User** — an authenticated institutional person. ~~Identified by an **opaque, immutable,
+non-reassignable subject claim** (Q5).~~ **Corrected 2026-08-01** — see
+[`docs/identity-trust-contract.md`](../../identity-trust-contract.md) §9.1, which supersedes this:
+the principal is the **Authentik username**, because it is the **required compatibility key** — every
+existing portal ownership, ACL, and audit row is already keyed to it
+(`records.data->'attribution'->>'uploaded_by'`, `record_history.actor`, `record_acl.grantee_identity`,
+`record_acl.granted_by`, `api_requests.username`, `portal_access_log.username`,
+`hyp_project_shares.identity`; established by direct audit of the **public** upstream source).
+Institutional confirmation is still required that usernames are **non-reassignable across rename,
+departure, and rehire** — that is Q5, and it is unanswered, so username is a *technical stable-ID
+candidate*, **not** a lifecycle guarantee. **Do not introduce a second identity namespace based on
+`sub` without an explicit migration and compatibility plan** — two principals for one person, with
+every existing row keyed to the one ISAAC would not be using, is the expensive mistake here. Never
+email (trust contract §9). **Never ORCID**: it is scientific-credit metadata and must never confer
+authorization — upstream already guards this with `test_orcid_in_body_confers_no_rights`. Fields:
+internal id; external IdP; Authentik username as the compatibility key; display name; email *only if a
+product requirement forces it*; active state; created / last-seen.
 
 **Group** — a lab, team, department, facility unit, or research collaboration. Owns **only**: name,
 slug, description, membership, roles, its shared experiments, an activity summary, and basic settings.
 It owns no schedule, no tasks, no status of its own.
+
+> **These are ISAAC-defined collaboration groups and have nothing to do with Authentik's groups.**
+> Authentik forwards only `admin` and `researcher` (upstream `portal/api.py:66-67`;
+> `docs/deployment.md:28`; `docs/developer-guide-k8s.md:59`) — **coarse deployment-access groups**
+> answering *may this person use the deployment at all*. They are not research-collaboration groups and
+> must not be used as such: keying sharing to `researcher` would grant every researcher access to every
+> experiment. Note that upstream itself never uses groups for sharing — it uses **per-resource ACL
+> rows** keyed on the username, in both of its databases (trust contract §5.1, §5.3).
 
 **Experiment / Record** — remains the primary unit of work, unchanged. Scope is either `personal` or
 `group`. It continues to own its scientific metadata, evidence, confirmation state, validation, export
@@ -319,7 +343,7 @@ of them.
 |---|---|
 | **A — same PostgreSQL, separate ISAAC application schema** | **RECOMMENDED, when unblocked.** The role already owns the database and its `public` schema and may freely create tables (guide `:136-140`); connectivity is already deployed and proven-by-config (`PGHOST` present in the pod); transactions are available; and Dean explicitly blesses *"adding app-specific tables next to the mirrored schema"*. Put them in a **named schema** (e.g. `app`) rather than loose in `public`, so the mirrored portal tables stay visibly separate. **Do not alter the existing `records` table.** |
 | **B — separate collaboration database** | **Rejected on current evidence.** It buys isolation that pg_hba already provides, and costs new infrastructure, a new Secret, a new backup lifecycle, and cross-database linkage — every one of which is a Dean-owned change, converting a two-approval problem into a five-approval one. |
-| **C — existing portal identity/group service** | **Cannot be evaluated.** No evidence that such a service exists: no users/groups/memberships table is documented, and no portal API contract for identity appears anywhere in this repository. This is Q12. If it does exist it likely **supersedes** option A for the user/group entities, so **Q12 must be answered before A is implemented** — building duplicate accounts would be the expensive mistake. |
+| **C — existing portal identity/group service** | ~~**Cannot be evaluated.**~~ **RULED OUT 2026-08-01 — no such service exists.** Direct audit of the **public** upstream source (`ISAAC-DOE/isaac-ai-ready-record`, `gh api … --jq '.visibility'` → `public`) found **22** tables across its two databases and **none** of them a users / accounts / identities / groups / memberships / roles / permissions / teams / organizations table; identity is a bare `TEXT` Authentik username written onto rows; and there is **no `/me`, no group endpoint, and no membership API** among its ~60 routes. **Q12 is answered — No** (trust contract §5.1). Option C therefore cannot supersede option A, and **A is no longer contingent on Q12**. What upstream *does* provide is a **pattern**, not a service: per-resource ACL rows (`record_acl`, `hyp_project_shares`) plus the locked authorization logic in `portal/record_authz.py` — a design source for ISAAC, explicitly **not** implemented here (trust contract §5.2). |
 
 **Migration policy.** The six-item checklist below is **this document's proposed contract**, not a
 pre-existing repository requirement — it appears nowhere else in the tree, and is named as a proposal
@@ -339,7 +363,7 @@ block in `readiness-plan:48-52` and `CLAUDE.md` §15 must be lifted.
 | **B** | Record location and access report | **AUTHORIZED — done this session** (`where-the-30-records-are.md`) | — |
 | **C** | Identity trust contract | **DOCUMENT AUTHORIZED — done** (`identity-trust-contract.md`). **CODE BLOCKED** | **G7** (Q1–Q4, Q6) |
 | **D** | `/api/me` + frontend session context | **BLOCKED** | G7 — cannot return a current user when no user can be safely identified |
-| **E** | Users / groups / memberships persistence | **BLOCKED** | G7 + 4 of 6 migration approvals + **Q12** (does a portal identity service already own this?) |
+| **E** | Users / groups / memberships persistence | **BLOCKED** | G7 + 4 of 6 migration approvals. ~~+ **Q12**~~ — **Q12 answered "No" 2026-08-01** (no upstream identity service exists; trust contract §5.1), so this is no longer a blocker on E, and option A no longer waits on it |
 | **F** | Group navigation and membership UX | **BLOCKED** | depends on E; membership administration policy is institution-owned |
 | **G** | Experiment scope (personal vs group) | **BLOCKED** | depends on E |
 | **H** | Collaborative editing | **~80% ALREADY SHIPPED** (§1.1). The remaining 20% — actor attribution + audit — is **BLOCKED** on G7 | G7 |
@@ -374,8 +398,12 @@ The four that gate everything: **Q1** header names injected; **Q2** which reach 
 **Q3** whether forged copies are stripped; **Q4** whether the Service is reachable bypassing the edge.
 Then **Q5** stable subject claim, **Q6** are group claims authoritative in-app, **Q7** group→role map.
 
-Storage — **Q12** does a portal identity/group service already exist? Then migration process,
-backup/retention, and group administration policy.
+Storage — ~~**Q12** does a portal identity/group service already exist?~~ **answered "No" 2026-08-01
+by direct audit of the public upstream source** (trust contract §5.1) — no longer a question for Dean.
+Remaining: migration process, backup/retention, and group administration policy. **New: Q16** — is
+`record_acl` actually present in the mirrored schema? It exists upstream since 2026-06-30 (`dc5da9c`,
+PR #169) but is absent from the 8-table list in `postgres-test-db-guide.md:20-22`, so that list should
+not be treated as an authoritative schema statement.
 
 Visibility — **G2** per-record display; **G6** personal data in `data->'attribution'`; **G3** the two
 retained aggregate breakdowns.
@@ -390,20 +418,33 @@ retained aggregate breakdowns.
 | K4 | Do **personal** experiments remain the default scope? | **yes** — §3.4 assumes it |
 | K5 | May a Viewer export? | **no** |
 | K6 | Do comments belong in the first collaboration release? | **no** — deferred (§3.6) |
-| K7 | Should the recon result be captured as a durable committed artifact when G1 is run? | **yes** — recommended; it is the missing evidence behind the withdrawn 30/30 claim |
+| K7 | Should the recon result be captured as a durable committed artifact when G1 is run? | **yes** — recommended, and now the *only* thing G1 still needs. ~~"the withdrawn 30/30 claim"~~ **corrected 2026-08-01:** the 30/30 claim is **not withdrawn** — the scan ran against image `v0.0.38` (`ceea656`) and Krish has restated the result at field level. It is **operator testimony, not an artifact**, because the endpoint keeps its result in process memory only, by design. Capture converts testimony into evidence |
 
 ### Immediately actionable by Krish, unblocking the most
 
-1. **Run [`hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1** — now runnable, its
-   placeholder filled this session. Closes **G1**, and settles the withdrawn 30/30 claim either way.
+1. **Run [`hosted-qa-checklist.md`](../../hosted-qa-checklist.md) Part 1 and paste the JSON back** —
+   now runnable, its placeholder filled this session. This is **capture, not discovery**: the scan
+   already ran against `v0.0.38` and reported 30/30 with no leaks (operator testimony). Pasting the
+   sanitized body back is what closes **G1**. A rerun is not needed for correctness —
+   `db_recon.py`, `schema/isaac_record_v1.json` and `src/isaac_records/` are byte-identical between
+   `ceea656` and HEAD and no `_DB_RECON` line in `routes.py` changed — so expect the same result with a
+   newer `app_commit`.
 2. **Forward the four G7 questions to Dean.** They are the critical path for nine of ten slices.
-3. **Ask Dean Q12** before any storage work — it could make option A the wrong answer.
+3. ~~**Ask Dean Q12** before any storage work — it could make option A the wrong answer.~~
+   **Discharged 2026-08-01** — Q12 is answered "No" from public upstream source (trust contract §5.1);
+   option A stands. **Instead ask Q16:** is `record_acl` in the mirrored schema? And ask **Q5** in its
+   sharpened form: is an Authentik username non-reassignable across rename, departure, and rehire?
 
 ---
 
 ## 7. Boundary proof for this session
 
-- No production-derived record exposed, read, or written. No database connection attempted.
+- No production-derived record exposed, read, or written. **No database connection was opened during
+  this discovery session.** That statement is precise and must be kept in that form. It does **not**
+  mean the deployed database has never been contacted — the deployed pod contacted it once, on
+  2026-07-31, against image `v0.0.38`, observed by Krish in an authenticated session (see the baseline
+  matrix §0, Entry 2). *Nothing was opened from here* and *nothing has ever been opened* are different
+  claims; only the first is true.
 - No record copied into Git. No new fixture contains anything but synthetic data.
 - No unauthorized database write; no write of any kind.
 - No schema weakened; `schema/`, `src/isaac_records/` and the API route logic untouched.
@@ -413,5 +454,11 @@ retained aggregate breakdowns.
 - No external model used; nothing sent to any external service.
 - The only call to the **hosted deployment** was an unauthenticated `curl` to `/krish/api/health`,
   which returned **302** to the Authentik outpost. No credential was sent; the body was discarded.
-  Read-only `gh` API calls were also made to **GitHub** — CI run status, release list, and upstream
-  repository visibility — none of which touches SLAC infrastructure or any record.
+  Read-only `gh` API calls were also made to **GitHub** — CI run status, release list, upstream
+  repository visibility, and (2026-08-01) the **public** source of `ISAAC-DOE/isaac-ai-ready-record`
+  (`portal/database.py`, `portal/api.py`, `portal/record_authz.py`, `portal/ontology.py`) plus commit
+  metadata for `dc5da9c` — none of which touches SLAC infrastructure or any record. The upstream repo
+  is public (`gh api … --jq '.visibility'` → `public`); reading it discloses nothing.
+- An **unauthenticated** page load of the Authentik login flow
+  (`/if/flow/default-authentication-flow/`) was observed on 2026-08-01 to correct a claim in
+  `developer-guide-k8s.md`. No credential was entered and no session was created.

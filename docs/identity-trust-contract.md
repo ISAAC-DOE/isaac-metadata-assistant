@@ -19,33 +19,65 @@ observed runtime evidence; the vendored ISAAC v1.05 schema; tests.
 
 ### 1.1 Identity headers in this repository: zero
 
+**Amended 2026-08-01 — this guard no longer expects zero matches tree-wide, and pretending otherwise
+would have made it fire on the very slice it was written to supervise.** The temporary identity probe
+legitimately names these headers. The invariant is therefore restated as a *permitted set*: exactly
+four files may mention an identity-forwarding header, and no others.
+
 ```
-$ rg --hidden -g '!.git' -g '!node_modules' -g '!.venv' \
-    -g '!docs/identity-trust-contract.md' \
-    -g '!docs/superpowers/plans/2026-08-01-experiment-centered-collaboration.md' \
-    -i "x-forwarded|x-auth-request|remote-user|remote-groups|x-real-ip|x-authentik" --stats
-0 matches / 0 files contained matches / 498 files searched
+$ rg --hidden -g '!.git' -g '!node_modules' -g '!.venv' -g '!.claude/worktrees' \
+    -i "x-forwarded|x-auth-request|remote-user|remote-groups|x-real-ip|x-authentik" \
+    --files-with-matches
+apps/api/isaac_api/identity_probe.py     # the probe's frozen candidate tuple
+apps/api/tests/test_identity_probe.py    # its tests, synthetic values only
+docs/identity-probe.md                   # its contract + removal plan
+docs/identity-trust-contract.md          # this file, which discusses the names
 ```
 
-**The exclusion that matters is this document**, which now *discusses* these header names and would
-otherwise match itself (3 lines) — the command is a forward guard, and a self-match would make it
-useless for distinguishing "doc mentions a header" from "someone added a header read". The companion
-plan is excluded **pre-emptively**; it does not currently match, and dropping that second `-g` gives
-`0 matches / 499 files searched` — same verdict, different denominator. Run it as written; a non-zero
-match count means real code changed. The *file count* tracks tree size and will drift with any new
-file; only the match count is the signal.
+Measured 2026-08-01: **61 matches across exactly those 4 files**, 504 files searched (501 tracked by
+`git ls-files | wc -l`, plus the three then-untracked probe files).
 
-No identity-forwarding header name appears anywhere — not in code, config, docs, tests, or fixtures.
-`X-Forwarded-For` and `X-Forwarded-Proto` are absent too.
+**Any fifth file is the signal.** That is a stronger guard than the old `0 matches`, not a weaker one:
+before, the check could only say "nobody mentions these"; now it says "only the measurement instrument
+mentions these, and nothing consumes them". Note in particular that **`routes.py` is not in the list** —
+the probe's candidate names live in `identity_probe.py`, so the route module still contains no identity
+header name at all.
+
+**When the probe is removed, this reverts to a three-file list** (the doc set), and eventually to the
+original `0 matches` once `docs/identity-probe.md` goes too. A removal PR that leaves any probe file
+matching here has not finished. The *file count* tracks tree size and will drift; only the **set of
+matching files** is the signal.
+
+**Restated 2026-08-01 to match the amendment above; the previous sentence is now false and is not
+kept.** It read *"No identity-forwarding header name appears anywhere — not in code, config, docs,
+tests, or fixtures"* — written when that was true, and left standing three lines below the block that
+lists two code files naming these headers. The accurate statement is the permitted set:
+
+**Identity-forwarding header names appear in exactly four files, all of them measurement apparatus or
+documentation, and no application code path consumes any of them.** `X-Forwarded-For` and
+`X-Forwarded-Proto` are absent entirely — zero matches, no permitted set, in code, config, docs, tests
+or fixtures.
 
 ### 1.2 Every request header the backend reads — four, none of them identity
 
 | Header | Location | Purpose |
 |---|---|---|
 | `authorization` | `apps/api/isaac_api/auth.py:45` | shared-secret bearer compare |
-| `If-None-Match` | `apps/api/isaac_api/routes.py:827-829` | optimistic concurrency |
-| `If-Match` | `routes.py:967-969, 1089-1091, 1209-1211, 1381-1383` | optimistic concurrency |
-| `X-Filename` | `routes.py:1389-1391` | upload filename (the upload itself is refused) |
+| `If-None-Match` | `apps/api/isaac_api/routes.py:909-911` | optimistic concurrency |
+| `If-Match` | `routes.py:1049-1051, 1171-1173, 1291-1293, 1463-1465` | optimistic concurrency |
+| `X-Filename` | `routes.py:1471-1473` | upload filename (the upload itself is refused) |
+
+**Line numbers corrected 2026-08-01, and pinned to `7a9f15d`.** Every `routes.py` citation in this
+file was stale by **+82** after commit `0d0a089` (`fix(demo): stop POST /api/demo/run from silently
+destroying confirmed edits`), having been written before that commit landed. The originals were
+`:827-829`, `:967-969, 1089-1091, 1209-1211, 1381-1383`, and `:1389-1391`.
+
+**All `routes.py` line numbers in this document are as of commit `7a9f15d`.** They are stated with a
+SHA because that is the only way a line number is checkable rather than merely stale-able: `git show
+7a9f15d:apps/api/isaac_api/routes.py | sed -n '909,911p'` will always reproduce what was cited, whereas
+the bare number silently drifts on the next unrelated edit and gives no signal that it has. **Prefer
+the symbol over the line** wherever possible — re-derive with
+`rg -n 'alias="If-Match"' apps/api/isaac_api/routes.py`.
 
 `rg -n "alias=" apps/api/isaac_api/routes.py` returns exactly those six lines and nothing else. The
 only other `Request` uses are a bounded `request.stream()` and `request.app.openapi()`.
@@ -125,7 +157,11 @@ annotation — **neither of which is in this repository**. The names are therefo
 
 A bounded corollary worth recording without alarm: the same in-cluster bypass applies to
 `GET /api/runtime/database/recon`. Its exposure is limited by design — the response is projected onto
-four frozen allowlists and leak-scanned (`routes.py:3065, 3093, 3258, 3275, 3341`) — so the practical
+four frozen allowlists and leak-scanned (the allowlist constants are `_DB_RECON_DATASET_KEYS`
+`routes.py:3147`, `_DB_RECON_INTEGRITY_KEYS` `:3175`, `_DB_RECON_DATABASE_KEYS` `:3340`,
+`_DB_RECON_GATE_KEYS` `:3357` — re-derive with
+`rg -n '_DB_RECON_(DATASET|INTEGRITY|DATABASE|GATE)_KEYS' apps/api/isaac_api/routes.py`; the earlier
+citation `:3065, 3093, 3258, 3275, 3341` was stale) — so the practical
 risk today is aggregate-only. It is named here because it is the same boundary, and it should be part
 of the question put to Dean (Q4).
 
@@ -140,9 +176,9 @@ of the question put to Dean (Q4).
 | User profiles | **No** | none | n/a | n/a | — | — |
 | JIT provisioning | **No** | none | n/a | n/a | — | there is no local principal to provision into |
 | Roles | **No** — only *proposed* | `readiness-plan:79` | n/a | n/a | Dean | every authenticated user has identical, full capability |
-| Group memberships | **Edge admission only** (`admin`, `researcher`) | `developer-guide-k8s.md:58`; `deployment.md:118-122` | edge: yes | Authentik | Dean | the two groups are indistinguishable to the app |
+| Group memberships | **Edge admission only** (`admin`, `researcher`) — **coarse deployment-access groups, NOT research-collaboration groups** (§5.3) | `developer-guide-k8s.md:58`; `deployment.md:118-122`; upstream `portal/api.py:66-67` | edge: yes | Authentik | Dean | the two groups are indistinguishable to the app, and keying collaboration to `researcher` would share every experiment with every researcher |
 | Record ownership | **No** | `workspace.py:239-258` — `Experiment` has no owner field | n/a | `emptyDir`, wiped on restart | — | any authenticated user can edit or delete any record |
-| Audit attribution | **No actor** — timestamps only | `answer_log` at `workspace.py:245`, appended `routes.py:616, 1014, 1141` as `{"applied"/"edited": …, "at": ts}` | n/a | ephemeral | — | changes are untraceable to a person |
+| Audit attribution | **No actor** — timestamps only | `answer_log` at `workspace.py:245`, appended at **two** sites, `routes.py:1097` and `:1224`, as `{"applied"/"edited": …, "at": ts}` (re-derive: `rg -n 'answer_log\.append' apps/api/isaac_api/routes.py`) | n/a | ephemeral | — | changes are untraceable to a person |
 | Per-user settings | **No** | settings are deployment-scoped | n/a | n/a | — | — |
 | Deactivation / account deletion | **No** | none | n/a | n/a | Authentik | the app cannot revoke anyone |
 | Per-user API credentials | **No — deliberately** | `apps/web/src/screens/settings/ApiKeys.tsx:1-32`; `auth.py:26-56` | n/a | none | — | the one shared key is unset in prod, so there is no app-level authN behind the edge |
@@ -151,7 +187,7 @@ of the question put to Dean (Q4).
 `user|actor|owner|group|role|permission|member|principal|subject|identity` across `src/` and
 `apps/api/isaac_api/` is non-identity (**190** lines: `rg -wi -e user -e actor -e owner -e group -e role -e permission -e member -e principal -e subject -e identity src/ apps/api/isaac_api/ | wc -l`): ARIA `role=` attributes; the *scientific* enums
 `measurement.series[].channels[].role` and `assets[].content_role`; the **PostgreSQL** login role
-`metadata_assistant`; search-result grouping (`routes.py:2376-2399`); UI capability groups;
+`metadata_assistant`; search-result grouping (`routes.py:2458-2481`, was cited `:2376-2399`); UI capability groups;
 `_evidence_owner_label` (the JSON path owning an evidence entry, `search.py:255-260`); the Postgres
 **table** owner; and "deploy identity" meaning the commit SHA on `/api/health`.
 
@@ -193,13 +229,108 @@ role**. Conflating the two would be a schema-semantics error, not just a modelli
 
 ## 5. Database structures for identity
 
-Dean documents these tables (`postgres-test-db-guide.md:19-22`): `records`, `record_history`,
+Dean documents these tables (`postgres-test-db-guide.md:20-22`): `records`, `record_history`,
 `templates`, `vocabulary_cache`, `vocabulary_sync_log`, `vocabulary_proposals`, `api_requests`,
-`portal_access_log`.
+`portal_access_log` — **eight**.
 
-**No users table, no groups table, no memberships table is documented.** Reported as absence of
-evidence, not as a negative finding: the portal's own identity model, if it has one, is simply not
-described in this repository.
+> **Open question for Dean, raised 2026-08-01: `record_acl` is missing from that list.** The portal has
+> created it since **2026-06-30** — upstream commit `dc5da9c`, PR **#169**, *"Record editing:
+> owner+co-author (ACL) edits, versioning, owner-reassign, evidence-drift detection"* (verified:
+> `gh api repos/ISAAC-DOE/isaac-ai-ready-record/commits/dc5da9c`), with the DDL at
+> `portal/database.py:241`. Dean's guide says the seeded schema *"is identical to the production ISAAC
+> records database"*, so either the mirror omits `record_acl`, or the guide's list is incomplete.
+> **Do not treat the 8-table list as an authoritative schema statement.** This is recorded as question
+> **Q16**; it matters because `record_acl` is precisely the table any collaboration design would build
+> on.
+
+### 5.1 The portal's identity model — established by direct source audit, 2026-08-01
+
+This section previously said *"No users table, no groups table, no memberships table is documented …
+reported as absence of evidence, not as a negative finding: the portal's own identity model, if it has
+one, is simply not described in this repository."* **That hedge is now resolvable, and is resolved.**
+The upstream portal repository `ISAAC-DOE/isaac-ai-ready-record` is **public** (`gh api … --jq
+'.visibility'` → `public`), so its source was read directly rather than inferred.
+
+**Finding: the portal does not own users or research groups.**
+
+- Enumerating every table it creates
+  (`gh api …/contents/portal/database.py | base64 -d | grep -oE 'CREATE TABLE IF NOT EXISTS [a-z_]+'`)
+  yields **22** tables across its two databases — the portal DB (`records`, `record_history`,
+  `record_acl`, `templates`, `api_requests`, `portal_access_log`, `vocabulary_*`) and the Discovery DB
+  (`discovery_meta`, `hyp_*`). **None** is a `users`, `accounts`, `identities`, `groups`,
+  `memberships`, `roles`, `permissions`, `teams`, or `organizations` table.
+- Identity is a **bare `TEXT` username string sourced from Authentik on every request** — never stored
+  as a principal, only as a foreign value on rows: `records.data->'attribution'->>'uploaded_by'`,
+  `record_history.actor`, `record_acl.grantee_identity`, `record_acl.granted_by`,
+  `api_requests.username`, `portal_access_log.username`.
+- It has **no `/me` endpoint, no group endpoint, and no membership API** among its ~60 routes
+  (`grep -c '\.route(' portal/api.py` → 60; zero of those routes match `me|group|user`).
+
+**Consequence for ISAAC design: do not imply the portal owns users or research groups.** There is no
+upstream identity **service** — no user directory to read, join against, or inherit, and no API that
+would expose one. Question **Q12** is therefore **answered — No** (see §7).
+
+**Scope this claim precisely, because it load-bears.** What is established is what the portal's
+**source** creates and exposes. The service conclusion is safe on the API evidence: an application
+cannot serve users it has no route for. The *database* half is weaker — a table present in the
+mirrored schema that `database.py` does not create would not appear in this audit, which is exactly
+the guide-vs-code divergence **Q16** documents as live in this same schema. So: **no upstream identity
+service to integrate with — proven; no identity table anywhere in that database — not proven, and not
+needed for the design conclusion.**
+
+**A second per-identity ACL exists upstream, and this document had not recorded it.** The Discovery
+database defines `hyp_project_shares` (`portal/database.py:566-575`): `project_id`, `identity TEXT NOT
+NULL`, `access TEXT DEFAULT 'read'`, `granted_by TEXT`, `UNIQUE (project_id, identity)`. So the portal
+solves resource sharing **twice**, both times the same way — a per-resource grant row keyed on the
+Authentik username string, with no group namespace anywhere. That consistency is itself evidence about
+the intended model.
+
+### 5.2 The upstream authorization pattern — a DESIGN SOURCE, not an implementation
+
+`portal/record_authz.py` in the public upstream repository is the closest thing to a ratified ISAAC
+authorization model that exists. **It is recorded here as a design source. Nothing in it is
+implemented in this repository, and this note does not authorize implementing it.**
+
+It is 71 lines, imports nothing but `__future__`, and its header reads *"PURE LOGIC (no DB, no Flask),
+so the entire access-control matrix is unit-tested offline … **Locked after adversarial security
+review (2026-06-30)**"*. The rules:
+
+- **Edit rights = admin ∨ owner ∨ explicit `record_acl` editor grant.** Owner is
+  `attribution.uploaded_by == caller`.
+- **Default deny.** `can_edit_record` returns a reason code, not a bare boolean.
+- **Unowned legacy records are admin-only** — explicitly *"never an unowned free-for-all"*.
+- **Only the owner or an admin may manage the ACL.** An editor cannot re-grant: no privilege
+  delegation.
+- **The owner is never an ACL row** — ownership and grants are separate concepts, not two rows in one
+  table.
+- **Client-supplied `contributors[]` and ORCID confer no rights**, with a named regression test
+  `test_orcid_in_body_confers_no_rights` (`tests/test_record_authz.py`).
+
+**Two upstream gaps to inherit deliberately or not at all**, stated because adopting the pattern
+without them would be adopting a weaker system than it looks:
+
+1. **ACL grantees are never verified to exist in Authentik.** A grant is a string write. A typo, a
+   departed user, or a username that was never real all persist silently as a grant row.
+2. **The header-trust boundary fails open and is untested.** `portal/ontology.py`'s `trusted_identity`
+   *"fail[s]-open with a warning"* when `EDGE_AUTH_SECRET` is unset — its own comment says the gate is
+   *"INACTIVE (EDGE_AUTH_SECRET unset, fail-open)"* — and it carries **zero tests**. This is the same
+   boundary §2 of this document identifies as the hard part, and upstream has not closed it either.
+   A locked, adversarially-reviewed *decision layer* sitting on an unproven *trust layer* is exactly
+   the shape §2 warns about.
+
+### 5.3 Authentik's groups are coarse deployment-access groups, not collaboration groups
+
+`portal/api.py:66-67` hardcodes `ALLOWED_GROUPS = {"admin", "researcher"}` and
+`ADMIN_GROUPS = {"admin"}`. (Naming them here discloses nothing: both already appear in this repository
+at `docs/deployment.md:28` and `docs/developer-guide-k8s.md:59`.)
+
+**Do not treat these as ISAAC research-collaboration groups.** They answer *may this person use the
+deployment at all*, and every authenticated user of `/krish` is in one of exactly two buckets — which
+§3 of this document already records as meaning "the two groups are indistinguishable to the app". They
+carry no notion of a lab, a beamtime team, a project, or a co-author set. A collaboration feature keyed
+to `researcher` would grant every researcher at SLAC access to every experiment. Note too that upstream
+itself does not use them for sharing: it uses per-resource ACL rows (§5.1, §5.2), never group
+membership.
 
 The only DDL Dean provides is `records` (`:100-112`) — and it has **no identity column**: no
 `created_by`, no `uploaded_by`, no `user_id`.
@@ -265,17 +396,18 @@ workflows. Dean is therefore the only person who can answer Q1–Q4.
 | Q2 | Which of those are listed in the ingress's `nginx.ingress.kubernetes.io/auth-response-headers` annotation, and therefore actually reach the app? |
 | Q3 | Does the ingress strip or overwrite client-supplied copies of those headers, so a forged header cannot reach the pod? |
 | Q4 | Can any workload in the cluster reach the `metadata-assistant` Service directly, bypassing the ingress and therefore Authentik? |
-| Q5 | Which single claim should ISAAC treat as the stable, non-reassignable subject identifier, and is it stable across an email change, a name change, and a SLAC account rename? |
+| Q5 | **Sharpened 2026-08-01.** ISAAC's provisional principal is the **Authentik username**, because all existing portal ownership/ACL/audit rows are keyed to it (§5.1, §9.1). The question is therefore no longer "which claim?" but: **is an Authentik/SLAC username non-reassignable across rename, departure, and rehire?** If it is not, what mapping should ISAAC hold, and does any `sub`-style opaque claim reach the pod at all? |
 | Q6 | Are forwarded group claims authoritative for in-app authorization, or descriptive only? |
-| Q7 | What is the complete set of Authentik groups ISAAC should recognise, and how do they map to app roles? |
+| Q7 | What is the complete set of Authentik groups ISAAC should recognise, and how do they map to app roles? **Context (§5.3):** `admin`/`researcher` are coarse deployment-access groups; upstream uses per-resource ACL rows, not groups, for sharing. |
 | Q8 | On session expiry, what exactly does a browser XHR to `/krish/api/*` receive — a 302, a 401, or an HTML login page — and should the app treat all three identically? |
 | Q9 | Is there a logout URL the app may link to, and should it be surfaced at all? |
 | Q10 | Should this app server-stamp `attribution.uploaded_by` from the forwarded identity per the schema's own description, and from which claim? |
 | Q11 | What are the columns of `record_history`, `api_requests`, and `portal_access_log`, and do any store a user identity? |
-| Q12 | Does the ISAAC portal have a users/groups/memberships model in Postgres that this repository has not been told about? |
+| ~~Q12~~ | ~~Does the ISAAC portal have a users/groups/memberships model in Postgres that this repository has not been told about?~~ **ANSWERED for the SERVICE — No** (2026-08-01, direct audit of the public upstream source; §5.1). The portal's source creates **22** tables across its two databases, none of them a users/accounts/identities/groups/memberships/roles/permissions/teams/organizations table; identity is a bare `TEXT` Authentik username written onto rows; and there is no `/me`, no group endpoint and no membership API among ~60 routes. **So there is no upstream identity *service* to inherit — that is the part that load-bears, and it rests on the API surface, which the source does establish.** *Precision added after review:* Q12 as originally worded asked about **Postgres**, and this evidence enumerates what the portal's **source** creates. Whether the mirrored database also carries a table `database.py` does not create is **unverified** — the same class of guide-vs-code divergence as **Q16**, which proves that class is live in this very schema. Retained struck-through rather than deleted so the resolution stays visible. |
 | Q13 | May the app issue a metadata-only `information_schema.columns` query against those three tables — column names and types, no rows? |
 | **Q14 (G6)** | **Do the 30 seeded records contain real personal identifiers in `data->'attribution'`, and does the G2 visibility decision cover personal data as distinct from scientific content?** |
-| Q15 | May the deployment temporarily enable a presence-only identity probe so the header contract can be observed once and recorded? |
+| **Q15** | May the deployment temporarily enable a presence-only identity probe so the header contract can be observed once and recorded? **⚠ The code has pre-empted this question and you are entitled to object.** The probe shipped **active by default** on 2026-08-01 (`docs/identity-probe.md` §5), because a default-OFF switch could only be turned on by editing `isaac-k8`, which you own. With `ISAAC_UI_API_KEY` unset in production it is therefore live and app-unauthenticated from its first image roll, before this answer. **A "no" means set `ISAAC_IDENTITY_PROBE=0` and remove the endpoint — not merely "do not enable it".** |
+| **Q16** | **`record_acl` is absent from the 8-table list in `postgres-test-db-guide.md:20-22`, yet the portal has created it since 2026-06-30 (upstream `dc5da9c`, PR #169). Does the seeded mirror actually omit it, or is the guide's list incomplete?** (§5) |
 
 ---
 
@@ -285,8 +417,10 @@ The design does not strictly require knowing the header names: an env-supplied a
 empty, returning `Principal | None` that is `None` unless every configured header is present, would be
 a pure no-op in every current environment, exhaustively testable with synthetic headers, and would
 never touch the truth core. The codebase already contains three reviewed instances of the needed
-pattern — frozen-allowlist projection (`routes.py:3335`), raise-on-unlisted-key (`:3330-3334`), and an
-unconditional leak guard (`:3341`).
+pattern — frozen-allowlist projection (`_DB_RECON_DATABASE_KEYS`, `routes.py:3340`),
+raise-on-unlisted-key (`:3413-3419`), and an unconditional leak guard (`db_recon.scan_for_leaks`,
+`:3439` and `:3762`). *(Line numbers refreshed 2026-08-01 after the +82 shift from `0d0a089`; re-derive
+by symbol rather than trusting them.)*
 
 **It is still the wrong move, for three reasons, the third decisive:**
 
@@ -303,6 +437,45 @@ unconditional leak guard (`:3341`).
 
 **Decision:** do not build a live identity seam. Wire nothing until Q1–Q4 and Q6 are answered.
 
+> **Reconciliation, 2026-08-01 — this decision STANDS, and a probe is not an exception to it.**
+>
+> A temporary observation probe (`POST {base}/api/runtime/identity/probe`) was authorized and built
+> after this section was written. That is not a reversal: §8 forbids an identity **seam** — a
+> `get_principal()`-shaped affordance that a later slice can consume. The probe consumes nothing,
+> exports no principal type, returns no value, persists nothing, and is scheduled for removal. Every
+> one of the three reasons above still holds, and reason 1 in particular is why the probe must not be
+> allowed to grow into `identity.py`.
+>
+> **Two deliberate divergences from the design sketched below, both recorded rather than quietly
+> applied:**
+>
+> 1. **`GET` → `POST`.** The canary must travel in the request **body**. Uvicorn runs with default
+>    access logging (`Dockerfile:50`), which writes the request line — including any query string —
+>    to stdout. A canary in a query parameter would be logged; a body is not.
+> 2. **`ISAAC_IDENTITY_PROBE` EXISTS, but its polarity is inverted: it is a kill switch, default ON,
+>    not an enabler, default OFF. This is a genuine weakening of the design below, not a
+>    technicality.** Setting a default-OFF switch means editing `isaac-k8`, which Dean owns, and the
+>    authorizing instruction for this slice explicitly required *no new secret and no infrastructure
+>    change*. A gate nobody is permitted to open does not make the probe safer — it makes it
+>    incapable of ever observing anything, leaving the header contract unmeasured indefinitely. So
+>    the switch is retained for the property that is actually worth having: setting it to a falsy
+>    value disables the probe **without a code deploy**. An unrecognised value fails towards ON, so a
+>    manifest typo cannot silently mute the probe and manufacture an empty result that reads like the
+>    substantive finding "no identity header arrives".
+>
+> The compensating controls, stated so the trade is auditable: the probe returns **no value of any
+> kind** — its maximum disclosure is a boolean vector over a fixed tuple of header names that is
+> already public in this repository's source and documentation; **ISAAC consumes none of those
+> headers**, so a forged one currently accomplishes nothing; and removal is a committed follow-up,
+> not an aspiration (see `docs/identity-probe.md`).
+>
+> The residual risk below is **not** neutralised by those controls and is carried knowingly: the
+> probe is an ingress-configuration oracle for a caller who holds **both** an authenticated edge
+> session **and** direct in-cluster network reach. That conjunction is not far-fetched at a national
+> laboratory. It is bounded today only because no header is trusted by any code path, which is
+> exactly the condition that ends the moment Q1–Q4 are answered — so the probe must be removed
+> *before*, not after, any identity seam is built.
+
 ### If a runtime probe is later authorized (design only — nothing implemented)
 
 `GET {base}/api/runtime/identity/probe`, returning **only**: `authenticated` (bool);
@@ -314,9 +487,12 @@ an **unlisted** header name (projection, never a filter — a filter can leak a 
 cannot); any **count** of headers received (that number fingerprints the ingress config); any echo of
 `Authorization`, `Cookie`, or `X-Filename`; any logging of the probe's inputs.
 
-Safety requirements: env-flag gated **default off** (`ISAAC_IDENTITY_PROBE`), checked before the
-request object is touched; the `strict=True` raise on the success path only (`routes.py:3303-3309`
-explains why the failure envelope must *not* raise); the existing unconditional leak guard; contract
+Safety requirements: env-flag gated **default off** (`ISAAC_IDENTITY_PROBE`) **[SUPERSEDED — the
+shipped probe inverts this to a kill switch, default ON; see the reconciliation block above and
+`docs/identity-probe.md` §5]**, checked before the
+request object is touched; the `strict=True` raise on the success path only (`routes.py:3643`, `:4041`;
+the comment above `_DB_RECON_DATABASE_KEYS` explains why the failure envelope must *not* raise); the
+existing unconditional leak guard; contract
 tests asserting the exact key set, including that an unlisted header produces no observable difference
 in the response bytes; and **time-bounded use** — enable, observe once, disable. It is a measurement
 instrument, not a feature.
@@ -326,7 +502,10 @@ the list of header names to forge for an attacker who can reach the pod directly
 itself a claim about a person (`groups: true` on a deployment admitting only two groups narrows the
 caller). A point-in-time observation invites false confidence, since Dean can change the provider's
 header set with no signal to this repo. And with `ISAAC_UI_API_KEY` unset in production, the env flag
-is the **only** real gate — which is exactly why it must default off.
+is the **only** real gate — which is exactly why it must default off. **[SUPERSEDED — the shipped
+probe defaults ON, so this gate is not gating anything until someone sets it. The burden is carried
+instead by the fact that the operation cannot emit a value, that ISAAC consumes none of these headers,
+and that removal is a committed follow-up. See the reconciliation block above.]**
 
 ---
 
@@ -350,10 +529,55 @@ is the **only** real gate — which is exactly why it must default off.
    — as the intended subject identifier. Adopting it now would be **inventing** a decision, not
    recording one.
 
-**What would be safe instead:** an opaque, immutable, non-reassignable subject claim (an Authentik
-`sub`/UUID, if one is forwarded), with a display name resolved separately and never used as a key.
-Whether such a claim is forwarded at all is **UNKNOWN — requires Dean** (Q1, Q5). Until then, no
-identifier is chosen.
+### 9.1 What ISAAC should use instead — corrected 2026-08-01
+
+This section previously concluded: *"What would be safe instead: an opaque, immutable,
+non-reassignable subject claim (an Authentik `sub`/UUID, if one is forwarded), with a display name
+resolved separately and never used as a key."* **That recommendation was made before the upstream
+portal's storage model had been read, and it is superseded.** It is kept because it names a real
+property worth wanting; it is corrected because acting on it would fork the identity namespace.
+
+**The position to adopt, stated once and to be reproduced wherever the stable identifier is
+discussed:**
+
+> **Authentik username is the required compatibility key and the provisional ISAAC authorization
+> principal, because existing portal ownership, ACL, and audit data are keyed to it. Institutional
+> confirmation is still required that usernames are non-reassignable across rename, departure, and
+> rehire lifecycles.**
+
+Two halves, and neither may be dropped:
+
+1. **Compatibility is not a preference.** §5.1 establishes by direct source audit that every upstream
+   ownership, grant, and audit row stores a bare Authentik username string —
+   `records.data->'attribution'->>'uploaded_by'`, `record_history.actor`,
+   `record_acl.grantee_identity`, `record_acl.granted_by`, `api_requests.username`,
+   `portal_access_log.username`, `hyp_project_shares.identity`. Those rows are already written. An
+   ISAAC principal that is anything else cannot be compared to them without a mapping that does not
+   exist.
+2. **Username stability is a *technical stable-ID candidacy*, never an *institutional lifecycle
+   guarantee*, and the two must never be stated as the same thing.** Nothing observed establishes that
+   a SLAC/Authentik username is non-reassignable after a rename, a departure, or a rehire. Until an
+   institution says so, "username is the key" means "username is the key we are compatible with", not
+   "username identifies one human forever". That confirmation is question **Q5**, and it is
+   **unanswered**.
+
+**Do not introduce a second identity namespace based on `sub` without an explicit migration and
+compatibility plan.** An opaque `sub` has better lifecycle properties in the abstract, but adopting it
+alongside the username produces two principals for one person, with every existing portal row keyed to
+the one ISAAC would not be using. If `sub` is ever adopted it must arrive as a migration — a mapping
+table, a backfill, and a rule for which key authorizes during the overlap — not as a new field added
+because it looked cleaner.
+
+**ORCID is disqualified for this role, explicitly and permanently.** ORCID is **scientific-credit
+metadata** — `attribution.contributors[].orcid`, alongside `name`, `affiliation`, `email` — and it
+**must never confer authorization**. This is stated as a forward guard because the temptation is now
+concrete rather than hypothetical: ORCID is visibly an *authentication* option at the Authentik login
+page (see `developer-guide-k8s.md` §4, observed 2026-08-01), and upstream has already had to defend
+against exactly this confusion — `portal/record_authz.py` treats client-supplied `contributors[]` and
+ORCID as conferring **no** rights, guarded by a named regression test
+`test_orcid_in_body_confers_no_rights` (`tests/test_record_authz.py`). Authenticating *via* ORCID and
+being *credited* by ORCID are different facts; a record's contributor list is a scientific claim
+authored by a human, not an access-control list.
 
 ---
 
@@ -361,11 +585,13 @@ identifier is chosen.
 
 | PROVEN (this repo) | NOT PRESENT IN THIS REPO | UNKNOWN — REQUIRES DEAN |
 |---|---|---|
-| Zero identity headers anywhere (0 matches / 498 files, excluding the two docs that name them) | Any k8s / ingress / Authentik manifest | The header names the outpost injects (Q1) |
+| Identity header names confined to **4 files** — 61 matches, all measurement apparatus or documentation, **none consumed by any code path** (§1.1). ~~"Zero identity headers anywhere (0 matches …, excluding the two docs that name them)"~~ — the file count in this cell was refreshed 498→501 on 2026-08-01 while the false "0 matches" and "two docs" beside it were left intact; corrected here | Any k8s / ingress / Authentik manifest | The header names the outpost injects (Q1) |
 | Backend reads exactly 4 headers, none identity | Any users / roles / groups / permissions model | Whether the ingress strips client copies (Q3) |
 | `ApiKeyAuthMiddleware` = one shared secret, fail-open, **unset in prod** | Any logout, session, or expiry logic | Whether the pod is reachable bypassing the ingress (Q4) |
 | No trusted-proxy config, no header-stripping middleware | Any record ownership or actor attribution | The intended subject-identifier claim (Q5) |
 | SPA has no user/session/profile concept — every match is a false positive | `uploaded_by` in any code — schema-only, 2 lines | Columns of `record_history` / `api_requests` / `portal_access_log` (Q11) |
 | Schema defines `attribution.uploaded_by` + `contributors[]` | `PII`/`email`/`username` in any DB-governance doc — **zero mentions** | Whether seeded rows carry real personal identifiers (Q14 / G6) |
 | Recon already queries `information_schema`; table inventory computed but **not served** | — | Whether group claims may be authoritative in-app (Q6) |
-| Edge is an Authentik proxy outpost — observed at `/outpost.goauthentik.io/start` | — | Whether any hosted rollout works at all — **G1 open**, `/krish` → 302 |
+| Edge is an Authentik proxy outpost — observed at `/outpost.goauthentik.io/start` | — | Whether `/krish` works **now**. **Amended 2026-08-01:** a rollout of `v0.0.38` and a recon run against it *were* observed by Krish (operator testimony — see the baseline matrix §0, Entry 2). **G1 is narrowed, not closed:** what is owed is the captured JSON, not the run. Unauthenticated probes from an agent session still return 302 |
+| **Upstream portal owns no users or research groups** — 22 tables, none identity; bare `TEXT` Authentik username on rows; no `/me`, no group endpoint, no membership API (§5.1, public-source audit) | Any upstream user directory to read or join against | Whether an Authentik username is non-reassignable across rename/departure/rehire (**Q5** — a technical stable-ID candidate is not a lifecycle guarantee) |
+| **Upstream `record_authz.py` is a locked, adversarially-reviewed authorization pattern** — admin ∨ owner ∨ ACL editor, default deny, no delegation (§5.2) | Any ISAAC implementation of it — **none exists, and none is authorized** | Whether the mirrored schema actually contains `record_acl` (**Q16**) |
