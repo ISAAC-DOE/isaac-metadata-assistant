@@ -1,0 +1,127 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "SYNTHETICEMPTYPROBE0100000",
+  "record_type": "evidence",
+  "record_domain": "characterization",
+  "source_type": "facility",
+  "timestamps": {
+    "acquired_start_utc": "2025-12-10T18:30:00Z",
+    "acquired_end_utc": "2025-12-10T18:45:00Z",
+    "created_utc": "2025-12-14T20:15:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "SYNTHETIC PROBE MATERIAL - NOT REAL DATA",
+      "formula": "CuO2",
+      "provenance": "commercial",
+      "notes": "Vendor: Sigma-Aldrich. Pressed pellet. [ambient_exposure: True]"
+    },
+    "sample_form": "pellet",
+    "composition": {
+      "CuO2_mass_fraction": 0.001,
+      "sucrose_mass_fraction": 0.999
+    },
+    "geometry": {
+      "pellet_diameter_mm": 7.0
+    }
+  },
+  "system": {
+    "domain": "experimental",
+    "technique": "HERFD-XAS",
+    "facility": {
+      "facility_name": "SSRL",
+      "organization": "SLAC",
+      "beamline": "15-2",
+      "site": "SSRL",
+      "endstation": "XES"
+    },
+    "instrument": {
+      "instrument_type": "beamline_endstation",
+      "instrument_name": "HiQ_Station_XES",
+      "vendor_or_project": "Custom"
+    },
+    "configuration": {
+      "monochromator_crystal": "Si(311)",
+      "spectrometer_geometry": "Von_Hamos",
+      "detector_model": "Pilatus_100K"
+    }
+  },
+  "context": {
+    "environment": "ex_situ",
+    "temperature_K": 298,
+    "thermodynamics": {
+      "atmosphere": "air"
+    }
+  },
+  "measurement": {
+    "processing": {
+      "type": "averaged_normalized_spectrum",
+      "recipe_link": {
+        "rel": "processing_recipe",
+        "target": "workflow://xanes_reduction/v2"
+      }
+    },
+    "series": [],
+    "qc": {
+      "status": "valid",
+      "evidence": "No beam damage evolution observed across 6 scans."
+    }
+  },
+  "assets": [
+    {
+      "asset_id": "raw_scans_archive_001",
+      "content_role": "raw_data_pointer",
+      "uri": "ssrl-archive://BL15-2/2025_run_001/raw.h5",
+      "media_type": "application/x-hdf5",
+      "sha256": "a3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b123",
+      "notes": "Full raw scan set including monitor channels."
+    },
+    {
+      "asset_id": "reduced_spectrum_fullres",
+      "content_role": "reduction_product",
+      "uri": "ssrl-archive://BL15-2/2025_run_001/reduced/CuO2_merged.xdi",
+      "media_type": "text/plain",
+      "sha256": "b3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b234",
+      "notes": "Full resolution merged spectrum in XDI format."
+    },
+    {
+      "asset_id": "processing_notebook",
+      "content_role": "processing_script",
+      "uri": "workflow://xanes_reduction/v2",
+      "media_type": "application/x-ipynb+json",
+      "sha256": "c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b345",
+      "notes": "Jupyter notebook used for averaging and normalization."
+    }
+  ],
+  "links": [],
+  "descriptors": {
+    "outputs": [
+      {
+        "label": "manual_review_2025-12-14",
+        "generated_utc": "2025-12-14T20:20:00Z",
+        "generated_by": {
+          "agent": "manual_review",
+          "version": "1.0"
+        },
+        "descriptors": [
+          {
+            "name": "xanes_inflection_point_energy",
+            "kind": "absolute",
+            "source": "manual",
+            "value": 9001.2,
+            "unit": "eV",
+            "definition": "Inflection point derived from derivative maximum.",
+            "uncertainty": {
+              "sigma": 0.01,
+              "unit": "eV"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "tags": [
+    "synthetic-truthpath-probe",
+    "synthetic-empty-probe-01"
+  ]
+}
