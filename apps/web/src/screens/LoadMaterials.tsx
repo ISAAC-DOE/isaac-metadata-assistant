@@ -180,11 +180,21 @@ export function LoadMaterials() {
             {upload.name === 'down' && (
               <BackendDown error={upload.error} onRetry={tryLocalFiles} />
             )}
+            {/* R1b. "no file is read, parsed, or inspected" was an ABSOLUTE and
+                false: `RecordValidator` and `CsvReconcilePanel` both read a
+                file the reader picks. The refusal claim holds for the UPLOAD
+                path and is kept, scoped to it; the two readers are named
+                instead of denied. Pinned to the other two sites that make this
+                claim (Governance → Policy, Settings → Data & Privacy) by
+                `__tests__/upload-claim-parity.test.tsx`. */}
             <p className="onramp-warn">
               <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
-              Every file upload is refused outright, whatever it contains — no file is read, parsed,
-              or inspected. Keeping real or private artifacts out is the operator's responsibility,
-              not a check this software performs.
+              Every file upload is refused outright, whatever it contains — the refused request is
+              never read, parsed, or inspected. Two review tools elsewhere do read a file you paste
+              or pick — the standalone Validator, and campaign-sheet CSV reconciliation — checking
+              the text in memory, discarding it, and recording only the outcome, never the content.
+              Keeping real or private artifacts out is the operator's responsibility, not a check
+              this software performs.
             </p>
           </div>
         </div>

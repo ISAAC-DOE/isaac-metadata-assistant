@@ -15,8 +15,14 @@ export type FetchState<T> =
 export function useFetch<T>(
   fetcher: () => Promise<T>,
   deps: readonly unknown[],
-): FetchState<T> & { reload: () => void; reloadSilent: () => void } {
+): FetchState<T> & { reload: () => void; reloadSilent: () => void; refreshFailed: boolean } {
   const [state, setState] = useState<FetchState<T>>({ status: 'loading' });
+  // R1b — did the LAST silent reload fail? Deliberately separate from `state`:
+  // the whole point of a silent reload is that the screen keeps its data, so
+  // this cannot be a `status: 'error'` without recreating the blanking that
+  // `reloadSilent` exists to avoid. The caller renders it as a non-blocking
+  // notice; see components/LiveSyncNote.tsx.
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
@@ -39,6 +45,9 @@ export function useFetch<T>(
   useEffect(() => {
     let alive = true;
     setState({ status: 'loading' });
+    // A deps change or an explicit `reload` supersedes any stale silent-refresh
+    // failure: this run has its own loading and error states to report.
+    setRefreshFailed(false);
     fetcherRef
       .current()
       .then((data) => {
@@ -61,21 +70,38 @@ export function useFetch<T>(
 
   // P27.6 — silent reload: re-run the fetcher WITHOUT flipping to the loading
   // state first, so a read-only screen refreshing on a poll hit keeps showing
-  // its current data (never blanks). On success we swap in the fresh data; on
-  // error we keep the current data and stay quiet — the poll only signalled a
-  // change, and the honest recourse (manual Refresh / the degraded indicator)
-  // remains. `reload` (the loading-flip variant) is unchanged for initial and
-  // explicit reloads.
+  // its current data (never blanks). `reload` (the loading-flip variant) is
+  // unchanged for initial and explicit reloads.
+  //
+  // R1b — SILENT MEANS "DOES NOT BLANK", NOT "DOES NOT SAY". The catch used to be
+  // empty, with the comment "keep the current data and stay quiet". Keeping the
+  // data is right; staying quiet is not, and two consequences were real:
+  //
+  //   - `screens/RecordWorkbench.tsx` and `screens/EvidenceExplorer.tsx` also call
+  //     this AFTER A WRITE (`onAgentRefresh`, the post-confirm refetch). A failed
+  //     refetch there leaves the PRE-write state on screen with nothing said, so
+  //     the reader sees a record that does not reflect their own confirmed change.
+  //   - the "honest recourse" the old comment relied on — the degraded poll
+  //     indicator — only appears after three consecutive POLL failures. A single
+  //     failed refetch, or a refetch that fails while polling still succeeds
+  //     (a 304-serving poll and a 503-serving bundle read are different calls),
+  //     raised nothing at all.
+  //
+  // So the failure is recorded and the caller must surface it. The data stays,
+  // the screen never blanks, and a success clears the flag.
   const reloadSilent = useCallback(() => {
     fetcherRef
       .current()
       .then((data) => {
-        if (mountedRef.current) setState({ status: 'data', data });
+        if (mountedRef.current) {
+          setState({ status: 'data', data });
+          setRefreshFailed(false);
+        }
       })
       .catch(() => {
-        /* keep the current data; a failed silent refresh must not blank/error */
+        if (mountedRef.current) setRefreshFailed(true);
       });
   }, []);
 
-  return { ...state, reload, reloadSilent };
+  return { ...state, reload, reloadSilent, refreshFailed };
 }

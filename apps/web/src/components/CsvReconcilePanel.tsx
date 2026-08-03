@@ -4,6 +4,7 @@ import { StatusChip } from './StatusChip';
 import { LoadingPanel, BackendDown } from './FetchStates';
 import { Upload } from './icons';
 import { api, ApiError } from '../lib/api';
+import { LABELS } from '../lib/labels';
 import { RECONCILE_STATE_CHIP, EVIDENCE_CLASS_CHIP } from '../lib/status';
 import type { ApiCsvPreview, ApiCsvReconcileItem, ApiCsvWarning } from '../lib/types';
 
@@ -24,7 +25,14 @@ type Phase = 'idle' | 'loading' | 'done' | 'error';
 interface CsvReconcilePanelProps {
   experimentId: string;
   version: string;
-  onOpenRecord?: () => void;
+  /**
+   * R1b — renamed from `onOpenRecord`. Its ONE call site
+   * (`screens/EvidenceExplorer.tsx`) navigates to `ROUTES.complete`, i.e. Complete
+   * Missing Fields — not the record. The old name agreed with the old (wrong)
+   * button label rather than with the destination, which is how the mismatch
+   * survived: reading the component alone, label and callback were consistent.
+   */
+  onGoToComplete?: () => void;
 }
 
 /**
@@ -105,7 +113,7 @@ function safeErrorMessage(err: ApiError): string {
 export function CsvReconcilePanel({
   experimentId,
   version,
-  onOpenRecord,
+  onGoToComplete,
 }: CsvReconcilePanelProps): JSX.Element {
   const [phase, setPhase] = useState<Phase>('idle');
   const [preview, setPreview] = useState<ApiCsvPreview | null>(null);
@@ -166,8 +174,15 @@ export function CsvReconcilePanel({
           CSV values are review evidence — uploading this file does not change the
           official record.
         </p>
+        {/* R1b — was "Synthetic or public data only — do not upload real or
+            private data." The first clause named a runtime mode the reader has no
+            way to check and the product never defines for them; the instruction is
+            the part that carries the governance boundary, and it is what the app
+            can honestly ask for. Nothing here inspects the file to judge whether
+            it is real (there is no such detection anywhere in the codebase), so
+            this is a request, not a check. */}
         <p className="csv-recon-banner csv-recon-banner-warn">
-          Synthetic or public data only — do not upload real or private data.
+          Do not upload real or private data — nothing here checks the file to tell the difference.
         </p>
         <p className="csv-recon-banner">
           CSV only — the ISAAC campaign metadata sheet (.csv).
@@ -222,7 +237,7 @@ export function CsvReconcilePanel({
           preview={preview}
           stale={stale}
           onDiscard={discard}
-          onOpenRecord={onOpenRecord}
+          onGoToComplete={onGoToComplete}
         />
       )}
     </section>
@@ -233,12 +248,12 @@ function ReconResults({
   preview,
   stale,
   onDiscard,
-  onOpenRecord,
+  onGoToComplete,
 }: {
   preview: ApiCsvPreview;
   stale: boolean;
   onDiscard: () => void;
-  onOpenRecord?: () => void;
+  onGoToComplete?: () => void;
 }) {
   const s = preview.reconciliation_summary;
   return (
@@ -295,9 +310,12 @@ function ReconResults({
         <button type="button" className="btn btn-secondary" onClick={onDiscard}>
           Discard Preview
         </button>
-        {onOpenRecord && (
-          <button type="button" className="btn btn-secondary" onClick={onOpenRecord}>
-            Open Record
+        {/* R1b — the label read "Open Record" while the click navigated to
+            Complete Missing Fields. Taken from LABELS so a rename of the screen
+            carries the button with it, instead of the two drifting again. */}
+        {onGoToComplete && (
+          <button type="button" className="btn btn-secondary" onClick={onGoToComplete}>
+            {LABELS.screenComplete} →
           </button>
         )}
       </div>
