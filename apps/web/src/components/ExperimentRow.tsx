@@ -4,6 +4,7 @@ import { ChevronRight, LayoutList } from './icons';
 import { StatusChip } from './StatusChip';
 import { ROUTES } from '../lib/routes';
 import { LABELS } from '../lib/labels';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { ExperimentSummary, QueueGroupKey } from '../lib/types';
 
 interface ExperimentRowProps {
@@ -49,6 +50,11 @@ export function ExperimentRow({ exp }: ExperimentRowProps) {
       to={ROUTES.record(exp.id)}
       className={`exp-row${exp.group === 'done' ? ' done' : ''}`}
       aria-label={accessibleName}
+      /* The guided walkthrough's anchor for "opening a record". EVERY row carries
+         it, and the walkthrough resolves the FIRST one in document order —
+         deliberately, because the step describes what a row IS, not one
+         particular record. */
+      data-tutorial-anchor={TUTORIAL_ANCHORS.experimentRow}
     >
       <div className="exp-main">
         <div className="exp-title">{exp.title}</div>

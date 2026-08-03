@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Check, CircleHelp, MessageSquare } from './icons';
 import { LABELS } from '../lib/labels';
 import { answerValuePreview } from '../lib/adapt';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { PendingBlocker } from '../lib/types';
 
 interface GuidedPromptProps {
@@ -70,7 +71,12 @@ export function GuidedPrompt({
   };
 
   return (
-    <section className="guided" aria-label={`Question ${index + 1} of ${total}`}>
+    <section
+      className="guided"
+      aria-label={`Question ${index + 1} of ${total}`}
+      /* The walkthrough's "answering a question" anchor. */
+      data-tutorial-anchor={TUTORIAL_ANCHORS.completionQuestion}
+    >
       <div className="guided-head">
         <span className="guided-num" aria-hidden="true">
           {index + 1}
@@ -133,6 +139,7 @@ export function GuidedPrompt({
                 <button
                   type="button"
                   className="btn btn-primary"
+                  data-tutorial-anchor={TUTORIAL_ANCHORS.completionConfirm}
                   onClick={handleConfirm}
                   disabled={!canConfirm || submitting}
                 >
@@ -160,6 +167,7 @@ export function GuidedPrompt({
               <button
                 type="button"
                 className="btn btn-primary"
+                data-tutorial-anchor={TUTORIAL_ANCHORS.completionConfirm}
                 onClick={handleConfirm}
                 disabled={!canConfirm || submitting}
               >
@@ -174,6 +182,7 @@ export function GuidedPrompt({
         <button
           type="button"
           className="guided-dontknow"
+          data-tutorial-anchor={TUTORIAL_ANCHORS.completionDontKnow}
           onClick={onDontKnow}
           disabled={submitting}
         >

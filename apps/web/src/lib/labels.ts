@@ -148,11 +148,32 @@ export const LABELS = {
   chipExported: 'Exported',
   chipMentorReview: 'Mentor Review',
   chipDraft: 'Draft',
-  // The mode chip's BASE label. "workspace" scopes the claim to what the reader
-  // is looking at: since Slice 2A the deployment may additionally run a
-  // protected read-only diagnostic over an isolated test database, so an
-  // unqualified "Synthetic" would over-claim about the whole deployment.
-  modeSynthetic: 'Synthetic workspace',
+  /*
+   * The mode chip's BASE label.
+   *
+   * "workspace" scopes the claim to what the reader is looking at: since Slice 2A
+   * the deployment may additionally run a protected read-only diagnostic over an
+   * isolated test database, so an unqualified whole-deployment claim would
+   * over-claim. That scoping is why the word "workspace" is load-bearing and must
+   * survive any rewording.
+   *
+   * R0 replaced the first word. "Synthetic" is the name of the runtime MODE — it
+   * is what `GET /api/health` reports, it is what `runtime_mode.py` refuses to
+   * boot without, and none of that changed — but as the persistent chip on every
+   * screen it was the app describing itself in the vocabulary of its own test
+   * harness. "Example workspace" is the product-facing name for the same thing.
+   *
+   * THE CLAIM THE OLD WORD CARRIED IS NOT DROPPED, it is moved somewhere it fits:
+   * `CHIP_ARIA_DETAIL` in `components/TopBar.tsx` now spells out, in plain
+   * language, that the records are rebuilt from reference files committed to the
+   * build, that file upload is refused, and that no official institutional record
+   * is shown. The full disclosure still lives in the Governance banner, the
+   * Governance & Safety policy tab and the Help panel, whose exact technical
+   * wording is deliberately UNCHANGED — a chip is not the place to make a
+   * governance guarantee, but it must not be the place a guarantee quietly
+   * disappears either.
+   */
+  modeSynthetic: 'Example workspace',
   // Deliberate register exception (see the header: register 1 is Title Case).
   // These two are QUALIFIERS appended after "·" to the base chip label above,
   // not standalone labels — Title-Casing them ("Test DB Diagnostics") would read
@@ -275,6 +296,43 @@ export const LABELS = {
   assistantSuggestion: 'Assistant Suggestion',
   suggestedQuestions: 'Suggested Questions',
   actionStageAnswer: 'Stage Answer',
+
+  /*
+   * Guided walkthrough (R0). Deliberately NOT placed beside the reset labels
+   * above: a walkthrough replay and a workspace reset are different in kind, and
+   * nothing here is allowed to grow into a control that changes a record.
+   *
+   * "Skip for Now" is the offer's decline, and its wording is the contract: it
+   * says "not now", and the code honours exactly that — the completion flag is not
+   * written, so the offer returns on the next visit, and it stays hidden for the
+   * rest of this session so the reader is not asked twice.
+   */
+  actionStartTutorial: 'Start Tutorial',
+  actionSkipForNow: 'Skip for Now',
+  actionSkipTutorial: 'Skip Tutorial',
+  actionTutorialBack: 'Back',
+  actionTutorialNext: 'Next',
+  actionTutorialFinish: 'Finish',
+  actionCloseTutorial: 'Close Tutorial',
+  actionReplayTutorial: 'Replay Tutorial',
+
+  tutorialOfferTitle: 'Take the Guided Walkthrough',
+  tutorialOfferBody:
+    'A short guided tour of this app, pointing at the real controls on the real screens: what this ' +
+    'list holds, how a record shows what it still needs, how evidence and confirmation work, and ' +
+    'why export stays closed until a record earns it. It only reads — it answers nothing and ' +
+    'changes nothing.',
+
+  // The mandated completion copy. Sentence case is deliberate here: it is an
+  // outcome statement rather than the name of a surface, and it matches
+  // `demoDriftedTitle` above, the other outcome statement in this file.
+  tutorialCompleteTitle: 'Tutorial complete',
+  tutorialCompleteBody:
+    'That is the whole workflow. Nothing you have looked at was changed, and any work already in ' +
+    'this workspace is untouched. You can reopen this walkthrough from Settings & API → Help & ' +
+    'Tutorial at any time.',
+
+  settingsTabHelp: 'Help & Tutorial',
 
   // Export artifacts
   officialRecord: 'Official Record',

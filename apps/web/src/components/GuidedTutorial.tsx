@@ -1,0 +1,470 @@
+import './tutorial.css';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+
+import { X } from './icons';
+import { api } from '../lib/api';
+import { LABELS } from '../lib/labels';
+import { ROUTES } from '../lib/routes';
+import {
+  claimTargetResolution,
+  closeCompletion,
+  dismissTutorial,
+  failTutorialTargets,
+  goToNextStep,
+  goToPreviousStep,
+  setTutorialTargets,
+  startTutorial,
+  tutorialReturnFocusTarget,
+  useTutorialState,
+} from '../lib/tutorialController';
+import {
+  NO_TARGETS,
+  TUTORIAL_STEPS,
+  resolveTutorialTargets,
+  stepNeedsMissingRecord,
+  stepPath,
+  tutorialAnchorSelector,
+  type TutorialStep,
+} from '../lib/tutorialSteps';
+
+/**
+ * The guided walkthrough overlay.
+ *
+ * MOUNTED BY `AppShell`, so it exists on every screen and survives the route
+ * changes the walkthrough itself performs. It renders NOTHING at all while the
+ * walkthrough is idle, issues no request while idle, and touches no storage while
+ * idle — mounting it is free.
+ *
+ * IT IS READ-ONLY OVER THE WORKSPACE. The only request it ever makes is
+ * `GET /api/experiments`, once per run, to find out which records already exist
+ * and in what state. It never answers a question, never exports, never edits and
+ * never calls `POST /api/demo/reset`. A step whose control is not present is
+ * explained, not manufactured: see `lib/tutorialSteps.ts`.
+ *
+ * THE HIGHLIGHT DOES NOT SWALLOW THE CONTROL. There is no modal backdrop. The
+ * ring is a sibling element with `pointer-events: none`, and the control keeps
+ * its place in the accessibility tree, so the reader can operate the thing being
+ * described while it is being described. Focus is moved INTO the coach mark and
+ * is not trapped there.
+ *
+ * ESCAPE CONTRACT (documented because it is a decision, not an obvious default):
+ * Escape leaves the walkthrough exactly as "Skip Tutorial" and "Close" do. It
+ * does NOT record the version as complete, so the walkthrough is offered again on
+ * the next visit; it does hide the offer for the rest of this session, so the
+ * reader is not interrupted twice; and focus returns to the control that started
+ * it. Escape never advances a step and never confirms anything.
+ */
+
+const DEFAULT_ANCHOR_TIMEOUT_MS = 2500;
+
+interface MarkPosition {
+  top: number;
+  left: number;
+  /** Which edge of the mark the decorative pointer sits on. */
+  arrow: 'up' | 'down';
+}
+
+interface RingBox {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+interface GuidedTutorialProps {
+  /**
+   * How long to wait for a step's control to appear before telling the reader it
+   * is not there. The default is generous because a step navigates to another
+   * surface first and that surface has to finish its own fetch. Tests shorten it
+   * so the missing-control path is observable without a real wait.
+   */
+  anchorTimeoutMs?: number;
+}
+
+export function GuidedTutorial({
+  anchorTimeoutMs = DEFAULT_ANCHOR_TIMEOUT_MS,
+}: GuidedTutorialProps = {}) {
+  const state = useTutorialState();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const running = state.phase === 'running';
+  const step: TutorialStep | undefined = running ? TUTORIAL_STEPS[state.index] : undefined;
+  const targets = state.targets ?? NO_TARGETS;
+
+  // --- 1. the ONE read: which records exist, and in what state ---------------
+  // Read once per run. The overlay remounts on every navigation the walkthrough
+  // performs, so the claim/flag lives in the module store rather than in a ref.
+  useEffect(() => {
+    if (!running) return;
+    if (state.targets !== undefined) return;
+    if (!claimTargetResolution()) return;
+    let cancelled = false;
+    api
+      .listExperiments()
+      .then((summaries) => {
+        if (cancelled) return;
+        setTutorialTargets(resolveTutorialTargets(summaries));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        failTutorialTargets();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [running, state.targets]);
+
+  // --- 2. be on the surface the step describes -------------------------------
+  const targetPath = step && state.targets !== undefined ? stepPath(step, targets) : null;
+  const here = `${location.pathname}${location.search}`;
+  useEffect(() => {
+    if (targetPath === null) return;
+    if (here === targetPath) return;
+    navigate(targetPath);
+  }, [targetPath, here, navigate]);
+
+  // --- 3. resolve the step's control -----------------------------------------
+  // `settled` distinguishes "still looking" from "looked, and it is not there".
+  // Only the second may tell the reader anything, or a slow surface would be
+  // reported as a missing control.
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [anchorSettled, setAnchorSettled] = useState(false);
+  const missingRecord = step ? stepNeedsMissingRecord(step, targets) : false;
+  const waitingOnTargets = running && state.targets === undefined;
+
+  useEffect(() => {
+    setAnchorEl(null);
+    setAnchorSettled(false);
+    if (!running || step === undefined) return;
+    if (missingRecord || waitingOnTargets) return;
+    // Do not start looking until we are on the right surface, or the previous
+    // screen's DOM would be searched and a stale control could be highlighted.
+    if (targetPath !== null && here !== targetPath) return;
+
+    const selector = tutorialAnchorSelector(step.anchor);
+    let done = false;
+
+    const found = (): boolean => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el === null) return false;
+      done = true;
+      setAnchorEl(el);
+      setAnchorSettled(true);
+      return true;
+    };
+
+    if (found()) return;
+
+    // The control usually appears when the surface's own fetch resolves, so watch
+    // for it rather than polling on a fixed cadence.
+    const observer = new MutationObserver(() => {
+      if (done) return;
+      if (found()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    const giveUp = window.setTimeout(() => {
+      if (done) return;
+      observer.disconnect();
+      setAnchorEl(null);
+      setAnchorSettled(true);
+    }, anchorTimeoutMs);
+
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(giveUp);
+    };
+  }, [running, step, missingRecord, waitingOnTargets, targetPath, here, anchorTimeoutMs]);
+
+  // --- 4. mark the control, and bring it into view ----------------------------
+  // The attribute is what a test asserts on: it proves the highlight landed on
+  // the REAL control rather than on a decorative stand-in.
+  useEffect(() => {
+    if (anchorEl === null) return;
+    anchorEl.setAttribute('data-tutorial-highlight', 'true');
+    // `scrollIntoView` is unimplemented in jsdom and absent on some older
+    // engines; the walkthrough must not depend on it existing.
+    anchorEl.scrollIntoView?.({
+      block: 'center',
+      inline: 'nearest',
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+    });
+    return () => {
+      anchorEl.removeAttribute('data-tutorial-highlight');
+    };
+  }, [anchorEl]);
+
+  // --- 5. place the mark next to the control, and keep it there ---------------
+  const markRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<MarkPosition | null>(null);
+  const [ring, setRing] = useState<RingBox | null>(null);
+
+  const reposition = useCallback(() => {
+    const el = anchorEl;
+    if (el === null) {
+      setPosition(null);
+      setRing(null);
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const mark = markRef.current?.getBoundingClientRect();
+    const markWidth = mark?.width || 360;
+    const markHeight = mark?.height || 200;
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    const gap = 12;
+    const edge = 8;
+
+    let top = r.bottom + gap;
+    let arrow: MarkPosition['arrow'] = 'up';
+    const fitsBelow = top + markHeight <= vh - edge;
+    const fitsAbove = r.top - gap - markHeight >= edge;
+    if (!fitsBelow && fitsAbove) {
+      top = r.top - gap - markHeight;
+      arrow = 'down';
+    }
+    setPosition({
+      top: clamp(top, edge, vh - markHeight - edge),
+      left: clamp(r.left, edge, vw - markWidth - edge),
+      arrow,
+    });
+    setRing({ top: r.top - 4, left: r.left - 4, width: r.width + 8, height: r.height + 8 });
+  }, [anchorEl]);
+
+  useLayoutEffect(() => {
+    if (anchorEl === null) {
+      setPosition(null);
+      setRing(null);
+      return;
+    }
+    reposition();
+    // Give scrolling and layout a moment to settle, then place it again — the
+    // first measurement is taken before the scroll requested in step 4 lands.
+    const settle = window.setTimeout(reposition, prefersReducedMotion() ? 0 : 140);
+    const onResize = () => reposition();
+    window.addEventListener('resize', onResize);
+    // Capture phase: a scroll inside any scrollable ancestor moves the control
+    // too, and those events do not bubble.
+    window.addEventListener('scroll', onResize, true);
+    return () => {
+      window.clearTimeout(settle);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onResize, true);
+    };
+  }, [anchorEl, reposition]);
+
+  // --- 6. focus, and give it back --------------------------------------------
+  const showMark = running && step !== undefined && (anchorSettled || missingRecord);
+  const finished = state.phase === 'finished';
+  const overlayOpen = showMark || finished;
+
+  // Focus moves into the mark each time a step becomes visible. Keyed on the step
+  // id (not the element) so advancing a step re-focuses even though the mark node
+  // is reused.
+  const stepKey = finished ? 'finished' : (step?.id ?? '');
+  useEffect(() => {
+    if (!overlayOpen) return;
+    markRef.current?.focus();
+  }, [overlayOpen, stepKey]);
+
+  const releaseFocus = useCallback(() => {
+    const trigger = tutorialReturnFocusTarget();
+    if (trigger !== null) {
+      trigger.focus();
+      return;
+    }
+    // Documented fallback: the trigger has been unmounted by the walkthrough's
+    // own navigation, so focus goes to the main region rather than to <body>,
+    // where a keyboard reader would have to Tab from the top of the document.
+    (document.getElementById('main') as HTMLElement | null)?.focus();
+  }, []);
+
+  const leave = useCallback(
+    (reason: 'skip' | 'escape' | 'close') => {
+      dismissTutorial(reason);
+      releaseFocus();
+    },
+    [releaseFocus],
+  );
+
+  // --- 7. Escape ---------------------------------------------------------------
+  useEffect(() => {
+    if (!overlayOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      if (finished) {
+        closeCompletion();
+        releaseFocus();
+        return;
+      }
+      leave('escape');
+    }
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [overlayOpen, finished, leave, releaseFocus]);
+
+  if (!overlayOpen) return null;
+
+  if (finished) {
+    return (
+      <CompletionPanel
+        markRef={markRef}
+        onGoToExperiments={() => {
+          closeCompletion();
+          navigate(ROUTES.experiments);
+          releaseFocus();
+        }}
+        onReplay={() => startTutorial(tutorialReturnFocusTarget())}
+      />
+    );
+  }
+
+  const current = step as TutorialStep;
+  const total = TUTORIAL_STEPS.length;
+  const number = state.index + 1;
+  const unavailable = anchorEl === null;
+  const progress = `Step ${number} of ${total}`;
+
+  return (
+    <>
+      {/* The announcement. Separate from the dialog's own accessible name so a
+          step CHANGE is announced too — the dialog node is reused between steps,
+          and a reused node's label is not re-read. */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {`${progress}: ${current.title}`}
+      </div>
+
+      {ring !== null && !unavailable && (
+        <div
+          className="tutorial-ring"
+          aria-hidden="true"
+          data-testid="tutorial-ring"
+          style={{ top: ring.top, left: ring.left, width: ring.width, height: ring.height }}
+        />
+      )}
+
+      <div
+        ref={markRef}
+        className={`tutorial-mark${unavailable || position === null ? ' centered' : ''}`}
+        role="dialog"
+        aria-labelledby="tutorial-mark-title"
+        aria-describedby="tutorial-mark-body"
+        data-tutorial-step={current.id}
+        data-tutorial-step-available={unavailable ? 'false' : 'true'}
+        tabIndex={-1}
+        style={
+          unavailable || position === null
+            ? undefined
+            : { top: position.top, left: position.left, transform: 'none' }
+        }
+      >
+        {!unavailable && position !== null && (
+          <span className={`tutorial-arrow ${position.arrow}`} aria-hidden="true" />
+        )}
+
+        <div className="tutorial-progress">{progress}</div>
+        <p className="tutorial-title" id="tutorial-mark-title">
+          {current.title}
+        </p>
+        <div id="tutorial-mark-body">
+          <p className="tutorial-body">{current.body}</p>
+          {unavailable && (
+            <p className="tutorial-unavailable">
+              <strong>Not shown on this visit —</strong> {current.unavailable}
+            </p>
+          )}
+        </div>
+
+        <div className="tutorial-actions">
+          <button
+            type="button"
+            className="tutorial-btn"
+            onClick={() => leave('skip')}
+          >
+            {LABELS.actionSkipTutorial}
+          </button>
+          <span className="tutorial-spacer" />
+          <button
+            type="button"
+            className="tutorial-btn"
+            onClick={goToPreviousStep}
+            disabled={state.index === 0}
+          >
+            {LABELS.actionTutorialBack}
+          </button>
+          <button type="button" className="tutorial-btn primary" onClick={goToNextStep}>
+            {number === total ? LABELS.actionTutorialFinish : LABELS.actionTutorialNext}
+          </button>
+          <button
+            type="button"
+            className="tutorial-btn"
+            aria-label={LABELS.actionCloseTutorial}
+            onClick={() => leave('close')}
+          >
+            <X size={13} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The completion panel. EXACTLY two actions, by design: the primary one returns
+ * the reader to their work, and the secondary one replays the walkthrough. There
+ * is no third "don't show me again" control, because finishing already recorded
+ * that, and no "reset the workspace" control, because the walkthrough has never
+ * been allowed to change a record and must not gain the power on its last screen.
+ */
+function CompletionPanel({
+  markRef,
+  onGoToExperiments,
+  onReplay,
+}: {
+  markRef: RefObject<HTMLDivElement>;
+  onGoToExperiments: () => void;
+  onReplay: () => void;
+}) {
+  return (
+    <div
+      ref={markRef}
+      className="tutorial-mark centered"
+      role="dialog"
+      aria-labelledby="tutorial-done-title"
+      aria-describedby="tutorial-done-body"
+      data-tutorial-step="complete"
+      tabIndex={-1}
+    >
+      <p className="tutorial-title" id="tutorial-done-title">
+        {LABELS.tutorialCompleteTitle}
+      </p>
+      <p className="tutorial-body" id="tutorial-done-body">
+        {LABELS.tutorialCompleteBody}
+      </p>
+      <div className="tutorial-actions">
+        <button type="button" className="tutorial-btn primary" onClick={onGoToExperiments}>
+          {LABELS.actionGoToExperiments}
+        </button>
+        <button type="button" className="tutorial-btn" onClick={onReplay}>
+          {LABELS.actionReplayTutorial}
+        </button>
+      </div>
+    </div>
+  );
+}

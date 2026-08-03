@@ -181,7 +181,17 @@ export const TABBED_SURFACES = [
     id: 'settings',
     path: '/settings',
     tablistName: 'Settings & API sections',
-    tabs: ['Overview', 'Data & Privacy', 'About', 'API Access', 'Endpoint Explorer'],
+    // R0 added 'Help & Tutorial' (the tutorial replay surface). The tab COUNT the
+    // APG-structure spec asserts is derived from this array, so the list is the
+    // single place a new tab has to be declared — no magic number to chase.
+    tabs: [
+      'Overview',
+      'Data & Privacy',
+      'About',
+      'API Access',
+      'Endpoint Explorer',
+      'Help & Tutorial',
+    ],
     panelIdPrefix: 'settings-tabpanel-',
   },
 ] as const;
