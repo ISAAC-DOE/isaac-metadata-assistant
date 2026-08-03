@@ -80,7 +80,27 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
     record["timestamps"].setdefault("created_utc", now)
 
     # Structured blocks copied verbatim, evidence keys stripped.
-    if draft.get("series"):
+    # R2 — `is not None`, NOT truthiness. The guard used to read `if draft.get("series"):`,
+    # so a draft with `series: []` fell through the whole block and the exported record
+    # carried NO `measurement` at all. That silently DELETED an evidenced qc verdict:
+    # measured on a draft holding `series: []` plus
+    # `qc: {status: "nonvalid", evidence: "Beam damage observed in scans 4-6."}`, the
+    # transform produced a record with `"measurement" in record` False, and official
+    # validation PASSED — an operator's recorded judgment that the data was bad, dropped,
+    # with a clean bill of health on the way out.
+    #
+    # It compounded: with the qc block gone, `_qc_nonvalid_without_evidence` had nothing
+    # to inspect, so the deletion also suppressed the one advisory warning that would
+    # have flagged it. The falsy guard laundered its own evidence.
+    #
+    # `series: []` is schema-valid (no `minItems` — verified against the vendored schema,
+    # 0 errors), so emitting it is legal, and PRESERVING the operator's verdict is
+    # strictly more honest than discarding it. An empty series is now disclosed instead,
+    # by `portal_warnings.NO_MEASUREMENT_SERIES`.
+    #
+    # An ABSENT `series` (None) still skips the block, unchanged: there is no measurement
+    # to describe and nothing to preserve. Only the empty-list case changes.
+    if draft.get("series") is not None:
         record.setdefault("measurement", {})["series"] = strip_evidence(draft["series"])
         if draft.get("qc"):
             # qc goes through verbatim (a shallow copy of its entries), NOT
