@@ -1,0 +1,421 @@
+{
+  "package": "ISAAC Standalone Validator upload package",
+  "generated_utc": "2026-08-02",
+  "file_count": 18,
+  "target_screen": "Governance & Safety -> Validator tab -> Paste box or Upload JSON File",
+  "target_route": "POST /api/validate/record",
+  "request_size_limit_bytes": 524288,
+  "provenance": {
+    "independently_generated": true,
+    "source_material": [
+      "schema/isaac_record_v1.json \u2014 the vendored official ISAAC v1.05 schema, copied verbatim from the public upstream repository (see schema/PROVENANCE.md)",
+      "tests/fixtures/official/*.json \u2014 the 10 public upstream example records, copied verbatim from the public upstream examples directory (see schema/PROVENANCE.md); ex_situ_xanes_cuo2_record.json was read as a shape reference for a characterization record"
+    ],
+    "production_derived_content": "none",
+    "database_access": "none \u2014 no database connection was opened while producing this package",
+    "statement": "Every field name in these files comes from the public schema. Every value was chosen by hand for this package. No content, field-presence pattern, missingness pattern, title, value, evidence entry or attribution was taken from, derived from, or informed by any production or production-derived record store.",
+    "attribution_block_omitted": "The optional attribution block is deliberately absent from all 18 files so that no person, group or account is named as the origin of any value here.",
+    "scientific_claims": "Values are physically plausible for a copper K-edge measurement (edge near 8979 eV) and are labelled in each record's own notes as illustrative and carrying no measurement provenance. They are not, and must not be presented as, a measurement from any facility."
+  },
+  "validator_invocation": {
+    "command": ".venv/bin/python -c \"import json,sys; from pathlib import Path; from isaac_records.official import validate_official; rec=json.loads(Path(sys.argv[1]).read_text()); r=validate_official(rec, Path('.')); print('OK' if r.ok else 'FAIL'); print(r.render())\" <file>",
+    "note": "validate_official(record: dict, root: Path) -> OfficialReport, called with root = the repository root, exactly as the API route calls it. Run from /Users/krishverma/Documents/ISAAC. This is the same function POST /api/validate/record invokes, so the verdicts agree by construction."
+  },
+  "http_contract": {
+    "200": "The body parsed as a JSON object. The response carries ok true or false plus the {path, message} error list. An invalid record is a 200 with ok false, NOT an error status.",
+    "422": "The body is not well-formed JSON (error invalid_json), or it is valid JSON but not an object (error not_a_json_object). Not reachable from the screen, which parses first.",
+    "413": "The body exceeded 512 KB; the read aborts the moment the limit is passed. Not reachable from the screen, which checks the file size and the text length against the same 512 KB bound first.",
+    "screen_side_refusals_that_never_reach_http": [
+      "file larger than 512 KB \u2014 refused at file-choose time",
+      "text larger than 512 KB \u2014 refused at validate time",
+      "empty box",
+      "text that does not parse as JSON"
+    ]
+  },
+  "known_divergences": [
+    {
+      "filename": "invalid-date-time.json",
+      "intended": "invalid",
+      "measured": "valid",
+      "cause": "format is not enforced: no format_checker is supplied, and date-time is not a registered checker in this environment because rfc3339-validator is not installed"
+    },
+    {
+      "filename": "empty-measurement-series.json",
+      "intended": "invalid",
+      "measured": "valid",
+      "cause": "measurement.series must be present and an array but has no minItems, so an empty array satisfies the schema"
+    }
+  ],
+  "files": [
+    {
+      "id": 1,
+      "filename": "complete-valid-record.json",
+      "bytes": 5223,
+      "purpose": "Baseline: a fully schema-valid characterization record. Everything else in the package is this record with one or three deliberate defects.",
+      "schema_paths_exercised": [
+        "/required",
+        "/properties/measurement/required",
+        "/properties/descriptors/required",
+        "/allOf/0"
+      ],
+      "intended_outcome": "valid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": true,
+        "error_count": 0,
+        "first_error_path": null,
+        "first_error_message": null
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "Use this first to establish that the validator returns a pass, so a later failure is attributable to the file and not to the tool."
+    },
+    {
+      "id": 2,
+      "filename": "missing-required-information.json",
+      "bytes": 5194,
+      "purpose": "Exactly one TOP-LEVEL required field is absent: source_type.",
+      "schema_paths_exercised": [
+        "/required/4"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "$",
+        "first_error_message": "'source_type' is a required property"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "The schema's top-level required list is [isaac_record_version, record_id, record_type, record_domain, source_type, timestamps]. Only source_type was removed."
+    },
+    {
+      "id": 3,
+      "filename": "missing-nested-information.json",
+      "bytes": 5180,
+      "purpose": "A required field inside a nested object is absent: timestamps.created_utc.",
+      "schema_paths_exercised": [
+        "/properties/timestamps/required/0"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "timestamps",
+        "first_error_message": "'created_utc' is a required property"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "timestamps itself is present and the two acquisition timestamps remain, so the error is reported against the nested object rather than the document root."
+    },
+    {
+      "id": 4,
+      "filename": "missing-conditional-information.json",
+      "bytes": 4079,
+      "purpose": "A real schema conditional is triggered and its dependent required field is absent.",
+      "schema_paths_exercised": [
+        "/allOf/0",
+        "/allOf/0/if/properties/record_type/const",
+        "/allOf/0/then/required/0"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "$",
+        "first_error_message": "'descriptors' is a required property"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "The conditional exercised is /allOf/0: if record_type == \"evidence\" then descriptors is required. record_type is \"evidence\" and the whole descriptors block was removed. Enumerated from the schema: there are four TOP-LEVEL if/then conditionals, /allOf/0 .. /allOf/3. The other three are electrochemistry rules (record_domain=performance with context.electrochemistry => control_mode; control_mode=galvanostatic => current_setpoint_mA_cm2; control_mode=potentiostatic => potential_setpoint_V) and are unreachable from a characterization record. Three further if/then conditionals are nested at /properties/context/properties/electrochemistry/properties/potential_vs_RHE/allOf/0..2 and are likewise electrochemistry-only. The schema contains no dependentRequired at all, and exactly one oneOf, at /properties/descriptors/properties/outputs/items/properties/descriptors/items/properties/relative_to/oneOf, which is a string-or-object choice rather than a required-field branch. /allOf/0 is therefore the only conditional a characterization record can exercise, and it is the one used."
+    },
+    {
+      "id": 5,
+      "filename": "invalid-date-time.json",
+      "bytes": 5213,
+      "purpose": "A REQUIRED field declared \"format\": \"date-time\" carries the literal value \"not-a-date\". Everything else is unchanged from file 1.",
+      "schema_paths_exercised": [
+        "/properties/timestamps/properties/created_utc/format",
+        "/properties/timestamps/required/0"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": true,
+        "error_count": 0,
+        "first_error_path": null,
+        "first_error_message": null
+      },
+      "measured_matches_intent": false,
+      "expected_http_status": 200,
+      "notes": "KNOWN DIVERGENCE. The measured result is a PASS. Two independent reasons, both verified: (a) validate_official constructs Draft202012Validator(schema) with no format_checker, and under JSON Schema 2020-12 format is annotation-only unless a checker is supplied; (b) even when a jsonschema FormatChecker() is supplied in this environment, \"date-time\" is not among its registered checkers (registered: date, email, idn-email, idn-hostname, ipv4, ipv6, regex, time, uuid) because the optional rfc3339-validator dependency is not installed. Enforcing date-time would require both a format_checker AND that dependency. Keep this file: it documents the gap."
+    },
+    {
+      "id": 6,
+      "filename": "empty-measurement-series.json",
+      "bytes": 3902,
+      "purpose": "measurement is present and measurement.qc is intact, but measurement.series is an empty array.",
+      "schema_paths_exercised": [
+        "/properties/measurement/properties/series",
+        "/properties/measurement/required/0"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": true,
+        "error_count": 0,
+        "first_error_path": null,
+        "first_error_message": null
+      },
+      "measured_matches_intent": false,
+      "expected_http_status": 200,
+      "notes": "KNOWN DIVERGENCE. The measured result is a PASS. measurement.series is required to be PRESENT and to be an array, but the schema sets no minItems on it, so [] satisfies it. Verified alternative readings of \"empty series\" are equally accepted: a series object whose independent_variables[].values and channels[].values are all [] passes, and so does one where the values keys are omitted entirely (values is not in the items' required list). The only minItems in the whole schema is on descriptors uncertainty.bounds (2), and the only minLength is on tags items (1). A record can therefore be officially valid while carrying no measured points at all."
+    },
+    {
+      "id": 7,
+      "filename": "missing-evidence.json",
+      "bytes": 5090,
+      "purpose": "A scientific value is asserted while the value-provenance structure the schema attaches to it is absent: descriptors.outputs[0].descriptors[0] keeps name/kind/source/value/unit/definition but has no uncertainty block.",
+      "schema_paths_exercised": [
+        "/properties/descriptors/properties/outputs/items/properties/descriptors/items/required/4"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "descriptors.outputs.0.descriptors.0",
+        "first_error_message": "'uncertainty' is a required property"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "SUBSTITUTION, documented. The official schema has NO per-field evidence requirement and no per-field evidence envelope anywhere \u2014 the {value, status, evidence} envelope is a draft-layer construct in this project, and field-level evidence is carried in a separate evidence sidecar precisely because the official record cannot hold it. The nearest structure the official schema DOES require alongside an asserted value is uncertainty, which is in the descriptor's required list next to value and whose basis sub-field records provenance (reported / digitization_estimate / assumed / not_reported). That is what was removed. Related finding, not used here: measurement.qc.evidence is described in the schema as \"REQUIRED in practice when status != valid\", but that is prose only \u2014 a record with qc.status \"compromised\" and no qc.evidence was measured to PASS."
+    },
+    {
+      "id": 8,
+      "filename": "missing-confirmation.json",
+      "bytes": 5198,
+      "purpose": "The QC block is present but its status affirmation is absent: measurement.qc has evidence and notes but no status.",
+      "schema_paths_exercised": [
+        "/properties/measurement/properties/qc/required/0",
+        "/properties/measurement/properties/qc/properties/status/enum"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "measurement.qc",
+        "first_error_message": "'status' is a required property"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "SUBSTITUTION, documented. The official schema has NO \"confirmation\" concept. needs_confirmation and user-confirmation requests are draft-layer constructs in this project, not official-schema constructs, and nothing in the schema is named confirm/confirmed/confirmation. The closest real official construct is measurement.qc.status, the required affirmation of the record's quality state (enum: valid, compromised, failed, pending). That required field was removed while the rest of the qc block was left in place."
+    },
+    {
+      "id": 9,
+      "filename": "invalid-controlled-value.json",
+      "bytes": 5225,
+      "purpose": "An out-of-vocabulary token at a field with a real enum: system.technique is \"XANES\".",
+      "schema_paths_exercised": [
+        "/properties/system/properties/technique/enum"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "system.technique",
+        "first_error_message": "'XANES' is not one of ['XAS', 'HERFD-XAS', 'XES', 'RIXS', 'XPS', 'XRF', 'XRD', 'SAXS', 'WAXS', 'PDF', 'neutron_reflectometry', 'neutron_diffraction', 'SANS', 'cyclic_voltammetry', 'chronoamperometry', 'chronopotentiometry', 'EIS', 'linear_sweep_voltammetry', 'TEM', 'SEM', 'AFM', 'STM', 'DFT', 'ab_initio_MD', 'classical_MD', 'kinetic_monte_carlo', 'microkinetic_modeling', 'machine_learning_potential', 'GC', 'HPLC', 'ICP_MS', 'ICP_OES', 'NMR', 'mass_spectrometry', 'FTIR', 'Raman', 'UV_Vis']"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "Allowed values at /properties/system/properties/technique/enum: XAS, HERFD-XAS, XES, RIXS, XPS, XRF, XRD, SAXS, WAXS, PDF, neutron_reflectometry, neutron_diffraction, SANS, cyclic_voltammetry, chronoamperometry, chronopotentiometry, EIS, linear_sweep_voltammetry, TEM, SEM, AFM, STM, DFT, ab_initio_MD, classical_MD, kinetic_monte_carlo, microkinetic_modeling, machine_learning_potential, GC, HPLC, ICP_MS, ICP_OES, NMR, mass_spectrometry, FTIR, Raman, UV_Vis. \"XANES\" is a realistic mistake because it is the everyday name for the near-edge region, but the controlled vocabulary only admits the parent technique XAS."
+    },
+    {
+      "id": 10,
+      "filename": "invalid-field-type.json",
+      "bytes": 5225,
+      "purpose": "Wrong JSON type at a real schema path: context.temperature_K is the string \"297.5\" where number is declared.",
+      "schema_paths_exercised": [
+        "/properties/context/properties/temperature_K/type"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "context.temperature_K",
+        "first_error_message": "'297.5' is not of type 'number'"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "A quoted number is the classic spreadsheet-export defect. The value is numerically correct; only its JSON type is wrong."
+    },
+    {
+      "id": 11,
+      "filename": "unknown-field.json",
+      "bytes": 5254,
+      "purpose": "An extra property at a path that closes itself: sample.material.purity_percent.",
+      "schema_paths_exercised": [
+        "/properties/sample/properties/material/additionalProperties"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "sample.material",
+        "first_error_message": "Additional properties are not allowed ('purity_percent' was unexpected)"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "VERIFIED: /properties/sample/properties/material has \"additionalProperties\": false. So does the document root, timestamps, sample, system, system.facility, system.instrument, context, measurement, measurement.qc, every series/channel/independent_variable item, every asset item, every link item, descriptors and every descriptor item. The schema is closed almost everywhere; the deliberate open extension namespaces are system.configuration, sample.composition, sample.geometry, measurement.series[].conditions and measurement.processing, which is why the extra property was placed under sample.material rather than there."
+    },
+    {
+      "id": 12,
+      "filename": "multiple-issues.json",
+      "bytes": 5224,
+      "purpose": "Exactly three defects, each of a different class.",
+      "schema_paths_exercised": [
+        "/required/3",
+        "/properties/context/properties/temperature_K/type",
+        "/properties/system/properties/instrument/additionalProperties"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 3,
+        "first_error_path": "$",
+        "first_error_message": "'record_domain' is a required property"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "Defect 1 (missing top-level required): record_domain removed. Defect 2 (wrong type): context.temperature_K is the string \"ambient\". Defect 3 (unknown property): system.instrument.serial_number added where additionalProperties is false. Removing record_domain also makes the /allOf/1 conditional's if-clause fail, so no conditional error is added \u2014 the count stays at exactly three."
+    },
+    {
+      "id": 13,
+      "filename": "unicode-and-escaping.json",
+      "bytes": 5822,
+      "purpose": "VALID record carrying accented Latin, CJK, an emoji, embedded double quotes, backslashes, escaped newlines and tabs, guillemets, en/em dashes, a numero sign and a check mark, across free-text fields (material name and notes, series notes, QC evidence, descriptor definition, a configuration string, and tags).",
+      "schema_paths_exercised": [
+        "/properties/sample/properties/material/properties/notes",
+        "/properties/measurement/properties/qc/properties/evidence",
+        "/properties/tags/items/pattern",
+        "/properties/tags/items/maxLength"
+      ],
+      "intended_outcome": "valid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": true,
+        "error_count": 0,
+        "first_error_path": null,
+        "first_error_message": null
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "Written as UTF-8 without \\u escaping, so the transport really carries multi-byte characters. Tags stay inside their pattern (no leading/trailing whitespace) and their 64-character limit. Descriptor names are left plain ASCII because the schema constrains them with a regex."
+    },
+    {
+      "id": 14,
+      "filename": "large-valid-record.json",
+      "bytes": 181163,
+      "purpose": "VALID and large: one full-resolution spectrum of 2600 energy points from 8850.00 to 9629.70 eV in 0.30 eV steps, with two channels (normalized absorption and an i0 monitor), 7800 numbers in total.",
+      "schema_paths_exercised": [
+        "/properties/measurement/properties/series/items/properties/independent_variables/items/properties/values",
+        "/properties/measurement/properties/series/items/properties/channels/items/properties/values"
+      ],
+      "intended_outcome": "valid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": true,
+        "error_count": 0,
+        "first_error_path": null,
+        "first_error_message": null
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "Size comes from real data density, not padding: the absorption curve is an arctangent edge step at 8979 eV plus a Lorentzian white line and a damped sinusoidal oscillation above the edge, and the monitor channel drifts slowly downward. Exact size is recorded in bytes below; it is under the 512 KB limit with a wide margin, and the browser re-serializes the object compactly before sending, which makes the transmitted body smaller still."
+    },
+    {
+      "id": 15,
+      "filename": "malformed-json.json",
+      "bytes": 1654,
+      "purpose": "Intentionally not parseable: the document is truncated in the middle of the measurement block, leaving several objects and arrays unclosed.",
+      "schema_paths_exercised": [],
+      "intended_outcome": "not-parseable",
+      "measured_validator_result": {
+        "parsed": false,
+        "ok": null,
+        "error_count": null,
+        "first_error_message": null,
+        "parse_error": "Expecting value: line 62 column 1 (char 1654)",
+        "note": "Not parseable, so the official validator was never invoked on it."
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": null,
+      "notes": "This file never reaches the validator. The screen parses the text before sending it, so the request is not made at all and there is no HTTP status. Sent directly to the API instead, it would be a 422 with error \"invalid_json\". Measured locally: JSONDecodeError \"Expecting value: line 62 column 1\"."
+    },
+    {
+      "id": 16,
+      "filename": "unsupported-file.txt",
+      "bytes": 304,
+      "purpose": "Not JSON at all: a plain-text page of run notes.",
+      "schema_paths_exercised": [],
+      "intended_outcome": "not-parseable",
+      "measured_validator_result": {
+        "parsed": false,
+        "ok": null,
+        "error_count": null,
+        "note": "Not a JSON document; the official validator was never invoked on it."
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": null,
+      "notes": "Two independent refusals. The file chooser is restricted to application/json and .json, so this file is filtered out of the default listing (on macOS it can still be forced through by switching the dialog's file-type filter). If it is forced through, the text loads into the box and the parse check refuses it before any request is made. Sent directly to the API it would be a 422 with error \"invalid_json\"; it would only reach the separate \"not_a_json_object\" 422 if its whole content happened to be a valid non-object JSON value, which it is not."
+    },
+    {
+      "id": 17,
+      "filename": "duplicate-of-complete-valid-record.json",
+      "bytes": 5223,
+      "purpose": "Byte-identical copy of file 1, including the same record_id.",
+      "schema_paths_exercised": [
+        "/properties/record_id/pattern"
+      ],
+      "intended_outcome": "valid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": true,
+        "error_count": 0,
+        "first_error_path": null,
+        "first_error_message": null
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "HONEST EXPECTATION: this screen does not detect duplicates and should not be expected to. It holds no record store, writes nothing and compares nothing against anything else, so it must return exactly the same pass as file 1. Duplicate detection is only meaningful on a path that persists what it accepts; this file is here to confirm that repeated validation is stable and side-effect-free, and to be reused later against an importing path."
+    },
+    {
+      "id": 18,
+      "filename": "repairable-record.json",
+      "bytes": 5220,
+      "purpose": "Invalid in exactly one way that is fixable by hand in the paste box: measurement.qc.status is \"OK\".",
+      "schema_paths_exercised": [
+        "/properties/measurement/properties/qc/properties/status/enum"
+      ],
+      "intended_outcome": "invalid",
+      "measured_validator_result": {
+        "parsed": true,
+        "ok": false,
+        "error_count": 1,
+        "first_error_path": "measurement.qc.status",
+        "first_error_message": "'OK' is not one of ['valid', 'compromised', 'failed', 'pending']"
+      },
+      "measured_matches_intent": true,
+      "expected_http_status": 200,
+      "notes": "EXACT EDIT: find \"status\": \"OK\" inside the measurement quality block and change OK to valid, i.e. \"status\": \"valid\". Allowed values are valid, compromised, failed, pending. After that single four-character edit the record is expected to pass. Note this shares the enum class with file 9 by design: file 9 is diagnosis at a different path, this one is the repair loop."
+    }
+  ]
+}
