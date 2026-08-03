@@ -353,7 +353,7 @@
         "ok": null,
         "error_count": null,
         "first_error_message": null,
-        "parse_error": "Expecting value (line 62 column 1)",
+        "parse_error": "Expecting value: line 62 column 1 (char 1654)",
         "note": "Not parseable, so the official validator was never invoked on it."
       },
       "measured_matches_intent": true,
