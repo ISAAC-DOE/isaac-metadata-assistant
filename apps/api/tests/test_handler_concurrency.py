@@ -55,6 +55,12 @@ import isaac_api.workspace as ws
 # exist so a genuine deadlock fails the run instead of hanging it.
 _RENDEZVOUS_TIMEOUT_S = 15.0
 _EVENT_TIMEOUT_S = 15.0
+#: The concurrent read in test 4 gets its OWN, much shorter budget. It is a
+#: fail-fast assertion, not a safety net: if reads are serialised behind the
+#: write lock the GET never returns on its own, and waiting 15s to learn that
+#: (or inheriting the writer's wait, as this test used to) turns a clean
+#: failure into a hang.
+_READ_TIMEOUT_S = 2.0
 
 # Two still-pending asset blockers on the NEW-DRAFT seed (answers path). Two are
 # needed because ``/answers`` only FILLS an OPEN blocker: once the first uri is
@@ -351,14 +357,26 @@ def test_absent_if_match_is_428_and_mutates_nothing(client, endpoint, target, ur
 
 def test_read_during_in_flight_write_sees_a_consistent_state(client, monkeypatch):
     """A GET issued while a write is mid-flight — the handler holds the record lock
-    and the state file has NOT yet been replaced — returns promptly and returns a
-    self-consistent record: valid JSON, an ETag that is exactly the quoted body
-    ``version``, and a ``rev`` that is one of the two committed values (never a
-    half-applied one).
+    and the state file has NOT yet been replaced — returns promptly, and returns the
+    pre-write revision: valid JSON, an ETag that is exactly the quoted body
+    ``version``, and ``rev`` still at the pre-write value.
 
-    The write is suspended at the atomic replace itself, so this also pins that reads
-    are not serialised behind the per-record write lock: the GET completes before the
-    writer is released, which it could not do if reads took that lock.
+    WHAT THIS PROVES, precisely: reads are NOT serialised behind the per-record write
+    lock. The GET completes while the writer is suspended inside that lock, which it
+    could not do if reads acquired it.
+
+    WHAT THIS DOES NOT PROVE — corrected after independent review, which is the whole
+    reason this paragraph exists. The suspension point is *before* ``real_write`` is
+    called, so the target file on disk is never partially written while the read
+    happens: the reader sees the intact OLD file, not a torn one. This test therefore
+    cannot fail on a non-atomic write, and a reviewer confirmed that by replacing
+    ``atomic_write_text`` with a genuinely torn truncate-sleep-write — all six tests
+    here stayed green.
+
+    Do not read the assertions below as atomicity evidence. Atomicity of the replace
+    is covered where it can actually be exercised:
+    ``apps/api/tests/test_versioning.py::test_atomic_write_failure_leaves_original_intact``,
+    which does fail under that mutation.
     """
     target = ws.SEED_NEW_DRAFT_ID
     before = _detail(client, target)
@@ -395,11 +413,32 @@ def test_read_during_in_flight_write_sees_a_consistent_state(client, monkeypatch
             "the writer never reached the state-file write"
         )
         # The write is suspended INSIDE the record lock. This read must still work.
-        r = client.get(f"/api/experiments/{target}")
+        #
+        # It runs on its OWN thread with a short join, so that a regression which
+        # serialises reads behind the write lock FAILS HERE in ~2s. Previously the
+        # read ran inline with no timeout of its own and could only unblock when the
+        # writer's 15s wait expired — so a "reads are now serialised" regression cost
+        # 16s, and a variant where the writer waited longer would HANG the suite
+        # instead of failing it. That is the opposite of what a safety net is for.
+        read_result: dict = {}
+
+        def reader():
+            resp = client.get(f"/api/experiments/{target}")
+            read_result["response"] = resp
+
+        rt = threading.Thread(target=reader, name="concurrent-reader")
+        rt.start()
+        rt.join(timeout=_READ_TIMEOUT_S)
+        assert not rt.is_alive(), (
+            f"the GET did not complete within {_READ_TIMEOUT_S}s while a write was "
+            "in flight — reads are being serialised behind the per-record write lock"
+        )
+
+        r = read_result["response"]
         assert r.status_code == 200, r.text
         mid = r.json()  # would raise if the response were not valid JSON
-        assert r.headers["ETag"] == f'"{mid["version"]}"', "torn read: ETag and body disagree"
-        assert mid["version"].endswith(f".{mid['rev']}"), "torn read: version and rev disagree"
+        assert r.headers["ETag"] == f'"{mid["version"]}"', "ETag and body version disagree"
+        assert mid["version"].endswith(f".{mid['rev']}"), "version and rev disagree"
         assert mid["rev"] == before["rev"], (
             "the not-yet-replaced state file must still read as the pre-write revision"
         )
@@ -414,7 +453,8 @@ def test_read_during_in_flight_write_sees_a_consistent_state(client, monkeypatch
     assert after["rev"] == before["rev"] + 1
     assert after["version"].endswith(f".{after['rev']}")
     assert _asset_sha(target, PENDING_URI) == SHA_A
-    # And the file the writer actually landed is parseable JSON, not a fragment.
+    # The landed file parses. NOT an atomicity proof (see the docstring): the
+    # write was suspended before it began, so nothing torn was ever on disk.
     json.loads(state_path.read_text(encoding="utf-8"))
 
 
