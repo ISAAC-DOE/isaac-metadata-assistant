@@ -10,6 +10,7 @@ import {
   stubFetchDown,
   stubFetchRoutes,
 } from '../test/apiFixtures';
+import type { RouteEntry } from '../test/apiFixtures';
 
 /*
  * S2 · Run Synthetic Demo — the protective 409 refusal.
@@ -55,7 +56,10 @@ function renderLoad() {
 /** Render /load with one stubbed outcome for the demo run, then click Run Demo. */
 function runDemoWith(
   outcome: { status?: number; body: unknown },
-  extraRoutes: Record<string, { status?: number; body: unknown }> = {},
+  // `RouteEntry`, not a plain descriptor: since R1 `resetDemoRoutes` serves the reset
+  // endpoint with a per-call thunk (it must branch on the request's `mode`), and a
+  // narrower parameter type here would reject it.
+  extraRoutes: Record<string, RouteEntry> = {},
 ) {
   stubFetchRoutes({ 'POST /api/demo/run': outcome, ...extraRoutes });
   const view = renderLoad();

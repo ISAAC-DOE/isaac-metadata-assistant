@@ -197,7 +197,16 @@ def test_reset_is_reflected_freshly(client):
     # drifted: the ready seed is now done
     assert any(r["status"] == "done" and r["experiment_id"] == ws.SEED_READY_ID
                for r in _records(client)["records"])
-    r = client.post("/api/demo/reset", json={"mode": "execute", "confirmation": "RESET SYNTHETIC DEMO"})
+    # R1: an execute carries the plan digest from its own preview (428 without it).
+    digest = client.post("/api/demo/reset", json={"mode": "preview"}).json()["plan_digest"]
+    r = client.post(
+        "/api/demo/reset",
+        json={
+            "mode": "execute",
+            "confirmation": "RESET EXAMPLE WORKSPACE",
+            "plan_digest": digest,
+        },
+    )
     assert r.status_code == 200
     after = _records(client)
     counts: dict[str, int] = {}
