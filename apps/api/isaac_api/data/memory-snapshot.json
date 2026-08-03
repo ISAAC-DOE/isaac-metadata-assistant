@@ -10824,11 +10824,11 @@
       },
       {
         "path": "src/isaac_records/draft_validator.py",
-        "sha256": "3fc13a9a673d11ad171e7ead4b4b9004dde7fce5001a95391d890a2ab0cd4fa9"
+        "sha256": "641fcf91501e795a16393fe41a2a93a75277602886d7a8905f50d4e347ccc02f"
       },
       {
         "path": "src/isaac_records/export.py",
-        "sha256": "8e9bcb57399eddc7fea1936566a87fc471bcfa7df37cafbd5304b5c5bf121d94"
+        "sha256": "6d87676ed525c4857afc5103b34cf5b3e3e23fbc857db0cc06708d58c0f530a3"
       },
       {
         "path": "src/isaac_records/extract/__init__.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "fbb4527fa37a17946ba0136f49f79f131a434da0340dc2217100be7a5ba82fbf"
+    "served_manifest_fingerprint": "9e9865e68cda82191d29a7955d39a83e9676c5e9c0b2572ea90ce40a36da97aa"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
