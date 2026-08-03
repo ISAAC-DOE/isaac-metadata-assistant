@@ -34,14 +34,24 @@
  * WHAT THIS GUARD CANNOT CATCH. Stated plainly, because a guard that looks
  * complete is worse than one that admits its edges.
  *
- *  1. BACKEND-SERVED COPY. This test reads `apps/web/src` only. The most-rendered
- *     string in the entire app — the seed record title — is built in
+ *  1. BACKEND-SERVED COPY — AND THIS GAP HAS ALREADY FIRED, so it is not a
+ *     hypothetical. This test reads `apps/web/src` only. The most-rendered string
+ *     in the entire app — the seed record title — is built in
  *     `apps/api/isaac_api/workspace.py`, and so are the five per-record labels,
  *     the suggested-answer label in `serialize.py`, and every OpenAPI summary and
  *     description the Endpoint Explorer renders verbatim. Nothing here sees any of
  *     them. The Python-side sibling is
  *     `apps/api/tests/test_backend_copy_truthfulness.py`, which guards TRUTH, not
- *     register — so backend register is currently guarded by review alone.
+ *     register — so backend register is guarded by review alone.
+ *
+ *     WHAT IT LET THROUGH: P1 shipped with `routes.py`'s `TAG_EVIDENCE` still
+ *     reading "previews of the source fixtures the evidence cites" while the
+ *     operation it groups had been reworded to "reference source file". Both render
+ *     on the same Endpoint Explorer screen, and no test failed. The review caught
+ *     it; a fix-up slice corrected the string. A register guard over
+ *     `apps/api/isaac_api/**` string literals is the obvious remedy and was NOT
+ *     built here — it is a backend test, out of this file's scope — so treat the
+ *     gap as live and check backend copy by hand in any copy slice.
  *
  *  2. COPY COMPOSED AT RUNTIME. A string assembled from parts ("Reset " + noun),
  *     interpolated from a variable, or received in a response body and rendered
@@ -135,10 +145,22 @@ function renderedCopy(path: string): string {
 // --- 2. the allowlist -------------------------------------------------------
 
 /**
- * EXPLICIT, per-file, per-STRING exemptions. Deliberately not "exempt this file":
- * an allowlisted file would go on absorbing new defects invisibly. Each entry is
- * an exact substring that is removed from that file's copy before matching, so
- * every OTHER occurrence in the same file is still caught.
+ * EXPLICIT, per-file, per-STRING, per-OCCURRENCE exemptions. Deliberately not
+ * "exempt this file": an allowlisted file would go on absorbing new defects
+ * invisibly. Each entry exempts exactly ONE occurrence of an exact substring —
+ * `scannedCopy` removes the first match and nothing else — so a SECOND occurrence
+ * of the same string in the same file is still flagged, and so is every other
+ * retired phrasing anywhere in that file.
+ *
+ * ONE occurrence, not all of them, because the justification for each exemption is
+ * a justification for a specific SITE: `RESET SYNTHETIC DEMO` is exempt because it
+ * is the wire value one request body must carry. Nothing justifies a second copy,
+ * and the previous mechanism (`copy.split(allowed).join(' ')`) removed every
+ * occurrence, so a second one — including one used as user-visible copy — would
+ * have been silently laundered. The per-entry count is pinned at 1 by
+ * `the allowlist exempts ONE occurrence…` below, so if a legitimate second site
+ * ever appears the guard fails and forces a deliberate decision rather than
+ * absorbing it.
  *
  * Everything here is on the project's MUST-NOT-CHANGE list — a wire constant, or a
  * statement of what the runtime MODE is. Renaming any of them would either break
@@ -156,9 +178,26 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   'lib/api.ts': ['RESET SYNTHETIC DEMO'],
 };
 
+/** How many times `needle` occurs in `haystack` (non-overlapping, exact). */
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
+/**
+ * Remove the FIRST occurrence of `needle` only. A space replaces it so the text on
+ * either side is not spliced into a phrase the source never contained — the same
+ * reasoning the backend guard's allowlist gives for using containment rather than
+ * excision.
+ */
+function removeOneOccurrence(haystack: string, needle: string): string {
+  const at = haystack.indexOf(needle);
+  if (at === -1) return haystack;
+  return `${haystack.slice(0, at)} ${haystack.slice(at + needle.length)}`;
+}
+
 function scannedCopy(path: string): string {
   let copy = renderedCopy(path);
-  for (const allowed of ALLOWED[path] ?? []) copy = copy.split(allowed).join(' ');
+  for (const allowed of ALLOWED[path] ?? []) copy = removeOneOccurrence(copy, allowed);
   return copy;
 }
 
@@ -437,10 +476,51 @@ describe('P1 · product-facing language — every pattern still flags its own de
         ).toBe(true);
       }
     }
-    // and the exemption is surgical: the rest of that file is still scanned, so a
-    // second occurrence of the same phrase in `lib/api.ts` would still fail.
-    const copy = scannedCopy('lib/api.ts');
-    expect(copy).not.toContain('RESET SYNTHETIC DEMO');
-    expect(copy.length).toBeGreaterThan(1000);
+    // and the exemption is surgical: the rest of that file really is still scanned
+    // (it is not reduced to a stub by the removal).
+    //
+    // The assertion that used to sit here — `expect(scannedCopy('lib/api.ts'))
+    // .not.toContain('RESET SYNTHETIC DEMO')` — was TAUTOLOGICAL: `scannedCopy`
+    // removes that string, so it could not fail for any state of the source. It is
+    // gone; the real property is pinned by the next test, which can fail.
+    expect(scannedCopy('lib/api.ts').length).toBeGreaterThan(1000);
+  });
+
+  /*
+   * P1 review — THE ALLOWLIST'S DEPTH, which the mechanism previously got wrong.
+   *
+   * `scannedCopy` used `copy.split(allowed).join(' ')`, removing EVERY occurrence
+   * while the comment beside it claimed a second occurrence would still fail. The
+   * review disproved it by adding a second `'RESET SYNTHETIC DEMO'` to `lib/api.ts`
+   * and watching the suite stay green. Two properties are now pinned:
+   *
+   *   (a) each allowlisted string occurs exactly ONCE in its file — so if a second
+   *       site ever appears, this fails and forces a decision instead of absorbing
+   *       it; and
+   *   (b) the removal really is one-deep — proven by doubling the REAL file's copy
+   *       and showing the surviving occurrence is still flagged by a real pattern.
+   *
+   * (b) uses the production `removeOneOccurrence`, not a re-implementation, so the
+   * proof cannot drift away from the mechanism it is proving.
+   */
+  it('the allowlist exempts ONE occurrence — a second copy of the same phrase still fails', () => {
+    for (const [path, allowed] of Object.entries(ALLOWED)) {
+      for (const value of allowed) {
+        const raw = renderedCopy(path);
+        expect(
+          occurrences(raw, value),
+          `${path} contains ${occurrences(raw, value)} copies of "${value}"; the ` +
+            'allowlist exempts exactly ONE, so either remove the extra site or ' +
+            'justify it here deliberately',
+        ).toBe(1);
+
+        const doubled = `${raw} ${value}`;
+        const swept = removeOneOccurrence(doubled, value);
+        expect(occurrences(swept, value), 'the removal must be one-deep').toBe(1);
+        const flagged = RETIRED_VOCABULARY.filter(([, p]) => p.test(swept)).map(([l]) => l);
+        expect(flagged, `a second copy of "${value}" in ${path} would not be caught`)
+          .not.toEqual([]);
+      }
+    }
   });
 });

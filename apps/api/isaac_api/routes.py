@@ -142,7 +142,8 @@ OPENAPI_TAGS: list[dict] = [
         "name": TAG_EVIDENCE,
         "description": (
             "The per-field evidence trail, its evidence-support classification, "
-            "and previews of the source fixtures the evidence cites. Read-only."
+            "and previews of the reference source files the evidence cites. "
+            "Read-only."
         ),
     },
     {

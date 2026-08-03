@@ -111,6 +111,10 @@ describe('S2 · demo run — 409 demo_target_drifted is a refusal, not a failure
     // rename of the button cannot leave this copy pointing at a control that no
     // longer exists — the exact way the pre-P1 wording went stale.
     expect(text).toContain(LABELS.actionResetDemo); // the deliberate remedy
+    // BOTH properties, because the `LABELS` indirection alone pins only AGREEMENT
+    // between the copy and the button — it would still pass if the two were renamed
+    // together to anything at all. This pins the words the user actually reads.
+    expect(text).toContain('Reset Workspace');
     // …and it must not misdescribe a healthy server or invent a loss
     expect(text).not.toMatch(/not running|unreachable|not responding|offline|down/i);
     expect(text).not.toMatch(/lost|deleted|corrupt/i);

@@ -161,6 +161,39 @@ describe('P26.0b · Reset Workspace — preview (non-mutating) & disclosure', ()
     expect(text).toMatch(/restores all five/);
     expect(text).toContain('real data is unaffected');
   });
+
+  /*
+   * P1 review — this pins the SHAPE of the reassurance clause, not just its words.
+   *
+   * The clause has been wrong twice. It first denied a data class on the
+   * deployment's behalf ("holds no real experiment data"); that was replaced by a
+   * positive WHOLE-CONTENT claim ("this workspace is built only from committed
+   * example files") which was FALSE — a 64-char canary posted to
+   * `POST /api/experiments/{id}/answers` is present in the persisted workspace
+   * state file and absent from both committed reference files, so the workspace
+   * holds what users store as well as what was committed. Worse, that wording was
+   * chosen partly BECAUSE the positive form slipped past the honesty sweep in
+   * `db-recon-truthfulness.test.tsx`, which only nets denials.
+   *
+   * So the negative assertion below is deliberately a PATTERN over the whole
+   * family of whole-content claims, not the one retired string: the next variant
+   * ("contains only…", "holds no real…") must fail here too. What the clause is
+   * allowed to say is a MODE claim — which the control is already gated on, since
+   * it renders only when health reports `synthetic-only`.
+   */
+  it('makes a mode claim, never a whole-content claim about the workspace', async () => {
+    const view = renderHome(resetDemoRoutes().routes);
+    await openReset(view);
+    const text = (dialog(view).textContent ?? '').toLowerCase();
+
+    // the mode claim, and the two checkable facts that qualify it
+    expect(text).toContain('synthetic-only mode');
+    expect(text).toMatch(/come from committed files/);
+    expect(text).toMatch(/every upload is refused/);
+
+    // ...and NOT any claim about the whole of what the workspace contains
+    expect(text).not.toMatch(/built only from|contains only|holds no real/i);
+  });
 });
 
 // --- 9–12. typed confirmation gate; cancel / escape do not mutate -------------

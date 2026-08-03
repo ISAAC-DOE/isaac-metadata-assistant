@@ -62,7 +62,13 @@ from isaac_records.export import export_draft
 #: jargon; NEITHER was decorative, so both were replaced rather than dropped — the
 #: numbering still distinguishes five examples from five duplicates, and the scope
 #: marker is still the only thing keeping each clause past-tense. Every assertion
-#: below is unchanged in strictness; only the expected strings moved.
+#: below is unchanged in strictness, WITH ONE EXCEPTION, named here because the
+#: blanket claim was false as first written: ``test_no_draft_contains_the_label``
+#: was NARROWED. It previously asserted the bare word ``Scenario`` appears nowhere
+#: in any draft; it now asserts only the ``Example N ·`` shape, because ``Example``
+#: on its own is ordinary English that legitimate draft prose may contain while
+#: ``Scenario`` was not. The narrowing is defensible and is argued at its own site;
+#: it is a real loss of strictness and must not be described as a string move.
 EXPECTED_LABELS = {
     ws.SEED_NEW_DRAFT_ID: "Example 1 · at setup: extraction only",
     ws.SEED_PARTIAL_ID: "Example 2 · at setup: some answers confirmed",
@@ -287,7 +293,7 @@ def test_advanced_seed_label_is_not_falsified_by_the_new_state(client):
     materialised fixture: seed 4's live descriptor now HAS an uncertainty, and seed 2's
     live draft now has every answer applied. Read as a present-tense description of the
     record, the label would therefore be a lie on screen. It is not one, because the
-    ``seeded:`` scope confines it to setup — which is the property asserted here, and
+    ``at setup:`` scope confines it to setup — which is the property asserted here, and
     the property the earlier wording ("Partially Confirmed", "Missing Required Field")
     did not have.
     """

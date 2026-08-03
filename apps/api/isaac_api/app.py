@@ -86,11 +86,22 @@ def create_app() -> FastAPI:
             # uploaded FILE is read, but the CSV-preview and record-validator
             # operations do parse caller-supplied text. The frontend copy already
             # says so plainly; this prose is now held to the same standard.
+            #
+            # P1 review: "seeded" is load-bearing and was briefly lost to "built".
+            # The workspace is not built only from committed content — a confirmed
+            # answer or an edit is persisted into the record's state file, which a
+            # measured canary proved. "Seeded" scopes the claim to materialisation,
+            # which is the only form of it that is true. The third sentence exists
+            # because the two before it, read together, otherwise implied that
+            # nothing a caller supplies is ever stored.
             "This deployment runs in a synthetic-only data mode: file upload is "
-            "always refused and the workspace is built only from committed "
+            "always refused and the workspace is seeded only from committed "
             "reference files. Two operations do parse text you supply in the "
             "request body — the CSV preview and the standalone record validator — "
-            "and neither stores what it reads.\n\n"
+            "and neither stores what it reads. The answers and edits you confirm "
+            "are stored, in the record's workspace state, so once you have worked "
+            "on a record the workspace holds your input as well as the committed "
+            "content it was seeded from.\n\n"
             # Slice 2A: the paragraph above reads as an exhaustive account of what
             # data this deployment touches, and it no longer is. Same wording the
             # frontend's reviewed governance copy carries, so the two cannot drift.
