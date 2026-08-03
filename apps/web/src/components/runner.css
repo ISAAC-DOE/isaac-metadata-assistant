@@ -137,7 +137,15 @@
 }
 .onramp-icon.neutral { background: var(--cover-bg); color: var(--text-slate); }
 .onramp-title { font-size: 14px; font-weight: 600; color: var(--text-heading); }
-.onramp-tagline { font-size: 11px; color: var(--text-tertiary); }
+/* --text-tertiary (#78838f) is ~3.9:1 on the white card — below the 4.5:1 AA
+ * threshold for 11px normal text, so axe reported these two taglines as `serious`
+ * color-contrast failures. The token is used on ~dozens of other surfaces, so it is
+ * NOT moved here; only this rule is corrected, to --text-muted (#5b6570, 5.9:1).
+ * The defect was pre-existing: both taglines always used this colour. Renaming the
+ * first tagline's text in the product-facing-language slice merely made that node
+ * newly measurable at 375px, where the longer old string had wrapped out of axe's
+ * reach. Fixing the colour is the right response; raising the baseline was not. */
+.onramp-tagline { font-size: 11px; color: var(--text-muted); }
 .onramp-tag {
   margin-left: auto;
   font-size: 10.5px;

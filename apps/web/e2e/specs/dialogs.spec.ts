@@ -175,10 +175,24 @@ test.describe('@interaction reset-demo confirmation dialog', () => {
   test('is a labelled modal with a typed-confirmation gate, and Escape cancels', async ({ page, app }) => {
     await app.open(experiments);
 
-    const trigger = page.getByRole('button', { name: /Reset Demo/i });
-    if ((await trigger.count()) === 0) {
-      test.skip(true, 'Reset Demo trigger not present (nothing removable in this workspace state).');
-    }
+    // Asserted, NOT skipped. This used to read
+    //   `if ((await trigger.count()) === 0) test.skip(true, 'nothing removable …')`
+    // and that escape hatch was actively harmful in two ways. Its stated reason was
+    // wrong — the control's visibility is gated on `mode === 'synthetic-only'` from
+    // `GET /api/health` (`ResetDemoDialog` returns null otherwise), never on whether
+    // anything is removable. And because a missing trigger produced a SKIP rather
+    // than a failure, renaming the button from "Reset Demo" to "Reset Workspace"
+    // turned this whole test — the only real-browser coverage of the destructive
+    // dialog's focus trap and typed-confirmation gate — silently vacuous. The
+    // backend this suite asserts as a precondition always runs synthetic-only, so
+    // the trigger is always present; if it is not, that is a defect and must fail.
+    const trigger = page.getByRole('button', { name: /Reset Workspace/i });
+    await expect(
+      trigger,
+      'the Reset Workspace trigger is absent from /experiments. Either the control ' +
+        'was renamed again (update this locator) or the app is not reporting ' +
+        'mode: synthetic-only. Both are failures, not reasons to skip.'
+    ).toBeVisible();
     await trigger.click();
 
     const dialog = page.getByRole('dialog');

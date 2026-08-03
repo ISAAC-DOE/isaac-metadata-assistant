@@ -312,11 +312,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // change: it would move counts on many surfaces at once.
       'guided-completion@mobile-375x812': 8,
       'guided-completion@zoom-200': 9,
-      'load@desktop-1280x800': 5,
-      'load@laptop-1024x768': 5,
-      'load@tablet-768x1024': 5,
-      'load@mobile-375x812': 3,
-      'load@zoom-200': 4,
+      'load@desktop-1280x800': 3,
+      'load@laptop-1024x768': 3,
+      'load@tablet-768x1024': 3,
+      'load@mobile-375x812': 2,
+      'load@zoom-200': 2,
       'memory@desktop-1280x800': 18,
       'memory@laptop-1024x768': 18,
       'memory@tablet-768x1024': 18,
@@ -489,8 +489,24 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Same total, different arithmetic — and the rule that got it here stands:
   // if CI disagrees with a number in this file, correct THE NUMBER from the CI
   // output, never loosen the assertion.
-  darwin: 1629,
-  linux: 1634,
+  // 2026-08-03, product-facing-language slice. darwin 1629 -> 1620, linux
+  // 1634 -> 1625: both fall by the SAME 9, and that is arithmetic rather than a
+  // guess. `.onramp-tagline` used `--text-tertiary` (#78838f, 3.86:1 on the white
+  // card) at 11px, below the 4.5:1 AA threshold, so BOTH taglines on /load were
+  // `serious` color-contrast failures. The rule now uses `--text-muted`
+  // (#5b6570, 5.93:1). The five `load@*` color-contrast entries that fall are
+  // SCALARS, i.e. both platforms read the identical per-key number, so the same
+  // -2/-2/-2/-1/-2 = -9 applies to each total by construction.
+  //
+  // The defect was PRE-EXISTING, not introduced by the rename: both taglines
+  // always used that colour. Renaming the first tagline's text merely made its
+  // node newly measurable at 375px, where the longer old string had wrapped out
+  // of axe's reach — which is why the correct response was to fix the colour, not
+  // to raise the count. If CI disagrees with either number, correct THE NUMBER
+  // from the CI output, never loosen the assertion.
+  //
+  darwin: 1620,
+  linux: 1625,
 };
 
 /**
