@@ -177,6 +177,21 @@ jobs:
         working-directory: apps/web
         run: npm run test:e2e
 
+      # R3 — the MUTATION suite, run after the read-only one and deliberately NOT
+      # merged into it.
+      #
+      # It starts its own backend, its own ISAAC_UI_WORKSPACE and its own dev server
+      # (see `playwright.mutation.config.ts`), so it cannot disturb the read-only
+      # suite's shared seeded workspace — whose assertions are about canonical seed
+      # CONTENT and would fail if a spec answered a question or exported a record.
+      #
+      # Placed AFTER the read-only run so that a failure here is unambiguous in the
+      # log rather than interleaved with it. That is presentation, not a dependency:
+      # the two share no state.
+      - name: Run browser mutation suite (own backend, own workspace)
+        working-directory: apps/web
+        run: npm run test:e2e:mutation
+
       - name: Backend log on failure
         if: failure()
         run: cat /tmp/isaac-api.log || true
