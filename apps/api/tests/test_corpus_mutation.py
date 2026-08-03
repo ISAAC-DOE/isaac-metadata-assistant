@@ -399,16 +399,32 @@ def test_category_d_is_observed_never_asserted(harness):
     # as do five other paths.
     #
     # The real reason, and it is a broader finding than the one it replaces:
-    # `official.py` builds `Draft202012Validator(schema)` with **no
-    # `format_checker`**, so under JSON Schema `format` is annotation-only and
-    # ISAAC enforces NO format constraint anywhere. `created_utc =
-    # "NOT-A-DATE-AT-ALL"` validates too. This is therefore a property of OUR
-    # VALIDATOR CONFIGURATION, not of the upstream schema -- unlike the three
-    # observations above, which are genuinely upstream.
+    # ISAAC enforces NO format constraint anywhere, so `created_utc =
+    # "NOT-A-DATE-AT-ALL"` validates too. This is a property of OUR VALIDATOR
+    # CONFIGURATION, not of the upstream schema -- unlike the three observations
+    # above, which are genuinely upstream.
     #
-    # Recorded rather than fixed: adding a `format_checker` would change what
-    # every existing record validates as, which is a truth-path change and needs
-    # its own slice and its own review.
+    # CORRECTED AGAIN (independent review): this comment previously named ONE
+    # cause -- `official.py` omitting `format_checker`. There are TWO, and they
+    # are independent:
+    #
+    #   Cause 1  `official.py` builds `Draft202012Validator(schema)` with no
+    #            `format_checker=`, so `format` is annotation-only.
+    #   Cause 2  `pyproject.toml` pins plain `jsonschema`, not
+    #            `jsonschema[format]`, so `date-time` is not in
+    #            `Draft202012Validator.FORMAT_CHECKER.checkers` AT ALL.
+    #
+    # Fixing either ALONE changes nothing. Fixing only Cause 1 is worse than
+    # doing nothing: the validator then LOOKS armed and still accepts
+    # "not-a-date". The single-cause belief this paragraph used to state is
+    # exactly the trap -- `tests/test_truthpath_characterization.py` exists to
+    # make that half-fix impossible to ship quietly, and its Part A interlock
+    # fails if these two files ever disagree about the model.
+    #
+    # Recorded rather than fixed: arming enforcement would change what every
+    # existing record validates as, which is a truth-path change needing its own
+    # slice, its own review, and -- because the same validator runs over the
+    # production-derived corpus in `db_recon.py` -- the database owner's answer.
     assert "set_empty_string@/timestamps/created_utc" in stayed_valid
     assert "set_whitespace_string@/timestamps/created_utc" in stayed_valid
 

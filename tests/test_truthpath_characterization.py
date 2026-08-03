@@ -33,9 +33,21 @@ the evidence that arming enforcement is safe for the public corpus.
 Nothing here asserts desired behaviour. When enforcement is genuinely armed,
 these tests are SUPPOSED to fail; the failure messages say what to change.
 
-Related, deliberately not edited: ``apps/api/tests/test_corpus_mutation.py``
-records the same lenient ``format`` behaviour from the mutation-harness side.
-Both describe one reality; they must stay consistent.
+EVERY TEST THAT ARMING ENFORCEMENT WILL BREAK. A fixer needs the whole list up
+front, because the fix is one change and the fallout is spread across three
+files. Measured by an independent reviewer who actually applied the full fix:
+
+  * this module — Part A (4 tests) and Part B (39 tests) — 43 in total;
+  * ``apps/api/tests/test_corpus_mutation.py`` — the ``stayed_valid``
+    assertions for ``created_utc``, which record the same leniency from the
+    mutation-harness side. Its comment now states the SAME two-cause model as
+    this module; if the two ever disagree, one of them is lying.
+  * ``tests/test_diagnostics.py`` —
+    ``test_format_is_present_in_the_schema_but_not_enforced_by_this_validator``.
+    This one was previously unnamed here, and a fixer following the old note
+    would have been ambushed by it.
+
+Three files, one reality. They must stay consistent.
 """
 
 from __future__ import annotations
@@ -129,14 +141,21 @@ def test_cause_2_the_rfc3339_dependency_is_not_declared():
     that a fresh environment would not reproduce.
     """
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"jsonschema>=4.21"' in text, (
-        "The jsonschema dependency declaration changed. If it now requests "
-        "jsonschema[format] or rfc3339-validator, Cause 2 is fixed and Cause 1 "
-        "(format_checker= in src/isaac_records/official.py) must be fixed in the "
-        "same change."
+    # Assert the ABSENCE of a format-capable declaration, never the presence of
+    # one exact pinned version string. Reviewed change: this used to require the
+    # literal '"jsonschema>=4.21"', so a routine unrelated version bump failed
+    # with a message about format enforcement — a false alarm pointing at the
+    # wrong file.
+    assert "rfc3339" not in text.lower(), (
+        "pyproject now declares an RFC3339 date-time implementation, so Cause 2 "
+        "is fixed. Cause 1 (format_checker= in src/isaac_records/official.py) "
+        "must be fixed in the SAME change, or ISAAC lands in the silent "
+        "half-fix state."
     )
-    assert "rfc3339" not in text.lower()
-    assert "jsonschema[format" not in text
+    assert "jsonschema[format" not in text, (
+        "pyproject now requests the jsonschema[format] extra, so Cause 2 is "
+        "fixed. Cause 1 must be fixed in the same change."
+    )
 
 
 def test_cause_1_the_official_validator_carries_no_format_checker():
@@ -177,7 +196,32 @@ def test_the_two_causes_agree_that_enforcement_is_dead():
     cause_2_available = "date-time" in Draft202012Validator.FORMAT_CHECKER.checkers
 
     record = load_probe("SYNTHETIC-FORMAT-PROBE-01")  # created_utc = "not-a-date"
-    observed_enforcement = not validate_official(record, ROOT).ok
+
+    # BASELINE GUARD (added after independent review). Without this, ANY schema
+    # error anywhere in the fixture — a corrupted ULID, a renamed enum, an
+    # unrelated schema edit — would read as `observed_enforcement = True` and
+    # this test would tell the reader that format enforcement had come alive.
+    # A reviewer proved that exact misdiagnosis by corrupting `record_id`. So
+    # first establish that the fixture is otherwise clean: with a canonical
+    # RFC3339 timestamp in place, it must validate.
+    baseline = load_probe("SYNTHETIC-FORMAT-PROBE-01")
+    baseline["timestamps"]["created_utc"] = "2099-01-01T00:00:00Z"
+    baseline_report = validate_official(baseline, ROOT)
+    assert baseline_report.ok, (
+        "The probe fixture is invalid for a reason that has nothing to do with "
+        "`format`. Fix that first — until it validates with a canonical "
+        "timestamp, this test cannot say anything about format enforcement.\n"
+        f"{baseline_report.render()}"
+    )
+
+    # ATTRIBUTABLE observation. Enforcement is 'live' only if the validator
+    # objects AT `timestamps.created_utc` ABOUT the date-time format — not
+    # merely if it objects to something.
+    report = validate_official(record, ROOT)
+    observed_enforcement = any(
+        err.path == "timestamps.created_utc" and "date-time" in err.message
+        for err in report.errors
+    )
 
     assert (cause_1_armed, cause_2_available, observed_enforcement) == (False, False, False), (
         "The format-enforcement state changed.\n"
@@ -517,6 +561,41 @@ def test_empty_series_exports_a_record_with_no_measurement_and_no_qc_verdict(dra
         "the sidecar no longer advertises evidence for a verdict absent from the "
         "record — a FIX; update this test"
     )
+
+
+def test_a_nonsense_timestamp_survives_the_whole_export_path_unchanged(draft):
+    """PINS A DEFECT — the third of the claim the rest of this module missed.
+
+    Added after independent review. Every other format test above stops at
+    VALIDATION: it proves the validator accepts a nonsense ``date-time``. That
+    leaves the more consequential half unpinned — that such a value travels the
+    whole export path and is written into the official record VERBATIM.
+
+    The gap was not theoretical. A reviewer armed a rejection inside
+    ``export_draft`` and the entire 76-test suite stayed green, because nothing
+    exercised the export gate with a bad timestamp. A fix (or a regression)
+    landing there would have shipped invisibly.
+
+    ``now`` is the exported record's ``timestamps.created_utc``, which is a
+    REQUIRED field carrying ``"format": "date-time"``.
+    """
+    result = export_draft(copy.deepcopy(draft), ROOT, record_id=RID, now="not-a-date")
+
+    assert result.ok, (
+        "the export path now REFUSES a non-RFC3339 created_utc — that is a FIX; "
+        "update this test and re-read the module docstring.\n"
+        f"{result.draft_report.render()}\n"
+        f"{result.official_report.render() if result.official_report else ''}"
+    )
+    assert result.official_report.ok, (
+        "official validation now objects to the timestamp; enforcement may be armed"
+    )
+    assert result.record["timestamps"]["created_utc"] == "not-a-date", (
+        "the exported record no longer carries the nonsense value verbatim — "
+        "something now normalises or rejects it; update this test"
+    )
+    # And it is really in the serialized artifact, not merely in a dict field.
+    assert '"created_utc": "not-a-date"' in json.dumps(result.record, indent=2)
 
 
 # =============================================================================
