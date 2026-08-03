@@ -272,7 +272,19 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'export-readiness@tablet-768x1024': 6,
       'export-readiness@mobile-375x812': 1,
       'export-readiness@zoom-200': 4,
-      'export-readiness-done@desktop-1280x800': 13,
+      // R1b: the `.verdict-cmd mono` block that rendered
+      // `isaac validate --official · exit N` is GONE (a fabricated CLI transcript —
+      // no process produced it), and it was a low-contrast node axe counted here.
+      //
+      // PER-PLATFORM, and the first attempt at this entry got it wrong. I lowered
+      // the scalar to 12 reasoning that "a removed DOM node is platform-
+      // independent", which sounds obvious and is FALSE here: linux MEASURED 12
+      // (CI run on 52c1576) while darwin MEASURED 13 (local run, same commit). The
+      // removal changes how the remaining fragments wrap, and the wider linux face
+      // merges two text nodes that darwin keeps apart — the same mechanism the
+      // notes below describe for other split pairs. Both numbers are measurements,
+      // neither is derived.
+      'export-readiness-done@desktop-1280x800': { darwin: 13, linux: 12 },
       'export-readiness-done@laptop-1024x768': 12,
       // The two pairs where LINUX HAS FEWER nodes: the wider face pushes two
       // fragments onto one line, so axe sees one text node instead of two.
@@ -505,8 +517,14 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // to raise the count. If CI disagrees with either number, correct THE NUMBER
   // from the CI output, never loosen the assertion.
   //
+  // R1b: LINUX ONLY falls by 1 (`export-readiness-done@desktop-1280x800` 13 -> 12,
+  // measured in CI). darwin measured 13 on the same commit and is UNCHANGED at 1620.
+  // The first version of this edit dropped both by 1 on the assumption that removing
+  // a DOM node must affect both platforms equally. It does not — see the note on that
+  // entry. Arithmetic on a total is only safe when the per-surface delta is itself
+  // measured on that platform.
   darwin: 1620,
-  linux: 1625,
+  linux: 1624,
 };
 
 /**

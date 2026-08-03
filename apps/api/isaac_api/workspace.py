@@ -844,19 +844,64 @@ def _canonical_state_counts() -> dict:
     return counts
 
 
-def reset_to_canonical_seed(*, dry_run: bool) -> dict:
-    """Classify the workspace and (unless ``dry_run``) restore the canonical seed.
+# --- R1: the reset plan digest -------------------------------------------------
+#
+# The reset used to accept ``{mode, confirmation}`` and nothing else. A client that
+# previewed, showed the operator a dialog, and executed thirty seconds later
+# destroyed anything committed in between — the operator had approved a
+# CLASSIFICATION that no longer held, and the response then stated an outcome
+# derived from that stale classification. ``plan_digest`` closes that: ``preview``
+# returns an opaque digest of the classified workspace, and ``execute`` must present
+# it back. A missing digest and a stale digest are refused SEPARATELY (the route maps
+# them to 428 / 412, mirroring the ``If-Match`` convention) and neither mutates.
 
-    Refuses (makes NO changes) if ANY ambiguous record exists. Otherwise, on
-    execute, removes ONLY the managed_legacy directories via ``remove_experiment``
-    (path-safe), then re-materialises EVERY canonical scenario to its deterministic
-    seed baseline — a present-but-drifted canonical record (partial answers, stale
-    evidence, a wrongly-exported artifact) is removed and rebuilt from the seed, not
-    merely left in place. This restores CONTENT, not just the id set, and mints a
-    fresh generation per id (invalidating every pre-reset ETag). Idempotent in
-    content. Returns typed, path-free data (no filesystem paths).
+#: Serialises the whole classify -> verify-digest -> mutate -> measure sequence, so
+#: two concurrent resets cannot interleave and a digest verified here cannot be
+#: invalidated by ANOTHER reset before the mutation runs.
+#:
+#: Deadlock-free with ``record_lock``: this lock is only ever acquired FIRST and the
+#: reset then takes at most ONE ``record_lock`` at a time (see the loops below).
+#: Nothing else in the codebase acquires this lock, and no ``record_lock`` holder
+#: ever waits for it, so the classic two-lock cycle cannot form.
+#:
+#: WHAT IT DOES NOT COVER, stated plainly: a per-record writer (``/answers``,
+#: ``/edit``, ``/export``) does NOT take this lock, so a write can still land in the
+#: window between the digest check and the per-id mutation. That window is
+#: sub-millisecond and in-process; the defect the digest exists to fix is the
+#: human-scale one (a dialog left open). Each individual record's mutation IS
+#: serialised against that writer by ``record_lock``, which is what keeps the
+#: filesystem consistent.
+_reset_lock = threading.Lock()
+
+
+def _seed_baseline(spec: "_SeedSpec") -> "Experiment":
+    """The canonical seed baseline for one spec, built IN MEMORY only — never saved.
+
+    Used to answer "has this example been worked on?" by comparing authoritative
+    signatures. ``record_id`` matters and is easy to get wrong: an ``exported`` spec
+    is materialised through a real export keyed to its own id, so disk carries
+    ``record_id == spec.id`` while a freshly-constructed ``Experiment`` carries
+    ``None`` — and ``record_id`` is inside ``_authoritative_signature``.
+
+    NOTE (duplication, deliberate and NOT fixed in this slice): ``routes._demo_baseline``
+    builds the same object for the demo-run drift check. Converging them means editing
+    a part of ``routes.py`` this slice does not own, so the two are kept identical by
+    hand for now — both derive from ``_seed_specs`` / ``_seed_source``, which remain the
+    single definition of the seed's CONTENT, so a drift between them could only be in
+    this wrapper. Fold them together in a later slice.
     """
-    experiments = _load_all_experiments()
+    return Experiment(
+        id=spec.id,
+        title=spec.title,
+        created_utc=spec.created_utc,
+        source=_seed_source(),
+        draft=spec.draft_fn(),
+        record_id=spec.id if spec.exported else None,
+    )
+
+
+def _classify_workspace(experiments: list["Experiment"]) -> dict[str, list["Experiment"]]:
+    """Split the workspace into the three reset buckets, in listing order."""
     buckets: dict[str, list[Experiment]] = {
         CANONICAL: [],
         MANAGED_LEGACY: [],
@@ -864,44 +909,216 @@ def reset_to_canonical_seed(*, dry_run: bool) -> dict:
     }
     for exp in experiments:
         buckets[classify_experiment(exp)].append(exp)
+    return buckets
 
-    previous_count = len(experiments)
-    canonical = buckets[CANONICAL]
-    legacy = buckets[MANAGED_LEGACY]
-    ambiguous = buckets[AMBIGUOUS]
-    refused = bool(ambiguous)
 
-    removed = 0
-    if not dry_run and not refused:
-        for exp in legacy:
-            remove_experiment(exp)
-            removed += 1
-        # Restore canonical CONTENT to the deterministic seed baseline (not just
-        # fill missing). Each canonical id is removed and re-materialised, so
-        # drifted content, partial answers, and wrongly-exported artifacts are
-        # cleared, and a FRESH generation is minted (invalidating every pre-reset
-        # ETag). Targeted to the fixed canonical id set — NOT a broad filesystem
-        # wipe.
-        for spec in _seed_specs():
-            with record_lock(spec.id):
-                target = workspace_root() / spec.id
-                if target.exists():
-                    _remove_experiment_dir(target)  # path-safe (direct-child guard)
-                _materialise_seed(spec)  # baseline content + fresh generation + DONE artifact
+def _plan_digest(buckets: dict[str, list["Experiment"]]) -> str:
+    """A deterministic, opaque digest of the CLASSIFIED workspace.
 
-    # final_count: nothing changes when refused; otherwise the reset guarantees
-    # exactly the five canonical records (legacy removed, missing canonical rebuilt).
-    final_count = previous_count if refused else len(CANONICAL_IDS)
+    One row per record present: its id, the bucket it classified into, its public
+    version token (``<generation>.<rev>``), how many entries its answer log holds,
+    and its authoritative signature. Any edit, answer, confirmation, export,
+    creation or removal anywhere in the workspace changes at least one row, so it
+    changes the digest:
+
+    * an answer / edit / export bumps ``rev`` -> the version token changes;
+    * a creation adds a row; a removal drops one;
+    * a delete-then-recreate of the same id mints a fresh ``generation``, so the
+      digest differs even though ``rev`` returned to 0 (the ABA the generation nonce
+      exists to defeat);
+    * a record whose provenance marker changed moves bucket.
+
+    The signature and the answer-log length are included because the preview reports
+    numbers DERIVED from them (``at_risk``), and a digest that did not cover them
+    could stay valid while the disclosed numbers went stale. In normal operation they
+    are redundant with ``rev`` — a content change always bumps it — but a state file
+    written outside ``save_versioned`` would not, and the digest must still notice.
+
+    Path-free and content-free by construction: ids and buckets are opaque
+    identifiers, and everything else is a hash or a count. The whole row set is
+    reduced to one sha256, so nothing is recoverable from the digest itself.
+    """
+    rows = sorted(
+        [
+            exp.id,
+            bucket,
+            exp.version_token(),
+            len(exp.answer_log or []),
+            _authoritative_signature(exp),
+        ]
+        for bucket, exps in buckets.items()
+        for exp in exps
+    )
+    blob = json.dumps(rows, sort_keys=True, ensure_ascii=False)
+    return "rp1." + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
+
+
+def _at_risk_summary(
+    canonical: list["Experiment"], legacy: list["Experiment"]
+) -> dict[str, int]:
+    """What confirmed work this reset would actually discard — DERIVED, never guessed.
+
+    Three counts, each from real persisted state, over exactly the records the reset
+    touches (canonical is re-materialised, managed-legacy is removed; an ambiguous
+    record is never touched and so is never counted):
+
+    * ``confirmed_answers`` — total entries in ``answer_log``. One entry is appended
+      per submission that actually changed the authoritative draft; a no-op
+      re-entry is popped again (``routes.submit_answers``), so this counts real
+      confirmations, not clicks.
+    * ``examples_with_progress`` — built-in examples whose authoritative signature
+      (``{title, source, draft, record_id}``) differs from the in-memory seed
+      baseline. That is the SAME comparison ``POST /api/demo/run`` uses to refuse
+      over a changed record, so the two surfaces cannot disagree about what "worked
+      on" means.
+    * ``exported_artifacts`` — exports that are NOT part of the baseline. The
+      built-in exported example is excluded by construction: its spec carries
+      ``exported=True``, so its ``record_id`` is baseline state rather than operator
+      progress. Counting it would tell the operator they are about to lose an export
+      they never made.
+    """
+    specs = {s.id: s for s in _seed_specs()}
+    confirmed_answers = 0
+    examples_with_progress = 0
+    exported_artifacts = 0
+
+    for exp in canonical:
+        confirmed_answers += len(exp.answer_log or [])
+        spec = specs.get(exp.id)
+        if spec is None:  # pragma: no cover - CANONICAL_IDS is derived from _seed_specs
+            continue
+        if _authoritative_signature(exp) != _authoritative_signature(_seed_baseline(spec)):
+            examples_with_progress += 1
+        if exp.record_id is not None and not spec.exported:
+            exported_artifacts += 1
+
+    for exp in legacy:
+        confirmed_answers += len(exp.answer_log or [])
+        if exp.record_id is not None:
+            exported_artifacts += 1
 
     return {
-        "refused": refused,
-        "previous_count": previous_count,
-        "canonical_count": len(canonical),
-        "legacy_count": len(legacy),
-        "ambiguous_count": len(ambiguous),
-        "removed_count": removed,
-        "final_count": final_count,
-        "canonical_ids": sorted(CANONICAL_IDS),
-        "removable": [{"id": e.id, "title": e.title} for e in legacy],
-        "state_counts": _canonical_state_counts(),
+        "confirmed_answers": confirmed_answers,
+        "examples_with_progress": examples_with_progress,
+        "exported_artifacts": exported_artifacts,
     }
+
+
+def reset_to_canonical_seed(
+    *, dry_run: bool, expected_plan_digest: str | None = None
+) -> dict:
+    """Classify the workspace and (unless ``dry_run``) restore the canonical seed.
+
+    Refuses (makes NO changes) if ANY ambiguous record exists, and — when
+    ``expected_plan_digest`` is supplied — if it does not match the digest of the
+    workspace as classified here. Otherwise, on execute, removes ONLY the
+    managed_legacy directories via ``remove_experiment`` (path-safe, each under that
+    record's own ``record_lock``), then re-materialises EVERY canonical scenario to
+    its deterministic seed baseline — a present-but-drifted canonical record (partial
+    answers, stale evidence, a wrongly-exported artifact) is removed and rebuilt from
+    the seed, not merely left in place. This restores CONTENT, not just the id set,
+    and mints a fresh generation per id (invalidating every pre-reset ETag).
+    Idempotent in content. Returns typed, path-free data (no filesystem paths).
+
+    ``expected_plan_digest`` defaults to ``None`` = no precondition, which is what the
+    direct in-process callers (tests, the concurrency suites) use. The HTTP route
+    ALWAYS supplies it for an execute: the precondition is part of the API contract,
+    not of this function's contract.
+
+    ``final_count`` is MEASURED after the mutation, never asserted from
+    ``len(CANONICAL_IDS)``. A record created between the classification and the
+    mutation is not classified, so it is not removed — it survives, and the reported
+    count says so.
+    """
+    with _reset_lock:
+        experiments = _load_all_experiments()
+        buckets = _classify_workspace(experiments)
+
+        previous_count = len(experiments)
+        canonical = buckets[CANONICAL]
+        legacy = buckets[MANAGED_LEGACY]
+        ambiguous = buckets[AMBIGUOUS]
+        plan_digest = _plan_digest(buckets)
+        at_risk = _at_risk_summary(canonical, legacy)
+
+        # Precondition BEFORE the ambiguity verdict: a client holding a stale plan
+        # must be told to look again, not handed a classification verdict about a
+        # workspace it has never seen.
+        refusal: str | None = None
+        if expected_plan_digest is not None and expected_plan_digest != plan_digest:
+            refusal = "plan_digest_stale"
+        elif ambiguous:
+            refusal = "ambiguous_records_present"
+        refused = refusal is not None
+
+        removed = 0
+        if not dry_run and not refused:
+            # Symmetric locking: BOTH the managed-legacy removal and the canonical
+            # re-materialisation hold that record's own ``record_lock``, so a
+            # concurrent writer can never race an unlocked directory removal. Taken
+            # one at a time and released before the next (never two at once), which
+            # is what keeps this deadlock-free against a mutation handler that can
+            # itself hold two record locks via ``ensure_seeded``.
+            for exp in legacy:
+                with record_lock(exp.id):
+                    remove_experiment(exp)
+                removed += 1
+            # Restore canonical CONTENT to the deterministic seed baseline (not just
+            # fill missing). Each canonical id is removed and re-materialised, so
+            # drifted content, partial answers, and wrongly-exported artifacts are
+            # cleared, and a FRESH generation is minted (invalidating every pre-reset
+            # ETag). Targeted to the fixed canonical id set — NOT a broad filesystem
+            # wipe.
+            for spec in _seed_specs():
+                with record_lock(spec.id):
+                    target = workspace_root() / spec.id
+                    if target.exists():
+                        _remove_experiment_dir(target)  # path-safe (direct-child guard)
+                    _materialise_seed(spec)  # baseline content + fresh generation + DONE artifact
+
+        # ``final_count`` — three cases, and the difference between them is the point
+        # of D3. Keep them distinct; collapsing any two makes the number dishonest.
+        #
+        #  * REFUSED: nothing changed, so the classification snapshot IS the truth.
+        #  * PREVIEW that would proceed: nothing has happened yet, so this is
+        #    necessarily a PROJECTION — and the projection is exactly the canonical
+        #    five, because a non-refused reset removes the legacy set and rebuilds the
+        #    canonical set. Since R1 that projection is also GUARANTEED rather than
+        #    hoped for: the ``plan_digest`` precondition means the execute cannot run
+        #    against a workspace that gained a record after this preview.
+        #  * EXECUTE that proceeded: MEASURED by re-reading the workspace. Never
+        #    ``len(CANONICAL_IDS)``, which was the D3 defect — a record created between
+        #    the classification and the mutation is not classified, so it is not
+        #    removed, so it survives, and the response must say so.
+        if refused:
+            final_count = previous_count
+            final_digest = plan_digest
+            final_at_risk = at_risk
+        elif dry_run:
+            final_count = len(CANONICAL_IDS)
+            final_digest = plan_digest
+            final_at_risk = at_risk
+        else:
+            post = _load_all_experiments()
+            post_buckets = _classify_workspace(post)
+            final_count = len(post)
+            final_digest = _plan_digest(post_buckets)
+            final_at_risk = _at_risk_summary(
+                post_buckets[CANONICAL], post_buckets[MANAGED_LEGACY]
+            )
+
+        return {
+            "refused": refused,
+            "refusal": refusal,
+            "previous_count": previous_count,
+            "canonical_count": len(canonical),
+            "legacy_count": len(legacy),
+            "ambiguous_count": len(ambiguous),
+            "removed_count": removed,
+            "final_count": final_count,
+            "canonical_ids": sorted(CANONICAL_IDS),
+            "removable": [{"id": e.id, "title": e.title} for e in legacy],
+            "state_counts": _canonical_state_counts(),
+            "plan_digest": final_digest,
+            "at_risk": final_at_risk,
+        }

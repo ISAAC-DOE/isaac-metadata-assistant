@@ -153,29 +153,46 @@ function renderedCopy(path: string): string {
  * retired phrasing anywhere in that file.
  *
  * ONE occurrence, not all of them, because the justification for each exemption is
- * a justification for a specific SITE: `RESET SYNTHETIC DEMO` is exempt because it
- * is the wire value one request body must carry. Nothing justifies a second copy,
- * and the previous mechanism (`copy.split(allowed).join(' ')`) removed every
- * occurrence, so a second one — including one used as user-visible copy — would
- * have been silently laundered. The per-entry count is pinned at 1 by
- * `the allowlist exempts ONE occurrence…` below, so if a legitimate second site
- * ever appears the guard fails and forces a deliberate decision rather than
- * absorbing it.
+ * a justification for a specific SITE. The worked example was the reset confirmation
+ * phrase, exempt in `lib/api.ts` as "the wire value one request body must carry";
+ * nothing justified a second copy, and the previous mechanism
+ * (`copy.split(allowed).join(' ')`) removed every occurrence, so a second one —
+ * including one used as user-visible copy — would have been silently laundered. The
+ * per-entry count is pinned at 1 by `the allowlist exempts ONE occurrence…` below, so
+ * if a legitimate second site ever appears the guard fails and forces a deliberate
+ * decision rather than absorbing it.
  *
- * Everything here is on the project's MUST-NOT-CHANGE list — a wire constant, or a
- * statement of what the runtime MODE is. Renaming any of them would either break
- * the protocol or make the app misreport itself, which is a worse defect than the
- * register problem this file exists to prevent.
+ * That example is now HISTORICAL — R1 renamed the phrase and removed the exemption,
+ * leaving `ALLOWED` empty (see the note on it). The mechanism is unchanged and is
+ * proven directly in §5 so it cannot rot while there is nothing to exempt.
+ *
+ * Anything added here must be on the project's MUST-NOT-CHANGE list — a wire
+ * constant, or a statement of what the runtime MODE is — where renaming it would
+ * either break the protocol or make the app misreport itself, which is a worse defect
+ * than the register problem this file exists to prevent.
  */
 const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   /*
-   * The confirmation phrase for `POST /api/demo/reset`, pinned character-for-
-   * character to `_RESET_CONFIRMATION` in `apps/api/isaac_api/routes.py`. It is a
-   * WIRE VALUE and is never surfaced to a user: the dialog asks the operator to
-   * type "RESET", and the client sends this constant on their behalf. Renaming it
-   * on one side only would make every reset fail closed with a 409.
+   * EMPTY, and that is the current state of the codebase rather than a decision to
+   * stop exempting things.
+   *
+   * It used to hold ONE entry: `'lib/api.ts': ['RESET SYNTHETIC DEMO']`, the
+   * confirmation phrase for `POST /api/demo/reset`, justified as a wire value the
+   * operator never sees. R1 renamed the phrase to `RESET EXAMPLE WORKSPACE` on both
+   * sides, so the exemption became dead and had to go — `the allowlist exempts exact
+   * strings` below fails on a dead exemption, by design.
+   *
+   * The original justification was also weaker than it read. "Never surfaced to a
+   * user" was true of the DIALOG (the operator types the shorter "RESET" gate) but
+   * not of the BUILD: the string shipped in the bundle, so anyone who looked found
+   * the product describing itself as a synthetic demo. That is precisely the register
+   * problem this file exists to prevent, one indirection removed.
+   *
+   * Adding a new entry is still legitimate — the mechanism below is intact and
+   * self-tested — but the bar is a wire constant or a runtime-MODE statement whose
+   * rename would break the protocol or make the app misreport itself. "It only ships
+   * in the bundle" is not that bar.
    */
-  'lib/api.ts': ['RESET SYNTHETIC DEMO'],
 };
 
 /** How many times `needle` occurs in `haystack` (non-overlapping, exact). */
@@ -484,6 +501,47 @@ describe('P1 · product-facing language — every pattern still flags its own de
     // removes that string, so it could not fail for any state of the source. It is
     // gone; the real property is pinned by the next test, which can fail.
     expect(scannedCopy('lib/api.ts').length).toBeGreaterThan(1000);
+  });
+
+  /*
+   * R1. `ALLOWED` is currently EMPTY, which makes the two loops above and below
+   * iterate zero times. That is a real hole: with nothing to iterate, a broken
+   * mechanism would pass both of them silently, and the next person to add an entry
+   * would inherit a guard that had stopped being proven.
+   *
+   * So the mechanism is proven directly, against a synthetic entry rather than the
+   * real one, using the production `removeOneOccurrence` and `renderedCopy`.
+   */
+  it('the removal mechanism still works when the allowlist happens to be empty', () => {
+    const needle = 'Run Synthetic Demo'; // a string a real pattern flags
+    expect(RETIRED_VOCABULARY.some(([, p]) => p.test(needle))).toBe(true);
+
+    const doubled = `alpha ${needle} beta ${needle} gamma`;
+    const once = removeOneOccurrence(doubled, needle);
+    expect(occurrences(once, needle)).toBe(1); // one-deep, not global
+    expect(RETIRED_VOCABULARY.some(([, p]) => p.test(once))).toBe(true);
+    expect(occurrences(removeOneOccurrence(once, needle), needle)).toBe(0);
+    // a needle that is absent leaves the text untouched (no accidental splicing)
+    expect(removeOneOccurrence('alpha beta', needle)).toBe('alpha beta');
+
+    // ...and with no exemptions, `scannedCopy` is exactly `renderedCopy`
+    expect(Object.keys(ALLOWED)).toEqual([]);
+    expect(scannedCopy('lib/api.ts')).toBe(renderedCopy('lib/api.ts'));
+  });
+
+  /*
+   * R1 renamed the reset confirmation phrase on BOTH sides. The rename is pinned here
+   * rather than left to the scan, because the scan can only prove the old string is
+   * gone — it cannot prove the new one is present and correct, and a half-applied
+   * rename fails every reset closed with a 409.
+   */
+  it('the reset confirmation phrase is the renamed, jargon-free one', () => {
+    const copy = renderedCopy('lib/api.ts');
+    expect(copy).toContain("RESET EXAMPLE WORKSPACE");
+    expect(copy).not.toContain('RESET SYNTHETIC DEMO');
+    // and the new value trips no pattern, so it needs no exemption at all
+    const flagged = RETIRED_VOCABULARY.filter(([, p]) => p.test('RESET EXAMPLE WORKSPACE'));
+    expect(flagged.map(([l]) => l)).toEqual([]);
   });
 
   /*

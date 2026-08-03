@@ -76,6 +76,9 @@ export function EvidenceExplorer() {
       agentContext={session.context}
       agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
+      // R1b — a change-signalled refetch that failed must be stated, or the
+      // reader is looking at a superseded evidence trail with no hint of it.
+      refreshFailed={bundle.refreshFailed}
     />
   );
 }
@@ -87,6 +90,7 @@ function LoadedEvidence({
   agentContext,
   agentDegraded,
   onManualRefresh,
+  refreshFailed,
 }: {
   id: string;
   data: EvidenceBundle;
@@ -94,6 +98,7 @@ function LoadedEvidence({
   agentContext: AgentContext | undefined;
   agentDegraded: boolean;
   onManualRefresh: () => void;
+  refreshFailed: boolean;
 }) {
   const { detail, evidence, artifacts, graph, sourcePreviews, classification } = data;
   const navigate = useNavigate();
@@ -229,7 +234,11 @@ function LoadedEvidence({
           say; the wrapper carries no vertical margin, so an empty wrapper adds
           no space and `.evclass` still starts exactly one gutter below the bar. */}
       <div className="main-inset">
-        <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
+        <LiveSyncNote
+          degraded={degraded}
+          refreshFailed={refreshFailed}
+          onRefresh={onManualRefresh}
+        />
         <WorkflowProgressBanner
           workflow={detail.workflow}
           recordId={id}
@@ -244,7 +253,7 @@ function LoadedEvidence({
       <CsvReconcilePanel
         experimentId={id}
         version={detail.version}
-        onOpenRecord={() => navigate(ROUTES.complete(id))}
+        onGoToComplete={() => navigate(ROUTES.complete(id))}
       />
       <SourcePreview
         entry={selected}

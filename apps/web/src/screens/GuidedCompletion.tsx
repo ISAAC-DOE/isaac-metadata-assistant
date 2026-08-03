@@ -239,9 +239,24 @@ function LoadedCompletion({
         note="Every field is confirmed or resolved — export is now unlocked."
       />
     ) : (
+      // R1b — the note used to read "Export unlocks automatically once every field
+      // is confirmed or honestly left missing." The second half was false: export
+      // requires `pending_count == 0` (apps/api/isaac_api/workflow.py:
+      // `complete_metadata = pending_count == 0`), and pressing "I don't know"
+      // sends nothing and leaves the question in `pending`. So leaving a field
+      // honestly missing never unlocks export — and this screen's own
+      // skipped-list copy already said the opposite ("Export stays gated until
+      // each is confirmed"), so the surface contradicted itself.
       <StatusBar
         phase={`${remaining} of ${total} fields still to confirm`}
-        note="Export unlocks automatically once every field is confirmed or honestly left missing."
+        /* R1b. The old note said export unlocks "once every field is confirmed OR
+           honestly left missing" — false: the gate is `pending_count == 0`, and
+           saying "I don't know" sends nothing, so it leaves the field pending and
+           export stays shut. The correction must also stay SHORT: a longer first
+           draft wrapped at the 640px/200%-zoom layout viewport and pushed the
+           status bar 1px past the screen card (zoom-200 layout baseline). This is
+           shorter than the false sentence it replaces. */
+        note="Export unlocks once every field is confirmed — saying you don't know leaves it open."
       />
     );
 
@@ -410,7 +425,17 @@ function LoadedCompletion({
           <Check size={13} strokeWidth={2.6} />
         </span>
         <span className="answered-label">{ans.label}</span>
-        <span className="answered-stored">stored {ans.storedValue}</span>
+        {/* R1b — was `stored {ans.storedValue}`. `storedValue` is
+            `answerValuePreview(kind, value)` over the value the CLIENT submitted:
+            `ApiAnswersResponse` is `{pending, status, workflow, invalidation}` plus
+            version fields and carries NO echo of what was stored. The server may
+            also drop an answer it does not recognise
+            (`routes.py::_answers_to_apply_shape`: "Blank and unrecognised answers
+            are dropped rather than applied"), so "stored" was a claim about server
+            state that nothing in the response supports. The value is still shown;
+            only the unsupported verb is gone. The neighbouring "Confirmed by You"
+            chip is the accurate claim — the reader confirmed it. */}
+        <span className="answered-stored">you answered {ans.storedValue}</span>
         <span className="answered-trailing">
           <StatusChip kind="confirmed" />
           <button
@@ -540,14 +565,33 @@ function LoadedCompletion({
         </div>
       ))}
 
+      {/* R1b — the title used to read "You've reviewed every question · N left
+          honestly missing", which presented SESSION state as a durable review
+          outcome. The skip decision lives only in the `skipped` useState above:
+          pressing "I don't know" sends nothing (deliberately — inventing a value
+          would be worse), and `LoadedCompletion` is remounted by every reload, so
+          the set is gone on refresh and on navigating away. Persisting it needs a
+          new backend field, which is out of scope here, so the copy states the
+          scope it can actually keep. */}
       {!blocker && skippedItems.length > 0 && (
         <div className="completion-allskipped" role="note">
+          {/* KEPT NO LONGER THAN THE COPY IT REPLACED, and that is a hard constraint,
+              not a style preference. The first scoping draft ran several lines longer;
+              at 200% zoom (a 640px layout viewport) it pushed the page tall enough that
+              the status-bar phase text clipped vertically by ONE pixel. Caught by the
+              zoom-200 layout baseline — no unit test sees it, and it reproduces on both
+              platforms. A second, shorter draft still overflowed by 1px; this is the
+              third.
+              The "not saved" claim is not lost, it MOVED: the eyebrow below states it
+              outright, and "a reload brings all N back as open questions" says the same
+              thing concretely. If this block grows again, run the zoom-200 layout spec
+              before assuming it fits. */}
           <div className="completion-allskipped-title">
-            You've reviewed every question · {skippedItems.length} left honestly missing
+            Every question reviewed this visit · {skippedItems.length} you don't know
           </div>
           <p className="completion-allskipped-text">
-            Nothing was invented for these. Export stays gated until each is confirmed — answer one
-            when you're ready, or return to the record.
+            Nothing was invented. A reload brings all {skippedItems.length} back as open questions,
+            and export stays gated until each is confirmed.
           </p>
         </div>
       )}
@@ -582,9 +626,20 @@ function LoadedCompletion({
         </div>
       )}
 
+      {/* R1b — same scoping as the all-skipped summary above: this list is client
+          state for the current visit, and the eyebrow says so rather than reading
+          as a recorded property of the record. */}
       {skippedItems.length > 0 && (
         <div className="leftmissing">
-          <div className="leftmissing-eyebrow eyebrow">Left Honestly Missing</div>
+          {/* Both halves are load-bearing and `session-only-decisions.test.tsx`
+              requires both: "This Visit" is the DURATION, "Not Saved" is the
+              PERSISTENCE. A shorter draft kept only the second, and the guard caught
+              it — dropping the duration leaves the reader unable to tell whether the
+              list survives navigation. The zoom-200 headroom that pays for these
+              words comes from the workflow note above, not from here. */}
+          <div className="leftmissing-eyebrow eyebrow">
+            Left Honestly Missing · This Visit, Not Saved
+          </div>
           {skippedItems.map((item) => (
             <div className="leftmissing-row" key={item.id}>
               <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />

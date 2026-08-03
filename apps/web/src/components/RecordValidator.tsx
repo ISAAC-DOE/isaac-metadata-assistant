@@ -53,7 +53,6 @@ function toValidationResult(v: ApiValidateRecordResult): ValidationResult {
     verdict: v.ok ? 'pass' : 'fail',
     ok: v.ok,
     schemaVersion: v.schema_version,
-    exitCode: v.ok ? 0 : 1,
     errors: v.errors,
   };
 }
@@ -153,12 +152,19 @@ export function RecordValidator() {
       </header>
 
       {/* Was "Synthetic/local validator", which asserted the reader's machine on
-          a build that also runs hosted. "Synthetic-mode" is a claim about the
-          BUILD's configured mode — the app cannot tell real data from synthetic
-          by looking at it, and nothing here tries to. */}
+          a build that also runs hosted; then "Synthetic-mode validator", a claim
+          about the BUILD's configured mode.
+
+          R1b drops those two words entirely. They named a runtime configuration
+          flag, told the reader nothing about what this control does, and invited
+          exactly the misreading the flag does not support — the app cannot tell
+          real data from synthetic by looking at it, and nothing here tries to.
+          What is left is verified against `routes.py::post_validate_record`: the
+          body is "never written anywhere and its content is never logged; only the
+          outcome and error count are". */}
       <p className="rec-val-scope-note" id="rec-val-scope-note-id">
-        Synthetic-mode validator: the record is checked in memory and discarded. Nothing here is
-        uploaded to a model, indexed, or stored.
+        The record is checked in memory and discarded. Nothing here is uploaded to a model, indexed,
+        or stored.
       </p>
 
       <details className="rec-val-purpose">

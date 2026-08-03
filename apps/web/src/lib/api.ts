@@ -102,11 +102,18 @@ function apiKey(): string | undefined {
 }
 
 /**
- * The exact phrase the backend requires to EXECUTE a synthetic-demo reset. Sent
- * verbatim on execute only; the operator types the shorter "RESET" gate in the UI
- * and never sees or re-types this phrase (no auto-fill of the typed gate).
+ * The exact phrase the backend requires to EXECUTE a reset of the example
+ * workspace. Sent verbatim on execute only; the operator types the shorter "RESET"
+ * gate in the UI and never sees or re-types this phrase (no auto-fill of the typed
+ * gate). Pinned character-for-character to `_RESET_CONFIRMATION` in
+ * `apps/api/isaac_api/routes.py` — renaming it on one side only makes every reset
+ * fail closed with a 409.
+ *
+ * R1 retired the previous value. It named the app after its own test harness, and
+ * although the dialog does not display it, it ships in the bundle and reads as the
+ * product's own vocabulary to anyone who finds it.
  */
-export const RESET_CONFIRMATION = 'RESET SYNTHETIC DEMO';
+export const RESET_CONFIRMATION = 'RESET EXAMPLE WORKSPACE';
 
 /**
  * The exact command that starts the local backend (shown in the LOCAL down
@@ -659,23 +666,38 @@ export const api = {
     });
   },
 
-  // P26.0b — the guarded synthetic-demo reset. Preview (200) and both safe
-  // refusals (403 not-synthetic / 409 wrong-confirmation or ambiguous) all carry
-  // the SAME typed body, so — like blockUpload — we read the JSON on those
-  // statuses instead of throwing. Only a status OUTSIDE {200,403,409} (or a
-  // network failure, which request() already turns into an unreachable ApiError)
-  // is a genuine error. Preview sends only { mode }; execute adds the phrase.
+  // P26.0b / R1 — the guarded example-workspace reset. Preview (200) and ALL FOUR
+  // safe refusals carry the SAME typed body, so — like blockUpload — we read the
+  // JSON on those statuses instead of throwing:
+  //
+  //   403  not in synthetic-only mode
+  //   409  wrong confirmation phrase, or an ambiguous record is present
+  //   428  `plan_digest` omitted        (R1 precondition, nothing was written)
+  //   412  `plan_digest` stale          (R1 precondition, nothing was written)
+  //
+  // 412/428 are refusals, not failures: the body carries the CURRENT `plan_digest`
+  // and refreshed counts, which is exactly what the caller needs to show the
+  // operator what changed. Throwing them away as HTTP errors would leave the dialog
+  // saying "request failed" about the one outcome it most needs to explain.
+  //
+  // Only a status outside {200,403,409,412,428} (or a network failure, which
+  // request() already turns into an unreachable ApiError) is a genuine error.
+  // Preview sends only { mode }; execute adds the phrase and the digest.
   async resetDemo(
     mode: 'preview' | 'execute',
     confirmation?: string,
+    planDigest?: string,
   ): Promise<ApiDemoResetResult> {
+    // A missing digest is deliberately NOT substituted or invented here: it is sent
+    // as absent so the SERVER refuses (428). The client never decides that a reset
+    // may proceed.
     const payload =
-      mode === 'execute' ? { mode, confirmation } : { mode };
+      mode === 'execute' ? { mode, confirmation, plan_digest: planDigest } : { mode };
     const res = await request('/demo/reset', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    if (res.status === 200 || res.status === 403 || res.status === 409) {
+    if ([200, 403, 409, 412, 428].includes(res.status)) {
       // readJson still guards the HTML-intercept case: an edge sign-in page can
       // carry any status, and it is never a typed reset result.
       return readJson<ApiDemoResetResult>(res, '/demo/reset');

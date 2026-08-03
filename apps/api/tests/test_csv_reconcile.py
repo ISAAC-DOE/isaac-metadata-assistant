@@ -310,9 +310,15 @@ def test_endpoint_stale_after_reset(client):
     """(23) reset re-materialises the record (new generation/rev); reconciliation
     bound to the pre-reset rev is no longer current."""
     rev0 = _post(client, ws.SEED_NEW_DRAFT_ID, BEAMLINE_MATCH_CSV).json()["source_record_rev"]
+    # R1: an execute carries the plan digest from its own preview (428 without it).
+    digest = client.post("/api/demo/reset", json={"mode": "preview"}).json()["plan_digest"]
     r = client.post(
         "/api/demo/reset",
-        json={"mode": "execute", "confirmation": "RESET SYNTHETIC DEMO"},
+        json={
+            "mode": "execute",
+            "confirmation": "RESET EXAMPLE WORKSPACE",
+            "plan_digest": digest,
+        },
     )
     assert r.status_code == 200, r.text
     # After reset the canonical baseline is restored (2/1/1/1); a fresh preview is

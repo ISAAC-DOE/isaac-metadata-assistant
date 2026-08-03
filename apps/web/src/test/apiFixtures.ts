@@ -908,10 +908,30 @@ const LEGACY_REMOVABLE = [
 
 const RESET_STATE_COUNTS = { needs_attention: 2, ready_to_export: 1, in_review: 1, done: 1 };
 
+/** R1 — the plan digest a preview returns and an execute must carry back. Opaque and
+ *  shape-faithful to `workspace._plan_digest` ("rp1." + 32 lowercase hex). */
+export const RESET_PLAN_DIGEST = 'rp1.0f1e2d3c4b5a69788796a5b4c3d2e1f0';
+/** A DIFFERENT digest — what a preview returns after the workspace has moved on. */
+export const RESET_PLAN_DIGEST_FRESH = 'rp1.a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+/** R1 — a workspace with no operator progress at all (the post-reset baseline). */
+export const RESET_AT_RISK_NONE = {
+  confirmed_answers: 0,
+  examples_with_progress: 0,
+  exported_artifacts: 0,
+};
+/** R1 — a workspace someone has actually worked in. */
+export const RESET_AT_RISK_SOME = {
+  confirmed_answers: 3,
+  examples_with_progress: 2,
+  exported_artifacts: 1,
+};
+
 /** POST /api/demo/reset {mode:'preview'} — 5 canonical + 2 legacy present, 0 ambiguous. */
 export const demoResetPreviewClean = {
   status: 'ok' as const,
   mode: 'preview' as const,
+  refusal_reason: null,
   previous_count: 7,
   canonical_count: 5,
   legacy_count: 2,
@@ -921,21 +941,26 @@ export const demoResetPreviewClean = {
   canonical_ids: CANONICAL_RESET_IDS,
   removable: LEGACY_REMOVABLE,
   state_counts: RESET_STATE_COUNTS,
+  plan_digest: RESET_PLAN_DIGEST,
+  at_risk: RESET_AT_RISK_SOME,
 };
 
-/** POST /api/demo/reset {mode:'execute', confirmation:'RESET SYNTHETIC DEMO'} — success. */
+/** POST /api/demo/reset {mode:'execute', confirmation:RESET_CONFIRMATION} — success. */
 export const demoResetExecuteOk = {
   ...demoResetPreviewClean,
   mode: 'execute' as const,
   previous_count: 7,
   removed_count: 2,
   final_count: 5,
+  plan_digest: RESET_PLAN_DIGEST_FRESH,
+  at_risk: RESET_AT_RISK_NONE,
 };
 
 /** Preview when an ambiguous (unmanaged) record is present — refused (HTTP 200). */
 export const demoResetPreviewAmbiguous = {
   status: 'refused' as const,
   mode: 'preview' as const,
+  refusal_reason: 'ambiguous_records_present' as const,
   previous_count: 8,
   canonical_count: 5,
   legacy_count: 2,
@@ -945,6 +970,34 @@ export const demoResetPreviewAmbiguous = {
   canonical_ids: CANONICAL_RESET_IDS,
   removable: LEGACY_REMOVABLE,
   state_counts: RESET_STATE_COUNTS,
+  plan_digest: RESET_PLAN_DIGEST,
+  at_risk: RESET_AT_RISK_SOME,
+};
+
+/** R1 — the stale-precondition refusal (HTTP 412). Nothing was written; the body
+ *  carries the CURRENT digest and refreshed figures, which is what lets the dialog
+ *  explain what changed instead of reporting a failure. */
+export const demoResetExecuteStale = {
+  ...demoResetPreviewClean,
+  status: 'refused' as const,
+  mode: 'execute' as const,
+  refusal_reason: 'plan_digest_stale' as const,
+  previous_count: 8,
+  legacy_count: 3,
+  removed_count: 0,
+  final_count: 8,
+  plan_digest: RESET_PLAN_DIGEST_FRESH,
+  at_risk: { confirmed_answers: 4, examples_with_progress: 2, exported_artifacts: 1 },
+};
+
+/** R1 — the missing-precondition refusal (HTTP 428). */
+export const demoResetExecuteDigestRequired = {
+  ...demoResetPreviewClean,
+  status: 'refused' as const,
+  mode: 'execute' as const,
+  refusal_reason: 'plan_digest_required' as const,
+  removed_count: 0,
+  final_count: 7,
 };
 
 /**
@@ -958,9 +1011,20 @@ export function resetDemoRoutes(
     mode?: string;
     preview?: unknown;
     execute?: unknown;
+    /**
+     * R1: applies to the EXECUTE only, never to the preview that precedes it. The
+     * two used to share one `status`, which made it impossible to stub the case that
+     * matters most — a 200 preview followed by a 412 execute — without also breaking
+     * the preview the dialog needs in order to open at all.
+     */
     executeStatus?: number;
+    /** Body for the SECOND and later executes (a re-attempt after a stale refusal). */
+    executeRetry?: unknown;
+    /** Body for the SECOND and later previews (the refreshed figures after a stale
+     *  refusal). Defaults to the first preview body. */
+    previewRefresh?: unknown;
   } = {},
-): { routes: Record<string, StubbedRoute>; flipToFive: () => void } {
+): { routes: Record<string, RouteEntry>; flipToFive: () => void } {
   const legacySummaries = LEGACY_REMOVABLE.map((r, i) => ({
     id: r.id,
     title: r.title,
@@ -976,27 +1040,35 @@ export function resetDemoRoutes(
     five = true;
   };
   // The dialog issues the preview POST on open, then the execute POST on submit —
-  // same METHOD+path, so the body is served by call order: 1st = preview, 2nd+ =
-  // execute (which also flips the list to the canonical five, mirroring the real
-  // backend so a subsequent GET /experiments reflects the reset).
+  // same METHOD+path. R1 made the sequence longer than "1st then 2nd": a stale
+  // refusal is followed by ANOTHER preview (the refresh) and possibly another
+  // execute. So the stub branches on the request BODY's `mode` rather than on call
+  // order, which is both more faithful to the real backend and immune to a component
+  // that legitimately previews more than once.
   const previewBody = opts.preview ?? demoResetPreviewClean;
+  const previewRefreshBody = opts.previewRefresh ?? previewBody;
   const executeBody = opts.execute ?? demoResetExecuteOk;
-  let postCalls = 0;
-  const routes: Record<string, StubbedRoute> = {
+  const executeRetryBody = opts.executeRetry ?? executeBody;
+  let previews = 0;
+  let executes = 0;
+  const routes: Record<string, RouteEntry> = {
     'GET /api/health': { body: { ...healthSynthetic, mode: opts.mode ?? 'synthetic-only' } },
     'GET /api/experiments': {
       body: () => ({
         experiments: five ? canonicalFiveSummaries : [...canonicalFiveSummaries, ...legacySummaries],
       }),
     },
-    'POST /api/demo/reset': {
-      status: opts.executeStatus,
-      body: () => {
-        postCalls += 1;
-        if (postCalls === 1) return previewBody;
-        five = true;
-        return executeBody;
-      },
+    'POST /api/demo/reset': (init?: RequestInit) => {
+      const mode = (JSON.parse(String(init?.body ?? '{}')) as { mode?: string }).mode;
+      if (mode === 'execute') {
+        executes += 1;
+        const status = opts.executeStatus ?? 200;
+        // Only a 200 execute actually reset anything, so only a 200 flips the list.
+        if (status === 200) five = true;
+        return { status, body: executes === 1 ? executeBody : executeRetryBody };
+      }
+      previews += 1;
+      return { status: 200, body: previews === 1 ? previewBody : previewRefreshBody };
     },
   };
   return { routes, flipToFive };
@@ -2056,7 +2128,7 @@ export const openApiFixture = {
 export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: string }[] = [
   { op: "GET /api/health", description: "Liveness banner for platform and container probes: the service status, the runtime data mode, the name of the deterministic core package the app calls in process, the app version, and the build commit when the deployment supplies one (otherwise `null` — it is never guessed). This is the one operation that stays reachable without credentials when the deployment enables authentication. Read-only.\n\nIt also states whether this deployment has an application database configured, how that database is classified, whether hosted display of its per-record content is open, and the outcome of the most recent reconnaissance scan in this process. That block is derived from configuration alone: this operation never opens a database connection, issues a query, or waits on one, so a database problem can never change its result and can never fail a container probe." },
   { op: "POST /api/demo/run", description: "Runs the committed worked-example pipeline and returns the ordered steps it executed together with the resulting experiment id and status. `mode: \"draft_only\"` (the default) extracts a draft from the committed reference files and runs the no-guessing draft checks; `mode: \"full\"` additionally applies the committed simulated answers and exports an official record. It targets one fixed canonical experiment id per mode, so re-running never adds a record and never increases the record count. It reads only the two committed reference files and accepts no uploaded data.\n\nIt never overwrites your work. The target must still hold exactly its original example content: when it does, running the pipeline would reproduce that content byte for byte, so nothing at all is written and the record's version is untouched. If the target has been changed — an answer confirmed, a field edited, a record exported — the run is refused with `409` and nothing is written.\n\nA body other than `draft_only` or `full` for `mode` is rejected and nothing runs." },
-  { op: "POST /api/demo/reset", description: "Restores the workspace to exactly the five canonical built-in example records and reports the before/after counts, the removable set, and a state histogram. `mode: \"preview\"` classifies only and mutates nothing; `mode: \"execute\"` additionally requires the exact confirmation phrase and refuses without it. It accepts no caller-supplied ids or paths — any extra field is rejected — it removes only records it can classify as records this workspace itself created, and it refuses to remove anything at all if any record is ambiguous. No filesystem path appears in the response.\n\nThere is deliberately no general per-experiment delete operation." },
+  { op: "POST /api/demo/reset", description: "Restores the workspace to exactly the five canonical built-in example records and reports the before/after counts, the removable set, a state histogram, and a derived summary of the confirmed work the reset would discard. `mode: \"preview\"` classifies only and mutates nothing; `mode: \"execute\"` additionally requires the exact confirmation phrase and the `plan_digest` the preview returned. It accepts no caller-supplied ids or paths — any extra field is rejected — it removes only records it can classify as records this workspace itself created, and it refuses to remove anything at all if any record is ambiguous. No filesystem path appears in the response.\n\n**The `plan_digest` precondition.** `preview` returns an opaque digest of the workspace it classified. `execute` must send it back, and the reset runs only if the workspace still matches it. Without this, a client that previewed, showed a confirmation dialog, and executed a while later would destroy anything committed in between — the operator would have approved a classification that no longer held. A missing digest is `428`, a stale one is `412`, and neither mutates anything. Every response carries the CURRENT digest, so a `412` can be recovered from in one further request.\n\nThere is deliberately no general per-experiment delete operation." },
   { op: "GET /api/experiments", description: "One summary row per experiment currently in the workspace: its id, title, derived status, creation time, how many blocking questions are still open, how many fields carry evidence, whether it has been exported, and the exported record id when there is one. Rows for the five built-in example records also carry a derived, never-stored `scenario` label naming which example the row is; it is null for any other record. Read-only, and it states no validity verdict." },
   { op: "GET /api/experiments/{experiment_id}", description: "The full detail bundle for one experiment: its summary row plus whether the draft passes the no-guessing checks, the exported artifact filenames (basenames only, never a server path), the source files it was extracted from, the derived workflow progression, the exported-artifact freshness state, and the current revision metadata.\n\nThe response carries the record's current `ETag`. Send it back as `If-None-Match` to receive `304` while the record is unchanged. Read-only." },
   { op: "GET /api/experiments/{experiment_id}/draft", description: "This record's draft fields, grouped into the stable sections the record review screen renders. Each field carries its label, official path, current value, the status derived from its evidence, and the kinds of source that evidence came from. Read-only; the response carries the record's current `ETag`." },
