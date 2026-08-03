@@ -55,7 +55,7 @@ async function answerNotebook(screen: ReturnType<typeof renderAt>) {
   fireEvent.change(getByLabelText('Asset Hash'), { target: { value: SHA } });
   fireEvent.click(getByText('Confirm'));
   // the answered summary row appears (adopting version 1.1 from the response)
-  await findByText(/^stored /);
+  await findByText(/^you answered /);
 }
 
 function completeRoutes() {

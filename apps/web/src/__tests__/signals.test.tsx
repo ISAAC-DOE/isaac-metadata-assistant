@@ -9,7 +9,6 @@ const PASS: ValidationResult = {
   verdict: 'pass',
   ok: true,
   schemaVersion: 'v1.05',
-  exitCode: 0,
   errors: [],
 };
 const AUDIT: AuditResult = { resolved: 33, total: 33, uncovered: [], dangling: [] };

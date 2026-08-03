@@ -97,11 +97,17 @@ export interface PendingBlocker {
 
 export type Verdict = 'pass' | 'fail' | 'pending';
 
+/**
+ * R1b — `exitCode: number` was removed. Nothing ever exited with it: every
+ * producer computed the literal `ok ? 0 : 1`, and its only reader rendered it as
+ * if it were captured CLI output (see `components/VerdictCard.tsx`). A field that
+ * can only ever hold a restatement of `ok`, and that invites being displayed as
+ * an observation, is worse than absent.
+ */
 export interface ValidationResult {
   verdict: Verdict; // hard gate
   ok: boolean;
   schemaVersion: string; // v1.05
-  exitCode: number;
   errors: { path: string; message: string }[];
 }
 
@@ -387,8 +393,10 @@ export interface RunnerStage {
   state: RunnerStageState;
   result?: string; // right-aligned result, e.g. "2 sources", "26 fields"
   subResult?: string; // secondary result line, e.g. "12 verified · 3 inferred"
-  detail?: string; // blocker explanatory copy (sentence case)
-  isBlocker?: boolean;
+  detail?: string; // the step's own explanatory copy (sentence case)
+  // R1b — `isBlocker?: boolean` was removed. Nothing ever set it; its only reader
+  // was a `StagedRunner` CTA whose handler was never passed and whose field count
+  // was hard-coded. See components/StagedRunner.tsx.
 }
 
 // --- workflow spine ---------------------------------------------------

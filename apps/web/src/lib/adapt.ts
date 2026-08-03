@@ -181,7 +181,6 @@ export function toValidationResult(v: ApiValidateResult): ValidationResult {
     verdict: v.ok ? 'pass' : 'fail',
     ok: v.ok,
     schemaVersion: v.schema,
-    exitCode: v.ok ? 0 : 1,
     errors: v.errors,
   };
 }

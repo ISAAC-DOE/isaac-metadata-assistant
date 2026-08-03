@@ -1295,6 +1295,17 @@
 .livesync-degraded-text { flex: 1 1 auto; }
 .livesync-degraded-refresh { flex: none; }
 
+/* R1b — a refresh the READER triggered (Re-Validate, or a post-write refetch)
+   that did not reach the API. Same shape and same place as the degraded note, so
+   it is one notice to learn, but lifted onto the advisory amber so it is not
+   mistaken for the quiet background condition. Deliberately NOT the reserved
+   fail red: nothing is invalid, the state on screen is simply not fresh. */
+.livesync-degraded.livesync-refresh-failed {
+  background: var(--advisory-bg);
+  border-color: var(--advisory-border);
+  color: var(--advisory-text);
+}
+
 /* P27.6 — "this record changed elsewhere" proactive notice (S4). Reuses the
    calm completion-submit-error treatment; nothing was lost, input is kept. */
 .livesync-changed {

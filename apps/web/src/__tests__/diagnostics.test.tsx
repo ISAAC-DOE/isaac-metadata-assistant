@@ -729,17 +729,24 @@ describe('hosted truthfulness — the four record loading labels', () => {
 });
 
 describe('hosted truthfulness — the standalone validator scope note', () => {
-  it('claims a synthetic MODE, never the reader’s machine', async () => {
+  // R1b — was 'claims a synthetic MODE, never the reader's machine', pinning
+  // /Synthetic-mode validator/. The mode words are gone: they named a runtime
+  // configuration flag, said nothing about what the control does, and the note is
+  // stronger without them. The two properties that mattered are unchanged and
+  // still asserted — no locality claim, and both verified guarantees kept.
+  it('makes no locality claim and no mode claim, keeping only the verified guarantees', async () => {
     const hosted = await loadHosted();
     const view = renderHosted(<hosted.RecordValidator />, '/experiments');
     const note = view.container.querySelector('.rec-val-scope-note');
     expect(note).not.toBeNull();
     expect(note!.textContent).not.toMatch(LOCAL_DEV_CLAIM);
-    // The true half of the old sentence is preserved verbatim.
-    expect(note!.textContent).toContain('the record is checked in memory and discarded');
+    // The true half of the old sentence is preserved (now sentence-initial, so
+    // matched case-insensitively rather than as a mid-sentence substring).
+    expect(note!.textContent).toMatch(/the record is checked in memory and discarded/i);
     expect(note!.textContent).toContain('Nothing here is uploaded to a model, indexed, or stored');
-    // Mode, not content: nothing here inspects a record to decide it is synthetic.
-    expect(note!.textContent).toMatch(/Synthetic-mode validator/);
+    // Nothing here inspects a record to decide whether it is real, and the copy no
+    // longer implies a mode claim that would suggest otherwise.
+    expect(note!.textContent).not.toMatch(/synthetic/i);
   });
 });
 

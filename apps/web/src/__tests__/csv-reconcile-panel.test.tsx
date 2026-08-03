@@ -9,7 +9,8 @@
  * CSV FIELD_MAP official field is never manually editable — every item is read-only.
  *
  * The honesty contract these tests pin:
- *   - a visible "review evidence, not a write" banner + synthetic/public-only warning;
+ *   - a visible "review evidence, not a write" banner + a do-not-upload-real-data
+ *     warning (R1b: the retired wording named a runtime mode instead);
  *   - match/conflict/absent shown with a TEXT label (never colour-only);
  *   - both values preserved on conflict; no winner;
  *   - NO Stage / Confirm / Apply / Apply All / Import / Overwrite control anywhere;
@@ -75,9 +76,9 @@ function previewFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function renderPanel(props: Partial<{ version: string; onOpenRecord: () => void }> = {}) {
+function renderPanel(props: Partial<{ version: string; onGoToComplete: () => void }> = {}) {
   return render(
-    <CsvReconcilePanel experimentId={EXP} version={props.version ?? VERSION} onOpenRecord={props.onOpenRecord} />,
+    <CsvReconcilePanel experimentId={EXP} version={props.version ?? VERSION} onGoToComplete={props.onGoToComplete} />,
   );
 }
 
@@ -100,10 +101,15 @@ beforeEach(() => {
 // --- pre-upload honesty surface ------------------------------------------------
 
 describe('CsvReconcilePanel — pre-upload', () => {
-  it('shows the synthetic/public-only warning', () => {
+  // R1b — was 'shows the synthetic/public-only warning', asserting
+  // /synthetic|public/i. The banner no longer names a runtime mode: "Synthetic or
+  // public data only" told the reader nothing they could check, and the product
+  // never defines the word for them. What must survive is the INSTRUCTION plus the
+  // honest admission that the app performs no such check.
+  it('shows the do-not-upload-real-data warning, and admits it is not a check', () => {
     renderPanel();
-    expect(screen.getByText(/synthetic|public/i)).toBeInTheDocument();
-    expect(screen.getByText(/do not upload real|private/i)).toBeInTheDocument();
+    expect(screen.getByText(/do not upload real or private data/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing here checks the file/i)).toBeInTheDocument();
   });
 
   it('states this is review evidence, not a write to the record', () => {
