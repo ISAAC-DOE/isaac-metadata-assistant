@@ -448,6 +448,14 @@ def test_source_preview_rejects_traversal_and_absolute(client):
 
 
 def test_artifacts_before_export_are_null(client):
+    """Kept as an EXACT whole-response equality, deliberately.
+
+    P4 added the derived ``artifact`` block so a caller can distinguish "never
+    exported" from "exported but the artifact file is gone" — both of which return
+    null payloads. Asserting the full dict (rather than relaxing to a subset check)
+    is what makes a future additive key on this endpoint fail loudly and get
+    reviewed, which is exactly how the P4 change surfaced here.
+    """
     exp_id = _seed_id(client)
     body = client.get(f"/api/experiments/{exp_id}/artifacts").json()
     assert body == {
@@ -455,6 +463,7 @@ def test_artifacts_before_export_are_null(client):
         "sidecar": None,
         "record_filename": None,
         "sidecar_filename": None,
+        "artifact": {"state": "none", "reason": None},
     }
 
 

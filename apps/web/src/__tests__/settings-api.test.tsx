@@ -1089,8 +1089,26 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // product language ("built-in example", "reference file"), for a net -4
     // characters. Operation and paragraph counts are unchanged: no paragraph was
     // added or removed, only rewritten.
-    expect(total).toBe(21266);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(44);
+    // 21,266 -> 21,909: the export-recovery slice extended four operation
+    // descriptions, because it made four artifact readers tolerate an unreadable
+    // exported artifact and the contract text would otherwise have been false —
+    // `POST .../validate`, `GET|POST .../warnings` and `GET .../evidence`. Each now
+    // states what it does when the written artifact cannot be read. Net +643
+    // characters, and the POST-lead paragraph count moves 44 -> 45: `POST
+    // .../validate` gained a paragraph rather than extending an existing one,
+    // because its fail-closed behaviour is a separate statement from its verdict
+    // contract. Operation count is unchanged at 36. (An earlier draft of this
+    // note claimed the paragraph count was unchanged; it was not, and the
+    // assertion below caught that.)
+    //
+    // A NOTE FOR WHOEVER MOVES THIS NEXT: this figure went stale twice in one
+    // session because `REAL_CONTRACT_DESCRIPTIONS` was a hand-transcribed copy of
+    // the generated spec with no parity check — the drift was caught by a human
+    // reading a diff, not by a test. `apps/api/tests/test_contract_description_parity.py`
+    // now asserts the copy matches `create_app().openapi()` in both directions, so
+    // this constant should only ever move together with a deliberate contract edit.
+    expect(total).toBe(21909);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(45);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

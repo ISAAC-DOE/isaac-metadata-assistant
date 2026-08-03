@@ -29,7 +29,11 @@ _STALE_REASON = (
     "the current record. Records are immutable — regenerate the record (or reset "
     "the workspace) to refresh it."
 )
-_MISSING_REASON = "The exported artifact is missing or unreadable."
+#: PUBLIC (P4): the single definition of the missing/unreadable-artifact reason.
+#: ``routes.get_artifacts`` reports the same absence with the same vocabulary, so
+#: this string must have exactly ONE definition — a second copy in the route would
+#: be a copy unit free to drift out of step with the state it describes.
+MISSING_REASON = "The exported artifact is missing or unreadable."
 
 
 def _canonical(obj: dict) -> str:
@@ -58,12 +62,12 @@ def artifact_state(exp) -> dict:
         now0 = ondisk["timestamps"]["created_utc"]
     except Exception:
         # Missing/unreadable/not-JSON, or no created_utc — treat as stale, never throw.
-        return {"state": "stale", "reason": _MISSING_REASON}
+        return {"state": "stale", "reason": MISSING_REASON}
 
     try:
         current = transform(exp.draft, record_id=exp.id, now=now0)
     except Exception:  # pragma: no cover - defensive; transform is read-only + total
-        return {"state": "stale", "reason": _MISSING_REASON}
+        return {"state": "stale", "reason": MISSING_REASON}
 
     if _canonical(current) == _canonical(ondisk):
         return {"state": "current", "reason": None}

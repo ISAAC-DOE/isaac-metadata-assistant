@@ -261,7 +261,7 @@ Every user-facing claim about the sidecar, located and quoted verbatim.
 
 | Where | String |
 |---|---|
-| `apps/api/isaac_api/routes.py:1701-1703` | "For an already-exported record the trail is read from the evidence sidecar written alongside the official record; otherwise it is read from the draft's own evidence envelopes." |
+| `apps/api/isaac_api/routes.py` (`GET …/evidence`) | "For an already-exported record the trail is read from the evidence sidecar written alongside the official record; otherwise — including when that sidecar or record cannot be read — it is read from the draft's own evidence envelopes, which are the sidecar's own source." — *extended 2026-08-03: the export-recovery slice made this reader tolerate an unreadable artifact, and the contract text had to say so. The line number is dropped because it drifts; the operation is the stable reference.* |
 | `apps/api/isaac_api/routes.py:1857-1859` | "The official ISAAC record and the evidence-sidecar JSON that this …" |
 
 **Documentation**
