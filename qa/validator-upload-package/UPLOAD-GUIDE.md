@@ -98,14 +98,21 @@ combination with another field's value.
 
 - **What to do:** upload, then Validate.
 - **Expected upload outcome:** loads normally.
-- **Expected validation state:** **PASS.** That is what will happen, and it is wrong.
-- **Expected visible issue:** none shown — and that is the finding. The measurement block is present
+- **Expected validation state:** **PASS**, with **0 errors** — and an advisory warning beside it.
+- **Expected visible issue:** an advisory **`NO_MEASUREMENT_SERIES`** on `measurement.series`, plus
+  the routine `NO_LINKS` every file in this package raises. The record's measurement block is present
   and its quality section is intact, but the list of measured series is empty, so the record contains
-  no measured points whatsoever. The current checks require the list to exist, not to contain
-  anything.
-- **Expected export availability:** not blocked. An empty measurement would pass this gate today.
-- **Repair action:** none — do not "fix" this file. Record the observation: a record with no
-  measurement data was accepted.
+  no measured points whatsoever.
+- **What changed, and what did not.** Until recently this file produced a **bare PASS with no signal
+  of any kind** — the validator ran schema validation and nothing else, so nothing said the record
+  held no data. The advisory now says so. The **schema** behaviour is unchanged: `measurement.series`
+  still has no minimum length, so an empty list is still schema-valid and this file still passes.
+  Whether an empty series *ought* to be invalid, incomplete, or simply not applicable is a
+  **scientific decision for a domain owner** and has deliberately not been decided.
+- **Expected export availability:** not blocked. Advisory warnings never gate export, by design —
+  they are advice, not authority.
+- **Repair action:** none — do not "fix" this file. Record two observations: a record with no
+  measurement data is accepted by the schema, and the app now says so out loud.
 - **Expected result after repair:** n/a.
 
 ## 7. `missing-evidence.json`
@@ -313,7 +320,7 @@ not clear the error section, that is the finding.
 | 3 | `missing-nested-information.json` | FAIL — 1 error |
 | 4 | `missing-conditional-information.json` | FAIL — 1 error |
 | 5 | `invalid-date-time.json` | PASS — **and that is the finding** |
-| 6 | `empty-measurement-series.json` | PASS — **and that is the finding** |
+| 6 | `empty-measurement-series.json` | PASS + advisory `NO_MEASUREMENT_SERIES` — **the pass is the finding** |
 | 7 | `missing-evidence.json` | FAIL — 1 error |
 | 8 | `missing-confirmation.json` | FAIL — 1 error |
 | 9 | `invalid-controlled-value.json` | FAIL — 1 error |

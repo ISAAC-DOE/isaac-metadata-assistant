@@ -263,6 +263,38 @@ export function RecordValidator() {
             <p className="rec-val-schema-line mono">
               Checked against official ISAAC schema v{outcome.schema_version}
             </p>
+            {/*
+              R2 — the ADVISORY tier, rendered BELOW the verdict and visibly separate
+              from it.
+
+              Why it is here at all: this route used to call schema validation and
+              nothing else, so a record with `measurement.series: []` came back as an
+              unqualified PASS — schema-valid with zero errors, and no signal anywhere
+              that it contained no measured data. The per-record route had always run
+              these checks; the standalone validator, the surface an operator actually
+              points at a file, was the one place they were invisible.
+
+              Why it is styled as a note and not as an error: advisory means advisory.
+              The heading says so, `gating: false` comes from the server, and the
+              verdict above is unchanged by anything here. A reader must not come away
+              thinking a warning blocked something.
+            */}
+            {outcome.warnings && outcome.warnings.length > 0 && (
+              <section className="rec-val-advisory" aria-labelledby="rec-val-advisory-h">
+                <h3 id="rec-val-advisory-h" className="rec-val-advisory-h">
+                  Advisory notes ({outcome.warnings.length}) — these do not affect the verdict
+                </h3>
+                <ul className="rec-val-advisory-list">
+                  {outcome.warnings.map((w) => (
+                    <li key={`${w.code}:${w.where}`} className="rec-val-advisory-item">
+                      <code className="mono rec-val-advisory-where">{w.where}</code>
+                      <span className="rec-val-advisory-msg">{w.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             <details className="rec-val-summary-details">
               <summary>Full validator summary</summary>
               <pre className="mono rec-val-summary-pre">{outcome.summary}</pre>

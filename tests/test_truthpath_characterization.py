@@ -519,16 +519,31 @@ def test_empty_series_skips_the_qc_evidence_rule_in_draft_validation(draft):
     )
 
 
-def test_empty_series_exports_a_record_with_no_measurement_and_no_qc_verdict(draft):
-    """PINS A DEFECT, end to end — NOT desired behaviour.
+def test_empty_series_now_preserves_the_measurement_block_and_the_qc_verdict(draft):
+    """WAS A DEFECT, NOW FIXED (R2) — kept as a regression test, renamed to match.
 
-    A draft whose ``series`` is ``[]`` EXPORTS SUCCESSFULLY, and the exported
-    official record has NO ``measurement`` key at all — so the QC verdict the
-    draft carried has silently DISAPPEARED from the record. The export is not
-    refused, and nothing in the record says a verdict was dropped.
+    THE DEFECT, recorded because the fix is only legible against it. ``transform``
+    guarded the measurement block with ``if draft.get("series"):`` — truthiness. A
+    draft whose ``series`` was ``[]`` fell through the ENTIRE block, so the exported
+    official record carried no ``measurement`` key at all and the QC verdict the
+    draft carried silently DISAPPEARED. Export succeeded, official validation
+    passed, and nothing anywhere said a verdict had been dropped. The evidence
+    sidecar made it sharper still: it went on publishing a ``qc:status`` evidence
+    entry for a verdict that was nowhere in the record it accompanied.
 
-    The evidence sidecar makes it sharper: it still publishes a ``qc:status``
-    evidence entry for a verdict that is nowhere in the record it accompanies.
+    It compounded. With the qc block deleted, ``portal_warnings``'
+    ``_qc_nonvalid_without_evidence`` had nothing left to inspect — so the deletion
+    also suppressed the one advisory that would have flagged it. The falsy guard
+    laundered its own evidence.
+
+    THE FIX is ``is not None`` rather than truthiness. ``series: []`` is schema-valid
+    (no ``minItems`` — measured, 0 errors), so emitting it is legal and preserving
+    the operator's verdict is strictly more honest than discarding it. The empty
+    series is now DISCLOSED instead, by ``portal_warnings.NO_MEASUREMENT_SERIES``.
+
+    WHAT WAS DELIBERATELY NOT DONE: the empty series was not made invalid. That is
+    the vendored schema's call, and whether an empty series means invalid,
+    incomplete, not-applicable or deliberately-empty is a domain owner's decision.
     """
     baseline = export_draft(copy.deepcopy(draft), ROOT, record_id=RID, now=FIXED_NOW)
     assert baseline.ok
@@ -540,26 +555,30 @@ def test_empty_series_exports_a_record_with_no_measurement_and_no_qc_verdict(dra
     hollow["series"] = []
 
     record = transform(hollow, record_id=RID, now=FIXED_NOW)
-    assert "measurement" not in record, (
-        "transform now emits a measurement block for an empty series list — a FIX; "
-        "update this test"
+    assert "measurement" in record, (
+        "the falsy guard is back: an empty series list skipped the whole measurement "
+        "block again, which silently deletes the QC verdict"
+    )
+    assert record["measurement"]["series"] == []
+    assert record["measurement"]["qc"]["status"] == "valid", (
+        "the QC verdict was dropped for an empty series — the original defect"
     )
 
     result = export_draft(hollow, ROOT, record_id=RID, now=FIXED_NOW)
     assert result.ok, (
-        "export now refuses an empty series list — a FIX; update this test.\n"
+        "export now refuses an empty series list. That is a behaviour change this "
+        "slice did not intend — the fix preserves data, it does not add a gate.\n"
         f"{result.draft_report.render()}\n"
         f"{result.official_report.render() if result.official_report else ''}"
     )
-    assert "measurement" not in result.record
-    blob = json.dumps(result.record)
-    assert "qc" not in result.record.get("measurement", {})
-    assert '"status": "valid"' not in blob
+    assert result.record["measurement"]["qc"]["status"] == "valid"
 
-    # The sidecar still claims evidence for the vanished verdict.
-    assert "qc:status" in result.sidecar["evidence"], (
-        "the sidecar no longer advertises evidence for a verdict absent from the "
-        "record — a FIX; update this test"
+    # The sidecar's claim is now CONSISTENT with the record: it advertises evidence
+    # for a verdict that is actually present. Previously it pointed at nothing.
+    assert "qc:status" in result.sidecar["evidence"]
+    assert "qc" in result.record["measurement"], (
+        "the sidecar advertises qc:status evidence for a verdict absent from the "
+        "record it accompanies — the inconsistency this fix removed"
     )
 
 

@@ -211,3 +211,47 @@
     align-items: stretch;
   }
 }
+
+/* R2 — the advisory tier on the standalone validator.
+ *
+ * Deliberately the ADVISORY amber token family, not the reserved fail red: nothing
+ * here is invalid, and a reader who sees red next to a PASS verdict will reasonably
+ * conclude something is broken. Same token family the record surfaces already use
+ * for `portal_warnings`, so one visual language means one thing app-wide. */
+.rec-val-advisory {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--advisory-border);
+  border-radius: 6px;
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+}
+
+.rec-val-advisory-h {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rec-val-advisory-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rec-val-advisory-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.rec-val-advisory-where {
+  font-size: 11px;
+  opacity: 0.85;
+  /* A JSON path can be long; wrap rather than force the card to scroll sideways. */
+  overflow-wrap: anywhere;
+}

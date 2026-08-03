@@ -1962,14 +1962,34 @@ async def post_validate_record(request: Request):
         )
 
     report = validate_official(body, REPO_ROOT)
+
+    # R2 — the advisory tier, which this route did not run.
+    #
+    # Until now `post_validate_record` called `validate_official` and NOTHING else, while
+    # the per-record route (`_warnings_payload`) has always also run `portal_warnings`.
+    # So the standalone validator — the surface an operator actually points at a
+    # candidate file — was the one place the advisory tier was invisible. A record with
+    # `measurement.series: []` came back as an unqualified PASS: schema-valid with zero
+    # errors (no `minItems`), no signal of any kind that it holds no measured data.
+    #
+    # `warnings` is ADVISORY and NON-GATING, and the shape says so: `ok` above is
+    # computed from `report` alone and is deliberately NOT combined with the warning
+    # count. A warning must never be able to turn a PASS into a FAIL here, because that
+    # would make this module a second authority on validity alongside the vendored
+    # schema. Same serializer as the per-record route, so the two cannot drift.
+    warnings = serialize.warnings_to_dict(portal_warnings(body))
     _log.info(
-        "validate_record outcome=ok ok=%s error_count=%d", report.ok, len(report.errors)
+        "validate_record outcome=ok ok=%s error_count=%d warning_count=%d",
+        report.ok,
+        len(report.errors),
+        len(warnings.get("warnings", [])),
     )
     return {
         "ok": report.ok,
         "summary": report.render(),
         "errors": [{"path": e.path, "message": e.message} for e in report.errors],
         "schema_version": EXPECTED_VERSION,
+        **warnings,
     }
 
 
