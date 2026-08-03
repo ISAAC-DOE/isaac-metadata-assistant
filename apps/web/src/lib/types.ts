@@ -564,6 +564,17 @@ export interface ApiValidateRecordResult {
   summary: string;
   errors: { path: string; message: string }[];
   schema_version: string; // "1.05"
+  // R2 — the ADVISORY tier, which this route did not previously run at all. Optional
+  // in the type because a cached/older response shape must not break the client, and
+  // because the two 422 rejection paths (malformed JSON, non-object body) legitimately
+  // carry no warnings: there is no record to advise on.
+  //
+  // `ok` above is computed from schema validation ALONE and is never combined with the
+  // warning count. A warning must not be able to turn a PASS into a FAIL, or this tier
+  // becomes a second authority on validity beside the vendored schema.
+  advisory?: boolean;
+  gating?: boolean;
+  warnings?: AdvisoryWarning[];
 }
 
 // A clean, typed rejection from POST /api/validate/record (non-object body,

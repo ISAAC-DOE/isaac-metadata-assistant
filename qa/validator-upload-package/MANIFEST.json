@@ -43,7 +43,8 @@
       "filename": "empty-measurement-series.json",
       "intended": "invalid",
       "measured": "valid",
-      "cause": "measurement.series must be present and an array but has no minItems, so an empty array satisfies the schema"
+      "cause": "measurement.series must be present and an array but has no minItems, so an empty array satisfies the schema",
+      "mitigated_by": "R2. The SCHEMA divergence is unchanged and remains open: measurement.series still has no minItems, so [] still validates with zero errors, and this file still measures as valid. What changed is that it is no longer a SILENT pass \u2014 the validator now returns advisory NO_MEASUREMENT_SERIES, so an operator sees that the record holds no measured data. Whether an empty series should be invalid, incomplete, or not-applicable is a scientific decision for a domain owner and is deliberately NOT decided here."
     }
   ],
   "files": [
@@ -64,7 +65,11 @@
         "ok": true,
         "error_count": 0,
         "first_error_path": null,
-        "first_error_message": null
+        "first_error_message": null,
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -84,7 +89,11 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "$",
-        "first_error_message": "'source_type' is a required property"
+        "first_error_message": "'source_type' is a required property",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -104,7 +113,11 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "timestamps",
-        "first_error_message": "'created_utc' is a required property"
+        "first_error_message": "'created_utc' is a required property",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -126,7 +139,11 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "$",
-        "first_error_message": "'descriptors' is a required property"
+        "first_error_message": "'descriptors' is a required property",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -147,7 +164,11 @@
         "ok": true,
         "error_count": 0,
         "first_error_path": null,
-        "first_error_message": null
+        "first_error_message": null,
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": false,
       "expected_http_status": 200,
@@ -168,7 +189,12 @@
         "ok": true,
         "error_count": 0,
         "first_error_path": null,
-        "first_error_message": null
+        "first_error_message": null,
+        "advisory_warnings": [
+          "NO_LINKS",
+          "NO_MEASUREMENT_SERIES"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": false,
       "expected_http_status": 200,
@@ -188,7 +214,11 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "descriptors.outputs.0.descriptors.0",
-        "first_error_message": "'uncertainty' is a required property"
+        "first_error_message": "'uncertainty' is a required property",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -209,7 +239,11 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "measurement.qc",
-        "first_error_message": "'status' is a required property"
+        "first_error_message": "'status' is a required property",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -229,7 +263,11 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "system.technique",
-        "first_error_message": "'XANES' is not one of ['XAS', 'HERFD-XAS', 'XES', 'RIXS', 'XPS', 'XRF', 'XRD', 'SAXS', 'WAXS', 'PDF', 'neutron_reflectometry', 'neutron_diffraction', 'SANS', 'cyclic_voltammetry', 'chronoamperometry', 'chronopotentiometry', 'EIS', 'linear_sweep_voltammetry', 'TEM', 'SEM', 'AFM', 'STM', 'DFT', 'ab_initio_MD', 'classical_MD', 'kinetic_monte_carlo', 'microkinetic_modeling', 'machine_learning_potential', 'GC', 'HPLC', 'ICP_MS', 'ICP_OES', 'NMR', 'mass_spectrometry', 'FTIR', 'Raman', 'UV_Vis']"
+        "first_error_message": "'XANES' is not one of ['XAS', 'HERFD-XAS', 'XES', 'RIXS', 'XPS', 'XRF', 'XRD', 'SAXS', 'WAXS', 'PDF', 'neutron_reflectometry', 'neutron_diffraction', 'SANS', 'cyclic_voltammetry', 'chronoamperometry', 'chronopotentiometry', 'EIS', 'linear_sweep_voltammetry', 'TEM', 'SEM', 'AFM', 'STM', 'DFT', 'ab_initio_MD', 'classical_MD', 'kinetic_monte_carlo', 'microkinetic_modeling', 'machine_learning_potential', 'GC', 'HPLC', 'ICP_MS', 'ICP_OES', 'NMR', 'mass_spectrometry', 'FTIR', 'Raman', 'UV_Vis']",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -249,7 +287,11 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "context.temperature_K",
-        "first_error_message": "'297.5' is not of type 'number'"
+        "first_error_message": "'297.5' is not of type 'number'",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -269,7 +311,11 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "sample.material",
-        "first_error_message": "Additional properties are not allowed ('purity_percent' was unexpected)"
+        "first_error_message": "Additional properties are not allowed ('purity_percent' was unexpected)",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -291,7 +337,11 @@
         "ok": false,
         "error_count": 3,
         "first_error_path": "$",
-        "first_error_message": "'record_domain' is a required property"
+        "first_error_message": "'record_domain' is a required property",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -314,7 +364,11 @@
         "ok": true,
         "error_count": 0,
         "first_error_path": null,
-        "first_error_message": null
+        "first_error_message": null,
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -335,7 +389,11 @@
         "ok": true,
         "error_count": 0,
         "first_error_path": null,
-        "first_error_message": null
+        "first_error_message": null,
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -354,7 +412,9 @@
         "error_count": null,
         "first_error_message": null,
         "parse_error": "Expecting value: line 62 column 1 (char 1654)",
-        "note": "Not parseable, so the official validator was never invoked on it."
+        "note": "Not parseable, so the official validator was never invoked on it.",
+        "advisory_warnings": [],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": null,
@@ -371,7 +431,9 @@
         "parsed": false,
         "ok": null,
         "error_count": null,
-        "note": "Not a JSON document; the official validator was never invoked on it."
+        "note": "Not a JSON document; the official validator was never invoked on it.",
+        "advisory_warnings": [],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": null,
@@ -391,7 +453,11 @@
         "ok": true,
         "error_count": 0,
         "first_error_path": null,
-        "first_error_message": null
+        "first_error_message": null,
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
@@ -411,11 +477,20 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "measurement.qc.status",
-        "first_error_message": "'OK' is not one of ['valid', 'compromised', 'failed', 'pending']"
+        "first_error_message": "'OK' is not one of ['valid', 'compromised', 'failed', 'pending']",
+        "advisory_warnings": [
+          "NO_LINKS"
+        ],
+        "advisory_is_gating": false
       },
       "measured_matches_intent": true,
       "expected_http_status": 200,
       "notes": "EXACT EDIT: find \"status\": \"OK\" inside the measurement quality block and change OK to valid, i.e. \"status\": \"valid\". Allowed values are valid, compromised, failed, pending. After that single four-character edit the record is expected to pass. Note this shares the enum class with file 9 by design: file 9 is diagnosis at a different path, this one is the repair loop."
     }
-  ]
+  ],
+  "expectations_valid_for": {
+    "slice": "R2 \u2014 empty-measurement and validation truthfulness",
+    "note": "Every measured_validator_result below was re-measured through the real POST /api/validate/record on this commit. The advisory tier is NEW here: the route previously called validate_official and nothing else, so no warning reached this screen at all. If a later slice changes validator output, re-measure and update this file rather than letting an operator work from a stale expectation."
+  },
+  "advisory_warnings_note": "NO_LINKS appears on every JSON record in this package because each declares links: [] \u2014 the schema makes links optional, so it is advisory and expected, not a defect in the file. The two 422 files (malformed-json.json, unsupported-file.txt) carry no warnings because the body never parses into a record to advise on. Warnings are ADVISORY and NON-GATING: ok is computed from schema validation alone and a warning can never turn a PASS into a FAIL."
 }

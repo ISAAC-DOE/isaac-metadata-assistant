@@ -106,11 +106,60 @@ def _qc_nonvalid_without_evidence(record: dict) -> PortalWarning | None:
     return None
 
 
+def _no_measurement_series(record: dict) -> PortalWarning | None:
+    """``measurement.series`` absent or empty — the record carries no measured data.
+
+    WHY THIS IS ADVISORY AND NOT AN ERROR, stated carefully, because the temptation to
+    "just require it" is strong and would be the wrong call here.
+
+    The official schema permits it. `measurement.series` has no ``minItems``, so a
+    record with ``series: []`` validates with **zero errors** — measured, not assumed.
+    Making it a hard error would mean this module contradicting the vendored schema,
+    which would create a second authoritative validator. The schema is not ours to
+    reinterpret.
+
+    And the SCIENTIFIC meaning of an empty series is genuinely ambiguous. It could be
+    invalid (a reduction that produced nothing), incomplete (data not yet attached),
+    not applicable (a record type that legitimately carries none), or deliberately
+    empty. Those four cases want four different outcomes, and choosing between them is
+    a domain owner's decision, not an inference this code may make. So the warning
+    states the OBSERVATION — there is no measured data — and does not classify it.
+
+    What this does fix is the honesty gap: a record with no measurement data used to
+    reach a reader as an unqualified PASS with no signal of any kind, because the
+    schema is silent and nothing else looked. Now something says so out loud.
+    """
+    measurement = record.get("measurement")
+    if measurement is None:
+        return PortalWarning(
+            code="NO_MEASUREMENT_SERIES",
+            where="measurement",
+            message=(
+                "record carries no `measurement` block, so it contains no measured "
+                "data; the schema does not require one, so this is advisory."
+            ),
+        )
+    series = (measurement or {}).get("series")
+    if not series:
+        return PortalWarning(
+            code="NO_MEASUREMENT_SERIES",
+            where="measurement.series",
+            message=(
+                "`measurement.series` is empty, so the record contains no measured "
+                "data; the schema sets no minimum, so this is advisory. Whether an "
+                "empty series is invalid, incomplete, or not applicable is a "
+                "scientific decision this check does not make."
+            ),
+        )
+    return None
+
+
 # Registry of advisory checks. Each takes a record and returns a PortalWarning or None.
 # Intentionally small and generic — no domain-specific scientific judgment, no guessing.
 _CHECKS: tuple[Callable[[dict], PortalWarning | None], ...] = (
     _no_links,
     _qc_nonvalid_without_evidence,
+    _no_measurement_series,
 )
 
 
