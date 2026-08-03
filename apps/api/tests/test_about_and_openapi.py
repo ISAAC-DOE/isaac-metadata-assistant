@@ -449,7 +449,10 @@ def test_registered_tags_match_the_module_level_definitions(client):
 EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/about", "get"): ["200", "401"],
     ("/api/assistant/memory/query", "post"): ["200", "400", "401", "422"],
-    ("/api/demo/reset", "post"): ["200", "401", "403", "409", "422"],
+    # 412/428 are the R1 reset precondition: `plan_digest` stale / omitted. They
+    # mirror the per-record If-Match convention on the mutation routes below, which
+    # is why they read the same here.
+    ("/api/demo/reset", "post"): ["200", "401", "403", "409", "412", "422", "428"],
     ("/api/demo/run", "post"): ["200", "401", "409", "422"],
     ("/api/experiments", "get"): ["200", "401"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422"],
@@ -530,7 +533,20 @@ EXPECTED_COMPONENT_SCHEMAS: dict[str, dict] = {
         "properties": ["grounded_rev", "history", "question"],
         "required": ["question"],
     },
-    "DemoResetRequest": {"properties": ["confirmation", "mode"], "required": ["mode"]},
+    # `plan_digest` (R1) is the execute precondition. It is deliberately NOT required
+    # by the schema: `preview` has no precondition, so requiring it at the model level
+    # would reject a perfectly valid preview. The route enforces it for `execute`
+    # only, and enforces it fail-closed (omitted -> 428, no mutation).
+    #
+    # NOTE ON THE NAME. It is `plan_digest`, not `plan_token`, because
+    # `test_openapi_contains_no_secret_or_infra_host_strings` forbids the substring
+    # "token" anywhere in the generated document — a blunt credential-leak scan with
+    # a deliberate no-exception policy. Weakening that scan to spell a
+    # non-credential field name the industry way would be the wrong trade.
+    "DemoResetRequest": {
+        "properties": ["confirmation", "mode", "plan_digest"],
+        "required": ["mode"],
+    },
     "HTTPValidationError": {"properties": ["detail"], "required": []},
     "ValidationError": {
         "properties": ["ctx", "input", "loc", "msg", "type"],

@@ -13,6 +13,13 @@ demo workspace to EXACTLY the five canonical P26.0a scenarios, safely:
   * there is NO general per-experiment delete route.
 
 All fixtures are synthetic. Truth core is never bypassed.
+
+R1 (2026-08-02) added a PRECONDITION on top of all of the above: an `execute` must
+carry the `plan_digest` its own `preview` returned, or it is refused without mutating
+(428 omitted / 412 stale). This file keeps testing the classification contract; the
+precondition itself, the lock symmetry, and the measured `final_count` are covered by
+`test_reset_safety.py`. R1 also renamed the confirmation phrase, which is DISPLAYED to
+the operator, from harness jargon to `RESET EXAMPLE WORKSPACE`.
 """
 
 from __future__ import annotations
@@ -23,7 +30,7 @@ from fastapi.testclient import TestClient
 import isaac_api.workspace as ws
 from isaac_records.official import validate_official  # truth-core authority
 
-CONFIRM = "RESET SYNTHETIC DEMO"
+CONFIRM = "RESET EXAMPLE WORKSPACE"
 CANONICAL_IDS = {
     ws.SEED_NEW_DRAFT_ID,
     ws.SEED_PARTIAL_ID,
@@ -72,11 +79,35 @@ def _make_ambiguous(title: str = "Some other experiment"):
 
 
 def _reset(client, mode, confirmation=None, **extra):
+    """POST the reset exactly as given — no digest is added.
+
+    Kept deliberately literal so the tests that probe the request MODEL (extra fields
+    rejected, wrong phrase refused) still send exactly what they mean to send. Use
+    ``_execute`` for the happy path, which supplies the R1 precondition.
+    """
     body = {"mode": mode}
     if confirmation is not None:
         body["confirmation"] = confirmation
     body.update(extra)
     return client.post("/api/demo/reset", json=body)
+
+
+def _plan_digest(client) -> str:
+    """The current plan digest, from a (non-mutating) preview."""
+    r = _reset(client, "preview")
+    assert r.status_code == 200, r.text
+    return r.json()["plan_digest"]
+
+
+def _execute(client, confirmation=CONFIRM, **extra):
+    """An execute carrying the R1 precondition from its own preview.
+
+    NOTE the ordering constraint this helper embeds: the preview must be the LAST
+    thing to touch the workspace before the execute. A mutating call in between — or
+    a read that lazily seeds a missing canonical id — legitimately invalidates the
+    digest and the execute answers 412. Tests that want that are explicit about it.
+    """
+    return _reset(client, "execute", confirmation, plan_digest=_plan_digest(client), **extra)
 
 
 # --- 1. authentication --------------------------------------------------------
@@ -157,9 +188,13 @@ def test_preview_reports_typed_counts(client):
 def test_execute_requires_exact_confirmation(client):
     _make_managed_legacy()
     before = _ids(client)
-    for bad in (None, "", "reset", "RESET", "reset synthetic demo"):
-        r = _reset(client, "execute", bad)
+    # "RESET SYNTHETIC DEMO" is the RETIRED phrase: it is listed here so the rename
+    # cannot be half-applied — a backend still accepting it would fail this.
+    for bad in (None, "", "reset", "RESET", "reset example workspace", "RESET SYNTHETIC DEMO"):
+        r = _reset(client, "execute", bad, plan_digest=_plan_digest(client))
+        assert r.status_code == 409, (bad, r.status_code)
         assert r.json().get("status") == "refused", bad
+        assert r.json().get("refusal_reason") == "confirmation_required", bad
     assert _ids(client) == before  # still nothing removed
 
 
@@ -192,7 +227,7 @@ def test_execute_removes_only_managed_legacy_and_keeps_canonical(client):
     a = _make_managed_legacy()
     b = _make_managed_legacy()
     assert {a.id, b.id} <= _ids(client)
-    body = _reset(client, "execute", CONFIRM).json()
+    body = _execute(client).json()
     assert body["status"] == "ok"
     ids_after = _ids(client)
     assert ids_after == CANONICAL_IDS  # exactly five canonical
@@ -207,7 +242,7 @@ def test_ambiguous_record_causes_refusal_and_no_removal(client):
     amb = _make_ambiguous()
     legacy = _make_managed_legacy()
     before = _ids(client)
-    r = _reset(client, "execute", CONFIRM)
+    r = _execute(client)
     assert r.json().get("status") == "refused"
     assert r.json().get("ambiguous_count", 0) >= 1
     # NOTHING removed — not even the clearly-managed legacy record
@@ -231,7 +266,7 @@ def test_filename_overlap_without_marker_is_ambiguous_not_removed(client):
     assert prev["ambiguous_count"] >= 1
     assert imposter.id not in {r["id"] for r in prev["removable"]}
     # execute refuses (ambiguous present) and removes nothing
-    assert _reset(client, "execute", CONFIRM).json()["status"] == "refused"
+    assert _execute(client).json()["status"] == "refused"
     assert imposter.id in _ids(client)
 
 
@@ -246,13 +281,13 @@ def test_missing_canonical_is_recreated(client):
     assert CANONICAL_IDS <= _ids(client)
     shutil.rmtree(ws.workspace_root() / ws.SEED_READY_ID)
     # reset execute must recreate the missing canonical via the deterministic seed
-    _reset(client, "execute", CONFIRM)
+    _execute(client)
     assert CANONICAL_IDS <= _ids(client)
 
 
 def test_canonical_titles_and_ids_stable_after_reset(client):
     before = {e["id"]: e["title"] for e in _experiments(client)}
-    _reset(client, "execute", CONFIRM)
+    _execute(client)
     after = {e["id"]: e["title"] for e in _experiments(client)}
     for cid in CANONICAL_IDS:
         assert after[cid] == before[cid]
@@ -264,7 +299,7 @@ def test_canonical_titles_and_ids_stable_after_reset(client):
 def test_repeated_execute_stays_at_five(client):
     _make_managed_legacy()
     for _ in range(3):
-        _reset(client, "execute", CONFIRM)
+        _execute(client)
         assert _ids(client) == CANONICAL_IDS
 
 
@@ -273,7 +308,7 @@ def test_repeated_execute_stays_at_five(client):
 
 def test_final_state_distribution(client):
     _make_managed_legacy()
-    _reset(client, "execute", CONFIRM)
+    _execute(client)
     dist: dict[str, int] = {}
     for e in _experiments(client):
         dist[e["status"]] = dist.get(e["status"], 0) + 1
@@ -284,7 +319,7 @@ def test_final_state_distribution(client):
 
 
 def test_exported_canonical_record_remains_schema_valid(client):
-    _reset(client, "execute", CONFIRM)
+    _execute(client)
     art = client.get(f"/api/experiments/{ws.SEED_DONE_ID}/artifacts").json()
     assert art.get("record") is not None
     # the truth core — not the reset — is the validation authority
@@ -303,7 +338,7 @@ def test_no_general_experiment_delete_route(client):
 
 
 def test_existing_experiment_routes_unchanged(client):
-    _reset(client, "execute", CONFIRM)
+    _execute(client)
     assert client.get("/api/experiments").status_code == 200
     assert client.get(f"/api/experiments/{ws.SEED_DONE_ID}").status_code == 200
     assert client.get(f"/api/experiments/{ws.SEED_DONE_ID}/draft").status_code == 200

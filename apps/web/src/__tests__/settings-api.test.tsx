@@ -1107,8 +1107,17 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // reading a diff, not by a test. `apps/api/tests/test_contract_description_parity.py`
     // now asserts the copy matches `create_app().openapi()` in both directions, so
     // this constant should only ever move together with a deliberate contract edit.
-    expect(total).toBe(21909);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(45);
+    // 21,909 -> 22,576: R1 made the Example-Workspace reset refuse to run against a
+    // classification the operator approved but that no longer holds, so
+    // `POST /api/demo/reset` documents a new precondition (`plan_digest`, 428 when
+    // omitted / 412 when stale) and a derived summary of the confirmed work a reset
+    // would discard. Net +667 characters in ONE operation, and the post-lead
+    // paragraph count moves 45 -> 46: the precondition is a separate statement from
+    // what the operation does, and folding it into the lead would have buried the one
+    // sentence that explains why an execute can be refused. Operation count is
+    // unchanged at 36.
+    expect(total).toBe(22576);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(46);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

@@ -392,7 +392,16 @@ def test_reset_mints_fresh_token_for_canonical(client):
     canonical record must be restored, not left in place, so every pre-reset token is
     invalid afterward — a stale client is forced to refetch."""
     before = _token_of(client, ws.SEED_READY_ID)
-    r = client.post("/api/demo/reset", json={"mode": "execute", "confirmation": "RESET SYNTHETIC DEMO"})
+    # R1: an execute carries the plan digest from its own preview (428 without it).
+    digest = client.post("/api/demo/reset", json={"mode": "preview"}).json()["plan_digest"]
+    r = client.post(
+        "/api/demo/reset",
+        json={
+            "mode": "execute",
+            "confirmation": "RESET EXAMPLE WORKSPACE",
+            "plan_digest": digest,
+        },
+    )
     assert r.status_code == 200, r.text
     after = _token_of(client, ws.SEED_READY_ID)
     assert before != after, "reset mints a fresh generation, invalidating the pre-reset token"
