@@ -830,6 +830,8 @@ export const artifactsNull = {
   sidecar: null,
   record_filename: null,
   sidecar_filename: null,
+  // P4 — nulls because nothing was exported, NOT because a file went missing.
+  artifact: { state: 'none' as const, reason: null },
 };
 
 export const demoRunDraftOnly = {
@@ -1051,7 +1053,7 @@ export const editApplied = {
     rev: 4,
     changed_fields: ['ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb'],
     reopened_steps: [],
-    artifact: { state: 'none', reason: null },
+    artifact: { state: 'none' as const, reason: null },
     reason: 'Updated 1 field(s); no downstream steps reopened.',
   },
 };
@@ -1303,6 +1305,8 @@ export const artifactsExported = {
   // P30.6 — safe basenames only, never an absolute server/mount path.
   record_filename: `${EXP_ID}.json`,
   sidecar_filename: `${EXP_ID}.evidence.json`,
+  // P4 — both files read cleanly and match the current draft.
+  artifact: { state: 'current' as const, reason: null },
 };
 
 export const sourcePreviewListing = {
@@ -1345,7 +1349,7 @@ export function evidenceBundleRoutes(id: string = EXP_ID): Record<string, Stubbe
           sidecar_filename: artifactsExported.sidecar_filename,
         },
         workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
-        artifact: { state: 'current', reason: null },
+        artifact: { state: 'current' as const, reason: null },
       },
     },
     [`GET ${base}/evidence`]: { body: evidenceExported },
@@ -1582,7 +1586,7 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
           sidecar_filename: artifactsExported.sidecar_filename,
         },
         workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
-        artifact: { state: 'current', reason: null },
+        artifact: { state: 'current' as const, reason: null },
       },
     },
     [`GET ${base}/pending`]: { body: { pending: [] } },
@@ -2061,12 +2065,12 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "POST /api/experiments/{experiment_id}/edit", description: "Overwrites the current value of a field that has already been answered, recording a fresh user confirmation, and returns the same refreshed bundle as the answers operation.\n\nRequires `confirmed_by_user: true` and the record's current `ETag` in `If-Match`. A body that names no recognised editable field is rejected with `422` rather than silently doing nothing, and a value that fails the core's own checks leaves the stored value unchanged. It never reopens or creates a blocking question." },
   { op: "POST /api/experiments/{experiment_id}/export", description: "Runs the schema-gated export for this record. On success it writes the official ISAAC record and its evidence sidecar into the workspace and returns the record id, the two artifact filenames (basenames only, never a server path), the refreshed revision metadata, the workflow, and the downstream invalidation.\n\nA gated failure also returns `200`, with `ok: false`, the failing draft and official reports, and a flat `errors` list — decide by reading `ok`, not the status code. Nothing is written in that case.\n\nRequires the record's current `ETag` in `If-Match`. Exported records are immutable: exporting a record that already has one is refused." },
   { op: "POST /api/experiments/{experiment_id}/ingestion/csv/preview", description: "Read-only preview of a campaign-sheet CSV, reconciled field by field against this record's current authoritative values. Returns the row and candidate counts, the mapped candidate fields with their reconciliation outcome, and non-actionable warnings for unrecognised columns.\n\nSend the CSV as a raw `text/csv` request body, not as a multipart form. The body is read in memory under a hard size limit and is never written anywhere: no draft change, no revision bump, no export, no indexing, and no retained upload. Only outcome metadata is logged — never the rows, the candidate values, or the filename.\n\nRequires the record's current `ETag` in `If-Match`, which is checked before the body is read. Available only while the deployment is in synthetic-only data mode.\n\nA malformed CSV — unreadable, an empty or duplicated header column, a missing required column, or a row, column, cell, or candidate count over the limit — is rejected with `422` and a stable error code." },
-  { op: "POST /api/experiments/{experiment_id}/validate", description: "Checks this record against the vendored official ISAAC schema and returns `ok`, a list of `{path, message}` errors, the schema label, and whether the check was a dry run.\n\nFor an already-exported record the written record is validated (`dry_run: false`). Otherwise the export is run in memory and the resulting candidate record is validated without writing anything (`dry_run: true`). Read-only in both cases. The verdict comes from the same deterministic core function the command line uses." },
+  { op: "POST /api/experiments/{experiment_id}/validate", description: "Checks this record against the vendored official ISAAC schema and returns `ok`, a list of `{path, message}` errors, the schema label, and whether the check was a dry run.\n\nFor an already-exported record the written record is validated (`dry_run: false`). Otherwise the export is run in memory and the resulting candidate record is validated without writing anything (`dry_run: true`). Read-only in both cases. The verdict comes from the same deterministic core function the command line uses.\n\nIf the written record cannot be read at all, no verdict is invented: the operation reports `ok: false` with the single fixed error `Validation could not be completed.` and `dry_run: false`. Read that as *no verdict*, not as a schema violation — the artifacts operation reports why the file could not be read." },
   { op: "POST /api/validate/record", description: "Standalone validator for a candidate official ISAAC record supplied directly as a JSON request body — no experiment, no draft, and no workspace involved. Returns `ok`, a rendered summary line, the `{path, message}` errors, and the schema version checked against.\n\nIt calls the same authoritative validator over the same vendored schema that the per-experiment validation operation uses, so the two verdicts agree by construction. The body is never written anywhere and its content is never logged; only the outcome and error count are.\n\nSend the record as a raw JSON body. The body is read in memory under a hard size limit." },
   { op: "POST /api/experiments/{experiment_id}/audit", description: "Runs the deterministic audit over the official record and evidence sidecar this record's export wrote, returning the per-record official-schema report, its evidence-coverage counts, and the rendered text report.\n\nA record that has not been exported yet returns `200` with no rows and a message saying so, rather than an error. Read-only." },
-  { op: "GET /api/experiments/{experiment_id}/warnings", description: "Advisory, non-gating warnings for this record. For an already-exported record the written record is checked (`dry_run: false`); otherwise the in-memory export candidate is checked (`dry_run: true`).\n\nThis channel deliberately carries no pass, fail, or validity field, and it never blocks an export — read it as advice for a human, alongside the official-schema verdict, not instead of it. The `GET` and `POST` forms are equivalent: both are read-only and return the same payload." },
-  { op: "POST /api/experiments/{experiment_id}/warnings", description: "Advisory, non-gating warnings for this record. For an already-exported record the written record is checked (`dry_run: false`); otherwise the in-memory export candidate is checked (`dry_run: true`).\n\nThis channel deliberately carries no pass, fail, or validity field, and it never blocks an export — read it as advice for a human, alongside the official-schema verdict, not instead of it. The `GET` and `POST` forms are equivalent: both are read-only and return the same payload." },
-  { op: "GET /api/experiments/{experiment_id}/evidence", description: "The field-by-field evidence trail for this record: each official path, its value, the kind of support behind it, and the source file and locator cited.\n\nFor an already-exported record the trail is read from the evidence sidecar written alongside the official record; otherwise it is read from the draft's own evidence envelopes. Read-only." },
+  { op: "GET /api/experiments/{experiment_id}/warnings", description: "Advisory, non-gating warnings for this record. For an already-exported record the written record is checked (`dry_run: false`); otherwise — including when that written record cannot be read — the in-memory export candidate is checked (`dry_run: true`). Always read `dry_run` to know which document the advice describes.\n\nThis channel deliberately carries no pass, fail, or validity field, and it never blocks an export — read it as advice for a human, alongside the official-schema verdict, not instead of it. The `GET` and `POST` forms are equivalent: both are read-only and return the same payload." },
+  { op: "POST /api/experiments/{experiment_id}/warnings", description: "Advisory, non-gating warnings for this record. For an already-exported record the written record is checked (`dry_run: false`); otherwise — including when that written record cannot be read — the in-memory export candidate is checked (`dry_run: true`). Always read `dry_run` to know which document the advice describes.\n\nThis channel deliberately carries no pass, fail, or validity field, and it never blocks an export — read it as advice for a human, alongside the official-schema verdict, not instead of it. The `GET` and `POST` forms are equivalent: both are read-only and return the same payload." },
+  { op: "GET /api/experiments/{experiment_id}/evidence", description: "The field-by-field evidence trail for this record: each official path, its value, the kind of support behind it, and the source file and locator cited.\n\nFor an already-exported record the trail is read from the evidence sidecar written alongside the official record; otherwise — including when that sidecar or record cannot be read — it is read from the draft's own evidence envelopes, which are the sidecar's own source. Read-only." },
   { op: "GET /api/experiments/{experiment_id}/evidence-classification", description: "Per-field evidence-support classification for this record's current state, plus a histogram over the five classes — `supported`, `inferred_candidate`, `insufficient_evidence`, `conflicting_evidence` and `unknown` — bound to the authoritative `record_rev` so a client can tell when its view is stale.\n\nThis carries the evidence-support axis only. It deliberately reports no validity, completion, exportability, or advisory verdict; those live in their own operations. Read-only, and it takes no lock." },
   { op: "GET /api/experiments/{experiment_id}/source-preview", description: "The text of one committed reference source file, line by line, together with the one-based line numbers this record's evidence actually cites in it. Read-only.\n\nOnly the two committed reference files may be previewed. A name containing a path separator or a traversal fragment is rejected, and any other filename is refused with the allowed names listed in the response. The file that cites fields rather than lines yields no cited line numbers, which is expected rather than an error." },
   { op: "GET /api/experiments/{experiment_id}/artifacts", description: "The official ISAAC record and the evidence-sidecar JSON that this record's export wrote, plus their filenames as bare basenames — never a server path.\n\nBoth files are resolved from the record id, never from a caller-supplied path. A record that has not been exported yet returns `200` with null payloads rather than an error. Read-only." },

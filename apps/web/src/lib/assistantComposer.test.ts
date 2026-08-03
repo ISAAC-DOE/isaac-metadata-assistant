@@ -1086,7 +1086,7 @@ describe('artifact_paths — safe, never renders undefined/null/empty', () => {
   it('record only → names record, states no sidecar path', () => {
     const answer = artifacts(
       evidenceState({
-        artifacts: { record: null, sidecar: null, record_filename: RECORD_FILENAME, sidecar_filename: null },
+        artifacts: { ...artifactsNull, record_filename: RECORD_FILENAME },
       }),
     );
     expect(answer.text).toBe(
@@ -1097,7 +1097,7 @@ describe('artifact_paths — safe, never renders undefined/null/empty', () => {
   it('sidecar only → names sidecar, states no record path', () => {
     const answer = artifacts(
       evidenceState({
-        artifacts: { record: null, sidecar: null, record_filename: null, sidecar_filename: SIDECAR_FILENAME },
+        artifacts: { ...artifactsNull, sidecar_filename: SIDECAR_FILENAME },
       }),
     );
     expect(answer.text).toBe(
@@ -1123,7 +1123,7 @@ describe('artifact_paths — safe, never renders undefined/null/empty', () => {
     for (const v of variants) {
       const answer = artifacts(
         evidenceState({
-          artifacts: { record: null, sidecar: null, ...v } as unknown as EvidenceBundle['artifacts'],
+          artifacts: { ...artifactsNull, ...v } as unknown as EvidenceBundle['artifacts'],
         }),
       );
       expect(answer.text).toBe(
@@ -1143,10 +1143,10 @@ describe('compose evidence — no-verdict / no-undefined sweep over every compos
     evidenceState({}, 'no.such.path'),
     evidenceState({ artifacts: artifactsExported }),
     evidenceState({
-      artifacts: { record: null, sidecar: null, record_filename: RECORD_FILENAME, sidecar_filename: null },
+      artifacts: { ...artifactsNull, record_filename: RECORD_FILENAME },
     }),
     evidenceState({
-      artifacts: { record: null, sidecar: null, record_filename: null, sidecar_filename: SIDECAR_FILENAME },
+      artifacts: { ...artifactsNull, sidecar_filename: SIDECAR_FILENAME },
     }),
     evidenceState({
       evidence: [

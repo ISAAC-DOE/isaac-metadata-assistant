@@ -457,6 +457,48 @@ def _workflow_for(exp: Experiment) -> dict:
     )
 
 
+# --- defensive artifact reads (shared) ----------------------------------------
+
+
+def _read_artifact_json(path) -> dict | None:
+    """Parse one exported artifact file, or ``None`` when it is absent/unreadable/not JSON.
+
+    P4. A read operation must never 500. An unguarded read raised ``FileNotFoundError``,
+    i.e. an unhandled exception on a GET, which is a 500 for two separate reasons:
+    the caller gets nothing usable (and, in a bundled ``Promise.all``, neither do its
+    siblings), and the exception message — which carries the ABSOLUTE server path
+    ``/data/isaac-workspace/…`` — is written to the SERVER LOG, itself an
+    exfiltration surface (P30.6). To be exact, and this was overstated once already:
+    the RESPONSE body is the framework's bare ``Internal Server Error``
+    (``app.debug`` is False and no 500 handler is registered), so the path never
+    reached a client. So an unreadable artifact becomes a typed, path-free absence
+    here rather than an exception every caller has to survive. Same tolerance as
+    ``dependencies.artifact_state``, which already treats this situation as ``stale``
+    instead of throwing.
+
+    SHARED by every reader of an exported artifact: ``post_validate``,
+    ``_warnings_payload``, ``get_evidence``, ``get_artifacts`` and
+    ``_assistant_validate_dryrun``. Each decides for itself what a ``None`` means in
+    its own contract; the tolerance itself has exactly one definition.
+
+    The ``except`` is deliberately NARROW. ``OSError`` covers absent/unreadable/
+    permission/is-a-directory; ``ValueError`` covers ``json.JSONDecodeError``. Any
+    OTHER exception type propagates on purpose: a ``MemoryError``, a
+    ``KeyboardInterrupt``, or a genuine programming error must NOT be silently
+    reported to the caller as "the artifact is missing", because that would be a
+    false statement about the filesystem. Pinned by
+    ``test_export_recovery.test_read_artifact_json_lets_an_unexpected_exception_propagate``.
+    (``dependencies.artifact_state`` uses a bare ``except Exception`` for the same
+    read — the codebase is inconsistent here. That is left alone on purpose: it is a
+    different function with a different contract (it must produce a state label, never
+    raise) and changing it is not this slice's scope.)
+    """
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # ValueError covers json.JSONDecodeError
+        return None
+
+
 # --- 1. health ----------------------------------------------------------------
 
 
@@ -1319,9 +1361,36 @@ def post_export(
         # completes the final step, so no step reopens — but we report honestly).
         pre_steps = _workflow_for(exp)["ordered_steps"]
 
-        # Immutability guard (mirrors cli.cmd_export): never overwrite an existing record.
+        # Immutability guard (mirrors cli.cmd_export): never overwrite the record of
+        # an ALREADY-EXPORTED experiment whose artifacts are BOTH on disk.
+        #
+        # The guard is deliberately STATE-aware, not file-only. The 409 this returns
+        # makes a STATE claim ("This record has already been exported") — see the
+        # `responses` entry above — and a file on disk is only a valid proxy for that
+        # claim while state and disk AGREE. They can disagree: this handler writes
+        # artifact -> sidecar -> state (`_write_record`, then `save_versioned`), so a
+        # fault anywhere in that window leaves the artifact(s) on disk with
+        # `record_id` still null. A file-only guard then WEDGED the record: every
+        # clean retry returned 409 forever, the wedge survived a restart (it is all
+        # on disk), and with no per-record repair route the only recovery was the
+        # destructive whole-workspace reset. So an orphan artifact is reconciled
+        # (below) instead of being mistaken for an exported record. Covered by
+        # `apps/api/tests/test_export_recovery.py`, which pins every state x file
+        # combination: rows 1-4 for the record file, plus rows 3b/3c for each half of
+        # the pair.
+        #
+        # BOTH files are required, not just the record. An export produces a PAIR,
+        # and the sidecar is written second, so `record present + sidecar absent` is
+        # a reachable half-written state — reachable from the very self-heal this
+        # slice blesses (fault the sidecar write during the exported+missing repair).
+        # With a record-only check that state was a PERMANENT 409 wedge whose sidecar
+        # could never be regenerated: the exact defect class this guard was fixed to
+        # remove, one file over. Requiring both is also the SAME rule `get_artifacts`
+        # already applies ("force `stale` whenever EITHER file failed to read"), so
+        # the two agree about what "the artifact is present" means.
         record_path = exp.records_dir / f"{exp.id}.json"
-        if record_path.exists():
+        sidecar_path = exp.records_dir / f"{exp.id}.evidence.json"
+        if exp.exported() and record_path.exists() and sidecar_path.exists():
             return JSONResponse(
                 status_code=409,
                 content={
@@ -1329,6 +1398,29 @@ def post_export(
                     "message": f"{record_path.name} already exists; records are immutable.",
                     "record_id": exp.id,
                 },
+            )
+        if not exp.exported() and record_path.exists():
+            # RECONCILIATION: not exported, yet an artifact exists — the crash window
+            # above. Proceed and republish from the CURRENT draft (the orphan may be
+            # a projection of an older draft, so it is replaced, never adopted). Warn
+            # so an operator sees that a fault happened rather than the repair being
+            # silent. Path-free by rule: the record id and the BASENAME only, never a
+            # filesystem path (P30.6, and a log line is an exfiltration surface too).
+            #
+            # `not exp.exported()` is EXPLICIT (it was implied by the fall-through
+            # before the sidecar clause above existed). This warning means exactly one
+            # thing — "state and disk disagree about whether an export happened" — and
+            # an exported record missing one of its files is NOT that: state and disk
+            # agree an export happened, one file is simply gone. That is the same
+            # class as the mirror case, which is deliberately silent (see
+            # `test_no_reconciliation_warning_on_the_mirror_case`), so both self-heals
+            # stay silent and the warning keeps one unambiguous meaning.
+            _log.warning(
+                "export reconciliation: record %s has an orphan artifact %s on disk "
+                "while its state says not exported (a fault between the artifact "
+                "write and the state save); republishing from the current draft",
+                exp.id,
+                record_path.name,
             )
 
         result = export_draft(exp.draft, REPO_ROOT, record_id=exp.id)
@@ -1350,9 +1442,19 @@ def post_export(
             return JSONResponse(status_code=200, content=payload)
 
         _write_record(exp, result)
-        # export changes the authoritative state (record_id: None -> id), so this bumps
-        # rev and stamps updated_utc, persisting the state atomically.
-        exp.save_versioned()
+        # export normally changes the authoritative state (record_id: None -> id), so
+        # this bumps rev and stamps updated_utc, persisting the state atomically. On a
+        # self-heal of an already-exported record `record_id` is ALREADY set, the
+        # authoritative signature is unchanged, and it returns False without rewriting
+        # anything — a filesystem repair, not a scientific state change.
+        #
+        # P4 review FIX E — that return value is PASSED THROUGH to the invalidation,
+        # exactly as the two sibling mutation handlers do (`post_answers`,
+        # `post_edit`). It used to be hardcoded `changed=True, ["record_id"]`, which on
+        # the self-heal path contradicted the same response's own `rev` (unchanged),
+        # its ETag (unchanged) and this handler's own failure-branch rule ("never
+        # fabricate a mutation that did not occur").
+        changed = exp.save_versioned()
         payload["record_id"] = exp.record_id
         # P30.6 — SAFE basename only (see _detail); never the absolute path.
         payload["artifact_refs"] = {
@@ -1363,8 +1465,8 @@ def post_export(
         # export completes the final workflow step and makes the artifact current.
         payload["workflow"] = _workflow_for(exp)
         payload["invalidation"] = dependencies.build_invalidation(
-            changed=True,
-            changed_fields=["record_id"],
+            changed=changed,
+            changed_fields=["record_id"] if changed else [],
             pre_steps=pre_steps,
             post_exp=exp,
         )
@@ -1567,7 +1669,12 @@ async def post_csv_preview(
         "(`dry_run: false`). Otherwise the export is run in memory and the "
         "resulting candidate record is validated without writing anything "
         "(`dry_run: true`). Read-only in both cases. The verdict comes from the "
-        "same deterministic core function the command line uses."
+        "same deterministic core function the command line uses.\n\n"
+        "If the written record cannot be read at all, no verdict is invented: the "
+        "operation reports `ok: false` with the single fixed error `Validation "
+        "could not be completed.` and `dry_run: false`. Read that as *no verdict*, "
+        "not as a schema violation — the artifacts operation reports why the file "
+        "could not be read."
     ),
     response_description="The official-schema verdict, its errors, and whether it was a dry run.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
@@ -1578,7 +1685,39 @@ def post_validate(experiment_id: ExperimentId):
         return _not_found(experiment_id)
 
     if exp.exported():
-        record = json.loads(exp.record_path().read_text(encoding="utf-8"))
+        # P4 review FIX C — read DEFENSIVELY. The state can say exported while the
+        # artifact is absent or corrupt (a fault in export's artifact->sidecar->state
+        # window, or an out-of-band deletion), and an unguarded read raised
+        # `FileNotFoundError` -> an unhandled 500 with the absolute server path in the
+        # server log. The frontend `getExportReadiness` fetches this in the SAME
+        # `Promise.all` as `/artifacts`, so one raise took the whole readiness view
+        # down no matter how well the other responses degraded.
+        record = _read_artifact_json(exp.record_path())
+        if record is None:
+            # FAIL CLOSED, and reuse the EXISTING crash-sentinel vocabulary rather
+            # than inventing a message. `ok: true` here would be a false claim of
+            # validity about a record that could not even be read, and falling back to
+            # a dry run would silently change the SUBJECT of the verdict from the
+            # written artifact to an in-memory candidate. `Validation could not be
+            # completed.` is the one message `assistant_paths.is_validation_unavailable`
+            # (and its TypeScript twin `isValidationUnavailable`) already recognises as
+            # "the validator did not run", so both readers say so instead of rendering
+            # "1 record-level validation issue" for a violation nobody located. The
+            # artifact-specific reason is single-sourced in `/artifacts`
+            # (`dependencies.MISSING_REASON`), which is the endpoint that describes
+            # files; this one describes verdicts. `dry_run: false` is accurate: no dry
+            # run happened.
+            _log.warning(
+                "validate: record %s is marked exported but its artifact could not be "
+                "read; reporting no verdict",
+                exp.id,
+            )
+            return {
+                "ok": False,
+                "errors": [{"path": "$", "message": "Validation could not be completed."}],
+                "schema": SCHEMA_LABEL,
+                "dry_run": False,
+            }
         report = validate_official(record, REPO_ROOT)
         return {
             "ok": report.ok,
@@ -1735,6 +1874,13 @@ def post_audit(experiment_id: ExperimentId):
             "text": "No records found.",
             "message": "Nothing exported yet — export this experiment before auditing.",
         }
+    # P4 review FIX C — checked, NOT changed. Unlike its sibling read endpoints this
+    # one never raised on a missing artifact, and it needs no defensive read: it does
+    # not open a path derived from `record_id` at all. `audit_records` GLOBS
+    # `records_dir/*.json`, so a deleted artifact simply yields no rows (200, `text:
+    # "No records found."`), and a corrupt one is reported as `invalid JSON` against
+    # `path.name` — a basename, never a path. Pinned by
+    # `test_export_recovery.test_audit_already_tolerates_a_missing_artifact`.
     results = audit_records(exp.records_dir, REPO_ROOT)
     return serialize.audit_to_dict(results, render_audit(results))
 
@@ -1743,11 +1889,24 @@ def post_audit(experiment_id: ExperimentId):
 
 
 def _warnings_payload(exp: Experiment) -> dict:
-    if exp.exported():
-        record = json.loads(exp.record_path().read_text(encoding="utf-8"))
+    # P4 review FIX C — read DEFENSIVELY (see `post_validate`). `getExportReadiness`
+    # fetches this in the same `Promise.all` as `/artifacts`, so an unguarded read here
+    # took the whole readiness view down with an unhandled 500.
+    record = _read_artifact_json(exp.record_path()) if exp.exported() else None
+    if record is not None:
         dry_run = False
     else:
         # Advisory check on the dry-run record (populated even when official fails).
+        #
+        # This is ALSO the degradation when the record is marked exported but its
+        # artifact cannot be read — and it is honest here in a way it would not be in
+        # `post_validate`, because this channel carries no verdict at all (no pass,
+        # fail, validity or exportability field, by design) and it already publishes
+        # the one distinction that matters: `dry_run` states WHICH document was
+        # checked. `dry_run: true` says "these warnings came from the in-memory export
+        # candidate", which is exactly what happened. Zero warnings would instead
+        # imply "nothing to advise" about a document nobody read, and warnings
+        # computed from `{}` would be advice about a record that does not exist.
         result = export_draft(exp.draft, REPO_ROOT)
         record = result.record or {}
         dry_run = True
@@ -1760,8 +1919,10 @@ def _warnings_payload(exp: Experiment) -> dict:
 #: they are documented with the same consumer-facing text.
 _WARNINGS_DESCRIPTION = (
     "Advisory, non-gating warnings for this record. For an already-exported "
-    "record the written record is checked (`dry_run: false`); otherwise the "
-    "in-memory export candidate is checked (`dry_run: true`).\n\n"
+    "record the written record is checked (`dry_run: false`); otherwise — "
+    "including when that written record cannot be read — the in-memory export "
+    "candidate is checked (`dry_run: true`). Always read `dry_run` to know which "
+    "document the advice describes.\n\n"
     "This channel deliberately carries no pass, fail, or validity field, and it "
     "never blocks an export — read it as advice for a human, alongside the "
     "official-schema verdict, not instead of it. The `GET` and `POST` forms are "
@@ -1815,8 +1976,9 @@ def post_warnings(experiment_id: ExperimentId):
         "its value, the kind of support behind it, and the source file and locator "
         "cited.\n\n"
         "For an already-exported record the trail is read from the evidence "
-        "sidecar written alongside the official record; otherwise it is read from "
-        "the draft's own evidence envelopes. Read-only."
+        "sidecar written alongside the official record; otherwise — including when "
+        "that sidecar or record cannot be read — it is read from the draft's own "
+        "evidence envelopes, which are the sidecar's own source. Read-only."
     ),
     response_description="One evidence entry per field carrying a value.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
@@ -1825,11 +1987,34 @@ def get_evidence(experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id)
     if exp is None:
         return _not_found(experiment_id)
-    if exp.exported():
-        record = json.loads(exp.record_path().read_text(encoding="utf-8"))
-        sidecar = json.loads(exp.sidecar_path().read_text(encoding="utf-8"))
+    # P4 review FIX C — read DEFENSIVELY (see `post_validate`). `getEvidenceBundle`
+    # fetches this in the same `Promise.all` as `/artifacts`, so an unguarded read here
+    # took the whole evidence explorer down with an unhandled 500.
+    record = _read_artifact_json(exp.record_path()) if exp.exported() else None
+    sidecar = _read_artifact_json(exp.sidecar_path()) if exp.exported() else None
+    if record is not None and sidecar is not None:
         entries = serialize.evidence_trail_from_sidecar(sidecar, record)
     else:
+        # DEGRADE TO THE DRAFT TRAIL, which is what a not-yet-exported record returns
+        # and is not a substitute source in any meaningful sense: the sidecar is a
+        # projection of these very envelopes, written at export time. So the trail is
+        # still this record's own evidence, from its origin, never fabricated — and
+        # `evidence_trail_from_sidecar` needs BOTH files anyway (it reads values from
+        # the record and support from the sidecar), so one absent file is already
+        # enough to make the sidecar trail unbuildable.
+        #
+        # Deliberately NO new response field. The one honest thing a marker would add
+        # — that the artifact pair is not readable — is already published by
+        # `/artifacts` as `artifact.state: "stale"`, which this endpoint's only caller
+        # fetches in the same `Promise.all`; and `api.ts::getEvidence` discards every
+        # key except `evidence`, so a marker here would be unreachable weight on the
+        # wire. The description above states the fallback instead.
+        if exp.exported():
+            _log.warning(
+                "evidence: record %s is marked exported but its artifact pair could "
+                "not be read; serving the draft evidence trail instead",
+                exp.id,
+            )
         entries = serialize.evidence_trail_from_draft(exp.draft)
     return {"evidence": entries}
 
@@ -1993,6 +2178,20 @@ def get_artifacts(experiment_id: ExperimentId):
     Read-only: it reads ONLY the two files ``export`` wrote inside the workspace,
     resolved from the record id (never a query-controlled path). A non-exported
     experiment returns null payloads (200, not an error); an unknown id is 404.
+
+    P4 — an artifact that is MISSING or unreadable while the state says exported is
+    also a ``200`` with a null payload for that file, never a raise. The response
+    additionally carries ``artifact``: the SAME derived
+    ``{"state": "none"|"current"|"stale", "reason": …}`` block the detail endpoint
+    serves under the same key (``_detail`` -> ``dependencies.artifact_state``), so a
+    caller can tell "never exported" (``none``) from "exported but the artifact is
+    gone" (``stale``) — two situations that would otherwise both look like a null
+    payload. No new vocabulary is introduced and the reason string has one
+    definition (``dependencies.MISSING_REASON``).
+
+    ``200`` rather than ``404`` because the *record* exists and is being described;
+    only one of its files is absent. A 404 would say the record is unknown, which is
+    false, and would also lose the ``artifact`` distinction above.
     """
     exp = ws.load_experiment(experiment_id)
     if exp is None:
@@ -2003,17 +2202,32 @@ def get_artifacts(experiment_id: ExperimentId):
             "sidecar": None,
             "record_filename": None,
             "sidecar_filename": None,
+            # Single-sourced: for a non-exported record this is
+            # {"state": "none", "reason": None}.
+            "artifact": dependencies.artifact_state(exp),
         }
     record_path = exp.record_path()
     sidecar_path = exp.sidecar_path()
-    record = json.loads(record_path.read_text(encoding="utf-8"))
-    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    record = _read_artifact_json(record_path)
+    sidecar = _read_artifact_json(sidecar_path)
+    # `artifact_state` only judges the RECORD file, so a readable record with an
+    # absent sidecar would report `current` — true of the record, silent about the
+    # half that is gone. Force `stale` whenever EITHER file failed to read, so the
+    # block never implies a complete artifact pair that is not on disk.
+    if record is None or sidecar is None:
+        artifact = {"state": "stale", "reason": dependencies.MISSING_REASON}
+    else:
+        artifact = dependencies.artifact_state(exp)
     return {
         "record": record,
         "sidecar": sidecar,
-        # P30.6 — SAFE basename only, never the absolute server/mount path.
+        # P30.6 — SAFE basename only, never the absolute server/mount path. Reported
+        # even when the file is absent: it names what the export wrote (matching
+        # `_detail.artifact_refs`, which also keys off `exported()` rather than
+        # existence) and a basename leaks nothing.
         "record_filename": record_path.name,
         "sidecar_filename": sidecar_path.name,
+        "artifact": artifact,
     }
 
 
@@ -2764,9 +2978,28 @@ class AssistantQueryRequest(BaseModel):
 def _assistant_validate_dryrun(exp: Experiment) -> dict:
     """The SAME read-only validation the ``/validate`` endpoint computes, as a
     thunk the resolver invokes only for an export intent. Writes nothing; never
-    raises (mirrors ``post_validate``'s defensive dry-run)."""
+    raises (mirrors ``post_validate``'s defensive dry-run).
+
+    P4 review FIX C — "never raises" was FALSE for an exported record whose artifact
+    was absent or corrupt: the read below was unguarded, so an assistant question with
+    an export intent raised ``FileNotFoundError``. It now returns the SAME crash
+    sentinel ``post_validate`` returns, which ``assistant_query``'s
+    ``is_validation_unavailable`` check already routes to the honest
+    "could not be completed" answer — so the assistant states no count, no location
+    and no verdict, instead of describing a violation nobody located.
+    """
     if exp.exported():
-        record = json.loads(exp.record_path().read_text(encoding="utf-8"))
+        record = _read_artifact_json(exp.record_path())
+        if record is None:
+            _log.warning(
+                "assistant validate: record %s is marked exported but its artifact "
+                "could not be read; reporting no verdict",
+                exp.id,
+            )
+            return {
+                "ok": False,
+                "errors": [{"path": "$", "message": "Validation could not be completed."}],
+            }
         report = validate_official(record, REPO_ROOT)
         return {
             "ok": report.ok,

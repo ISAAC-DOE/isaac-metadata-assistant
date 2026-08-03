@@ -733,6 +733,11 @@ export interface ApiArtifactsResponse {
   // P30.6 — safe basenames only, never an absolute server/mount path.
   record_filename: string | null;
   sidecar_filename: string | null;
+  // P4 — the SAME derived freshness block the detail endpoint serves under the
+  // same key. A null `record`/`sidecar` alone is ambiguous: it means either "never
+  // exported" (`state: 'none'`) or "exported, but the artifact file is missing or
+  // unreadable" (`state: 'stale'`). This is the field that tells them apart.
+  artifact: ApiArtifactState;
 }
 
 export interface ApiDemoStep {
