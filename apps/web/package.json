@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "ISAAC Metadata Assistant — local UI prototype (Scientific Clarity design system). Static, synthetic, offline.",
+  "description": "ISAAC Metadata Assistant \u2014 local UI prototype (Scientific Clarity design system). Static, synthetic, offline.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -14,7 +14,8 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
     "test:e2e:install": "playwright install --with-deps chromium",
-    "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit"
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit",
+    "test:e2e:mutation": "playwright test --config=playwright.mutation.config.ts"
   },
   "dependencies": {
     "lucide-react": "^0.454.0",
