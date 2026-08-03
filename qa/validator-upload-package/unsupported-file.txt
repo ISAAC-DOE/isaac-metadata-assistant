@@ -1,0 +1,9 @@
+Cu K-edge run notes
+===================
+
+Beamline: 15-2   Operator log page 4
+Edge energy, first derivative maximum: about 8979 eV
+White line height (normalized): about 1.32
+
+This is a plain-text logbook page, not a record document. It is here to
+check that the uploader refuses a file that is not JSON.

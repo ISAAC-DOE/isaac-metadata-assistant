@@ -1,0 +1,196 @@
+{
+  "isaac_record_version": "1.05",
+  "record_id": "01K9AAB2RC5N7YQ2HTVJ4XM3E3",
+  "record_type": "evidence",
+  "record_domain": "characterization",
+  "source_type": "facility",
+  "timestamps": {
+    "acquired_start_utc": "2026-03-04T16:20:00Z",
+    "acquired_end_utc": "2026-03-04T16:58:00Z"
+  },
+  "sample": {
+    "material": {
+      "name": "Copper(II) oxide reference powder",
+      "formula": "CuO",
+      "provenance": "commercial",
+      "notes": "Constructed by hand for validator exercise. Values are illustrative and carry no measurement provenance."
+    },
+    "sample_form": "pellet",
+    "composition": {
+      "CuO_mass_fraction": 0.05,
+      "boron_nitride_mass_fraction": 0.95
+    },
+    "geometry": {
+      "pellet_diameter_mm": 13.0
+    }
+  },
+  "system": {
+    "domain": "experimental",
+    "technique": "XAS",
+    "facility": {
+      "facility_name": "SSRL",
+      "organization": "SLAC",
+      "beamline": "15-2",
+      "site": "SSRL",
+      "endstation": "XAS"
+    },
+    "instrument": {
+      "instrument_type": "beamline_endstation",
+      "instrument_name": "Cu_K_edge_transmission_station",
+      "vendor_or_project": "Custom"
+    },
+    "configuration": {
+      "monochromator_crystal": "Si(220)",
+      "detector_model": "ion_chamber_pair",
+      "harmonic_rejection_percent": 50
+    }
+  },
+  "context": {
+    "environment": "ex_situ",
+    "temperature_K": 297.5,
+    "thermodynamics": {
+      "atmosphere": "air",
+      "pressure_Pa": 101325
+    }
+  },
+  "measurement": {
+    "processing": {
+      "steps": [
+        "deglitch",
+        "merge_scans",
+        "normalize_edge_step"
+      ],
+      "recipe_link": {
+        "rel": "processing_recipe",
+        "target": "workflow://cu_k_edge_reduction/v1"
+      }
+    },
+    "series": [
+      {
+        "series_id": "merged_normalized_spectrum",
+        "independent_variables": [
+          {
+            "name": "incident_energy",
+            "unit": "eV",
+            "values": [
+              8950.0,
+              8960.0,
+              8970.0,
+              8975.0,
+              8979.0,
+              8983.0,
+              8990.0,
+              9000.0,
+              9020.0,
+              9050.0
+            ]
+          }
+        ],
+        "channels": [
+          {
+            "name": "absorption",
+            "unit": "mu_normalized",
+            "role": "primary_signal",
+            "values": [
+              0.008,
+              0.011,
+              0.062,
+              0.284,
+              0.612,
+              1.318,
+              1.106,
+              0.994,
+              0.951,
+              0.972
+            ]
+          },
+          {
+            "name": "i0_monitor",
+            "unit": "counts",
+            "role": "auxiliary_signal",
+            "values": [
+              50210,
+              50180,
+              50120,
+              50090,
+              50070,
+              50040,
+              49990,
+              49930,
+              49860,
+              49740
+            ]
+          }
+        ],
+        "notes": "Ten-point reduced spectrum across the Cu K edge."
+      }
+    ],
+    "qc": {
+      "status": "valid",
+      "evidence": "Edge position stable across the merged scans.",
+      "notes": "Constructed by hand for validator exercise. Values are illustrative and carry no measurement provenance."
+    }
+  },
+  "assets": [
+    {
+      "asset_id": "raw_scan_bundle_001",
+      "content_role": "raw_data_pointer",
+      "uri": "isaac-qa://cu-k-edge/run-001/raw.h5",
+      "media_type": "application/x-hdf5",
+      "sha256": "9f2c1d4e6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f",
+      "notes": "Pointer only. No file is expected to exist at this URI."
+    },
+    {
+      "asset_id": "reduced_spectrum_001",
+      "content_role": "reduction_product",
+      "uri": "isaac-qa://cu-k-edge/run-001/reduced.xdi",
+      "media_type": "text/plain",
+      "sha256": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f801"
+    }
+  ],
+  "links": [],
+  "tags": [
+    "cu-k-edge",
+    "validator-exercise"
+  ],
+  "descriptors": {
+    "outputs": [
+      {
+        "label": "edge_position_review_2026-03-05",
+        "generated_utc": "2026-03-05T09:20:00Z",
+        "generated_by": {
+          "agent": "manual_review",
+          "version": "1.0"
+        },
+        "descriptors": [
+          {
+            "name": "xanes_edge_position_energy",
+            "kind": "absolute",
+            "source": "manual",
+            "value": 8979.4,
+            "unit": "eV",
+            "definition": "Energy of the maximum of the first derivative of the normalized absorption.",
+            "uncertainty": {
+              "sigma": 0.2,
+              "unit": "eV",
+              "basis": "assumed"
+            }
+          },
+          {
+            "name": "white_line_intensity",
+            "kind": "absolute",
+            "source": "manual",
+            "value": 1.318,
+            "unit": "mu_normalized",
+            "definition": "Peak normalized absorption above the edge.",
+            "uncertainty": {
+              "sigma": 0.015,
+              "unit": "mu_normalized",
+              "basis": "assumed"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
