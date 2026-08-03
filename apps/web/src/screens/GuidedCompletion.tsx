@@ -239,9 +239,17 @@ function LoadedCompletion({
         note="Every field is confirmed or resolved — export is now unlocked."
       />
     ) : (
+      // R1b — the note used to read "Export unlocks automatically once every field
+      // is confirmed or honestly left missing." The second half was false: export
+      // requires `pending_count == 0` (apps/api/isaac_api/workflow.py:
+      // `complete_metadata = pending_count == 0`), and pressing "I don't know"
+      // sends nothing and leaves the question in `pending`. So leaving a field
+      // honestly missing never unlocks export — and this screen's own
+      // skipped-list copy already said the opposite ("Export stays gated until
+      // each is confirmed"), so the surface contradicted itself.
       <StatusBar
         phase={`${remaining} of ${total} fields still to confirm`}
-        note="Export unlocks automatically once every field is confirmed or honestly left missing."
+        note="Export unlocks once every field is confirmed. Saying you don't know keeps a question open — the system will not invent a value for it."
       />
     );
 
@@ -410,7 +418,17 @@ function LoadedCompletion({
           <Check size={13} strokeWidth={2.6} />
         </span>
         <span className="answered-label">{ans.label}</span>
-        <span className="answered-stored">stored {ans.storedValue}</span>
+        {/* R1b — was `stored {ans.storedValue}`. `storedValue` is
+            `answerValuePreview(kind, value)` over the value the CLIENT submitted:
+            `ApiAnswersResponse` is `{pending, status, workflow, invalidation}` plus
+            version fields and carries NO echo of what was stored. The server may
+            also drop an answer it does not recognise
+            (`routes.py::_answers_to_apply_shape`: "Blank and unrecognised answers
+            are dropped rather than applied"), so "stored" was a claim about server
+            state that nothing in the response supports. The value is still shown;
+            only the unsupported verb is gone. The neighbouring "Confirmed by You"
+            chip is the accurate claim — the reader confirmed it. */}
+        <span className="answered-stored">you answered {ans.storedValue}</span>
         <span className="answered-trailing">
           <StatusChip kind="confirmed" />
           <button
@@ -540,14 +558,24 @@ function LoadedCompletion({
         </div>
       ))}
 
+      {/* R1b — the title used to read "You've reviewed every question · N left
+          honestly missing", which presented SESSION state as a durable review
+          outcome. The skip decision lives only in the `skipped` useState above:
+          pressing "I don't know" sends nothing (deliberately — inventing a value
+          would be worse), and `LoadedCompletion` is remounted by every reload, so
+          the set is gone on refresh and on navigating away. Persisting it needs a
+          new backend field, which is out of scope here, so the copy states the
+          scope it can actually keep. */}
       {!blocker && skippedItems.length > 0 && (
         <div className="completion-allskipped" role="note">
           <div className="completion-allskipped-title">
-            You've reviewed every question · {skippedItems.length} left honestly missing
+            You've been through every question in this visit · {skippedItems.length} you said you
+            don't know
           </div>
           <p className="completion-allskipped-text">
-            Nothing was invented for these. Export stays gated until each is confirmed — answer one
-            when you're ready, or return to the record.
+            Nothing was invented for these. This list is only for the current visit — it is not
+            saved, so a reload brings all {skippedItems.length} back as open questions. Export stays
+            gated until each is confirmed: answer one when you're ready, or return to the record.
           </p>
         </div>
       )}
@@ -582,9 +610,14 @@ function LoadedCompletion({
         </div>
       )}
 
+      {/* R1b — same scoping as the all-skipped summary above: this list is client
+          state for the current visit, and the eyebrow says so rather than reading
+          as a recorded property of the record. */}
       {skippedItems.length > 0 && (
         <div className="leftmissing">
-          <div className="leftmissing-eyebrow eyebrow">Left Honestly Missing</div>
+          <div className="leftmissing-eyebrow eyebrow">
+            Left Honestly Missing · This Visit Only, Not Saved
+          </div>
           {skippedItems.map((item) => (
             <div className="leftmissing-row" key={item.id}>
               <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />

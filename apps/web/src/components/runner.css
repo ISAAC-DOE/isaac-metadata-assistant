@@ -1,7 +1,9 @@
 /*
  * Staged runner (S2). Each stage names the REAL command beneath it; progress
- * reflects command results only — no decorative bar. The blocker stage is amber
- * "needs you" (attention, not failure), never red; no colored vertical rail.
+ * reflects command results only — no decorative bar; no colored vertical rail.
+ *
+ * R1b removed the amber "blocker" stage treatment. It was reachable only through
+ * `RunnerStage.isBlocker`, which nothing ever set — see StagedRunner.tsx.
  */
 .runner-status {
   display: flex;
@@ -34,9 +36,10 @@
 }
 .stage:first-child { border-top: 0; }
 .stage.upcoming { opacity: 0.5; }
-.stage.blocker {
-  background: var(--advisory-bg);
-}
+/* R1b — `.stage.blocker`, `.stage.blocker .stage-disc` and `.stage-cta` were
+   removed with the never-reachable blocker branch in StagedRunner.tsx: the
+   `isBlocker` flag they styled was set by nothing, and the CTA inside
+   `.stage-cta` had no click handler. */
 .stage-disc {
   flex: none;
   width: 24px;
@@ -51,11 +54,6 @@
   background: var(--cover-bg);
   border: 1px solid var(--border-strong);
   color: var(--text-secondary);
-}
-.stage.blocker .stage-disc {
-  background: var(--needsyou-bg);
-  border: 1px solid var(--needsyou-border);
-  color: var(--advisory-icon);
 }
 .stage.upcoming .stage-disc {
   border: 1px dashed var(--border-strong);
@@ -96,9 +94,6 @@
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-quaternary);
-}
-.stage-cta {
-  margin-top: 10px;
 }
 
 /* ---- On-ramp cards -------------------------------------------------- */

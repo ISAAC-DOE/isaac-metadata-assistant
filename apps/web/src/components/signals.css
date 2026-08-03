@@ -87,11 +87,8 @@
   font-size: 13.5px;
   color: var(--text-secondary);
 }
-.verdict-cmd {
-  margin-top: 8px;
-  font-size: 11.5px;
-  color: var(--text-slate);
-}
+/* `.verdict-cmd` was removed in R1b along with the fabricated
+   `isaac validate --official · exit N` line it styled — see VerdictCard.tsx. */
 .verdict-head {
   display: flex;
   align-items: flex-start;
