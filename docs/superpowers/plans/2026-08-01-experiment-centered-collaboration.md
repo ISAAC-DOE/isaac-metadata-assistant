@@ -165,8 +165,14 @@ Ask him the four open questions, and clear the project-level gate separately.
   at ingestion … (tamper-proof attribution). **Decided by D. Sokaras 2026-06-15.**"*
 - `contributors[]` — `name`, `role`, `affiliation`, `orcid`, `email`, `notes`
 
-Verified: `rg "uploaded_by" src/ apps/ tests/ scripts/` → **zero matches**; only 2 occurrences exist,
-both inside the schema JSON. `attribution` is **optional** (not in the root `required` list).
+~~Verified: `rg "uploaded_by" src/ apps/ tests/ scripts/` → **zero matches**; only 2 occurrences
+exist, both inside the schema JSON.~~ **CORRECTED 2026-08-03.** The grep was accurate; the conclusion
+drawn from it — that the field was inert — was **false**. `export.transform` copied the entire
+`attribution` block, so a draft-authored `uploaded_by` reached the exported record and passed
+official validation **without any code naming the field**, which is precisely why the grep found
+nothing. "Verified" was doing work the command could not do. It is now refused fail-closed; see
+[`docs/identity-trust-contract.md`](../../identity-trust-contract.md) §"Two consequences" item 1.
+`attribution` is **optional** (not in the root `required` list).
 
 Two consequences:
 

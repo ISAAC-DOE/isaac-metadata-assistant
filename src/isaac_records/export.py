@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .draft_validator import DraftReport, validate_draft
+from .draft_validator import UPLOADED_BY_PATH, DraftReport, validate_draft
 from .ids import is_record_id, new_record_id
 from .official import OfficialReport, validate_official
 
@@ -53,6 +53,77 @@ def strip_evidence(node):
     if isinstance(node, list):
         return [strip_evidence(v) for v in node]
     return node
+
+
+def _enforce_server_owned_invariant(record: dict) -> None:
+    """FINAL INVARIANT — the assembled record carries no `attribution.uploaded_by`.
+
+    The schema declares this field SERVER-STAMPED from the authenticated identity, with
+    any client value overwritten (tamper-proof attribution, D. Sokaras 2026-06-15). ISAAC
+    authenticates nobody, so it has nothing true to stamp, and copying a draft's string
+    would launder client input into a field readers are told the server owns. The
+    USER-VISIBLE refusal is `draft_validator`'s, and `export_draft` gates on it; this is
+    the structural backstop for callers that invoke `transform` directly — which
+    `apps/api/isaac_api/dependencies.py:68` does for exported-artifact drift detection, so
+    it is live in production, not test-only.
+
+    WHY IT LIVES HERE, AFTER EVERY WRITER, AND NOT INSIDE ONE OF THEM. The first attempt
+    at this fix popped the key inside the `attribution` block writer. An independent
+    adversarial review (finding C1) proved that non-composing: `transform` writes into
+    `record["attribution"]` from TWO independent places, and the other one — the `fields`
+    loop's `set_path`, which is the draft format's NATIVE mechanism for scalar official
+    JSON-paths — was unguarded. Measured at that commit: `validate_draft` ok with zero
+    errors, `isaac export` printing "PASS — valid against official ISAAC schema v1.05",
+    and `{"uploaded_by": "attacker@example.invalid"}` on disk. A third mechanism
+    (`fields["attribution"]` carrying the whole block as one object value) leaked the same
+    way. Guarding write mechanisms one by one loses to whichever one you did not think of;
+    guarding the OUTPUT does not. Keep this call last, and add to it rather than
+    scattering equivalents back into the writers.
+
+    It also fixes review finding I2. The per-writer version had made one shape WORSE than
+    the pre-fix parent: an attribution block stripping to `{}` no longer overwrote what
+    the `fields` loop had already written there, so a leak that the parent's unconditional
+    assignment had accidentally clobbered became visible. Running after both writers means
+    there is no ordering in which a leak survives.
+
+    Do NOT turn this into a server-stamp. A future stamped value (Q10,
+    docs/identity-trust-contract.md §7) must be injected on the trusted server side at
+    ingestion — never read from draft content, and never plumbed through this function as
+    a caller-supplied argument, which would only move the same untrusted input one frame
+    up.
+    """
+    block_key, leaf_key = UPLOADED_BY_PATH.split(".")
+    attribution = record.get(block_key)
+    # A non-dict `attribution` — a draft can produce one via `fields["attribution"]` with a
+    # list or scalar value — is left alone: there is no key to remove. Be precise about what
+    # stops it, because the "single chokepoint" framing does not by itself: a LIST value
+    # like `[{"uploaded_by": ...}]` slips BOTH halves of this fix (the validator's
+    # spelling-(3) walk breaks on the first non-dict, and this skips it), and only OFFICIAL
+    # VALIDATION refuses it, as a type error. So the honest claim is that no *exported*
+    # record can carry the field — `transform` output alone is not the guarantee, which
+    # matters for `dependencies.py:68`, the one caller that consumes `transform` without
+    # validating. Review #2, finding M-2.
+    if isinstance(attribution, dict):
+        if leaf_key in attribution:
+            # Rebuild rather than `pop`. The `fields` loop writes by reference via
+            # `set_path`, so for the whole-block spelling `record["attribution"]` IS the
+            # draft's own nested dict — an in-place `pop` deleted the key from the CALLER'S
+            # draft (review #2, finding I-2). `transform` must stay total and side-effect
+            # free: `apps/api/isaac_api/dependencies.py:68` passes the LIVE `exp.draft` for
+            # read-only drift detection and `:69` documents transform as "read-only + total".
+            # Mutating there would silently strip a stored draft and make the check
+            # non-idempotent.
+            attribution = {k: v for k, v in attribution.items() if k != leaf_key}
+            record[block_key] = attribution
+        # An attribution block left empty is omitted rather than written as `{}`. `{}` IS
+        # schema-valid here (`additionalProperties: false`, no required keys — pinned by
+        # tests/test_truthpath_characterization.py's "attribution = {}" case), but it
+        # asserts nothing, so writing it records an empty claim. This applies both to a
+        # block emptied BY the refusal and to one that arrives empty because it held only
+        # `evidence` keys, which `strip_evidence` removes (review finding I4: a real,
+        # deliberate second behaviour change, disclosed rather than reverted).
+        if not attribution:
+            del record[block_key]
 
 
 def transform(draft: dict, *, record_id: str | None = None, now: str | None = None) -> dict:
@@ -121,6 +192,7 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
     if draft.get("tags"):
         record["tags"] = list(draft["tags"])
 
+    _enforce_server_owned_invariant(record)
     return record
 
 
@@ -147,6 +219,34 @@ def build_sidecar(draft: dict, record: dict) -> dict:
     # implicit: keys.
     for key, entries in (draft.get("block_evidence") or {}).items():
         ev[key] = entries
+    # THE SIDECAR IS DELIBERATELY NOT FILTERED FOR THE REFUSED FIELD, and that is a
+    # reversal — two earlier attempts in this branch filtered it. Both were wrong, and the
+    # reason is worth keeping so a fourth attempt is not made.
+    #
+    # An exact-match filter missed `implicit`; a normalising filter missed
+    # `implicit:implicit:...`, an unlisted `meta:` prefix, and zero-width characters
+    # (`'\u200b'.isspace()` is False). Each round was a denylist over caller-chosen free
+    # text, and a denylist over free text cannot be closed by adding cases.
+    #
+    # More importantly it was never a boundary. This map legitimately carries arbitrary
+    # caller text — contributor names, document quotes, user-confirmation answers — so an
+    # author who wants a person's name in a sidecar can simply write
+    # `about: "who_uploaded_this"` and no filter would or should object. Filtering keys that
+    # merely LOOK like the refused path prevented nothing while causing real harm: the
+    # normalising version silently deleted a legitimately-exported descriptor's evidence,
+    # and silent deletion of authored content is its own honesty defect.
+    #
+    # The invariant that matters is on the OFFICIAL RECORD, which is schema-validated and
+    # is what asserts a server-stamped identity: see `_enforce_server_owned_invariant`.
+    #
+    # BE EXACT ABOUT WHAT IS THEREFORE POSSIBLE, because a draft of this very note said the
+    # sidecar could only name the field via a draft that never exports, and that was FALSE —
+    # `validate_draft` refuses the RECORD-bound spellings (the `attribution` block and the
+    # `fields` map), not `implicit[].about`. So an exporting draft CAN produce a sidecar
+    # entry naming `attribution.uploaded_by`, carrying a value. That is accepted, not
+    # overlooked: the sidecar makes no authentication claim, and the same author can write
+    # the same name under any key they like. `tests/test_attribution_uploaded_by.py` pins
+    # this as a deliberate non-guarantee so it cannot be mistaken later for an oversight.
     return {
         "record_id": record["record_id"],
         "schema_version": ISAAC_VERSION,

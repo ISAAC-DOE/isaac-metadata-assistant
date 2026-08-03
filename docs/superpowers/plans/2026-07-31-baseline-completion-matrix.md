@@ -890,7 +890,13 @@ that change the shape of that phase, recorded here so they are not re-derived:
 4. **The schema already owns record attribution, and the app has never used it.** `/attribution/uploaded_by`
    is described in v1.05 as *"SERVER-STAMPED from the authenticated identity at ingestion … Decided by
    D. Sokaras 2026-06-15"*, and `/attribution/contributors[]` carries `name|role|affiliation|orcid|email`.
-   `rg "uploaded_by" src/ apps/ tests/ scripts/` → **zero**. So attribution does **not** need a home
+   ~~`rg "uploaded_by" src/ apps/ tests/ scripts/` → **zero**.~~ **CORRECTED 2026-08-03:** the grep
+   was accurate but the inference ("the app has never used it") was **wrong** — the passthrough was
+   *structural*, so no code named the field while `export.transform` copied the whole `attribution`
+   block, and a draft-authored `uploaded_by` reached an exported record and passed official schema
+   validation. It is now refused fail-closed at draft validation with a final invariant in
+   `transform`; see [`docs/identity-trust-contract.md`](../../identity-trust-contract.md) §"Two
+   consequences" item 1. So attribution does **not** need a home
    outside the record. But `contributors[].role` is `data_owner|performed_measurement|performed_analysis|curated_record`
    — a **scientific contribution** enum. It **cannot** double as an authorization role.
 5. **Identity is absent and its trust boundary is unproven** — the full evidence is in

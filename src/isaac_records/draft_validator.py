@@ -18,6 +18,33 @@ from dataclasses import dataclass, field as dc_field
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 FINAL_STATUSES = ("verified", "inferred")
+
+# The one official field a draft may never author, as a dotted official JSON-path.
+#
+# It is LOAD-BEARING, not decorative, and that distinction was earned: an earlier revision
+# of this comment claimed the constant coupled three sites so that renaming it would move
+# them all, while the block refusal below and `export`'s invariant both hardcoded the leaf
+# string. Review #4 renamed the constant and measured the result — the validator stopped
+# refusing and the invariant stopped stripping, i.e. the single edit the comment promised was
+# safe silently DISARMED the guard. Both sites now split this constant instead, so the claim
+# is true. Do not reintroduce a literal "uploaded_by" in either place.
+UPLOADED_BY_PATH = "attribution.uploaded_by"
+
+# ONE message for every mechanism. It used to be typed out at the single site that
+# existed; an independent review then found a second, unguarded mechanism, and a
+# hand-copied second message would have been free to drift from the first.
+UPLOADED_BY_REFUSAL = (
+    "a draft may not author this field — the official schema declares it "
+    "server-stamped from the authenticated identity at ingestion, with any "
+    "client value overwritten. ISAAC has no trusted authenticated identity to "
+    "stamp it with, and no evidence can make a client-supplied value true "
+    "(evidence can show a document names someone, not that the server "
+    "authenticated them). Remove it; record people via "
+    "attribution.contributors[], which is evidence-gated. A future "
+    "server-stamped value must be injected server-side at ingestion, never "
+    "carried in draft content."
+)
+
 OBSERVED_SOURCE_TYPES = (
     "document",
     "spreadsheet",
@@ -80,6 +107,59 @@ def _check_envelope(report: DraftReport, where: str, env: dict) -> None:
             report.err(where, "inferred field has no derivation evidence with a stated rule")
         elif not _has_observed(entries):
             report.warn(where, "inferred field cites a rule but no observed supporting evidence")
+
+
+def _paths_authoring_uploaded_by(fields) -> list[str]:
+    """Every `draft["fields"]` key that would land a value on `attribution.uploaded_by`.
+
+    `fields` + `export.set_path` is the draft format's NATIVE mechanism for scalar
+    official JSON-paths, and `attribution.uploaded_by` IS a scalar official string —
+    so this is not an exotic bypass, it is the ordinary way to write the field. Three
+    spellings reach it, and all three are refused:
+
+      1. the exact path, `fields["attribution.uploaded_by"]`;
+      2. a DEEPER path, `fields["attribution.uploaded_by.x"]`, which `set_path` creates
+         the refused key as a dict in order to reach;
+      3. a SHORTER path whose envelope VALUE supplies the remaining segments, e.g.
+         `fields["attribution"] = {"value": {"uploaded_by": ...}, ...}`.
+
+    (3) is measured, not hypothetical: at the first-attempt commit it produced a record
+    carrying `{"uploaded_by": "attacker@example.invalid"}` exactly as (1) did.
+
+    On spellings that do NOT reach it: `set_path` performs no normalisation whatsoever —
+    it splits on "." and uses the segments as dict keys verbatim. So `" attribution.
+    uploaded_by"` writes a top-level `" attribution"` key and `"attribution.uploaded_by "`
+    writes `"uploaded_by "` inside the block; `"attribution..uploaded_by"` nests under an
+    empty-string key. None is the real field, and each is rejected outright by the
+    official schema, which sets `additionalProperties: false` on both the record root and
+    the attribution block. Whitespace variants are therefore deliberately NOT normalised
+    here: silently treating `" attribution"` as `attribution` would invent an intent the
+    draft did not express, and the schema already refuses it loudly.
+
+    Refusal is on KEY PRESENCE, consistent with the `attribution` block check: a null or
+    empty-string value still asserts authorship of a server-owned field. (Note the
+    exporter would SKIP such an envelope, so this check is strictly stricter than what
+    can leak — that is the intended direction.)
+    """
+    target = UPLOADED_BY_PATH.split(".")
+    offenders: list[str] = []
+    for path, env in (fields or {}).items():
+        if not isinstance(path, str):
+            continue
+        parts = path.split(".")
+        if parts[: len(target)] == target:
+            offenders.append(path)  # spellings (1) and (2)
+            continue
+        if target[: len(parts)] == parts:
+            # spelling (3): walk the envelope's value for the missing segments.
+            node = env.get("value") if isinstance(env, dict) else None
+            for segment in target[len(parts) :]:
+                if not isinstance(node, dict) or segment not in node:
+                    break
+                node = node[segment]
+            else:
+                offenders.append(path)
+    return sorted(offenders)
 
 
 def _claim_covered(entries) -> bool:
@@ -168,9 +248,40 @@ def validate_draft(draft: dict) -> DraftReport:
         if not _claim_covered(block_evidence.get(key)):
             report.err(where, "link has no evidence; a cross-record link must cite its basis or be user-confirmed")
 
-    # Attribution: each contributor must cite its source; name|role keys must be unique.
+    # Attribution: `uploaded_by` is refused outright, and each contributor must cite
+    # its source; name|role keys must be unique.
+    attribution = draft.get("attribution") or {}
+
+    # `attribution.uploaded_by` is not a field a draft may author. The official schema
+    # declares it SERVER-STAMPED from the authenticated identity at ingestion, with any
+    # client value overwritten ("tamper-proof attribution", D. Sokaras 2026-06-15) — and
+    # ISAAC has no trusted identity to stamp it with (nothing in the app reads an
+    # authenticated principal; see docs/identity-trust-contract.md §6A). So there is no
+    # evidence that could make a draft-supplied value true: evidence can show that a
+    # document NAMES someone, never that the server AUTHENTICATED them. Letting it pass
+    # would launder a client string into a field readers are told is tamper-proof, and
+    # it can name a real person. Refuse, fail closed. This is key-presence, not
+    # truthiness: a null, an empty string and an envelope are all refused, because each
+    # asserts authorship of a server-owned field.
+    #
+    # TWO refusals, because there are two ways a draft can express the field, and the
+    # first attempt at this fix guarded only the block. `where` names the mechanism so a
+    # user can tell which one they used; the message is one shared constant.
+    if isinstance(attribution, dict) and UPLOADED_BY_PATH.split(".")[1] in attribution:
+        report.err(UPLOADED_BY_PATH, UPLOADED_BY_REFUSAL)
+    for path in _paths_authoring_uploaded_by(draft.get("fields")):
+        report.err(f"fields[{path!r}]", UPLOADED_BY_REFUSAL)
+    # THE SIDECAR-ONLY MECHANISMS (`implicit[].about`, `block_evidence` keys) ARE
+    # DELIBERATELY NOT REFUSED. An earlier revision of this branch refused them, to keep
+    # every spelling loud rather than silently filtered. That was withdrawn together with
+    # the sidecar filter it paired with — see the long note in `export.build_sidecar`. In
+    # short: the sidecar is unvalidated free text that legitimately carries names and
+    # quotes, so matching keys that merely LOOK like this field guarded nothing, and the
+    # refusal's normalising comparison over-matched (it would have rejected a
+    # `block_evidence` key a user wrote as `implicit:...`). The official record is where a
+    # server-stamped identity is asserted, and that is guarded above and in `export`.
     seen_contrib: set[str] = set()
-    for i, c in enumerate((draft.get("attribution") or {}).get("contributors") or []):
+    for i, c in enumerate(attribution.get("contributors") or []):
         where = f"attribution.contributors[{i}]"
         name, role = c.get("name"), c.get("role")
         if not (name and role):

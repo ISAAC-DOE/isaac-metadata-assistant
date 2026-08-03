@@ -221,17 +221,56 @@ of the question put to Dean (Q4).
 
 Two consequences that matter for collaboration design:
 
-1. **`uploaded_by` is dead in this codebase.** `rg -n "uploaded_by" src/ apps/ tests/ scripts/`
-   returns **zero**. The only occurrences in the tree are the two inside the schema JSON itself
-   (`:1704`, `:1706`) — plus, since 2026-08-01, this document and its companions, which is why the
-   command is scoped to code directories. The field Dean designed for the authenticated identity has
-   never been written.
+1. ~~**`uploaded_by` is dead in this codebase.** `rg -n "uploaded_by" src/ apps/ tests/ scripts/`
+   returns **zero**.~~ **CORRECTED 2026-08-03 — this was FALSE, and the way it was false matters
+   more than the fact.** The grep was accurate. The *inference* was wrong: there is no literal
+   `uploaded_by` in `src/` because the passthrough was **structural** —
+   `export.transform` copied the whole `attribution` dict, so a draft-authored value flowed into the
+   official record with no code ever naming the field. A grep for a field name cannot detect a
+   wholesale block copy, and "zero matches" was read as "never written".
+
+   What was actually true until 2026-08-03: a draft carrying `attribution.uploaded_by` passed
+   `validate_draft` with **zero errors and no evidence required**, `isaac export` printed
+   *"PASS — valid against official ISAAC schema v1.05"*, and the exported record on disk carried the
+   client's string — a value that can name a real person, in a field readers are told is
+   server-stamped and tamper-proof. Three violations at once: the schema's normative guarantee, the
+   no-guessing rule (an unevidenced non-null finalized field), and impersonation.
+
+   **It is now refused, fail-closed, on the RECORD path.** `draft_validator` errors on key presence in
+   both record-bound mechanisms — the `attribution` block and the `fields` dotted-path map (three
+   spellings, see `_paths_authoring_uploaded_by`) — and `export.transform` enforces a final invariant
+   over the assembled record, so no writer can emit the field. Stated precisely: a *list*-valued
+   `attribution` slips both draft-side halves and is stopped by official validation as a type error,
+   so the guarantee is on the **exported** record, not on `transform` output alone.
+   **The evidence sidecar is deliberately NOT filtered** — two revisions of this branch filtered it
+   and both were withdrawn, because a denylist over unvalidated caller-chosen key text cannot be
+   closed by adding cases, and the filter silently deleted a legitimately-exported descriptor's
+   evidence. An exporting draft can still name the field in a sidecar `implicit` entry; the sidecar
+   makes no authentication claim, and the same author can write the same name under any key. A first attempt guarded each write
+   mechanism individually and an independent adversarial review proved that **non-composing** (it
+   found an unguarded second mechanism, and a third was found while fixing it) — hence the single
+   chokepoint. See `tests/test_attribution_uploaded_by.py`.
+
+   **Consequence for Q10:** its precondition is now *enforced* rather than merely undecided. ISAAC no
+   longer carries a client value in this field, so Dean's answer is free to specify the identifier
+   without first having to undo a laundering path. Nothing is stamped, and nothing will be until he
+   answers.
 2. **`contributors[]` IS fully wired through the truth core** — but as manually-authored,
    evidence-cited draft content, not as authenticated identity:
-   `src/isaac_records/draft_validator.py:171-185` requires each contributor to cite evidence and
-   enforces `name|role` uniqueness; `src/isaac_records/export.py:99-100` strips the envelope and passes
-   `attribution` into the official record; `src/isaac_records/audit.py:83-84` keys sidecar evidence as
-   `attribution:{name}|{role}`.
+   `draft_validator.validate_draft`'s contributor loop requires each contributor to cite evidence and
+   enforces `name|role` uniqueness; `export.transform` strips the envelope and passes `attribution`
+   into the official record, after which `export._enforce_server_owned_invariant` enforces the
+   `uploaded_by` refusal; `audit.py` keys sidecar evidence as `attribution:{name}|{role}`
+   (`_block_targets`).
+
+   **These are SYMBOL references, deliberately, and that is a correction of method rather than of a
+   number.** This paragraph carried line ranges through five successive drifts in a single session —
+   `export.py:99-100` stale from an earlier phase, then `draft_validator.py:271-291` which overshot
+   the loop, then `270-283` which was correct until the next edit in the same branch, then
+   `export.py:229`/`:233` which the descope invalidated and which landed inside an unrelated comment,
+   then `279-292`. Every one was caught in review, and each fix was invalidated by the next edit to
+   the same file. A line range is not an anchor for code that is still moving; a symbol name is.
+   Re-derive with `rg -n "def _enforce_server_owned_invariant" src/isaac_records/export.py`.
 
 **So record-level attribution does not need a new home outside the record.** What is missing is
 (a) a decision on which claim populates `uploaded_by`, and (b) recognition that
@@ -766,7 +805,7 @@ authored by a human, not an access-control list.
 | Backend reads exactly 4 headers, none identity | Any users / roles / groups / permissions model | Whether the ingress strips client copies (Q3) |
 | `ApiKeyAuthMiddleware` = one shared secret, fail-open, **unset in prod** | Any logout, session, or expiry logic | Whether the pod is reachable bypassing the ingress (Q4) |
 | No trusted-proxy config, no header-stripping middleware | Any record ownership or actor attribution | The intended subject-identifier claim (Q5) |
-| SPA has no user/session/profile concept — every match is a false positive | `uploaded_by` in any code — schema-only, 2 lines | Columns of `record_history` / `api_requests` / `portal_access_log` (Q11) |
+| SPA has no user/session/profile concept — every match is a false positive | ~~`uploaded_by` in any code — schema-only, 2 lines~~ **CORRECTED 2026-08-03: `uploaded_by` IS now in code** — refused in `draft_validator.py` and `export.py`, with `tests/test_attribution_uploaded_by.py`. It was never merely "schema-only": the passthrough was structural. See item 1 of "Two consequences" above. *(This cell was missed when the same commit corrected three other sites — exactly the failure the correction record three rows down warns about.)* | Columns of `record_history` / `api_requests` / `portal_access_log` (Q11) |
 | Schema defines `attribution.uploaded_by` + `contributors[]` | `PII`/`email`/`username` in any DB-governance doc — **zero mentions** | Whether seeded rows carry real personal identifiers (Q14 / G6) |
 | Recon already queries `information_schema`; table inventory computed but **not served** | — | Whether group claims may be authoritative in-app (Q6) |
 | Edge is an Authentik proxy outpost — observed at `/outpost.goauthentik.io/start` | — | Whether `/krish` works **now**. **Amended 2026-08-01:** a rollout of `v0.0.38` and a recon run against it *were* observed by Krish (operator testimony — see the baseline matrix §0, Entry 2). **G1 is narrowed, not closed:** what is owed is the captured JSON, not the run. Unauthenticated probes from an agent session still return 302 |
