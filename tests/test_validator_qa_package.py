@@ -56,6 +56,7 @@ from pathlib import Path
 import pytest
 
 from isaac_records.official import validate_official
+from isaac_records.portal_warnings import portal_warnings
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "qa" / "validator-upload-package"
@@ -248,6 +249,30 @@ def test_the_manifest_records_the_verdict_the_validator_actually_produces(entry)
         assert len(report.errors) == expected_count, (
             f"{path.name}: MANIFEST.json says error_count={expected_count}, "
             f"measured {len(report.errors)}.\n{report.render()}"
+        )
+
+    # R2 — the ADVISORY tier, re-measured too.
+    #
+    # The manifest now publishes an `advisory_warnings` list per file, and the guide
+    # tells the operator which warning to expect on which screen. Without this
+    # assertion those are unverified prose: the manifest could name a warning the code
+    # no longer emits, or go silent about one it does, and the operator would work from
+    # it either way. `ok`/`error_count` above cannot catch that — warnings are
+    # deliberately non-gating, so they move independently of the verdict.
+    if (expected_warnings := measured.get("advisory_warnings")) is not None:
+        actual = sorted(w.code for w in portal_warnings(record).warnings)
+        assert actual == sorted(expected_warnings), (
+            f"{path.name}: MANIFEST.json says advisory_warnings="
+            f"{sorted(expected_warnings)}, measured {actual}.\n"
+            "UPLOAD-GUIDE.md quotes these to the operator per file AND in its "
+            "quick-reference table — update both, and re-check whether "
+            "known_divergences still describes the situation."
+        )
+        # Non-gating is a property of the CONTRACT, not a hope about it: a record can
+        # carry warnings and still be `ok`, and that must stay true or this tier
+        # becomes a second authority on validity beside the vendored schema.
+        assert measured.get("advisory_is_gating") is False, (
+            f"{path.name}: the manifest must record advisory_is_gating: false"
         )
 
     # `ok` and `error_count` alone let a file be swapped to fail for a COMPLETELY
