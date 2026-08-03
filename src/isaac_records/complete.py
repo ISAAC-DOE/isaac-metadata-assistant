@@ -95,7 +95,14 @@ def apply_answers(draft: dict, answers: dict) -> dict:
 
         if kind == "series":
             series = answers.get("series")
-            if series is None:
+            # TYPE-GUARDED, like `qc` below. Without the isinstance check a caller who
+            # sends a STRING here reaches `s.get("series_id")` a few lines down, where
+            # iterating the string yields characters and `.get` raises AttributeError —
+            # surfacing as an HTTP 500 from POST /api/experiments/{id}/answers. A
+            # wrong-typed answer must never crash the truth core; it follows the same
+            # "not applied -> stays pending" rule an off-enum qc verdict already does,
+            # so nothing is invented and nothing is silently written.
+            if not isinstance(series, list) or not all(isinstance(s, dict) for s in series):
                 remaining_pending.append(entry)
                 continue
             draft["series"] = copy.deepcopy(series)
@@ -134,7 +141,10 @@ def apply_answers(draft: dict, answers: dict) -> dict:
 
         if kind == "descriptor":
             descriptor = answers.get("descriptor")
-            if descriptor is None:
+            # Same guard, same reason: `desc["evidence"] = [...]` two lines down raises
+            # TypeError on a str ("does not support item assignment"), which also
+            # surfaced as a 500. Only a mapping can carry a descriptor value.
+            if not isinstance(descriptor, dict):
                 remaining_pending.append(entry)
                 continue
             desc = copy.deepcopy(descriptor)
