@@ -67,15 +67,14 @@ function locateSrcDir(): string {
 
 const SRC_DIR = locateSrcDir();
 
-/** Strip comments — so the prose EXPLAINING a retired claim is never counted as
- *  the claim — then collapse whitespace, because JSX wraps a sentence across
- *  lines and a clause matched in the DOM would otherwise go unmatched here. */
-function renderedCopy(path: string): string {
-  return readFileSync(join(SRC_DIR, path), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1')
-    .replace(/\s+/g, ' ');
-}
+/*
+ * A comment-stripping source reader was here. It is deliberately GONE: the two
+ * page-level sites are checked by RENDERING them (see `policyTabText` below), not
+ * by scanning their source, because a source scan of `GovernancePage.tsx` matches
+ * `/validator/i` on its `import { RecordValidator }` line and would pass without a
+ * word of copy saying so. Rendering is the stronger check, so the reader it
+ * replaced is removed rather than left dangling for a future edit to reach for.
+ */
 
 /** The raw source, comments included — for the §1 capability proof, which is
  *  about what the code DOES, not about what any copy says. */
@@ -221,10 +220,111 @@ const ABSOLUTE_NO_READ: [string, RegExp][] = [
   ['no file you choose is ever opened or read', /\bno file (you|a user) (choose|chooses|picks?) is (ever )?(opened|read)\b/i],
 ];
 
+/*
+ * §3b — POLARITY. Found by negative control while integrating this slice, and the
+ * finding is recorded because the guard as first written did not survive it.
+ *
+ * The control inverted the disclosure to `No review tool reads a file you paste or
+ * pick` and ALL 35 assertions still passed. §2 only requires each site to MENTION
+ * the validator, the CSV preview, the in-memory bound and the outcome-only bound —
+ * a negation keeps every one of those words. §3 bans four specific sentences that
+ * shipped, and the inverted sentence is not one of them. So the four topics were
+ * pinned and the CLAIM'S DIRECTION was not: the guard could not tell "these two do
+ * read" from "these two do not read", which is the entire difference between the
+ * true wording and the false one.
+ *
+ * Two additions, because either alone is defeatable:
+ *
+ * The fix is ONE tight pattern plus a regression fixture, and the two rejected
+ * alternatives are worth recording because both are tempting and both are wrong:
+ *
+ *   A greedy `[^.]{0,60}` window between the negator and the reader noun produces
+ *   FALSE POSITIVES on the correct copy. `settingsContent` reads "…with no file
+ *   parsed at all, while the CSV preview and the record validator do read what you
+ *   paste or pick" — the `no` attaches to the refused UPLOAD, and a window that
+ *   crosses the comma reads it as attaching to the readers. So the window is
+ *   `[^.,]` — a negator only counts when it governs the same clause.
+ *
+ *   Requiring an AFFIRMATIVE reader sentence (name a reader, say it reads, contain
+ *   no negator) was tried and abandoned. Correct copy pairs the two polarities in
+ *   one sentence on purpose — "Two review tools DO READ a file you paste or pick,
+ *   and NEITHER adds it to the workspace" — so the negator test excluded the very
+ *   sentence it was meant to find, failing all three sites. Detecting polarity in
+ *   English needs a parser, and a guard that misfires on true copy is worse than
+ *   the gap it closes: it trains the next reader to weaken it.
+ *
+ * So the structural half is a FIXTURE, not a parser: §4b pins the exact inverted
+ * sentence the control used and asserts the pattern rejects it. Deterministic, and
+ * it cannot rot into vacuity the way a topic-mention check did.
+ */
+const NEGATED_READER: [string, RegExp][] = [
+  [
+    'a negator governing the reader nouns in the same clause',
+    /\b(no|neither|none of|not one)\b[^.,]{0,30}\b(review tool|validator|preview|reconciliation)\b[^.,]{0,30}\b(read|reads|parse|parses|inspect|inspects|open|opens)\b/i,
+  ],
+  [
+    'a reader noun denied in the same clause',
+    /\b(review tool|validator|csv preview|campaign sheet)\b[^.,]{0,30}\b(never|does not|do not|doesn't|don't|cannot|can't)\b[^.,]{0,20}\b(read|reads|parse|parses|inspect|inspects|open|opens)\b/i,
+  ],
+];
+
+/** The exact sentence the integration negative control substituted, which the
+ *  first version of this guard passed. Kept verbatim as a fixture. */
+const INVERTED_DISCLOSURE =
+  'No review tool reads a file you paste or pick, and neither adds it to the workspace: ' +
+  'the Validator on the next tab, and campaign-sheet CSV reconciliation on a record’s ' +
+  'evidence trail. Each checks the text in memory and discards it, and records only the ' +
+  'outcome — never the content.';
+
 describe('R1b §3 · no site claims the absolute "no file is read"', () => {
   for (const [site, text] of SITES) {
     it.each(ABSOLUTE_NO_READ)(`${site} never claims %s`, (_what, pattern) => {
       expect(text()).not.toMatch(pattern);
+    });
+  }
+});
+
+describe('R1b §3b · no site denies that the two review tools read', () => {
+  for (const [site, text] of SITES) {
+    it.each(NEGATED_READER)(`${site} never states %s`, (_what, pattern) => {
+      expect(text()).not.toMatch(pattern);
+    });
+  }
+});
+
+describe('R1b §4b · the polarity pattern is proven on the string that defeated §2', () => {
+  it('rejects the inverted disclosure', () => {
+    const caught = NEGATED_READER.filter(([, p]) => p.test(INVERTED_DISCLOSURE)).map(
+      ([label]) => label
+    );
+    expect(
+      caught,
+      'the inverted disclosure ("No review tool reads…") is not caught. This exact ' +
+        'sentence passed all 35 assertions of the first version of this guard, because ' +
+        '§2 checks only that the validator and the CSV preview are MENTIONED and a ' +
+        'negation mentions them just as well. If this assertion fails, the guard has ' +
+        'regressed to pinning topics instead of the claim.'
+    ).not.toHaveLength(0);
+  });
+
+  // One test PER SITE, not one loop over all three. `policyTabText` renders, and
+  // `cleanup` runs between tests rather than between calls — looping renders the
+  // second site on top of the first, and the by-role query then matches two
+  // tabpanels. That is a harness artefact, not a copy defect, and it is easy to
+  // misread as one.
+  for (const [site, text] of SITES) {
+    it(`does NOT fire on the correct copy of ${site}`, () => {
+      // Hoisted: `text()` RENDERS, and `.filter` would call it once per pattern —
+      // two renders in one test, which the by-role query reports as an ambiguous
+      // match rather than as the copy defect it is not.
+      const rendered = text();
+      const fired = NEGATED_READER.filter(([, p]) => p.test(rendered)).map(([label]) => label);
+      expect(
+        fired,
+        `${site} is correct copy and must not trip the polarity pattern. A false ` +
+          `positive here is worse than the gap it closes: it teaches the next reader ` +
+          `to weaken the guard rather than fix the copy.`
+      ).toEqual([]);
     });
   }
 });
