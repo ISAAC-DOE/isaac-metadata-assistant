@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "a4d4cd021210ad928a7a98169035090d8f10b0661913425022817391d050e8d5"
+        "sha256": "9a45ae2aacd22a363a8f9fec8a361c8e43475470e889d4aa58751ec81a321e23"
       },
       {
         "path": "AGENTS.md",
@@ -10324,7 +10324,7 @@
       },
       {
         "path": "apps/web/package.json",
-        "sha256": "5723bb05c87d6c0cd534ae00f40ddbe94eb1177a359d9b489c187413dc53b3bf"
+        "sha256": "e38d8fb116818559a4b4b1455fd3bd8631848d5d7bd26fe5b1ee3fe10d3e3b65"
       },
       {
         "path": "apps/web/src/App.tsx",
@@ -10820,7 +10820,7 @@
       },
       {
         "path": "src/isaac_records/complete.py",
-        "sha256": "7f415924fb5e2673fd229d261c3f7ef05f1c3392d7f5cdc23caa324a9d4a237c"
+        "sha256": "de28344d3c178dc19ccffa38d8d798f02fc00d9c5a2727495ea1a646a9b3e5ff"
       },
       {
         "path": "src/isaac_records/draft_validator.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "a58b97634736b72b37e3978244d1c5becd4cd41bcbf096515f71c232a7804831"
+    "served_manifest_fingerprint": "6dad89486ce02142cff2ab8055274ea940278d27fbae6bdcd1216f6d59f261de"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
