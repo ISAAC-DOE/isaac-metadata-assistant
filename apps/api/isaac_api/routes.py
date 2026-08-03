@@ -99,7 +99,7 @@ TAG_MEMORY = "Project Memory"
 TAG_GRAPH = "Graph"
 TAG_SEARCH = "Search"
 TAG_ASSISTANT = "Assistant"
-TAG_DEMO = "Demo"
+TAG_DEMO = "Example Workspace"
 TAG_INGESTION = "Ingestion"
 TAG_UPLOADS = "Uploads"
 TAG_SCHEMA = "Schema & Vocabulary"
@@ -184,9 +184,9 @@ OPENAPI_TAGS: list[dict] = [
     {
         "name": TAG_DEMO,
         "description": (
-            "Running and resetting the committed synthetic demo. Both operate only "
-            "on the canonical synthetic records and accept no caller-supplied "
-            "ids or paths."
+            "Running and resetting the committed built-in example records. Both "
+            "operate only on the canonical example records and accept no "
+            "caller-supplied ids or paths."
         ),
     },
     {
@@ -556,19 +556,19 @@ def _demo_baseline(target_id: str) -> Experiment:
 @router.post(
     "/demo/run",
     tags=[TAG_DEMO],
-    summary="Run the Synthetic Demo Pipeline",
+    summary="Run the Worked Example Pipeline",
     description=(
-        "Runs the committed synthetic demo pipeline and returns the ordered steps "
+        "Runs the committed worked-example pipeline and returns the ordered steps "
         "it executed together with the resulting experiment id and status. "
         "`mode: \"draft_only\"` (the default) extracts a draft from the committed "
-        "fixtures and runs the no-guessing draft checks; `mode: \"full\"` "
+        "reference files and runs the no-guessing draft checks; `mode: \"full\"` "
         "additionally applies the committed simulated answers and exports an "
         "official record. It targets one fixed canonical experiment id per mode, "
         "so re-running never adds a record and never increases the record count. "
-        "It reads only the two committed synthetic fixtures and accepts no "
+        "It reads only the two committed reference files and accepts no "
         "uploaded data.\n\n"
         "It never overwrites your work. The target must still hold exactly its "
-        "canonical seed content: when it does, running the pipeline would "
+        "original example content: when it does, running the pipeline would "
         "reproduce that content byte for byte, so nothing at all is written and "
         "the record's version is untouched. If the target has been changed — an "
         "answer confirmed, a field edited, a record exported — the run is refused "
@@ -582,9 +582,9 @@ def _demo_baseline(target_id: str) -> Experiment:
         409: {
             "description": (
                 "Refused without writing anything: the canonical record this mode "
-                "targets no longer holds its seed content, so running the demo "
-                "over it would discard a real change. Restore the synthetic demo "
-                "with `POST /api/demo/reset` if you want the seed content back."
+                "targets no longer holds its original content, so running the "
+                "example over it would discard a real change. Restore the built-in "
+                "examples with `POST /api/demo/reset` if you want that content back."
             )
         },
     },
@@ -686,10 +686,10 @@ def demo_run(
                     "error": "demo_target_drifted",
                     "experiment_id": target_id,
                     "message": (
-                        "This record has changed since it was seeded, so the "
-                        "synthetic demo will not run over it — nothing was "
+                        "This record has changed since it was created, so the "
+                        "worked example will not run over it — nothing was "
                         "written and your work is intact. Use "
-                        "POST /api/demo/reset to restore the synthetic demo."
+                        "POST /api/demo/reset to restore the built-in examples."
                     ),
                 },
             )
@@ -776,16 +776,17 @@ def _reset_response(data: dict, *, mode: str, status: str, http: int) -> JSONRes
 @router.post(
     "/demo/reset",
     tags=[TAG_DEMO],
-    summary="Reset the Synthetic Demo Workspace",
+    summary="Reset the Example Workspace",
     description=(
-        "Restores the workspace to exactly the canonical synthetic demo scenarios "
-        "and reports the before/after counts, the removable set, and a state "
+        "Restores the workspace to exactly the five canonical built-in example "
+        "records and reports the before/after counts, the removable set, and a state "
         "histogram. `mode: \"preview\"` classifies only and mutates nothing; "
         "`mode: \"execute\"` additionally requires the exact confirmation phrase "
         "and refuses without it. It accepts no caller-supplied ids or paths — any "
         "extra field is rejected — it removes only records it can classify as "
-        "managed synthetic-demo records, and it refuses to remove anything at all "
-        "if any record is ambiguous. No filesystem path appears in the response.\n\n"
+        "records this workspace itself created, and it refuses to remove anything at "
+        "all if any record is ambiguous. No filesystem path appears in the "
+        "response.\n\n"
         "There is deliberately no general per-experiment delete operation."
     ),
     response_description=(
@@ -805,7 +806,7 @@ def _reset_response(data: dict, *, mode: str, status: str, http: int) -> JSONRes
             "description": (
                 "Refused without mutating: either the `execute` confirmation "
                 "phrase was missing or wrong, or at least one record could not be "
-                "classified as a managed synthetic-demo record."
+                "classified as a record this workspace itself created."
             )
         },
     },
@@ -863,8 +864,8 @@ def demo_reset(
         "title, derived status, creation time, how many blocking questions are "
         "still open, how many fields carry evidence, whether it has been "
         "exported, and the exported record id when there is one. Rows for the "
-        "five canonical synthetic seeds also carry a derived, never-stored "
-        "`scenario` label naming which seeded fixture they are; it is null for "
+        "five built-in example records also carry a derived, never-stored "
+        "`scenario` label naming which example the row is; it is null for "
         "any other record. Read-only, and it states no validity verdict."
     ),
     response_description="Every experiment as a summary row.",
@@ -965,7 +966,7 @@ def get_draft(experiment_id: ExperimentId, response: Response):
     description=(
         "The questions that are still blocking this draft, each with the stable "
         "key an answer must be submitted under, what the question is about, and — "
-        "for the committed synthetic demo only — a clearly labelled suggested "
+        "for the built-in examples only — a clearly labelled suggested "
         "answer that is never applied automatically. Read-only; the response "
         "carries the record's current `ETag`."
     ),
@@ -1892,18 +1893,18 @@ def get_evidence_classification(experiment_id: ExperimentId, response: Response)
 @router.get(
     "/experiments/{experiment_id}/source-preview",
     tags=[TAG_EVIDENCE],
-    summary="Preview a Cited Source Fixture",
+    summary="Preview a Cited Source File",
     description=(
-        "The text of one committed synthetic source fixture, line by line, "
+        "The text of one committed reference source file, line by line, "
         "together with the one-based line numbers this record's evidence actually "
         "cites in it. Read-only.\n\n"
-        "Only the two committed synthetic fixtures may be previewed. A name "
+        "Only the two committed reference files may be previewed. A name "
         "containing a path separator or a traversal fragment is rejected, and any "
         "other filename is refused with the allowed names listed in the response. "
-        "The fixture that cites fields rather than lines yields no cited line "
+        "The file that cites fields rather than lines yields no cited line "
         "numbers, which is expected rather than an error."
     ),
-    response_description="The fixture's lines, its media type, and the cited line numbers.",
+    response_description="The file's lines, its media type, and the cited line numbers.",
     responses={
         **_R_UNAUTHORIZED,
         400: {
@@ -1915,7 +1916,7 @@ def get_evidence_classification(experiment_id: ExperimentId, response: Response)
         404: {
             "description": (
                 "Either no experiment has that id, or the `source` name is a bare "
-                "filename outside the two-fixture allowlist. The allowed names are "
+                "filename outside the two-file allowlist. The allowed names are "
                 "listed in the refusal."
             )
         },
@@ -1927,7 +1928,7 @@ def get_source_preview(
         str,
         Query(
             description=(
-                "The bare filename of a committed synthetic fixture. A path, a "
+                "The bare filename of a committed reference file. A path, a "
                 "traversal fragment, or any name outside the allowlist is refused."
             )
         ),
@@ -1943,7 +1944,7 @@ def get_source_preview(
             status_code=400,
             content={
                 "error": "unsafe_source_name",
-                "message": "Path traversal rejected — pass a bare fixture basename.",
+                "message": "Path traversal rejected — pass a bare filename.",
             },
         )
     except sources.SourceNotAllowed:
@@ -1958,7 +1959,7 @@ def get_source_preview(
                 # which now also runs a read-only diagnostic over an isolated
                 # test database. This is the wording the operation's own
                 # description already carries, so the two cannot drift.
-                "message": "Only the two committed synthetic fixtures may be previewed.",
+                "message": "Only the two committed reference files may be previewed.",
                 "allowed": list(ws.SOURCE_FILES),
             },
         )

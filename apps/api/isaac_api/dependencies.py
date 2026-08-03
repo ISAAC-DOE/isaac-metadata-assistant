@@ -27,7 +27,7 @@ from .workflow import CANONICAL_LABELS, derive_workflow
 _STALE_REASON = (
     "The record changed after export; the exported artifact no longer reflects "
     "the current record. Records are immutable — regenerate the record (or reset "
-    "the demo) to refresh it."
+    "the workspace) to refresh it."
 )
 _MISSING_REASON = "The exported artifact is missing or unreadable."
 

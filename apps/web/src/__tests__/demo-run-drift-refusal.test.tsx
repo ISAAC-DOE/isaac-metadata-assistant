@@ -98,7 +98,7 @@ describe('S2 · demo run — 409 demo_target_drifted is a refusal, not a failure
     expect(view.queryByText('Open the Record →')).toBeNull();
   });
 
-  it('states that nothing ran, why, and that Reset Demo is the deliberate way back', async () => {
+  it('states that nothing ran, why, and that Reset Workspace is the deliberate way back', async () => {
     const view = runDemoWith({ status: 409, body: driftedBody });
     await view.findByText(LABELS.demoDriftedTitle);
     const text = (refusal(view) as HTMLElement).textContent ?? '';
@@ -106,7 +106,11 @@ describe('S2 · demo run — 409 demo_target_drifted is a refusal, not a failure
     expect(text).toMatch(/nothing ran/i); // it did not run
     expect(text).toMatch(/nothing changed/i); // and it changed nothing
     expect(text).toMatch(/edited/i); // why
-    expect(text).toMatch(/Reset Demo/); // the deliberate remedy
+    // The remedy must name the reset control by the label that control actually
+    // renders. Asserted through LABELS rather than as a literal so a future
+    // rename of the button cannot leave this copy pointing at a control that no
+    // longer exists — the exact way the pre-P1 wording went stale.
+    expect(text).toContain(LABELS.actionResetDemo); // the deliberate remedy
     // …and it must not misdescribe a healthy server or invent a loss
     expect(text).not.toMatch(/not running|unreachable|not responding|offline|down/i);
     expect(text).not.toMatch(/lost|deleted|corrupt/i);

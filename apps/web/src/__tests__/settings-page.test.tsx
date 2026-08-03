@@ -656,7 +656,7 @@ describe('Settings — Data & Privacy', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     openTab('Data & Privacy');
-    await screen.findByText(/only the synthetic workspace/i);
+    await screen.findByText(/only the example workspace/i);
 
     const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
     expect(concepts.map((c) => c.heading)).toEqual([
@@ -694,7 +694,7 @@ describe('Settings — Data & Privacy', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     openTab('Data & Privacy');
-    await screen.findByText(/only the synthetic workspace/i);
+    await screen.findByText(/only the example workspace/i);
 
     // Slice 2A (I5) sweep. Both needles named copy that has been retired for
     // being untrue of the deployment, and both are replaced by a needle from
@@ -733,7 +733,7 @@ describe('Settings — Data & Privacy', () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
     openTab('Data & Privacy');
-    await screen.findByText(/only the synthetic workspace/i);
+    await screen.findByText(/only the example workspace/i);
 
     const disclosures = Array.from(
       container.querySelectorAll('details.settings-more'),
@@ -778,7 +778,7 @@ describe('Settings — Data & Privacy', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     openTab('Data & Privacy');
-    await screen.findByText(/only the synthetic workspace/i);
+    await screen.findByText(/only the example workspace/i);
 
     // Governance: refusal is a blanket upload block, NOT real-data detection —
     // the CSV preview and record validator really do read what they are given.
@@ -1047,7 +1047,7 @@ describe('Settings — API browser', () => {
     openTab('API Access');
     expect(
       await screen.findByText(
-        /OpenAPI 3\.1\.0 · ISAAC Metadata Assistant — local UI backend · v0\.1\.0/,
+        /OpenAPI 3\.1\.0 · ISAAC Metadata Assistant API · v0\.1\.0/,
       ),
     ).toBeInTheDocument();
 
@@ -1369,7 +1369,7 @@ const SURFACES: { name: string; open: () => void; settle: () => Promise<unknown>
   {
     name: 'Data & Privacy',
     open: () => openTab('Data & Privacy'),
-    settle: () => screen.findByText(/only the synthetic workspace/i),
+    settle: () => screen.findByText(/only the example workspace/i),
   },
   { name: 'About', open: () => openTab('About'), settle: () => screen.findByText('0.1.0') },
   {

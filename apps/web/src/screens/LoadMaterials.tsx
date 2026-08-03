@@ -112,7 +112,7 @@ export function LoadMaterials() {
   return (
     <AppShell
       variant="full"
-      topBar={<TopBar variant="breadcrumb" breadcrumb={LABELS.actionNewRecord} />}
+      topBar={<TopBar variant="breadcrumb" breadcrumb={LABELS.actionOpenRecord} />}
       mainPad="centered"
     >
       <div className="centered-col">
@@ -125,10 +125,10 @@ export function LoadMaterials() {
                 <Play size={16} strokeWidth={2.2} />
               </span>
               <div>
-                <div className="onramp-title">Run the Synthetic Demo</div>
-                <div className="onramp-tagline">the reference happy path · ~10s</div>
+                <div className="onramp-title">Worked Example: CuO Cu K-edge XANES</div>
+                <div className="onramp-tagline">a complete example run · ~10s</div>
               </div>
-              <span className="onramp-tag">Safe · Fake</span>
+              <span className="onramp-tag">Built-in Example</span>
             </div>
             <p className="onramp-body">
               A fictional year-2099 CuO / Cu K-edge XANES session. Assembles the evidenced draft,
@@ -192,7 +192,7 @@ export function LoadMaterials() {
         {run.name === 'running' && (
           <div className="runner-status">
             <span className="dot dot-processing" aria-hidden="true" />
-            <span className="runner-status-label">Synthetic Demo — Running</span>
+            <span className="runner-status-label">Example Run — Running</span>
             <span className="runner-status-note">calling the deterministic pipeline…</span>
           </div>
         )}
@@ -203,8 +203,8 @@ export function LoadMaterials() {
          * a click; the visual treatment is the same protective slate as the
          * governance refusal above, never the red error treatment — the backend
          * is healthy and has just done the right thing. Focus deliberately stays
-         * on Run Demo: the alert announces itself, and the remedy button follows
-         * in DOM order.
+         * on the example-run button: the alert announces itself, and the remedy
+         * button follows in DOM order.
          */}
         {run.name === 'drifted' && (
           <div
@@ -244,7 +244,7 @@ export function LoadMaterials() {
                 className={`dot ${run.result.status === 'needs_attention' ? 'dot-attention' : 'dot-ready'}`}
                 aria-hidden="true"
               />
-              <span className="runner-status-label">Synthetic Demo — Draft Assembled</span>
+              <span className="runner-status-label">Example Run — Draft Assembled</span>
               <span className="runner-status-note">
                 {run.result.status === 'needs_attention'
                   ? 'paused for your input · your turn'

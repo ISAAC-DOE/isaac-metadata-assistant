@@ -203,9 +203,9 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
     {
       id: 'what-is-stored',
       heading: 'What Is Stored',
-      summary: 'Just the synthetic workspace, held on the server for this deployment.',
+      summary: 'Just the example workspace, held on the server for this deployment.',
       detail:
-        'Only the synthetic workspace is stored. It is held on the server for this deployment and is not shared between deployments.',
+        'Only the example workspace is stored. It is held on the server for this deployment and is not shared between deployments.',
       more: {
         label: 'What the Workspace Contains',
         text: 'Experiments, their drafts, the answers you confirm, exported records, and evidence sidecars.',

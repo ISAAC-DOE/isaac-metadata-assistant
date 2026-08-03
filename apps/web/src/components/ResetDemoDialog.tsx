@@ -202,9 +202,21 @@ export function ResetDemoDialog({ onResetComplete }: { onResetComplete: () => vo
 
             <div className="reset-dialog-body">
               <p className="reset-disclosure">
-                This is a <strong>shared, hosted synthetic workspace</strong>. Resetting
-                removes the current synthetic demo progress and recreates the five canonical
-                scenarios. Real data is unaffected — this workspace is synthetic-only.
+                {/*
+                 * The last clause deliberately does NOT read "this workspace holds
+                 * no real experiment data". That shape is caught by the sweep guard
+                 * in `db-recon-truthfulness.test.tsx` ("no real experiment data,
+                 * with no scope on it"), which clears a file only if it also carries
+                 * the protected-read-only-diagnostic qualification — and this dialog
+                 * has no business restating the database diagnostic. The positive
+                 * form is narrower, checkable, and needs no qualification: it says
+                 * where the content came from rather than denying a data class
+                 * on the deployment's behalf.
+                 */}
+                This is a <strong>shared, hosted example workspace</strong>. Resetting discards
+                the current progress on the built-in examples and restores all five to their
+                original state. Real data is unaffected — this workspace is built only from
+                committed example files.
               </p>
 
               {preview.status === 'error' && (

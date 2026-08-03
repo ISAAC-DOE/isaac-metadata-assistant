@@ -41,9 +41,9 @@ from isaac_records.export import export_draft
 #:                          -> "extraction only"
 #:   2 ``_partial_draft`` — only the committed answers MINUS ``series`` and
 #:                          ``descriptor`` applied
-#:                          -> "partial answers applied"
+#:                          -> "some answers confirmed"
 #:   3 ``_full_draft``    — every committed answer applied
-#:                          -> "all answers applied"
+#:                          -> "all answers confirmed"
 #:   4 ``_review_draft``  — full answers MINUS the descriptor's ``uncertainty``
 #:                          sub-key (``answers["descriptor"].pop("uncertainty")``),
 #:                          which the official schema lists as a REQUIRED descriptor
@@ -51,18 +51,24 @@ from isaac_records.export import export_draft
 #:                          -> "descriptor uncertainty omitted"
 #:   5 ``_full_draft`` + ``exported=True``, so ``_materialise_seed`` runs the REAL
 #:                          ``export_draft`` while building the fixture
-#:                          -> "export run at setup"
+#:                          -> "export run"
 #:
 #: Every clause is past tense and about SETUP, never about the record's current
 #: state, so no later user action can make it false. Seed 5 deliberately avoids the
 #: bare word "Exported" so the badge does not verbatim-duplicate the lifecycle chip
 #: rendered on the same row.
+#: P1 renamed the user-visible prefix ``Scenario N`` -> ``Example N`` and the
+#: materialisation-scope marker ``seeded:`` -> ``at setup:``. Both were development
+#: jargon; NEITHER was decorative, so both were replaced rather than dropped — the
+#: numbering still distinguishes five examples from five duplicates, and the scope
+#: marker is still the only thing keeping each clause past-tense. Every assertion
+#: below is unchanged in strictness; only the expected strings moved.
 EXPECTED_LABELS = {
-    ws.SEED_NEW_DRAFT_ID: "Scenario 1 · seeded: extraction only",
-    ws.SEED_PARTIAL_ID: "Scenario 2 · seeded: partial answers applied",
-    ws.SEED_READY_ID: "Scenario 3 · seeded: all answers applied",
-    ws.SEED_REVIEW_ID: "Scenario 4 · seeded: descriptor uncertainty omitted",
-    ws.SEED_DONE_ID: "Scenario 5 · seeded: export run at setup",
+    ws.SEED_NEW_DRAFT_ID: "Example 1 · at setup: extraction only",
+    ws.SEED_PARTIAL_ID: "Example 2 · at setup: some answers confirmed",
+    ws.SEED_READY_ID: "Example 3 · at setup: all answers confirmed",
+    ws.SEED_REVIEW_ID: "Example 4 · at setup: descriptor uncertainty omitted",
+    ws.SEED_DONE_ID: "Example 5 · at setup: export run",
 }
 
 ALL_LABEL_STRINGS = tuple(EXPECTED_LABELS.values())
@@ -246,10 +252,13 @@ def test_label_is_unchanged_when_the_record_advances(seeded_ws):
     assert label_before == EXPECTED_LABELS[seeded_ws.SEED_PARTIAL_ID]
 
 
-#: The materialisation-scope marker every label must carry after ``Scenario N · ``.
+#: The materialisation-scope marker every label must carry after ``Example N · ``.
 #: Without an explicit scope the clause reads as a description of the record as it
 #: is NOW, and an unchanging description of a mutating record goes false.
-SCOPE_MARKER = "seeded: "
+SCOPE_MARKER = "at setup: "
+
+#: The numbering prefix every label must carry. ``Example `` since P1.
+LABEL_PREFIX = "Example "
 
 
 def _if_match(client, exp_id: str) -> dict:
@@ -360,7 +369,7 @@ def test_every_label_is_explicitly_scoped_to_materialisation():
     marker, so none of them can be read as a live-state description."""
     for seed_id, label in EXPECTED_LABELS.items():
         prefix, _, clause = label.partition(" · ")
-        assert prefix.startswith("Scenario "), label  # the deliberate N prefix stays
+        assert prefix.startswith(LABEL_PREFIX), label  # the deliberate N prefix stays
         assert clause.startswith(SCOPE_MARKER), f"{seed_id}: {label!r} states no scope"
         assert clause[len(SCOPE_MARKER):].strip(), f"{seed_id}: empty scoped clause"
 
@@ -402,7 +411,11 @@ def test_no_draft_contains_the_label(seeded_ws):
         blob = json.dumps(exp.draft, ensure_ascii=False)
         for label in ALL_LABEL_STRINGS:
             assert label not in blob
-        assert "Scenario " not in blob
+        # The bare numbering prefix must not leak either — checked as the exact
+        # "<prefix>N ·" shape a label would carry, because "Example " on its own is
+        # an ordinary English word that legitimate draft prose could contain.
+        for n in range(1, 6):
+            assert f"{LABEL_PREFIX}{n} ·" not in blob
 
 
 def test_exported_record_and_sidecar_files_do_not_contain_the_label(seeded_ws):

@@ -77,13 +77,13 @@ function chipText(health: ApiHealth | undefined): string {
 /** The accessible name always OPENS with the exact visible text (WCAG 2.5.3
  *  label-in-name), then spells out the same distinction the qualifier makes. */
 const CHIP_ARIA_DETAIL: Record<DbChipState, string> = {
-  none: 'demo data only',
+  none: 'example data only',
   diagnostics:
-    'demo data only. This deployment is also configured to run a protected, ' +
+    'example data only. This deployment is also configured to run a protected, ' +
     'read-only diagnostic against an isolated test database; it returns ' +
     'sanitized aggregate results only, and no database records are displayed.',
   failed:
-    'demo data only. The most recent protected, read-only test-database ' +
+    'example data only. The most recent protected, read-only test-database ' +
     'diagnostic recorded by this deployment did not complete; it returns ' +
     'sanitized aggregate results only, and no database records are displayed.',
 };
