@@ -380,6 +380,112 @@ describe('P1 · product-facing language — no copy promises record creation', (
   });
 });
 
+// --- 4b. R0 · the guided walkthrough's own copy ------------------------------
+
+/*
+ * A SECOND, NARROWER RATCHET, over the files R0 authored.
+ *
+ * WHY IT IS SCOPED TO THOSE FILES AND NOT TO THE WHOLE APP. The terms below
+ * ("synthetic", "fixture", "demo", "mock", "scenario", …) are exactly the words
+ * the app's GOVERNANCE copy is required to use: `db-recon-truthfulness.test.tsx`
+ * asserts the Governance banner, the Governance & Safety policy tab and the Help
+ * popover each say "records shown here are synthetic" / "the visible workspace
+ * remains synthetic", and `hosted-truthfulness.test.tsx` pins the mode claims
+ * verbatim. A repo-wide ban on those words would break a required-claim guard —
+ * which is the failure this file's own header warns about: dropping a true claim
+ * while removing jargon is a WORSE defect than the jargon.
+ *
+ * So the rule applied here is the honest one: NEW product copy is written in
+ * product language, and the existing disclosure copy keeps the precise technical
+ * wording its guards require. The walkthrough is new product copy, and every word
+ * a reader sees in it comes from these three files.
+ */
+const TUTORIAL_COPY_FILES: readonly string[] = [
+  'lib/tutorialSteps.ts',
+  'components/TutorialPromotion.tsx',
+  'components/GuidedTutorial.tsx',
+  'screens/settings/HelpAndTutorial.tsx',
+];
+
+/** `[label, pattern, aStringItMustFlag]` — the third element keeps a pattern from
+ *  being narrowed until it detects nothing, the same discipline §5 applies to the
+ *  retired vocabulary above. */
+const HARNESS_VOCABULARY: readonly [string, RegExp, string][] = [
+  ['"synthetic" in any form', /\bsynthetic/i, 'the synthetic workspace'],
+  ['"demo"', /\bdemos?\b/i, 'run the demo'],
+  ['"fixture"', /\bfixtures?\b/i, 'restored from committed fixtures'],
+  ['"scenario"', /\bscenarios?\b/i, 'open Scenario 2'],
+  ['"mock"', /\bmock(ed|s)?\b/i, 'a mock record'],
+  ['"fake"', /\bfake[ds]?\b/i, 'safe, fake data'],
+  ['"seeded"/"seed data"', /\b(seeded|seed\s+data|test\s+data)\b/i, 'seeded test data'],
+  ['"dummy"', /\bdummy\b/i, 'a dummy value'],
+  ['"sandbox"', /\bsandbox(ed)?\b/i, 'a sandbox workspace'],
+];
+
+describe("R0 · the guided walkthrough's copy uses no harness vocabulary", () => {
+  it('scans the real walkthrough copy files, all of which exist and are scanned', () => {
+    const files = frontendSourceFiles();
+    for (const path of TUTORIAL_COPY_FILES) {
+      expect(files, `${path} must be scanned`).toContain(path);
+      // Non-trivial: a file reduced to a stub would pass every pattern below.
+      expect(renderedCopy(path).length, `${path} looks empty`).toBeGreaterThan(400);
+    }
+  });
+
+  it.each(HARNESS_VOCABULARY.map(([label, pattern]) => [label, pattern] as const))(
+    'no walkthrough copy file contains %s',
+    (_label, pattern) => {
+      const offenders = TUTORIAL_COPY_FILES.filter((path) => pattern.test(scannedCopy(path)));
+      expect(offenders).toEqual([]);
+    },
+  );
+
+  it.each(HARNESS_VOCABULARY.map(([label, pattern, shipped]) => [label, pattern, shipped]))(
+    '%s is still detected',
+    (_label, pattern, shipped) => {
+      expect((pattern as RegExp).test(shipped as string)).toBe(true);
+    },
+  );
+
+  it('leaves the walkthrough\'s actual copy alone — it must pass its own ratchet', () => {
+    for (const shipped of [
+      'Take the Guided Walkthrough',
+      'Start Tutorial',
+      'Skip for Now',
+      'Skip Tutorial',
+      'Replay Tutorial',
+      'Close Tutorial',
+      'Tutorial complete',
+      'Help & Tutorial',
+      'What My Experiments Contains',
+      'Opening a Worked Example',
+      'How Readiness Is Shown',
+      'The Trust Readout',
+      'Finding What Is Still Missing',
+      'How Evidence Works',
+      'Answering a Question',
+      'How Confirmation Works',
+      'When You Do Not Know',
+      'How Validation Works',
+      'Why Export Can Be Blocked',
+      'Repairing What Blocks Export',
+      'How Export Becomes Available',
+      'Where the Standalone Validator Lives',
+      'Where Settings and API Access Live',
+      'Replaying This Walkthrough',
+      'The records here are worked examples rebuilt from reference files committed to this build',
+      'Example workspace',
+    ]) {
+      const harness = HARNESS_VOCABULARY.filter(([, p]) => p.test(shipped)).map(([l]) => l);
+      expect(harness, `${shipped} is wrongly flagged as harness vocabulary`).toEqual([]);
+      const retired = RETIRED_VOCABULARY.filter(([, p]) => p.test(shipped)).map(([l]) => l);
+      expect(retired, `${shipped} is wrongly flagged as retired vocabulary`).toEqual([]);
+      const promised = FORBIDDEN_CREATION_PROMISE.filter(([, p]) => p.test(shipped)).map(([l]) => l);
+      expect(promised, `${shipped} is wrongly read as a creation promise`).toEqual([]);
+    }
+  });
+});
+
 // --- 5. the guard is proven on the strings it was written for ---------------
 
 describe('P1 · product-facing language — every pattern still flags its own defect', () => {
@@ -450,7 +556,15 @@ describe('P1 · product-facing language — every pattern still flags its own de
      * "fixes" the copy.
      */
     for (const claim of [
+      // R0 renamed the CHIP to "Example workspace". "Synthetic workspace" is
+      // still shipped copy — it leads the Governance banner and titles the Help
+      // popover's governance section — and it must keep that wording: the
+      // WORKSPACE_CLAIMS guard in `db-recon-truthfulness.test.tsx` REQUIRES the
+      // word ("records shown here are synthetic" / "visible workspace remains
+      // synthetic"), so removing it there would break a required-claim guard
+      // rather than tidy a register. Both spellings are therefore listed.
       'Synthetic workspace',
+      'Example workspace',
       'test DB diagnostics',
       'test DB check failed',
       'Synthetic-only mode — file upload is refused outright.',

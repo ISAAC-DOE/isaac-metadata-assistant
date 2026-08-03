@@ -10404,7 +10404,7 @@
       },
       {
         "path": "apps/web/src/components/AppShell.tsx",
-        "sha256": "ffec1841032ec6178e80aff18dd4a5437f429c4540a47fb16721ac0e225d71e9"
+        "sha256": "e4c9b1b3cc6aeaae26ab38d8220f6030587709ac2ff9eb81f68fc066d0088466"
       },
       {
         "path": "apps/web/src/components/ArtifactCard.tsx",
@@ -10428,11 +10428,11 @@
       },
       {
         "path": "apps/web/src/components/ExperimentQueue.tsx",
-        "sha256": "541029d4128871cb6623d3268beb05b8b1c8e042331a7c69eb4d3d8dfa4e5c42"
+        "sha256": "be7c14aede8bbb6a5eba6765269776513b9a3298eb8f338a9f5ed6207efbea00"
       },
       {
         "path": "apps/web/src/components/ExperimentRow.tsx",
-        "sha256": "1d14794056671d7745da66555bd501dd3f3275458816e237099f009c92d719d1"
+        "sha256": "476baaa52293043821e6ce57ab836e4d2593e0f3ea9e384be62f4a9ae3624561"
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "5f7f4d1716b315b1ad3fab51c8dc50459db6754bb6cc5398df551828500213bc"
+        "sha256": "666ac12c7fe3d0e98579d8bb5f9a188f24d8183ec1f0d32a32df4c8fcd1bca63"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10476,7 +10476,7 @@
       },
       {
         "path": "apps/web/src/components/StatusBar.tsx",
-        "sha256": "0b468a1ce0da4fedf0e93c77383d6b178017e289e0621a5be31bf533b4502748"
+        "sha256": "244749deb4544d63018fe97d45e17eb974a0195dd4f5f4c158b6efc85885c8d1"
       },
       {
         "path": "apps/web/src/components/StatusChip.tsx",
@@ -10484,7 +10484,7 @@
       },
       {
         "path": "apps/web/src/components/TopBar.tsx",
-        "sha256": "67c640705f7132ad7d9364ba812beebcd5a29b39255da6827f9052e7ca47c493"
+        "sha256": "5286cbc7b7fc93c4653ff993d5bc900fcda570a825dbb8a6746419bae82c1f85"
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
@@ -10492,11 +10492,11 @@
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
-        "sha256": "171e2ecebfa58461209b9faf5f58532ab51016da287d79d5d9aa924735ee2e47"
+        "sha256": "8d392415eb18224cb3ff92b38419ebadfda60eef260afd30c13dabd49009bde8"
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "84cb9797ba9378329e6035acad42eba0323596dbad2c08266b3d4b088cff70a1"
+        "sha256": "88b5a448de2d76a2417f842fdb5ad17087bae0ff8c3282d9b66f690d8c72c44e"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -10512,11 +10512,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "4bcd1532782e7346e0cdd8382ef78393bb0c0831428f95153ee744fc467527a2"
+        "sha256": "eb9b0b8fb52e4ad875062e63834c0ccc4914a3128da692c4c5f7db9b7b8a6785"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "4426f24ac711bec4f38a57f0c020ff2128124d813524e3ab45df5963b8b020b5"
+        "sha256": "f7d4152b6d1925a00069514385a8a8bbbe05050730656a08e365bd10a2c74215"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10540,11 +10540,11 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "18acc5d82c7022038e8dec6ec3c2702515f8758d5d9d635367f267695c2e07d4"
+        "sha256": "d4f4a393e98cb6aaa7ceae809c7665731c5ac924a009a8959ae0c715c5a87484"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "11cfa0a96db5b3be8294e7c1b80cfe9489c2cfdeffdd10ec65f2ca892bb66613"
+        "sha256": "888caa4ef5c51f8dc77a3045e9af087e1cab6c5a64180618d1a643dc42a48072"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10564,11 +10564,11 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "63c0d3f16a4371d80d9fd24f84c6201f9e43835d140b51d2ab1d370bb1b3d94f"
+        "sha256": "f667b3bff752ea656d6db6c08d3c15875003f21eb042090c65436705ec1fbd43"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "7036d140921e3f50c72b4547d189d07e176aec3e2750b108612cabd869e1a3ca"
+        "sha256": "a2e79b5b4bde932b58b67fe5a0bdae039f8ea6a47f4bb289ce3039c311bd74ed"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
@@ -10576,7 +10576,7 @@
       },
       {
         "path": "apps/web/src/test/setup.ts",
-        "sha256": "f0652274bff1dc20bcbc27513e81d7e4b83add76ee1adb74295e4b023b8ad9e5"
+        "sha256": "3a47e7555dffe02dad9b89c367abd1c020227507c30c75ad1bce8985989ee0ad"
       },
       {
         "path": "apps/web/src/vite-env.d.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "57c889656b6cfe6118c293917bdfab75897b70118dec63497d7fef07bd8553f5"
+    "served_manifest_fingerprint": "fbb4527fa37a17946ba0136f49f79f131a434da0340dc2217100be7a5ba82fbf"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

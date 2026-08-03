@@ -1,5 +1,6 @@
 import './queue.css';
 import { ExperimentRow } from './ExperimentRow';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { QueueGroup, QueueGroupKey } from '../lib/types';
 
 interface ExperimentQueueProps {
@@ -20,7 +21,9 @@ const GROUP_DOT: Record<QueueGroupKey, string> = {
  */
 export function ExperimentQueue({ groups }: ExperimentQueueProps) {
   return (
-    <div className="queue">
+    /* The guided walkthrough's anchor for "what this list holds". An attribute,
+       not a wrapper element, so the layout is untouched. */
+    <div className="queue" data-tutorial-anchor={TUTORIAL_ANCHORS.experimentsQueue}>
       {groups.map((group) => (
         <section
           className="queue-group"

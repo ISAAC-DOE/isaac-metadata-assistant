@@ -5,6 +5,7 @@ import { LoadingPanel, BackendDown } from './FetchStates';
 import { Upload, FileJson, TriangleAlert } from './icons';
 import { api, ApiError } from '../lib/api';
 import type { ApiValidateRecordResult, ValidationResult } from '../lib/types';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 
 /**
  * P36.3 — the standalone Governance & Safety validator.
@@ -131,7 +132,11 @@ export function RecordValidator() {
   }
 
   return (
-    <section className="rec-val card" aria-labelledby="rec-val-heading">
+    <section
+      className="rec-val card"
+      aria-labelledby="rec-val-heading"
+      data-tutorial-anchor={TUTORIAL_ANCHORS.standaloneValidator}
+    >
       <header className="rec-val-head">
         <FileJson size={18} strokeWidth={2} aria-hidden="true" className="rec-val-icon" />
         <div>

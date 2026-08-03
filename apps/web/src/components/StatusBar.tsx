@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { StatusChip } from './StatusChip';
 import { LABELS } from '../lib/labels';
 import { RUNTIME_BADGE } from '../lib/runtimeContext';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { AdvisoryResult, AuditResult, ValidationResult } from '../lib/types';
 
 interface StatusBarProps {
@@ -61,7 +62,15 @@ export function StatusBar({
 
     // Resolved signals read value-then-label; pending signals read label-then-note.
     segments.push(
-      <span className="statusbar-seg" key="validation" aria-label="Validation signal">
+      <span
+        className="statusbar-seg"
+        key="validation"
+        aria-label="Validation signal"
+        /* The walkthrough's "how validation works" anchor. The SEGMENT, not the
+           whole readout: the readout is a different step, about the three signals
+           being kept apart. */
+        data-tutorial-anchor={TUTORIAL_ANCHORS.exportValidation}
+      >
         {validationResolved ? (
           <>
             <StatusChip kind={validation.verdict === 'pass' ? 'pass' : 'fail'} />
@@ -108,7 +117,11 @@ export function StatusBar({
   }
 
   return (
-    <footer className="statusbar" aria-label="Trust readout">
+    <footer
+      className="statusbar"
+      aria-label="Trust readout"
+      data-tutorial-anchor={TUTORIAL_ANCHORS.recordSignals}
+    >
       {segments.map((seg, i) => (
         <span key={i} style={{ display: 'inline-flex', alignItems: 'center' }}>
           {i > 0 && <span className="statusbar-sep" aria-hidden="true" />}

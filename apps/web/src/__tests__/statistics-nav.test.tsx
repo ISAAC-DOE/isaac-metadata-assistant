@@ -197,17 +197,20 @@ describe('the Settings destination reads "Settings & API"', () => {
     ).toBeInTheDocument();
   });
 
-  it('keeps the About This Build eyebrow and the five tab labels unchanged', async () => {
+  it('keeps the About This Build eyebrow, and the tab labels, unchanged', async () => {
     stubFetchRoutes(settingsRoutes());
     renderAt(ROUTES.settings);
 
     expect(await screen.findByText('About This Build')).toBeInTheDocument();
+    // R0 appended a sixth tab, Help & Tutorial. The five that were here are
+    // unchanged in label and in order, which is what this guard is for.
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
       'Overview',
       'Data & Privacy',
       'About',
       'API Access',
       'Endpoint Explorer',
+      'Help & Tutorial',
     ]);
   });
 });

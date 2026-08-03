@@ -164,10 +164,14 @@ afterEach(() => {
 // --- tab structure ------------------------------------------------------------
 
 describe('Settings — tabs', () => {
-  it('renders exactly the five specified tabs, with Overview selected by default', () => {
+  it('renders exactly the six specified tabs, with Overview selected by default', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
 
+    /* R0 added a SIXTH tab, Help & Tutorial. It is last on purpose: the five
+       before it report what this build is, and the sixth is the one thing on the
+       page a reader ACTS on (replaying the guided walkthrough), so it does not
+       belong in the middle of a readout. */
     const tabs = screen.getAllByRole('tab');
     expect(tabs.map((t) => t.textContent)).toEqual([
       'Overview',
@@ -175,6 +179,7 @@ describe('Settings — tabs', () => {
       'About',
       'API Access',
       'Endpoint Explorer',
+      'Help & Tutorial',
     ]);
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'settings-tabpanel-overview');
@@ -272,20 +277,20 @@ describe('Settings — tabs', () => {
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowRight' });
     expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
 
-    // End is now the FIFTH tab, not the fourth.
+    // End is now the SIXTH tab (R0 added Help & Tutorial), not the fifth.
     fireEvent.keyDown(tab('Data & Privacy'), { key: 'End' });
-    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Help & Tutorial')).toHaveAttribute('aria-selected', 'true');
 
-    fireEvent.keyDown(tab('Endpoint Explorer'), { key: 'Home' });
+    fireEvent.keyDown(tab('Help & Tutorial'), { key: 'Home' });
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
 
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowLeft' });
-    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Help & Tutorial')).toHaveAttribute('aria-selected', 'true');
 
-    // ArrowLeft from the last tab reaches the new fourth tab, so the wrap is
-    // walking all five entries rather than a stale four-entry array.
-    fireEvent.keyDown(tab('Endpoint Explorer'), { key: 'ArrowLeft' });
-    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
+    // ArrowLeft from the last tab reaches the new fifth tab, so the wrap is
+    // walking all six entries rather than a stale five-entry array.
+    fireEvent.keyDown(tab('Help & Tutorial'), { key: 'ArrowLeft' });
+    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('keyboard selection moves focus with it, so the arrow keys stay usable', () => {
@@ -293,8 +298,8 @@ describe('Settings — tabs', () => {
     renderSettings();
     tab('Overview').focus();
     fireEvent.keyDown(tab('Overview'), { key: 'End' });
-    expect(tab('Endpoint Explorer')).toHaveFocus();
-    expect(tab('Endpoint Explorer')).toHaveAttribute('tabindex', '0');
+    expect(tab('Help & Tutorial')).toHaveFocus();
+    expect(tab('Help & Tutorial')).toHaveAttribute('tabindex', '0');
   });
 
   it('states plainly that there is nothing to configure (no invented settings)', () => {

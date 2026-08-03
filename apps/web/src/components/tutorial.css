@@ -1,0 +1,219 @@
+/*
+ * Guided walkthrough — coach marks, the highlight ring, the first-run offer and
+ * the completion panel.
+ *
+ * THREE RULES HERE THAT ARE BEHAVIOUR, NOT DECORATION:
+ *
+ *  1. The highlight NEVER covers its target. The ring is a separate,
+ *     `pointer-events: none` element drawn OVER the control, and there is no
+ *     full-screen backdrop that would swallow clicks or hide the page from a
+ *     screen reader. The control the mark is describing stays operable and stays
+ *     in the accessibility tree — a walkthrough that makes the thing it is
+ *     explaining unusable has explained nothing.
+ *
+ *  2. Motion is opt-out. Every transition below is switched off under
+ *     `prefers-reduced-motion: reduce`, and `GuidedTutorial.tsx` ALSO stops
+ *     issuing smooth scrolls — the media query cannot cancel a scroll a script
+ *     asked for.
+ *
+ *  3. No hex literals and no colored left/right borders. Every colour is a
+ *     design token: `no-vertical-rail.test.ts` flags a coloured
+ *     `border-left`/`border-right` anywhere (a hex fallback counts as a colour),
+ *     and `interaction-states.test.ts` flags ANY hex inside a
+ *     `:hover`/`:active`/`:focus` rule. The pointer is therefore a clip-path
+ *     triangle rather than the conventional rotated-border square, which would
+ *     have needed exactly the border declaration the rail rule forbids.
+ */
+
+.tutorial-ring {
+  position: fixed;
+  z-index: 70;
+  pointer-events: none;
+  border-radius: var(--radius-control);
+  box-shadow:
+    0 0 0 2px var(--action),
+    0 0 0 6px var(--action-tint);
+  transition: top 160ms ease, left 160ms ease, width 160ms ease, height 160ms ease;
+}
+
+.tutorial-mark {
+  position: fixed;
+  z-index: 71;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-screen);
+  padding: 14px 16px 12px;
+  transition: top 160ms ease, left 160ms ease;
+}
+
+/* Centered variant: the honest "this step cannot be shown" state and the
+   completion panel, neither of which has a control to point at. */
+.tutorial-mark.centered {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: none;
+}
+
+.tutorial-mark:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+/* The decorative pointer. It carries no information the copy does not already
+   carry, so it is aria-hidden and purely a visual link between mark and
+   control. A clip-path triangle — see rule 3 in the header. */
+.tutorial-arrow {
+  position: absolute;
+  width: 14px;
+  height: 8px;
+  background: var(--border);
+}
+.tutorial-arrow.up {
+  top: -8px;
+  left: 22px;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.tutorial-arrow.down {
+  bottom: -8px;
+  left: 22px;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.tutorial-progress {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+
+.tutorial-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin-bottom: 6px;
+}
+
+.tutorial-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.tutorial-unavailable {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.tutorial-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.tutorial-spacer {
+  flex: 1 1 auto;
+}
+
+.tutorial-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.tutorial-btn:hover:not(:disabled) {
+  background: var(--border-faint);
+}
+.tutorial-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.tutorial-btn.primary {
+  background: var(--action);
+  border-color: var(--action);
+  color: var(--surface);
+}
+.tutorial-btn.primary:hover:not(:disabled) {
+  background: var(--action-hover);
+}
+.tutorial-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The first-run offer on My Experiments. A card in the page flow — never a modal
+   over the queue, because the queue is the reader's actual work. */
+.tutorial-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+}
+
+.tutorial-offer-body {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.tutorial-offer h2 {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin-bottom: 4px;
+}
+
+.tutorial-offer p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.tutorial-offer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: none;
+}
+
+/* Settings & API → Help & Tutorial */
+.tutorial-help-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.tutorial-help-note {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  margin-top: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-ring,
+  .tutorial-mark {
+    transition: none;
+  }
+}

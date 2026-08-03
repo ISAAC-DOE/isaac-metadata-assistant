@@ -163,9 +163,23 @@ async function chipTextAfterHealth(health: ApiHealth | 'down', expected: string)
   return chip;
 }
 
-const SYNTHETIC = 'Synthetic workspace';
-const DIAGNOSTICS = 'Synthetic workspace · test DB diagnostics';
-const FAILED = 'Synthetic workspace · test DB check failed';
+/*
+ * R0 renamed the chip's BASE label "Synthetic workspace" -> "Example workspace".
+ * What changed is one product-facing WORD; what did not change is anything this
+ * file is guarding. The runtime mode is still `synthetic-only` on the wire, the
+ * two database qualifiers are byte-for-byte the same, and the chip still refuses
+ * to claim reachability, liveness, or a completed check it has not observed.
+ *
+ * The claim the retired word carried is not gone either — it moved into the
+ * chip's ACCESSIBLE NAME, which now spells out that the records are rebuilt from
+ * reference files committed to the build, that upload is refused, and that no
+ * official institutional record is shown. That is asserted below, in
+ * `the accessible name carries the claim the visible label no longer spells out`,
+ * so this rename cannot be repeated as a quiet weakening.
+ */
+const SYNTHETIC = 'Example workspace';
+const DIAGNOSTICS = 'Example workspace · test DB diagnostics';
+const FAILED = 'Example workspace · test DB check failed';
 
 // --- 1/2/3: the three chip states -------------------------------------------
 
@@ -209,14 +223,36 @@ describe('mode chip — the last recorded diagnostic did not complete', () => {
 // --- 4: absent / failed health ------------------------------------------------
 
 describe('mode chip — health absent or failed', () => {
-  it('still shows the synthetic indicator and never implies non-synthetic', async () => {
+  it('still shows the example-workspace indicator and never implies otherwise', async () => {
     const chip = await chipTextAfterHealth('down', SYNTHETIC);
-    expect(chip.textContent).toContain('Synthetic');
+    expect(chip.textContent).toContain('Example workspace');
     expect(chip.textContent).not.toMatch(/production|real data|non-synthetic/i);
     // We know nothing about the database, so we claim nothing about it either —
     // neither qualifier may be guessed into existence.
     expect(chip.textContent).not.toMatch(/test DB/i);
     expect(chip.getAttribute('aria-label')).not.toMatch(/test.database|diagnostic/i);
+  });
+});
+
+// --- 4b: the rename did not drop a claim --------------------------------------
+
+/*
+ * WHY THIS TEST EXISTS. The visible label used to carry the word "Synthetic",
+ * which did a lot of work in a very small space. R0 replaced it with product
+ * language, and the failure mode of that kind of change — in this repository,
+ * repeatedly — is that the true claim leaves with the jargon. So the claim is
+ * pinned where it now lives: the accessible name. If a later slice simplifies the
+ * accessible name back down, this fails.
+ */
+describe('mode chip — the rename moved a claim rather than dropping one', () => {
+  it('the accessible name carries the claim the visible label no longer spells out', async () => {
+    const chip = await chipTextAfterHealth(healthNoBlock, SYNTHETIC);
+    const name = chip.getAttribute('aria-label') ?? '';
+    // WCAG 2.5.3: the accessible name still OPENS with the exact visible text.
+    expect(name.startsWith(chip.textContent ?? '')).toBe(true);
+    expect(name).toMatch(/reference files committed to this build/i);
+    expect(name).toMatch(/file upload is refused/i);
+    expect(name).toMatch(/no official institutional record is shown/i);
   });
 });
 

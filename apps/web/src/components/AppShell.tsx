@@ -2,6 +2,7 @@ import './chrome.css';
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { GuidedTutorial } from './GuidedTutorial';
 
 type ShellVariant = 'full' | 'record' | 'evidence';
 
@@ -102,6 +103,23 @@ export function AppShell({
         </div>
         {statusBar}
       </div>
+
+      {/*
+        The guided walkthrough's overlay. Mounted HERE — in the one component
+        every screen renders — because the walkthrough crosses routes: it points
+        at a control on My Experiments, then at one on a record, then at one in
+        Settings, and React Router unmounts the whole screen at each of those
+        moves. Its state therefore lives in a module store
+        (`lib/tutorialController.ts`), not in this component, so remounting is
+        free and loses nothing.
+
+        Mounting it costs nothing while idle: it renders null, issues no request
+        and reads no storage until a reader actually starts it. It is
+        deliberately NOT wrapped in a provider around `AppRoutes` — that would
+        force every test that renders a screen directly to grow a provider it has
+        no interest in.
+      */}
+      <GuidedTutorial />
     </div>
   );
 }
