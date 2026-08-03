@@ -479,9 +479,15 @@ def test_demo_run_keeps_exactly_five_canonical_records_and_labels(client):
 
 
 def test_reset_restores_the_five_labels(client):
+    # R1: an execute carries the plan digest from its own preview (428 without it).
+    digest = client.post("/api/demo/reset", json={"mode": "preview"}).json()["plan_digest"]
     resp = client.post(
         "/api/demo/reset",
-        json={"mode": "execute", "confirmation": "RESET SYNTHETIC DEMO"},
+        json={
+            "mode": "execute",
+            "confirmation": "RESET EXAMPLE WORKSPACE",
+            "plan_digest": digest,
+        },
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "ok"

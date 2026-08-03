@@ -203,6 +203,29 @@ export const LABELS = {
   resetCountAmbiguous: 'Ambiguous Records',
   resetCountFinal: 'Final Experiments',
 
+  // R1 — the DERIVED at-risk disclosure. Every number in the sentence this heads is
+  // computed by the server from persisted state and rendered verbatim; the UI adds
+  // no estimate, no rounding, and no reassurance the numbers do not support. The
+  // heading is deliberately second person and blunt: the previous dialog stated a
+  // record COUNT and left the operator to infer what a count of five meant for the
+  // afternoon's work.
+  resetAtRiskLabel: 'What you would lose',
+  resetAtRiskNothing:
+    'Nothing. None of the built-in examples has been changed since it was set up.',
+
+  // R1 — the workspace moved between opening this window and pressing the button, so
+  // the server refused and wrote nothing. This copy has three jobs and does all
+  // three: say plainly that no records changed, say WHY the refusal happened in
+  // terms of the workspace rather than of HTTP, and send the operator back to the
+  // refreshed numbers. It must NEVER offer a one-click retry: the figures the
+  // operator approved are no longer the figures that apply, so re-approving is the
+  // whole point rather than a formality.
+  resetStaleTitle: 'Nothing was reset — this workspace changed',
+  resetStaleBody:
+    'Something in this workspace changed after this window opened, so the reset was ' +
+    'refused and no records were changed. The figures below have been refreshed. ' +
+    'Please read them again and confirm again if you still want to reset.',
+
   // The worked example refused to re-run because its target record has been
   // edited (POST /api/demo/run → 409 `demo_target_drifted`). The server protected
   // the edits instead of overwriting them, so this copy states three things and
