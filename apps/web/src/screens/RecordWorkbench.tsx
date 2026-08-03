@@ -18,6 +18,7 @@ import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
   draftGroupsToFieldGroups,
@@ -185,6 +186,7 @@ function LoadedWorkbench({
       <button
         type="button"
         className="evidence-trail-link"
+        data-tutorial-anchor={TUTORIAL_ANCHORS.recordEvidenceTrail}
         onClick={() => navigate(ROUTES.evidence(id))}
       >
         <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
@@ -234,7 +236,11 @@ function LoadedWorkbench({
       />
 
       {pending.length > 0 && (
-        <div className="needsyou-banner" role="note">
+        <div
+          className="needsyou-banner"
+          role="note"
+          data-tutorial-anchor={TUTORIAL_ANCHORS.recordPending}
+        >
           <CircleAlert className="needsyou-icon" size={20} strokeWidth={2.2} aria-hidden="true" />
           <div className="needsyou-body">
             <div className="needsyou-title">

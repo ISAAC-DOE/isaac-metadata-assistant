@@ -31,6 +31,7 @@ import {
   AudioWaveform,
   CircleHelp,
   Circle,
+  Compass,
   Download,
   LayoutList,
   BarChart3,
@@ -110,6 +111,7 @@ export {
   AudioWaveform,
   CircleHelp,
   Circle,
+  Compass,
   Download,
   LayoutList,
   // The Statistics destination glyph: a plain axis-and-bars mark. Chosen over the

@@ -7,6 +7,7 @@ import { LeftNav } from '../components/LeftNav';
 import { LoadingPanel, BackendDown, DiagnosticsPanel } from '../components/FetchStates';
 import {
   CircleHelp,
+  Compass,
   LayoutList,
   ChevronRight,
   Lock,
@@ -30,6 +31,8 @@ import { diagnosticsAppFrom, diagnosticsMemoryFrom } from '../lib/diagnostics';
 import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../lib/types';
 import { ApiExplorerPanel, ApiQuickStartPanel } from './settings/ApiDocs';
 import { ApiKeysPanel } from './settings/ApiKeys';
+import { HelpAndTutorialPanel } from './settings/HelpAndTutorial';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 
 /**
  * Settings — P36R Slice 9 reorganised this surface into four local page tabs
@@ -90,6 +93,11 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: 'about', label: 'About' },
   { id: 'api', label: 'API Access' },
   { id: 'explorer', label: 'Endpoint Explorer' },
+  /* R0 — the sixth tab. It is the ONE permanent home of the guided walkthrough's
+     replay control: the first-run offer on My Experiments disappears for good
+     once the walkthrough is finished, so without a fixed home a reader who
+     completed it could never get it back. */
+  { id: 'help', label: LABELS.settingsTabHelp },
 ];
 
 const tabId = (id: SettingsTab) => `settings-tab-${id}`;
@@ -194,6 +202,18 @@ export function SettingsPage() {
           <EndpointExplorerTab state={openapi} />
         </div>
       )}
+
+      {activeTab === 'help' && (
+        <div
+          className="settings-panel"
+          id={panelId('help')}
+          role="tabpanel"
+          aria-labelledby={tabId('help')}
+          tabIndex={0}
+        >
+          <HelpAndTutorialTab />
+        </div>
+      )}
     </AppShell>
   );
 }
@@ -226,7 +246,14 @@ function SettingsSectionTabs({
   }
 
   return (
-    <div className="section-tabs" role="tablist" aria-label="Settings & API sections">
+    <div
+      className="section-tabs"
+      role="tablist"
+      aria-label="Settings & API sections"
+      /* The walkthrough's "where Settings and API access live" anchor: the
+         tablist, because that is what the step is actually describing. */
+      data-tutorial-anchor={TUTORIAL_ANCHORS.settingsSections}
+    >
       {SETTINGS_TABS.map((tab, i) => {
         const selected = active === tab.id;
         return (
@@ -646,6 +673,26 @@ function EndpointExplorerTab({ state }: { state: OpenApiState }) {
       {state.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
       {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
       {state.status === 'data' && <ApiExplorerPanel schema={state.data} />}
+    </SettingsCard>
+  );
+}
+
+// --- Help & Tutorial ---------------------------------------------------------
+
+/**
+ * Needs no fetch: everything on it is either authored copy or the walkthrough's
+ * own browser-local completion flag. It therefore renders immediately, with no
+ * loading state to flash and no failure state to invent.
+ */
+function HelpAndTutorialTab() {
+  return (
+    <SettingsCard
+      icon={<Compass size={18} strokeWidth={2} aria-hidden="true" className="settings-card-icon" />}
+      headingId="settings-help-heading"
+      title={LABELS.settingsTabHelp}
+      sub="A guided tour of the real screens, and where finishing it is remembered."
+    >
+      <HelpAndTutorialPanel />
     </SettingsCard>
   );
 }

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Check, Pencil, Lock, TriangleAlert, CircleDashed } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import { CANONICAL_STEPS } from '../lib/workflowSteps';
 import type { ApiWorkflow, ApiWorkflowStep } from '../lib/types';
 
@@ -64,7 +65,11 @@ export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
     // The live spine below still renders the backend's own labels; the skeleton
     // exists purely so the shape is visible before the bundle arrives.
     return (
-      <nav className="spine" aria-label="Workflow pipeline">
+      <nav
+        className="spine"
+        aria-label="Workflow pipeline"
+        data-tutorial-anchor={TUTORIAL_ANCHORS.recordWorkflow}
+      >
         <div className="spine-eyebrow eyebrow">{LABELS.workflowEyebrow}</div>
         <ol className="spine-steps">
           {CANONICAL_STEPS.map((step) => (
@@ -85,7 +90,11 @@ export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
   }
 
   return (
-    <nav className="spine" aria-label="Workflow pipeline">
+    <nav
+        className="spine"
+        aria-label="Workflow pipeline"
+        data-tutorial-anchor={TUTORIAL_ANCHORS.recordWorkflow}
+      >
       <div className="spine-eyebrow eyebrow">{LABELS.workflowEyebrow}</div>
       <ol className="spine-steps">
         {workflow.ordered_steps.map((step) => {

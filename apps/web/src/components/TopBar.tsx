@@ -11,11 +11,15 @@ import type { ChipKind } from '../lib/status';
 import type { ApiHealth, ApiHealthDatabase } from '../lib/types';
 
 /** Map the backend health.mode to the chip's BASE label. "synthetic-only" is the
- * only expected mode → the friendly "Synthetic workspace" label. A missing/failed
- * health check degrades to it too — the workspace is synthetic, so an ABSENT
- * signal must never vanish or imply non-synthetic. But an UNEXPECTED non-empty
- * mode (a real value we did not anticipate) is surfaced honestly as a visibly
- * distinct label, never masked as synthetic. */
+ * only expected mode → the product-facing "Example workspace" label. A
+ * missing/failed health check degrades to it too — the workspace really is
+ * example-only, so an ABSENT signal must never vanish or imply otherwise. But an
+ * UNEXPECTED non-empty mode (a real value we did not anticipate) is surfaced
+ * honestly as a visibly distinct label, never masked as the expected one.
+ *
+ * The MODE'S OWN NAME is untouched by the label change: `synthetic-only` is what
+ * `/api/health` reports, what `runtime_mode.py` enforces, and what the machine
+ * contract carries. Only the reader-facing word changed. */
 function modeLabel(mode: string | undefined): string {
   if (mode === 'synthetic-only' || !mode) return LABELS.modeSynthetic;
   // Anomalous mode: show it truthfully (capitalize the raw value, safe on any
@@ -74,16 +78,38 @@ function chipText(health: ApiHealth | undefined): string {
   return `${base} · ${qualifier}`;
 }
 
-/** The accessible name always OPENS with the exact visible text (WCAG 2.5.3
- *  label-in-name), then spells out the same distinction the qualifier makes. */
+/**
+ * The accessible name always OPENS with the exact visible text (WCAG 2.5.3
+ * label-in-name), then spells out the same distinction the qualifier makes.
+ *
+ * R0 STRENGTHENED THE FIRST CLAUSE, and that is the point of this comment. The
+ * visible label used to carry the word "Synthetic", which did a lot of work in a
+ * very small space. Renaming the chip to "Example workspace" would have quietly
+ * dropped that work if the accessible name had stayed at the old four-word
+ * "example data only" — so the three claims the chip is responsible for are now
+ * stated here in full, in plain language:
+ *
+ *   · the records are rebuilt from reference files committed to this build;
+ *   · file upload is refused;
+ *   · no official institutional record is shown.
+ *
+ * These are the SAME claims the Governance banner, the Governance & Safety policy
+ * tab and the Help panel make at length, and those three keep their exact
+ * technical wording — a chip is not where a governance guarantee is defined, but
+ * it must not be where one silently disappears either.
+ */
+const EXAMPLE_ONLY =
+  'the records here are rebuilt from reference files committed to this build; file upload is ' +
+  'refused, and no official institutional record is shown.';
+
 const CHIP_ARIA_DETAIL: Record<DbChipState, string> = {
-  none: 'example data only',
+  none: EXAMPLE_ONLY,
   diagnostics:
-    'example data only. This deployment is also configured to run a protected, ' +
+    `${EXAMPLE_ONLY} This deployment is also configured to run a protected, ` +
     'read-only diagnostic against an isolated test database; it returns ' +
     'sanitized aggregate results only, and no database records are displayed.',
   failed:
-    'example data only. The most recent protected, read-only test-database ' +
+    `${EXAMPLE_ONLY} The most recent protected, read-only test-database ` +
     'diagnostic recorded by this deployment did not complete; it returns ' +
     'sanitized aggregate results only, and no database records are displayed.',
 };

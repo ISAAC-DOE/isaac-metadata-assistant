@@ -15,7 +15,13 @@
  */
 export const SETTINGS_TAB_PARAM = 'tab';
 
-export const SETTINGS_TAB_IDS = ['overview', 'privacy', 'about', 'api', 'explorer'] as const;
+/*
+ * `help` (R0) is the Help & Tutorial tab — the one permanent home of the guided
+ * walkthrough's replay control. It is a tab id like the other five, so it is
+ * deep-linkable (`/settings?tab=help`) by exactly the same mechanism, and the
+ * walkthrough's own last step links to it rather than describing where to find it.
+ */
+export const SETTINGS_TAB_IDS = ['overview', 'privacy', 'about', 'api', 'explorer', 'help'] as const;
 
 export type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 

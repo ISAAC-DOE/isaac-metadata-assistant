@@ -6,6 +6,7 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
 import { ResetDemoDialog } from '../components/ResetDemoDialog';
+import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Play } from '../components/icons';
 import { LABELS } from '../lib/labels';
@@ -95,6 +96,17 @@ export function ExperimentsHome() {
           </button>
         </div>
       </div>
+
+      {/*
+        The guided walkthrough's first-run offer. Rendered only on the LOADED
+        branch: offering a tour of the app over the top of "Backend Not Running"
+        would be an invitation to a tour that cannot start, and offering it over
+        the loading state would make it flicker on every visit. It disappears for
+        good once the walkthrough is finished — no permanent replay card sits in
+        the primary workflow (that control lives in Settings & API → Help &
+        Tutorial).
+      */}
+      {result.status === 'data' && <TutorialPromotion />}
 
       {body}
     </AppShell>

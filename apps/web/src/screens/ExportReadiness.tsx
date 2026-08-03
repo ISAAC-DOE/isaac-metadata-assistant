@@ -23,6 +23,7 @@ import { compose } from '../lib/assistantComposer';
 import { api, ApiError } from '../lib/api';
 import { useRecordSession } from '../lib/useRecordSession';
 import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type {
   ApiExportResponse,
   ExportReadinessBundle,
@@ -498,7 +499,11 @@ function LoadedExport({
       {!exported && (
         <>
           {!pendingZero && (
-            <section className="preexport-gate" role="note">
+            <section
+              className="preexport-gate"
+              role="note"
+              data-tutorial-anchor={TUTORIAL_ANCHORS.exportGate}
+            >
               <Lock size={18} strokeWidth={2} aria-hidden="true" className="preexport-icon" />
               <div>
                 <div className="preexport-title">
@@ -512,6 +517,7 @@ function LoadedExport({
                   type="button"
                   className="btn btn-primary"
                   style={{ marginTop: 12 }}
+                  data-tutorial-anchor={TUTORIAL_ANCHORS.exportRepair}
                   onClick={() => navigate(ROUTES.complete(id))}
                 >
                   {LABELS.actionBackToComplete} →
@@ -535,6 +541,7 @@ function LoadedExport({
               <button
                 type="button"
                 className="btn btn-primary"
+                data-tutorial-anchor={TUTORIAL_ANCHORS.exportAction}
                 onClick={doExport}
                 disabled={!canExport || phase.name === 'exporting'}
               >
@@ -561,6 +568,7 @@ function LoadedExport({
               <button
                 type="button"
                 className="btn btn-secondary"
+                data-tutorial-anchor={TUTORIAL_ANCHORS.exportRepair}
                 onClick={() => navigate(ROUTES.complete(id))}
               >
                 {LABELS.actionBackToComplete} →
