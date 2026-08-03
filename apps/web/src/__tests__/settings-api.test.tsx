@@ -1080,7 +1080,16 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // confirmed edit (W1). The old description asserted the opposite ("overwriting
     // it in place"), so leaving this pinned at 20,915 would have kept a caption
     // describing behaviour the API no longer has.
-    expect(total).toBe(21270);
+    //
+    // 21,270 -> 21,266: P1 (product-facing language) re-synced the captured copy
+    // for the five operations whose OpenAPI prose it reworded — `POST /api/demo/run`,
+    // `POST /api/demo/reset`, `GET /api/experiments`, `.../pending` and
+    // `.../source-preview`. Development jargon rendered verbatim in the Endpoint
+    // Explorer ("synthetic demo", "seeded fixture", "synthetic fixture") became
+    // product language ("built-in example", "reference file"), for a net -4
+    // characters. Operation and paragraph counts are unchanged: no paragraph was
+    // added or removed, only rewritten.
+    expect(total).toBe(21266);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(44);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {

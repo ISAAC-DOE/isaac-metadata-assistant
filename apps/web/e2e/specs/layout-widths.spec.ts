@@ -356,7 +356,7 @@ test.describe('probe regression cases (injected geometry)', () => {
       title.className = 'record-title';
       title.style.cssText =
         'flex: 0 1 0; width: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
-      title.textContent = 'Synthetic XANES — CuO (Cu K-edge) · Partially answered';
+      title.textContent = 'XANES Example — CuO (Cu K-edge) · Partially answered';
       row.appendChild(title);
       document.querySelector('main')!.appendChild(row);
     });
@@ -444,7 +444,8 @@ test.describe('probe regression cases (injected geometry)', () => {
   test('@responsive I1: a 4.9px sliver of a 128px control is not "visible"', async ({ page, app }) => {
     await app.open(experiments);
 
-    // The measured `/experiments` @ 375x812 geometry: the New Record button ran
+    // The measured `/experiments` @ 375x812 geometry: the (since-removed) New
+    // Record button ran
     // 359 → 487 in a 375px viewport — 4.9px of a ~128px button. The old probe
     // hit-tested the CENTRE OF THE VISIBLE INTERSECTION, so it tested a point
     // inside the 4.9px sliver, found the button there, and passed. Hit-testing
@@ -452,7 +453,7 @@ test.describe('probe regression cases (injected geometry)', () => {
     await page.evaluate(() => {
       const btn = document.createElement('button');
       btn.id = 'e2e-regression-i1';
-      btn.textContent = 'New Record';
+      btn.textContent = 'Open the Worked Example';
       const vw = document.documentElement.clientWidth;
       btn.style.cssText =
         `position: fixed; left: ${vw - 4.9}px; top: 320px; width: 128px; height: 30px; z-index: 5;`;

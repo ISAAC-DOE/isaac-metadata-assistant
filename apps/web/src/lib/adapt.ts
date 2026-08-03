@@ -203,7 +203,7 @@ export function toAdvisoryResult(w: ApiWarningsResponse): AdvisoryResult {
 // --- S4 completion blockers ---------------------------------------------
 // The /pending items (id / kind / question / about / demo_answer) become the
 // render blockers. Asset blockers take a pasted sha256; series/descriptor carry
-// a structured value the user can only *confirm* from the labeled demo answer —
+// a structured value the user can only *confirm* from the labeled example answer —
 // the UI never lets the assistant type a scientific value.
 
 const KIND_LABEL: Record<string, string> = {
@@ -219,9 +219,9 @@ const KIND_CONTEXT: Record<string, string> = {
   asset:
     'An asset can only be cited once it carries a hash. Paste the sha256 — the system will never generate this value for you.',
   series:
-    'A structured reduced-spectrum value the system will never generate for you. Confirm the synthetic demo value, or leave it honestly missing.',
+    'A structured reduced-spectrum value the system will never generate for you. Confirm the example value, or leave it honestly missing.',
   descriptor:
-    'A structured scientific descriptor the system will never generate for you. Confirm the synthetic demo value, or leave it honestly missing.',
+    'A structured scientific descriptor the system will never generate for you. Confirm the example value, or leave it honestly missing.',
 };
 
 function inputTypeForKind(kind: BlockerKind): CompletionInputType {

@@ -189,7 +189,7 @@ describe('contract-wide derivations', () => {
     expect(facts.operationCount).toBe(rows.length);
     expect(facts.authRequiredCount).toBe(rows.length - 1);
     expect(facts.contractLine).toBe(
-      'OpenAPI 3.1.0 · ISAAC Metadata Assistant — local UI backend · v0.1.0',
+      'OpenAPI 3.1.0 · ISAAC Metadata Assistant API · v0.1.0',
     );
   });
 

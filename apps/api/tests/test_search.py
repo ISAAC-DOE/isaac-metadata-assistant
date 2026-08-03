@@ -230,8 +230,10 @@ def test_tier_order_is_monotonic(experiments):
 
 def test_prefix_tie_broken_by_created_then_id(experiments):
     # Every canonical title starts with the shared base -> prefix tier on all five,
-    # so the title results order by created_utc (scenario 1..5), then id.
-    r = run("synthetic xanes", experiments, limit=search.MAX_RESULTS)
+    # so the title results order by created_utc (example 1..5), then id.
+    # The query must be a genuine PREFIX of that shared base, or this exercises the
+    # substring tier instead of the prefix tier it is named for.
+    r = run("xanes example", experiments, limit=search.MAX_RESULTS)
     title_ids = [
         x.experiment_id for x in r.results if x.kind == "experiment" and x.match.field == "title"
     ]
@@ -349,7 +351,12 @@ def test_shared_token_returns_multiple_scenarios(experiments):
 
 def test_result_status_matches_derived_status(experiments):
     scen = by_scenario(experiments)
-    r = run("synthetic xanes", experiments, limit=search.MAX_RESULTS)
+    r = run("xanes example", experiments, limit=search.MAX_RESULTS)
+    # Non-vacuity: a query that matches nothing would let the loop below pass
+    # without checking a single status. (Before P1 renamed the seed titles this
+    # query read "synthetic xanes"; the rename would otherwise have silently
+    # emptied it.)
+    assert r.results
     for x in r.results:
         assert x.status == scen[x.experiment_id].status()
     # spot-check the four derived states are all represented across the seed

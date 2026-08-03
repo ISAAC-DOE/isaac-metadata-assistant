@@ -338,7 +338,7 @@ export function StatisticsPage() {
         <span className="eyebrow">Workspace Insights</span>
         <h1>Statistics</h1>
         <p>
-          A read-only view of the current synthetic workspace, workflow readiness, evidence, Project
+          A read-only view of the current example workspace, workflow readiness, evidence, Project
           Memory, and the API surface.
         </p>
       </div>

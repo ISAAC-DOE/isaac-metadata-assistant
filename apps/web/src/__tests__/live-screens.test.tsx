@@ -117,11 +117,11 @@ describe('S2 · Load Materials', () => {
     expect(queryByText(new RegExp(uploadsBlocked.reason))).toBeNull();
   });
 
-  it('Run Demo renders the real POST /api/demo/run steps — the old mock figures are gone', async () => {
+  it('the example run renders the real POST /api/demo/run steps — the old mock figures are gone', async () => {
     stubFetchRoutes({ 'POST /api/demo/run': { body: demoRunDraftOnly } });
     const { findByText, getByText, queryByText } = renderAt('/load');
 
-    fireEvent.click(getByText('Run Demo'));
+    fireEvent.click(getByText('Run the Worked Example'));
 
     // the returned pipeline steps, verbatim details
     expect(await findByText('Build Draft')).toBeInTheDocument();

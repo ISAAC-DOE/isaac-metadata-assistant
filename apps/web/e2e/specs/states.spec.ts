@@ -130,7 +130,7 @@ test('@interaction REFUSED: Load Materials refuses uploads and explains the boun
   await expect(blocked).toContainText(/Blocked by governance/i);
 
   // The offered alternative is present and enabled.
-  await expect(page.getByRole('button', { name: 'Run Demo' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Run the Worked Example' })).toBeEnabled();
 });
 
 test('@interaction REFUSED: the upload endpoint itself answers 403', async ({ request }) => {

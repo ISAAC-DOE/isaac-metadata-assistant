@@ -185,37 +185,42 @@ export const LABELS = {
   evidenceAudit: 'Evidence Audit',
 
   // Actions
-  actionRunDemo: 'Run Synthetic Demo',
-  actionRunDemoShort: 'Run Demo',
-  actionNewRecord: 'New Record',
-  actionResetDemo: 'Reset Demo',
+  actionRunDemo: 'Open the Worked Example',
+  actionRunDemoShort: 'Run the Worked Example',
+  // The /load breadcrumb. NOT "New Record": nothing on that screen can create a
+  // record — its second on-ramp is a permanent governance refusal — so the
+  // breadcrumb names what the screen actually offers.
+  actionOpenRecord: 'Open a Record',
+  actionResetDemo: 'Reset Workspace',
   actionCancel: 'Cancel',
 
-  // Guarded synthetic-demo reset (P26.0b)
-  resetDialogTitle: 'Reset Shared Synthetic Demo',
-  resetConfirmAction: 'Reset Shared Demo',
+  // Guarded example-workspace reset (P26.0b)
+  resetDialogTitle: 'Reset the Shared Workspace',
+  resetConfirmAction: 'Reset Shared Workspace',
   resetCountCurrent: 'Current Experiments',
-  resetCountCanonical: 'Canonical Scenarios Preserved',
-  resetCountLegacy: 'Legacy Demo Records Removed',
+  resetCountCanonical: 'Built-in Examples Restored',
+  resetCountLegacy: 'Additional Records Removed',
   resetCountAmbiguous: 'Ambiguous Records',
   resetCountFinal: 'Final Experiments',
 
-  // The synthetic demo refused because its target scenario has been edited
-  // (POST /api/demo/run → 409 `demo_target_drifted`). The server protected the
-  // edits instead of overwriting them, so this copy states three things and
-  // guesses nothing further: the demo did NOT run, why, and that Reset Demo is
-  // the deliberate — and equally destructive — way back to the baseline. It must
-  // never read as a backend failure (the server answered, correctly) and must
-  // never imply anything was lost.
-  demoDriftedTitle: 'Demo not run — the scenario has been edited',
+  // The worked example refused to re-run because its target record has been
+  // edited (POST /api/demo/run → 409 `demo_target_drifted`). The server protected
+  // the edits instead of overwriting them, so this copy states three things and
+  // guesses nothing further: the example did NOT run, why, and that Reset
+  // Workspace is the deliberate — and equally destructive — way back to the
+  // baseline. It must never read as a backend failure (the server answered,
+  // correctly) and must never imply anything was lost. The remedy sentence names
+  // the reset control by its EXACT rendered label (`actionResetDemo`) — if that
+  // label changes, this string changes with it.
+  demoDriftedTitle: 'Example not re-run — this record has been edited',
   demoDriftedBody:
-    'The demo puts a fixed scenario in place from the committed fixtures. This one has ' +
-    'been edited since it was seeded, and re-seeding it would discard those edits — so the ' +
+    'The built-in example is restored from fixed reference files. This record has been ' +
+    'edited since it was created, and restoring it would discard those edits — so the ' +
     'server refused. Nothing ran and nothing changed.',
   demoDriftedRemedy:
-    'To return to the baseline deliberately, use Reset Demo on My Experiments. That restores ' +
-    'all five scenarios and discards these edits with them.',
-  demoDriftedScenario: 'Edited scenario',
+    'To return to the baseline deliberately, use Reset Workspace on My Experiments. That ' +
+    'restores all five built-in examples and discards these edits with them.',
+  demoDriftedScenario: 'Edited record',
   actionGoToExperiments: 'Go to My Experiments',
   actionReviewAnswer: 'Review & Answer',
   actionConfirm: 'Confirm',

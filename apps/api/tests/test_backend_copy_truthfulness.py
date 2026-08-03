@@ -461,9 +461,9 @@ def test_literal_scan_covers_the_response_body_message_constants():
         # _UPLOAD_BLOCKED["reason"] — the 403 body of POST /api/uploads
         "Real or private data upload is approval-gated and not enabled in this workspace.",
         # the source_not_allowed 404 body
-        "Only the two committed synthetic fixtures may be previewed.",
+        "Only the two committed reference files may be previewed.",
         # a representative spread of the other response-body messages
-        "Path traversal rejected — pass a bare fixture basename.",
+        "Path traversal rejected — pass a bare filename.",
         "CSV preview is available only in synthetic-only mode.",
         "Nothing exported yet — export this experiment before auditing.",
         "confirmed_by_user must be true to apply answers.",
@@ -588,10 +588,10 @@ def test_the_two_prototype_labelled_strings_are_flagged_for_their_label():
         # What actually shipped in app.py: the token is scoped to the workspace
         # and the diagnostic is named in the same breath.
         "FastAPI wrapper over the deterministic isaac_records core: a synthetic-only "
-        "workspace plus one read-only, aggregate-only database diagnostic.",
+        "example workspace plus one read-only, aggregate-only database diagnostic.",
         # The two corrected message constants.
         "Real or private data upload is approval-gated and not enabled in this workspace.",
-        "Only the two committed synthetic fixtures may be previewed.",
+        "Only the two committed reference files may be previewed.",
         # Runtime-MODE statements, which the project keeps on purpose.
         "CSV preview is available only in synthetic-only mode.",
         "Synthetic-only mode — file upload is refused outright.",

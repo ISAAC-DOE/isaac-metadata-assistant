@@ -43,7 +43,7 @@ export const SURFACES: readonly Surface[] = [
     id: 'load',
     name: 'Load Materials',
     path: '/load',
-    ready: { role: 'button', name: 'Run Demo' },
+    ready: { role: 'button', name: 'Run the Worked Example' },
     // FINDING A11Y-05: this surface renders no <h1>. Recorded, not waived.
     expectH1: false,
   },

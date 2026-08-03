@@ -502,7 +502,33 @@ CANONICAL_IDS = frozenset(
     {SEED_NEW_DRAFT_ID, SEED_PARTIAL_ID, SEED_READY_ID, SEED_REVIEW_ID, SEED_DONE_ID}
 )
 
-_SEED_TITLE_BASE = "Synthetic XANES — CuO (Cu K-edge)"
+#: The shared scientific title every canonical seed carries (the lifecycle suffix
+#: below distinguishes the five).
+#:
+#: RENAMING THIS IS A BEHAVIOUR CHANGE, not a copy change, and P1 renamed it.
+#: ``title`` is one of the four fields inside :func:`_authoritative_signature`
+#: (``{title, source, draft, record_id}``), and :func:`ensure_seeded` heals by ID
+#: only — it never reconciles the CONTENT of a canonical id that already exists on
+#: disk. So in any workspace that SURVIVES the deploy, the five records keep their
+#: pre-rename titles while ``routes._demo_baseline`` builds post-rename ones, the
+#: two signatures differ, and ``POST /api/demo/run`` answers 409 with a refusal
+#: that says the user's record has been edited — when nothing of theirs changed;
+#: the baseline's definition did. Auto-healing titles by content is deliberately
+#: NOT done (it would let a deploy silently overwrite a record's authoritative
+#: state); the remedy is the Reset Workspace control, which removes and
+#: re-materialises each canonical id from the current specs.
+#:
+#: WHICH DEPLOYMENTS ARE AFFECTED. The S3DF pod mounts ``ISAAC_UI_WORKSPACE`` on an
+#: ``emptyDir`` (docs/deployment.md:29), so it reseeds on every pod restart and a
+#: rename can never strand it. A workspace on durable storage CAN be stranded: a
+#: developer's default ``/tmp/isaac-ui-workspace`` that has not been cleared, and
+#: the Railway deployment's persistent volume at ``/data/isaac-workspace``
+#: (docs/personal-deployment-retirement.md:44).
+#:
+#: The title reaches NO exported artifact — ``src/isaac_records/export.py`` contains
+#: no reference to it — so official schema compliance and exported record content
+#: are unaffected by any rename here.
+_SEED_TITLE_BASE = "XANES Example — CuO (Cu K-edge)"
 
 
 def _raw_draft() -> dict:
@@ -563,25 +589,31 @@ class _SeedSpec:
 
 def _seed_specs() -> list["_SeedSpec"]:
     return [
-        # The `Scenario N` prefix is retained deliberately: it is what makes "these
-        # are five different scenarios, not five duplicates" legible at a glance,
-        # and the demo script refers to the records by number. Everything after the
-        # prefix names the MATERIALISATION, in the past tense.
+        # The `Example N` prefix is retained deliberately (it replaces `Scenario N`,
+        # which was development jargon): the NUMBERING is what makes "these are five
+        # different examples, not five duplicates" legible at a glance, and the walk-
+        # through refers to the records by number. Everything after the prefix names
+        # the MATERIALISATION, and `at setup:` is the anchor that keeps it in the past
+        # tense — see the load-bearing docstring on ``_SeedSpec.scenario`` above.
+        # Without that anchor, "extraction only" / "some answers confirmed" /
+        # "descriptor uncertainty omitted" read as descriptions of the record's
+        # CURRENT state and go false the moment a user confirms an answer, which is
+        # exactly the defect that comment records. Do not drop it.
         _SeedSpec(SEED_NEW_DRAFT_ID, "2026-07-12T00:00:01Z",
                   f"{_SEED_TITLE_BASE} · New Draft", _raw_draft, False,
-                  "Scenario 1 · seeded: extraction only"),
+                  "Example 1 · at setup: extraction only"),
         _SeedSpec(SEED_PARTIAL_ID, "2026-07-12T00:00:02Z",
                   f"{_SEED_TITLE_BASE} · Partially Completed", _partial_draft, False,
-                  "Scenario 2 · seeded: partial answers applied"),
+                  "Example 2 · at setup: some answers confirmed"),
         _SeedSpec(SEED_READY_ID, "2026-07-12T00:00:03Z",
                   f"{_SEED_TITLE_BASE} · Ready to Export", _full_draft, False,
-                  "Scenario 3 · seeded: all answers applied"),
+                  "Example 3 · at setup: all answers confirmed"),
         _SeedSpec(SEED_REVIEW_ID, "2026-07-12T00:00:04Z",
                   f"{_SEED_TITLE_BASE} · Export Review Required", _review_draft, False,
-                  "Scenario 4 · seeded: descriptor uncertainty omitted"),
+                  "Example 4 · at setup: descriptor uncertainty omitted"),
         _SeedSpec(SEED_DONE_ID, "2026-07-12T00:00:05Z",
                   f"{_SEED_TITLE_BASE} · Exported Record", _full_draft, True,
-                  "Scenario 5 · seeded: export run at setup"),
+                  "Example 5 · at setup: export run"),
     ]
 
 

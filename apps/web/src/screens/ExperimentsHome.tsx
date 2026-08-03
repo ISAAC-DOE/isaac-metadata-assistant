@@ -7,7 +7,7 @@ import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
 import { ResetDemoDialog } from '../components/ResetDemoDialog';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { Play, Plus } from '../components/icons';
+import { Play } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
@@ -51,8 +51,15 @@ export function ExperimentsHome() {
       groups.length > 0 ? (
         <ExperimentQueue groups={groups} />
       ) : (
+        /*
+         * P1: the previous copy ("run the synthetic demo to create your first
+         * record") promised something this build cannot do. `POST /api/demo/run`
+         * writes NOTHING when its canonical target still holds seed content, and
+         * `ensure_seeded()` restores all five built-in examples on its own — so a
+         * user never creates a record here. The copy now points at what exists.
+         */
         <p className="queue-empty">
-          No experiments yet — run the synthetic demo to create your first record.
+          No experiments yet — open the built-in example to see a complete record.
         </p>
       );
   }
@@ -71,13 +78,20 @@ export function ExperimentsHome() {
         </div>
         <div className="page-actions">
           <ResetDemoDialog onResetComplete={result.reload} />
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(ROUTES.load)}>
+          {/*
+           * P1: there used to be a SECOND button here, labelled "New Record",
+           * styled btn-primary and navigating to ROUTES.load — the same route as
+           * this one. It promised a capability the build does not have: `/load`
+           * offers the worked example and one permanently 403'd upload seam, and
+           * nothing there accepts anything a user supplies. It was removed rather
+           * than relabelled, because a duplicate control to a single destination
+           * is not worth keeping under any wording. This button inherits the
+           * primary treatment it vacated: it is the one affirmative action on the
+           * screen, and Reset Workspace must stay the restrained one.
+           */}
+          <button type="button" className="btn btn-primary" onClick={() => navigate(ROUTES.load)}>
             <Play size={14} strokeWidth={2} aria-hidden="true" />
             {LABELS.actionRunDemo}
-          </button>
-          <button type="button" className="btn btn-primary" onClick={() => navigate(ROUTES.load)}>
-            <Plus size={15} strokeWidth={2.2} aria-hidden="true" />
-            {LABELS.actionNewRecord}
           </button>
         </div>
       </div>

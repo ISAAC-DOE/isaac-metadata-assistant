@@ -162,7 +162,7 @@ def draft_to_groups(draft: dict) -> dict:
 
 # --- pending blockers ---------------------------------------------------------
 
-_DEMO_LABEL = "Demo answer (synthetic)"
+_DEMO_LABEL = "Example answer"
 
 
 def _demo_answer_for(entry: dict, demo_answers: dict):

@@ -129,7 +129,7 @@ def test_list_seeds_five_canonical_experiments(client):
     assert len(experiments) == 5
     # The raw New Draft scenario keeps the old single-seed properties.
     seed = next(e for e in experiments if e["pending_count"] == 5)
-    assert "Synthetic" in seed["title"] and "New Draft" in seed["title"]
+    assert "XANES Example" in seed["title"] and "New Draft" in seed["title"]
     assert seed["status"] == "needs_attention"
     assert seed["pending_count"] == 5
     assert seed["evidenced_field_count"] == 26
@@ -180,7 +180,7 @@ def test_pending_blockers(client):
     # Every blocker has a labeled demo suggestion from the fixture answers.
     assert all(b["demo_answer"] is not None for b in pending)
     assert all(
-        b["demo_answer"]["label"] == "Demo answer (synthetic)" for b in pending
+        b["demo_answer"]["label"] == "Example answer" for b in pending
     )
 
 

@@ -202,9 +202,19 @@ export function ResetDemoDialog({ onResetComplete }: { onResetComplete: () => vo
 
             <div className="reset-dialog-body">
               <p className="reset-disclosure">
-                This is a <strong>shared, hosted synthetic workspace</strong>. Resetting
-                removes the current synthetic demo progress and recreates the five canonical
-                scenarios. Real data is unaffected — this workspace is synthetic-only.
+                {/*
+                 * HISTORY of the last clause. A positive whole-content claim was
+                 * tried here ("this workspace is built only from committed example
+                 * files") and it was false: a confirmed answer or an edit is
+                 * persisted into the record's workspace state, so the workspace also
+                 * holds what users store. It was replaced with a MODE claim, which
+                 * the control is already gated on, plus two independently checkable
+                 * facts.
+                 */}
+                This is a <strong>shared, hosted example workspace</strong>. Resetting discards
+                the current progress on the built-in examples and restores all five to their
+                original state. Real data is unaffected — this workspace runs in synthetic-only
+                mode: the examples come from committed files and every upload is refused.
               </p>
 
               {preview.status === 'error' && (

@@ -439,7 +439,7 @@ function LoadedCompletion({
         {editImpact.artifact.state === 'stale' && (
           <p className="edit-impact-note">
             The exported record is now out of date — records are immutable, so regenerate (or reset
-            the demo) to refresh it.
+            the workspace) to refresh it.
           </p>
         )}
       </div>

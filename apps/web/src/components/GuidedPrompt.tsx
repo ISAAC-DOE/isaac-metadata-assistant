@@ -85,7 +85,7 @@ export function GuidedPrompt({
       {blocker.context && <p className="guided-context">{blocker.context}</p>}
 
       {demo && (
-        <div className="guided-suggestion" aria-label="Demo answer suggestion">
+        <div className="guided-suggestion" aria-label="Example answer suggestion">
           <div className="guided-suggestion-head">
             <MessageSquare size={14} strokeWidth={2} aria-hidden="true" />
             {demo.label}
@@ -119,13 +119,13 @@ export function GuidedPrompt({
                 </div>
               ) : (
                 <p className="guided-structured-hint">
-                  A structured value from the reduced pipeline. Confirm the synthetic demo value
-                  above, or leave it honestly missing — the assistant will not type it for you.
+                  A structured value from the reduced pipeline. Confirm the example value above, or
+                  leave it honestly missing — the assistant will not type it for you.
                 </p>
               )
             ) : (
               <p className="guided-structured-hint">
-                No synthetic value is available for this field — leave it honestly missing.
+                No example value is available for this field — leave it honestly missing.
               </p>
             )}
             {demo && (

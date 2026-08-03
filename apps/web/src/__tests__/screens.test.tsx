@@ -36,7 +36,7 @@ describe('router-level smoke: each surface renders without error', () => {
 
   it('S2 · Load Materials (/load)', () => {
     const { getByText } = renderAt('/load');
-    expect(getByText('Run the Synthetic Demo')).toBeInTheDocument();
+    expect(getByText('Worked Example: CuO Cu K-edge XANES')).toBeInTheDocument();
   });
 
   it('S3 · Review Record (/record/:id) — live bundle', async () => {

@@ -12,7 +12,7 @@ import {
 } from '../test/apiFixtures';
 
 /*
- * P26.0b — the guarded synthetic-demo Reset Demo control on My Experiments.
+ * P26.0b — the guarded Reset Workspace control on My Experiments.
  *
  * Behaviour contract (test-first; RED until the control + dialog + api.resetDemo
  * exist). The control:
@@ -20,7 +20,7 @@ import {
  *     fail-closed), and is a restrained *destructive* action, never the primary;
  *   - opens a labeled modal dialog that first PREVIEWS (never mutates) via
  *     POST /api/demo/reset {mode:'preview'}, showing the typed counts;
- *   - warns this is a shared hosted synthetic workspace and progress will be removed;
+ *   - warns this is a shared hosted example workspace and progress will be discarded;
  *   - requires the operator to type exactly "RESET"; the destructive action stays
  *     disabled until it matches (and always, if any ambiguous record is present);
  *   - on execute sends the exact backend phrase, fires exactly once, then refreshes
@@ -55,9 +55,9 @@ function countCalls(calls: string[], key: string): number {
   return calls.filter((k) => k === key).length;
 }
 
-/** Open the Reset Demo dialog, focusing the trigger first so focus-return is testable. */
+/** Open the Reset Workspace dialog, focusing the trigger first so focus-return is testable. */
 async function openReset(view: ReturnType<typeof renderHome>) {
-  const trigger = (await view.findByRole('button', { name: 'Reset Demo' })) as HTMLButtonElement;
+  const trigger = (await view.findByRole('button', { name: 'Reset Workspace' })) as HTMLButtonElement;
   trigger.focus();
   fireEvent.click(trigger);
   // the dialog appears once the preview resolves
@@ -75,37 +75,48 @@ afterEach(() => {
 
 // --- 1–3. presence, synthetic-only gate, non-primary treatment ---------------
 
-describe('P26.0b · Reset Demo — presence & treatment', () => {
-  it('renders the Reset Demo control on My Experiments in synthetic-only mode', async () => {
+describe('P26.0b · Reset Workspace — presence & treatment', () => {
+  it('renders the Reset Workspace control on My Experiments in synthetic-only mode', async () => {
     const view = renderHome(resetDemoRoutes().routes);
-    expect(await view.findByRole('button', { name: 'Reset Demo' })).toBeInTheDocument();
+    expect(await view.findByRole('button', { name: 'Reset Workspace' })).toBeInTheDocument();
   });
 
   it('does NOT render the control when the backend is not synthetic-only', async () => {
     const view = renderHome(resetDemoRoutes({ mode: 'production' }).routes);
     // wait until the page (and the health probe) have settled
-    await view.findByRole('button', { name: 'Run Synthetic Demo' });
+    await view.findByRole('button', { name: 'Open the Worked Example' });
     await waitFor(() =>
-      expect(view.queryByRole('button', { name: 'Reset Demo' })).toBeNull(),
+      expect(view.queryByRole('button', { name: 'Reset Workspace' })).toBeNull(),
     );
   });
 
-  it('is a restrained destructive action — not the primary, distinct from New Record', async () => {
+  it('is a restrained destructive action — not the primary on the screen', async () => {
     const view = renderHome(resetDemoRoutes().routes);
-    const reset = (await view.findByRole('button', { name: 'Reset Demo' })) as HTMLButtonElement;
-    const primary = view.getByRole('button', { name: 'New Record' }) as HTMLButtonElement;
-    // the primary is btn-primary; Reset Demo must not borrow the primary styling
+    const reset = (await view.findByRole('button', { name: 'Reset Workspace' })) as HTMLButtonElement;
+    /*
+     * P1 removed the button this test used to reach for. It was labelled "New
+     * Record", styled btn-primary, and navigated to the SAME route as the
+     * example-run button beside it — promising a capability the build does not
+     * have. The screen's one affirmative action inherited the primary treatment,
+     * so the property under test is unchanged: SOMETHING affirmative is primary,
+     * and Reset must not borrow that styling.
+     */
+    const primary = view.getByRole('button', {
+      name: 'Open the Worked Example',
+    }) as HTMLButtonElement;
     expect(primary.className).toContain('btn-primary');
     expect(reset.className).not.toContain('btn-primary');
-    // and it is a genuinely separate control from Run Synthetic Demo
-    const runDemo = view.getByRole('button', { name: 'Run Synthetic Demo' });
-    expect(reset).not.toBe(runDemo);
+    // and it is a genuinely separate control from the affirmative one
+    expect(reset).not.toBe(primary);
+    // The removal is pinned, not incidental: no control on this screen may offer
+    // record creation, because nothing in this build can create a record.
+    expect(view.queryByRole('button', { name: /new record|new experiment|create/i })).toBeNull();
   });
 });
 
 // --- 4–8. preview is non-mutating and shows the typed counts + warnings -------
 
-describe('P26.0b · Reset Demo — preview (non-mutating) & disclosure', () => {
+describe('P26.0b · Reset Workspace — preview (non-mutating) & disclosure', () => {
   it('opening the dialog previews (mode:preview) and issues no execute', async () => {
     const view = renderHome(resetDemoRoutes().routes);
     await openReset(view);
@@ -123,8 +134,8 @@ describe('P26.0b · Reset Demo — preview (non-mutating) & disclosure', () => {
     const d = within(dialog(view));
     // labels are the operator-facing vocabulary from the spec
     expect(d.getByText('Current Experiments')).toBeInTheDocument();
-    expect(d.getByText('Canonical Scenarios Preserved')).toBeInTheDocument();
-    expect(d.getByText('Legacy Demo Records Removed')).toBeInTheDocument();
+    expect(d.getByText('Built-in Examples Restored')).toBeInTheDocument();
+    expect(d.getByText('Additional Records Removed')).toBeInTheDocument();
     expect(d.getByText('Ambiguous Records')).toBeInTheDocument();
     expect(d.getByText('Final Experiments')).toBeInTheDocument();
     // the numeric values come straight from the preview response
@@ -134,25 +145,65 @@ describe('P26.0b · Reset Demo — preview (non-mutating) & disclosure', () => {
     expect(text).toMatch(/\b2\b/); // legacy_count
   });
 
-  it('states that this is a shared hosted synthetic workspace and progress is removed', async () => {
+  it('states that this is a shared hosted example workspace and progress is discarded', async () => {
     const view = renderHome(resetDemoRoutes().routes);
     await openReset(view);
     const text = (dialog(view).textContent ?? '').toLowerCase();
     expect(text).toContain('shared');
-    expect(text).toContain('synthetic');
+    // P1: was `toContain('synthetic')`. The disclosure now names the thing being
+    // reset ("example workspace") instead of the data regime, which the mode chip
+    // and the Governance surface own. Pinned MORE tightly than before — the old
+    // check accepted the bare word anywhere and the alternation accepted either
+    // half of the destructive claim; both halves are now required.
+    expect(text).toContain('example workspace');
     expect(text).toMatch(/progress/);
-    expect(text).toMatch(/removed|remove/);
+    expect(text).toMatch(/discards/);
+    expect(text).toMatch(/restores all five/);
+    expect(text).toContain('real data is unaffected');
+  });
+
+  /*
+   * P1 review — this pins the SHAPE of the reassurance clause, not just its words.
+   *
+   * The clause has been wrong twice. It first denied a data class on the
+   * deployment's behalf ("holds no real experiment data"); that was replaced by a
+   * positive WHOLE-CONTENT claim ("this workspace is built only from committed
+   * example files") which was FALSE — a 64-char canary posted to
+   * `POST /api/experiments/{id}/answers` is present in the persisted workspace
+   * state file and absent from both committed reference files, so the workspace
+   * holds what users store as well as what was committed. Worse, that wording was
+   * chosen partly BECAUSE the positive form slipped past the honesty sweep in
+   * `db-recon-truthfulness.test.tsx`, which only nets denials.
+   *
+   * So the negative assertion below is deliberately a PATTERN over the whole
+   * family of whole-content claims, not the one retired string: the next variant
+   * ("contains only…", "holds no real…") must fail here too. What the clause is
+   * allowed to say is a MODE claim — which the control is already gated on, since
+   * it renders only when health reports `synthetic-only`.
+   */
+  it('makes a mode claim, never a whole-content claim about the workspace', async () => {
+    const view = renderHome(resetDemoRoutes().routes);
+    await openReset(view);
+    const text = (dialog(view).textContent ?? '').toLowerCase();
+
+    // the mode claim, and the two checkable facts that qualify it
+    expect(text).toContain('synthetic-only mode');
+    expect(text).toMatch(/come from committed files/);
+    expect(text).toMatch(/every upload is refused/);
+
+    // ...and NOT any claim about the whole of what the workspace contains
+    expect(text).not.toMatch(/built only from|contains only|holds no real/i);
   });
 });
 
 // --- 9–12. typed confirmation gate; cancel / escape do not mutate -------------
 
-describe('P26.0b · Reset Demo — confirmation gate', () => {
+describe('P26.0b · Reset Workspace — confirmation gate', () => {
   it('keeps the destructive action disabled until exactly "RESET" is typed', async () => {
     const view = renderHome(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
-    const action = d.getByRole('button', { name: 'Reset Shared Demo' }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: 'Reset Shared Workspace' }) as HTMLButtonElement;
     const input = d.getByRole('textbox') as HTMLInputElement;
 
     expect(action.disabled).toBe(true); // nothing typed
@@ -194,7 +245,7 @@ describe('P26.0b · Reset Demo — confirmation gate', () => {
 
 // --- 13–16. dialog a11y: labelled, focus in / trapped / returned --------------
 
-describe('P26.0b · Reset Demo — dialog accessibility', () => {
+describe('P26.0b · Reset Workspace — dialog accessibility', () => {
   it('is a modal dialog labelled by its visible title', async () => {
     const view = renderHome(resetDemoRoutes().routes);
     await openReset(view);
@@ -202,7 +253,7 @@ describe('P26.0b · Reset Demo — dialog accessibility', () => {
     expect(d.getAttribute('aria-modal')).toBe('true');
     const labelledby = d.getAttribute('aria-labelledby');
     expect(labelledby).toBeTruthy();
-    expect(document.getElementById(labelledby!)!.textContent).toMatch(/Reset Shared Synthetic Demo/i);
+    expect(document.getElementById(labelledby!)!.textContent).toMatch(/Reset the Shared Workspace/i);
   });
 
   it('moves focus into the dialog on open', async () => {
@@ -248,13 +299,13 @@ describe('P26.0b · Reset Demo — dialog accessibility', () => {
 
 // --- 17–19. execute fires exactly once; double-click is safe ------------------
 
-describe('P26.0b · Reset Demo — single-submit safety', () => {
+describe('P26.0b · Reset Workspace — single-submit safety', () => {
   it('executing sends the exact backend confirmation phrase exactly once', async () => {
     const view = renderHome(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Demo' }));
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     const executes = resetPosts().filter((p) => p.mode === 'execute');
     expect(executes).toHaveLength(1);
@@ -266,7 +317,7 @@ describe('P26.0b · Reset Demo — single-submit safety', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    const action = d.getByRole('button', { name: 'Reset Shared Demo' });
+    const action = d.getByRole('button', { name: 'Reset Shared Workspace' });
     fireEvent.click(action);
     fireEvent.click(action);
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
@@ -276,7 +327,7 @@ describe('P26.0b · Reset Demo — single-submit safety', () => {
 
 // --- 20–21. ambiguous refusal is safe and offers no bypass --------------------
 
-describe('P26.0b · Reset Demo — ambiguous refusal', () => {
+describe('P26.0b · Reset Workspace — ambiguous refusal', () => {
   it('when the preview is refused for ambiguity, execution is disabled with no bypass', async () => {
     const view = renderHome(resetDemoRoutes({ preview: demoResetPreviewAmbiguous }).routes);
     await openReset(view);
@@ -286,7 +337,7 @@ describe('P26.0b · Reset Demo — ambiguous refusal', () => {
     // no "delete it yourself" style bypass is offered
     expect(text).not.toMatch(/delete.*manual|manually delete|override/);
     // typing the phrase must NOT enable execution while ambiguous
-    const action = d.getByRole('button', { name: 'Reset Shared Demo' }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: 'Reset Shared Workspace' }) as HTMLButtonElement;
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
     expect(action.disabled).toBe(true);
   });
@@ -296,7 +347,7 @@ describe('P26.0b · Reset Demo — ambiguous refusal', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    const action = d.getByRole('button', { name: 'Reset Shared Demo' });
+    const action = d.getByRole('button', { name: 'Reset Shared Workspace' });
     fireEvent.click(action);
     expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
   });
@@ -304,7 +355,7 @@ describe('P26.0b · Reset Demo — ambiguous refusal', () => {
 
 // --- 22–24. success refreshes from the backend to the canonical five ----------
 
-describe('P26.0b · Reset Demo — success refreshes the dashboard', () => {
+describe('P26.0b · Reset Workspace — success refreshes the dashboard', () => {
   it('after a successful reset the experiments list is re-fetched and shows the canonical five', async () => {
     const view = renderHome(resetDemoRoutes().routes);
     // the legacy demo rows are present before the reset (two identically-titled
@@ -313,7 +364,7 @@ describe('P26.0b · Reset Demo — success refreshes the dashboard', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Demo' }));
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
 
     // the list endpoint is hit again after the execute (initial load + refresh)
     await waitFor(() =>
@@ -336,16 +387,16 @@ describe('P26.0b · Reset Demo — success refreshes the dashboard', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Demo' }));
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     // no unhandled error banner
     expect(view.queryByText(/unexpected error|something went wrong/i)).toBeNull();
   });
 });
 
-// --- 25–26. no secret/path leak; existing Run Synthetic Demo intact -----------
+// --- 25–26. no secret/path leak; existing example-run action intact -----------
 
-describe('P26.0b · Reset Demo — leak safety & coexistence', () => {
+describe('P26.0b · Reset Workspace — leak safety & coexistence', () => {
   it('never renders a credential or internal filesystem path', async () => {
     const view = renderHome(resetDemoRoutes().routes);
     await openReset(view);
@@ -355,9 +406,9 @@ describe('P26.0b · Reset Demo — leak safety & coexistence', () => {
     }
   });
 
-  it('leaves the existing Run Synthetic Demo action intact', async () => {
+  it('leaves the existing example-run action intact', async () => {
     const view = renderHome(resetDemoRoutes().routes);
-    expect(await view.findByRole('button', { name: 'Run Synthetic Demo' })).toBeInTheDocument();
+    expect(await view.findByRole('button', { name: 'Open the Worked Example' })).toBeInTheDocument();
   });
 });
 

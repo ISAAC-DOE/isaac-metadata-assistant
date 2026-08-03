@@ -32,7 +32,8 @@ import { render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
-import { EXP_ID, bundleRoutes, stubFetchRoutes } from '../test/apiFixtures';
+import { EXP_ID, bundleRoutes, healthSynthetic, stubFetchRoutes } from '../test/apiFixtures';
+import { LABELS } from '../lib/labels';
 
 const cssFiles = import.meta.glob('../**/*.css', {
   query: '?raw',
@@ -134,19 +135,35 @@ describe('I1 · the page actions can wrap inside a phone-width header', () => {
     expect(header!).not.toMatch(/display:\s*block/);
   });
 
-  it('DOM: the three demo actions are direct children of .page-actions', async () => {
-    stubFetchRoutes(bundleRoutes());
+  it('DOM: the page actions are direct children of .page-actions', async () => {
+    /*
+     * P1 changed WHAT this row holds, not the property under test. The screen used
+     * to render three controls — Reset Demo, Run Synthetic Demo and a "New Record"
+     * button that navigated to the same route as the one beside it and promised a
+     * capability the build does not have. The duplicate is gone, so the row is now
+     * Reset Workspace + Open the Worked Example.
+     *
+     * The measured 447.7px overflow in the header comment above was a THREE-button
+     * row; that measurement is history and is left as written. It is not re-derived
+     * here (jsdom lays nothing out), and this test never claimed it — it asserts
+     * only that `.page-actions > *` has real direct children to target.
+     *
+     * `/api/health` is stubbed synthetic-only on purpose: without it the reset
+     * control is (correctly, fail-closed) absent and this row would hold ONE child,
+     * which would let the direct-child assertion pass on a single element.
+     */
+    stubFetchRoutes({ ...bundleRoutes(), 'GET /api/health': { body: healthSynthetic } });
     const { container } = renderAt('/experiments');
     await waitFor(() => expect(container.querySelector('.page-actions')).not.toBeNull());
     const actions = container.querySelector('.page-actions')!;
+    await waitFor(() => expect(actions.children.length).toBeGreaterThanOrEqual(2));
     const children = [...actions.children];
-    // `.page-actions > *` is the selector the fix uses — it only works if the
-    // controls really are direct children. (This fixture renders two of the
-    // three actions; the running app renders three — Reset Demo, Run Synthetic
-    // Demo, New Record — which is the 447.7px row measured in the browser.)
-    expect(children.length).toBeGreaterThanOrEqual(2);
     for (const child of children) expect(child.tagName).toBe('BUTTON');
-    expect(children.map((c) => c.textContent?.trim())).toContain('New Record');
+    const labels = children.map((c) => c.textContent?.trim());
+    expect(labels).toContain(LABELS.actionResetDemo);
+    expect(labels).toContain(LABELS.actionRunDemo);
+    // and nothing here offers record creation, which this build cannot do
+    expect(labels.join(' ')).not.toMatch(/new record/i);
   });
 });
 

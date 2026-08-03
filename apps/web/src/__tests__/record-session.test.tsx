@@ -329,7 +329,7 @@ describe('P29.4 · record screen wiring', () => {
 // ---------------------------------------------------------------------------
 
 describe('P29.4 · Reset clears the assistant session', () => {
-  it('a successful Reset Demo clears conversation + staged proposals', async () => {
+  it('a successful Reset Workspace clears conversation + staged proposals', async () => {
     const { resetDemoRoutes } = await import('../test/apiFixtures');
     const { routes } = resetDemoRoutes();
     stubFetchRoutes(routes);
@@ -341,13 +341,13 @@ describe('P29.4 · Reset clears the assistant session', () => {
     expect(loadSession(EXP_ID).proposal).not.toBeNull();
 
     const view = renderAt('/experiments');
-    const trigger = (await view.findByRole('button', { name: 'Reset Demo' })) as HTMLButtonElement;
+    const trigger = (await view.findByRole('button', { name: 'Reset Workspace' })) as HTMLButtonElement;
     fireEvent.click(trigger);
 
     const dialog = await view.findByRole('dialog');
     const input = within(dialog).getByLabelText(/Type RESET to confirm/i);
     fireEvent.change(input, { target: { value: 'RESET' } });
-    const confirm = within(dialog).getByRole('button', { name: /Reset the Demo|Reset Demo|Reset/i });
+    const confirm = within(dialog).getByRole('button', { name: 'Reset Shared Workspace' });
     fireEvent.click(confirm);
 
     await waitFor(() => {
