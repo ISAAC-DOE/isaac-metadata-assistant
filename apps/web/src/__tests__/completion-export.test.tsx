@@ -110,7 +110,7 @@ describe('S4 · Guided Completion (live)', () => {
     // `useState` only and does not survive a reload), so a test that tolerated its
     // removal would let the deceptive wording back in.
     expect(
-      getByText('Left Honestly Missing · This Visit Only, Not Saved')
+      getByText('Left Honestly Missing · This Visit, Not Saved')
     ).toBeInTheDocument();
     // NOTHING was sent — no POST to /answers at all
     expect(answerPosts()).toHaveLength(0);

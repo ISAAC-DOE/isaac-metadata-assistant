@@ -249,7 +249,14 @@ function LoadedCompletion({
       // each is confirmed"), so the surface contradicted itself.
       <StatusBar
         phase={`${remaining} of ${total} fields still to confirm`}
-        note="Export unlocks once every field is confirmed. Saying you don't know keeps a question open — the system will not invent a value for it."
+        /* R1b. The old note said export unlocks "once every field is confirmed OR
+           honestly left missing" — false: the gate is `pending_count == 0`, and
+           saying "I don't know" sends nothing, so it leaves the field pending and
+           export stays shut. The correction must also stay SHORT: a longer first
+           draft wrapped at the 640px/200%-zoom layout viewport and pushed the
+           status bar 1px past the screen card (zoom-200 layout baseline). This is
+           shorter than the false sentence it replaces. */
+        note="Export unlocks once every field is confirmed — saying you don't know leaves it open."
       />
     );
 
@@ -568,14 +575,23 @@ function LoadedCompletion({
           scope it can actually keep. */}
       {!blocker && skippedItems.length > 0 && (
         <div className="completion-allskipped" role="note">
+          {/* KEPT NO LONGER THAN THE COPY IT REPLACED, and that is a hard constraint,
+              not a style preference. The first scoping draft ran several lines longer;
+              at 200% zoom (a 640px layout viewport) it pushed the page tall enough that
+              the status-bar phase text clipped vertically by ONE pixel. Caught by the
+              zoom-200 layout baseline — no unit test sees it, and it reproduces on both
+              platforms. A second, shorter draft still overflowed by 1px; this is the
+              third.
+              The "not saved" claim is not lost, it MOVED: the eyebrow below states it
+              outright, and "a reload brings all N back as open questions" says the same
+              thing concretely. If this block grows again, run the zoom-200 layout spec
+              before assuming it fits. */}
           <div className="completion-allskipped-title">
-            You've been through every question in this visit · {skippedItems.length} you said you
-            don't know
+            Every question reviewed this visit · {skippedItems.length} you don't know
           </div>
           <p className="completion-allskipped-text">
-            Nothing was invented for these. This list is only for the current visit — it is not
-            saved, so a reload brings all {skippedItems.length} back as open questions. Export stays
-            gated until each is confirmed: answer one when you're ready, or return to the record.
+            Nothing was invented. A reload brings all {skippedItems.length} back as open questions,
+            and export stays gated until each is confirmed.
           </p>
         </div>
       )}
@@ -615,8 +631,14 @@ function LoadedCompletion({
           as a recorded property of the record. */}
       {skippedItems.length > 0 && (
         <div className="leftmissing">
+          {/* Both halves are load-bearing and `session-only-decisions.test.tsx`
+              requires both: "This Visit" is the DURATION, "Not Saved" is the
+              PERSISTENCE. A shorter draft kept only the second, and the guard caught
+              it — dropping the duration leaves the reader unable to tell whether the
+              list survives navigation. The zoom-200 headroom that pays for these
+              words comes from the workflow note above, not from here. */}
           <div className="leftmissing-eyebrow eyebrow">
-            Left Honestly Missing · This Visit Only, Not Saved
+            Left Honestly Missing · This Visit, Not Saved
           </div>
           {skippedItems.map((item) => (
             <div className="leftmissing-row" key={item.id}>
