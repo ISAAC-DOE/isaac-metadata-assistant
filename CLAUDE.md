@@ -438,6 +438,44 @@ Current state:
   and was corrected. **HOSTED QA of every image `v0.0.13`–`v0.0.19` is PENDING (Krish)** — `/krish`
   is behind an Authentik edge this environment cannot authenticate to; no rollout is claimed as
   verified. Responsive / 200%-zoom human sign-off and personal-deploy retirement remain OPEN.
+- **Product-hardening phase (2026-08-03) — SIX PRs merged**, `#47` `3263e1e`, `#48` `0c13629`,
+  `#49` `a3c0fb3`, `#52` `74299b3`, `#50` `91dc09c`, `#51` (see git log). Closure record:
+  `docs/superpowers/plans/2026-08-03-product-hardening-closure.md`. What a future session must not
+  re-derive or silently reverse:
+  - **Reset is now precondition-gated.** `preview` returns an opaque `plan_digest`; `execute`
+    REQUIRES it (**428** absent, **412** stale), and the match is verified *inside the same critical
+    section as the mutation*. Managed-legacy removal now holds `record_lock` like canonical
+    re-materialisation always did, and `final_count` is **measured**, not asserted. The displayed
+    confirmation phrase is `RESET EXAMPLE WORKSPACE`.
+  - **Three claims that were FALSE and are now scoped, not deleted.** Governance & Safety and Load
+    Materials asserted *"no file is read, parsed, or inspected"* while `RecordValidator` (one tab
+    away) and `CsvReconcilePanel` read and POST a chosen file. The refusal claim is true of
+    `POST /api/uploads` only. `__tests__/upload-claim-parity.test.tsx` pins all three sites — and
+    pins **polarity**, because its first version passed an inverted disclosure.
+  - **`VerdictCard` no longer renders `isaac validate --official · exit N`.** No CLI is ever
+    invoked; `exitCode` was a client-side literal. Do not reintroduce a command transcript.
+  - **`export.transform` guards `series` with `is not None`, not truthiness.** The old falsy guard
+    deleted an evidenced `qc` verdict for `series: []` AND suppressed the advisory that would have
+    caught it. `portal_warnings.NO_MEASUREMENT_SERIES` now discloses an empty series; it is
+    **advisory and non-gating** and deliberately does not classify the science.
+  - **`POST /api/validate/record` runs the advisory tier.** `ok` stays computed from schema
+    validation ALONE — a warning must never turn a PASS into a FAIL.
+  - **`complete.py` type-guards `series` and `descriptor`** (matching what `qc` already did). A
+    wrong-typed structured answer used to return **HTTP 500** from the truth core. A typed 422 is a
+    deliberate follow-up, not an oversight.
+  - **A second Playwright suite exists**: `playwright.mutation.config.ts`, own backend, own
+    workspace, own dev server, `workers: 1`, `retries: 0`. Do NOT fold it into the read-only suite —
+    that one asserts canonical seed CONTENT across five parallel projects and would break.
+  - **Guided tutorial** with browser-local versioned completion; replay never calls
+    `POST /api/demo/reset`. The mode chip reads **"Example workspace"** and its *accessible name*
+    carries the three claims the word "Synthetic" used to carry. `/api/health`'s
+    `mode: synthetic-only` is UNCHANGED — presentation moved, contract did not.
+  - **STILL OPEN**: backend-sourced jargon on product screens (`MANAGED_SOURCE_DESCRIPTION` feeds
+    `classify_experiment`, so it is a behaviour change to the destructive path); axe scans at
+    390/320 px; evidence/confirmation/validation mutation specs; tutorial browser specs; the
+    screenshot sweep; `.section-tab` contrast (pre-existing, now documented in the a11y baseline).
+  - **HOSTED QA PENDING (Krish)** for every image from this phase. `/krish` returns `302` here.
+    Manual sequence: `docs/krish-manual-verification-checklist.md`.
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
