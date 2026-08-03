@@ -82,7 +82,8 @@ describe('S4 · Guided Completion (live)', () => {
     // pending shrank (4 remain, question 2 is current) + answered row with the chip
     expect(await findByText('1 / 5')).toBeInTheDocument();
     expect(getByText('What is the sha256 of the raw scan file?')).toBeInTheDocument();
-    expect(getByText(`stored ${SHA}`)).toBeInTheDocument();
+    // R1b: `stored X` claimed server state the /answers response never echoes.
+    expect(getByText(`you answered ${SHA}`)).toBeInTheDocument();
     expect(getByText('Confirmed by You')).toBeInTheDocument();
     expect(queryByText('What is the sha256 of the processing notebook?')).toBeNull();
 
@@ -104,7 +105,13 @@ describe('S4 · Guided Completion (live)', () => {
 
     // advanced to the next question; the skipped one is listed, honestly missing
     expect(await findByText('What is the sha256 of the raw scan file?')).toBeInTheDocument();
-    expect(getByText('Left Honestly Missing')).toBeInTheDocument();
+    // R1b: the eyebrow carries the session-scope disclosure. Asserted in FULL, not
+    // as a prefix regex: the "not saved" half is the honest part (the skip set is
+    // `useState` only and does not survive a reload), so a test that tolerated its
+    // removal would let the deceptive wording back in.
+    expect(
+      getByText('Left Honestly Missing · This Visit, Not Saved')
+    ).toBeInTheDocument();
     // NOTHING was sent — no POST to /answers at all
     expect(answerPosts()).toHaveLength(0);
     // non-penalized: no alert/error styling anywhere for the skipped question
@@ -470,7 +477,7 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
     expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
     // NOT advanced: still 0/5, no answered "stored" row, question 1 still current
     expect(getByText('0 / 5')).toBeInTheDocument();
-    expect(queryByText(/^stored /)).toBeNull();
+    expect(queryByText(/^you answered /)).toBeNull();
 
     // Refresh re-fetches current state via the parent useFetch reload
     const before = calls.filter((c) => c === 'GET /api/experiments/demo').length;

@@ -773,14 +773,44 @@ def demo_run(
     return {"experiment_id": exp.id, "steps": steps, "status": exp.status()}
 
 
-# --- 2b. guarded synthetic-demo reset (P26.0b) --------------------------------
+# --- 2b. guarded example-workspace reset (P26.0b, precondition added in R1) ----
 #
 # Restores the workspace to EXACTLY the five canonical P26.0a scenarios. It never
 # accepts caller-supplied ids or paths (unknown fields are rejected by the typed
-# request model), removes ONLY managed synthetic-demo records, and refuses on any
-# ambiguous record. There is deliberately NO general per-experiment delete route.
+# request model), removes ONLY managed records this workspace itself created, and
+# refuses on any ambiguous record. There is deliberately NO general per-experiment
+# delete route.
+#
+# R1 added the ``plan_digest`` precondition. Every guard here is FAIL-CLOSED and each
+# has its own status code, because a UI that cannot tell the refusals apart cannot
+# respond correctly to any of them:
+#
+#   403  not synthetic-only        — stop; nothing about this request can fix it
+#   409  wrong/missing phrase      — the operator can fix it by typing correctly
+#   409  ambiguous record present  — stop; a human must resolve the record first
+#   428  digest omitted            — the client is broken; send the preview's digest
+#   412  digest stale              — preview again and let the operator re-approve
+#
+# The 403/409 arms deliberately still classify (read-only) so the refusal carries the
+# same counts as a preview would; none of them mutates anything.
 
-_RESET_CONFIRMATION = "RESET SYNTHETIC DEMO"
+#: The phrase an operator types to arm the destructive reset. It is DISPLAYED and
+#: typed, so it is product copy as well as a wire value: it must be truthful and free
+#: of harness jargon, and it must match `RESET_CONFIRMATION` in `apps/web/src/lib/api.ts`
+#: character for character or every reset fails closed with a 409.
+_RESET_CONFIRMATION = "RESET EXAMPLE WORKSPACE"
+
+#: Why the reset declined, when it declined. A TYPED reason, because the five
+#: refusals are not interchangeable and the UI must respond differently to each:
+#: re-preview (stale digest), send the digest (omitted), fix the phrase, or stop
+#: entirely (an ambiguous record, or the wrong runtime mode). ``None`` on success.
+DemoResetRefusal = Literal[
+    "not_synthetic_only",
+    "confirmation_required",
+    "plan_digest_required",
+    "plan_digest_stale",
+    "ambiguous_records_present",
+]
 
 
 class DemoResetRequest(BaseModel):
@@ -792,6 +822,11 @@ class DemoResetRequest(BaseModel):
 
     mode: Literal["preview", "execute"]
     confirmation: str | None = None
+    #: The ``plan_digest`` the matching ``preview`` returned. REQUIRED for
+    #: ``execute``: it is the precondition that stops a dialog left open from
+    #: executing a classification the operator approved but that no longer holds.
+    #: Ignored for ``preview``, which mutates nothing and so has no precondition.
+    plan_digest: str | None = None
 
 
 class DemoResetResponse(BaseModel):
@@ -799,6 +834,8 @@ class DemoResetResponse(BaseModel):
 
     status: Literal["ok", "refused"]
     mode: Literal["preview", "execute"]
+    #: ``None`` when ``status`` is ``ok``; otherwise which guard declined.
+    refusal_reason: DemoResetRefusal | None = None
     previous_count: int
     canonical_count: int
     legacy_count: int
@@ -808,11 +845,30 @@ class DemoResetResponse(BaseModel):
     canonical_ids: list[str]
     removable: list[dict]
     state_counts: dict
+    #: An opaque digest of the classified workspace. Always the CURRENT one, so a
+    #: stale-precondition refusal echoes the digest that would work — the client
+    #: recovers in one hop, exactly as the ``If-Match`` 412 echoes the current ETag.
+    plan_digest: str
+    #: Derived counts of the confirmed work this reset would discard. Every number
+    #: comes from persisted state (``answer_log``, the authoritative signature versus
+    #: the in-memory seed baseline, ``record_id``); nothing is estimated.
+    at_risk: dict
 
 
-def _reset_response(data: dict, *, mode: str, status: str, http: int) -> JSONResponse:
-    payload = {k: v for k, v in data.items() if k != "refused"}
-    resp = DemoResetResponse(status=status, mode=mode, **payload)
+def _reset_response(
+    data: dict,
+    *,
+    mode: str,
+    status: str,
+    http: int,
+    refusal_reason: str | None = None,
+) -> JSONResponse:
+    # ``refused``/``refusal`` are the workspace layer's internal verdict; the HTTP
+    # contract expresses the same thing as ``status`` + ``refusal_reason``.
+    payload = {k: v for k, v in data.items() if k not in ("refused", "refusal")}
+    resp = DemoResetResponse(
+        status=status, mode=mode, refusal_reason=refusal_reason, **payload
+    )
     return JSONResponse(status_code=http, content=resp.model_dump())
 
 
@@ -822,19 +878,28 @@ def _reset_response(data: dict, *, mode: str, status: str, http: int) -> JSONRes
     summary="Reset the Example Workspace",
     description=(
         "Restores the workspace to exactly the five canonical built-in example "
-        "records and reports the before/after counts, the removable set, and a state "
-        "histogram. `mode: \"preview\"` classifies only and mutates nothing; "
+        "records and reports the before/after counts, the removable set, a state "
+        "histogram, and a derived summary of the confirmed work the reset would "
+        "discard. `mode: \"preview\"` classifies only and mutates nothing; "
         "`mode: \"execute\"` additionally requires the exact confirmation phrase "
-        "and refuses without it. It accepts no caller-supplied ids or paths — any "
-        "extra field is rejected — it removes only records it can classify as "
-        "records this workspace itself created, and it refuses to remove anything at "
-        "all if any record is ambiguous. No filesystem path appears in the "
-        "response.\n\n"
+        "and the `plan_digest` the preview returned. It accepts no caller-supplied "
+        "ids or paths — any extra field is rejected — it removes only records it "
+        "can classify as records this workspace itself created, and it refuses to "
+        "remove anything at all if any record is ambiguous. No filesystem path "
+        "appears in the response.\n\n"
+        "**The `plan_digest` precondition.** `preview` returns an opaque digest of "
+        "the workspace it classified. `execute` must send it back, and the reset "
+        "runs only if the workspace still matches it. Without this, a client that "
+        "previewed, showed a confirmation dialog, and executed a while later would "
+        "destroy anything committed in between — the operator would have approved a "
+        "classification that no longer held. A missing digest is `428`, a stale one "
+        "is `412`, and neither mutates anything. Every response carries the CURRENT "
+        "digest, so a `412` can be recovered from in one further request.\n\n"
         "There is deliberately no general per-experiment delete operation."
     ),
     response_description=(
-        "The reset outcome: `ok` when it proceeded, or `refused` with the same "
-        "counts when it declined."
+        "The reset outcome: `ok` when it proceeded, or `refused` with a typed "
+        "`refusal_reason` and the same counts when it declined."
     ),
     responses={
         **_R_UNAUTHORIZED,
@@ -852,46 +917,108 @@ def _reset_response(data: dict, *, mode: str, status: str, http: int) -> JSONRes
                 "classified as a record this workspace itself created."
             )
         },
+        412: {
+            "description": (
+                "Refused without mutating: the `plan_digest` does not match the "
+                "current workspace, so it changed after the preview the operator "
+                "approved. The response carries the current `plan_digest`; preview "
+                "again and let the operator re-approve what they would now lose."
+            )
+        },
+        428: {
+            "description": (
+                "Refused without mutating: `plan_digest` was omitted. Every execute "
+                "requires the digest from its own preview, so a reset can never run "
+                "against a workspace nobody looked at."
+            )
+        },
     },
 )
 def demo_reset(
     req: DemoResetRequest = Body(
         description=(
             "`mode` is `preview` or `execute`. `execute` also requires "
-            "`confirmation` to be the exact phrase the UI displays. Any other "
+            "`confirmation` to be the exact phrase the UI displays and "
+            "`plan_digest` to be the digest its own preview returned. Any other "
             "field is rejected."
         ),
     ),
 ):
-    # demo_reset is a single-user, confirmation-gated synthetic-demo admin reset: a
-    # whole-workspace rmtree-of-managed-legacy + reseed spanning MULTIPLE ids. It is
-    # intentionally NOT coordinated with the per-record mutation locks (which guard a
-    # single id's compare-and-swap); a multi-id admin reset has no meaningful single
-    # lock to take, and it is not part of the concurrent-writer contract.
+    # demo_reset is a single-user, confirmation-gated admin reset spanning MULTIPLE
+    # ids: an rmtree of the managed-legacy records plus a re-materialisation of the
+    # five canonical ones. It IS coordinated with the per-record mutation locks —
+    # ``reset_to_canonical_seed`` takes ``record_lock(id)`` around every id it
+    # touches, one at a time — and its cross-record precondition is the
+    # ``plan_digest`` checked below rather than a single ETag.
     mode = req.mode
 
-    # Governance gate: refuse outside synthetic-only mode (classification is
-    # read-only, so it is safe to report counts alongside the refusal).
+    # Governance gate FIRST: refuse outside synthetic-only mode, before any
+    # precondition is even considered (classification is read-only, so it is safe to
+    # report counts alongside the refusal).
     if not ws.is_synthetic_only():
         data = ws.reset_to_canonical_seed(dry_run=True)
-        return _reset_response(data, mode=mode, status="refused", http=403)
+        return _reset_response(
+            data,
+            mode=mode,
+            status="refused",
+            http=403,
+            refusal_reason="not_synthetic_only",
+        )
 
-    # Preview NEVER mutates: classify only.
+    # Preview NEVER mutates: classify only. It has no precondition to satisfy — it is
+    # what PRODUCES the precondition for the execute that may follow.
     if mode == "preview":
         data = ws.reset_to_canonical_seed(dry_run=True)
-        status = "refused" if data["refused"] else "ok"
-        return _reset_response(data, mode=mode, status=status, http=200)
+        return _reset_response(
+            data,
+            mode=mode,
+            status="refused" if data["refused"] else "ok",
+            http=200,
+            refusal_reason=data["refusal"],
+        )
 
-    # Execute requires the exact confirmation phrase; otherwise no mutation.
+    # Execute, gate 1 — the exact confirmation phrase. Checked BEFORE the digest so a
+    # mistyped phrase keeps its long-standing 409 and stays distinguishable from a
+    # precondition problem the operator cannot fix by typing.
     if req.confirmation != _RESET_CONFIRMATION:
         data = ws.reset_to_canonical_seed(dry_run=True)
-        return _reset_response(data, mode=mode, status="refused", http=409)
+        return _reset_response(
+            data,
+            mode=mode,
+            status="refused",
+            http=409,
+            refusal_reason="confirmation_required",
+        )
 
-    # Confirmed execute: the reset itself refuses (no mutation) if any ambiguous
-    # record is present; otherwise it removes managed legacy + reseeds.
-    data = ws.reset_to_canonical_seed(dry_run=False)
+    # Execute, gate 2 — the precondition must be PRESENT. Fail-closed: an omitted
+    # digest is never treated as "no opinion", because that is exactly the blind
+    # overwrite this slice exists to remove.
+    digest = (req.plan_digest or "").strip()
+    if not digest:
+        data = ws.reset_to_canonical_seed(dry_run=True)
+        return _reset_response(
+            data,
+            mode=mode,
+            status="refused",
+            http=428,
+            refusal_reason="plan_digest_required",
+        )
+
+    # Execute, gate 3 — the precondition must MATCH, and the match is verified inside
+    # the same critical section as the mutation (so it is not re-checked here).
+    data = ws.reset_to_canonical_seed(dry_run=False, expected_plan_digest=digest)
+    if data["refusal"] == "plan_digest_stale":
+        return _reset_response(
+            data, mode=mode, status="refused", http=412, refusal_reason="plan_digest_stale"
+        )
     if data["refused"]:
-        return _reset_response(data, mode=mode, status="refused", http=409)
+        return _reset_response(
+            data,
+            mode=mode,
+            status="refused",
+            http=409,
+            refusal_reason="ambiguous_records_present",
+        )
     return _reset_response(data, mode=mode, status="ok", http=200)
 
 

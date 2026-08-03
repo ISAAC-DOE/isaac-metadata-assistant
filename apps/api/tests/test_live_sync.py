@@ -178,8 +178,15 @@ def test_reset_makes_prior_etag_detect_change(client):
         == 304
     )
     # reset re-materialises canonical with a fresh generation → ETag changes
+    # R1: an execute carries the plan digest from its own preview (428 without it).
+    digest = client.post("/api/demo/reset", json={"mode": "preview"}).json()["plan_digest"]
     r = client.post(
-        "/api/demo/reset", json={"mode": "execute", "confirmation": "RESET SYNTHETIC DEMO"}
+        "/api/demo/reset",
+        json={
+            "mode": "execute",
+            "confirmation": "RESET EXAMPLE WORKSPACE",
+            "plan_digest": digest,
+        },
     )
     assert r.status_code == 200
     after = client.get(

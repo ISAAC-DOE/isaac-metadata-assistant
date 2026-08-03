@@ -1295,6 +1295,17 @@
 .livesync-degraded-text { flex: 1 1 auto; }
 .livesync-degraded-refresh { flex: none; }
 
+/* R1b — a refresh the READER triggered (Re-Validate, or a post-write refetch)
+   that did not reach the API. Same shape and same place as the degraded note, so
+   it is one notice to learn, but lifted onto the advisory amber so it is not
+   mistaken for the quiet background condition. Deliberately NOT the reserved
+   fail red: nothing is invalid, the state on screen is simply not fresh. */
+.livesync-degraded.livesync-refresh-failed {
+  background: var(--advisory-bg);
+  border-color: var(--advisory-border);
+  color: var(--advisory-text);
+}
+
 /* P27.6 — "this record changed elsewhere" proactive notice (S4). Reuses the
    calm completion-submit-error treatment; nothing was lost, input is kept. */
 .livesync-changed {
@@ -1452,6 +1463,25 @@
   line-height: 1.5;
   color: var(--fail-text);
 }
+/* R1 — the derived "what you would lose" disclosure.
+   Deliberately NOT styled as a failure (nothing has gone wrong yet), and
+   deliberately NOT borrowing any RESERVED signal colour: `--fail-*` means "the
+   validation verdict is fail" and `--advisory-*` means "the advisory review has a
+   warning", and this is neither. It is a factual disclosure about a destructive
+   action, so it earns its weight from a raised surface and full body-text contrast
+   rather than from a colour that already means something else. Both tokens are
+   theme-aware, so it follows light/dark with the rest of the dialog. */
+.reset-at-risk {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+.reset-at-risk strong { color: var(--text-heading); }
 .reset-confirm-field {
   display: flex;
   flex-direction: column;

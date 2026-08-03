@@ -69,16 +69,37 @@ export function ExportReadiness() {
   const { id = '' } = useParams();
   const [load, setLoad] = useState<Load>({ name: 'loading' });
 
+  // R1b — did the last NON-blanking fetch fail? This screen does not use
+  // `useFetch`; it has its own `runFetch(showLoading)`, and the `showLoading:
+  // false` branch used to discard the error entirely. That is what made
+  // `Re-Validate` on the PASS card able to do nothing at all: on a backend
+  // outage the card stayed exactly as it was, and the reader believed they had
+  // just re-validated a passing record. The verdict is the surface that gates
+  // export, so a trust control failing silently there is the worst instance of
+  // the pattern.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+
   const runFetch = useCallback(
     (showLoading: boolean) => {
-      if (showLoading) setLoad({ name: 'loading' });
+      if (showLoading) {
+        setLoad({ name: 'loading' });
+        setRefreshFailed(false);
+      }
       api
         .getExportReadiness(id)
-        .then((data) => setLoad({ name: 'data', data }))
+        .then((data) => {
+          setLoad({ name: 'data', data });
+          setRefreshFailed(false);
+        })
         .catch((e: unknown) => {
           const error =
             e instanceof ApiError ? e : new ApiError(e instanceof Error ? e.message : String(e));
+          // A blanking fetch owns the whole screen and shows BackendDown. A
+          // non-blanking one keeps the data on screen — deliberately, so a
+          // post-export refresh never blanks the artifacts just written — and
+          // raises the honest note instead of swallowing the failure.
           if (showLoading) setLoad({ name: 'error', error });
+          else setRefreshFailed(true);
         });
     },
     [id],
@@ -106,17 +127,26 @@ export function ExportReadiness() {
     );
   }
 
-  return <LoadedExport id={id} data={load.data} onRefresh={() => runFetch(false)} />;
+  return (
+    <LoadedExport
+      id={id}
+      data={load.data}
+      onRefresh={() => runFetch(false)}
+      refreshFailed={refreshFailed}
+    />
+  );
 }
 
 function LoadedExport({
   id,
   data,
   onRefresh,
+  refreshFailed,
 }: {
   id: string;
   data: ExportReadinessBundle;
   onRefresh: () => void;
+  refreshFailed: boolean;
 }) {
   const navigate = useNavigate();
   const { detail, pending, validate, audit, warnings, graph, artifacts } = data;
@@ -244,7 +274,6 @@ function LoadedExport({
                 verdict: resp.official_report?.ok ? 'pass' : 'fail',
                 ok: !!resp.official_report?.ok,
                 schemaVersion: SCHEMA,
-                exitCode: resp.official_report?.ok ? 0 : 1,
                 errors: resp.official_report?.errors ?? [],
               },
             },
@@ -390,7 +419,7 @@ function LoadedExport({
       mainPad="pad"
     >
       <h1 className="sr-only">{LABELS.screenExport}</h1>
-      <LiveSyncNote degraded={degraded} onRefresh={onRefresh} />
+      <LiveSyncNote degraded={degraded} refreshFailed={refreshFailed} onRefresh={onRefresh} />
       <WorkflowProgressBanner
         workflow={detail.workflow}
         recordId={id}

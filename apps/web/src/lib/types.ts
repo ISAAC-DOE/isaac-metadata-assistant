@@ -97,11 +97,17 @@ export interface PendingBlocker {
 
 export type Verdict = 'pass' | 'fail' | 'pending';
 
+/**
+ * R1b — `exitCode: number` was removed. Nothing ever exited with it: every
+ * producer computed the literal `ok ? 0 : 1`, and its only reader rendered it as
+ * if it were captured CLI output (see `components/VerdictCard.tsx`). A field that
+ * can only ever hold a restatement of `ok`, and that invites being displayed as
+ * an observation, is worse than absent.
+ */
 export interface ValidationResult {
   verdict: Verdict; // hard gate
   ok: boolean;
   schemaVersion: string; // v1.05
-  exitCode: number;
   errors: { path: string; message: string }[];
 }
 
@@ -387,8 +393,10 @@ export interface RunnerStage {
   state: RunnerStageState;
   result?: string; // right-aligned result, e.g. "2 sources", "26 fields"
   subResult?: string; // secondary result line, e.g. "12 verified · 3 inferred"
-  detail?: string; // blocker explanatory copy (sentence case)
-  isBlocker?: boolean;
+  detail?: string; // the step's own explanatory copy (sentence case)
+  // R1b — `isBlocker?: boolean` was removed. Nothing ever set it; its only reader
+  // was a `StagedRunner` CTA whose handler was never passed and whose field count
+  // was hard-coded. See components/StagedRunner.tsx.
 }
 
 // --- workflow spine ---------------------------------------------------
@@ -1095,14 +1103,35 @@ export interface ApiHealth {
   database?: ApiHealthDatabase;
 }
 
-// POST /api/demo/reset — the guarded synthetic-demo reset (DemoResetResponse in
+// POST /api/demo/reset — the guarded example-workspace reset (DemoResetResponse in
 // apps/api/isaac_api/routes.py). The SAME shape carries both success (status
-// "ok") and a safe refusal (status "refused"), returned at HTTP 200/403/409.
-// Every field is a server-derived count/id; the client renders them, it never
-// computes a reset decision.
+// "ok") and a safe refusal (status "refused"), returned at HTTP
+// 200/403/409/412/428. Every field is a server-derived count/id; the client renders
+// them, it never computes a reset decision.
+
+/** Why the server declined. The five reasons are NOT interchangeable: two of them
+ *  are recoverable by looking again, one by typing correctly, and two are dead ends.
+ *  `null` on success. Mirrors `DemoResetRefusal` in routes.py. */
+export type ApiDemoResetRefusal =
+  | 'not_synthetic_only'
+  | 'confirmation_required'
+  | 'plan_digest_required'
+  | 'plan_digest_stale'
+  | 'ambiguous_records_present';
+
+/** The confirmed work a reset would discard. Server-DERIVED from persisted state
+ *  (the answer log, each example's content versus its original, exported records) —
+ *  the client renders these numbers and never estimates one. */
+export interface ApiDemoResetAtRisk {
+  confirmed_answers: number;
+  examples_with_progress: number;
+  exported_artifacts: number;
+}
+
 export interface ApiDemoResetResult {
   status: 'ok' | 'refused';
   mode: 'preview' | 'execute';
+  refusal_reason: ApiDemoResetRefusal | null;
   previous_count: number;
   canonical_count: number;
   legacy_count: number;
@@ -1112,6 +1141,10 @@ export interface ApiDemoResetResult {
   canonical_ids: string[];
   removable: { id: string; title: string }[];
   state_counts: Record<string, number>;
+  /** The precondition an execute must carry back. Always the CURRENT one, so a
+   *  stale refusal already contains the value a fresh attempt needs. */
+  plan_digest: string;
+  at_risk: ApiDemoResetAtRisk;
 }
 
 // Everything S3 needs, fetched concurrently but kept as separate values so the

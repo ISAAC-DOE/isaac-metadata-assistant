@@ -125,13 +125,32 @@ export function GovernancePage() {
               wording constraints as components/GovernanceBanner.tsx — "may
               run", never "is running"; an isolated SLAC test database, never
               the production database; and no claim that the app itself verified
-              that isolation (the guarantee is an external pg_hba grant). */}
+              that isolation (the guarantee is an external pg_hba grant).
+
+              R1b. The last clause used to read "and no file is read, parsed, or
+              inspected" — an ABSOLUTE claim, and false: this very page's
+              `validator` tab (below) mounts `RecordValidator`, which reads the
+              file you pick (`file.text()` / `FileReader`) and POSTs it to
+              `/api/validate/record`; `CsvReconcilePanel` does the same for a
+              campaign sheet. The refusal claim is still true of the UPLOAD path
+              (`POST /api/uploads` declares no multipart and parses nothing), so
+              it is kept and SCOPED, and the two readers are disclosed rather
+              than denied. `lib/settingsContent.ts`'s `no-real-experiment-data`
+              card already said this correctly; the three sites are now pinned to
+              one claim by `__tests__/upload-claim-parity.test.tsx`. */}
           <p>
             The visible workspace remains synthetic and uploads remain disabled. Real SLAC/SSRL or
             private artifacts require written data-governance approval before they can be read,
-            indexed, or sent to any model. Nothing is uploaded to a model or index without that
-            approval: every file upload is refused outright, whatever it contains, and no file is
-            read, parsed, or inspected.
+            indexed, or sent to any model — and nothing on any screen here is sent to a model or an
+            index. Adding a file to this workspace is closed off entirely: every file upload is
+            refused outright, whatever it contains, and the refused request is never read, parsed,
+            or inspected.
+          </p>
+          <p style={{ marginTop: 12 }}>
+            Two review tools do read a file you paste or pick, and neither adds it to the workspace:
+            the Validator on the next tab, and campaign-sheet CSV reconciliation on a record's
+            evidence trail. Each checks the text in memory and discards it, and records only the
+            outcome — never the content.
           </p>
           <p style={{ marginTop: 12 }}>
             Separately, this deployment may run a protected, read-only diagnostic against an

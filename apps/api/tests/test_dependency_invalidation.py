@@ -227,9 +227,15 @@ def test_exported_then_regressed_workflow_and_artifact_are_coherent(client):
 
 
 def test_reset_restores_artifact_baseline(client):
+    # R1: an execute carries the plan digest from its own preview (428 without it).
+    digest = client.post("/api/demo/reset", json={"mode": "preview"}).json()["plan_digest"]
     r = client.post(
         "/api/demo/reset",
-        json={"mode": "execute", "confirmation": "RESET SYNTHETIC DEMO"},
+        json={
+            "mode": "execute",
+            "confirmation": "RESET EXAMPLE WORKSPACE",
+            "plan_digest": digest,
+        },
     )
     assert r.status_code == 200 and r.json()["status"] == "ok", r.text
     # The exported canonical record is current against its own baseline draft.

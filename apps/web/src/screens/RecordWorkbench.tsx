@@ -90,6 +90,10 @@ export function RecordWorkbench() {
       agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
       onAgentRefresh={onAgentRefresh}
+      // R1b — a silent refetch that failed (the poll-signalled one above, or the
+      // post-write one in `onAgentRefresh`) must not be invisible: the reader
+      // would be looking at pre-write state believing it is current.
+      refreshFailed={bundle.refreshFailed}
     />
   );
 }
@@ -116,6 +120,7 @@ function LoadedWorkbench({
   agentDegraded,
   onManualRefresh,
   onAgentRefresh,
+  refreshFailed,
 }: {
   id: string;
   bundle: RecordBundle;
@@ -124,6 +129,7 @@ function LoadedWorkbench({
   agentDegraded: boolean;
   onManualRefresh: () => void;
   onAgentRefresh: () => void;
+  refreshFailed: boolean;
 }) {
   const navigate = useNavigate();
   const { detail, pending, validate, audit, warnings, evidence, graph } = bundle;
@@ -227,7 +233,11 @@ function LoadedWorkbench({
       mainPad="pad"
     >
       <h1 className="sr-only">{LABELS.screenReview}</h1>
-      <LiveSyncNote degraded={degraded} onRefresh={onManualRefresh} />
+      <LiveSyncNote
+        degraded={degraded}
+        refreshFailed={refreshFailed}
+        onRefresh={onManualRefresh}
+      />
       <WorkflowProgressBanner
         workflow={detail.workflow}
         recordId={id}

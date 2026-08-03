@@ -2,14 +2,22 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { api } from '../lib/api';
+import { api, RESET_CONFIRMATION } from '../lib/api';
+import { LABELS } from '../lib/labels';
+import { atRiskSentence } from '../components/ResetDemoDialog';
 import {
   stubFetchRoutes,
   resetDemoRoutes,
   demoResetPreviewClean,
   demoResetPreviewAmbiguous,
   demoResetExecuteOk,
+  demoResetExecuteStale,
+  demoResetExecuteDigestRequired,
+  RESET_PLAN_DIGEST,
+  RESET_PLAN_DIGEST_FRESH,
+  RESET_AT_RISK_NONE,
 } from '../test/apiFixtures';
+import type { RouteEntry } from '../test/apiFixtures';
 
 /*
  * P26.0b — the guarded Reset Workspace control on My Experiments.
@@ -33,7 +41,7 @@ import {
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
 
-function renderHome(routes: Record<string, { status?: number; body: unknown }>) {
+function renderHome(routes: Record<string, RouteEntry>) {
   const calls = stubFetchRoutes(routes);
   const view = render(
     <MemoryRouter initialEntries={['/experiments']} future={FUTURE}>
@@ -44,7 +52,7 @@ function renderHome(routes: Record<string, { status?: number; body: unknown }>) 
 }
 
 /** The parsed JSON bodies of every POST /api/demo/reset the app issued, in order. */
-function resetPosts(): Array<{ mode: string; confirmation?: string }> {
+function resetPosts(): Array<{ mode: string; confirmation?: string; plan_digest?: string }> {
   const mock = (globalThis.fetch as unknown as { mock: { calls: [unknown, RequestInit?][] } }).mock;
   return mock.calls
     .filter(([input, init]) => String(input).endsWith('/demo/reset') && init?.method === 'POST')
@@ -309,7 +317,7 @@ describe('P26.0b · Reset Workspace — single-submit safety', () => {
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     const executes = resetPosts().filter((p) => p.mode === 'execute');
     expect(executes).toHaveLength(1);
-    expect(executes[0].confirmation).toBe('RESET SYNTHETIC DEMO');
+    expect(executes[0].confirmation).toBe('RESET EXAMPLE WORKSPACE');
   });
 
   it('double-clicking the destructive action cannot produce two executions', async () => {
@@ -414,33 +422,266 @@ describe('P26.0b · Reset Workspace — leak safety & coexistence', () => {
 
 // --- §4 client contract: resetDemo reads the typed body on refusal, not throws -
 
+/** `api.resetDemo`, reached without its public typing (the tests assert on the raw
+ *  body shape, which is the point — the client must not swallow it). */
+type RawResetDemo = (
+  m: string,
+  c?: string,
+  digest?: string,
+) => Promise<Record<string, unknown>>;
+const rawResetDemo = () => (api as unknown as { resetDemo: RawResetDemo }).resetDemo;
+
 describe('P26.0b · api.resetDemo — typed outcomes', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('preview returns the typed body on 200', async () => {
     stubFetchRoutes({ 'POST /api/demo/reset': { body: demoResetPreviewClean } });
-    const res = await (api as unknown as { resetDemo: (m: string, c?: string) => Promise<Record<string, unknown>> }).resetDemo('preview');
+    const res = await rawResetDemo()('preview');
     expect(res.status).toBe('ok');
     expect(res.legacy_count).toBe(2);
   });
 
   it('execute success returns the typed body on 200', async () => {
     stubFetchRoutes({ 'POST /api/demo/reset': { body: demoResetExecuteOk } });
-    const res = await (api as unknown as { resetDemo: (m: string, c?: string) => Promise<Record<string, unknown>> }).resetDemo('execute', 'RESET SYNTHETIC DEMO');
+    const res = await rawResetDemo()('execute', 'RESET EXAMPLE WORKSPACE', RESET_PLAN_DIGEST);
     expect(res.status).toBe('ok');
     expect(res.removed_count).toBe(2);
   });
 
   it('reads the typed refusal body on a 409 (ambiguous) rather than throwing', async () => {
     stubFetchRoutes({ 'POST /api/demo/reset': { status: 409, body: { ...demoResetPreviewAmbiguous, mode: 'execute' } } });
-    const res = await (api as unknown as { resetDemo: (m: string, c?: string) => Promise<Record<string, unknown>> }).resetDemo('execute', 'RESET SYNTHETIC DEMO');
+    const res = await rawResetDemo()('execute', 'RESET EXAMPLE WORKSPACE', RESET_PLAN_DIGEST);
     expect(res.status).toBe('refused');
     expect(res.ambiguous_count).toBe(1);
   });
 
   it('reads the typed refusal body on a 403 (not synthetic) rather than throwing', async () => {
     stubFetchRoutes({ 'POST /api/demo/reset': { status: 403, body: { ...demoResetPreviewClean, status: 'refused' } } });
-    const res = await (api as unknown as { resetDemo: (m: string, c?: string) => Promise<Record<string, unknown>> }).resetDemo('preview');
+    const res = await rawResetDemo()('preview');
     expect(res.status).toBe('refused');
+  });
+
+  /*
+   * R1. A 412/428 is a REFUSAL, not a failure, and the distinction is load-bearing:
+   * the body carries the current digest and the refreshed figures, which is exactly
+   * what the dialog needs in order to explain what changed. If `resetDemo` threw
+   * these as HTTP errors the dialog could only say "request failed", about the one
+   * outcome it most needs to be clear about.
+   */
+  it('reads the typed refusal body on a 412 (stale precondition) rather than throwing', async () => {
+    stubFetchRoutes({ 'POST /api/demo/reset': { status: 412, body: demoResetExecuteStale } });
+    const res = await rawResetDemo()('execute', 'RESET EXAMPLE WORKSPACE', RESET_PLAN_DIGEST);
+    expect(res.status).toBe('refused');
+    expect(res.refusal_reason).toBe('plan_digest_stale');
+    expect(res.removed_count).toBe(0);
+    // ...and it carries the digest a fresh attempt would need
+    expect(res.plan_digest).toBe(RESET_PLAN_DIGEST_FRESH);
+  });
+
+  it('reads the typed refusal body on a 428 (precondition omitted) rather than throwing', async () => {
+    stubFetchRoutes({ 'POST /api/demo/reset': { status: 428, body: demoResetExecuteDigestRequired } });
+    const res = await rawResetDemo()('execute', 'RESET EXAMPLE WORKSPACE');
+    expect(res.status).toBe('refused');
+    expect(res.refusal_reason).toBe('plan_digest_required');
+    expect(res.removed_count).toBe(0);
+  });
+
+  it('sends the digest on execute and never on preview', async () => {
+    stubFetchRoutes({ 'POST /api/demo/reset': { body: demoResetPreviewClean } });
+    await rawResetDemo()('preview');
+    await rawResetDemo()('execute', 'RESET EXAMPLE WORKSPACE', RESET_PLAN_DIGEST);
+    const posts = resetPosts();
+    expect(posts[0]).toEqual({ mode: 'preview' });
+    expect(posts[1].plan_digest).toBe(RESET_PLAN_DIGEST);
+  });
+
+  it('does NOT invent a digest when it has none — the SERVER decides', async () => {
+    stubFetchRoutes({ 'POST /api/demo/reset': { status: 428, body: demoResetExecuteDigestRequired } });
+    await rawResetDemo()('execute', 'RESET EXAMPLE WORKSPACE');
+    const execute = resetPosts().find((p) => p.mode === 'execute')!;
+    expect(execute.plan_digest).toBeUndefined();
+    expect(Object.keys(execute).sort()).toEqual(['confirmation', 'mode']);
+  });
+});
+
+// --- R1 · the precondition is carried, and a stale refusal is honest -----------
+
+describe('R1 · Reset Workspace — the plan-digest precondition', () => {
+  it('carries the digest from its OWN preview into the execute', async () => {
+    const view = renderHome(resetDemoRoutes().routes);
+    await openReset(view);
+    const d = within(dialog(view));
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
+    const execute = resetPosts().find((p) => p.mode === 'execute')!;
+    expect(execute.plan_digest).toBe(RESET_PLAN_DIGEST);
+    expect(execute.confirmation).toBe(RESET_CONFIRMATION);
+  });
+
+  it('a stale refusal says nothing was reset, in plain language and not in HTTP', async () => {
+    const view = renderHome(
+      resetDemoRoutes({ executeStatus: 412, execute: demoResetExecuteStale }).routes,
+    );
+    await openReset(view);
+    const d = within(dialog(view));
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+
+    const alert = await view.findByRole('alert');
+    const text = (alert.textContent ?? '').toLowerCase();
+    expect(text).toContain('nothing was reset');
+    expect(text).toContain('no records were changed');
+    expect(text).toContain('confirm again');
+    // never HTTP jargon, never a suggestion that something broke
+    expect(text).not.toMatch(/\b412\b|\b428\b|precondition|digest|http|error|failed/);
+  });
+
+  it('a stale refusal re-previews and DISARMS the action — no safe-looking retry', async () => {
+    const view = renderHome(
+      resetDemoRoutes({ executeStatus: 412, execute: demoResetExecuteStale }).routes,
+    );
+    await openReset(view);
+    const d = within(dialog(view));
+    const input = d.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'RESET' } });
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    await view.findByRole('alert');
+
+    // exactly ONE execute was attempted — nothing auto-retried
+    await waitFor(() =>
+      expect(resetPosts().filter((p) => p.mode === 'execute')).toHaveLength(1),
+    );
+    // a SECOND preview ran, so the figures on screen are the current ones
+    await waitFor(() =>
+      expect(resetPosts().filter((p) => p.mode === 'preview').length).toBeGreaterThanOrEqual(2),
+    );
+    // the typed gate was cleared and the destructive action is disarmed again
+    expect((d.getByRole('textbox') as HTMLInputElement).value).toBe('');
+    const action = d.getByRole('button', { name: 'Reset Shared Workspace' }) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    // and the dialog is still open (the explanation was not flashed away)
+    expect(view.queryByRole('dialog')).not.toBeNull();
+  });
+
+  it('after re-arming, the second execute carries the REFRESHED digest', async () => {
+    const view = renderHome(
+      resetDemoRoutes({
+        executeStatus: 412,
+        execute: demoResetExecuteStale,
+        previewRefresh: { ...demoResetPreviewClean, plan_digest: RESET_PLAN_DIGEST_FRESH },
+      }).routes,
+    );
+    await openReset(view);
+    const d = within(dialog(view));
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    await view.findByRole('alert');
+    await waitFor(() =>
+      expect(resetPosts().filter((p) => p.mode === 'preview').length).toBeGreaterThanOrEqual(2),
+    );
+    await waitFor(() =>
+      expect((d.getByRole('textbox') as HTMLInputElement).disabled).toBe(false),
+    );
+
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    await waitFor(() =>
+      expect(
+        (d.getByRole('button', { name: 'Reset Shared Workspace' }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    await waitFor(() =>
+      expect(resetPosts().filter((p) => p.mode === 'execute')).toHaveLength(2),
+    );
+    const executes = resetPosts().filter((p) => p.mode === 'execute');
+    expect(executes[0].plan_digest).toBe(RESET_PLAN_DIGEST);
+    expect(executes[1].plan_digest).toBe(RESET_PLAN_DIGEST_FRESH);
+  });
+
+  it('a 428 is handled exactly like a stale refusal, not as an error', async () => {
+    const view = renderHome(
+      resetDemoRoutes({ executeStatus: 428, execute: demoResetExecuteDigestRequired }).routes,
+    );
+    await openReset(view);
+    const d = within(dialog(view));
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    const alert = await view.findByRole('alert');
+    expect((alert.textContent ?? '').toLowerCase()).toContain('nothing was reset');
+    expect(view.queryByText(/could not be completed/i)).toBeNull();
+  });
+});
+
+// --- R1 · the derived at-risk disclosure ---------------------------------------
+
+describe('R1 · Reset Workspace — what you would lose', () => {
+  it('states the actual server-derived numbers, not a vague warning', async () => {
+    const view = renderHome(resetDemoRoutes().routes);
+    await openReset(view);
+    const text = dialog(view).textContent ?? '';
+    expect(text).toContain(LABELS.resetAtRiskLabel);
+    // demoResetPreviewClean.at_risk = {3 answers, 2 examples, 1 export}
+    expect(text).toContain('3 confirmed answers');
+    expect(text).toContain('2 built-in examples carrying progress');
+    expect(text).toContain('1 record you exported');
+    expect(text).toMatch(/discards them permanently/);
+  });
+
+  it('says so outright when there is nothing to lose', async () => {
+    const view = renderHome(
+      resetDemoRoutes({
+        preview: { ...demoResetPreviewClean, at_risk: RESET_AT_RISK_NONE },
+      }).routes,
+    );
+    await openReset(view);
+    expect(dialog(view).textContent).toContain(LABELS.resetAtRiskNothing);
+  });
+
+  it('the sentence is derived, singular/plural correct, and never invented', () => {
+    // Unit-level, because the SENTENCE is the disclosure and a wrong number here is
+    // the defect the whole slice exists to prevent.
+    expect(atRiskSentence(RESET_AT_RISK_NONE)).toBe(LABELS.resetAtRiskNothing);
+    expect(
+      atRiskSentence({ confirmed_answers: 1, examples_with_progress: 0, exported_artifacts: 0 }),
+    ).toBe('1 confirmed answer. Resetting discards it permanently.');
+    expect(
+      atRiskSentence({ confirmed_answers: 0, examples_with_progress: 1, exported_artifacts: 0 }),
+    ).toBe('1 built-in example carrying progress. Resetting discards it permanently.');
+    expect(
+      atRiskSentence({ confirmed_answers: 2, examples_with_progress: 0, exported_artifacts: 3 }),
+    ).toBe(
+      '2 confirmed answers and 3 records you exported. Resetting discards them permanently.',
+    );
+    expect(
+      atRiskSentence({ confirmed_answers: 4, examples_with_progress: 5, exported_artifacts: 1 }),
+    ).toBe(
+      '4 confirmed answers, 5 built-in examples carrying progress and 1 record you ' +
+        'exported. Resetting discards them permanently.',
+    );
+    // a missing block yields nothing at all rather than a fabricated reassurance
+    expect(atRiskSentence(undefined)).toBe('');
+  });
+
+  it('the at-risk figure is refreshed after a stale refusal', async () => {
+    const view = renderHome(
+      resetDemoRoutes({
+        executeStatus: 412,
+        execute: demoResetExecuteStale,
+        previewRefresh: {
+          ...demoResetPreviewClean,
+          plan_digest: RESET_PLAN_DIGEST_FRESH,
+          at_risk: { confirmed_answers: 9, examples_with_progress: 4, exported_artifacts: 0 },
+        },
+      }).routes,
+    );
+    await openReset(view);
+    const d = within(dialog(view));
+    expect(dialog(view).textContent).toContain('3 confirmed answers');
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    await view.findByRole('alert');
+    await waitFor(() => expect(dialog(view).textContent).toContain('9 confirmed answers'));
+    expect(dialog(view).textContent).not.toContain('3 confirmed answers');
   });
 });
