@@ -133,8 +133,26 @@ Validator, Settings.
 Look for: clipped or overlapping text, a horizontally scrolling page body, touch targets
 too small, focus outlines invisible when tabbing.
 
-**390 and 320 are not covered by any automated project** — the suite runs 1280 / 1024 /
-768 / 375 and a 200 %-zoom project. Those two widths are unverified by anything.
+**What is and is not already automated at these widths — corrected.** An earlier version
+of this file said *"390 and 320 are not covered by any automated project … unverified by
+anything."* **That was wrong**, and the correction matters because it changes what you
+actually need to look at.
+
+- **Layout at 390 and 320 IS covered.** `apps/web/e2e/specs/layout-widths.spec.ts` sweeps
+  `[1280, 1024, 768, 640, 390, 375, 320]`, checking nested overflow, lost text and
+  obscured controls at each. Its header states that *320 "is included and is not
+  optional: it is the WCAG 1.4.10 reflow width"*. It moves the viewport itself inside one
+  project rather than adding five more, deliberately, for runtime — which is why 390/320
+  do not appear in the project list and why I misread their absence as absent coverage.
+- **Accessibility (axe) at 390 and 320 is NOT covered.** `a11y-axe.spec.ts` is
+  per-project, so it only ever runs at 1280 / 1024 / 768 / 375 / zoom-200. Adding two
+  narrow projects for it needs measured baseline counts for **both** platforms
+  (`a11y-baseline.ts` keys by project and refuses an unlisted one), which needs a CI
+  round-trip per platform. Attempted, then abandoned rather than ship a half-configured
+  baseline. **This is the real remaining gap.**
+
+So: contrast, accessible names and focus visibility at **390 and 320** are the part worth
+your eyes. Gross layout breakage at those widths would already have failed CI.
 
 ---
 
@@ -147,7 +165,8 @@ too small, focus outlines invisible when tabbing.
 | Real-record display | **Closed by default** by the database owner. Not a gap to close here. |
 | Upload that creates a record | `POST /api/uploads` is an unconditional 403 with no implementation behind it. Governance, not a bug. |
 | Wrong-typed API answer returns no typed 422 | It no longer returns 500 (fixed). A precise 422 is a follow-up. |
-| Tutorial | Built and tested, **not yet merged** at the time of writing. |
+| Tutorial | Built and tested; see whether PR #51 is merged at the commit you are testing. |
+| Accessibility scans at 390 / 320 px | **Not automated.** See §6 — layout at those widths *is* covered; axe is not. |
 
 ---
 
