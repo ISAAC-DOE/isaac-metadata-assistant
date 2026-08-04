@@ -443,7 +443,28 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'statistics@desktop-1280x800': 4,
       'statistics@laptop-1024x768': 4,
       'statistics@tablet-768x1024': 4,
-      'statistics@mobile-375x812': 3,
+      /*
+       * SPLIT BY PLATFORM 2026-08-04, from a MEASURED CI run — not a guess and not
+       * a tuning-to-green. The first exact-SHA CI run of the tutorial-scope slice
+       * reported this surface at 2 on linux while darwin measures 3, and the
+       * ratchet failed the build to say so:
+       *
+       *   IMPROVED statistics @ mobile-375x812 on linux: rule "color-contrast"
+       *   fell from 3 to 2 node(s) (-1) … a stale number would re-admit the defect.
+       *
+       * Read it the same way as the four entries above: FEWER NODES ARE DRAWN on
+       * the empty ordinary page, not "a contrast token was fixed". The one node
+       * that differs between the platforms is a wrap-boundary artefact of the
+       * 375px layout — darwin and linux disagree about whether one label wraps at
+       * that width, so one extra text node is present to be scanned. The surviving
+       * nodes fail on the same `--text-tertiary`/`--text-quaternary` tokens as
+       * before, on both platforms.
+       *
+       * Lowering is the safe direction (it tightens the ratchet); the darwin
+       * column is left where two local runs measured it rather than lowered to
+       * match, because nothing has measured darwin at 2.
+       */
+      'statistics@mobile-375x812': { darwin: 3, linux: 2 },
       'statistics@zoom-200': 3,
       /*
        * THE POPULATED Statistics page, at the same route inside a worked-example
