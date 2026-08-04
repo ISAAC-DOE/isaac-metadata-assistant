@@ -172,12 +172,26 @@ export const CHART_MIN_WIDTH = 120;
  * the confident wrong cause is the more dangerous of the two errors: it invites a
  * maintainer to "fix" the open state and delete the synchronous read.
  *
- * The failure is real. Measured 2026-08-04 with `apply(node.getBoundingClientRect
- * ().width)` removed and the observer left in place: both SVGs stay at the 560px
- * fallback while their columns measure 918, and `e2e/specs/charts.spec.ts` fails
- * — 25 of its 40 runs across the five viewport projects, i.e. 5 of its 8 tests in
- * each. (An isolated single-project run of the same file failed only 3 of 8, so
- * WHICH of the eight fail is load-dependent; that the poll never settles is not.)
+ * The failure is real. Measured with `apply(node.getBoundingClientRect().width)`
+ * removed and the observer left in place: both SVGs stay at the 560px fallback
+ * while their columns measure 918, and `e2e/specs/charts.spec.ts` fails — 25 of
+ * its 45 runs across the five viewport projects, i.e. 5 of its 9 tests in each.
+ *
+ * WHICH five is not a mystery and not load-dependent: they are exactly the five
+ * worked-example tests, the only ones that open `Technical Details` and draw a
+ * chart. The four that pass are the empty-workspace test and the three My Stats
+ * tests, none of which draws anything. Re-measured in isolation three times —
+ * `--project=desktop-1280x800`, twice at Playwright's default worker count and
+ * once at `--workers=1` — 5 failed / 4 passed every time, the same five.
+ *
+ * A PREVIOUS VERSION OF THIS PARAGRAPH SAID "an isolated single-project run failed
+ * only 3 of 8, so WHICH of the eight fail is load-dependent". THAT DOES NOT
+ * REPRODUCE. The 3 was observed once, the conditions that produced it were never
+ * identified, and load dependence was inferred from that single reading; three
+ * re-runs contradict it. The claim is removed rather than re-explained. (The
+ * per-project total moved 8 → 9 in the commit that re-measured this, because a new
+ * `renders EXACTLY the approved sentences` test was added. The failing count is 5
+ * either way.)
  *
  * But the skipped-element rule does not explain it. Measured on the same node, in
  * the same session: a SEPARATELY installed `ResizeObserver` on that

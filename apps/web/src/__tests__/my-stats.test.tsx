@@ -73,7 +73,40 @@ function textOf(root: HTMLElement): string {
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-/* ── the emptiness matcher, and the two generations of hole it has had ───────
+/**
+ * Every text node of a subtree AND every accessible-name attribute on it, as a
+ * list of raw copy units — one entry per authored string, not one joined blob.
+ *
+ * Per UNIT, deliberately. `textOf` above joins the whole subtree with spaces,
+ * which is right for a substring scan and wrong for a sentence set: it welds a
+ * heading with no full stop onto the paragraph after it ("Personal Statistics
+ * What this tab will show…") and invents a sentence nobody wrote. A text node is
+ * the smallest thing an author edits, so it is the unit.
+ *
+ * The attributes come last and are prefixed with nothing: an `aria-label` is copy,
+ * and it belongs in the same set as visible text. `aria-hidden` subtrees are NOT
+ * skipped — a decorative icon carries no text, and anything that does carry text
+ * is visible to somebody.
+ */
+function copyUnitsOf(root: HTMLElement): string[] {
+  const units: string[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) units.push(walker.currentNode.textContent ?? '');
+  for (const element of [root, ...root.querySelectorAll('*')]) {
+    for (const attribute of ACCESSIBLE_NAME_ATTRS) {
+      const value = element.getAttribute(attribute);
+      if (value !== null) units.push(value);
+    }
+  }
+  return units;
+}
+
+/* ── the emptiness matcher, and the three generations of hole it has had ─────
+ *
+ * The two layers now in force, and why, are documented inside the shared block
+ * below — read that first. This is the failure record that produced them, kept
+ * because each generation's fix was itself defeated and the pattern in HOW is
+ * more useful than the individual holes.
  *
  * GENERATION 1 — DIGIT-SHAPED GUARDS. Trap 4 used `/\b\d+\b/` and `/\b0\b/`, plus
  * a per-sentence check that fired on three literal phrases:
@@ -113,6 +146,31 @@ function textOf(root: HTMLElement): string {
  * flagged by "zero exports" and not by the phrase. Hence
  * `retired literal parity` below: whenever a class matcher replaces a literal
  * list, assert the new one flags everything the old one did.
+ *
+ * GENERATION 3 — CLAUSE SCOPING OVER AN ALLOWLIST OF JOINERS, DEFEATED BY DELETING
+ * ONE COMMA. `clausesOf` split on `, and|but|so|or|yet` and `; `, so generation
+ * 2's own example sentence — with the comma removed —
+ *
+ *     You have no records and this preview cannot tell you more than that.
+ *
+ * was ONE clause and `cannot` was in it. RE-MEASURED at 4b86f7e rather than taken
+ * on report: rendered in the panel as a `stats-note` paragraph, it passed all 231
+ * tests of the five statistics vitest files — 71 of them in this file, including
+ * trap 4, whose title claims to check for a zero "IN WORDS" — and all 40 browser
+ * tests in `e2e/specs/charts.spec.ts`, including the one titled "no zero". A third
+ * independent reviewer measured nine further evasions of the same kind, all
+ * re-measured here: a colon, a parenthesis, `while`, `whereas`, `although`,
+ * `because`, a newline, an em-dash (which was explicitly exempt), and one
+ * `Your export count is zero — no way to say otherwise.`
+ *
+ * THE CONCLUSION IS STRUCTURAL AND IT IS THE REVIEWER'S: a guard shaped like an
+ * allowlist of joiners will keep losing. So the enforcement point is INVERTED
+ * rather than widened — an allowlist of approved SENTENCES, compared as an exact
+ * set, with this matcher demoted to a second layer over that allowlist's own
+ * entries. Two changes are also made inside the matcher, because both were wrong
+ * on their own terms: the em-dash exemption was justified by a cost that did not
+ * exist (measured), and the escape now has to open BEFORE the claim it excuses
+ * ends, which is what all ten of the reviewer's sentences turn on.
  */
 
 /* >>> SHARED-EMPTINESS-MATCHER-START >>>
@@ -127,27 +185,208 @@ function textOf(root: HTMLElement): string {
  * assertion fails.
  */
 
+/* ══ LAYER 1 · THE APPROVED SENTENCES ═══════════════════════════════════════
+ *
+ * WHY THE ENFORCEMENT POINT MOVED. Three generations of this guard were an
+ * ALLOWLIST OF SYNTAX, and each was defeated by one syntactic route:
+ *
+ *   1. a three-phrase literal list      → a phrase that was not in it;
+ *   2. a whole-sentence modal escape    → a conjoined clause, so `cannot`
+ *                                         anywhere excused a zero anywhere;
+ *   3. a clause splitter over five      → DELETING ONE COMMA. Generation 2's own
+ *      joiners (`, and|but|so|or|yet`,    example sentence, comma removed, was
+ *      `; `)                              rendered in the panel and passed ALL 231
+ *                                         tests of the five statistics vitest
+ *                                         files — 71 of them in
+ *                                         `my-stats.test.tsx` — and ALL 40 browser
+ *                                         tests in `charts.spec.ts`. Re-measured
+ *                                         at 4b86f7e before this was written.
+ *
+ * A guard shaped like an allowlist of joiners will keep losing, because the set
+ * of ways English joins two clauses is open and the set of ways a maintainer can
+ * write one is larger still. So the PRIMARY guard is no longer a pattern over
+ * free prose. It is EXACT SET EQUALITY between the sentences this tab renders and
+ * the two lists below.
+ *
+ * The consequence is the point: inserting ANY new sentence into the panel fails
+ * immediately — false or true, punctuated any way at all, because nothing is
+ * being parsed for meaning. Editing an approved sentence fails until the list is
+ * updated, which puts the changed claim in the diff.
+ *
+ * HOW A LEGITIMATE COPY CHANGE PROCEEDS. Edit the copy; the set test fails and
+ * prints the difference; transcribe the new sentence into the list below IN THE
+ * SAME COMMIT. That transcription is the moment honesty is judged — by layer 2,
+ * which is applied to these entries, and by whoever reads the diff. There is no
+ * way to change what this tab says without the new sentence appearing here.
+ *
+ * WHAT IS COMPARED. Every text NODE of the subtree, plus every accessible-name
+ * attribute on it (see {@link ACCESSIBLE_NAME_ATTRS}) — an `aria-label` is copy a
+ * reader is read out, and a guard over text nodes alone would not see it. Each
+ * unit is whitespace-normalised and split into sentences, and the UNIQUE set is
+ * compared, sorted, in full.
+ *
+ * UNIQUE, NOT A MULTISET, and that is a deliberate weakening of one edge: five
+ * planned views share the gate label `Needs records linked to an account.`, and
+ * three share `Will render as a line chart.`, so a multiset would pin how many
+ * views happen to sit behind each precondition and would fail on a re-labelling
+ * that says nothing new. Repeating a sentence that is already approved states no
+ * new claim; saying anything else does, and that is what is caught.
+ */
+
+/** Attributes that put copy into the accessible name, and so into the claim set. */
+const ACCESSIBLE_NAME_ATTRS: readonly string[] = [
+  'aria-label',
+  'aria-description',
+  'aria-roledescription',
+  'aria-valuetext',
+  'aria-placeholder',
+  'title',
+  'alt',
+];
+
+/**
+ * EVERY SENTENCE THE MY STATS PANEL MAY RENDER. Nothing else may appear in
+ * `#statistics-tabpanel-mine`.
+ *
+ * Transcribed from the rendered DOM, not imported from
+ * `lib/myStatsContract.ts` — deriving this list from the constants the panel
+ * renders would make the comparison circular and it would pass whatever the
+ * panel said. The duplication is the mechanism.
+ */
+const APPROVED_PANEL_SENTENCES: readonly string[] = [
+  'Personal Statistics',
+  'What this tab will show once records are associated with a signed-in account.',
+  'Not Available in This Preview',
+  'Records in this preview are not associated with an account, so this view cannot tell which of them are yours.',
+  'It is not showing zero — it has no way to select your records at all.',
+  'Personal statistics will appear here once experiments are associated with your signed-in account.',
+  'Two things are missing today, and both are properties of this preview rather than of your work: nothing here establishes who you are, and no record in this workspace carries an author, so there is no way to select the records that are yours.',
+  'Nothing on this tab is hidden from you, and none of the figures below are zero — they are absent.',
+  'A count of zero would say you have no records;',
+  'what is true is that this build cannot tell whose records these are.',
+  'Open Data & Privacy Settings',
+  'See Workspace Statistics',
+  'Views Prepared for Your Account',
+  'Each view below is defined as a typed dataset, so it can be filled in without changing this page\'s layout.',
+  'None of them is drawing anything right now.',
+  'Records You Author, by Workflow Step',
+  'how many records you author sit at each step of the five-step workflow, counted once each at their first unsatisfied step.',
+  'Will render as a bar chart.',
+  'Needs records linked to an account.',
+  'Evidence Support in Records You Author',
+  'what share of the fields in records you author is supported by evidence, counted in fields rather than in records.',
+  'Will render as a stacked bar.',
+  'Records You Authored and Records You Contributed To',
+  'how many records name you as their author, and how many you contributed to without authoring.',
+  'A record can be both, so the two are never added together.',
+  'Will render as a comparison rows.',
+  'What Most Often Blocks Records You Author',
+  'which unmet requirements appear most often across the records you author.',
+  'One record can carry several, so these do not sum to a record count.',
+  'Export Readiness Over Time',
+  'how many records you author were ready to export in each period.',
+  'Will render as a line chart.',
+  'Validation Issues Over Time',
+  'how many schema-validation issues were raised against the records you author, in each period.',
+  'Needs change history this preview does not keep.',
+  'Exports You Made Over Time',
+  'how many official records you exported in each period.',
+  'Your Recent Activity',
+  'the most recent changes you made, each linking to the record it affected.',
+  'Will render as a list.',
+  'Each description names the unit it would count — records, fields, or validation issues — because a dashboard that blurs records into fields states a number nobody can act on.',
+  'That is the same distinction the workspace figures keep, where evidence support is counted in fields beside the number of records those fields came from.',
+];
+
+/**
+ * …AND THE PAGE LEAD, which renders OUTSIDE the panel and is the one piece of
+ * this tab's copy the panel-scoped set cannot see. `StatisticsPage.tsx` sets it
+ * per tab; this is the `mine` branch's sentence.
+ */
+const APPROVED_MINE_LEAD_SENTENCES: readonly string[] = [
+  'This preview cannot tell whose records these are, so this tab states that rather than a figure.',
+];
+
+/** One raw copy unit, whitespace-normalised and split into sentences. */
+function sentencesOfCopy(raw: string): string[] {
+  const normalised = raw.replace(/\s+/g, ' ').trim();
+  if (normalised === '') return [];
+  return normalised
+    .split(/(?<=[.;!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
+
+/** The unique, sorted sentence set of a list of raw copy units. */
+function sentenceSet(units: readonly string[]): string[] {
+  return [...new Set(units.flatMap(sentencesOfCopy))].sort();
+}
+
+/* ══ LAYER 2 · THE EMPTINESS MATCHER ════════════════════════════════════════
+ *
+ * ITS JOB IS SMALLER NOW, AND IT IS A JOB IT CAN DO. It no longer has to police
+ * free prose written by anyone; it is applied to the entries of the two lists
+ * above, so it has to catch a bad ADDITION — a false sentence somebody
+ * transcribed into an allowlist while adding it to the panel. That is a review
+ * aid with a review attached, not a perimeter.
+ *
+ * It is kept, rather than deleted, because the transcription step is exactly
+ * where a false claim would arrive looking legitimate.
+ */
+
 /** A quantity noun this tab could state a personal count of. */
 const COUNT_NOUN = 'records?|experiments?|exports?|fields?|figures?|activity|drafts?|issues?|questions?|counts?';
 
 /** The emptiness values a count can be given. */
 const EMPTY_WORD = 'zero|none|nil|nought|naught|nothing|empty';
 
-/** The reader, named. */
+/** The reader, named in the second person. */
 const PERSONAL = /\byou\b|\byour\b|\byours\b/i;
+
+/**
+ * The reader, named in the THIRD person — and this pattern is an admission.
+ *
+ * The personal gate below (which is real: see `PERSONAL_EMPTINESS`) let four
+ * hand-written sentences through, all measured passing at 4b86f7e:
+ *
+ *     This account has no records.       The signed-in user has no records.
+ *     The reader has no experiments.     The current user has authored zero records.
+ *
+ * On a tab headed "Views Prepared for Your Account", `This account has no
+ * records.` is a likelier edit than most of the `MUST_FLAG` table. The previous
+ * version of the comment below concluded that a leak here "is trap 1's job, and
+ * trap 1 forbids the import that would supply one" — which is true of a DERIVED
+ * figure and covers none of these four, because they are hand-written copy with
+ * no arithmetic behind them.
+ *
+ * So they are covered here, and this list is honestly a vocabulary allowlist of
+ * exactly the kind the header above says will keep losing. Measured against the
+ * pattern as written: `whoever is signed in has no records`, `this workspace's
+ * owner has no records` and `the viewer has no records` all pass it. That is
+ * acceptable ONLY because layer 1 rejects any of them on the way in. Do not promote
+ * this pattern into a perimeter, and do not read the four nouns it does list as a
+ * closed set of ways to name a person.
+ */
+const READER_IN_THIRD_PERSON =
+  /\bthis account\b|\bthe (?:signed[- ]in |current |logged[- ]in )?(?:user|reader|author|account holder)\b/i;
+
+/** True when `clause` names the reader as its subject, in either person. */
+function namesTheReaderAsSubject(clause: string): boolean {
+  return PERSONAL.test(clause) || READER_IN_THIRD_PERSON.test(clause);
+}
 
 /**
  * Emptiness applied to a countable unit. A CLAIM ONLY WHERE THE READER IS NAMED,
  * because the class this file guards is "an emptiness value applied to a
  * countable unit of THE READER'S work" and the reader is part of that definition.
  *
- * That narrowing is deliberate and it has a cost worth stating: this tab really
- * does say, truthfully, "no record in this workspace carries an author" — a
- * WORKSPACE fact with no personal subject. Under a sentence-wide escape that
- * clause was excused by a `no way` three clauses later, which is an accident;
- * under clause scoping without this gate it would be reported, which is a false
- * positive on true copy. A workspace figure leaking onto this tab is trap 1's
- * job, and trap 1 forbids the import that would supply one.
+ * THE COST OF THAT NARROWING, STATED AT FULL SIZE. What it buys is real: this tab
+ * truthfully says "no record in this workspace carries an author", a WORKSPACE
+ * fact with no personal subject, and under clause scoping without this gate it
+ * would be reported as a false positive on true copy. What it costs is the four
+ * third-person sentences named on `READER_IN_THIRD_PERSON`, which the gate let
+ * through and which that pattern now covers — partially, by an open-ended list of
+ * subject nouns. The exposure is stated there rather than described as covered.
  */
 const PERSONAL_EMPTINESS: readonly RegExp[] = [
   // Prepositive: "no records", "zero records", "none of the figures",
@@ -205,36 +444,80 @@ const SUBJECTLESS_EMPTINESS: readonly RegExp[] = [
 ];
 
 /**
- * The one escape, and it is deliberately NOT plain negation.
+ * The escape, and TWO properties of it are load-bearing.
  *
- * The tab's most important sentence is "A count of zero WOULD say you have no
- * records" — a hypothetical that denies the claim, and a page-wide ban on the
- * word would flag exactly the copy doing the honest work. So a triggered clause
- * passes only when IT — not some other clause of the same sentence — is framed as
- * a HYPOTHETICAL or as a statement about what this build CANNOT DO.
+ * 1 · IT IS ABOUT MODALITY, NOT POLARITY. The tab's most important sentence is
+ *     "A count of zero WOULD say you have no records" — a hypothetical that
+ *     denies the claim — so a page-wide ban on the words would flag exactly the
+ *     copy doing the honest work. `\bnot\b` is deliberately absent: it was the
+ *     obvious escape and it is a hole, because "You have not exported any
+ *     records" is a false personal claim wearing a negation.
  *
- * `\bnot\b` is not in this list on purpose. It was the obvious escape and it is
- * a hole: "You have not exported any records" is a false personal claim that
- * wears a negation, which is why the negated-verb pattern exists and why the
- * frame has to be about modality rather than polarity.
+ * 2 · IT MUST OPEN BEFORE THE CLAIM ENDS. A denial that FOLLOWS a claim does not
+ *     unsay it. "You have no records and this preview cannot tell you more than
+ *     that" states the zero, then reports the preview's ignorance OF it — and
+ *     that shape is what every one of the ten evasions a third reviewer measured
+ *     at 4b86f7e had in common, whatever punctuation joined the two halves:
+ *     em-dash, colon, parenthesis, `while`, `whereas`, `although`, `because`, a
+ *     newline, or nothing at all. Widening the joiner list would have caught some
+ *     of them and lost to the next one; the positional rule catches all ten
+ *     without knowing what a joiner is.
+ *
+ *     "Before the claim ENDS" and not "before it starts", because the frame can
+ *     sit INSIDE the trigger: "Nothing would be attributed to you rather than to
+ *     an account" is honest copy whose trigger match begins at "Nothing".
  */
 const DENIAL_FRAME = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brather than\b|\b(?:is|are) absent\b/i;
 
 /**
- * A sentence's coordinate clauses. Split on the coordinators that join two
- * independent claims — `, and`, `, so`, `, but`, `, or`, `, yet`, `; ` — and NOT
- * on the em-dash, which on this surface introduces an appositive that continues
- * the same claim ("none of the figures below are zero — they are absent").
+ * A sentence's coordinate clauses, split on the coordinators that join two
+ * independent claims — `, and`, `, so`, `, but`, `, or`, `, yet`, `; ` — AND ON
+ * THE EM-DASH.
+ *
+ * THE EM-DASH USED TO BE EXEMPT AND THE STATED REASON WAS FALSE. The exemption
+ * was justified here by true copy it would flag: "none of the figures below are
+ * zero — they are absent". Measured on that exact fragment against the matcher as
+ * it stood at 4b86f7e: `triggers=false`, `personal=false` — it does not trigger
+ * AT ALL, because the sibling personal-subject gate added in the same commit
+ * already excludes it (that clause names no reader). So the exemption was defended
+ * by a cost the same commit had eliminated, and it let
+ * `You have no records — this preview cannot tell you more than that.` through.
+ * The measured cost of splitting is zero.
+ *
+ * ONE CORRECTION TO THE NOTE THAT PROMPTED THIS. It recorded `denial=false` on the
+ * same fragment; measured, `DENIAL_FRAME` matches it — `are absent` is one of its
+ * alternatives, added in the same commit for this very sentence. The conclusion is
+ * unaffected, since `triggers=false` settles it alone, but the figure is corrected
+ * rather than repeated.
  */
 function clausesOf(sentence: string): string[] {
-  return sentence.split(/,\s+(?:and|but|so|or|yet)\s+|;\s+/i);
+  return sentence.split(/,\s+(?:and|but|so|or|yet)\s+|;\s+|\s*[—–]\s*/i);
 }
 
-/** True when `clause` states that a countable unit of the reader's work is empty. */
-function triggersEmptiness(clause: string): boolean {
-  if (SUBJECTLESS_EMPTINESS.some((p) => p.test(clause))) return true;
-  if (NAMES_THE_READER.some((p) => p.test(clause))) return true;
-  return PERSONAL.test(clause) && PERSONAL_EMPTINESS.some((p) => p.test(clause));
+/** Where a denial frame opens in `clause`, or `null` if none does. */
+function denialFrameAt(clause: string): number | null {
+  const found = DENIAL_FRAME.exec(clause);
+  return found === null ? null : found.index;
+}
+
+/**
+ * Where the EARLIEST emptiness trigger in `clause` ends, or `null` when the
+ * clause states no emptiness about the reader's work.
+ */
+function triggerEndsAt(clause: string): number | null {
+  const patterns: readonly RegExp[] = [
+    ...SUBJECTLESS_EMPTINESS,
+    ...NAMES_THE_READER,
+    ...(namesTheReaderAsSubject(clause) ? PERSONAL_EMPTINESS : []),
+  ];
+  let earliest: number | null = null;
+  for (const pattern of patterns) {
+    const found = pattern.exec(clause);
+    if (found === null) continue;
+    const end = found.index + found[0].length;
+    if (earliest === null || end < earliest) earliest = end;
+  }
+  return earliest;
 }
 
 /** Every CLAUSE of `text` that asserts the reader has nothing. */
@@ -242,7 +525,11 @@ function emptinessClaims(text: string): string[] {
   const claims: string[] = [];
   for (const sentence of text.split(/(?<=[.;])\s+/)) {
     for (const clause of clausesOf(sentence)) {
-      if (triggersEmptiness(clause) && !DENIAL_FRAME.test(clause)) claims.push(clause.trim());
+      const claimEnds = triggerEndsAt(clause);
+      if (claimEnds === null) continue;
+      const frame = denialFrameAt(clause);
+      if (frame !== null && frame < claimEnds) continue;
+      claims.push(clause.trim());
     }
   }
   return claims;
@@ -499,12 +786,18 @@ describe('My Stats invents no personal figure — the six traps', () => {
 
     /*
      * …and NO CLAUSE ASSERTS THAT THE READER HAS NOTHING — in digits or in words.
-     * Checked per clause, with the modal escape documented above, so the sentences
-     * that legitimately DENY a zero stay legal while a clause that states one
-     * cannot borrow the denial from its neighbour.
+     * Checked per clause, with the positional modal escape documented above, so
+     * the sentences that legitimately DENY a zero stay legal while a clause that
+     * states one cannot borrow a denial from its neighbour or from its own tail.
      *
      * The whole set is reported rather than the first match, so a copy edit that
      * introduces two says so once.
+     *
+     * THIS IS NO LONGER THE PRIMARY GUARD, and it must not be relied on as one.
+     * Three generations of it were evaded by punctuation; what actually stops a
+     * new sentence — false OR true — is `the approved-sentence allowlist` below,
+     * which compares the rendered set to an enumerated one. This check survives
+     * because it is what reads the allowlist's entries.
      */
     expect(
       emptinessClaims(text),
@@ -621,6 +914,183 @@ describe('My Stats invents no personal figure — the six traps', () => {
   });
 });
 
+// --- layer 1 · the approved-sentence allowlist -------------------------------
+
+/**
+ * FOURTEEN SENTENCES A THIRD INDEPENDENT REVIEWER MEASURED AS PASSING at 4b86f7e,
+ * each inserted into production copy one at a time.
+ *
+ * The first ten defeated the clause splitter: every one states a personal zero and
+ * then follows it with a denial, joined by something the splitter did not know
+ * about — or, in entry 2, by nothing at all. The last four defeated the
+ * personal-subject gate by naming the reader in the third person.
+ *
+ * ALL FOURTEEN RE-MEASURED against the matcher as it stood at 4b86f7e, rather than
+ * accepted from the review: all fourteen came back UNFLAGGED. Every one of them is
+ * now reported, and every one of them additionally fails layer 1 when inserted into
+ * production copy — measured one at a time, fourteen runs.
+ *
+ * They are listed separately from `MUST_FLAG` because they carry a second job:
+ * `an approved sentence that asserts an emptiness is rejected` runs the layer-2
+ * matcher over each of them as though somebody had transcribed it into the
+ * allowlist, which is the one route into the panel that layer 1 cannot see past.
+ */
+const REVIEWER_EVASIONS: readonly string[] = [
+  // 1–10 · a denial that FOLLOWS the claim, joined ten different ways.
+  'You have no records — this preview cannot tell you more than that.',
+  'You have no records and this preview cannot tell you more than that.',
+  'You have no records: this preview cannot tell you more.',
+  'You have no records (this preview cannot tell you more).',
+  'You have no records while this preview cannot tell more.',
+  'You have no records whereas the workspace cannot say.',
+  'You have no records although this cannot be confirmed.',
+  'You have no records because nothing would be attributed.',
+  'You have no records\nand this preview cannot tell you more.',
+  'Your export count is zero — no way to say otherwise.',
+  // 11–14 · the reader named in the third person, past the personal gate.
+  'This account has no records.',
+  'The signed-in user has no records.',
+  'The current user has authored zero records.',
+  'The reader has no experiments.',
+];
+
+/**
+ * THE PRIMARY GUARD. The panel's rendered sentences must be EXACTLY the approved
+ * set — not a subset, not a superset, no substring matching anywhere.
+ *
+ * Every test in here is about a set difference, so none of them can be evaded by
+ * how a sentence is punctuated, joined, framed or spelled: an unapproved sentence
+ * fails because it is unapproved.
+ */
+describe('the approved-sentence allowlist', () => {
+  it('the panel renders exactly the approved sentences, and nothing else', async () => {
+    const { container } = await renderMineTab();
+    const panel = container.querySelector('#statistics-tabpanel-mine') as HTMLElement;
+
+    const rendered = sentenceSet(copyUnitsOf(panel));
+    // Vacuity guard first: a broken extractor returning [] would otherwise be
+    // reported as a mismatch against a list, which reads like a copy change.
+    expect(rendered.length, 'the extractor found no copy at all — it is broken').toBeGreaterThan(30);
+    expect(
+      rendered,
+      'the My Stats panel renders a sentence that is not on the approved list, or no ' +
+        'longer renders one that is. If the change is intended, transcribe it into ' +
+        'APPROVED_PANEL_SENTENCES in the SAME commit — that entry is where the claim gets reviewed.',
+    ).toEqual([...APPROVED_PANEL_SENTENCES].sort());
+  });
+
+  it('the page lead renders exactly the approved lead sentence', async () => {
+    const { container } = await renderMineTab();
+    const lead = container.querySelector('.placeholder > p') as HTMLElement;
+    expect(lead, 'the page lead must exist').not.toBeNull();
+    expect(sentenceSet(copyUnitsOf(lead))).toEqual([...APPROVED_MINE_LEAD_SENTENCES].sort());
+  });
+
+  /*
+   * THE DESIGN, DEMONSTRATED. Every one of the fourteen measured evasions is
+   * rejected by set difference — and so is a sentence that is perfectly TRUE.
+   * That is not a bug in the guard, it is the whole mechanism: layer 1 does not
+   * read meaning, so it cannot be argued with, and the cost is that an honest copy
+   * addition has to be transcribed. The two `it.each` cases below are the same
+   * assertion over the two polarities, which is the point being made.
+   */
+  it.each([...REVIEWER_EVASIONS, 'This preview also has no view for a readiness trend.'])(
+    'a sentence the panel does not currently render is rejected, whatever it says: %s',
+    async (inserted) => {
+      const { container } = await renderMineTab();
+      const panel = container.querySelector('#statistics-tabpanel-mine') as HTMLElement;
+      const withInsertion = sentenceSet([...copyUnitsOf(panel), inserted]);
+      expect(withInsertion).not.toEqual([...APPROVED_PANEL_SENTENCES].sort());
+    },
+  );
+
+  /*
+   * …and DELETING an approved sentence fails too, in the other direction. A guard
+   * that only rejected additions would let the tab's own zero-denying sentence be
+   * removed, which is how the honest copy stops being said.
+   */
+  it('removing an approved sentence fails as well — the set is exact in both directions', async () => {
+    const { container } = await renderMineTab();
+    const panel = container.querySelector('#statistics-tabpanel-mine') as HTMLElement;
+    const units = copyUnitsOf(panel);
+    const removed = units.filter((unit) => !unit.includes('A count of zero would say'));
+    expect(removed.length, 'the removal must apply').toBeLessThan(units.length);
+    expect(sentenceSet(removed)).not.toEqual([...APPROVED_PANEL_SENTENCES].sort());
+  });
+
+  /*
+   * THE ACCESSIBLE-NAME HALF OF THE EXTRACTOR IS EXERCISED HERE, because the panel
+   * currently carries NONE of those attributes — measured: the extraction over
+   * `#statistics-tabpanel-mine` yields text nodes only. An unexercised branch of a
+   * guard is the same defect as a guard with a hole (it is how `IN_SEGMENT_LABEL_SLOTS`
+   * shipped untested), so the mechanism is proved by planting one.
+   *
+   * `aria-label` is the realistic route: a decorative icon or an icon-only control
+   * gets a name, the name is copy, and it is read out to exactly the readers who
+   * cannot see the paragraph that qualifies it.
+   */
+  it.each([...ACCESSIBLE_NAME_ATTRS])(
+    'reads copy out of the %s attribute, not just out of text nodes',
+    async (attribute) => {
+      const { container } = await renderMineTab();
+      const panel = container.querySelector('#statistics-tabpanel-mine') as HTMLElement;
+      const before = sentenceSet(copyUnitsOf(panel));
+      expect(before, 'the panel must start clean').toEqual([...APPROVED_PANEL_SENTENCES].sort());
+
+      const heading = panel.querySelector('h2') as HTMLElement;
+      expect(heading, 'the panel must have a heading to plant the attribute on').not.toBeNull();
+      heading.setAttribute(attribute, 'You have no records.');
+
+      const after = sentenceSet(copyUnitsOf(panel));
+      expect(after, `copy in ${attribute} is invisible to the extractor`).toContain(
+        'You have no records.',
+      );
+      expect(after).not.toEqual([...APPROVED_PANEL_SENTENCES].sort());
+      // …and layer 2 reports it as well, so the two layers agree about attributes.
+      expect(assertsEmptiness('You have no records.')).toBe(true);
+    },
+  );
+
+  it('carries no duplicate entry, so the sorted comparison is well defined', () => {
+    for (const [name, list] of [
+      ['APPROVED_PANEL_SENTENCES', APPROVED_PANEL_SENTENCES],
+      ['APPROVED_MINE_LEAD_SENTENCES', APPROVED_MINE_LEAD_SENTENCES],
+    ] as const) {
+      expect(new Set(list).size, `${name} lists a sentence twice`).toBe(list.length);
+    }
+  });
+
+  /*
+   * …and each entry is ONE sentence, so an entry cannot smuggle a second claim in
+   * behind a full stop. Checked with the same splitter the comparison uses.
+   */
+  it('every entry is a single sentence under the splitter that compares them', () => {
+    for (const entry of [...APPROVED_PANEL_SENTENCES, ...APPROVED_MINE_LEAD_SENTENCES]) {
+      expect(sentencesOfCopy(entry), `"${entry}" is more than one sentence`).toEqual([entry]);
+    }
+  });
+
+  /*
+   * LAYER 2, APPLIED WHERE IT NOW BELONGS. The emptiness matcher reads the
+   * allowlist's own entries, so a false sentence transcribed into it — the one
+   * route past layer 1 — is reported.
+   */
+  it('no approved sentence asserts that the reader has nothing', () => {
+    for (const entry of [...APPROVED_PANEL_SENTENCES, ...APPROVED_MINE_LEAD_SENTENCES]) {
+      expect(emptinessClaims(entry), `approved sentence: ${entry}`).toEqual([]);
+    }
+  });
+
+  it.each([...REVIEWER_EVASIONS])(
+    'an approved sentence that asserts an emptiness is rejected: %s',
+    (sentence) => {
+      const wouldBeApproved = [...APPROVED_PANEL_SENTENCES, sentence];
+      const flagged = wouldBeApproved.filter((entry) => assertsEmptiness(entry));
+      expect(flagged).toEqual([sentence]);
+    },
+  );
+});
+
 // --- the matcher itself -----------------------------------------------------
 
 /**
@@ -701,6 +1171,28 @@ describe('the emptiness matcher', () => {
     // is not one: it is exactly how an emptiness ASSERTION is normally phrased.
     expect(DENIAL_FRAME.test('You have not exported any records.')).toBe(false);
     expect(assertsEmptiness('You have not exported any records.')).toBe(true);
+  });
+
+  /*
+   * POSITION, NOT PRESENCE — the generation-3 fix, and the one that catches all
+   * ten of the third reviewer's sentences without knowing what joins two clauses.
+   * Each pair contains the SAME claim and the SAME modal vocabulary; they differ
+   * only in whether the denial opens before the claim ends or after it.
+   */
+  it.each([
+    [
+      'You have no records and this preview cannot tell you more than that.',
+      'A count of zero would say you have no records.',
+    ],
+    ['You have no records: this preview cannot tell you more.', 'It would be wrong to say you have no records.'],
+    [
+      'Your export count is zero — no way to say otherwise.',
+      'Nothing would be attributed to you rather than to an account.',
+    ],
+    ['The reader has no experiments.', 'A count of zero would say the reader has no experiments.'],
+  ])('a denial that FOLLOWS the claim does not unsay it: %s', (claim, denial) => {
+    expect(assertsEmptiness(claim), `must be FLAGGED: ${claim}`).toBe(true);
+    expect(assertsEmptiness(denial), `must PASS: ${denial}`).toBe(false);
   });
 
   /*
@@ -790,9 +1282,14 @@ describe('the emptiness matcher', () => {
       'e2e/specs/charts.spec.ts',
     );
 
-    // Vacuity guard: the block must be the real thing, not two empty slices.
+    // Vacuity guard: the block must be the real thing, not two empty slices —
+    // and it must carry BOTH layers, since layer 1 is what the browser copy is
+    // now mostly for.
     expect(here).toContain('function emptinessClaims');
     expect(here).toContain('SUBJECTLESS_EMPTINESS');
+    expect(here).toContain('const APPROVED_PANEL_SENTENCES');
+    expect(here).toContain('const APPROVED_MINE_LEAD_SENTENCES');
+    expect(here).toContain('function sentenceSet');
     expect(here.length).toBeGreaterThan(2000);
     expect(there, 'the browser copy of the emptiness matcher has drifted').toBe(here);
   });

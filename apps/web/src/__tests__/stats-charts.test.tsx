@@ -703,66 +703,286 @@ describe('the chart palette declared on .statistics', () => {
   });
 
   /*
-   * THE TITLE USED TO ASSERT MORE THAN THE BODY, which is its own defect.
+   * ── THE COLOUR POLICY, BOUND PER SELECTOR ─────────────────────────────────
    *
-   * It read "every mark rule draws from those six slots and no other colour" while
-   * the body only rejected a literal `#hex` / `rgb()` / `hsl()`. It never inspected
-   * the var NAME, so `fill: var(--anything)` passed — and an independent reviewer
-   * used exactly that, declaring three identity hues on a descendant selector and
-   * painting three slots with them, through 2697 passing tests.
+   * TWO GENERATIONS OF THIS TEST OVERSTATED WHAT IT CHECKED, in different ways,
+   * and both are recorded because the second was introduced while fixing the first.
    *
-   * So the name is now resolved against a MEASURED allowlist, and the title says
-   * what is checked. The allowlist is not the six colour tokens alone: measured off
-   * this stylesheet, chart marks legitimately also wear three tokens this file does
-   * not own — `--surface` for the marker ring, `--border-faint` for the gridlines
-   * and `--border` for the axis rule — plus the keyword `transparent` on the
-   * pointer hit area. Those are CHROME, not data ink, and they are listed
-   * separately so a ramp colour cannot be smuggled in as chrome or vice versa.
+   * ROUND 1 — TITLE OVER BODY. It read "every mark rule draws from those six slots
+   * and no other colour" while the body only rejected a literal `#hex` / `rgb()` /
+   * `hsl()`. It never inspected the var NAME, so `fill: var(--anything)` passed —
+   * and a reviewer declared three identity hues on a descendant selector and
+   * painted three slots with them through 2697 passing tests.
+   *
+   * ROUND 2 — A UNION THAT ENFORCED NO DIRECTION. The fix resolved the name against
+   * `[...DATA_INK, ...CHROME]` and the comment claimed the two were "listed
+   * separately so a ramp colour cannot be smuggled in as chrome or vice versa".
+   * One union membership test cannot say that. Negative control, measured at
+   * 4b86f7e: `--stats-ramp-3` on `.stats-chart-grid` AND `--border` on
+   * `.stats-chart-segment[data-slot='3']`, both at once — 59 of 59 tests passed.
+   * The gridline became a data colour and the middle of the ramp became a hairline,
+   * and nothing in this file objected.
+   *
+   * ROUND 2 ALSO SCANNED TOO FEW PROPERTIES. It extracted `fill|stroke` only, so a
+   * literal colour in `background` or `color` was unguarded — including on
+   * `.stats-chart-swatch` and `.stats-chart-tooltip-key`, which are the legend and
+   * readout keys that BIND a legend entry to a segment, i.e. exactly where a
+   * categorical identity hue would be reintroduced. Negative control, measured at
+   * 4b86f7e: three identity hues as literal hex on swatches 1–3 — 59 of 59 passed.
+   *
+   * SO THE POLICY IS NOW PER SELECTOR. Every colour-bearing declaration under a
+   * `.stats-chart-*` rule is looked up by its own class, and each class names the
+   * exact value set it may carry. The table is closed: a class that declares a
+   * colour and is not in it fails, so a new chart class cannot ship unclassified.
+   * `a data-ink token is referenced only by a mark class` below closes the other
+   * direction over EVERY property, including the ones this scan does not read.
    */
-  it('every mark rule wears a NAMED token from the data-ink or chrome set, and no other colour', async () => {
+
+  /** Data ink: the only colours that may encode a value. */
+  const DATA_INK: readonly string[] = [...CHART_COLOUR_TOKENS];
+  /** Text tokens. Chart text may wear these and nothing else. */
+  const TEXT_INK: readonly string[] = [
+    '--text-heading',
+    '--text-strong',
+    '--text-secondary',
+    '--text-muted',
+    '--text-slate',
+    '--text-primary',
+    '--action',
+  ];
+  /** Non-colour keywords a declaration may legally carry. */
+  const KEYWORDS: readonly string[] = ['transparent', 'none', 'currentColor'];
+
+  /**
+   * What each `.stats-chart-*` class may paint with. Closed: an unlisted class that
+   * declares a colour fails.
+   *
+   * The three groups are the point of the table. Only the first may name a ramp
+   * step or the series colour; the chrome entries name ONE token each, spelled out,
+   * so "it is chrome" cannot be used to admit an arbitrary token; text may only
+   * wear text tokens.
+   */
+  const COLOUR_POLICY: Readonly<Record<string, readonly string[]>> = {
+    // ── data ink · the marks that encode a value, plus the two keys that BIND a
+    //    legend or readout entry to one. Nothing else may name a ramp step.
+    'stats-chart-bar': DATA_INK,
+    'stats-chart-marker': DATA_INK,
+    'stats-chart-series': DATA_INK,
+    'stats-chart-segment': DATA_INK,
+    // The unslotted swatch is a fallback for a key with no slot, hence the one
+    // chrome token beside the ramp.
+    'stats-chart-swatch': [...DATA_INK, '--border-strong'],
+    'stats-chart-tooltip-key': DATA_INK,
+    // ── chrome · geometry and surfaces. One token each.
+    'stats-chart-marker-ring': ['--surface'],
+    'stats-chart-grid': ['--border-faint'],
+    'stats-chart-axis-rule': ['--border'],
+    'stats-chart-hit': ['transparent'],
+    'stats-chart-tooltip': ['--surface'],
+    'stats-chart-state-block': ['--surface-subtle'],
+    'stats-chart-state-pending': ['--cover-bg'],
+    // ── text · the contrast test above computes the RATIOS these have to clear;
+    //    this only keeps them out of the data set and the data set out of them.
+    'stats-chart-caption': TEXT_INK,
+    'stats-chart-note': TEXT_INK,
+    'stats-chart-row-label': TEXT_INK,
+    'stats-chart-row-value': TEXT_INK,
+    'stats-chart-tick': TEXT_INK,
+    'stats-chart-value': TEXT_INK,
+    'stats-chart-cat': TEXT_INK,
+    'stats-chart-xlabel': TEXT_INK,
+    'stats-chart-legend-label': TEXT_INK,
+    'stats-chart-legend-detail': TEXT_INK,
+    'stats-chart-tooltip-value': TEXT_INK,
+    'stats-chart-tooltip-label': TEXT_INK,
+    'stats-chart-table-toggle': TEXT_INK,
+    'stats-chart-table': TEXT_INK,
+    'stats-chart-state': TEXT_INK,
+    'stats-chart-state-title': TEXT_INK,
+    'stats-chart-state-label': TEXT_INK,
+    // ── the one deliberate crossing: text set INSIDE a coloured fill, which is
+    //    why `--surface` (white on the two dark ramp steps) is legal here.
+    'stats-chart-inlabel': ['--surface', '--text-heading'],
+  };
+
+  /** The classes the table permits to name a data-ink token. */
+  const dataMarkClasses = Object.entries(COLOUR_POLICY)
+    .filter(([, allowed]) => allowed.includes('--stats-ramp-3'))
+    .map(([cls]) => cls)
+    .sort();
+
+  /** The last `.stats-chart-*` class in one comma-separated selector part. */
+  function chartClassOf(selectorPart: string): string | null {
+    const classes = [...selectorPart.matchAll(/\.(stats-chart-[a-z0-9-]*)/g)].map((m) => m[1]);
+    return classes.length === 0 ? null : classes[classes.length - 1];
+  }
+
+  /** Every `selector { … }` rule of the comment-stripped stylesheet. */
+  function rulesOf(css: string): { selector: string; declarations: string }[] {
+    return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({
+      selector: m[1],
+      declarations: m[2],
+    }));
+  }
+
+  it('the data-mark classes are exactly the six the policy names', () => {
+    // Derived from the table, then pinned: widening the table is what this test
+    // makes visible, since the table is also what the scan below trusts.
+    expect(dataMarkClasses).toEqual([
+      'stats-chart-bar',
+      'stats-chart-marker',
+      'stats-chart-segment',
+      'stats-chart-series',
+      'stats-chart-swatch',
+      'stats-chart-tooltip-key',
+    ]);
+  });
+
+  it('every chart colour declaration wears a token its OWN selector is allowed', async () => {
     const css = await statisticsCss();
 
-    /** Data ink: the only colours that may encode a value. */
-    const DATA_INK: readonly string[] = [...CHART_COLOUR_TOKENS];
-    /** Chrome: tokens this file references but does not own. Never data. */
-    const CHROME: readonly string[] = ['--surface', '--border-faint', '--border'];
-    /** Non-colour keywords a mark may legally carry. */
-    const KEYWORDS: readonly string[] = ['transparent', 'none', 'currentColor'];
-
     const seen: string[] = [];
-    for (const [, decl] of css.matchAll(/\.stats-chart-[a-z-]*(?:\[[^\]]*\])?\s*\{([^}]*)\}/g)) {
-      for (const [, value] of decl.matchAll(/\b(?:fill|stroke)\s*:\s*([^;]+)/g)) {
-        const raw = value.trim();
-        seen.push(raw);
+    for (const { selector, declarations } of rulesOf(css)) {
+      if (!/\.stats-chart-/.test(selector)) continue;
+      for (const [, property, rawValue] of declarations.matchAll(
+        /(?:^|[;{\s])(fill|stroke|background|color)\s*:\s*([^;]+)/g,
+      )) {
+        const value = rawValue.trim();
 
-        // 1 · no literal colour of any notation.
-        expect(raw, 'a chart mark must not carry a literal colour').not.toMatch(
+        // 1 · no literal colour of any notation, in any of the four properties.
+        expect(value, `${property} must not carry a literal colour: "${value}"`).not.toMatch(
           /#[0-9a-fA-F]{3,8}|\brgba?\(|\bhsla?\(|\bcolor-mix\(|\boklch\(|\blab\(/,
         );
 
-        if (KEYWORDS.includes(raw)) continue;
+        // 2 · one plain `var()` or a listed keyword — no fallback colour hiding in
+        //     a second argument, no space-separated list.
+        const named = KEYWORDS.includes(value)
+          ? value
+          : (/^var\(\s*(--[a-z0-9-]+)\s*\)$/.exec(value)?.[1] ?? null);
+        expect(named, `must be one plain var() or a listed keyword: "${value}"`).not.toBeNull();
 
-        // 2 · it is a single `var()` reference and nothing else — no fallback
-        //     colour hiding in the second argument, no space-separated list.
-        const ref = /^var\(\s*(--[a-z0-9-]+)\s*\)$/.exec(raw);
-        expect(ref, `a chart mark must be one plain var() or a listed keyword: "${raw}"`).not.toBeNull();
-
-        // 3 · and the NAME is on the allowlist. This is the assertion the title
-        //     always claimed and the body never made.
-        expect(
-          [...DATA_INK, ...CHROME],
-          `"${raw}" is not a validated chart colour — a new custom property is how a ` +
-            `categorical slot comes back under a new name`,
-        ).toContain(ref![1]);
+        // 3 · and its own selector must be allowed to wear it. Per PART, so a
+        //     comma-grouped rule has to be legal for every selector in the group.
+        let classesInRule = 0;
+        for (const part of selector.split(',')) {
+          const cls = chartClassOf(part);
+          if (cls === null) continue;
+          classesInRule += 1;
+          const allowed = COLOUR_POLICY[cls];
+          expect(
+            allowed,
+            `.${cls} declares ${property} and has no COLOUR_POLICY entry — classify it as ` +
+              `data ink, chrome or text rather than leaving it unchecked`,
+          ).toBeDefined();
+          expect(
+            allowed,
+            `.${cls} { ${property}: ${value} } is not permitted for that selector. A ramp step ` +
+              `outside the mark classes is a data colour used as chrome; a chrome or text token ` +
+              `on a mark is a value drawn in the wrong ink.`,
+          ).toContain(named);
+          seen.push(`${cls} ${property} ${value}`);
+        }
+        expect(classesInRule, `no chart class found in selector "${selector.trim()}"`).toBeGreaterThan(0);
       }
     }
 
-    // Vacuity guard: the scan must actually be finding mark declarations. Measured
-    // today: 11 — five ramp fills, two series, the marker ring, the grid, the axis
-    // rule, and the transparent hit area.
-    expect(seen.length, 'no chart mark rule was inspected — the scan is broken').toBe(11);
-    expect(seen, 'the ramp fills in particular must be covered').toContain('var(--stats-ramp-3)');
-    expect(seen).toContain('transparent');
+    /*
+     * Vacuity guard. MEASURED today: 50 checked (selector-part, property) pairs
+     * over 47 declarations. The three extra are the comma-grouped rules, each
+     * checked once per class in the group — `.stats-chart-bar`/`.stats-chart-marker`
+     * and the two `.stats-chart-inlabel` slot pairs. Round 2's `fill|stroke` scan
+     * saw 11 of those 47.
+     */
+    expect(seen.length, 'the colour scan found almost nothing — it is broken').toBe(50);
+    expect(seen, 'the ramp fills must be covered').toContain(
+      'stats-chart-segment fill var(--stats-ramp-3)',
+    );
+    expect(seen, 'and the legend swatch backgrounds, which fill|stroke could not see').toContain(
+      'stats-chart-swatch background var(--stats-ramp-3)',
+    );
+    expect(seen, 'and chart text colour').toContain('stats-chart-tick color var(--text-muted)');
+  });
+
+  /*
+   * THE OTHER DIRECTION, over EVERY property rather than the four above. A data
+   * colour must appear only where a value is encoded — so `--stats-ramp-3` in a
+   * `border`, a `box-shadow`, an `outline` or a property nobody has thought of yet
+   * is caught here even though the scan above does not read those properties.
+   */
+  it('a data-ink token is referenced ONLY by a class allowed to encode a value', async () => {
+    const css = await statisticsCss();
+    const references: string[] = [];
+    for (const { selector, declarations } of rulesOf(css)) {
+      for (const [, token] of declarations.matchAll(/var\((--stats-(?:ramp-\d|series))\)/g)) {
+        for (const part of selector.split(',')) {
+          const cls = chartClassOf(part);
+          references.push(`${cls ?? '(no chart class)'} ${token}`);
+          expect(
+            dataMarkClasses,
+            `${token} is referenced by "${part.trim()}", which is not a data-mark class — a ` +
+              `value colour is being used as chrome or as text`,
+          ).toContain(cls);
+        }
+      }
+    }
+    // Vacuity guard: 19 (selector-part, reference) pairs measured — 5 segment
+    // fills, 5 swatch backgrounds, 5 tooltip-key backgrounds, the series colour on
+    // the line rule and on the unslotted tooltip key, and the bar/marker rule,
+    // which is one declaration counted once per class in its group.
+    expect(references.length, 'no data-ink reference was inspected').toBe(19);
+  });
+});
+
+/*
+ * M2 — AN INLINE PRESENTATION ATTRIBUTE WOULD BYPASS EVERY TEST ABOVE, because
+ * all of them read the stylesheet as text.
+ *
+ * MEASURED, in two parts. At 4b86f7e an inline `fill="#b0522c"` on
+ * `.stats-chart-segment` passed all 59 tests in this file. And in headless Chromium
+ * on the worked-example surface, with that attribute on every segment, all five
+ * slots still COMPUTE their ramp step — slot 1: attribute `#b0522c`, computed
+ * `rgb(28, 74, 122)`; slots 2–5 likewise — because a presentation attribute ranks
+ * below any author declaration and `statistics.css` declares `fill` for slots 1–5.
+ *
+ * So today it is inert, BY ACCIDENT OF COVERAGE, and the accident is narrow: a
+ * sixth slot or any mark class with no CSS `fill` has no author declaration for the
+ * attribute to lose to. That half is the cascade rule applied, NOT an observation —
+ * there is no sixth slot to measure. `.stats-chart-hit`'s `fill: transparent` is
+ * the same exposure in the other direction, and the hit area is what makes the
+ * tooltip work.
+ *
+ * So it is GUARDED rather than recorded as a residual. Every form is rendered and
+ * the presentation attributes actually present are pinned: `fill="none"` on the
+ * line chart's path (a geometry keyword, not a colour) and nothing else, plus no
+ * inline `style` carrying a colour property. jsdom applies no stylesheet, which is
+ * exactly right here — what is being checked is what the COMPONENT emits.
+ */
+describe('the components emit no inline colour', () => {
+  const COLOUR_PROPERTIES = /(?:^|[;\s])(?:fill|stroke|background|color|border-color|box-shadow)\s*:/i;
+
+  it.each(ALL_FORMS)('%s emits no colour attribute and no colour in style', (_name, caption, mount) => {
+    mount();
+    const fig = figure(caption);
+
+    const attributes: string[] = [];
+    for (const element of [fig, ...fig.querySelectorAll('*')]) {
+      for (const attribute of ['fill', 'stroke', 'color', 'stop-color', 'flood-color']) {
+        const value = element.getAttribute(attribute);
+        if (value !== null) attributes.push(`${attribute}="${value}"`);
+      }
+      const style = element.getAttribute('style');
+      if (style !== null) {
+        expect(style, `${element.tagName.toLowerCase()} carries a colour in its inline style`).not.toMatch(
+          COLOUR_PROPERTIES,
+        );
+      }
+    }
+    // `fill="none"` is a geometry keyword on the line chart's path — a stroked
+    // polyline must not be filled — and is the ONLY presentation attribute any
+    // form emits. Any other value is a colour the stylesheet cannot govern.
+    expect([...new Set(attributes)].sort()).toEqual(
+      caption === 'Exports per week' ? ['fill="none"'] : [],
+    );
   });
 });
 
