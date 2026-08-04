@@ -174,6 +174,17 @@ export const LABELS = {
    * disappears either.
    */
   modeSynthetic: 'Example workspace',
+  /*
+   * Shown INSTEAD of `modeSynthetic` while a worked-example session is open.
+   *
+   * "temporary" is the load-bearing word: the records in this scope are discarded
+   * when the walkthrough ends, and a reader who spends time answering fields in
+   * them is entitled to know that before they do. `modeSynthetic` is retained for
+   * the ordinary scope and reads as "this is a demonstration workspace", which
+   * stays true there — the accessible name supplies the precision that it now
+   * holds no records of its own.
+   */
+  modeWorkedExample: 'Worked example · temporary',
   // Deliberate register exception (see the header: register 1 is Title Case).
   // These two are QUALIFIERS appended after "·" to the base chip label above,
   // not standalone labels — Title-Casing them ("Test DB Diagnostics") would read

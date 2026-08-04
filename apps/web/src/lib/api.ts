@@ -48,6 +48,7 @@ import type {
   ApiSearchResponse,
   ApiSearchScope,
   ApiSourcePreview,
+  ApiTutorialSession,
   ApiDemoRunResponse,
   ApiDemoResetResult,
   ApiUploadsBlocked,
@@ -59,6 +60,7 @@ import type {
   ExportReadinessBundle,
   RecordBundle,
 } from './types';
+import { readTutorialSession } from './tutorialSession';
 
 /**
  * The base a build with no `VITE_API_BASE` falls back to — the local FastAPI
@@ -233,6 +235,35 @@ async function readJson<T>(res: Response, path: string): Promise<T> {
   }
 }
 
+/** The header the backend resolves the workspace scope from. Must match
+ *  `TUTORIAL_SESSION_HEADER` in `apps/api/isaac_api/routes.py`. */
+export const TUTORIAL_SESSION_HEADER = 'X-Isaac-Tutorial-Session';
+
+/**
+ * Which workspace scope every request operates in: `null` = the ordinary
+ * workspace, otherwise an open worked-example session.
+ *
+ * Module-level rather than threaded through the ~40 exported functions, because
+ * `request()` below is the single point where headers are composed — so scope is
+ * applied in exactly one place and a new API function cannot forget it.
+ *
+ * INITIALISED FROM `sessionStorage` AT MODULE LOAD, and that ordering is
+ * load-bearing: after a reload the first record fetch can be issued by a screen
+ * mounting before any tutorial code runs, and an unscoped fetch would 404 the
+ * reader out of their own session.
+ */
+let tutorialScope: string | null = readTutorialSession()?.sessionId ?? null;
+
+/** Enter (`sessionId`) or leave (`null`) a worked-example session. */
+export function setTutorialScope(sessionId: string | null): void {
+  tutorialScope = sessionId;
+}
+
+/** The scope requests currently carry. `null` = the ordinary workspace. */
+export function getTutorialScope(): string | null {
+  return tutorialScope;
+}
+
 async function request(path: string, init?: RequestInit): Promise<Response> {
   const key = apiKey();
   try {
@@ -246,6 +277,7 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
         Accept: 'application/json',
         ...(key !== undefined ? { Authorization: `Bearer ${key}` } : {}),
         ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(tutorialScope !== null ? { [TUTORIAL_SESSION_HEADER]: tutorialScope } : {}),
         ...init?.headers,
       },
     });
@@ -311,6 +343,32 @@ export const api = {
   // base path).
   getOpenApi(): Promise<ApiOpenApiResponse> {
     return getJson<ApiOpenApiResponse>('/openapi');
+  },
+
+  /**
+   * Open an isolated worked-example session and return its id plus the record
+   * ids actually materialised in it.
+   *
+   * The caller is responsible for entering the scope (`setTutorialScope`) before
+   * reading those records — creating a session does not by itself change which
+   * workspace subsequent requests address. Deliberately NOT scope-carrying
+   * itself: opening a session from inside another session would be meaningless.
+   */
+  createTutorialSession(): Promise<ApiTutorialSession> {
+    return postJson<ApiTutorialSession>('/tutorial/sessions');
+  },
+
+  /**
+   * Discard a worked-example session and everything in it.
+   *
+   * Idempotent at the backend: discarding a session that is already gone
+   * succeeds, so a client never has to know whether it is retrying. Returns
+   * nothing — a 204 carries no body.
+   */
+  async disposeTutorialSession(sessionId: string): Promise<void> {
+    const path = `/tutorial/sessions/${enc(sessionId)}`;
+    const res = await request(path, { method: 'DELETE' });
+    if (!res.ok) throw httpError(res, path);
   },
 
   // S1 — the experiment queue.

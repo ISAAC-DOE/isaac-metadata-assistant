@@ -126,6 +126,46 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
   return calls;
 }
 
+/**
+ * A synthetic worked-example session id, shaped like the real thing.
+ *
+ * The backend mints these with `secrets.token_urlsafe(16)` and validates them
+ * against `^[A-Za-z0-9_-]{16,64}$`, so a fixture id must satisfy that pattern —
+ * a test that used a friendly string like `'test-session'` (12 chars) would be
+ * rejected as malformed by the real API and would prove nothing about the path
+ * it claims to cover.
+ */
+export const TUTORIAL_SESSION_ID = 'fixtureSessionId0000000';
+
+/**
+ * The two worked-example session routes, for any test that starts the
+ * walkthrough.
+ *
+ * Needed because starting is no longer a UI-only act: it opens a server-side
+ * session, and the fetch stub throws on an unrouted call — so a tutorial test
+ * without these routes exercises the CREATE-FAILED path rather than the
+ * walkthrough, which is a real state but not the one it means to assert.
+ *
+ * `record_ids` deliberately echoes the canonical five: the backend materialises
+ * exactly those inside a new session, and the walkthrough resolves its targets
+ * from the list it then reads.
+ */
+export function tutorialSessionRoutes(
+  sessionId: string = TUTORIAL_SESSION_ID,
+): Record<string, StubbedRoute> {
+  return {
+    'POST /api/tutorial/sessions': {
+      status: 201,
+      body: {
+        session_id: sessionId,
+        record_ids: [...CANONICAL_RESET_IDS],
+        ttl_hours: 24,
+      },
+    },
+    [`DELETE /api/tutorial/sessions/${sessionId}`]: { status: 204, body: undefined },
+  };
+}
+
 /** Stub `fetch` as a dead backend: every call fails at the network level. */
 export function stubFetchDown(): void {
   vi.stubGlobal(

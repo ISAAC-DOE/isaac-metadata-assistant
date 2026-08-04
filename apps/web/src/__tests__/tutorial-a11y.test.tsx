@@ -27,6 +27,7 @@ import {
   CANONICAL_RESET_IDS,
   bundleRoutes,
   canonicalFiveSummaries,
+  tutorialSessionRoutes,
   exportReadyRoutes,
   graphStatusUnavailable,
   healthSynthetic,
@@ -89,7 +90,10 @@ function Harness() {
 }
 
 function renderHarness() {
-  stubFetchRoutes({ 'GET /api/experiments': { body: { experiments: canonicalFiveSummaries } } });
+  stubFetchRoutes({
+    ...tutorialSessionRoutes(),
+    'GET /api/experiments': { body: { experiments: canonicalFiveSummaries } },
+  } as never);
   return render(
     <MemoryRouter
       initialEntries={['/experiments']}

@@ -5,10 +5,8 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
-import { ResetDemoDialog } from '../components/ResetDemoDialog';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { Play } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
@@ -53,15 +51,57 @@ export function ExperimentsHome() {
         <ExperimentQueue groups={groups} />
       ) : (
         /*
-         * P1: the previous copy ("run the synthetic demo to create your first
-         * record") promised something this build cannot do. `POST /api/demo/run`
-         * writes NOTHING when its canonical target still holds seed content, and
-         * `ensure_seeded()` restores all five built-in examples on its own — so a
-         * user never creates a record here. The copy now points at what exists.
+         * THE PERMANENT ORDINARY STATE, not a transient one — so it is written as
+         * a real empty state rather than a one-line placeholder.
+         *
+         * This build has no way to create or import a record: there is no
+         * `POST /api/experiments`, `create_experiment` has no production caller,
+         * and `POST /api/uploads` refuses every upload by design. The five
+         * built-in examples now exist only inside a worked-example session, so
+         * this list is empty until an import capability exists.
+         *
+         * Copy rules this had to satisfy, each because the previous wording broke
+         * one of them: it must not promise creation or import (the earlier "run
+         * the synthetic demo to create your first record" did); it must not point
+         * at the built-in example as if it were in this list (the wording it
+         * replaces, "open the built-in example", did once the examples moved into
+         * a session); and it must not blame the reader for an absence the
+         * deployment caused.
          */
-        <p className="queue-empty">
-          No experiments yet — open the built-in example to see a complete record.
-        </p>
+        <div className="queue-empty-state">
+          <h2 className="queue-empty-title">No experiments yet</h2>
+          <p className="queue-empty-body">
+            Experiments you work on will appear here. This deployment cannot yet create or
+            import a record, so nothing has been added.
+          </p>
+          <p className="queue-empty-body">In the meantime you can:</p>
+          <ul className="queue-empty-list">
+            <li>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate(`${ROUTES.governance}?tab=validator`)}
+              >
+                Open Validator
+              </button>
+              <span className="queue-empty-hint">
+                Check a record file you already have against the official ISAAC schema.
+              </span>
+            </li>
+            <li>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate(ROUTES.settings)}
+              >
+                {LABELS.actionReplayTutorial}
+              </button>
+              <span className="queue-empty-hint">
+                Walk through a complete worked example in a temporary workspace of its own.
+              </span>
+            </li>
+          </ul>
+        </div>
       );
   }
 
@@ -77,24 +117,30 @@ export function ExperimentsHome() {
           <h1 className="page-title">{LABELS.screenExperiments}</h1>
           {subcount && <p className="page-subcount">{subcount}</p>}
         </div>
-        <div className="page-actions">
-          <ResetDemoDialog onResetComplete={result.reload} />
-          {/*
-           * P1: there used to be a SECOND button here, labelled "New Record",
-           * styled btn-primary and navigating to ROUTES.load — the same route as
-           * this one. It promised a capability the build does not have: `/load`
-           * offers the worked example and one permanently 403'd upload seam, and
-           * nothing there accepts anything a user supplies. It was removed rather
-           * than relabelled, because a duplicate control to a single destination
-           * is not worth keeping under any wording. This button inherits the
-           * primary treatment it vacated: it is the one affirmative action on the
-           * screen, and Reset Workspace must stay the restrained one.
-           */}
-          <button type="button" className="btn btn-primary" onClick={() => navigate(ROUTES.load)}>
-            <Play size={14} strokeWidth={2} aria-hidden="true" />
-            {LABELS.actionRunDemo}
-          </button>
-        </div>
+        {/*
+         * TWO CONTROLS WERE REMOVED FROM HERE, and neither was a styling choice.
+         *
+         * "Open the Worked Example" navigated to `/load`, whose own button calls
+         * `POST /api/demo/run`; and "Reset Workspace" (ResetDemoDialog) calls
+         * `POST /api/demo/reset`. Both endpoints now REQUIRE a worked-example
+         * session header and refuse without one, writing nothing. Left mounted
+         * here they would be dead controls in the ordinary workspace — a button
+         * that looks like it acts and does not — which is exactly the failure
+         * mode the P1 comment below was written about.
+         *
+         * They are not deleted: both are still correct INSIDE a worked-example
+         * session, which is reached from Settings & API → Help & Tutorial. The
+         * example records live only in such a session, so the controls that
+         * rebuild them belong there too.
+         *
+         * Earlier P1 note, kept because it records why there is no create action:
+         * a "New Record" button used to sit here, styled primary, navigating to
+         * ROUTES.load. It promised a capability the build does not have — `/load`
+         * offers the worked example and one permanently 403'd upload seam, and
+         * nothing there accepts anything a user supplies. There is still no
+         * record-creation route in this application, so no control here may imply
+         * one.
+         */}
       </div>
 
       {/*

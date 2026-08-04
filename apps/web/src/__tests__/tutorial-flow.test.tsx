@@ -32,6 +32,7 @@ import {
   aboutResponse,
   bundleRoutes,
   canonicalFiveSummaries,
+  tutorialSessionRoutes,
   exportReadyRoutes,
   graphStatusUnavailable,
   healthSynthetic,
@@ -48,6 +49,7 @@ const TOTAL = TUTORIAL_STEPS.length;
 /** Every READ the walkthrough or the surfaces it visits need — and nothing else. */
 function readOnlyRoutes(experiments = canonicalFiveSummaries): Record<string, unknown> {
   return {
+    ...tutorialSessionRoutes(),
     ...bundleRoutes(PENDING_ID),
     ...exportReadyRoutes(READY_ID),
     'GET /api/health': { body: healthSynthetic },

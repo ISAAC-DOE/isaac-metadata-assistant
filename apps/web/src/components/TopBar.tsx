@@ -7,6 +7,7 @@ import { StatusChip } from './StatusChip';
 import { HelpPanel } from './HelpPanel';
 import { SearchDialog } from './SearchDialog';
 import { useHealth } from '../lib/useHealth';
+import { useTutorialState } from '../lib/tutorialController';
 import type { ChipKind } from '../lib/status';
 import type { ApiHealth, ApiHealthDatabase } from '../lib/types';
 
@@ -69,8 +70,8 @@ function databaseChipState(database: ApiHealthDatabase | undefined): DbChipState
  *  deployment has one. Never renders a host, database name, user, secret name,
  *  connection detail, record count, or any record content — the only inputs are
  *  `mode` and two booleans-worth of database state. */
-function chipText(health: ApiHealth | undefined): string {
-  const base = modeLabel(health?.mode);
+function chipText(health: ApiHealth | undefined, inExampleSession: boolean): string {
+  const base = inExampleSession ? LABELS.modeWorkedExample : modeLabel(health?.mode);
   const state = databaseChipState(health?.database);
   if (state === 'none') return base;
   const qualifier =
@@ -98,24 +99,62 @@ function chipText(health: ApiHealth | undefined): string {
  * technical wording — a chip is not where a governance guarantee is defined, but
  * it must not be where one silently disappears either.
  */
-const EXAMPLE_ONLY =
-  'the records here are rebuilt from reference files committed to this build; file upload is ' +
-  'refused, and no official institutional record is shown.';
+/*
+ * SCOPE-DEPENDENT, and this is a correctness fix rather than a rewording.
+ *
+ * The single `EXAMPLE_ONLY` sentence used to open with "the records here are
+ * rebuilt from reference files committed to this build". That was true when the
+ * five built-in examples were materialised into the ordinary workspace on every
+ * read. They are not any more: they exist only inside a worked-example session,
+ * and the ordinary workspace holds no records at all. So in the ordinary scope
+ * the clause described records that are not there — a false claim in the
+ * accessible name of the one control responsible for carrying this deployment's
+ * three governance claims.
+ *
+ * Split, so each scope states what is actually true of it. The two claims that
+ * hold unconditionally — upload refused, no official institutional record shown
+ * — are shared and must never be dropped from either branch.
+ */
+const CLAIMS_ALWAYS =
+  'file upload is refused, and no official institutional record is shown.';
 
-const CHIP_ARIA_DETAIL: Record<DbChipState, string> = {
-  none: EXAMPLE_ONLY,
-  diagnostics:
-    `${EXAMPLE_ONLY} This deployment is also configured to run a protected, ` +
-    'read-only diagnostic against an isolated test database; it returns ' +
-    'sanitized aggregate results only, and no database records are displayed.',
-  failed:
-    `${EXAMPLE_ONLY} The most recent protected, read-only test-database ` +
-    'diagnostic recorded by this deployment did not complete; it returns ' +
-    'sanitized aggregate results only, and no database records are displayed.',
-};
+/** Ordinary workspace: no records exist here, so nothing is claimed about any. */
+const ORDINARY_ONLY = `this workspace holds no records of its own; ${CLAIMS_ALWAYS}`;
 
-function chipAriaLabel(health: ApiHealth | undefined): string {
-  return `${chipText(health)} — ${CHIP_ARIA_DETAIL[databaseChipState(health?.database)]}`;
+/** Inside a worked-example session: the examples ARE rebuilt from committed
+ *  reference files, and they are discarded with the session. */
+const EXAMPLE_SESSION_ONLY =
+  'the example records here are rebuilt from reference files committed to this ' +
+  `build and are discarded when the walkthrough ends; ${CLAIMS_ALWAYS}`;
+
+function baseAriaDetail(inExampleSession: boolean): string {
+  return inExampleSession ? EXAMPLE_SESSION_ONLY : ORDINARY_ONLY;
+}
+
+function chipAriaDetail(state: DbChipState, inExampleSession: boolean): string {
+  const base = baseAriaDetail(inExampleSession);
+  if (state === 'diagnostics') {
+    return (
+      `${base} This deployment is also configured to run a protected, ` +
+      'read-only diagnostic against an isolated test database; it returns ' +
+      'sanitized aggregate results only, and no database records are displayed.'
+    );
+  }
+  if (state === 'failed') {
+    return (
+      `${base} The most recent protected, read-only test-database ` +
+      'diagnostic recorded by this deployment did not complete; it returns ' +
+      'sanitized aggregate results only, and no database records are displayed.'
+    );
+  }
+  return base;
+}
+
+function chipAriaLabel(health: ApiHealth | undefined, inExampleSession: boolean): string {
+  return `${chipText(health, inExampleSession)} — ${chipAriaDetail(
+    databaseChipState(health?.database),
+    inExampleSession,
+  )}`;
 }
 
 // Driven by the backend health (via the shared, cached useHealth) rather than a
@@ -125,10 +164,15 @@ function chipAriaLabel(health: ApiHealth | undefined): string {
 // and never implies non-synthetic.
 function SyntheticChip() {
   const health = useHealth();
+  // Which scope the chip is describing. Read from the tutorial store rather than
+  // from health: `/api/health`'s `mode` describes the DEPLOYMENT and is
+  // deliberately unchanged by this (it is still `synthetic-only` in both scopes),
+  // while the chip describes the workspace the reader is currently looking at.
+  const inExampleSession = useTutorialState().sessionId !== null;
   return (
-    <span className="mode-chip" aria-label={chipAriaLabel(health)}>
+    <span className="mode-chip" aria-label={chipAriaLabel(health, inExampleSession)}>
       <Shield size={13} strokeWidth={2} aria-hidden="true" />
-      {chipText(health)}
+      {chipText(health, inExampleSession)}
     </span>
   );
 }
