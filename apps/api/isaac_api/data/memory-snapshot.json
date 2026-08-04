@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "9a45ae2aacd22a363a8f9fec8a361c8e43475470e889d4aa58751ec81a321e23"
+        "sha256": "20e6774350fd2e35c18af34540822e1f3f71c92c49ae4d234ec85abdf2bb1f28"
       },
       {
         "path": "AGENTS.md",
@@ -10264,7 +10264,7 @@
       },
       {
         "path": "apps/api/isaac_api/app.py",
-        "sha256": "bd71c47dd3e7d7e973e404d74aeba1a877044c8236ff2618320bbacb9f8bc128"
+        "sha256": "025071f0fef4893ac9e1b6fe9fe838817975a9469a1d451d3d6f43f8a2ff77f6"
       },
       {
         "path": "apps/api/isaac_api/auth.py",
@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "32b65389b1b0af328c1285e45414bbc362182ebbe43d25ac8fb14aa56fb2500b"
+        "sha256": "d8d44c6cea5fbd1da14f7e89f1f199ddd2046de36de1cac7778ed064e06d2703"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,11 +10288,11 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "e3c10eb8743fc029b0af9149f2c185f458f418d11a9c7238148dae4f4e7eb8b6"
+        "sha256": "85f12195b6ef36ebfc9c010707a90cb19644f9882048ff191118d290abf534af"
       },
       {
         "path": "apps/api/tests/test_api.py",
-        "sha256": "6cfb1aee98c0618b79340f6f5f02f3d3efd07b36e9b8c534f26ed7f24b2dfed0"
+        "sha256": "b588d083f6a05a30b6bfd50b4c841e18b6f7fab5566ac7135964429292d7e56a"
       },
       {
         "path": "apps/api/tests/test_build_memory_snapshot.py",
@@ -10332,7 +10332,7 @@
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
-        "sha256": "db24b4be22b6abff951c8519febc59e9b7a13f0e2bd92239e7b5acfa6102f257"
+        "sha256": "4ec818cc41ed3d7ce6a839e7a4d5ee6351d73bfb6486699f5051887b18aad58b"
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
@@ -10404,7 +10404,7 @@
       },
       {
         "path": "apps/web/src/components/AppShell.tsx",
-        "sha256": "e4c9b1b3cc6aeaae26ab38d8220f6030587709ac2ff9eb81f68fc066d0088466"
+        "sha256": "0c1ce06aba2c448f27dca830593a14aa05d673e05e41b9242983b27fe6ee52cb"
       },
       {
         "path": "apps/web/src/components/ArtifactCard.tsx",
@@ -10484,7 +10484,7 @@
       },
       {
         "path": "apps/web/src/components/TopBar.tsx",
-        "sha256": "5286cbc7b7fc93c4653ff993d5bc900fcda570a825dbb8a6746419bae82c1f85"
+        "sha256": "76739a4835447543e8894d471081679ade7f73200484152e9a6b0f110d0f50fe"
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "cd43f95218b87380ef63cf90f7e5cceb1f0d0363ff8f3b125ac91e6de0784f73"
+        "sha256": "2cc5a749ff28eeabe08c4ff41773529b0daf7d598fb67ee7515f0bd2568c7b19"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "eb9b0b8fb52e4ad875062e63834c0ccc4914a3128da692c4c5f7db9b7b8a6785"
+        "sha256": "634e22c5bdc1b42c261a0383231eef33b099ff878d0a47f00a79576bcd2ed8fe"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "fb5668571b8ded98524b2f8feb6ceb0babc7bed54997fc3c29a740d53f2c71ab"
+        "sha256": "5f46900fc50984c96e683e24310203cfadc44b5588e787593ff931564dd30a2f"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10532,19 +10532,19 @@
       },
       {
         "path": "apps/web/src/main.tsx",
-        "sha256": "0405df6c20a072eef21566869531740b88dbbf70b0bc1de491b45293026aa159"
+        "sha256": "94c2add5a87bfa5d7df1cd5122468195f568fc86fe760f5571d7483f3da2d78e"
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "0722dcf0ca5c0130b57a5fb94f627a5091c2ccedb7257ab2fcb38c71feeb0c69"
+        "sha256": "8dda3c40d643df331e0e5bb71814c2a027e9af162d01fcaa4384b2edcc079d07"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "d4f4a393e98cb6aaa7ceae809c7665731c5ac924a009a8959ae0c715c5a87484"
+        "sha256": "46bd152ae855ed2acec52830f7a1f03a4b5dfdf29683b0ea582a5fedb089fed2"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "888caa4ef5c51f8dc77a3045e9af087e1cab6c5a64180618d1a643dc42a48072"
+        "sha256": "ef0926b65161a63a08c257430fa5aa197b55c02b8aa6ebea73fdc5213fa56c75"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10552,11 +10552,11 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "cc5b64f48a82e2ba5ff8e6dc06296b864e1c6334d025b423cd2f10719970a0a0"
+        "sha256": "aca029e4484a607d4d5b7a391152317195b6404b817ac49c7ca18fa941f08df2"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
-        "sha256": "8b9a7e9c2b0d4bb5e164c9973783217552af637d030b51443b8988e30696867d"
+        "sha256": "bde0e5f0b55f1f45056415412183cf5a3e7abd353110381806f74f85fc26e84f"
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "f667b3bff752ea656d6db6c08d3c15875003f21eb042090c65436705ec1fbd43"
+        "sha256": "e0423024e44208760c26d43061cf97c59240bf50ee71f710f4baa140bfdcd1c1"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "3698e08e9667ded99ba225a45abe56dc8d69e9297aa3373eed29ef8cf5dcce1e"
+        "sha256": "eaf7aa09c5c64588030a5fe6b746a8f38149504abb5caa4e466297a675480439"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "9e9865e68cda82191d29a7955d39a83e9676c5e9c0b2572ea90ce40a36da97aa"
+    "served_manifest_fingerprint": "5fbf02c81b4e8e9ecfcab6e145fc7be88bce68b9388dc11aabe081656d44d6a8"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
