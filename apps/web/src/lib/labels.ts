@@ -437,13 +437,29 @@ export const LABELS = {
    * promised:
    *
    *  1. THE RECORDS ARE THIS SESSION'S OWN COPY. `_materialise_seed`
-   *     (`apps/api/isaac_api/workspace.py:806`) REQUIRES a `session_id` and has no
-   *     normal-scope form, and it writes under `workspace_root()/_tutorial/<id>/`.
+   *     (`apps/api/isaac_api/workspace.py:811`) takes a REQUIRED `session_id`, REFUSES
+   *     `None` with `InvalidTutorialSession`, and writes under
+   *     `workspace_root()/_tutorial/<id>/`.
+   *
+   *     THE REFUSAL IS NOT A RESTATEMENT OF THE REQUIREMENT, and this comment used to
+   *     cite only the requirement. "Requires a `session_id`" establishes what a caller
+   *     must pass, not what the function does with `None`: `scope_root(None)` returns
+   *     `workspace_root()` silently, and an explicit `session_id=None` was measured
+   *     writing a canonical record into the ordinary root. Note that this fact is about
+   *     where THESE records live, which is why it survived that error — nothing here
+   *     ever claimed the ordinary workspace was empty. The chip's ordinary-scope clause
+   *     did, twice; see `components/TopBar.tsx`'s `ORDINARY_ONLY`.
    *  2. NO REQUEST MADE OUTSIDE THE SESSION REACHES THEM. A scope is a directory
    *     namespace, not a filter: `_experiment_dirs` enumerates one root and skips
-   *     `_`-prefixed entries unconditionally (`:839-861`), so exclusion is
-   *     structural. This is also why the bar says plainly that the app's own screens
+   *     `_`-prefixed entries unconditionally (`:845-866`), so exclusion is
+   *     structural. This is also why the bar says plainly that the app's record screens
    *     — My Experiments included — are showing this walkthrough while it is open.
+   *
+   *     "EVERY SCREEN THAT SHOWS RECORDS", not "every screen in the app", which is what
+   *     this said and which over-claimed. `AppShell` mounts the bar everywhere, but
+   *     Concepts, Schema Reference, Project Memory, the API docs and the Governance
+   *     policy tab show neither scope's records, so "is showing this walkthrough rather
+   *     than the ordinary workspace" is not a true description of them.
    *  3. THEY ARE DISCARDED WHEN THE WALKTHROUGH ENDS. Every exit path drops the
    *     scope and the pointer synchronously (`leaveTutorialScopeLocally`), so the
    *     reader's access ends unconditionally. The server-side DELETE is best effort
@@ -456,7 +472,7 @@ export const LABELS = {
   tutorialSessionBarBody:
     'These five example records belong to this walkthrough only: they are its own copy, in a ' +
     'temporary workspace of its own, and no request made outside it reaches them. While this bar ' +
-    'is showing, every screen in the app — My Experiments included — is showing this ' +
+    'is showing, every screen that shows records — My Experiments included — is showing this ' +
     'walkthrough rather than the ordinary workspace. They are discarded when the walkthrough ends.',
   tutorialSessionBarRegion: 'Worked example session',
 
@@ -523,9 +539,16 @@ export const LABELS = {
    * The reassurance is kept rather than deleted, and it is the true one: what is
    * protected is the READER's work, not the absence of a write. The precise form is
    * "no record of yours is created, changed, or removed", which is exactly what the
-   * code enforces — `_materialise_seed` requires a `session_id` and has no
-   * normal-scope form, so nothing this button does can address a record outside the
-   * session it opens.
+   * code enforces — `_materialise_seed`, `reset_to_canonical_seed` and
+   * `ensure_tutorial_seeded` all REFUSE a `None` session id (`InvalidTutorialSession`),
+   * so nothing this button does can address a record outside the session it opens.
+   *
+   * The citation used to be "requires a `session_id` and has no normal-scope form",
+   * which is weaker than it reads: a required parameter says what a caller must pass,
+   * and `scope_root(None)` returned `workspace_root()` without complaint, so an
+   * explicit `None` reached the ordinary root. Note what this sentence does NOT claim,
+   * and must not grow into claiming: that the ordinary workspace is empty. It says the
+   * reader's records are untouched, which is a statement about this button's reach.
    */
   tutorialOfferTitle: 'Take the Guided Walkthrough',
   tutorialOfferBody:

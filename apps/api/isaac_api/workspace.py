@@ -671,15 +671,29 @@ CANONICAL_IDS = frozenset(
 #: session is open, because ``POST /api/demo/reset`` refuses without a session header.
 #: So the remedy is reachable only from inside the stranded session itself.
 #:
-#: WHICH DEPLOYMENTS ARE AFFECTED, and the exposure is now much narrower than it
-#: was. Only a SESSION can be stranded, and a session is created on demand and swept
-#: after ``TUTORIAL_TTL_HOURS``, so a rename can strand one for at most that long —
-#: whereas it used to strand the whole workspace indefinitely. The S3DF pod mounts
-#: ``ISAAC_UI_WORKSPACE`` on an ``emptyDir`` (docs/deployment.md:29), so it loses
-#: every session on a pod restart anyway. Durable storage still carries the (now
-#: time-bounded) risk: a developer's default ``/tmp/isaac-ui-workspace`` that has not
-#: been cleared, and the Railway deployment's persistent volume at
-#: ``/data/isaac-workspace`` (docs/personal-deployment-retirement.md:44).
+#: WHICH DEPLOYMENTS ARE AFFECTED. There are TWO cases. An earlier version of this note
+#: described only the first and asserted it was the only one — "Only a SESSION can be
+#: stranded ... for at most ``TUTORIAL_TTL_HOURS``" — which independent review falsified.
+#:
+#: 1. A STRANDED SESSION — time-bounded and repairable. A session is created on demand and
+#:    swept after ``TUTORIAL_TTL_HOURS``, so a rename can strand one for at most that
+#:    long, and the **Reset Worked Example** control in the session's own bar fixes it at
+#:    once. The S3DF pod mounts ``ISAAC_UI_WORKSPACE`` on an ``emptyDir``
+#:    (docs/deployment.md:29), so it loses every session on a pod restart anyway.
+#:
+#: 2. FIVE CANONICAL RECORDS SITTING IN THE ORDINARY SCOPE, left by a build that predates
+#:    scope isolation — NOT time-bounded, and NOT repairable through the UI at all. The
+#:    retired ``ensure_seeded()`` materialised them into ``workspace_root()`` itself.
+#:    Nothing in this build creates that state, and nothing migrates it away either:
+#:    ``list_experiments(None)`` enumerates them (measured — all five, each classifying
+#:    ``canonical``), ``sweep_stale_tutorial_sessions`` only ever looks inside
+#:    ``_tutorial/``, ``remove_experiment`` REFUSES a canonical id, and
+#:    ``POST /api/demo/reset`` refuses without a session header. So no in-app control can
+#:    remove or re-materialise them and they keep their pre-rename titles indefinitely;
+#:    the remedy is operational — clear the workspace directory. Reachable wherever the
+#:    workspace is durable: a developer's default ``/tmp/isaac-ui-workspace`` that has not
+#:    been cleared, and the Railway deployment's persistent volume at
+#:    ``/data/isaac-workspace`` (docs/personal-deployment-retirement.md:44).
 #:
 #: The title reaches NO exported artifact — ``src/isaac_records/export.py`` contains
 #: no reference to it — so official schema compliance and exported record content
@@ -811,14 +825,21 @@ def _write_seed_record(exp: Experiment, result) -> None:
 def _materialise_seed(spec: "_SeedSpec", *, session_id: str) -> Experiment:
     """Materialise one canonical seed INTO A TUTORIAL SESSION.
 
-    ``session_id`` is REQUIRED and has no default. That is the structural form of
-    the product rule "the five worked examples exist only inside a tutorial scope":
-    there is no way to call this function such that it writes into the normal
-    workspace, so no future caller can reintroduce normal-scope auto-seeding by
-    forgetting an argument. ``scope_root`` then validates the id, so a malformed
-    session can never produce a path either.
+    ``session_id`` is REQUIRED and has no default, AND ``None`` is REFUSED at
+    runtime. Together those are the enforcement of the product rule "the five worked
+    examples exist only inside a tutorial scope".
+
+    THE MISSING DEFAULT ALONE WAS NOT ENOUGH, and it was relied on as though it were.
+    ``scope_root(None)`` returns ``workspace_root()`` without raising, so
+    ``_materialise_seed(spec, session_id=None)`` — an explicit argument, not a
+    forgotten one — used to write ``workspace_root()/<canonical id>/``; independent
+    review measured it doing exactly that, and nothing in CI type-checks this package,
+    so the annotation caught nothing. The refusal below is what makes the rule
+    behavioural: ``validate_tutorial_session_id`` rejects ``None`` (it is not a
+    ``str``) with the same path-free :class:`InvalidTutorialSession` a malformed id
+    gets, so neither a missing scope nor a malformed one can produce a path.
     """
-    scope_root(session_id)  # validate the id before any path is built from it
+    validate_tutorial_session_id(session_id)  # refuses None; refuses a malformed id
     if not is_record_id(spec.id):  # guard: fixed ids must match RECORD_ID_RE
         raise ValueError(f"canonical seed id {spec.id!r} is not a valid record id")
     exp = Experiment(
@@ -872,7 +893,11 @@ def ensure_tutorial_seeded(session_id: str) -> None:
     Idempotent: only canonical ids not already present IN THAT SESSION are (re)built,
     so repeated calls — and the idempotent demo pass — never grow the session's
     record count. Nothing here can write outside the session's own directory:
-    ``_materialise_seed`` requires a session id and has no normal-scope form.
+    ``_materialise_seed`` requires a session id and REFUSES ``None``, and this
+    function refuses ``None`` too rather than leaning on that — ``scope_root(None)``
+    returns ``workspace_root()`` silently, so without the refusal below an unscoped
+    call would have enumerated the ordinary workspace looking for canonical ids to
+    fill, and only the write itself would have stopped it.
 
     This replaces the former ``ensure_seeded()``, which ran on EVERY normal read.
     Normal scope is never auto-seeded now; there is no code path that materialises a
@@ -895,7 +920,7 @@ def ensure_tutorial_seeded(session_id: str) -> None:
     at most ONE key at a time and released before the next, so no thread ever holds
     two record locks — the classic lock-ordering cycle cannot form.
     """
-    root = scope_root(session_id)  # validates the id once, up front
+    root = scope_root(validate_tutorial_session_id(session_id))  # refuses None + malformed
     for spec in _seed_specs():
         # Cheap lock-free check first (common case: present -> no lock taken, so
         # repeat calls stay contention-free and cannot deadlock).
@@ -1402,11 +1427,14 @@ def reset_to_canonical_seed(
     and mints a fresh generation per id (invalidating every pre-reset ETag).
     Idempotent in content. Returns typed, path-free data (no filesystem paths).
 
-    ``session_id`` is REQUIRED and has no default, for the same structural reason
-    ``_materialise_seed``'s is: this operation re-materialises the canonical seed, and
-    a normal-scope form of it would be a normal-scope auto-seed by another name.
-    Requiring it also means preview and execute cannot disagree about which scope they
-    describe — the projection below depends on that.
+    ``session_id`` is REQUIRED and has no default, and ``None`` is REFUSED at runtime,
+    for the same reason ``_materialise_seed``'s is: this operation re-materialises the
+    canonical seed, and a normal-scope form of it would be a normal-scope auto-seed by
+    another name. The refusal is not decoration — before it, an explicit
+    ``reset_to_canonical_seed(dry_run=False, session_id=None)`` was measured
+    materialising all five canonical records into ``workspace_root()`` and reporting
+    ``final_count: 5``. Requiring the id also means preview and execute cannot disagree
+    about which scope they describe — the projection below depends on that.
 
     ``expected_plan_digest`` defaults to ``None`` = no precondition, which is what the
     direct in-process callers (tests, the concurrency suites) use. The HTTP route
@@ -1418,7 +1446,7 @@ def reset_to_canonical_seed(
     mutation is not classified, so it is not removed — it survives, and the reported
     count says so.
     """
-    scope_root(session_id)  # validate the id before any work is done
+    validate_tutorial_session_id(session_id)  # refuses None; refuses a malformed id
     with _reset_lock:
         experiments = _load_all_experiments(session_id)
         buckets = _classify_workspace(experiments)

@@ -337,6 +337,25 @@ describe('D1 · leaving a worked-example session does not leave its record on sc
      * a whole HTTP round trip React believed the session was still open and a record
      * surface went on presenting records that had already ceased to exist. The
      * redirect is now driven by a state change that happens before the request.
+     *
+     * THIS TEST WAS INERT WHEN IT WAS WRITTEN, and the two causes are worth naming
+     * because either alone would do it again. `stubFetchRoutes` did not `await` a route
+     * thunk, so the async handler below returned a pending Promise that the stub read
+     * `.status` off (`undefined` -> 200) and answered instantly: `held` gated nothing.
+     * And an `as Record<string, RouteEntry>` cast sat on this very object, suppressing
+     * the TS2418 that said an async thunk was not an accepted route shape — the one
+     * signal that would have exposed it. Reintroducing the defect (moving
+     * `leaveTutorialScopeLocally()` + `emit()` after `await disposeTutorialSession`)
+     * left the whole suite green.
+     *
+     * Both are fixed in `test/apiFixtures.ts`: `RouteEntry` admits
+     * `Promise<RouteResult>` and the stub awaits it. The cast is gone — deliberately,
+     * because it is what hid the mismatch. Do not reinstate one here; if this object
+     * stops type-checking, the route shape is wrong, not the annotation.
+     *
+     * VERIFIED BY NEGATIVE CONTROL after the fix: with the ordering reverted this test
+     * fails on `expect(at()).toBe(ROUTES.experiments)` (the reader is still on the
+     * record surface while the DELETE is held), and passes with it restored.
      */
     let releaseDelete: (() => void) | null = null;
     const held = new Promise<void>((resolve) => {
@@ -348,7 +367,7 @@ describe('D1 · leaving a worked-example session does not leave its record on sc
         await held;
         return { status: 204, body: { discarded: true } };
       },
-    } as Record<string, RouteEntry>);
+    });
 
     renderApp();
     await startFromOffer();

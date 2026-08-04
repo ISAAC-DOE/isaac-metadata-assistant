@@ -83,8 +83,21 @@ export interface RouteResult {
  * 304, 304, then 200-with-new-version) with the status, body and ETag advancing
  * in lockstep, and branch on the `If-None-Match` header so the SAME endpoint can
  * serve a plain GET (no token) and a conditional GET (token) differently.
+ *
+ * AN ASYNC THUNK IS ALLOWED, AND SAYING SO IS THE FIX FOR A SILENTLY INERT TEST.
+ * `RouteResult` alone excluded `Promise<RouteResult>`, so a handler written
+ * `async () => { await gate; return … }` type-errored at the call site — and the one
+ * test that needed it silenced that with `as Record<string, RouteEntry>` rather than
+ * being told it was unsupported. `stubFetchRoutes` then did not await the thunk:
+ * `resolved` was the pending Promise, `resolved.status` was `undefined` (so 200) and
+ * the stub answered IMMEDIATELY. The gate blocked nothing, and the regression guard
+ * built on it passed with the defect it was written to catch reintroduced. A route
+ * that means to hold a response open must be able to, and must be able to say so in
+ * the type.
  */
-export type RouteEntry = StubbedRoute | ((init?: RequestInit) => RouteResult);
+export type RouteEntry =
+  | StubbedRoute
+  | ((init?: RequestInit) => RouteResult | Promise<RouteResult>);
 
 /**
  * Stub `fetch` with a `"METHOD /api/path" -> response` map. Returns the list of
@@ -104,7 +117,15 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
     // A whole-route thunk resolves the descriptor once per fetch (status/body/etag
     // in sync); a plain StubbedRoute is used as-is, and its `body` may itself be a
     // thunk re-evaluated per hit (e.g. the experiment list before/after a reset).
-    const resolved: RouteResult = typeof hit === 'function' ? hit(init) : hit;
+    //
+    // `await` is load-bearing, not defensive. Without it an async thunk's Promise WAS
+    // the descriptor: every field read off it was `undefined`, so the stub replied 200
+    // with an undefined body the instant it was called, and a test holding a response
+    // open to assert ordering was asserting nothing. `await` on a non-Promise is a
+    // no-op, so the synchronous thunks (the conditional-GET sequencers) are unaffected
+    // in value — they now resolve a microtask later, which no assertion depends on
+    // because every caller already awaits through `waitFor`/`findBy*`.
+    const resolved: RouteResult = typeof hit === 'function' ? await hit(init) : hit;
     const status = resolved.status ?? 200;
     const body =
       typeof resolved.body === 'function' ? (resolved.body as () => unknown)() : resolved.body;

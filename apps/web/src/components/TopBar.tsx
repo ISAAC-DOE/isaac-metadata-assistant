@@ -77,9 +77,11 @@ function databaseChipState(database: ApiHealthDatabase | undefined): DbChipState
  * TWO THINGS CHANGED HERE (D3), and neither is cosmetic.
  *
  * 1. THE SCOPE DECIDES THE LABEL. "Example workspace" was rendered on every
- *    ordinary screen while the ordinary workspace contains no examples at all —
- *    the label asserted contents that are not there. The examples exist only inside
- *    a worked-example session, so only that scope is named after them.
+ *    ordinary screen, naming that scope after content this build never puts there —
+ *    the examples are created only inside a worked-example session, so only that
+ *    scope is named after them. (Deliberately phrased as what the build does, not as
+ *    "the examples are not there": see `ORDINARY_ONLY` below, where two successive
+ *    versions of that contents claim had to be retired.)
  *
  * 2. THE DATABASE QUALIFIER IS NO LONGER APPENDED. "Example workspace · test DB
  *    diagnostics" put an infrastructure disclosure in the primary header of every
@@ -135,40 +137,60 @@ function chipText(health: ApiHealth | undefined, inExampleSession: boolean): str
  * unconditionally — upload refused, no official institutional record shown — are
  * shared and must never be dropped from either branch.
  *
- * THE ORDINARY BRANCH'S FIRST FIX OVERSHOT, AND IS ITSELF CORRECTED. It replaced the
- * stale clause with "this workspace holds no records of its own" — an EMPTINESS claim
- * that nothing in this app measures. See `ORDINARY_ONLY` below for why that is false on
- * a deployment whose workspace survived this deploy, and for the narrower claim (the
- * built-in examples are structurally absent) that is true of every deployment.
+ * THE ORDINARY BRANCH HAS NOW BEEN CORRECTED TWICE, and the second correction is the
+ * interesting one. The first fix replaced the stale clause with "this workspace holds no
+ * records of its own" — an EMPTINESS claim nothing in this app measures. The second fix
+ * replaced THAT with "the built-in example records are not in this workspace", which is a
+ * narrower emptiness claim and still an assertion about what a directory CONTAINS. Both
+ * were false in the same situation. See `ORDINARY_ONLY` below for the third wording, which
+ * states what the BUILD ENFORCES instead, and for why that distinction is the whole point.
  */
 export const CHIP_CLAIMS_ALWAYS =
   'file upload is refused, and no official institutional record is shown.';
 
 /**
- * Ordinary workspace: the STRUCTURAL claim, not a measured one.
+ * Ordinary workspace: a claim about what this BUILD DOES, never about what the
+ * directory holds.
  *
- * IT USED TO CLAIM EMPTINESS, AND NOTHING MEASURED IT. The string was "this workspace
- * holds no records of its own", derived from `sessionId === null` alone — the chip never
- * reads a count and never asks the backend what is in the scope. Meanwhile
- * `list_experiments(None)` enumerates whatever is on disk under the workspace root and
- * there is NO startup migration, so a deployment whose workspace survives this deploy
- * already holding the previously-seeded five WILL list them on My Experiments while this
- * chip denies they exist. `apps/api/isaac_api/workspace.py` names the affected
- * deployments in `_SEED_TITLE_BASE`'s note (a developer's uncleared
- * `/tmp/isaac-ui-workspace`, and the Railway deployment's persistent volume at
- * `/data/isaac-workspace`, which is still live); and those records are then undeletable
- * through the UI, because reset is session-scoped and `remove_experiment` refuses a
- * canonical id.
+ * TWO EARLIER WORDINGS WERE FALSE IN THE SAME SITUATION, and the second one was false
+ * while a comment here argued it was proven. Keeping both on the record, because the
+ * second mistake was made by a reader of the first correction:
  *
- * What IS enforced — and enforced structurally rather than checked — is that the
- * BUILT-IN EXAMPLES are not in this scope: `_materialise_seed` REQUIRES a `session_id`
- * and has no normal-scope form, so no code path in this build can put one here. That is
- * the claim the chip makes now. It is narrower than the one it replaces, and unlike it,
- * it is true of every deployment.
+ *  1. "this workspace holds no records of its own" — an emptiness claim derived from
+ *     `sessionId === null` alone. The chip reads no count and asks the backend nothing.
+ *  2. "the built-in example records are not in this workspace" — a NARROWER emptiness
+ *     claim, and narrower did not make it measured. The justification given for it was
+ *     that `_materialise_seed` requires a `session_id`, which establishes only that THIS
+ *     BUILD cannot put one there. It does not establish that none IS there.
+ *
+ * WHY THAT GAP IS REAL, MEASURED RATHER THAN REASONED. `list_experiments(None)`
+ * (`apps/api/isaac_api/workspace.py:922`) enumerates whatever is on disk under the
+ * workspace root, and there is NO startup migration. On a workspace pre-populated as the
+ * retired `ensure_seeded()` would have left it, that call returns all five canonical
+ * records, each classifying `canonical`, and `remove_experiment`
+ * (`apps/api/isaac_api/workspace.py:1220`) REFUSES to delete a canonical id — so wording
+ * 2 denied, on every screen, the presence of five rows My Experiments was listing
+ * directly beneath it. `DEFAULT_WORKSPACE` is `/tmp/isaac-ui-workspace`
+ * (`workspace.py:96`), so any developer who ran an older build then this one reaches that
+ * state by default; the `/krish` pod mounts `emptyDir` and does not.
+ *
+ * WHAT IS ACTUALLY TRUE OF EVERY DEPLOYMENT is the enforcement, so that is what is said.
+ * `_materialise_seed`, `reset_to_canonical_seed` and `ensure_tutorial_seeded` each now
+ * REFUSE a `None` session id at runtime with `InvalidTutorialSession` — not merely
+ * "require" one, which was the over-reading: `scope_root(None)` returns
+ * `workspace_root()` silently, and an explicit `session_id=None` was measured writing a
+ * canonical record into the ordinary root before the refusal was added. There is no other
+ * producer of a built-in example: `POST /api/uploads` is an unconditional 403, and record
+ * creation mints a fresh ULID rather than a canonical id
+ * (`apps/api/tests/test_tutorial_scope.py::test_the_seeding_functions_refuse_an_unscoped_call`).
+ *
+ * DO NOT REPLACE THIS WITH AN ABSENCE CLAIM WITHOUT MEASURING ONE. The honest way to
+ * assert absence would be to read the scope's count, which this chip deliberately does
+ * not do.
  */
 const ORDINARY_ONLY =
-  'the built-in example records are not in this workspace — they exist only inside a ' +
-  `guided-walkthrough session; ${CHIP_CLAIMS_ALWAYS}`;
+  'nothing in this build adds a built-in example record to this workspace — they are ' +
+  `created only inside a guided-walkthrough session; ${CHIP_CLAIMS_ALWAYS}`;
 
 /** Inside a worked-example session: the examples ARE rebuilt from committed
  *  reference files, and they are discarded with the session. */

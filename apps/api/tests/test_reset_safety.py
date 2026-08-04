@@ -505,6 +505,15 @@ def test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub(
       writer proceeds unsynchronised, and ``atomic_write_text`` re-creates the
       directory it was mid-way through deleting (``mkdir(parents=True)``) — leaving a
       resurrected stub holding a lone ``experiment.json`` and no ``records/``.
+
+    The key is pinned too, via :func:`_record_lock_keys` — the third of the three lock
+    spies in this file to get it. It was the one left without the guard, and unlike the
+    other two it is behaviourally compensated: this test contends two real threads on
+    the SAME key, so dropping ``session_id`` from the forwarding makes the reset take
+    ``"/<id>"`` while the writer takes ``"<session>/<id>"``, the two stop serialising,
+    and the resurrected-stub assertion at the end fails on its own. The guard is added
+    for consistency and for a legible failure — "these locks were not scope-qualified"
+    names the cause, where a resurrected directory only shows the symptom.
     """
     tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
@@ -547,15 +556,20 @@ def test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub(
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
+    keys: list[str] = []
     monkeypatch.setattr(ws, "record_lock", announcing_lock)
-    w = threading.Thread(target=writer, name="writer")
-    w.start()
-    assert writer_is_holding.wait(timeout=JOIN_TIMEOUT)
-    r = threading.Thread(target=resetter, name="resetter")
-    r.start()
-    w.join(timeout=JOIN_TIMEOUT)
-    r.join(timeout=JOIN_TIMEOUT)
+    # Installed BEFORE the writer starts: the writer holds ``real_lock`` directly, and
+    # its key is exactly the one that has to match the reset's for the two to serialise.
+    with _record_lock_keys(monkeypatch, keys):
+        w = threading.Thread(target=writer, name="writer")
+        w.start()
+        assert writer_is_holding.wait(timeout=JOIN_TIMEOUT)
+        r = threading.Thread(target=resetter, name="resetter")
+        r.start()
+        w.join(timeout=JOIN_TIMEOUT)
+        r.join(timeout=JOIN_TIMEOUT)
     assert not w.is_alive() and not r.is_alive(), "a thread never finished"
+    _assert_scope_qualified(keys, session_id, {*CANONICAL_IDS, legacy.id})
     assert reset_wants_the_lock.is_set(), (
         "the reset never asked for record_lock(<the managed-legacy id>) — its removal "
         "is unlocked, so a concurrent writer to that record races an rmtree of its "

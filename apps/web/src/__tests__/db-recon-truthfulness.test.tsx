@@ -285,8 +285,8 @@ describe('mode chip — health absent or failed', () => {
  *
  * ONE CLAUSE MOVED SCOPE RATHER THAN BEING DROPPED. "the records are rebuilt from
  * reference files committed to this build" is required of the WORKED-EXAMPLE scope,
- * where it is true, and is FORBIDDEN in the ordinary scope, where there are no records
- * to be rebuilt. Both halves are asserted, in `__tests__/mode-chip.test.tsx`, which
+ * where it is true, and is FORBIDDEN in the ordinary scope, which this build never
+ * materialises an example into. Both halves are asserted, in `__tests__/mode-chip.test.tsx`, which
  * can mount both scopes; here the ordinary half is pinned, including the negative.
  */
 describe('mode chip — the shortening moved claims rather than dropping them', () => {
@@ -298,15 +298,19 @@ describe('mode chip — the shortening moved claims rather than dropping them', 
     // The two claims that hold unconditionally, in EVERY scope.
     expect(name).toMatch(/file upload is refused/i);
     expect(name).toMatch(/no official institutional record is shown/i);
-    // The scope-specific claim. RE-POINTED: it required `holds no records of its own`,
-    // an emptiness claim the chip derives from `sessionId === null` and never measures —
-    // false on any deployment whose workspace survived this deploy still holding the
-    // previously-seeded five. The claim that IS enforced is that the built-in examples
-    // cannot be here at all (`_materialise_seed` requires a `session_id`), and the
-    // "rebuilt from reference files" clause would therefore describe records that are
-    // not in this scope.
-    expect(name).toMatch(/the built-in example records are not in this workspace/i);
+    // The scope-specific claim, RE-POINTED TWICE — each time off an emptiness claim the
+    // chip never measured. It derives this branch from `sessionId === null` alone and
+    // reads no count, while `list_experiments(None)` enumerates whatever is on disk with
+    // no startup migration; a workspace left holding the previously-seeded five lists
+    // them while the chip denies it. `holds no records of its own` went first, then
+    // `the built-in example records are not in this workspace` — narrower, still an
+    // assertion about contents. What is asserted now is what the build ENFORCES: the
+    // three canonical-seed entry points refuse a `None` session id. The full argument is
+    // in `components/TopBar.tsx`'s `ORDINARY_ONLY`; read it before editing this string.
+    expect(name).toMatch(/nothing in this build adds a built-in example record to this workspace/i);
     expect(name).not.toMatch(/holds no records of its own/i);
+    expect(name).not.toMatch(/the built-in example records are not in this workspace/i);
+    // Still forbidden here: this scope has no walkthrough copy to rebuild from anything.
     expect(name).not.toMatch(/reference files committed to this build/i);
   });
 });

@@ -580,10 +580,14 @@ function GlanceRuntimeCards({ body }: { body: ApiAboutResponse }) {
 function GlanceRecordCards({ body }: { body: { records: RuntimeRecord[]; total: number } }) {
   const totals = deriveWorkspaceTotals(body);
 
-  /* Defensive only. The workspace always holds its canonical synthetic records
-     and this app exposes no delete, so this branch is not reachable through the
-     shipped product; it exists so an empty body renders an honest sentence
-     instead of a grid of zeros. */
+  /* NOT defensive any more, and the comment here said it was. It read "the workspace
+     always holds its canonical synthetic records ... so this branch is not reachable
+     through the shipped product", which stopped being true when the five examples moved
+     into a worked-example session: the ORDINARY scope starts with no records, so opening
+     Statistics without a walkthrough open reaches this branch as the normal case. The
+     rendered sentence is measured (`totals.total === 0`, derived from the same body the
+     cards are built from), so it stays as it is — only the claim about reachability was
+     wrong. */
   if (totals.total === 0) {
     return (
       <div className="stats-empty">

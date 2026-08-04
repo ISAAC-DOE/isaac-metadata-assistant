@@ -221,10 +221,15 @@ OPENAPI_TAGS: list[dict] = [
             # workspace root and there is no startup migration, so a deployment whose
             # workspace survives an upgrade still holding the previously-seeded five
             # would serve them from the ordinary scope while this sentence denied
-            # they were there. What is genuinely enforced is structural, not a
-            # measurement: ``_materialise_seed`` REQUIRES a ``session_id`` and has no
-            # normal-scope form, so no code path in this build can create an example
-            # record outside a session. That is what is stated.
+            # they were there. What is genuinely enforced is a REFUSAL, not merely a
+            # required parameter: ``_materialise_seed``, ``reset_to_canonical_seed`` and
+            # ``ensure_tutorial_seeded`` each raise ``InvalidTutorialSession`` on a
+            # ``None`` session id, so no code path in this build can create an example
+            # record outside a session. That is what is stated. ("Requires a session_id"
+            # was the earlier justification and it was too weak to carry the sentence:
+            # ``scope_root(None)`` returns ``workspace_root()`` silently, and an explicit
+            # ``session_id=None`` was measured writing a canonical record into the
+            # ordinary root before the refusals were added.)
             "Creating and discarding an isolated worked-example workspace. The "
             "built-in example records are created only inside one of these — no "
             "operation in this API materialises one into the ordinary workspace."
@@ -926,11 +931,11 @@ def demo_run(
 
     REQUIRES tutorial scope. Called without ``X-Isaac-Tutorial-Session`` it refuses
     with ``409 {"error": "tutorial_scope_required"}`` and writes nothing. That is a
-    correctness requirement, not only a policy one: the canonical target id does not
-    exist in the ordinary workspace and can no longer be created there, so an
-    unscoped run would either report a spurious ``demo_target_drifted`` about a record
-    that is simply absent, or seed the ordinary workspace — and the whole point of
-    this slice is that nothing seeds the ordinary workspace.
+    correctness requirement, not only a policy one: this build cannot create the
+    canonical target id in the ordinary workspace, so an unscoped run would either
+    report a spurious ``demo_target_drifted`` about a record it has no way to
+    materialise, or seed the ordinary workspace — and the whole point of this slice is
+    that nothing seeds the ordinary workspace.
     """
     if scope is None:
         return _tutorial_scope_required("POST /api/demo/run")

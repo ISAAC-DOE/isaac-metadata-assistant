@@ -23,11 +23,16 @@ import {
 // the SAME indicator — never vanish, and never read as something else.
 //
 // D3 made the chip SCOPE-AWARE, which is the correction this file now pins on both
-// sides. "Example workspace" was rendered on every ordinary screen while the ordinary
-// workspace contains no examples at all — the five built-in examples exist only inside
-// a worked-example session. So the ordinary label is the neutral `Workspace`, the
-// in-session label is `Worked Example`, and an anomalous `health.mode` still outranks
-// both. The `mode` value on the wire is untouched.
+// sides. "Example workspace" was rendered on every ordinary screen, naming the ordinary
+// workspace after content this build never puts there — the five built-in examples are
+// created only inside a worked-example session. So the ordinary label is the neutral
+// `Workspace`, the in-session label is `Worked Example`, and an anomalous `health.mode`
+// still outranks both. The `mode` value on the wire is untouched.
+//
+// Note the wording of that: "never puts there", not "does not contain". This file has
+// twice pinned a claim about a directory's CONTENTS that nothing in the app measures —
+// see the long note in the scope-parity block below, which is where the distinction is
+// argued and where a future edit should read before changing a string.
 
 beforeEach(() => {
   __resetHealthCache(); // fresh module cache so each case proves a real fetch
@@ -57,8 +62,8 @@ describe('mode chip — health-driven', () => {
     const chip = container.querySelector('.mode-chip')!;
     expect(chip).not.toBeNull();
     expect(chip.textContent).toContain(LABELS.modeOrdinaryWorkspace);
-    // The retired label must not come back here: it asserted contents this scope
-    // does not have.
+    // The retired label must not come back here: it named this scope after contents
+    // nothing in this app measures.
     expect(chip.textContent).not.toContain('Example workspace');
   });
 
@@ -134,7 +139,7 @@ describe('mode chip — scope parity (visible text and accessible name)', () => 
     ['no official institutional record is shown', /no official institutional record is shown/i],
   ];
 
-  it('ordinary scope: names the workspace, and claims nothing about records that are not there', async () => {
+  it('ordinary scope: names the workspace, and claims only what this build enforces', async () => {
     const chip = await chipIn('ordinary');
     const name = chip.getAttribute('aria-label') ?? '';
 
@@ -146,25 +151,34 @@ describe('mode chip — scope parity (visible text and accessible name)', () => 
       expect(name, `the ordinary chip must still claim: ${what}`).toMatch(pattern);
     }
     /*
-     * RE-POINTED FROM A MEASUREMENT-FREE EMPTINESS CLAIM TO THE STRUCTURAL ONE.
+     * TWO RETIRED EMPTINESS CLAIMS, BOTH NOW FORBIDDEN, AND ONE ENFORCEMENT CLAIM
+     * REQUIRED.
      *
-     * This required `holds no records of its own`, which the chip derived from
+     * `holds no records of its own` went first: the chip derived it from
      * `sessionId === null` alone — it reads no count and asks the backend nothing.
-     * `list_experiments(None)` enumerates whatever is on disk and there is no startup
-     * migration, so a deployment whose workspace survived this deploy holding the
-     * previously-seeded five lists them on My Experiments while the chip denies it
-     * (`workspace.py`'s `_SEED_TITLE_BASE` note names the Railway persistent volume and
-     * an uncleared `/tmp/isaac-ui-workspace`).
      *
-     * The replacement is narrower but enforced: `_materialise_seed` REQUIRES a
-     * `session_id` and has no normal-scope form, so no code path in this build can put a
-     * built-in example here. The retired claim is now FORBIDDEN in BOTH scopes below,
-     * which is strictly more than this file asserted before — it was previously
-     * required here and merely absent there.
+     * `the built-in example records are not in this workspace` went second, and this
+     * assertion previously REQUIRED it while a comment here called the reasoning proven.
+     * It is a narrower emptiness claim, and narrower is not measured.
+     * `list_experiments(None)` enumerates whatever is on disk and there is no startup
+     * migration; a second independent review reproduced a workspace holding all five
+     * canonical records in the ordinary scope, each classifying `canonical` and each
+     * refused by `remove_experiment`. On such a deployment the chip denied, on every
+     * screen, five rows My Experiments was listing beneath it.
+     *
+     * What is required now is a claim about what the BUILD DOES, which is checkable and
+     * is checked: `_materialise_seed`, `reset_to_canonical_seed` and
+     * `ensure_tutorial_seeded` refuse a `None` session id with `InvalidTutorialSession`
+     * (`apps/api/tests/test_tutorial_scope.py::test_the_seeding_functions_refuse_an_unscoped_call`
+     * asserts the refusal and that nothing was written).
+     *
+     * If a future slice wants to say a scope is empty, it must read the count. Do not
+     * re-derive an absence claim from `sessionId` — that is the mistake, twice.
      */
-    expect(name).toMatch(/the built-in example records are not in this workspace/i);
-    expect(name).toMatch(/only inside a guided-walkthrough session/i);
+    expect(name).toMatch(/nothing in this build adds a built-in example record to this workspace/i);
+    expect(name).toMatch(/created only inside a guided-walkthrough session/i);
     expect(name).not.toMatch(/holds no records of its own/i);
+    expect(name).not.toMatch(/the built-in example records are not in this workspace/i);
     // FORBIDDEN here: no built-in example is in this scope to be rebuilt from anything,
     // and no walkthrough whose end could discard one.
     expect(name).not.toMatch(/reference files committed to this build/i);
@@ -185,11 +199,11 @@ describe('mode chip — scope parity (visible text and accessible name)', () => 
     expect(name).toMatch(/reference files committed to this build/i);
     expect(name).toMatch(/discarded when the walkthrough ends/i);
     expect(name).toMatch(/belong to this walkthrough only/i);
-    // FORBIDDEN here: five examples ARE present, so this scope must not claim they are
-    // absent...
+    // FORBIDDEN here: this scope's five examples ARE present, so it must carry neither
+    // the ordinary scope's enforcement clause (which is about a different scope)...
+    expect(name).not.toMatch(/nothing in this build adds a built-in example record/i);
+    // ...nor either retired emptiness claim, neither of which anything ever measured.
     expect(name).not.toMatch(/the built-in example records are not in this workspace/i);
-    // ...and the retired emptiness claim must not reappear in EITHER scope, because
-    // nothing in this app ever measured it.
     expect(name).not.toMatch(/holds no records of its own/i);
   });
 

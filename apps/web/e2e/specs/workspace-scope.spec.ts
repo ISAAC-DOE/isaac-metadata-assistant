@@ -76,30 +76,33 @@ test.describe('@interaction the ordinary workspace', () => {
     await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toBeVisible();
   });
 
-  test('names itself "Workspace" in the mode chip, and claims nothing about records', async ({ page, app }) => {
+  test('names itself "Workspace" in the mode chip, and claims only what this build enforces', async ({ page, app }) => {
     await app.open(ordinaryExperiments);
 
     const chip = page.locator('span.mode-chip');
     await expect(chip).toHaveCount(1);
-    // The visible text. `Example workspace` is GONE: it asserted contents that
-    // are not in this scope. A test that accepted either string would not have
+    // The visible text. `Example workspace` is GONE: it named this scope after content
+    // this build never puts there. A test that accepted either string would not have
     // caught that, so this is exact.
     await expect(chip).toHaveText('Workspace');
 
     // WCAG 2.5.3: the accessible name opens with the visible text, and it still
-    // carries the two claims that hold unconditionally — plus, in this scope,
-    // the honest statement that there are no records here.
+    // carries the two claims that hold unconditionally — plus, in this scope, the
+    // statement of what this build enforces about the built-in examples.
     const name = await chip.getAttribute('aria-label');
     expect(name, 'the mode chip must have an accessible name').toBeTruthy();
     expect(name!.startsWith('Workspace'), `accessible name must open with the visible text: ${name}`).toBe(true);
-    // RE-POINTED: `holds no records of its own` was an emptiness claim derived from
-    // `sessionId === null` and measured by nothing — `list_experiments(None)` enumerates
-    // whatever is on disk, and there is no startup migration, so a workspace that
-    // survived this deploy holding the previously-seeded five would list them while the
-    // chip denied it. The enforced claim is that the built-in examples cannot be in this
-    // scope: `_materialise_seed` requires a `session_id` and has no normal-scope form.
-    expect(name).toMatch(/the built-in example records are not in this workspace/i);
+    // RE-POINTED TWICE, off two different EMPTINESS claims. The chip derives this branch
+    // from `sessionId === null` and reads no count, while `list_experiments(None)`
+    // enumerates whatever is on disk with no startup migration — so a workspace left
+    // holding the previously-seeded five lists them while the chip denies it. First
+    // `holds no records of its own`, then `the built-in example records are not in this
+    // workspace` (narrower, equally unmeasured). Now: what the build ENFORCES — the
+    // three canonical-seed entry points refuse a `None` session id. Argument in
+    // `src/components/TopBar.tsx`'s `ORDINARY_ONLY`.
+    expect(name).toMatch(/nothing in this build adds a built-in example record to this workspace/i);
     expect(name).not.toMatch(/holds no records of its own/i);
+    expect(name).not.toMatch(/the built-in example records are not in this workspace/i);
     expect(name).toMatch(/file upload is refused/i);
     expect(name).toMatch(/no official institutional record is shown/i);
   });

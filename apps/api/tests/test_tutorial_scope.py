@@ -1,9 +1,18 @@
 """Worked-example scope isolation: the five examples live ONLY in a session.
 
-The product rule this file pins: the five canonical example records exist only
-inside an isolated worked-example session, and the ordinary workspace is empty
-until something explicitly creates a record in it. Nothing seeds the ordinary
-workspace — not a read, not the example-workspace operations, not the reset.
+The product rule this file pins: the five canonical example records are created only
+inside an isolated worked-example session. Nothing in this build seeds the ordinary
+workspace — not a read, not the example-workspace operations, not the reset — so on a
+FRESH deployment the ordinary workspace is empty and stays empty.
+
+Note the shape of that carefully, because an earlier version of this docstring got it
+wrong and one product string inherited the error. "Nothing seeds it" is a statement
+about what this build DOES; it is not a statement about what a given directory
+CONTAINS. ``list_experiments(None)`` enumerates whatever is on disk and there is no
+startup migration, so a workspace that already held the five before this change (a
+developer's uncleared ``/tmp/isaac-ui-workspace``, a persistent volume) still lists
+them. Every "is empty" assertion below is therefore about the ``tmp_path`` workspace
+its fixture just created, which is the only scope in which it is measured.
 
 Scope is a DIRECTORY NAMESPACE (``<workspace>/_tutorial/<session id>/``), so
 exclusion from an ordinary read is structural rather than a filter a future caller
@@ -96,16 +105,60 @@ def test_a_canonical_id_is_404_in_the_ordinary_workspace(plain):
         assert r.json()["error"] == "experiment_not_found"
 
 
-def test_no_workspace_function_can_seed_the_ordinary_scope():
-    """STRUCTURAL, not behavioural: the two functions that materialise a canonical
-    seed require a ``session_id`` with no default, so there is no way to call either
-    such that it writes into the ordinary workspace. A behavioural test can only
-    show that no CURRENT caller does it; this shows no future one can."""
+def test_the_seeding_functions_refuse_an_unscoped_call(tmp_path):
+    """BEHAVIOURAL. This test used to assert a SIGNATURE, and the signature was not the
+    property that mattered.
+
+    The old version checked that ``session_id`` has no default, and its docstring
+    concluded "there is no way to call either such that it writes into the ordinary
+    workspace ... this shows no future one can". That was false, and independent review
+    falsified it by execution: ``scope_root(None)`` returns ``workspace_root()`` without
+    raising, so ``_materialise_seed(spec, session_id=None)`` wrote
+    ``workspace_root()/01SYNTHXANESSEED0000000001/`` and
+    ``reset_to_canonical_seed(dry_run=False, session_id=None)`` materialised all five
+    there and reported ``final_count: 5``. Passing ``None`` EXPLICITLY is a way to call
+    them, a missing default does not prevent it, and there is no mypy/pyright gate in
+    this project's CI to make the annotation load-bearing.
+
+    So the refusal is now enforced at runtime and asserted here — and the assertion is
+    the one the copy on three product surfaces depends on: nothing in this build adds a
+    built-in example record to the ordinary workspace.
+    """
+    root = tmp_path / "unscoped"
+    root.mkdir()
+    monkey = pytest.MonkeyPatch()
+    monkey.setenv("ISAAC_UI_WORKSPACE", str(root))
+    try:
+        with pytest.raises(ws.InvalidTutorialSession):
+            ws._materialise_seed(ws._seed_specs()[0], session_id=None)
+        with pytest.raises(ws.InvalidTutorialSession):
+            ws.reset_to_canonical_seed(dry_run=False, session_id=None)
+        # A PREVIEW is refused too: it would otherwise report a classification of, and
+        # a projection for, the ordinary workspace — a scope this operation may not act
+        # on at all.
+        with pytest.raises(ws.InvalidTutorialSession):
+            ws.reset_to_canonical_seed(dry_run=True, session_id=None)
+        with pytest.raises(ws.InvalidTutorialSession):
+            ws.ensure_tutorial_seeded(None)
+        # The refusals wrote nothing: not a canonical directory, not the namespace.
+        assert sorted(p.name for p in root.iterdir()) == []
+    finally:
+        monkey.undo()
+
+
+def test_the_seeding_functions_still_take_no_default_session_id():
+    """The signature guard is KEPT — it is just no longer the whole argument.
+
+    A default would let a caller omit the argument entirely, which the runtime refusal
+    above cannot see (it would receive the default, not ``None``). The two checks cover
+    different mistakes: this one the forgotten argument, the one above the explicit
+    ``None``.
+    """
     for fn in (ws._materialise_seed, ws.reset_to_canonical_seed):
         param = inspect.signature(fn).parameters["session_id"]
         assert param.default is inspect.Parameter.empty, (
-            f"{fn.__name__} has a default session_id, so it can silently write into "
-            "the ordinary workspace"
+            f"{fn.__name__} has a default session_id, so a caller that omits it "
+            "silently addresses whatever that default names"
         )
 
 

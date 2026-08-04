@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "720e62215fda8957923ee9a3a24c356e315bd9b25b7420eb923887c65cde69a1"
+        "sha256": "9db662b13853223baf3e4fd0fbe708841c2e81176a5f27cfa53fd66d06b7b1fb"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "f5b0694e003082660ab2942900c021e75305fa030d534f4afe87a55388ce6f5e"
+        "sha256": "ebb36a98046a0d4aca0ad6a423fc4c31c5471b20bdb1bee4eecf86c15eae30ad"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10484,7 +10484,7 @@
       },
       {
         "path": "apps/web/src/components/TopBar.tsx",
-        "sha256": "8c104b2ef6a26771ec3760efc125043abf3d7aa6ea63d340afa4d82399ee0819"
+        "sha256": "f81004a7716b8696d8fd2690481c6f47c45c4a566d9a241bfab5fe6260a340a6"
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "e219ca0d701f0c5d0f50a80065542dee177d2c3d19434f1850c92f979b3054d8"
+        "sha256": "00fce7be5462602ae14d7a4c7a7f5ac384d60a144e9327f175b68a654ec3d9d7"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "68d415b77fd99c73fa9d1ae5e9f90cd1dc63a066118b0229016d89c5ca591205"
+        "sha256": "f005b8c3d1483366add67d680b07fcf6910cd6809fc21f788af40cba774e9d1d"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "0c924e35e2d926580d22effc4e18ae99d6985a9dd928edee233b67f52e2ad32a"
+    "served_manifest_fingerprint": "19420b298695b9e63b6ed3a39c8e55ff2b4ba81c48e139e85ea1669304906c7e"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

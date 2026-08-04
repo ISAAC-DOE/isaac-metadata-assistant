@@ -609,8 +609,15 @@ function TutorialSessionNotice({ reason }: { reason: TutorialSessionError }) {
  * The completion panel. EXACTLY two actions, by design: the primary one returns
  * the reader to their work, and the secondary one replays the walkthrough. There
  * is no third "don't show me again" control, because finishing already recorded
- * that, and no "reset the workspace" control, because the walkthrough has never
- * been allowed to change a record and must not gain the power on its last screen.
+ * that, and no "reset the workspace" control.
+ *
+ * THE REASON FOR THAT LAST ONE HAD TO BE RESTATED, because the scope-isolation slice
+ * made the old one false. It read "the walkthrough has never been allowed to change a
+ * record", and starting a walkthrough now materialises five of them. What is still true,
+ * and is the actual reason, is narrower and enough: everything the walkthrough writes it
+ * writes inside its own disposable session, and it has never been allowed to touch a
+ * record of the reader's — so a workspace-reset control here would be the first thing in
+ * the walkthrough that could, and it must not gain that on its last screen.
  */
 function CompletionPanel({
   markRef,

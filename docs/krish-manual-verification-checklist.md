@@ -39,10 +39,15 @@ Seeded test data.
 | Governance & Safety → Policy | a paragraph naming the Validator and CSV preview as tools that **do read** what you paste or pick | it is TRUE, and the previous wording denied it |
 | Settings → Data & Privacy | the `synthetic-only` data-regime value | it is the machine contract from `/api/health`, quoted verbatim, not product prose |
 
-**The register check that matters most:** search results and evidence previews render
-**backend-sourced** strings. Type `synthetic` into ⌘K. If you see
-*"Synthetic XANES campaign … committed demo fixtures"* or a filename `mock_campaign.csv`,
-that is **known and NOT yet fixed** — see §7. It is not a regression.
+**The register check that matters most is NOT here — it is step 5 of §2b, and running it
+here would report a known defect as fixed.** Search results and evidence previews render
+**backend-sourced** strings, so the check needs records to search. This section runs
+before §2b, i.e. in the ordinary workspace, which holds none: measured, `GET /api/search?q=synthetic`
+there returns `workspace.total = 0` with `reason: "scope_has_no_records"`. Zero hits is
+what an empty scope looks like, not what a fixed register looks like — and the same
+⌘K search inside a worked example returns five, carrying exactly the strings the check is
+hunting for. Do the language sweep on this page's four routes here; do the search check
+once you are inside the walkthrough.
 
 ---
 
@@ -100,6 +105,12 @@ in that workspace at all — they exist only inside a **worked-example session**
    discard the session and everything you did inside it. A **reload is safe** (the tab
    remembers which session it is in), and pressing Replay again is **not** — it discards
    the open session first.
+5. **The register check, moved here from §1 because it is only performable here.** Type
+   `synthetic` into ⌘K. Expect **five** hits. If they show *"Synthetic XANES campaign …
+   committed demo fixtures"* or a filename `mock_campaign.csv`, that is **known and NOT
+   yet fixed** — see §7, and it is not a regression. Run this **inside** the walkthrough:
+   run in the ordinary workspace it returns zero hits because there is nothing there to
+   search, and zero hits would read as the defect being fixed.
 
 ---
 
@@ -129,6 +140,16 @@ while a walkthrough is open. Complete §2b first.)
    **refuse** and re-check rather than proceeding — the state it showed you no longer
    holds. Nothing should be destroyed. If Duplicate tab does not carry the session
    (browser-dependent), say so in your report rather than recording this step as passed.
+
+   > **In the duplicate, do not press Escape, Close, Skip or Finish — the same warning as
+   > §2b step 4, which applies here and is easy to miss because the duplicate opens with
+   > the coach mark showing.** Because the duplicate inherits the pointer, it resumes the
+   > walkthrough into its `running` phase, and each of those four controls discards **the
+   > session both tabs share**. Do that and the first tab's reset returns
+   > `404 tutorial_session_not_found` instead of the `412` this step is testing — which
+   > looks like the precondition machinery failing when in fact the thing it was guarding
+   > was deleted from under it. Answer the question and switch back; leave the duplicate
+   > open.
 5. Then reset normally and confirm you get exactly five examples back.
 
 ---
@@ -166,8 +187,11 @@ Inside the worked example from §2b — these records do not exist outside it.
   "Reset Worked Example" button, no "Open the Worked Example" button, and no second
   **"Replay Tutorial"** button — the empty state points at Help & Tutorial with **Go to
   Help & Tutorial** instead. The mode chip must read **Workspace**, and its tooltip /
-  accessible name must claim only that the built-in examples are not in this workspace,
-  not that the workspace is empty (nothing measures that).
+  accessible name must say only that **nothing in this build adds a built-in example record
+  to this workspace** — a statement about what the build does. It must **not** say the
+  workspace is empty, and must **not** say the built-in examples *are not in* it: both are
+  claims about the directory's contents, which nothing in this app reads. Both have shipped;
+  the second was caught only by a second review. If you see either, report it.
 
 ---
 
@@ -207,7 +231,7 @@ your eyes. Gross layout breakage at those widths would already have failed CI.
 
 | Item | Status |
 |---|---|
-| Search results / evidence previews show `Synthetic XANES campaign…`, `mock_campaign.csv`, `01SYNTHXANESSEED…` | **Not fixed.** Backend-sourced. `MANAGED_SOURCE_DESCRIPTION` feeds `classify_experiment`, which decides what reset may delete — renaming it is a behaviour change to the destructive path and needs its own reviewed slice. |
+| Search results / evidence previews show `Synthetic XANES campaign…`, `mock_campaign.csv`, `01SYNTHXANESSEED…` | **Not fixed.** Backend-sourced. `MANAGED_SOURCE_DESCRIPTION` feeds `classify_experiment`, which decides what reset may delete — renaming it is a behaviour change to the destructive path and needs its own reviewed slice. **Check it from §2b step 5, inside the worked example.** The ordinary workspace has nothing to search, so a search run there returns zero hits and would read as this being fixed. |
 | `invalid-date-time.json` passes | Declared `format` is unenforced. **Dean — Q20.** |
 | Real-record display | **Closed by default** by the database owner. Not a gap to close here. |
 | Upload that creates a record | `POST /api/uploads` is an unconditional 403 with no implementation behind it. Governance, not a bug. |
