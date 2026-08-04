@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ExperimentRow } from '../components/ExperimentRow';
 import { toExperimentSummary } from '../lib/adapt';
-import { CANONICAL_SCENARIO_LABELS } from '../test/apiFixtures';
+import { CANONICAL_SCENARIO_LABELS, RESET_TITLE_BASE } from '../test/apiFixtures';
 import type { ApiExperimentSummary, ExperimentSummary } from '../lib/types';
 
 /*
@@ -21,7 +21,7 @@ import type { ApiExperimentSummary, ExperimentSummary } from '../lib/types';
  * actually collided with a live chip was the exported one.
  */
 
-const BASE_TITLE = 'Synthetic XANES — CuO (Cu K-edge)';
+const BASE_TITLE = 'XANES Example — CuO (Cu K-edge)';
 
 /** The five rows exactly as `GET /api/experiments` serves them (title suffix +
  * derived scenario label + the live derived status each seed actually has). */
@@ -29,7 +29,7 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
   {
     id: '01SYNTHXANESSEED0000000001',
     title: `${BASE_TITLE} · New Draft`,
-    scenario: 'Scenario 1 · seeded: extraction only',
+    scenario: 'Example 1 · at setup: extraction only',
     status: 'needs_attention',
     created_utc: '2026-07-12T00:00:01Z',
     pending_count: 5,
@@ -40,7 +40,7 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
   {
     id: '01SYNTHXANESSEED0000000002',
     title: `${BASE_TITLE} · Partially Completed`,
-    scenario: 'Scenario 2 · seeded: partial answers applied',
+    scenario: 'Example 2 · at setup: some answers confirmed',
     status: 'needs_attention',
     created_utc: '2026-07-12T00:00:02Z',
     pending_count: 2,
@@ -51,7 +51,7 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
   {
     id: '01SYNTHXANESSEED0000000003',
     title: `${BASE_TITLE} · Ready to Export`,
-    scenario: 'Scenario 3 · seeded: all answers applied',
+    scenario: 'Example 3 · at setup: all answers confirmed',
     status: 'ready_to_export',
     created_utc: '2026-07-12T00:00:03Z',
     pending_count: 0,
@@ -62,7 +62,7 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
   {
     id: '01SYNTHXANESSEED0000000004',
     title: `${BASE_TITLE} · Export Review Required`,
-    scenario: 'Scenario 4 · seeded: descriptor uncertainty omitted',
+    scenario: 'Example 4 · at setup: descriptor uncertainty omitted',
     status: 'in_review',
     created_utc: '2026-07-12T00:00:04Z',
     pending_count: 0,
@@ -73,7 +73,7 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
   {
     id: '01SYNTHXANESSEED0000000005',
     title: `${BASE_TITLE} · Exported Record`,
-    scenario: 'Scenario 5 · seeded: export run at setup',
+    scenario: 'Example 5 · at setup: export run',
     status: 'done',
     created_utc: '2026-07-12T00:00:05Z',
     pending_count: 0,
@@ -94,16 +94,29 @@ function renderRow(exp: ExperimentSummary) {
 describe('scenario label — adapt layer', () => {
   it('passes the server label through verbatim for all five canonical rows', () => {
     expect(CANONICAL_ROWS.map((r) => toExperimentSummary(r).scenario)).toEqual([
-      'Scenario 1 · seeded: extraction only',
-      'Scenario 2 · seeded: partial answers applied',
-      'Scenario 3 · seeded: all answers applied',
-      'Scenario 4 · seeded: descriptor uncertainty omitted',
-      'Scenario 5 · seeded: export run at setup',
+      'Example 1 · at setup: extraction only',
+      'Example 2 · at setup: some answers confirmed',
+      'Example 3 · at setup: all answers confirmed',
+      'Example 4 · at setup: descriptor uncertainty omitted',
+      'Example 5 · at setup: export run',
     ]);
   });
 
   it('stays in lockstep with the shared API fixtures', () => {
     expect(CANONICAL_ROWS.map((r) => r.scenario)).toEqual(CANONICAL_SCENARIO_LABELS);
+  });
+
+  /*
+   * ADDED because this file's OWN copy of the title base had drifted too, and nothing
+   * checked it. `BASE_TITLE` read `'Synthetic XANES — CuO (Cu K-edge)'` while the
+   * backend had been renamed to `'XANES Example — CuO (Cu K-edge)'` — the same drift
+   * that `apiFixtures.ts` carried, and the reason a backend-side pin now exists
+   * (`apps/api/tests/test_seed_fixture_parity.py`). That pin reads only
+   * `apiFixtures.ts`, so this test is what ties THIS file's literal to it, giving the
+   * pin transitive reach here.
+   */
+  it('uses the same title base as the shared API fixtures', () => {
+    expect(BASE_TITLE).toBe(RESET_TITLE_BASE);
   });
 
   it('leaves the scientific title as the stripped base title (never mutated)', () => {
@@ -158,7 +171,7 @@ describe('scenario label — ExperimentRow rendering', () => {
     expect(icon).not.toBeNull();
     // decorative only — the text carries the meaning
     expect(icon?.getAttribute('aria-hidden')).toBe('true');
-    expect(line?.textContent).toBe('Scenario 4 · seeded: descriptor uncertainty omitted');
+    expect(line?.textContent).toBe('Example 4 · at setup: descriptor uncertainty omitted');
   });
 
   it('renders NOTHING for a record without a scenario (no shell, no "undefined")', () => {
@@ -166,7 +179,7 @@ describe('scenario label — ExperimentRow rendering', () => {
     const { container } = renderRow(exp);
     expect(container.querySelector('.exp-scenario')).toBeNull();
     expect(container.textContent).not.toContain('undefined');
-    expect(container.textContent).not.toContain('Scenario');
+    expect(container.textContent).not.toContain('at setup');
     // the rest of the row is untouched
     expect(container.querySelector('.exp-title')?.textContent).toBe(BASE_TITLE);
     expect(container.querySelector('.exp-sub')?.textContent).toContain('Draft');
@@ -197,10 +210,10 @@ describe('scenario label — ExperimentRow rendering', () => {
       const sub = container.querySelector('.exp-sub')?.textContent ?? '';
       expect(sub).toContain(row.exported ? 'Exported' : 'Draft');
       // ...and the label never states a field count that the live chip could contradict.
-      expect(scenario.replace(`Scenario ${index + 1}`, '')).not.toMatch(/\d/);
+      expect(scenario.replace(`Example ${index + 1}`, '')).not.toMatch(/\d/);
       // ...and it is explicitly scoped to setup, so advancing the record — which
       // changes the chip and the group — cannot turn the label into a false claim.
-      expect(scenario).toContain(`Scenario ${index + 1} · seeded: `);
+      expect(scenario).toContain(`Example ${index + 1} · at setup: `);
     },
   );
 });
@@ -241,7 +254,7 @@ describe('scenario label — accessible name', () => {
       renderRow(toExperimentSummary(CANONICAL_ROWS[0])).getByRole('link').getAttribute('aria-label') ??
       '';
     expect(name).toBe(
-      `${BASE_TITLE} — Scenario 1 · seeded: extraction only, Draft, Needs Attention, 5 fields need you`,
+      `${BASE_TITLE} — Example 1 · at setup: extraction only, Draft, Needs Attention, 5 fields need you`,
     );
   });
 });

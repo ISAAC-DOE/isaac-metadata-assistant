@@ -2,12 +2,15 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { api, RESET_CONFIRMATION } from '../lib/api';
+import { api, RESET_CONFIRMATION, TUTORIAL_SESSION_HEADER, getTutorialScope } from '../lib/api';
 import { LABELS } from '../lib/labels';
+import { __resetTutorialStore } from '../lib/tutorialController';
 import { atRiskSentence } from '../components/ResetDemoDialog';
 import {
   stubFetchRoutes,
   resetDemoRoutes,
+  tutorialSessionRoutes,
+  TUTORIAL_SESSION_ID,
   demoResetPreviewClean,
   demoResetPreviewAmbiguous,
   demoResetExecuteOk,
@@ -20,19 +23,36 @@ import {
 import type { RouteEntry } from '../test/apiFixtures';
 
 /*
- * P26.0b — the guarded Reset Workspace control on My Experiments.
+ * P26.0b — the guarded Reset Worked Example control.
  *
- * Behaviour contract (test-first; RED until the control + dialog + api.resetDemo
- * exist). The control:
+ * WHERE IT LIVES CHANGED, AND EVERY TEST BELOW MOVED WITH IT. `POST /api/demo/reset`
+ * now REQUIRES a worked-example session header and refuses without one, writing
+ * nothing. The trigger therefore no longer sits on My Experiments — where it would be
+ * a control that looks like it acts and does not — but in the persistent
+ * worked-example bar (`components/TutorialSessionBar.tsx`), which exists only while a
+ * session is open.
+ *
+ * So these tests now ENTER a worked-example session first (`renderInSession`) instead
+ * of rendering the ordinary My Experiments. Nothing about the control's contract was
+ * relaxed to make that work: every assertion below asserts the same property, at the
+ * same strength, about the scope the control now acts on. Three assertions were made
+ * STRONGER in the move and say so at their site: the trigger's absence from the
+ * ordinary workspace is now pinned, the "shared workspace" claim is pinned as
+ * FORBIDDEN rather than required (it is false of a per-session scope), and the
+ * post-reset refetch is measured as an INCREASE rather than as a floor of two — the
+ * walkthrough's own list read would otherwise satisfy a floor of two on its own.
+ *
+ * Behaviour contract. The control:
  *   - renders ONLY when GET /api/health reports mode "synthetic-only" (authoritative,
  *     fail-closed), and is a restrained *destructive* action, never the primary;
  *   - opens a labeled modal dialog that first PREVIEWS (never mutates) via
  *     POST /api/demo/reset {mode:'preview'}, showing the typed counts;
- *   - warns this is a shared hosted example workspace and progress will be discarded;
+ *   - warns this is a temporary worked-example workspace and progress will be
+ *     discarded;
  *   - requires the operator to type exactly "RESET"; the destructive action stays
  *     disabled until it matches (and always, if any ambiguous record is present);
- *   - on execute sends the exact backend phrase, fires exactly once, then refreshes
- *     the list from the backend and reflects the canonical five;
+ *   - on execute sends the exact backend phrase, fires exactly once, then announces
+ *     the rebuild so the list is re-read and reflects the canonical five;
  *   - refuses safely (no bypass) when the backend refuses, and never leaks a
  *     credential or internal filesystem path.
  *
@@ -41,14 +61,54 @@ import type { RouteEntry } from '../test/apiFixtures';
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
 
-function renderHome(routes: Record<string, RouteEntry>) {
-  const calls = stubFetchRoutes(routes);
-  const view = render(
+/*
+ * THE TWO STRINGS THIS FILE WILL NOT READ FROM `LABELS`.
+ *
+ * The dialog title and the confirm action are the words that tell an operator what
+ * they are about to destroy, so they are written out here as INDEPENDENT literals.
+ *
+ * WHY, because it was got wrong once and the fix must not be undone. When the
+ * control moved into the worked-example bar its copy changed, and fourteen
+ * assertions in this file were re-pointed from their own literals to
+ * `LABELS.resetDialogTitle` / `LABELS.resetConfirmAction` — the SAME constants the
+ * component renders from. Both sides of every one of those assertions then came from
+ * one place, so the file agreed with the component by construction: a future rewrite
+ * of either string (to something vague, or to something that no longer says a
+ * destructive act is about to happen) would have passed silently, with nothing in the
+ * suite noticing that the guarded control's own words had changed.
+ *
+ * A literal here is not duplication for its own sake — it is the second, independent
+ * copy that makes the comparison meaningful. `LABELS` is still used freely for the
+ * other labels in this file; these two are the ones an operator's safety rests on.
+ */
+const DIALOG_TITLE = 'Reset the Worked Example';
+const CONFIRM_ACTION = 'Reset Example Records';
+
+/**
+ * Render My Experiments and open a real worked-example session, the way a reader
+ * does: by accepting the first-run offer.
+ *
+ * DELIBERATELY THE REAL PATH, not a seeded store. The control under test is gated on
+ * a session actually existing, and `startTutorial` is what creates one — a test seam
+ * that set `sessionId` directly would prove the bar renders without proving it renders
+ * when it should. The cost is that the walkthrough's coach mark is on screen
+ * throughout, which is exactly the real arrangement and is why `dialog()` below
+ * resolves the reset dialog BY NAME.
+ */
+async function renderInSession(routes: Record<string, RouteEntry>) {
+  const calls = stubFetchRoutes({ ...tutorialSessionRoutes(), ...routes });
+  const rendered = render(
     <MemoryRouter initialEntries={['/experiments']} future={FUTURE}>
       <AppRoutes />
     </MemoryRouter>,
   );
-  return { ...view, calls };
+  const view = { ...rendered, calls };
+  fireEvent.click(await view.findByRole('button', { name: LABELS.actionStartTutorial }));
+  // The bar's affirmative control is NOT health-gated, so it is the right thing to
+  // wait on: a `mode: production` case must still get into the session and then find
+  // the reset control absent.
+  await view.findByRole('button', { name: LABELS.actionRunDemo });
+  return view;
 }
 
 /** The parsed JSON bodies of every POST /api/demo/reset the app issued, in order. */
@@ -63,44 +123,110 @@ function countCalls(calls: string[], key: string): number {
   return calls.filter((k) => k === key).length;
 }
 
-/** Open the Reset Workspace dialog, focusing the trigger first so focus-return is testable. */
-async function openReset(view: ReturnType<typeof renderHome>) {
-  const trigger = (await view.findByRole('button', { name: 'Reset Workspace' })) as HTMLButtonElement;
+type SessionView = Awaited<ReturnType<typeof renderInSession>>;
+
+/** Open the reset dialog, focusing the trigger first so focus-return is testable. */
+async function openReset(view: SessionView) {
+  const trigger = (await view.findByRole('button', {
+    name: LABELS.actionResetDemo,
+  })) as HTMLButtonElement;
   trigger.focus();
   fireEvent.click(trigger);
   // the dialog appears once the preview resolves
-  await view.findByRole('dialog');
+  await waitFor(() => expect(dialog(view)).toBeInTheDocument());
   return trigger;
 }
 
-function dialog(view: ReturnType<typeof renderHome>) {
-  return view.getByRole('dialog');
+/**
+ * The reset dialog, resolved BY ITS ACCESSIBLE NAME.
+ *
+ * A bare `getByRole('dialog')` used to be unambiguous because the reset dialog was the
+ * only one on My Experiments. The walkthrough's coach mark is also a `role="dialog"`
+ * (deliberately: it names and describes itself), and it is on screen for the whole of
+ * every test in this file now. Naming the dialog is a MORE precise query than the one
+ * it replaces — it would fail if the dialog lost its label, which the bare query would
+ * not — so it is not a loosening.
+ */
+function dialog(view: SessionView) {
+  return view.getByRole('dialog', { name: new RegExp(DIALOG_TITLE, 'i') });
+}
+
+/** The reset dialog, or null — the same name-scoped query, for absence assertions.
+ *  A bare `queryByRole('dialog')` would now resolve the coach mark and never be null,
+ *  which would make every "the dialog closed" assertion below unfalsifiable. */
+function resetDialogOrNull(view: SessionView): HTMLElement | null {
+  return view.queryByRole('dialog', { name: new RegExp(DIALOG_TITLE, 'i') });
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // The walkthrough's store is a module singleton and holds the open session id, and
+  // `api.ts` holds the scope the header is built from. Both must be cleared or a later
+  // test starts inside the previous test's session.
+  __resetTutorialStore();
+  sessionStorage.clear();
 });
 
 // --- 1–3. presence, synthetic-only gate, non-primary treatment ---------------
 
-describe('P26.0b · Reset Workspace — presence & treatment', () => {
-  it('renders the Reset Workspace control on My Experiments in synthetic-only mode', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
-    expect(await view.findByRole('button', { name: 'Reset Workspace' })).toBeInTheDocument();
+describe('P26.0b · Reset Worked Example — presence & treatment', () => {
+  /*
+   * The copy pin, stated once so a rewrite fails with a legible message instead of
+   * as twenty-one "unable to find a dialog named …" errors. See the note on
+   * `DIALOG_TITLE`: these are the two strings this file deliberately does not read
+   * from the same constants the component renders from.
+   */
+  it('the dialog title and confirm action still say what they said', () => {
+    expect(LABELS.resetDialogTitle).toBe(DIALOG_TITLE);
+    expect(LABELS.resetConfirmAction).toBe(CONFIRM_ACTION);
+  });
+
+  it('renders the reset control in the worked-example bar in synthetic-only mode', async () => {
+    const view = await renderInSession(resetDemoRoutes().routes);
+    const reset = await view.findByRole('button', { name: LABELS.actionResetDemo });
+    expect(reset).toBeInTheDocument();
+    // It is in the worked-example bar, not loose on the screen — the bar is what
+    // scopes it, and a trigger outside it would not be session-gated.
+    expect(reset.closest('.tutorial-session-bar')).not.toBeNull();
+  });
+
+  /*
+   * ADDED IN THE MOVE, not carried over: the control's ABSENCE from the ordinary
+   * workspace is now a pinned property rather than a consequence of where it happens
+   * to be mounted. `POST /api/demo/reset` refuses without the session header, so a
+   * trigger here would be a dead control — the exact defect the move fixed.
+   */
+  it('does NOT render on the ordinary My Experiments, where the endpoint refuses', async () => {
+    const calls = stubFetchRoutes(resetDemoRoutes().routes);
+    const view = render(
+      <MemoryRouter initialEntries={['/experiments']} future={FUTURE}>
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    // Wait for the loaded screen (the offer only renders on the data branch), so this
+    // cannot pass merely because nothing has rendered yet.
+    await view.findByRole('button', { name: LABELS.actionStartTutorial });
+    expect(calls).toContain('GET /api/experiments');
+    expect(view.queryByRole('button', { name: LABELS.actionResetDemo })).toBeNull();
+    expect(document.querySelector('.tutorial-session-bar')).toBeNull();
+    // ...and no request was ever made to the reset endpoint from this screen.
+    expect(calls.filter((c) => c.includes('/demo/reset'))).toEqual([]);
   });
 
   it('does NOT render the control when the backend is not synthetic-only', async () => {
-    const view = renderHome(resetDemoRoutes({ mode: 'production' }).routes);
+    const view = await renderInSession(resetDemoRoutes({ mode: 'production' }).routes);
     // wait until the page (and the health probe) have settled
-    await view.findByRole('button', { name: 'Open the Worked Example' });
+    await view.findByRole('button', { name: LABELS.actionRunDemo });
     await waitFor(() =>
-      expect(view.queryByRole('button', { name: 'Reset Workspace' })).toBeNull(),
+      expect(view.queryByRole('button', { name: LABELS.actionResetDemo })).toBeNull(),
     );
   });
 
   it('is a restrained destructive action — not the primary on the screen', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
-    const reset = (await view.findByRole('button', { name: 'Reset Workspace' })) as HTMLButtonElement;
+    const view = await renderInSession(resetDemoRoutes().routes);
+    const reset = (await view.findByRole('button', {
+      name: LABELS.actionResetDemo,
+    })) as HTMLButtonElement;
     /*
      * P1 removed the button this test used to reach for. It was labelled "New
      * Record", styled btn-primary, and navigated to the SAME route as the
@@ -108,9 +234,13 @@ describe('P26.0b · Reset Workspace — presence & treatment', () => {
      * have. The screen's one affirmative action inherited the primary treatment,
      * so the property under test is unchanged: SOMETHING affirmative is primary,
      * and Reset must not borrow that styling.
+     *
+     * D2 moved BOTH controls into the worked-example bar — they are the two
+     * operations that require the session header — so the affirmative control this
+     * compares against is the same control it always was, in its new home.
      */
     const primary = view.getByRole('button', {
-      name: 'Open the Worked Example',
+      name: LABELS.actionRunDemo,
     }) as HTMLButtonElement;
     expect(primary.className).toContain('btn-primary');
     expect(reset.className).not.toContain('btn-primary');
@@ -124,9 +254,9 @@ describe('P26.0b · Reset Workspace — presence & treatment', () => {
 
 // --- 4–8. preview is non-mutating and shows the typed counts + warnings -------
 
-describe('P26.0b · Reset Workspace — preview (non-mutating) & disclosure', () => {
+describe('P26.0b · Reset Worked Example — preview (non-mutating) & disclosure', () => {
   it('opening the dialog previews (mode:preview) and issues no execute', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const posts = resetPosts();
     expect(posts).toHaveLength(1);
@@ -137,7 +267,7 @@ describe('P26.0b · Reset Workspace — preview (non-mutating) & disclosure', ()
   });
 
   it('preview displays current / canonical / legacy / ambiguous / final counts', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
     // labels are the operator-facing vocabulary from the spec
@@ -153,11 +283,50 @@ describe('P26.0b · Reset Workspace — preview (non-mutating) & disclosure', ()
     expect(text).toMatch(/\b2\b/); // legacy_count
   });
 
-  it('states that this is a shared hosted example workspace and progress is discarded', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+  /*
+   * THE SCOPE WORD FLIPPED POLARITY, and that is a correction rather than a
+   * relaxation. This test used to REQUIRE the word "shared", because the five
+   * examples lived in the single ordinary workspace that every reader of the hosted
+   * deployment saw. They now live in a worked-example session: one directory per
+   * session, mutually invisible (`test_two_sessions_are_independently_mutable_and_
+   * mutually_invisible`). "Shared" is therefore FALSE here — it would over-state the
+   * blast radius and under-state the privacy of the scope at the same time — so it is
+   * now FORBIDDEN, and the true property it stood for (the scope is temporary, and
+   * the reader's own records are not in it) is required in its place.
+   *
+   * Everything else in this test is unchanged, including the two clauses P1 tightened.
+   */
+  it('states that this is a temporary worked-example workspace and progress is discarded', async () => {
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const text = (dialog(view).textContent ?? '').toLowerCase();
-    expect(text).toContain('shared');
+    expect(text).toContain('temporary');
+    // the scope, both halves: what it IS, and what it is not
+    expect(text).toMatch(/belonging to this walkthrough alone/);
+    /*
+     * THIS ASSERTION WAS RE-POINTED, AND IT IS STRICTLY STRONGER THAN THE ONE IT
+     * REPLACES.
+     *
+     * It required `nothing in my experiments is in this scope`, which is FALSE — and
+     * false in the confirmation copy of the app's one destructive path. Entering a
+     * walkthrough changes the SCOPE every request carries, not the screen (`api.ts`
+     * attaches `X-Isaac-Tutorial-Session` in its single `request()` choke point), so
+     * whenever this dialog is reachable, My Experiments is listing the very records the
+     * reset is about. An operator reading the old sentence would have concluded the
+     * rows they had been working on were out of reach of the button they were pressing.
+     *
+     * Three things are now required where one was: the direction that IS enforced (the
+     * ordinary workspace is not in this scope, and `reset_to_canonical_seed` only ever
+     * addresses `scope_root(session_id)`), the fact the old sentence hid (those rows
+     * ARE what gets reset), and the forbidding of the false sentence itself.
+     */
+    expect(text).toMatch(/the ordinary workspace is not in this scope/);
+    expect(text).toMatch(/this control cannot reach it/);
+    expect(text).toMatch(/rows on my experiments are this walkthrough/);
+    expect(text).toMatch(/so they are what is reset/);
+    expect(text).not.toMatch(/nothing in my experiments is in this scope/);
+    // the retired claim must not come back — a session is not shared with anyone
+    expect(text).not.toMatch(/\bshared\b/);
     // P1: was `toContain('synthetic')`. The disclosure now names the thing being
     // reset ("example workspace") instead of the data regime, which the mode chip
     // and the Governance surface own. Pinned MORE tightly than before — the old
@@ -190,7 +359,7 @@ describe('P26.0b · Reset Workspace — preview (non-mutating) & disclosure', ()
    * it renders only when health reports `synthetic-only`.
    */
   it('makes a mode claim, never a whole-content claim about the workspace', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const text = (dialog(view).textContent ?? '').toLowerCase();
 
@@ -206,12 +375,12 @@ describe('P26.0b · Reset Workspace — preview (non-mutating) & disclosure', ()
 
 // --- 9–12. typed confirmation gate; cancel / escape do not mutate -------------
 
-describe('P26.0b · Reset Workspace — confirmation gate', () => {
+describe('P26.0b · Reset Worked Example — confirmation gate', () => {
   it('keeps the destructive action disabled until exactly "RESET" is typed', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
-    const action = d.getByRole('button', { name: 'Reset Shared Workspace' }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
     const input = d.getByRole('textbox') as HTMLInputElement;
 
     expect(action.disabled).toBe(true); // nothing typed
@@ -224,25 +393,56 @@ describe('P26.0b · Reset Workspace — confirmation gate', () => {
   });
 
   it('Cancel closes the dialog and performs no mutation, returning focus to the trigger', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     const trigger = await openReset(view);
     fireEvent.click(within(dialog(view)).getByRole('button', { name: 'Cancel' }));
-    expect(view.queryByRole('dialog')).toBeNull();
+    expect(resetDialogOrNull(view)).toBeNull();
     expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
     expect(document.activeElement).toBe(trigger);
   });
 
-  it('Escape closes the dialog without mutating and returns focus to the trigger', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+  /*
+   * THIS TEST NOW PINS A SECOND PROPERTY, and it is why `GuidedTutorial` gained a
+   * guard. The walkthrough registers a capture-phase Escape handler on `document`, and
+   * `AppShell` mounts it before anything inside it — so without a guard the walkthrough
+   * would see Escape FIRST, call `stopPropagation`, and this dialog could never be
+   * closed with the key. Worse, the reader's Escape would silently do something they did
+   * not ask for: leave the walkthrough while a destructive confirmation was on screen.
+   *
+   * So Escape must close the MODAL and leave the walkthrough alone. Both halves are
+   * asserted; the second half is the new one.
+   */
+  it('Escape closes the dialog without mutating, returns focus, and leaves the walkthrough running', async () => {
+    const view = await renderInSession(resetDemoRoutes().routes);
     const trigger = await openReset(view);
+    // the walkthrough really is running, so the assertion below is about a real overlay
+    expect(document.querySelector('.tutorial-mark')).not.toBeNull();
+
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(view.queryByRole('dialog')).toBeNull();
+
+    expect(resetDialogOrNull(view)).toBeNull();
     expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
     expect(document.activeElement).toBe(trigger);
+    // The modal owned that Escape: the walkthrough is untouched, and so is its session.
+    expect(document.querySelector('.tutorial-mark')).not.toBeNull();
+    expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID);
+    expect(view.queryByRole('button', { name: LABELS.actionResetDemo })).not.toBeNull();
+  });
+
+  it('a SECOND Escape, with no dialog open, does leave the walkthrough', async () => {
+    // The other side of the same guard: it must defer to a modal, not swallow Escape
+    // whenever one has ever been open.
+    const view = await renderInSession(resetDemoRoutes().routes);
+    await openReset(view);
+    fireEvent.keyDown(document, { key: 'Escape' }); // closes the dialog
+    expect(resetDialogOrNull(view)).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' }); // now leaves the walkthrough
+    await waitFor(() => expect(document.querySelector('.tutorial-mark')).toBeNull());
+    await waitFor(() => expect(getTutorialScope()).toBeNull());
   });
 
   it('pressing Enter with a non-matching phrase does not execute', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const input = within(dialog(view)).getByRole('textbox');
     fireEvent.change(input, { target: { value: 'nope' } });
@@ -253,25 +453,25 @@ describe('P26.0b · Reset Workspace — confirmation gate', () => {
 
 // --- 13–16. dialog a11y: labelled, focus in / trapped / returned --------------
 
-describe('P26.0b · Reset Workspace — dialog accessibility', () => {
+describe('P26.0b · Reset Worked Example — dialog accessibility', () => {
   it('is a modal dialog labelled by its visible title', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = dialog(view);
     expect(d.getAttribute('aria-modal')).toBe('true');
     const labelledby = d.getAttribute('aria-labelledby');
     expect(labelledby).toBeTruthy();
-    expect(document.getElementById(labelledby!)!.textContent).toMatch(/Reset the Shared Workspace/i);
+    expect(document.getElementById(labelledby!)!.textContent).toMatch(new RegExp(DIALOG_TITLE, 'i'));
   });
 
   it('moves focus into the dialog on open', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     expect(dialog(view).contains(document.activeElement)).toBe(true);
   });
 
   it('traps Tab within the dialog', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = dialog(view);
     const focusable = Array.from(
@@ -292,7 +492,7 @@ describe('P26.0b · Reset Workspace — dialog accessibility', () => {
   });
 
   it('the confirmation input has an accessible label', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const input = within(dialog(view)).getByRole('textbox');
     const name =
@@ -307,13 +507,13 @@ describe('P26.0b · Reset Workspace — dialog accessibility', () => {
 
 // --- 17–19. execute fires exactly once; double-click is safe ------------------
 
-describe('P26.0b · Reset Workspace — single-submit safety', () => {
+describe('P26.0b · Reset Worked Example — single-submit safety', () => {
   it('executing sends the exact backend confirmation phrase exactly once', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     const executes = resetPosts().filter((p) => p.mode === 'execute');
     expect(executes).toHaveLength(1);
@@ -321,11 +521,11 @@ describe('P26.0b · Reset Workspace — single-submit safety', () => {
   });
 
   it('double-clicking the destructive action cannot produce two executions', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    const action = d.getByRole('button', { name: 'Reset Shared Workspace' });
+    const action = d.getByRole('button', { name: CONFIRM_ACTION });
     fireEvent.click(action);
     fireEvent.click(action);
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
@@ -335,9 +535,9 @@ describe('P26.0b · Reset Workspace — single-submit safety', () => {
 
 // --- 20–21. ambiguous refusal is safe and offers no bypass --------------------
 
-describe('P26.0b · Reset Workspace — ambiguous refusal', () => {
+describe('P26.0b · Reset Worked Example — ambiguous refusal', () => {
   it('when the preview is refused for ambiguity, execution is disabled with no bypass', async () => {
-    const view = renderHome(resetDemoRoutes({ preview: demoResetPreviewAmbiguous }).routes);
+    const view = await renderInSession(resetDemoRoutes({ preview: demoResetPreviewAmbiguous }).routes);
     await openReset(view);
     const d = within(dialog(view));
     const text = (dialog(view).textContent ?? '').toLowerCase();
@@ -345,38 +545,127 @@ describe('P26.0b · Reset Workspace — ambiguous refusal', () => {
     // no "delete it yourself" style bypass is offered
     expect(text).not.toMatch(/delete.*manual|manually delete|override/);
     // typing the phrase must NOT enable execution while ambiguous
-    const action = d.getByRole('button', { name: 'Reset Shared Workspace' }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
     expect(action.disabled).toBe(true);
   });
 
   it('an ambiguous refusal never issues an execute request', async () => {
-    const view = renderHome(resetDemoRoutes({ preview: demoResetPreviewAmbiguous }).routes);
+    const view = await renderInSession(resetDemoRoutes({ preview: demoResetPreviewAmbiguous }).routes);
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    const action = d.getByRole('button', { name: 'Reset Shared Workspace' });
+    const action = d.getByRole('button', { name: CONFIRM_ACTION });
     fireEvent.click(action);
     expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
   });
 });
 
+/*
+ * AN UNINTERPRETABLE PREVIEW BODY MUST NOT ARM THE DESTRUCTIVE CONTROL.
+ *
+ * `POST /api/demo/reset` answers 409 `{"error": "tutorial_scope_required", …}` when
+ * the request carries no worked-example session — a body with no `status`, no counts
+ * and no `plan_digest` (`routes.py::_tutorial_scope_required`). 409 is also one of
+ * the statuses `api.resetDemo` decodes as a typed result, so that body used to be
+ * returned AS a result: `refused` is computed from `data.status === 'refused' ||
+ * data.ambiguous_count > 0`, both fields were `undefined`, and the expression is
+ * therefore `false`. The dialog rendered `undefined` counts and the execute button
+ * stayed armable by typing the phrase.
+ *
+ * This is believed unreachable today — the dialog is mounted only by
+ * `TutorialSessionBar`, which requires a non-null `sessionId` — but the invariant it
+ * would rest on is two module-level variables staying in step (`api.ts`'s
+ * `tutorialScope` and the tutorial store's `sessionId`), and a destructive control
+ * must fail closed rather than depend on that holding. The state is reached here the
+ * way the code would reach it: the endpoint answers that body, whatever the reason.
+ */
+describe('P26.0b · Reset Worked Example — a body it cannot interpret fails closed', () => {
+  const SCOPE_REQUIRED: RouteEntry = {
+    status: 409,
+    body: {
+      error: 'tutorial_scope_required',
+      operation: 'POST /api/demo/reset',
+      header: TUTORIAL_SESSION_HEADER,
+      message:
+        'This operation works on the built-in example records, which exist only inside ' +
+        'a worked-example session. Nothing was written.',
+    },
+  };
+
+  it('the execute control cannot be armed, and no execute is ever issued', async () => {
+    const view = await renderInSession({
+      ...resetDemoRoutes().routes,
+      'POST /api/demo/reset': SCOPE_REQUIRED,
+    });
+    await openReset(view);
+    const d = within(dialog(view));
+
+    // The dialog is in its honest preview-failure state…
+    expect(d.getByRole('note').textContent).toMatch(/preview could not be loaded/i);
+    // …and no count table was drawn from a body that carries no counts.
+    expect(dialog(view).querySelector('.reset-counts')).toBeNull();
+    expect(dialog(view).textContent ?? '').not.toMatch(/undefined|NaN/);
+
+    // Typing the exact phrase does NOT arm the destructive action.
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    expect(action.disabled).toBe(true);
+    // Pressing it anyway, and pressing Enter in the field, issue nothing.
+    fireEvent.click(action);
+    fireEvent.keyDown(d.getByRole('textbox'), { key: 'Enter' });
+    expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
+    expect(resetPosts().every((p) => p.mode === 'preview')).toBe(true);
+  });
+
+  it('presents no plan at all — no counts, and no "what you would lose" sentence', async () => {
+    const view = await renderInSession({
+      ...resetDemoRoutes().routes,
+      'POST /api/demo/reset': SCOPE_REQUIRED,
+    });
+    await openReset(view);
+
+    /*
+     * Both blocks below render on `data &&`, i.e. on "a preview body arrived". They
+     * are what the defect produced: an at-risk sentence and a count table built from
+     * a body that carries neither. Asserting their ABSENCE is what makes this test
+     * falsifiable — it fails if `resetDemo` ever returns the refusal body again.
+     */
+    expect(dialog(view).querySelector('.reset-counts')).toBeNull();
+    expect(dialog(view).querySelector('.reset-at-risk')).toBeNull();
+    const text = dialog(view).textContent ?? '';
+    expect(text).not.toContain(LABELS.resetAtRiskLabel);
+    // Nothing classified this workspace, so no classification verdict may be shown…
+    expect(text).not.toMatch(/refused for safety/i);
+    // …and the wire-level error code is not product copy.
+    expect(text).not.toMatch(/tutorial_scope_required/);
+  });
+});
+
 // --- 22–24. success refreshes from the backend to the canonical five ----------
 
-describe('P26.0b · Reset Workspace — success refreshes the dashboard', () => {
+describe('P26.0b · Reset Worked Example — success refreshes the dashboard', () => {
   it('after a successful reset the experiments list is re-fetched and shows the canonical five', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     // the legacy demo rows are present before the reset (two identically-titled
     // managed-legacy records — use the plural query since the title is shared)
     expect((await view.findAllByText(/Demo \(demo\/run\)/)).length).toBeGreaterThanOrEqual(1);
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    /*
+     * STRENGTHENED IN THE MOVE. This used to assert a FLOOR of two list reads
+     * ("initial load + refresh"). Inside a worked-example session the walkthrough
+     * itself reads the list once to resolve its targets, so a floor of two would now
+     * be satisfied before the reset ran at all — the assertion would have survived
+     * the refetch being deleted. It is now measured as an INCREASE across the
+     * execute, which is the property that was always meant.
+     */
+    const readsBefore = countCalls(view.calls, 'GET /api/experiments');
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
 
-    // the list endpoint is hit again after the execute (initial load + refresh)
     await waitFor(() =>
-      expect(countCalls(view.calls, 'GET /api/experiments')).toBeGreaterThanOrEqual(2),
+      expect(countCalls(view.calls, 'GET /api/experiments')).toBeGreaterThan(readsBefore),
     );
     // and the refreshed dashboard reflects exactly the five canonical scenarios.
     // P33 S1 redesigned the card: the server-authored lifecycle suffix (e.g.
@@ -391,11 +680,11 @@ describe('P26.0b · Reset Workspace — success refreshes the dashboard', () => 
   });
 
   it('does not surface an error state on a successful reset', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     // no unhandled error banner
     expect(view.queryByText(/unexpected error|something went wrong/i)).toBeNull();
@@ -404,9 +693,9 @@ describe('P26.0b · Reset Workspace — success refreshes the dashboard', () => 
 
 // --- 25–26. no secret/path leak; existing example-run action intact -----------
 
-describe('P26.0b · Reset Workspace — leak safety & coexistence', () => {
+describe('P26.0b · Reset Worked Example — leak safety & coexistence', () => {
   it('never renders a credential or internal filesystem path', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const text = view.container.textContent ?? '';
     for (const forbidden of ['Bearer', 'Authorization', 'VITE_API_KEY', '/data/', '/tmp/', 'isaac-workspace']) {
@@ -415,8 +704,40 @@ describe('P26.0b · Reset Workspace — leak safety & coexistence', () => {
   });
 
   it('leaves the existing example-run action intact', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
-    expect(await view.findByRole('button', { name: 'Open the Worked Example' })).toBeInTheDocument();
+    const view = await renderInSession(resetDemoRoutes().routes);
+    // Both example-workspace controls moved together — they are the two operations
+    // that require the session header — so this affirmative one is still beside the
+    // destructive one, in the bar rather than in the page header.
+    const run = await view.findByRole('button', { name: LABELS.actionRunDemo });
+    expect(run).toBeInTheDocument();
+    expect(run.closest('.tutorial-session-bar')).not.toBeNull();
+  });
+
+  /*
+   * ADDED IN THE MOVE. Every request the dialog issues must carry the session scope:
+   * that — not a filter, not a check inside the dialog — is what confines the reset to
+   * these five copies. Asserted on the outgoing headers, because the scope is applied
+   * in `api.ts`'s single `request()` choke point and a future API function that
+   * bypassed it would be invisible to any assertion about the dialog itself.
+   */
+  it('sends the worked-example scope on every reset request it issues', async () => {
+    const view = await renderInSession(resetDemoRoutes().routes);
+    await openReset(view);
+    const d = within(dialog(view));
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
+    await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
+
+    const mock = (globalThis.fetch as unknown as {
+      mock: { calls: [unknown, RequestInit?][] };
+    }).mock;
+    const resetCalls = mock.calls.filter(([input]) => String(input).endsWith('/demo/reset'));
+    expect(resetCalls.length).toBeGreaterThanOrEqual(2); // the preview and the execute
+    for (const [, init] of resetCalls) {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      expect(headers[TUTORIAL_SESSION_HEADER]).toBe(TUTORIAL_SESSION_ID);
+    }
+    expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID);
   });
 });
 
@@ -506,13 +827,13 @@ describe('P26.0b · api.resetDemo — typed outcomes', () => {
 
 // --- R1 · the precondition is carried, and a stale refusal is honest -----------
 
-describe('R1 · Reset Workspace — the plan-digest precondition', () => {
+describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
   it('carries the digest from its OWN preview into the execute', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     const execute = resetPosts().find((p) => p.mode === 'execute')!;
     expect(execute.plan_digest).toBe(RESET_PLAN_DIGEST);
@@ -520,13 +841,13 @@ describe('R1 · Reset Workspace — the plan-digest precondition', () => {
   });
 
   it('a stale refusal says nothing was reset, in plain language and not in HTTP', async () => {
-    const view = renderHome(
+    const view = await renderInSession(
       resetDemoRoutes({ executeStatus: 412, execute: demoResetExecuteStale }).routes,
     );
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
 
     const alert = await view.findByRole('alert');
     const text = (alert.textContent ?? '').toLowerCase();
@@ -538,14 +859,14 @@ describe('R1 · Reset Workspace — the plan-digest precondition', () => {
   });
 
   it('a stale refusal re-previews and DISARMS the action — no safe-looking retry', async () => {
-    const view = renderHome(
+    const view = await renderInSession(
       resetDemoRoutes({ executeStatus: 412, execute: demoResetExecuteStale }).routes,
     );
     await openReset(view);
     const d = within(dialog(view));
     const input = d.getByRole('textbox') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await view.findByRole('alert');
 
     // exactly ONE execute was attempted — nothing auto-retried
@@ -558,14 +879,14 @@ describe('R1 · Reset Workspace — the plan-digest precondition', () => {
     );
     // the typed gate was cleared and the destructive action is disarmed again
     expect((d.getByRole('textbox') as HTMLInputElement).value).toBe('');
-    const action = d.getByRole('button', { name: 'Reset Shared Workspace' }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
     expect(action.disabled).toBe(true);
     // and the dialog is still open (the explanation was not flashed away)
-    expect(view.queryByRole('dialog')).not.toBeNull();
+    expect(resetDialogOrNull(view)).not.toBeNull();
   });
 
   it('after re-arming, the second execute carries the REFRESHED digest', async () => {
-    const view = renderHome(
+    const view = await renderInSession(
       resetDemoRoutes({
         executeStatus: 412,
         execute: demoResetExecuteStale,
@@ -575,7 +896,7 @@ describe('R1 · Reset Workspace — the plan-digest precondition', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await view.findByRole('alert');
     await waitFor(() =>
       expect(resetPosts().filter((p) => p.mode === 'preview').length).toBeGreaterThanOrEqual(2),
@@ -587,10 +908,10 @@ describe('R1 · Reset Workspace — the plan-digest precondition', () => {
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
     await waitFor(() =>
       expect(
-        (d.getByRole('button', { name: 'Reset Shared Workspace' }) as HTMLButtonElement).disabled,
+        (d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement).disabled,
       ).toBe(false),
     );
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() =>
       expect(resetPosts().filter((p) => p.mode === 'execute')).toHaveLength(2),
     );
@@ -600,13 +921,13 @@ describe('R1 · Reset Workspace — the plan-digest precondition', () => {
   });
 
   it('a 428 is handled exactly like a stale refusal, not as an error', async () => {
-    const view = renderHome(
+    const view = await renderInSession(
       resetDemoRoutes({ executeStatus: 428, execute: demoResetExecuteDigestRequired }).routes,
     );
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     const alert = await view.findByRole('alert');
     expect((alert.textContent ?? '').toLowerCase()).toContain('nothing was reset');
     expect(view.queryByText(/could not be completed/i)).toBeNull();
@@ -615,9 +936,9 @@ describe('R1 · Reset Workspace — the plan-digest precondition', () => {
 
 // --- R1 · the derived at-risk disclosure ---------------------------------------
 
-describe('R1 · Reset Workspace — what you would lose', () => {
+describe('R1 · Reset Worked Example — what you would lose', () => {
   it('states the actual server-derived numbers, not a vague warning', async () => {
-    const view = renderHome(resetDemoRoutes().routes);
+    const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const text = dialog(view).textContent ?? '';
     expect(text).toContain(LABELS.resetAtRiskLabel);
@@ -629,7 +950,7 @@ describe('R1 · Reset Workspace — what you would lose', () => {
   });
 
   it('says so outright when there is nothing to lose', async () => {
-    const view = renderHome(
+    const view = await renderInSession(
       resetDemoRoutes({
         preview: { ...demoResetPreviewClean, at_risk: RESET_AT_RISK_NONE },
       }).routes,
@@ -664,7 +985,7 @@ describe('R1 · Reset Workspace — what you would lose', () => {
   });
 
   it('the at-risk figure is refreshed after a stale refusal', async () => {
-    const view = renderHome(
+    const view = await renderInSession(
       resetDemoRoutes({
         executeStatus: 412,
         execute: demoResetExecuteStale,
@@ -679,7 +1000,7 @@ describe('R1 · Reset Workspace — what you would lose', () => {
     const d = within(dialog(view));
     expect(dialog(view).textContent).toContain('3 confirmed answers');
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: 'Reset Shared Workspace' }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await view.findByRole('alert');
     await waitFor(() => expect(dialog(view).textContent).toContain('9 confirmed answers'));
     expect(dialog(view).textContent).not.toContain('3 confirmed answers');

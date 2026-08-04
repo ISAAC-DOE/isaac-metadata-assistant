@@ -27,6 +27,8 @@ from fastapi.testclient import TestClient
 import isaac_api.dependencies as dependencies
 import isaac_api.workspace as ws
 
+from conftest import tutorial_client, tutorial_ws
+
 ARTIFACT_STATES = {"none", "current", "stale"}
 INVALIDATION_KEYS = {"changed", "rev", "changed_fields", "reopened_steps", "artifact", "reason"}
 
@@ -37,7 +39,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _real_answers_payload():
@@ -158,7 +160,7 @@ def test_scientific_change_stales_the_exported_artifact(client):
     # A completed record has no pending blockers, so /answers cannot change a
     # scientific field (apply_answers only fills existing pending). Construct the
     # scientific change at the workspace level, exactly as the spec directs.
-    exp = ws.load_experiment(ws.SEED_READY_ID)
+    exp = tutorial_ws().load_experiment(ws.SEED_READY_ID)
     assert exp.exported()
     path = _first_scientific_field(exp.draft)
     exp.draft["fields"][path]["value"] = "STALE-SENTINEL-CHANGED"
@@ -176,12 +178,12 @@ def test_presentation_only_change_does_not_stale(client):
     r = client.post(f"/api/experiments/{ws.SEED_READY_ID}/export", headers=im)
     assert r.status_code == 200 and r.json().get("ok") is True, r.text
 
-    exp = ws.load_experiment(ws.SEED_READY_ID)
+    exp = tutorial_ws().load_experiment(ws.SEED_READY_ID)
     exp.title = "Renamed Experiment"
     exp.save()
 
     # Direct unit assertion on the pure derivation.
-    exp2 = ws.load_experiment(ws.SEED_READY_ID)
+    exp2 = tutorial_ws().load_experiment(ws.SEED_READY_ID)
     assert exp2.title == "Renamed Experiment"
     assert dependencies.artifact_state(exp2)["state"] == "current"
 
@@ -202,10 +204,10 @@ def test_exported_then_regressed_workflow_and_artifact_are_coherent(client):
     asserts that derived reopen + stale artifact agree after a real regression.
     """
     # Borrow a real, serialize-accepted pending entry from the fresh-draft seed.
-    fresh = ws.load_experiment(ws.SEED_NEW_DRAFT_ID)
+    fresh = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID)
     borrowed_pending = fresh.pending()[0]
 
-    exp = ws.load_experiment(ws.SEED_DONE_ID)
+    exp = tutorial_ws().load_experiment(ws.SEED_DONE_ID)
     assert exp.exported() and exp.record_id is not None
     exp.draft.setdefault("pending", []).append(borrowed_pending)
     # Also change a scientific field so the exported artifact no longer matches.

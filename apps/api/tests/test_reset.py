@@ -30,6 +30,8 @@ from fastapi.testclient import TestClient
 import isaac_api.workspace as ws
 from isaac_records.official import validate_official  # truth-core authority
 
+from conftest import bind_tutorial_session, tutorial_client, tutorial_ws
+
 CONFIRM = "RESET EXAMPLE WORKSPACE"
 CANONICAL_IDS = {
     ws.SEED_NEW_DRAFT_ID,
@@ -46,7 +48,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _experiments(client) -> list[dict]:
@@ -59,7 +61,7 @@ def _ids(client) -> set[str]:
 
 def _make_managed_legacy(title: str = "Synthetic XANES — CuO (Cu K-edge) Demo (demo/run)"):
     """A pre-P26.0a demo record: random id + the committed synthetic-demo marker."""
-    return ws.create_experiment(
+    return tutorial_ws().create_experiment(
         title=title,
         source={
             "description": "Synthetic XANES campaign (CuO, Cu K-edge) — committed demo fixtures",
@@ -71,7 +73,7 @@ def _make_managed_legacy(title: str = "Synthetic XANES — CuO (Cu K-edge) Demo 
 
 def _make_ambiguous(title: str = "Some other experiment"):
     """A record WITHOUT the managed-demo marker — must never be auto-removed."""
-    return ws.create_experiment(
+    return tutorial_ws().create_experiment(
         title=title,
         source={"description": "hand-authored / unknown provenance", "files": []},
         draft=ws.build_draft(ws.CSV_PATH, ws.LISTING_PATH),
@@ -118,7 +120,10 @@ def test_reset_requires_auth_when_key_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    # The session is opened in-process rather than over HTTP: this deployment
+    # requires the key, and pinning it as a client default would destroy the 401
+    # this test asserts. Same scope either way.
+    c = bind_tutorial_session(TestClient(create_app()))
     assert c.post("/api/demo/reset", json={"mode": "preview"}).status_code == 401
     ok = c.post(
         "/api/demo/reset",
@@ -175,7 +180,7 @@ def test_preview_reports_typed_counts(client):
     # id + title, and no value contains the workspace root path. (A title may
     # legitimately contain "/" — e.g. "Demo (demo/run)" — so the real leak check
     # is the workspace root, not a bare slash.)
-    root = str(ws.workspace_root())
+    root = str(tutorial_ws().workspace_root())
     for row in body["removable"]:
         assert set(row.keys()) == {"id", "title"}
         for val in row.values():
@@ -257,7 +262,7 @@ def test_filename_overlap_without_marker_is_ambiguous_not_removed(client):
     # be auto-deleted. (Guards against a filename-overlap heuristic mis-deleting a
     # real record.)
     assert len(_experiments(client)) == 5  # baseline
-    imposter = ws.create_experiment(
+    imposter = tutorial_ws().create_experiment(
         title="Real user experiment",
         source={"description": "hand-authored real data", "files": list(ws.SOURCE_FILES)},
         draft=ws.build_draft(ws.CSV_PATH, ws.LISTING_PATH),
@@ -279,7 +284,7 @@ def test_missing_canonical_is_recreated(client):
     # arrange: lazy-seed the canonical five via a real GET (create_app is read-only),
     # then remove one canonical experiment directly on disk.
     assert CANONICAL_IDS <= _ids(client)
-    shutil.rmtree(ws.workspace_root() / ws.SEED_READY_ID)
+    shutil.rmtree(tutorial_ws().workspace_root() / ws.SEED_READY_ID)
     # reset execute must recreate the missing canonical via the deterministic seed
     _execute(client)
     assert CANONICAL_IDS <= _ids(client)
@@ -360,7 +365,7 @@ def test_concurrent_execute_is_safe(client):
     directory-listing and its ``experiment.json`` read."""
     import concurrent.futures as cf
 
-    ws.ensure_seeded()  # the reset path is deliberately no-seed; establish canonical first
+    tutorial_ws().ensure_tutorial_seeded()  # the reset path is deliberately no-seed; establish canonical first
     for _ in range(4):
         _make_managed_legacy()
 
@@ -369,7 +374,7 @@ def test_concurrent_execute_is_safe(client):
     def resetter():
         # a raise here is exactly what would surface as an uncaught HTTP 500
         try:
-            ws.reset_to_canonical_seed(dry_run=False)
+            tutorial_ws().reset_to_canonical_seed(dry_run=False)
         except BaseException as exc:  # noqa: BLE001 - the whole point is to catch ANY raise
             errors.append(exc)
 
@@ -391,7 +396,7 @@ def test_concurrent_execute_is_safe(client):
     # Once quiescent, a final reset converges to exactly the five canonical — no
     # canonical lost, never fewer than five, no leftover legacy — with the exported
     # artifact still schema-valid (not corrupted by the race).
-    ws.reset_to_canonical_seed(dry_run=False)
+    tutorial_ws().reset_to_canonical_seed(dry_run=False)
     assert _ids(client) == CANONICAL_IDS
     art = client.get(f"/api/experiments/{ws.SEED_DONE_ID}/artifacts").json()
     assert art.get("record") is not None
@@ -407,15 +412,15 @@ def test_load_tolerates_dir_removed_between_listing_and_read(client, monkeypatch
     raises ``FileNotFoundError`` — which would surface as an uncaught HTTP 500."""
     import shutil
 
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
-    ghost = ws.workspace_root() / legacy.id
+    ghost = tutorial_ws().workspace_root() / legacy.id
     assert ghost.exists()
 
     real_experiment_dirs = ws._experiment_dirs
 
-    def list_then_delete_ghost():
-        listing = real_experiment_dirs()  # ghost still present, so it IS listed
+    def list_then_delete_ghost(root):
+        listing = real_experiment_dirs(root)  # ghost still present, so it IS listed
         if ghost.exists():
             shutil.rmtree(ghost)  # a concurrent reset deletes it right after listing
         return listing  # still references the now-deleted ghost -> read must tolerate
@@ -423,6 +428,6 @@ def test_load_tolerates_dir_removed_between_listing_and_read(client, monkeypatch
     monkeypatch.setattr(ws, "_experiment_dirs", list_then_delete_ghost)
 
     # the no-seed reset read path must skip the vanished dir without raising
-    ids = {e.id for e in ws._load_all_experiments()}
+    ids = {e.id for e in tutorial_ws()._load_all_experiments()}
     assert legacy.id not in ids
     assert CANONICAL_IDS <= ids

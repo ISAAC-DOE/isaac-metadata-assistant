@@ -42,6 +42,7 @@ import {
   aboutResponse,
   bundleRoutes,
   canonicalFiveSummaries,
+  tutorialSessionRoutes,
   exportReadyRoutes,
   graphStatusUnavailable,
   healthSynthetic,
@@ -151,6 +152,7 @@ const READY_ID = CANONICAL_RESET_IDS[2]; // 0 unanswered fields, not exported
  *  attempted anywhere in these tests fails loudly rather than being tolerated. */
 function readOnlyRoutes(): Record<string, unknown> {
   return {
+    ...tutorialSessionRoutes(),
     ...bundleRoutes(PENDING_ID),
     ...exportReadyRoutes(READY_ID),
     'GET /api/health': { body: healthSynthetic },
@@ -282,7 +284,10 @@ describe('R0 · anchors — a control that is not there is REPORTED, not swallow
   }
 
   it('tells the reader the control is not there, and says nothing was changed', async () => {
-    stubFetchRoutes({ 'GET /api/experiments': { body: { experiments: canonicalFiveSummaries } } });
+    stubFetchRoutes({
+    ...tutorialSessionRoutes(),
+    'GET /api/experiments': { body: { experiments: canonicalFiveSummaries } },
+  } as never);
     renderOverlayAlone();
     startTutorial(null);
 

@@ -1,6 +1,6 @@
 import './screens.css';
 import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { EvidenceTrailPanel } from '../components/EvidenceTrailPanel';
@@ -19,6 +19,7 @@ import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
+import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { ROUTES } from '../lib/routes';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
@@ -50,6 +51,12 @@ export function EvidenceExplorer() {
     onChange: () => bundle.reloadSilent(),
   });
   const degraded = session.syncDegraded;
+
+  // D1 — the evidence trail on this screen belongs to the workspace scope it was
+  // opened in. See `lib/workspaceScope.ts`: a scope change destroys the record the
+  // trail is about, so the trail describes nothing and must not stay on screen.
+  const scopeChanged = useWorkspaceScopeChanged();
+  if (scopeChanged) return <Navigate to={ROUTES.experiments} replace />;
 
   if (bundle.status !== 'data') {
     return (

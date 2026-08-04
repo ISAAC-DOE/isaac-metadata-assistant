@@ -21,6 +21,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import bind_tutorial_session, tutorial_client
+
 CLASSES = {"supported", "inferred_candidate", "insufficient_evidence", "conflicting_evidence", "unknown"}
 FIELD_KEYS = {"field", "classification", "value_state", "explanation", "sources"}
 
@@ -31,7 +33,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def test_endpoint_returns_typed_field_results_bound_to_rev(client):
@@ -83,7 +85,10 @@ def test_requires_auth_when_key_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    # The session is opened in-process rather than over HTTP: this deployment
+    # requires the key, and pinning it as a client default would destroy the 401
+    # this test asserts. Same scope either way.
+    c = bind_tutorial_session(TestClient(create_app()))
     r = c.get(f"/api/experiments/{ws.SEED_READY_ID}/evidence-classification")
     assert r.status_code == 401
 

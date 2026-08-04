@@ -13,13 +13,17 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+import isaac_api.workspace as ws
+
+from conftest import tutorial_client
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 # --- helpers ------------------------------------------------------------------
@@ -231,7 +235,12 @@ def test_export_success_writes_record_and_sidecar(client, tmp_path):
     sidecar_filename = body["artifact_refs"]["sidecar_filename"]
     assert record_filename != sidecar_filename
     assert "/" not in record_filename and "/" not in sidecar_filename
-    records_dir = tmp_path / "ws" / exp_id / "records"
+    # The worked-example records live inside the session, so the known layout is
+    # <workspace>/_tutorial/<session id>/<experiment id>/records.
+    records_dir = (
+        tmp_path / "ws" / ws.TUTORIAL_NAMESPACE / client.tutorial_session_id
+        / exp_id / "records"
+    )
     with open(records_dir / record_filename, encoding="utf-8") as fh:
         record = json.load(fh)
     with open(records_dir / sidecar_filename, encoding="utf-8") as fh:
@@ -293,7 +302,10 @@ def test_validate_on_exported_record(client):
 def test_validate_corrupt_draft_returns_errors_not_exception(client, tmp_path):
     exp_id = _seed_id(client)
     # Corrupt the stored draft directly in the workspace, then validate.
-    state_path = tmp_path / "ws" / exp_id / "experiment.json"
+    state_path = (
+        tmp_path / "ws" / ws.TUTORIAL_NAMESPACE / client.tutorial_session_id
+        / exp_id / "experiment.json"
+    )
     state = json.loads(state_path.read_text(encoding="utf-8"))
     state["draft"] = {"meta": {}, "fields": {"bogus.path": "not-an-envelope"}}
     state_path.write_text(json.dumps(state), encoding="utf-8")

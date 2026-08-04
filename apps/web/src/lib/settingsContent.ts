@@ -201,11 +201,63 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
         'Real or private facility artifacts are out of scope for this workspace and require written data-governance approval before they could be read, indexed, or sent anywhere. What the code enforces is narrower than that policy: file upload is refused outright, with no file parsed at all, while the CSV preview and the record validator do read what you paste or pick — in memory, never stored, and logged only as an outcome, never as content. Nothing in the app inspects that text to judge whether it is real. Separately, this deployment may run a protected, read-only diagnostic against an isolated SLAC test database containing production-derived records: those records are processed transiently in pod memory, only sanitized aggregate results are returned, no record is modified, no per-record content is displayed, and nothing is sent to any model. Database-backed record display remains disabled pending an explicit visibility decision.',
     },
     {
+      // WHAT WAS INCOMPLETE, and why the correction is an addition rather than a
+      // rewording. Both strings said the workspace is the ONLY thing stored
+      // ("Just the example workspace" / "Only the example workspace is stored").
+      // That was true while the five built-in examples were materialised into the
+      // ordinary workspace on every read. It stopped being true when they moved
+      // into a per-session scope: the server now also creates a temporary
+      // directory for each worked-example session and writes that session's own
+      // copies of the examples into it, plus everything answered, edited or
+      // exported inside it. A reader asking "what is stored?" was being told about
+      // one of the two places.
+      //
+      // Every clause below is checked against the backend, and nothing stronger is
+      // claimed than the code enforces:
+      //
+      //  · TWO PLACES, both files on the server. `workspace.py:10-13` gives the
+      //    layout under the workspace root (this cited `:16-19`, which is the
+      //    status-is-derived-on-read paragraph, not the layout block);
+      //    `scope_root` (`:170-180`) returns
+      //    `workspace_root()` for the ordinary scope and
+      //    `workspace_root()/_tutorial/<session_id>` for a session.
+      //  · ITS OWN COPY OF THE EXAMPLES. `create_tutorial_session`
+      //    (`:996-1024`) mints the directory and calls `ensure_tutorial_seeded`
+      //    (`:864-903`), which materialises the five canonical scenarios into THAT
+      //    session; the module docstring states "one independent copy per session"
+      //    (`:26-31`).
+      //  · ANSWERS, EDITS AND EXPORTS GO THERE, not into the workspace. Every path
+      //    an `Experiment` writes is rooted at its own scope: `Experiment.dir` is
+      //    `scope_root(self.session_id)/self.id` (`:413-415`), and `records_dir`
+      //    — which holds the exported record and its evidence sidecar — hangs off
+      //    that (`:417-419`).
+      //  · WHEN IT GOES AWAY, and why the copy hedges the first arm. Every exit
+      //    path calls `DELETE /api/tutorial/sessions/{id}` (`routes.py:762-779` →
+      //    `dispose_tutorial_session`, `workspace.py:1058-1066`), but that call is
+      //    BEST EFFORT BY DESIGN — `lib/tutorialController.ts:355-369` swallows a
+      //    failure and leaves the directory "for the backend's TTL sweep to
+      //    reclaim". So the copy says the app discards it and names the fallback,
+      //    rather than promising a deletion that a dropped request would not
+      //    perform. The fallback is `sweep_stale_tutorial_sessions`
+      //    (`workspace.py:1069-1113`), which runs when a session is OPENED
+      //    (`routes.py:719-723`), not on a timer — hence "the next time a
+      //    walkthrough is opened" rather than a promised deletion time.
+      //
+      // Deliberately NOT stated: the TTL's value. `TUTORIAL_TTL_HOURS = 24`
+      // (`workspace.py:128`) is a backend constant this module is not given — the
+      // API reports it as `ttl_hours` when a session is created — and this file's
+      // rule is that a value-dependent sentence is built from facts the backend
+      // actually reported (see the header). A hardcoded "24 hours" here would be a
+      // second copy of a number that can change without this file.
+      //
+      // Also NOT stated: any filesystem path. No other product surface names one,
+      // and `POST /api/demo/reset` deliberately keeps paths out of its response.
       id: 'what-is-stored',
       heading: 'What Is Stored',
-      summary: 'Just the example workspace, held on the server for this deployment.',
+      summary:
+        'The workspace, plus a temporary directory for each walkthrough that is opened.',
       detail:
-        'Only the example workspace is stored. It is held on the server for this deployment and is not shared between deployments.',
+        'Two things are stored, both as files on the server for this deployment, and neither is shared between deployments. The first is the workspace itself. The second is a temporary directory the server creates for each worked-example walkthrough: opening one writes that walkthrough its own copy of the five built-in example records, and every answer, edit and exported artifact you produce inside it is written there rather than into the workspace. The app discards that directory when the walkthrough ends; if that request does not reach the server the directory simply expires, and an expired one is removed the next time a walkthrough is opened.',
       more: {
         label: 'What the Workspace Contains',
         text: 'Experiments, their drafts, the answers you confirm, exported records, and evidence sidecars.',

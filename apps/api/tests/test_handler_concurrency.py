@@ -7,7 +7,7 @@ critical section guarded by ``ws.record_lock`` is race-safe — but it proves it
 a compare-and-swap **re-implemented in the test body** out of workspace primitives
 (``record_lock`` / ``load_experiment`` / ``version_token`` / ``save_versioned``).
 Neither of those two tests calls an HTTP handler. So if someone moved
-``exp = ws.load_experiment(...)`` OUTSIDE ``with ws.record_lock(...)`` in
+``exp = tutorial_ws().load_experiment(...)`` OUTSIDE ``with ws.record_lock(...)`` in
 ``routes.post_answers``, both of them would still pass while production silently
 lost updates. The suite could not see it.
 
@@ -50,6 +50,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import tutorial_client, tutorial_ws
+
 # Safety-net ceilings. NOTHING synchronises on these: every passing path trips its
 # rendezvous/event immediately, and the tests assert the net was never hit. They
 # exist so a genuine deadlock fails the run instead of hanging it.
@@ -84,7 +86,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 # --- read-only helpers (assertions only; never used to perform a mutation) -----
@@ -103,7 +105,7 @@ def _etag(client, exp_id) -> str:
 
 
 def _persisted(exp_id):
-    exp = ws.load_experiment(exp_id)
+    exp = tutorial_ws().load_experiment(exp_id)
     assert exp is not None, exp_id
     return exp
 
@@ -136,9 +138,30 @@ class _LockRendezvous:
     *when* the acquisition attempt is made.
 
     Arrivals are counted for the target id only, and only the first ``parties`` of
-    them block; every later call (including a re-entrant one from ``ensure_seeded``
-    under the same RLock) passes straight through, so the seam cannot deadlock the
-    reentrancy the real lock depends on.
+    them block; every later call (including any re-entrant one under the same
+    ``RLock``) passes straight through, so the seam cannot deadlock the reentrancy the
+    real lock retains. It forwards ``session_id`` through to the real lock, so it
+    contends on the same scope-qualified key the handler would.
+
+    THAT FORWARDING IS NOW RECORDED, not just documented. The paragraph above was the
+    only thing standing behind it: the seam accepted ``session_id`` and passed it on,
+    but if a future edit dropped it the wrapper would still compile, still rendezvous,
+    still delegate — and would contend on ``"/<id>"`` while the handler contends on
+    ``"<session>/<id>"`` (``workspace._lock_key``). Two threads on two different keys
+    do not serialise, so every test in this file would go on passing while the
+    interleaving it claims to pin had stopped being pinned.
+
+    TWO THINGS ARE THEREFORE RECORDED, and one alone is not enough:
+
+    * :attr:`scopes` — the ``session_id`` the seam was HANDED for the target. This is
+      the handler's half: it proves the route resolved a scope and passed it down.
+    * :attr:`lock_keys` — the key the REAL lock actually computed. This is the seam's
+      own half, captured by wrapping ``ws._lock_key`` rather than by re-deriving it
+      here; an assertion that only re-stated ``session_id`` would agree with the seam
+      by construction and would survive the forwarding being deleted (verified: it
+      did).
+
+    :meth:`assert_scoped` checks both, and every test that installs the seam calls it.
     """
 
     def __init__(self, monkeypatch, target: str, parties: int = 2):
@@ -146,15 +169,31 @@ class _LockRendezvous:
         self.parties = parties
         self.timed_out = False
         self.arrivals = 0
+        #: Every ``session_id`` this seam was handed for ``target``, in arrival order.
+        self.scopes: list[str | None] = []
+        #: Every lock key the REAL ``record_lock`` computed for ``target``.
+        self.lock_keys: list[str] = []
         self._guard = threading.Lock()
         self._open = threading.Event()
         real = ws.record_lock
+        real_key = ws._lock_key
+
+        def _recording_key(experiment_id: str, session_id: str | None) -> str:
+            key = real_key(experiment_id, session_id)
+            if experiment_id == self.target:
+                with self._guard:
+                    self.lock_keys.append(key)
+            return key
+
+        monkeypatch.setattr(ws, "_lock_key", _recording_key)
 
         @contextlib.contextmanager
-        def _patched(experiment_id: str):
+        def _patched(experiment_id: str, *, session_id: str | None = None):
             rendezvous = False
             last = False
             with self._guard:
+                if experiment_id == self.target:
+                    self.scopes.append(session_id)
                 if experiment_id == self.target and self.arrivals < self.parties:
                     self.arrivals += 1
                     rendezvous = True
@@ -166,10 +205,30 @@ class _LockRendezvous:
                     # Never reached on a healthy run; recorded so the test can fail
                     # with a real explanation instead of hanging.
                     self.timed_out = True
-            with real(experiment_id):
+            with real(experiment_id, session_id=session_id):
                 yield
 
         monkeypatch.setattr(ws, "record_lock", _patched)
+
+    def assert_scoped(self, session_id: str) -> None:
+        """Every acquisition of the target's lock was SCOPE-QUALIFIED to this session.
+
+        An unscoped acquisition would take ``"/<id>"`` while the concurrent writer
+        takes ``"<session>/<id>"``: two different keys, no serialisation, and the
+        interleaving this file pins would silently stop being pinned.
+        """
+        assert self.scopes, "the seam saw no acquisition of the target's lock at all"
+        assert set(self.scopes) == {session_id}, (
+            f"the target's lock was requested with scope(s) "
+            f"{sorted(set(map(str, self.scopes)))}, expected only {session_id!r} — "
+            f"the handler did not pass the session scope down"
+        )
+        expected = f"{session_id}/{self.target}"
+        assert self.lock_keys, "the real record_lock computed no key for the target"
+        assert set(self.lock_keys) == {expected}, (
+            f"the real lock contended on {sorted(set(self.lock_keys))}, expected only "
+            f"{expected!r} — the scope was received but not forwarded"
+        )
 
 
 def _race(fns) -> list:
@@ -242,6 +301,8 @@ def test_concurrent_answers_same_token_exactly_one_wins(client, monkeypatch):
     assert not rendezvous.timed_out, (
         "the two requests did not overlap; this run proved nothing about concurrency"
     )
+    # ...and both contended on the SAME scope-qualified key the handler uses.
+    rendezvous.assert_scoped(client.tutorial_session_id)
 
     codes = sorted(r.status_code for r in responses)
     assert codes == [200, 412], (
@@ -296,6 +357,7 @@ def test_concurrent_edit_same_token_exactly_one_wins(client, monkeypatch):
     ])
 
     assert rendezvous.arrivals == 2 and not rendezvous.timed_out
+    rendezvous.assert_scoped(client.tutorial_session_id)
 
     codes = sorted(r.status_code for r in responses)
     assert codes == [200, 412], (
@@ -385,7 +447,7 @@ def test_read_during_in_flight_write_sees_a_consistent_state(client, monkeypatch
     write_reached = threading.Event()
     read_done = threading.Event()
     real_write = ws.atomic_write_text
-    state_path = ws.workspace_root() / target / "experiment.json"
+    state_path = tutorial_ws().workspace_root() / target / "experiment.json"
 
     def _suspended_write(path, text):
         # Only the target's own state file is suspended; everything else (records,
@@ -491,6 +553,7 @@ def test_conflict_loser_refreshes_and_retries_successfully(client, monkeypatch):
         ),
     ])
     assert rendezvous.arrivals == 2 and not rendezvous.timed_out
+    rendezvous.assert_scoped(client.tutorial_session_id)
     assert sorted(r.status_code for r in responses) == [200, 412], _outcome(responses)
 
     loser = next(r for r in responses if r.status_code == 412)

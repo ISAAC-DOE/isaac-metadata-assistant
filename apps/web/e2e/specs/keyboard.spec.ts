@@ -9,7 +9,22 @@ import { activeElementFocusInfo } from '../helpers/focus';
 import { SURFACES } from '../surfaces';
 import { SEED } from '../env';
 
-const KEYBOARD_SURFACES = ['experiments', 'record-detail', 'guided-completion', 'memory', 'settings'] as const;
+/**
+ * `experiments-example` replaces `experiments` here, and that is not a swap for
+ * convenience. The ordinary My Experiments is now the EMPTY state: it renders
+ * three buttons, so a tab-order walk over it proves very little about the queue.
+ * The populated queue inside a worked-example session is where the row links,
+ * the group headings and the per-row controls are — the tab order this test was
+ * written to cover. The ordinary empty state's own controls are asserted in
+ * `specs/workspace-scope.spec.ts`, and the skip-link test below still runs on it.
+ */
+const KEYBOARD_SURFACES = [
+  'experiments-example',
+  'record-detail',
+  'guided-completion',
+  'memory',
+  'settings',
+] as const;
 
 /**
  * Wait for the page to stop re-rendering before walking the tab order. The
@@ -110,7 +125,8 @@ test('@interaction the skip link is the first tab stop and moves focus to main',
 
 test('@interaction disabled controls are named, inert and explained', async ({ page, app }) => {
   // Guided Completion's "Confirm" starts disabled until a value is staged.
-  await app.goto(`/record/${SEED.partial}/comp` + 'lete');
+  // Record surface → the shared worked-example session.
+  await app.gotoExample(`/record/${SEED.partial}/comp` + 'lete');
   const confirm = page.getByRole('button', { name: 'Confirm', exact: true });
   await expect(confirm).toBeVisible();
   await expect(confirm).toBeDisabled();

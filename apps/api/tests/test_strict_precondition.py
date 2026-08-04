@@ -25,6 +25,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import tutorial_client, tutorial_ws
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
@@ -32,7 +34,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _real_answers_payload():
@@ -94,7 +96,7 @@ def test_missing_if_match_performs_no_mutation(client):
 def test_missing_export_precondition_writes_no_record(client):
     r = client.post(f"/api/experiments/{ws.SEED_READY_ID}/export")
     assert r.status_code == 428
-    assert ws.load_experiment(ws.SEED_READY_ID).exported() is False
+    assert tutorial_ws().load_experiment(ws.SEED_READY_ID).exported() is False
 
 
 # --- matching still succeeds; stale/malformed unchanged -----------------------

@@ -198,3 +198,54 @@
   font-size: 13.5px;
   color: var(--text-secondary);
 }
+
+/*
+ * The PERMANENT ordinary empty state (no record can be created or imported in
+ * this build), so it is given real structure rather than the one-line
+ * `.queue-empty` treatment. Restrained on purpose: this is the resting state of
+ * the primary screen, not a promotion, so it must not out-shout the queue it
+ * replaces. Constrained to a readable measure and left-aligned to match the rest
+ * of the screen rather than floating centred.
+ */
+.queue-empty-state {
+  max-width: 52ch;
+  padding: 26px 4px 8px;
+}
+
+.queue-empty-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.queue-empty-body {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.queue-empty-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Button above its explanation, so the wrap at a narrow width is predictable and
+   the hint never squeezes into a two-character column beside the control. */
+.queue-empty-list li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.queue-empty-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}

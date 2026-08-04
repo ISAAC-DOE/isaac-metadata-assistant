@@ -21,21 +21,27 @@ from fastapi.testclient import TestClient
 import isaac_api.workspace as ws
 from isaac_records.export import export_draft
 
+from conftest import open_tutorial_scope, tutorial_client, tutorial_ws
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 @pytest.fixture()
 def seeded_ws(tmp_path, monkeypatch):
-    """Direct workspace access against an isolated tmp workspace (no HTTP)."""
+    """The store bound to an isolated worked-example session (no HTTP).
+
+    Re-pointed from the normal workspace, which is no longer auto-seeded. The five
+    canonical records and every assertion about them are unchanged; only the
+    directory they live in is.
+    """
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    ws.ensure_seeded()
-    return ws
+    return open_tutorial_scope()
 
 
 def _experiments(client) -> list[dict]:
@@ -177,9 +183,9 @@ def test_repeated_mixed_demo_runs_only_ever_canonical_ids(client):
 def test_seed_ids_are_stable_across_fresh_workspaces(tmp_path, monkeypatch):
     """Two independent fresh workspaces produce the identical set of ids."""
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "a"))
-    ids_a = {e.id for e in ws.list_experiments()}
+    ids_a = {e.id for e in open_tutorial_scope().list_experiments()}
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "b"))
-    ids_b = {e.id for e in ws.list_experiments()}
+    ids_b = {e.id for e in open_tutorial_scope().list_experiments()}
     assert ids_a == ids_b
     assert len(ids_a) == 5
 

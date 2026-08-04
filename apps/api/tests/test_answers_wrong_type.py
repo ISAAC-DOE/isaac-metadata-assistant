@@ -32,6 +32,8 @@ from fastapi.testclient import TestClient
 
 from isaac_api.app import create_app
 
+from conftest import tutorial_client
+
 PARTIAL = "01SYNTHXANESSEED0000000002"
 
 
@@ -43,7 +45,7 @@ def client(monkeypatch, tmp_path) -> TestClient:
     # changed. That showed up while running a negative control — tests that should have
     # been unaffected failed, which reads like a broken fix rather than a dirty fixture.
     monkeypatch.setenv('ISAAC_UI_WORKSPACE', str(tmp_path / 'ws'))
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _version(client: TestClient, rid: str) -> str:

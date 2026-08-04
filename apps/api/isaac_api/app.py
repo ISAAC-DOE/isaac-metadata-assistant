@@ -23,7 +23,12 @@ from . import __version__
 from . import runtime_mode
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
-from .routes import OPENAPI_TAGS, router
+from .routes import (
+    OPENAPI_TAGS,
+    TutorialScopeError,
+    router,
+    tutorial_scope_error_handler,
+)
 from .spa import mount_spa
 
 # Default: the Vite dev server origins. Deployed environments override via
@@ -60,10 +65,25 @@ def create_app() -> FastAPI:
         # deterministic isaac_records core.") was a flat whole-API claim, and this
         # API now also publishes a read-only database diagnostic. The synthetic
         # guarantee is scoped to the workspace; the diagnostic is named, not denied.
+        #
+        # AND THE WORKSPACE IS NO LONGER AN "EXAMPLE" ONE. The five built-in example
+        # records used to be materialised into the ordinary workspace on every read;
+        # they are created only inside a worked-example session, and on a FRESH
+        # deployment the ordinary workspace is empty and stays empty until something
+        # explicitly creates a record in it. So "a synthetic-only example workspace"
+        # named this scope after content this build never puts there — the same defect
+        # already corrected in the mode chip and on the Statistics page.
+        #
+        # NOTE THE "on a fresh deployment" QUALIFIER, which this comment previously
+        # dropped: the claim is about what the build DOES, not about what the directory
+        # holds. ``list_experiments(None)`` enumerates whatever is on disk and there is
+        # no startup migration, so a workspace that already held the five still lists
+        # them. Both scopes are now named, because both exist.
         summary=(
             "FastAPI wrapper over the deterministic isaac_records core: a "
-            "synthetic-only example workspace plus one read-only, aggregate-only "
-            "database diagnostic."
+            "synthetic-only workspace, isolated worked-example sessions holding the "
+            "built-in example records, and one read-only, aggregate-only database "
+            "diagnostic."
         ),
         # Documentation metadata only (consumed when the OpenAPI document is
         # generated, never at request time): the group descriptions for the tags
@@ -122,10 +142,18 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_cors_origins(),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        # DELETE is allowed because discarding a worked-example session is a DELETE.
+        # Without it, a cross-origin caller (the Vite dev server, or a deployment
+        # whose frontend is served from another origin) would have its preflight
+        # refused and could never clean a session up.
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["ETag"],
     )
+    # Scope-resolution refusals (a malformed or unknown worked-example session id)
+    # are raised from a dependency, which cannot return a response. This renders them
+    # with the same typed `{"error": ...}` body shape every other refusal uses.
+    app.add_exception_handler(TutorialScopeError, tutorial_scope_error_handler)
     # ISAAC_BASE_PATH prefixes every route (the router keeps its own /api
     # prefix, so routes land at {base}/api/*). Unset, prefix="" is byte-identical
     # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR

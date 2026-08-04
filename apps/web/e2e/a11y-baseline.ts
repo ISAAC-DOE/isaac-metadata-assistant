@@ -262,11 +262,42 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'evidence@tablet-768x1024': 71,
       'evidence@mobile-375x812': 68,
       'evidence@zoom-200': 69,
-      'experiments@desktop-1280x800': 10,
-      'experiments@laptop-1024x768': 10,
-      'experiments@tablet-768x1024': 10,
-      'experiments@mobile-375x812': 9,
-      'experiments@zoom-200': 9,
+      /*
+       * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
+       * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
+       * they MOVED, to `experiments-example` below, which measured exactly the old
+       * numbers (10/10/10/9/9).
+       *
+       * WHY. `ensure_seeded()` no longer materialises the five built-in examples
+       * into the ordinary workspace; they exist only inside a worked-example
+       * session. So this surface is now the real EMPTY state — a heading, two
+       * sentences, two buttons and the first-run offer — and the low-contrast nodes
+       * that used to be counted here were the queue's own (`.exp-row` metadata, the
+       * `--text-tertiary` and `--text-quaternary` row text, the `.exp-row.done`
+       * opacity composites). The remaining 3 (2 at the two narrow projects) are the
+       * offer card and the empty-state hints.
+       *
+       * The pair is the point: lowering this number without adding
+       * `experiments-example` would have looked like a 35-node accessibility
+       * improvement while the same 35 nodes were simply no longer being scanned.
+       */
+      'experiments@desktop-1280x800': 3,
+      'experiments@laptop-1024x768': 3,
+      'experiments@tablet-768x1024': 3,
+      'experiments@mobile-375x812': 2,
+      'experiments@zoom-200': 2,
+      /*
+       * The POPULATED queue, at the same route inside a worked-example session.
+       * These five numbers are byte-identical to what `experiments@*` measured
+       * before the examples moved out of the ordinary workspace, which is the
+       * corroboration that this surface inherited that coverage rather than
+       * introducing new debt: same markup, same tokens, same counts.
+       */
+      'experiments-example@desktop-1280x800': 10,
+      'experiments-example@laptop-1024x768': 10,
+      'experiments-example@tablet-768x1024': 10,
+      'experiments-example@mobile-375x812': 9,
+      'experiments-example@zoom-200': 9,
       'export-readiness@desktop-1280x800': 7,
       'export-readiness@laptop-1024x768': 6,
       'export-readiness@tablet-768x1024': 6,
@@ -376,7 +407,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-about@desktop-1280x800': 15,
       'settings-about@laptop-1024x768': 15,
       'settings-about@tablet-768x1024': 15,
-      'settings-about@mobile-375x812': 14,
+      // 14 -> 13 at 375 only, MEASURED in the tutorial-scope slice (2026-08-04).
+      // A genuine improvement, lowered rather than left stale. The About tab
+      // renders a workspace-derived line that is shorter now that the ordinary
+      // workspace is empty, and at 375 the shorter string stops wrapping — so one
+      // rendered text node fewer exists to fail. The other four projects are
+      // unchanged, which is what a wrap-boundary effect looks like.
+      'settings-about@mobile-375x812': 13,
       'settings-about@zoom-200': 14,
       'settings-api@desktop-1280x800': 18,
       'settings-api@laptop-1024x768': 18,
@@ -396,11 +433,69 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-privacy@tablet-768x1024': 8,
       'settings-privacy@mobile-375x812': 7,
       'settings-privacy@zoom-200': 7,
-      'statistics@desktop-1280x800': 10,
-      'statistics@laptop-1024x768': 10,
-      'statistics@tablet-768x1024': 10,
-      'statistics@mobile-375x812': 9,
-      'statistics@zoom-200': 9,
+      // 10/10/10/9/9 -> 4/4/4/3/3, MEASURED in the tutorial-scope slice
+      // (2026-08-04). "Workspace at a Glance" is derived from
+      // `GET /api/runtime/records`, which now answers about the EMPTY ordinary
+      // workspace, so the per-record breakdown rows this surface used to render are
+      // simply not there. Lowered rather than left stale — but read it as "fewer
+      // rows are drawn", NOT as "the contrast tokens were fixed": the surviving 4
+      // fail on the same `--text-tertiary`/`--text-quaternary` tokens as before.
+      'statistics@desktop-1280x800': 4,
+      'statistics@laptop-1024x768': 4,
+      'statistics@tablet-768x1024': 4,
+      /*
+       * SPLIT BY PLATFORM 2026-08-04, from a MEASURED CI run — not a guess and not
+       * a tuning-to-green. The first exact-SHA CI run of the tutorial-scope slice
+       * reported this surface at 2 on linux while darwin measures 3, and the
+       * ratchet failed the build to say so:
+       *
+       *   IMPROVED statistics @ mobile-375x812 on linux: rule "color-contrast"
+       *   fell from 3 to 2 node(s) (-1) … a stale number would re-admit the defect.
+       *
+       * Read it the same way as the four entries above: FEWER NODES ARE DRAWN on
+       * the empty ordinary page, not "a contrast token was fixed". The one node
+       * that differs between the platforms is a wrap-boundary artefact of the
+       * 375px layout — darwin and linux disagree about whether one label wraps at
+       * that width, so one extra text node is present to be scanned. The surviving
+       * nodes fail on the same `--text-tertiary`/`--text-quaternary` tokens as
+       * before, on both platforms.
+       *
+       * Lowering is the safe direction (it tightens the ratchet); the darwin
+       * column is left where two local runs measured it rather than lowered to
+       * match, because nothing has measured darwin at 2.
+       */
+      'statistics@mobile-375x812': { darwin: 3, linux: 2 },
+      'statistics@zoom-200': 3,
+      /*
+       * THE POPULATED Statistics page, at the same route inside a worked-example
+       * session — ADDED 2026-08-04 to close a gap the tutorial-scope slice left open.
+       *
+       * That slice compensated `experiments`' 48 -> 13 drop with a new
+       * `experiments-example` surface carrying the old numbers, and did NOT do the
+       * same for `statistics`' 48 -> 18 drop. So the per-record markup that moved into
+       * the session — the four record cards' real counts, the workflow spine's bars,
+       * the five evidence chips, the export-gate rows — was scanned by NO surface in
+       * ANY project for the whole of that slice. 30 nodes of recorded debt stopped
+       * being measured, while the lowered `statistics` numbers read as a 30-node
+       * accessibility improvement. Nothing was fixed; the rows were simply not drawn.
+       *
+       * MEASURED, not derived: two consecutive local darwin runs of
+       * `npx playwright test e2e/specs/a11y-axe.spec.ts -g "Statistics (worked
+       * example)"`, identical counts both times. The corroboration is the same one
+       * `experiments-example` has — 10/10/10/9/9 is byte-identical to what
+       * `statistics@*` measured BEFORE the examples left the ordinary workspace
+       * (48 across the five projects), i.e. this surface inherited exactly the
+       * coverage that was lost rather than introducing new debt.
+       *
+       * The LINUX column is UNMEASURED (see the note at the bottom of this file); the
+       * five values are written as scalars because the type system has no way to say
+       * "same as darwin, unverified". CI is the authority.
+       */
+      'statistics-example@desktop-1280x800': 10,
+      'statistics-example@laptop-1024x768': 10,
+      'statistics-example@tablet-768x1024': 10,
+      'statistics-example@mobile-375x812': 9,
+      'statistics-example@zoom-200': 9,
       'validator@desktop-1280x800': 9,
       'validator@laptop-1024x768': 9,
       'validator@tablet-768x1024': 9,
@@ -552,8 +647,74 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // tab changes how that tab row wraps, the split disappears, and darwin rises by 2
   // where linux rises by 1. So this is not '+1 per surface' arithmetic and must not
   // be re-derived that way.
-  darwin: 1650,
-  linux: 1650,
+  // TUTORIAL-SCOPE SLICE, 2026-08-04: 1650 -> 1632 on both columns.
+  //
+  // The arithmetic, so a reviewer can check it without a run: experiments
+  // 48 -> 13 (-35); experiments-example +48 (a NEW surface holding exactly the
+  // numbers `experiments` used to hold); statistics 48 -> 18 (-30);
+  // settings-about@mobile-375x812 14 -> 13 (-1). Net -18.
+  //
+  // Read the net as a MEASUREMENT ARTEFACT, not as accessibility work. Nothing was
+  // fixed: the built-in example records moved out of the ordinary workspace into a
+  // worked-example session, so My Experiments and Statistics now render far less
+  // text in the ordinary scope. The 48 queue nodes did not go away — they are
+  // counted under `experiments-example`, which is why that surface was added rather
+  // than the number simply being lowered.
+  //
+  // REVIEW FOLLOW-UP, 2026-08-04: 1632 -> 1680 on both columns.
+  //
+  // The paragraph above is the reason this correction was needed. It states the
+  // `experiments` rule — a drop that is a measurement artefact must be compensated by
+  // a new surface, or the coverage is silently lost — and then applies it to
+  // `experiments` ONLY. `statistics` fell by exactly the same 30 nodes, for exactly
+  // the same reason, and got no compensating surface. Independent review found it:
+  // `grep statistics e2e/surfaces.ts` returned one entry, ordinary scope, so the
+  // populated page existed in no project's scan grid at all.
+  //
+  // The arithmetic: statistics-example +48 (10/10/10/9/9), a NEW surface holding
+  // exactly the numbers `statistics` held before the examples moved. Net +48.
+  // Nothing regressed and nothing was fixed — 48 nodes that had stopped being
+  // measured are being measured again.
+  //
+  // ── The one thing in this file NOT measured on both platforms ───────────────
+  //
+  // Every number above was measured on darwin (two consecutive local runs, same
+  // counts). The LINUX column for the 21 changed/added keys — the five
+  // `experiments@*`, the five `experiments-example@*`, the five `statistics@*`, the
+  // five `statistics-example@*` and `settings-about@mobile-375x812` — is UNMEASURED:
+  // this environment cannot run the Linux system face, and the file's own type system
+  // leaves no way to say "unknown" (a per-platform pair must carry two DIFFERENT
+  // numbers, so an honest "same as darwin, unverified" can only be written as a
+  // scalar). They are therefore written as scalars and flagged here.
+  //
+  // CI (Linux) is the authority. If it disagrees, transcribe ITS numbers into the
+  // keys above and correct these two totals — never loosen the assertion. The
+  // previously-recorded keys are untouched and their linux values still stand.
+  //
+  // ── CI ANSWERED, 2026-08-04: linux 1680 -> 1679 ────────────────────────────
+  //
+  // The paragraph above said CI is the authority on the 21 unmeasured linux keys.
+  // It has now ruled on exactly one of them. Run 30924684494 on `5a31bc0` reported
+  // `statistics@mobile-375x812` color-contrast at 2 on linux where darwin measures
+  // 3, so that key is now `{ darwin: 3, linux: 2 }` and only the LINUX total moves.
+  //
+  // darwin stays 1680 and is NOT lowered to match: nothing has measured darwin at
+  // 2, and collapsing the pair to one number would assert a value no run produced.
+  // That is the same mistake the R1b note above records — "arithmetic on a total is
+  // only safe when the per-surface delta is itself measured on that platform".
+  //
+  // Worth recording because it cost a CI cycle: the entry edit and THIS total are
+  // one atomic change, and a darwin-only local run cannot tell you so. Lowering the
+  // linux key left this constant stale at 1680 against a 1679 sum, which failed the
+  // well-formedness guard in all five projects while every per-surface scan passed.
+  // Locally the guard was green, because darwin's column never moved. A linux-column
+  // edit is only verifiable in CI — so change the key and the total together, and
+  // expect CI, not the local run, to confirm it.
+  //
+  // The remaining 20 linux keys are still unmeasured; expect more single-node
+  // corrections of this benign kind, each one an entry AND a total.
+  darwin: 1680,
+  linux: 1679,
 };
 
 /**

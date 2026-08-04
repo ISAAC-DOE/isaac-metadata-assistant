@@ -19,6 +19,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import bind_tutorial_session, tutorial_client
+
 URL = "/api/experiments/{id}/ingestion/csv/preview"
 CT = {"Content-Type": "text/csv"}
 
@@ -38,7 +40,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _etag(client, exp_id):
@@ -82,7 +84,10 @@ def test_requires_auth_when_key_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    # The session is opened in-process rather than over HTTP: this deployment
+    # requires the key, and pinning it as a client default would destroy the 401
+    # this test asserts. Same scope either way.
+    c = bind_tutorial_session(TestClient(create_app()))
     assert c.post(URL.format(id=ws.SEED_NEW_DRAFT_ID), content=VALID_CSV, headers=CT).status_code == 401
 
 

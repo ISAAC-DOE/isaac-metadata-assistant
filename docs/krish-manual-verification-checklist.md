@@ -39,10 +39,15 @@ Seeded test data.
 | Governance & Safety → Policy | a paragraph naming the Validator and CSV preview as tools that **do read** what you paste or pick | it is TRUE, and the previous wording denied it |
 | Settings → Data & Privacy | the `synthetic-only` data-regime value | it is the machine contract from `/api/health`, quoted verbatim, not product prose |
 
-**The register check that matters most:** search results and evidence previews render
-**backend-sourced** strings. Type `synthetic` into ⌘K. If you see
-*"Synthetic XANES campaign … committed demo fixtures"* or a filename `mock_campaign.csv`,
-that is **known and NOT yet fixed** — see §7. It is not a regression.
+**The register check that matters most is NOT here — it is step 5 of §2b, and running it
+here would report a known defect as fixed.** Search results and evidence previews render
+**backend-sourced** strings, so the check needs records to search. This section runs
+before §2b, i.e. in the ordinary workspace, which holds none: measured, `GET /api/search?q=synthetic`
+there returns `workspace.total = 0` with `reason: "scope_has_no_records"`. Zero hits is
+what an empty scope looks like, not what a fixed register looks like — and the same
+⌘K search inside a worked example returns five, carrying exactly the strings the check is
+hunting for. Do the language sweep on this page's four routes here; do the search check
+once you are inside the walkthrough.
 
 ---
 
@@ -72,8 +77,10 @@ Upload in manifest order. For each: click **Upload JSON File**, pick the file, c
    PASS with no signal at all.
 2. **File 5 `invalid-date-time.json`** → **PASS**. Also correct-and-a-finding: declared
    `format` is not enforced. Do **not** "fix" the file. This is Dean question **Q20**.
-3. **Every JSON file** shows an advisory `NO_LINKS`. Expected — each declares
-   `links: []`, which the schema permits.
+3. **Every JSON file that parses** shows an advisory `NO_LINKS`. Expected — each declares
+   `links: []`, which the schema permits. File 15 `malformed-json.json` is the exception and
+   is not a failure of this check: it cannot be parsed, so it is refused as unreadable with
+   no verdict card and therefore no advisories at all.
 
 Also confirm, once each: no stack trace or server path in any message; switching files
 clears the previous result; keyboard-only upload works (Tab to the control, Enter);
@@ -81,27 +88,86 @@ readable at a narrow window.
 
 ---
 
+## 2b. Precondition for §3 and §4 — open the worked example first (1 min)
+
+**This step is new, and §3 and §4 were UNPERFORMABLE without it.** Both used to start
+from an example record on `/krish/experiments`. The five built-in examples are no longer
+in that workspace at all — they exist only inside a **worked-example session**, and
+`/krish/experiments` is empty until you open one.
+
+1. Open `/krish/experiments`. Expect **"No experiments yet"** and zero rows. That is
+   correct, not a broken deployment.
+2. Start the walkthrough — either the **Take the Guided Walkthrough** card (first visit
+   in this browser), or **`/krish/settings?tab=help` → Replay Tutorial** (always
+   available). The empty state's **Go to Help & Tutorial** button takes you there.
+3. A **Worked Example** bar now sits under the top bar on every screen, and
+   `/krish/experiments` lists **five** rows. The mode chip reads **Worked Example**.
+   Those five rows are the session's own copies — the scope changed, not the screen.
+4. Do §3 and §4 **without leaving the walkthrough**. Skip, Close, Escape and Finish all
+   discard the session and everything you did inside it. A **reload is safe** (the tab
+   remembers which session it is in), and pressing Replay again is **not** — it discards
+   the open session first.
+5. **The register check, moved here from §1 because it is only performable here.** Type
+   `synthetic` into ⌘K. Expect **five** hits. If they show *"Synthetic XANES campaign …
+   committed demo fixtures"* or a filename `mock_campaign.csv`, that is **known and NOT
+   yet fixed** — see §7, and it is not a regression. Run this **inside** the walkthrough:
+   run in the ordinary workspace it returns zero **workspace** hits because there are no
+   records there to search (project-memory leads still appear — ⌘K renders both groups, so
+   you get "No workspace matches." above a list of memory leads), and zero workspace hits
+   would read as the defect being fixed.
+
+---
+
 ## 3. Reset safety (5 min) — the highest-priority fix
 
-Route: **`/krish/experiments` → Reset Workspace**.
+Route: the **Worked Example** bar → **Reset Worked Example**. (It was
+`/krish/experiments` → "Reset Workspace". There is no such control: `POST /api/demo/reset`
+now refuses without a session header, so its trigger moved into the bar, which only exists
+while a walkthrough is open. Complete §2b first.)
 
 1. Open the dialog. It must state a **derived** count of what would be lost
    (confirmed answers / examples carrying progress / exported records) — real numbers,
    not "some data".
-2. The typed phrase is now **`RESET EXAMPLE WORKSPACE`** (it used to be
-   `RESET SYNTHETIC DEMO`).
-3. **The important one.** With the dialog still open, open a second tab, answer a
-   question on any example, then come back and complete the reset. It must **refuse**
-   and re-check the workspace rather than proceeding — the state it showed you no longer
-   holds. Nothing should be destroyed.
-4. Then reset normally and confirm you get exactly five examples back.
+2. The dialog arms on typing **`RESET`** — short, and shown in the field's own label
+   ("Type RESET to confirm this destructive reset"). The longer
+   `RESET EXAMPLE WORKSPACE` is the **backend's** phrase, sent internally on execute and
+   deliberately never surfaced; you never type it. (This step used to tell you to type
+   the long phrase, which leaves the confirm button disabled and stalls §3 at its most
+   important step.) The dialog's own title is **Reset the Worked Example**.
+3. Read the disclosure. It must say the ordinary workspace is **not** in this scope and
+   that this control cannot reach it — and it must say that the rows on My Experiments
+   **are** what gets reset. If it claims "Nothing in My Experiments is in this scope",
+   that is the false sentence this phase removed; report it.
+4. **The important one — and the two-tab trick now needs care.** The session pointer lives
+   in `sessionStorage`, which is **per tab**. A freshly opened tab is *not* in the
+   walkthrough and will show an empty workspace, so the old instruction ("open a second
+   tab") no longer reaches the examples. Use Chrome's **Duplicate tab** on the tab that is
+   already in the walkthrough — a duplicate inherits `sessionStorage`, so it is in the
+   same worked example. Then: leave the reset dialog open in the first tab, answer a
+   question on any example in the duplicate, come back and complete the reset. It must
+   **refuse** and re-check rather than proceeding — the state it showed you no longer
+   holds. Nothing should be destroyed. If Duplicate tab does not carry the session
+   (browser-dependent), say so in your report rather than recording this step as passed.
+
+   > **In the duplicate, do not press Escape, Close, Skip or Finish — the same warning as
+   > §2b step 4, which applies here and is easy to miss because the duplicate opens with
+   > the coach mark showing.** Because the duplicate inherits the pointer, it resumes the
+   > walkthrough into its `running` phase, and each of those four controls discards **the
+   > session both tabs share**. Do that and the first tab's reset returns
+   > `404 tutorial_session_not_found` instead of the `412` this step is testing — which
+   > looks like the precondition machinery failing when in fact the thing it was guarding
+   > was deleted from under it. Answer the question and switch back; leave the duplicate
+   > open.
+5. Then reset normally and confirm you get exactly five examples back.
 
 ---
 
 ## 4. Answers · edit · export (10 min)
 
+Inside the worked example from §2b — these records do not exist outside it.
+
 1. Open an example with open questions → answer one → **reload the page** → the answer
-   is still there.
+   is still there, and you are still in the same worked example.
 2. Press **"I don't know"** → nothing is sent, the question stays open, and the list says
    the decision is **not saved / this visit only**. Reload: the question is open again.
    That is correct — it was never persisted, and the copy now says so.
@@ -110,6 +176,10 @@ Route: **`/krish/experiments` → Reset Workspace**.
    a second artifact.
 4. On the export screen press **Re-Validate** with the network throttled or offline → it
    must **say** the refresh failed. A silent no-op here is the defect that was fixed.
+5. Finish or close the walkthrough. The bar goes, the chip returns to **Workspace**, and
+   `/krish/experiments` is empty again — everything from §3 and §4 went with the session.
+   The completion panel must **say** that; if it claims "Nothing you have looked at was
+   changed", report it.
 
 ---
 
@@ -118,9 +188,18 @@ Route: **`/krish/experiments` → Reset Workspace**.
 - No `isaac validate --official · exit 0` line under the verdict — that was a fabricated
   command transcript; no CLI ever ran.
 - No **"Answer 5 Fields →"** button on the worked-example screen — it was dead and its
-  count was hard-coded.
+  count was hard-coded. (Needs the §2b session; that screen is unreachable without one.)
 - **Create API Key** is disabled with a visible reason. Correct and intentional: there is
   no key-issuing operation in this build.
+- On the **ordinary** `/krish/experiments` (no walkthrough open) there must be **no**
+  "Reset Worked Example" button, no "Open the Worked Example" button, and no second
+  **"Replay Tutorial"** button — the empty state points at Help & Tutorial with **Go to
+  Help & Tutorial** instead. The mode chip must read **Workspace**, and its tooltip /
+  accessible name must say only that **nothing in this build adds a built-in example record
+  to this workspace** — a statement about what the build does. It must **not** say the
+  workspace is empty, and must **not** say the built-in examples *are not in* it: both are
+  claims about the directory's contents, which nothing in this app reads. Both have shipped;
+  the second was caught only by a second review. If you see either, report it.
 
 ---
 
@@ -160,7 +239,7 @@ your eyes. Gross layout breakage at those widths would already have failed CI.
 
 | Item | Status |
 |---|---|
-| Search results / evidence previews show `Synthetic XANES campaign…`, `mock_campaign.csv`, `01SYNTHXANESSEED…` | **Not fixed.** Backend-sourced. `MANAGED_SOURCE_DESCRIPTION` feeds `classify_experiment`, which decides what reset may delete — renaming it is a behaviour change to the destructive path and needs its own reviewed slice. |
+| Search results / evidence previews show `Synthetic XANES campaign…`, `mock_campaign.csv`, `01SYNTHXANESSEED…` | **Not fixed.** Backend-sourced. `MANAGED_SOURCE_DESCRIPTION` feeds `classify_experiment`, which decides what reset may delete — renaming it is a behaviour change to the destructive path and needs its own reviewed slice. **Check it from §2b step 5, inside the worked example.** The ordinary workspace has nothing to search, so a search run there returns zero hits and would read as this being fixed. |
 | `invalid-date-time.json` passes | Declared `format` is unenforced. **Dean — Q20.** |
 | Real-record display | **Closed by default** by the database owner. Not a gap to close here. |
 | Upload that creates a record | `POST /api/uploads` is an unconditional 403 with no implementation behind it. Governance, not a bug. |

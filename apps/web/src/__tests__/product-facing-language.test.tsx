@@ -350,9 +350,23 @@ describe('P1 · product-facing language — the scan itself', () => {
     // The remedy line in the drift refusal is concatenated across two source
     // lines; without the whitespace collapse the guard would read it as two
     // fragments and a phrase spanning the break would be invisible.
-    expect(renderedCopy('lib/labels.ts')).toContain(
-      'use Reset Workspace on My Experiments',
-    );
+    //
+    // The probe phrase moved with the control it names: the remedy used to read "use
+    // Reset Workspace on My Experiments", and both halves of that are now false —
+    // `POST /api/demo/reset` requires a worked-example session, so the control is
+    // "Reset Worked Example" and it lives in the worked-example bar.
+    //
+    // AND THE PROBE WAS CORRECTED WHILE IT WAS BEING MOVED. The old one sat entirely
+    // inside a single string literal on a single source line, so it would have passed
+    // with the whitespace collapse removed — it did not test what the comment above
+    // claims. This one starts on the KEY's line and continues into the value on the
+    // next, which is a real source-line break and is exactly what the collapse exists
+    // to bridge. (A phrase cannot span two concatenated literals: the `' + '` operator
+    // survives the collapse, so no probe could ever bridge that.)
+    const copy = renderedCopy('lib/labels.ts');
+    expect(copy).toContain("demoDriftedRemedy: 'To return to the baseline deliberately");
+    // ...and the remedy names the control the reader will actually see.
+    expect(copy).toContain('use Reset Worked Example in the worked-example');
     // ...and the comments that explain the retired wording are gone, so a note
     // ABOUT a defect is never counted as the defect.
     expect(renderedCopy('lib/labels.ts')).not.toContain('NOT "New Record"');

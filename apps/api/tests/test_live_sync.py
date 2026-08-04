@@ -23,6 +23,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import bind_tutorial_session, tutorial_client, tutorial_ws
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
@@ -30,7 +32,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _etag(client, exp_id):
@@ -97,7 +99,10 @@ def test_conditional_get_requires_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    # The session is opened in-process rather than over HTTP: this deployment
+    # requires the key, and pinning it as a client default would destroy the 401
+    # this test asserts. Same scope either way.
+    c = bind_tutorial_session(TestClient(create_app()))
     r = c.get(
         f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}",
         headers={"If-None-Match": '"whatever.0"'},
@@ -114,7 +119,7 @@ def _cors_client(tmp_path, monkeypatch, origin="https://isaac-demo-web.vercel.ap
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app()), origin
+    return tutorial_client(create_app()), origin
 
 
 def test_cors_preflight_allows_if_none_match(tmp_path, monkeypatch):
@@ -219,7 +224,7 @@ def test_reload_preserves_etag_no_false_change(client, tmp_path, monkeypatch):
     etag = _etag(client, ws.SEED_DONE_ID)
     # simulate a backend restart: a fresh Experiment loaded from the same on-disk
     # state must carry the SAME generation/rev, so a client's ETag still matches.
-    reloaded = ws.load_experiment(ws.SEED_DONE_ID)
+    reloaded = tutorial_ws().load_experiment(ws.SEED_DONE_ID)
     assert reloaded.etag() == etag, "generation/rev persist across reload — no false change"
     r = client.get(
         f"/api/experiments/{ws.SEED_DONE_ID}", headers={"If-None-Match": etag}

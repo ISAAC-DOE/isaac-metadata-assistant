@@ -21,12 +21,13 @@ import { AppRoutes } from '../App';
 import { GuidedTutorial } from '../components/GuidedTutorial';
 import { LABELS } from '../lib/labels';
 import { isTutorialCompleted } from '../lib/tutorialPreference';
-import { startTutorial } from '../lib/tutorialController';
+import { __resetTutorialStore, startTutorial } from '../lib/tutorialController';
 import { TUTORIAL_ANCHORS, TUTORIAL_STEPS } from '../lib/tutorialSteps';
 import {
   CANONICAL_RESET_IDS,
   bundleRoutes,
   canonicalFiveSummaries,
+  tutorialSessionRoutes,
   exportReadyRoutes,
   graphStatusUnavailable,
   healthSynthetic,
@@ -49,6 +50,10 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  // The walkthrough now owns a server-side session, held in a module singleton plus a
+  // `sessionStorage` key. Left behind, the next test starts already inside it.
+  __resetTutorialStore();
+  sessionStorage.clear();
 });
 
 /** Force a `prefers-reduced-motion` answer. jsdom has no matchMedia at all, so
@@ -89,7 +94,10 @@ function Harness() {
 }
 
 function renderHarness() {
-  stubFetchRoutes({ 'GET /api/experiments': { body: { experiments: canonicalFiveSummaries } } });
+  stubFetchRoutes({
+    ...tutorialSessionRoutes(),
+    'GET /api/experiments': { body: { experiments: canonicalFiveSummaries } },
+  } as never);
   return render(
     <MemoryRouter
       initialEntries={['/experiments']}
@@ -438,6 +446,7 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
 
   it('reports no violation on the coach mark, the offer, or the surface behind them', async () => {
     stubFetchRoutes({
+      ...tutorialSessionRoutes(),
       ...bundleRoutes(PENDING_ID),
       ...exportReadyRoutes(READY_ID),
       'GET /api/health': { body: healthSynthetic },
@@ -465,9 +474,10 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
 
   it('reports no violation on the completion panel', async () => {
     stubFetchRoutes({
+      ...tutorialSessionRoutes(),
       'GET /api/health': { body: healthSynthetic },
       'GET /api/experiments': { body: { experiments: canonicalFiveSummaries } },
-    });
+    } as never);
     render(
       <MemoryRouter
         initialEntries={['/experiments']}
@@ -489,5 +499,83 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
     // The panel is focused, and both of its actions are named.
     await waitFor(() => expect(document.activeElement).toBe(panel));
     expect(within(panel).getAllByRole('button')).toHaveLength(2);
+  }, 20000);
+
+  /*
+   * D2 · the persistent worked-example bar. It is chrome, present on every surface while
+   * a session is open, and it holds the one destructive control in the app — so it gets
+   * the same sweep the overlay does rather than being trusted because it is small.
+   */
+  it('reports no violation on the worked-example bar', async () => {
+    stubFetchRoutes({
+      ...tutorialSessionRoutes(),
+      ...bundleRoutes(PENDING_ID),
+      'GET /api/health': { body: healthSynthetic },
+      'GET /api/experiments': { body: { experiments: canonicalFiveSummaries } },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+    } as never);
+    const { container } = render(
+      <MemoryRouter
+        initialEntries={['/experiments']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
+
+    const bar = await waitFor(() => {
+      const found = container.querySelector<HTMLElement>('.tutorial-session-bar');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(await axeRules(document.body, RULES)).toEqual([]);
+    // It is a named region, so a screen-reader user can tell what these controls act on.
+    expect(bar.getAttribute('aria-label')).toBe(LABELS.tutorialSessionBarRegion);
+    // Both of its controls are real, named buttons.
+    const buttons = within(bar).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual([
+      LABELS.actionRunDemo,
+      LABELS.actionResetDemo,
+    ]);
+    for (const button of buttons) expect(button).toHaveAttribute('type', 'button');
+    // Its icon is decorative; the copy carries the meaning.
+    expect(bar.querySelector('svg')?.closest('[aria-hidden="true"]')).not.toBeNull();
+  }, 20000);
+
+  /*
+   * The session-failure notice. It exists because `sessionError` was set and rendered
+   * nowhere; a notice that is itself inaccessible would be the same defect one layer on.
+   */
+  it('reports no violation on the session-failure notice', async () => {
+    stubFetchRoutes({
+      'GET /api/health': { body: healthSynthetic },
+      'GET /api/experiments': { body: { experiments: [] } },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'POST /api/tutorial/sessions': { status: 500, body: { detail: 'boom' } },
+    } as never);
+    render(
+      <MemoryRouter
+        initialEntries={['/experiments']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
+
+    const notice = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-tutorial-notice]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(await axeRules(document.body, RULES)).toEqual([]);
+    // Announced (it appears in answer to a click, with no overlay to carry it) and
+    // dismissible by a real, named button.
+    expect(notice.getAttribute('role')).toBe('alert');
+    const dismiss = within(notice).getByRole('button', {
+      name: LABELS.actionDismissTutorialNotice,
+    });
+    expect(dismiss).toHaveAttribute('type', 'button');
   }, 20000);
 });

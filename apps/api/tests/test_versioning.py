@@ -38,11 +38,19 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import open_tutorial_scope, tutorial_client, tutorial_ws
+
 
 @pytest.fixture()
 def tmp_ws(tmp_path, monkeypatch):
+    """The store bound to an isolated worked-example session (no HTTP).
+
+    Re-pointed from the normal workspace, which is no longer auto-seeded. The five
+    canonical records and every assertion about them are unchanged; only the
+    directory they live in is.
+    """
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    return ws
+    return open_tutorial_scope()
 
 
 @pytest.fixture()
@@ -51,7 +59,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _fresh_draft():
@@ -237,7 +245,7 @@ def test_atomic_helper_is_exposed(tmp_ws):
 
 
 def test_canonical_seed_records_start_at_rev_zero(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     for exp in tmp_ws.list_experiments():
         if exp.id in tmp_ws.CANONICAL_IDS:
             assert exp.rev == 0, exp.id
@@ -245,7 +253,7 @@ def test_canonical_seed_records_start_at_rev_zero(tmp_ws):
 
 
 def test_reset_yields_canonical_rev_zero(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     tmp_ws.reset_to_canonical_seed(dry_run=False)
     for exp in tmp_ws.list_experiments():
         assert exp.rev == 0, exp.id
@@ -264,7 +272,7 @@ def test_export_bumps_rev_and_persists(client):
     body = r.json()
     assert body.get("ok") is True
 
-    reloaded = ws.load_experiment(ws.SEED_READY_ID)
+    reloaded = tutorial_ws().load_experiment(ws.SEED_READY_ID)
     assert reloaded.exported() is True
     assert reloaded.rev >= 1  # bumped from the canonical rev 0 by the export
     assert reloaded.updated_utc  # set
@@ -287,7 +295,7 @@ def test_http_answers_noop_reentry_does_not_bump_rev(client):
         headers=_if_match(client, ws.SEED_NEW_DRAFT_ID),
     )
     assert first.status_code == 200
-    rev_after_first = ws.load_experiment(ws.SEED_NEW_DRAFT_ID).rev
+    rev_after_first = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID).rev
     assert rev_after_first >= 1
 
     # re-submit the IDENTICAL answers — authoritative draft does not change.
@@ -298,7 +306,7 @@ def test_http_answers_noop_reentry_does_not_bump_rev(client):
         headers=_if_match(client, ws.SEED_NEW_DRAFT_ID),
     )
     assert second.status_code == 200
-    rev_after_second = ws.load_experiment(ws.SEED_NEW_DRAFT_ID).rev
+    rev_after_second = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID).rev
     assert rev_after_second == rev_after_first  # no bump on identical re-entry
 
 

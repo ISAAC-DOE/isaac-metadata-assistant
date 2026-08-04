@@ -35,6 +35,8 @@ import isaac_api.workspace as ws
 from isaac_records.complete import apply_answers
 from isaac_records.export import export_draft
 
+from conftest import open_tutorial_scope, tutorial_client, tutorial_ws
+
 #: The pinned contract. Each label states HOW ITS FIXTURE WAS MATERIALISED, and is
 #: traced here to the seed builder that does the materialising:
 #:   1 ``_raw_draft``     — ``build_draft`` only, no answers applied at all
@@ -85,15 +87,19 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 @pytest.fixture()
 def seeded_ws(tmp_path, monkeypatch):
-    """Direct workspace access against an isolated tmp workspace (no HTTP)."""
+    """The store bound to an isolated worked-example session (no HTTP).
+
+    Re-pointed from the normal workspace, which is no longer auto-seeded. The five
+    canonical records and every assertion about them are unchanged; only the
+    directory they live in is.
+    """
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    ws.ensure_seeded()
-    return ws
+    return open_tutorial_scope()
 
 
 def _experiments(client) -> list[dict]:
@@ -202,8 +208,8 @@ def test_non_canonical_record_is_served_with_scenario_null(tmp_path, monkeypatch
     from isaac_api.app import create_app
     from isaac_records.extract.draft_builder import build_draft
 
-    client = TestClient(create_app())
-    exp = ws.create_experiment(
+    client = tutorial_client(create_app())
+    exp = tutorial_ws().create_experiment(
         "Ad hoc synthetic record",
         {"description": ws.MANAGED_SOURCE_DESCRIPTION, "files": list(ws.SOURCE_FILES)},
         build_draft(ws.CSV_PATH, ws.LISTING_PATH),
@@ -333,7 +339,7 @@ def test_advanced_seed_label_is_not_falsified_by_the_new_state(client):
         "it is now — which this advance has just falsified"
     )
     assert len(pristine[pid].draft_fn()["pending"]) == 2, "setup left blockers open"
-    assert len(ws.load_experiment(pid).draft["pending"]) == 0, "live record has none"
+    assert len(tutorial_ws().load_experiment(pid).draft["pending"]) == 0, "live record has none"
 
     # -- seed 4: supply the omitted descriptor uncertainty via /edit, then export --
     rid = ws.SEED_REVIEW_ID
@@ -359,7 +365,7 @@ def test_advanced_seed_label_is_not_falsified_by_the_new_state(client):
     assert (after["pending_count"], after["exported"], after["status"]) == (0, True, "done")
     # The record now passes official validation and has an exported record — the
     # descriptor uncertainty is present.
-    assert "uncertainty" in _descriptor(ws.load_experiment(rid).draft)
+    assert "uncertainty" in _descriptor(tutorial_ws().load_experiment(rid).draft)
     verdict = client.post(f"/api/experiments/{rid}/validate")
     assert verdict.status_code == 200 and verdict.json()["ok"] is True, verdict.text
     # (a) invariant value, (b) still true — because of the setup scope.

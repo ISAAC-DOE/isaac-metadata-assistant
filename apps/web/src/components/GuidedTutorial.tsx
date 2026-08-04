@@ -8,16 +8,21 @@ import { api } from '../lib/api';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import {
+  acknowledgeTutorialSessionError,
+  claimStepNavigation,
   claimTargetResolution,
   closeCompletion,
   dismissTutorial,
   failTutorialTargets,
   goToNextStep,
   goToPreviousStep,
+  markStepArrived,
   setTutorialTargets,
   startTutorial,
+  stepHasArrived,
   tutorialReturnFocusTarget,
   useTutorialState,
+  type TutorialSessionError,
 } from '../lib/tutorialController';
 import {
   NO_TARGETS,
@@ -129,14 +134,47 @@ export function GuidedTutorial({
     };
   }, [running, state.targets]);
 
-  // --- 2. be on the surface the step describes -------------------------------
+  // --- 2. go to the surface the step describes, ONCE PER STEP -----------------
+  /*
+   * IT NAVIGATES ON A STEP CHANGE, NOT CONTINUOUSLY, and that is a behaviour fix
+   * rather than an optimisation.
+   *
+   * This effect used to navigate on every render where the location differed from
+   * the current step's path, which UNDID any navigation the reader performed.
+   * Three consequences, all real:
+   *
+   *   · the worked-example bar's "Open the Worked Example" could never work. It
+   *     navigates to `/load`, and the bar renders only while a session is open —
+   *     which is only while the walkthrough runs — so the pin returned the reader
+   *     instantly. A control that looks like it acts and does not.
+   *   · Settings → Replay Tutorial was unreachable for the same reason: arriving
+   *     at Settings was undone and the button was detached mid-click.
+   *   · the bar's own comment claimed it was present "on every surface the reader
+   *     wanders to inside the session", while the reader could not wander at all.
+   *
+   * So the claim is now enforced instead of asserted. `claimStepNavigation` grants
+   * exactly one navigation per step+path (it lives in the module store because
+   * `AppShell`, and therefore this component, is remounted by the very navigation
+   * a ref would have to survive). A reader who then walks away keeps the step they
+   * were on, and the coach mark tells them where its control is — the same honest
+   * degradation a step with no available record already gets, rather than a yank.
+   */
   const targetPath = step && state.targets !== undefined ? stepPath(step, targets) : null;
   const here = `${location.pathname}${location.search}`;
+  /** "this step, on this surface" — null when the step cannot be routed at all. */
+  const navKey = step !== undefined && targetPath !== null ? `${step.id}|${targetPath}` : null;
+  const onTargetSurface = navKey !== null && here === targetPath;
   useEffect(() => {
-    if (targetPath === null) return;
-    if (here === targetPath) return;
+    if (navKey === null || targetPath === null) return;
+    if (onTargetSurface) {
+      // Arriving also spends the step's claim, so being already on the right
+      // surface cannot leave an unspent one that fires when the reader leaves.
+      markStepArrived(navKey);
+      return;
+    }
+    if (!claimStepNavigation(navKey)) return;
     navigate(targetPath);
-  }, [targetPath, here, navigate]);
+  }, [navKey, onTargetSurface, targetPath, navigate]);
 
   // --- 3. resolve the step's control -----------------------------------------
   // `settled` distinguishes "still looking" from "looked, and it is not there".
@@ -146,6 +184,10 @@ export function GuidedTutorial({
   const [anchorSettled, setAnchorSettled] = useState(false);
   const missingRecord = step ? stepNeedsMissingRecord(step, targets) : false;
   const waitingOnTargets = running && state.targets === undefined;
+  /** The reader has moved off the surface this step describes — knowable only for a
+   *  step whose surface was actually reached first (see the effect below). */
+  const offTargetSurface =
+    running && step !== undefined && navKey !== null && !onTargetSurface && stepHasArrived(navKey);
 
   useEffect(() => {
     setAnchorEl(null);
@@ -154,7 +196,21 @@ export function GuidedTutorial({
     if (missingRecord || waitingOnTargets) return;
     // Do not start looking until we are on the right surface, or the previous
     // screen's DOM would be searched and a stale control could be highlighted.
-    if (targetPath !== null && here !== targetPath) return;
+    if (targetPath !== null && here !== targetPath) {
+      /*
+       * Two situations, and conflating them was the bug:
+       *
+       *   · the step's own navigation has been issued and has not landed yet —
+       *     keep waiting, and search nothing;
+       *   · the surface WAS reached and the reader has since gone elsewhere, which
+       *     they are now allowed to do. Settle, so the mark comes back and says
+       *     the control is on another screen. Waiting instead made the whole
+       *     walkthrough vanish — taking Skip, Close and its Escape handling with
+       *     it — for as long as the reader stayed away.
+       */
+      if (navKey !== null && stepHasArrived(navKey)) setAnchorSettled(true);
+      return;
+    }
 
     const selector = tutorialAnchorSelector(step.anchor);
     let done = false;
@@ -189,6 +245,10 @@ export function GuidedTutorial({
       observer.disconnect();
       window.clearTimeout(giveUp);
     };
+    // `navKey` is deliberately absent from the deps: it is derived from `step` and
+    // `targetPath`, which are both here, so adding it would only re-run this effect
+    // for no change of input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, step, missingRecord, waitingOnTargets, targetPath, here, anchorTimeoutMs]);
 
   // --- 4. mark the control, and bring it into view ----------------------------
@@ -307,6 +367,24 @@ export function GuidedTutorial({
     if (!overlayOpen) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Escape') return;
+      /*
+       * A REAL MODAL DIALOG OWNS ESCAPE, and this guard is why.
+       *
+       * This listener is registered in the capture phase on `document`, and
+       * `AppShell` mounts this overlay before any screen or chrome inside it — so
+       * without this check the walkthrough would see Escape FIRST and call
+       * `stopPropagation`, and a modal opened over it (the guarded reset in the
+       * worked-example bar) could never be closed with Escape. Worse, the reader's
+       * Escape would silently do something they did not ask for: leave the
+       * walkthrough while a confirmation dialog was still on screen.
+       *
+       * Detected structurally rather than by asking each dialog to register
+       * itself: `aria-modal="true"` is exactly the contract "this thing is modal",
+       * the coach mark deliberately does not set it (it is not modal — the control
+       * it describes must stay operable), and any future modal that sets it is
+       * covered without touching this file.
+       */
+      if (document.querySelector('[aria-modal="true"]') !== null) return;
       e.stopPropagation();
       if (finished) {
         closeCompletion();
@@ -319,10 +397,28 @@ export function GuidedTutorial({
     return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [overlayOpen, finished, leave, releaseFocus]);
 
-  if (!overlayOpen) return null;
+  /*
+   * The session-failure notice. Rendered whether or not the overlay is open, because
+   * none of the three failures leaves an overlay: a failed create never opens one, and
+   * an expired or unresumable session leaves the walkthrough in `phase: 'idle'`.
+   *
+   * WHY IT IS HERE. `sessionError` was being set and rendered NOWHERE — the field's own
+   * comment claimed it was surfaced to the reader while the only visible consequence of
+   * a failed start was that pressing the button did nothing. This component is mounted
+   * by `AppShell` on every screen, so it is the one place a notice can reach a reader
+   * whose session expired while they were on a record surface.
+   */
+  const notice =
+    state.sessionError !== null ? (
+      <TutorialSessionNotice reason={state.sessionError} />
+    ) : null;
+
+  if (!overlayOpen) return notice;
 
   if (finished) {
     return (
+      <>
+        {notice}
       <CompletionPanel
         markRef={markRef}
         onGoToExperiments={() => {
@@ -332,6 +428,7 @@ export function GuidedTutorial({
         }}
         onReplay={() => startTutorial(tutorialReturnFocusTarget())}
       />
+      </>
     );
   }
 
@@ -343,6 +440,7 @@ export function GuidedTutorial({
 
   return (
     <>
+      {notice}
       {/* The announcement. Separate from the dialog's own accessible name so a
           step CHANGE is announced too — the dialog node is reused between steps,
           and a reused node's label is not re-read. */}
@@ -367,6 +465,11 @@ export function GuidedTutorial({
         aria-describedby="tutorial-mark-body"
         data-tutorial-step={current.id}
         data-tutorial-step-available={unavailable ? 'false' : 'true'}
+        /* A separate attribute rather than a third value of the one above: "the
+           control is not on the screen you are on" and "the control is not in this
+           build / this workspace" are different facts with different remedies, and
+           `data-tutorial-step-available="false"` already means the second. */
+        data-tutorial-step-off-surface={offTargetSurface ? 'true' : undefined}
         tabIndex={-1}
         style={
           unavailable || position === null
@@ -384,10 +487,24 @@ export function GuidedTutorial({
         </p>
         <div id="tutorial-mark-body">
           <p className="tutorial-body">{current.body}</p>
-          {unavailable && (
+          {/*
+            TWO DIFFERENT REASONS THE CONTROL IS NOT BEING POINTED AT, and they must
+            not borrow each other's words. The step's own `unavailable` copy explains
+            an absent RECORD or an absent control ("nothing was un-answered or reset
+            to create one") — none of which is true when the only thing that happened
+            is that the reader navigated to another screen. Using it there would state
+            a cause that did not occur.
+          */}
+          {offTargetSurface ? (
             <p className="tutorial-unavailable">
-              <strong>Not shown on this visit —</strong> {current.unavailable}
+              <strong>Not on this screen —</strong> {LABELS.tutorialStepOffSurface}
             </p>
+          ) : (
+            unavailable && (
+              <p className="tutorial-unavailable">
+                <strong>Not shown on this visit —</strong> {current.unavailable}
+              </p>
+            )
           )}
         </div>
 
@@ -426,11 +543,81 @@ export function GuidedTutorial({
 }
 
 /**
+ * A worked-example session failed, said plainly.
+ *
+ * THREE REASONS, THREE SENTENCES, and none over-claims — see the copy's own comment in
+ * `lib/labels.ts` for why the create case deliberately does not say "nothing was
+ * created", and why `resume_failed` names no cause at all. All three say what the
+ * reader most needs to know, which is the same thing in every case: their own records
+ * were not touched.
+ *
+ * THE THIRD REASON IS NOT A NEW STATE, IT IS ONE THAT USED TO BE MISLABELLED. Anything
+ * that made the resume probe fail — a blip, a 401 at the authenticating edge, a 500 —
+ * rendered the EXPIRED sentence, which tells the reader their five records "are gone".
+ * `resumeTutorialSession` now reserves that for an observed
+ * `404 {"error": "tutorial_session_not_found"}` and routes every other failure here.
+ *
+ * The mapping is an exhaustive `Record<TutorialSessionError, …>` rather than a pair of
+ * ternaries, deliberately: the previous shape treated `expired` as the special case and
+ * let EVERYTHING else fall through to the create-failed copy, so a fourth reason would
+ * have been silently mislabelled. A `Record` keyed by the union makes that a type
+ * error instead — `tsc` refuses a missing key.
+ *
+ * `role="alert"` because it appears in answer to something the reader did (pressing
+ * Start / Replay) or to something that happened to them (an expiry discovered at boot),
+ * and in neither case is there an overlay left to carry the message. It is dismissible
+ * so it does not outlive its own relevance; dismissing it retries nothing.
+ */
+const SESSION_NOTICE_COPY: Record<
+  TutorialSessionError,
+  { title: string; body: string }
+> = {
+  create_failed: {
+    title: LABELS.tutorialSessionCreateFailedTitle,
+    body: LABELS.tutorialSessionCreateFailedBody,
+  },
+  expired: {
+    title: LABELS.tutorialSessionExpiredTitle,
+    body: LABELS.tutorialSessionExpiredBody,
+  },
+  resume_failed: {
+    title: LABELS.tutorialSessionResumeFailedTitle,
+    body: LABELS.tutorialSessionResumeFailedBody,
+  },
+};
+
+function TutorialSessionNotice({ reason }: { reason: TutorialSessionError }) {
+  const { title, body } = SESSION_NOTICE_COPY[reason];
+  return (
+    <div className="tutorial-session-notice" role="alert" data-tutorial-notice={reason}>
+      <div className="tutorial-session-notice-copy">
+        <p className="tutorial-session-notice-title">{title}</p>
+        <p className="tutorial-session-notice-body">{body}</p>
+      </div>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={acknowledgeTutorialSessionError}
+      >
+        {LABELS.actionDismissTutorialNotice}
+      </button>
+    </div>
+  );
+}
+
+/**
  * The completion panel. EXACTLY two actions, by design: the primary one returns
  * the reader to their work, and the secondary one replays the walkthrough. There
  * is no third "don't show me again" control, because finishing already recorded
- * that, and no "reset the workspace" control, because the walkthrough has never
- * been allowed to change a record and must not gain the power on its last screen.
+ * that, and no "reset the workspace" control.
+ *
+ * THE REASON FOR THAT LAST ONE HAD TO BE RESTATED, because the scope-isolation slice
+ * made the old one false. It read "the walkthrough has never been allowed to change a
+ * record", and starting a walkthrough now materialises five of them. What is still true,
+ * and is the actual reason, is narrower and enough: everything the walkthrough writes it
+ * writes inside its own disposable session, and it has never been allowed to touch a
+ * record of the reader's — so a workspace-reset control here would be the first thing in
+ * the walkthrough that could, and it must not gain that on its last screen.
  */
 function CompletionPanel({
   markRef,

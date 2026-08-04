@@ -309,7 +309,7 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
             f"{auto!r} (from `{function_name}`)"
         )
         checked += 1
-    assert checked == 36, f"expected 36 documented operations, found {checked}"
+    assert checked == 38, f"expected 38 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -335,13 +335,26 @@ def test_every_operation_has_a_description(client):
 
 def test_every_success_response_has_its_own_description(client):
     """The default is the bare string "Successful Response", which says nothing
-    about the payload. Every operation states what its success body represents."""
+    about the payload. Every operation states what its success body represents.
+
+    Checked against the operation's DECLARED success code rather than a hard-coded
+    `200`, because not every success is a `200` — opening a worked-example session is
+    `201` and discarding one is `204`. The exactly-one assertion is deliberate and is
+    strictly stronger than the previous form: an operation with two success codes has
+    an ambiguous contract, and this now says so instead of silently checking one of
+    them.
+    """
     schema = client.get("/api/openapi").json()
     for path, method, op in _operations(schema):
-        success = op["responses"].get("200")
-        assert success is not None, f"{method.upper()} {path} documents no 200"
+        success_codes = sorted(c for c in op["responses"] if c.startswith("2"))
+        assert len(success_codes) == 1, (
+            f"{method.upper()} {path} declares {success_codes} as success codes; "
+            "exactly one is expected"
+        )
+        success = op["responses"][success_codes[0]]
         assert success.get("description", "").strip() not in ("", "Successful Response"), (
-            f"{method.upper()} {path} still has the default 200 description"
+            f"{method.upper()} {path} still has the default "
+            f"{success_codes[0]} description"
         )
 
 
@@ -452,9 +465,14 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # 412/428 are the R1 reset precondition: `plan_digest` stale / omitted. They
     # mirror the per-record If-Match convention on the mutation routes below, which
     # is why they read the same here.
-    ("/api/demo/reset", "post"): ["200", "401", "403", "409", "412", "422", "428"],
-    ("/api/demo/run", "post"): ["200", "401", "409", "422"],
-    ("/api/experiments", "get"): ["200", "401"],
+    # 404 on every scope-resolving operation is the fail-closed arm of the
+    # worked-example session header: present but naming no existing session. It is
+    # never answered from the ordinary workspace instead.
+    ("/api/demo/reset", "post"): [
+        "200", "401", "403", "404", "409", "412", "422", "428",
+    ],
+    ("/api/demo/run", "post"): ["200", "401", "404", "409", "422"],
+    ("/api/experiments", "get"): ["200", "401", "404", "422"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422"],
     ("/api/experiments/{experiment_id}/answers", "post"): [
         "200", "400", "401", "404", "412", "422", "428",
@@ -497,9 +515,11 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/openapi", "get"): ["200", "401"],
     # 409 = a reconnaissance scan is already running; nothing is connected to.
     ("/api/runtime/database/recon", "get"): ["200", "401", "409"],
-    ("/api/runtime/records", "get"): ["200", "401", "422"],
     ("/api/schema", "get"): ["200", "401"],
-    ("/api/search", "get"): ["200", "401", "422"],
+    ("/api/runtime/records", "get"): ["200", "401", "404", "422"],
+    ("/api/search", "get"): ["200", "401", "404", "422"],
+    ("/api/tutorial/sessions", "post"): ["201", "401"],
+    ("/api/tutorial/sessions/{session_id}", "delete"): ["204", "401", "422"],
     ("/api/uploads", "post"): ["200", "401", "403"],
     ("/api/validate/record", "post"): ["200", "401", "413", "422"],
 }

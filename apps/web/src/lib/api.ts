@@ -48,6 +48,7 @@ import type {
   ApiSearchResponse,
   ApiSearchScope,
   ApiSourcePreview,
+  ApiTutorialSession,
   ApiDemoRunResponse,
   ApiDemoResetResult,
   ApiUploadsBlocked,
@@ -59,6 +60,7 @@ import type {
   ExportReadinessBundle,
   RecordBundle,
 } from './types';
+import { readTutorialSession } from './tutorialSession';
 
 /**
  * The base a build with no `VITE_API_BASE` falls back to — the local FastAPI
@@ -233,6 +235,86 @@ async function readJson<T>(res: Response, path: string): Promise<T> {
   }
 }
 
+/**
+ * The statuses on which `POST /api/demo/reset` answers with a typed RESET RESULT
+ * rather than an error: 200 (preview or a completed execute) and the four safe
+ * refusals 403 / 409 / 412 / 428. Named because the fail-closed check below has to
+ * apply to exactly this set and nothing wider.
+ */
+const RESET_RESULT_STATUSES = [200, 403, 409, 412, 428];
+
+/**
+ * Is this body actually a reset result?
+ *
+ * WHY THIS EXISTS, on the one destructive path in the app. `resetDemo` decodes five
+ * statuses as a typed result, and every genuine reset result is built by ONE
+ * backend helper (`routes._reset_response`), which always sets `status` to `"ok"`
+ * or `"refused"`. But those statuses are not exclusively its: `POST /api/demo/reset`
+ * also answers **409** `{"error": "tutorial_scope_required", …}` when the request
+ * carries no worked-example session (`routes.py:1254-1255` → `_tutorial_scope_required`,
+ * `:795-805`), and that body has no `status`, no counts and no `plan_digest`.
+ *
+ * Read as an `ApiDemoResetResult` it produced a HALF-BUILT object, and the failure
+ * was silent in the dangerous direction: `ResetDemoDialog`'s `refused` is
+ * `data.status === 'refused' || data.ambiguous_count > 0`, and with both fields
+ * `undefined` that is `false` — so the dialog would have rendered `undefined`
+ * counts and left the execute button armable by typing the phrase. Rejecting
+ * instead lands the dialog in its existing preview-`error` state, where
+ * `actionDisabled` is true because `preview.status !== 'data'`.
+ *
+ * Believed unreachable today (the dialog only mounts inside a session, so the
+ * request always carries the header), but it is a guard rather than an assertion
+ * about reachability: the invariant it would rest on is two module-level variables
+ * — `api.ts`'s `tutorialScope` and the tutorial store's `sessionId` — staying in
+ * step, and a destructive control must not be armed by that holding.
+ *
+ * Narrow on purpose: it tests ONLY the discriminator, so every currently-handled
+ * refusal (`not_synthetic_only`, `confirmation_required`, `plan_digest_required`,
+ * `plan_digest_stale`, `ambiguous_records_present`) keeps working exactly as it
+ * does now.
+ */
+function isResetResult(body: unknown): body is ApiDemoResetResult {
+  if (typeof body !== 'object' || body === null) return false;
+  const status = (body as { status?: unknown }).status;
+  return status === 'ok' || status === 'refused';
+}
+
+/** The header the backend resolves the workspace scope from. Must match
+ *  `TUTORIAL_SESSION_HEADER` in `apps/api/isaac_api/routes.py`. */
+export const TUTORIAL_SESSION_HEADER = 'X-Isaac-Tutorial-Session';
+
+/**
+ * Which workspace scope every request operates in: `null` = the ordinary
+ * workspace, otherwise an open worked-example session.
+ *
+ * Module-level rather than threaded through the ~40 exported functions, because
+ * `request()` below is the single point where headers are composed — so scope is
+ * applied in exactly one place and a new API function cannot forget it.
+ *
+ * INITIALISED FROM `sessionStorage` AT MODULE LOAD, and that ordering is
+ * load-bearing: after a reload the first record fetch can be issued by a screen
+ * mounting before any tutorial code runs, and an unscoped fetch would 404 the
+ * reader out of their own session.
+ *
+ * THIS IS THE AUTHORITY ON WHICH SCOPE REQUESTS CARRY, and the tutorial store's
+ * `sessionId` is its React-observable mirror — `tutorialController.ts`'s
+ * `initialState()` seeds itself from `getTutorialScope()` for exactly that reason, so
+ * the two cannot disagree on the first render. Nothing here may import that store
+ * (the dependency runs the other way, which is what guarantees this line has already
+ * executed when the store initialises).
+ */
+let tutorialScope: string | null = readTutorialSession()?.sessionId ?? null;
+
+/** Enter (`sessionId`) or leave (`null`) a worked-example session. */
+export function setTutorialScope(sessionId: string | null): void {
+  tutorialScope = sessionId;
+}
+
+/** The scope requests currently carry. `null` = the ordinary workspace. */
+export function getTutorialScope(): string | null {
+  return tutorialScope;
+}
+
 async function request(path: string, init?: RequestInit): Promise<Response> {
   const key = apiKey();
   try {
@@ -246,6 +328,7 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
         Accept: 'application/json',
         ...(key !== undefined ? { Authorization: `Bearer ${key}` } : {}),
         ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(tutorialScope !== null ? { [TUTORIAL_SESSION_HEADER]: tutorialScope } : {}),
         ...init?.headers,
       },
     });
@@ -311,6 +394,70 @@ export const api = {
   // base path).
   getOpenApi(): Promise<ApiOpenApiResponse> {
     return getJson<ApiOpenApiResponse>('/openapi');
+  },
+
+  /**
+   * Open an isolated worked-example session and return its id plus the record
+   * ids actually materialised in it.
+   *
+   * The caller is responsible for entering the scope (`setTutorialScope`) before
+   * reading those records — creating a session does not by itself change which
+   * workspace subsequent requests address. Deliberately NOT scope-carrying
+   * itself: opening a session from inside another session would be meaningless.
+   */
+  createTutorialSession(): Promise<ApiTutorialSession> {
+    return postJson<ApiTutorialSession>('/tutorial/sessions');
+  },
+
+  /**
+   * Discard a worked-example session and everything in it.
+   *
+   * Idempotent at the backend: discarding a session that is already gone
+   * succeeds, so a client never has to know whether it is retrying. Returns
+   * nothing — a 204 carries no body.
+   */
+  async disposeTutorialSession(sessionId: string): Promise<void> {
+    const path = `/tutorial/sessions/${enc(sessionId)}`;
+    const res = await request(path, { method: 'DELETE' });
+    if (!res.ok) throw httpError(res, path);
+  },
+
+  /**
+   * Does this worked-example session still exist? `'present'`, `'gone'`, or a throw.
+   *
+   * A scoped read of the experiment list is the cheapest existence probe there is:
+   * the shared scope dependency answers an unknown session with `404` and the typed
+   * body `{"error": "tutorial_session_not_found"}` BEFORE any record work happens
+   * (`apps/api/isaac_api/routes.py::tutorial_scope`). The header is passed
+   * explicitly rather than relied on from `tutorialScope`, so the probe asks about
+   * the session it was given and not about whatever scope the module happens to
+   * hold.
+   *
+   * WHY THIS IS NOT `listExperiments()` WRAPPED IN A `catch`. It was, and that was a
+   * defect: `getJson` builds its failure through `httpError`, which deliberately does
+   * NOT read the response body, so every caller saw an untyped `status` and could not
+   * tell the backend's stated reason from any other 404 — let alone from a 401 at the
+   * authenticating edge, a 500, or an unreachable backend. `'gone'` is therefore
+   * returned ONLY on the observed typed body. Everything else is rethrown as the
+   * `ApiError` it is, which forces the caller to decide what to do about a cause it
+   * cannot name instead of guessing "expired".
+   *
+   * Read-only, and it takes no lock.
+   */
+  async tutorialSessionState(sessionId: string): Promise<'present' | 'gone'> {
+    const path = '/experiments';
+    const res = await request(path, {
+      headers: { [TUTORIAL_SESSION_HEADER]: sessionId },
+    });
+    if (res.ok) return 'present';
+    const err = httpError(res, path);
+    // An HTML answer on an `/api/*` path is an edge intercept, never our 404 — do
+    // not try to read a typed reason out of a sign-in page.
+    if (res.status === 404 && !err.htmlIntercept) {
+      const body = (await res.json().catch(() => undefined)) as { error?: unknown } | undefined;
+      if (body?.error === 'tutorial_session_not_found') return 'gone';
+    }
+    throw err;
   },
 
   // S1 — the experiment queue.
@@ -697,10 +844,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    if ([200, 403, 409, 412, 428].includes(res.status)) {
+    if (RESET_RESULT_STATUSES.includes(res.status)) {
       // readJson still guards the HTML-intercept case: an edge sign-in page can
       // carry any status, and it is never a typed reset result.
-      return readJson<ApiDemoResetResult>(res, '/demo/reset');
+      const body = await readJson<unknown>(res, '/demo/reset');
+      // FAIL CLOSED on a body this client cannot interpret. See
+      // `isResetResult` — a half-built result leaves a destructive control armed.
+      if (!isResetResult(body)) {
+        throw new ApiError(
+          `The reset API answered ${res.status} with a body that is not a reset result.`,
+          { status: res.status, path: '/demo/reset', contentType: contentTypeOf(res) },
+        );
+      }
+      return body;
     }
     throw httpError(res, '/demo/reset');
   },

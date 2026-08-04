@@ -99,7 +99,8 @@ for (const surface of TABBED_SURFACES) {
 
 test('@interaction the Evidence preview-source tabs expose selection state', async ({ page, app }) => {
   const { SEED } = await import('../env');
-  await app.goto(`/record/${SEED.partial}/evidence`);
+  // Record surface → the shared worked-example session. See `e2e/worked-example.ts`.
+  await app.gotoExample(`/record/${SEED.partial}/evidence`);
   const tablist = page.getByRole('tablist', { name: 'Preview source' });
   await expect(tablist).toBeVisible();
   const tabs = tablist.getByRole('tab');

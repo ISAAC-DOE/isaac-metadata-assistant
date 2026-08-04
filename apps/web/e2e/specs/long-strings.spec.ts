@@ -52,7 +52,13 @@ test('@responsive a long unbroken paste into the Validator does not push the pag
 });
 
 test('@responsive an injected long title wraps or ellipsises rather than overflowing', async ({ page, app }) => {
-  await app.open(SURFACES.find((s) => s.id === 'experiments')!);
+  // The WORKED-EXAMPLE queue, not the ordinary one, and the change is what keeps
+  // this test meaningful rather than what makes it pass. The ordinary workspace
+  // is permanently empty, so `.exp-row` renders nowhere in it — the
+  // `test.skip(!mutated, …)` below would fire on every run and this test would
+  // silently stop covering anything. A populated queue exists only inside a
+  // worked-example session, so that is where a row is mutated.
+  await app.open(SURFACES.find((s) => s.id === 'experiments-example')!);
 
   // LABELLED SYNTHETIC MUTATION — see the file header. This overwrites the
   // rendered text of one already-present row title in the browser only. It
@@ -64,7 +70,13 @@ test('@responsive an injected long title wraps or ellipsises rather than overflo
     target.textContent = token;
     return true;
   }, LONG_TOKEN);
-  test.skip(!mutated, 'no experiment row rendered to mutate');
+  // Asserted, not skipped. A missing row now means the worked-example session did
+  // not materialise its five records — a real failure, and one a skip would hide.
+  expect(
+    mutated,
+    'no experiment row rendered inside the worked-example session to mutate: the session ' +
+      'should hold the five built-in examples (see e2e/global-setup.ts step 4).'
+  ).toBe(true);
 
   await page.waitForTimeout(300);
   await assertNoPageScroll(page, 'experiments list with an injected 240-char title');

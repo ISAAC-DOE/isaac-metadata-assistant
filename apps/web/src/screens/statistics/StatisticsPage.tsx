@@ -18,6 +18,8 @@ import {
 } from '../../components/icons';
 import { api } from '../../lib/api';
 import { useFetch, type FetchState } from '../../lib/useFetch';
+import { useWorkspaceScope } from '../../lib/workspaceScope';
+import { subscribeWorkspaceRebuilt } from '../../lib/workspaceInvalidation';
 import type { RuntimeRecord } from '../../lib/crossRecordTriage';
 import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../../lib/types';
 import { ROUTES } from '../../lib/routes';
@@ -177,6 +179,43 @@ function announceRound(round: Round, lastSuccess: Date | null): string {
 }
 
 /**
+ * The lead sentence, which names WHICH workspace the figures below describe.
+ *
+ * IT USED TO NAME THE WRONG ONE, unconditionally: "the current example
+ * workspace". The five built-in example records are created ONLY inside a
+ * worked-example session — `apps/api/isaac_api/workspace.py:22-32` states it as a
+ * structural property ("the NORMAL scope … is **never** auto-seeded: on a fresh
+ * deployment it is empty and it stays empty until something explicitly creates a
+ * record in it", against "a TUTORIAL scope … The five canonical worked-example
+ * records live ONLY here") — so on every ordinary screen that sentence named this
+ * scope after content this build never puts there. Same defect class, and same
+ * correction, as the mode chip: see `components/TopBar.tsx`, "THE SCOPE DECIDES
+ * THE LABEL".
+ *
+ * KEEP THE QUALIFIER THE QUOTE CARRIES. This conclusion used to read "so on every
+ * ordinary screen that sentence asserted contents that are not there" — dropping
+ * "on a fresh deployment" and turning a statement about what the build DOES into
+ * one about what a directory HOLDS. Nothing here measures contents: there is no
+ * startup migration, so a workspace that already held the five still lists them.
+ *
+ * ONE SENTENCE CANNOT BE TRUE OF BOTH SCOPES, which is why this is a branch rather
+ * than a rewording. The record read is keyed on the same `scope` value (see D1
+ * below), so this page really does describe either workspace: only the session
+ * scope holds examples, and only the ordinary scope can be named without them.
+ *
+ * The four other things listed are unchanged and are not scope claims: workflow
+ * readiness and evidence are derived from whichever records were read, while
+ * Project Memory and the API surface are properties of the build.
+ */
+function leadSentence(scope: string | null): string {
+  const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
+  return (
+    `A read-only view of ${workspace}, workflow readiness, evidence, Project ` +
+    'Memory, and the API surface.'
+  );
+}
+
+/**
  * A compact, localized failure note. Neutral rather than alarm-coloured, with
  * the recourse (a real button, keyboard reachable) still offered.
  *
@@ -281,10 +320,47 @@ export function StatisticsPage() {
     );
   }
 
-  const records = useFetch(() => track(api.getRuntimeRecords()), []);
+  /*
+   * D1 — the RECORD read is keyed on the workspace scope, the other three are not.
+   *
+   * `GET /api/runtime/records` is scope-sensitive exactly as the experiment list
+   * is: nothing in the ordinary workspace, the five built-in examples inside a
+   * worked-example session. With an empty dependency list this page read once, so
+   * opening or leaving a session left every record-derived figure on it describing
+   * a workspace that was no longer being addressed. This is a LIST-shaped surface,
+   * so the right answer is to re-read (unlike the record surfaces, which leave —
+   * see `lib/workspaceScope.ts`).
+   *
+   * The graph status, the About payload and the OpenAPI schema are properties of
+   * the build rather than of a workspace, so they are deliberately left unkeyed.
+   */
+  const scope = useWorkspaceScope();
+  const records = useFetch(() => track(api.getRuntimeRecords()), [scope]);
   const graph = useFetch(() => track(api.getGraphStatus()), []);
   const about = useFetch(() => track(api.getAbout()), []);
   const openapi = useFetch(() => track(api.getOpenApi()), []);
+
+  /*
+   * ...AND the record read also listens for a workspace REBUILD, which the scope
+   * key cannot cover.
+   *
+   * The guarded reset (`components/ResetDemoDialog.tsx`, in the worked-example bar
+   * that `AppShell` mounts on EVERY surface including this one) rewrites the record
+   * set without changing the scope — same session, different records. So `[scope]`
+   * is unchanged by it and every record-derived figure on this page — the four
+   * record cards, the workflow spine, the evidence totals, the export gate — went
+   * on describing the records the reset had just discarded. My Experiments already
+   * subscribed; this page renders the same workspace-derived data one click away
+   * from the control and did not.
+   *
+   * SILENT on purpose, exactly as the queue's is: the figures stay on screen while
+   * the fresh ones arrive, so the page does not blank and the reader does not lose
+   * their scroll position. Only the RECORD read is re-issued — the graph status, the
+   * About payload and the OpenAPI schema are properties of the build and a reset
+   * cannot change them.
+   */
+  const { reloadSilent: reloadRecordsSilent } = records;
+  useEffect(() => subscribeWorkspaceRebuilt(reloadRecordsSilent), [reloadRecordsSilent]);
 
   /*
    * Did the latest round come back complete? This reads the round's own TALLY,
@@ -337,10 +413,7 @@ export function StatisticsPage() {
       <div className="placeholder">
         <span className="eyebrow">Workspace Insights</span>
         <h1>Statistics</h1>
-        <p>
-          A read-only view of the current example workspace, workflow readiness, evidence, Project
-          Memory, and the API surface.
-        </p>
+        <p>{leadSentence(scope)}</p>
       </div>
 
       <div className="statistics">
@@ -514,10 +587,14 @@ function GlanceRuntimeCards({ body }: { body: ApiAboutResponse }) {
 function GlanceRecordCards({ body }: { body: { records: RuntimeRecord[]; total: number } }) {
   const totals = deriveWorkspaceTotals(body);
 
-  /* Defensive only. The workspace always holds its canonical synthetic records
-     and this app exposes no delete, so this branch is not reachable through the
-     shipped product; it exists so an empty body renders an honest sentence
-     instead of a grid of zeros. */
+  /* NOT defensive any more, and the comment here said it was. It read "the workspace
+     always holds its canonical synthetic records ... so this branch is not reachable
+     through the shipped product", which stopped being true when the five examples moved
+     into a worked-example session: the ORDINARY scope starts with no records, so opening
+     Statistics without a walkthrough open reaches this branch as the normal case. The
+     rendered sentence is measured (`totals.total === 0`, derived from the same body the
+     cards are built from), so it stays as it is — only the claim about reachability was
+     wrong. */
   if (totals.total === 0) {
     return (
       <div className="stats-empty">

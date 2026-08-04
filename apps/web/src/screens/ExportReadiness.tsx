@@ -1,7 +1,7 @@
 import './screens.css';
 import '../components/artifact.css';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
@@ -22,6 +22,7 @@ import { ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
 import { api, ApiError } from '../lib/api';
 import { useRecordSession } from '../lib/useRecordSession';
+import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type {
@@ -108,6 +109,13 @@ export function ExportReadiness() {
   useEffect(() => {
     runFetch(true);
   }, [runFetch]);
+
+  // D1 — the verdict, coverage and advisory on this screen belong to the workspace
+  // scope it was opened in. See `lib/workspaceScope.ts`: a scope change destroys
+  // the record they were computed for, and a trust readout about a record that no
+  // longer exists is the worst instance of showing destroyed content as current.
+  const scopeChanged = useWorkspaceScopeChanged();
+  if (scopeChanged) return <Navigate to={ROUTES.experiments} replace />;
 
   if (load.name !== 'data') {
     return (

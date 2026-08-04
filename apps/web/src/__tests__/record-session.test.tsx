@@ -329,10 +329,22 @@ describe('P29.4 · record screen wiring', () => {
 // ---------------------------------------------------------------------------
 
 describe('P29.4 · Reset clears the assistant session', () => {
-  it('a successful Reset Workspace clears conversation + staged proposals', async () => {
-    const { resetDemoRoutes } = await import('../test/apiFixtures');
+  /*
+   * RE-POINTED, NOT RELAXED. `POST /api/demo/reset` now requires a worked-example
+   * session, so the control lives in the worked-example bar and this test opens a real
+   * session before reaching for it. The property under test — a SUCCESSFUL reset wipes
+   * every ephemeral assistant session, so a proposal staged against a record that has
+   * just been rebuilt can never be confirmed — is unchanged, and so is the strength of
+   * every assertion. Two queries are narrowed because the walkthrough's coach mark is
+   * also a `role="dialog"`: the reset dialog is resolved by its accessible name, which
+   * is a more precise query than the bare one it replaces.
+   */
+  it('a successful reset clears conversation + staged proposals', async () => {
+    const { resetDemoRoutes, tutorialSessionRoutes } = await import('../test/apiFixtures');
+    const { LABELS } = await import('../lib/labels');
+    const { __resetTutorialStore } = await import('../lib/tutorialController');
     const { routes } = resetDemoRoutes();
-    stubFetchRoutes(routes);
+    stubFetchRoutes({ ...tutorialSessionRoutes(), ...routes });
 
     // Seed a conversation + a staged proposal for some experiment.
     appendMessage(EXP_ID, { role: 'user', text: 'seeded question', id: 'seed' });
@@ -341,13 +353,19 @@ describe('P29.4 · Reset clears the assistant session', () => {
     expect(loadSession(EXP_ID).proposal).not.toBeNull();
 
     const view = renderAt('/experiments');
-    const trigger = (await view.findByRole('button', { name: 'Reset Workspace' })) as HTMLButtonElement;
+    fireEvent.click(await view.findByRole('button', { name: LABELS.actionStartTutorial }));
+
+    const trigger = (await view.findByRole('button', {
+      name: LABELS.actionResetDemo,
+    })) as HTMLButtonElement;
     fireEvent.click(trigger);
 
-    const dialog = await view.findByRole('dialog');
+    const dialog = await view.findByRole('dialog', {
+      name: new RegExp(LABELS.resetDialogTitle, 'i'),
+    });
     const input = within(dialog).getByLabelText(/Type RESET to confirm/i);
     fireEvent.change(input, { target: { value: 'RESET' } });
-    const confirm = within(dialog).getByRole('button', { name: 'Reset Shared Workspace' });
+    const confirm = within(dialog).getByRole('button', { name: LABELS.resetConfirmAction });
     fireEvent.click(confirm);
 
     await waitFor(() => {
@@ -356,5 +374,8 @@ describe('P29.4 · Reset clears the assistant session', () => {
       expect(loadSession(EXP_ID).messages.length).toBe(0);
       expect(loadSession(EXP_ID).proposal).toBeNull();
     });
+
+    __resetTutorialStore();
+    sessionStorage.clear();
   });
 });

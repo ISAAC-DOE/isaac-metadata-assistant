@@ -20,7 +20,7 @@ from typing import Annotated, Literal, Mapping
 
 import logging
 
-from fastapi import APIRouter, Body, Header, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Header, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -103,6 +103,7 @@ TAG_DEMO = "Example Workspace"
 TAG_INGESTION = "Ingestion"
 TAG_UPLOADS = "Uploads"
 TAG_SCHEMA = "Schema & Vocabulary"
+TAG_TUTORIAL = "Worked Example Sessions"
 
 #: Tag definitions registered on the app (``isaac_api.app.create_app`` passes this
 #: as ``openapi_tags``). Every tag any route below uses appears here exactly once,
@@ -211,6 +212,41 @@ OPENAPI_TAGS: list[dict] = [
             "the controlled vocabularies. No editing affordance exists."
         ),
     },
+    {
+        "name": TAG_TUTORIAL,
+        "description": (
+            # "the ordinary workspace holds no example records at all" was a claim
+            # about the CONTENTS of a directory this API never inspects to say it.
+            # ``list_experiments(None)`` enumerates whatever is on disk under the
+            # workspace root and there is no startup migration, so a deployment whose
+            # workspace survives an upgrade still holding the previously-seeded five
+            # would serve them from the ordinary scope while this sentence denied
+            # they were there. What is genuinely enforced is a REFUSAL, not merely a
+            # required parameter: ``_materialise_seed``, ``reset_to_canonical_seed`` and
+            # ``ensure_tutorial_seeded`` each raise ``InvalidTutorialSession`` on a
+            # ``None`` session id, so no SEEDING path can create an example record
+            # outside a session. That is what is stated.
+            #
+            # "NO CODE PATH IN THIS BUILD CAN" is what this comment used to claim, and it
+            # was too strong: ``create_experiment(title, source, draft, id=SEED_READY_ID,
+            # session_id=None)`` is exactly such a path — ``rid = id or new_record_id()``
+            # (``workspace.py:608``), then ``exp.save()`` into ``scope_root(None)``. The
+            # sentence above survives for a DIFFERENT and stronger reason: this build
+            # exposes no record-creation surface at all. There is no ``POST
+            # /api/experiments``, and ``create_experiment`` has no caller anywhere under
+            # ``apps/api/isaac_api/`` — pinned by
+            # ``test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package``,
+            # so a future route that took a client-supplied id could not be added
+            # silently. ("Requires a session_id"
+            # was the earlier justification and it was too weak to carry the sentence:
+            # ``scope_root(None)`` returns ``workspace_root()`` silently, and an explicit
+            # ``session_id=None`` was measured writing a canonical record into the
+            # ordinary root before the refusals were added.)
+            "Creating and discarding an isolated worked-example workspace. The "
+            "built-in example records are created only inside one of these — no "
+            "operation in this API materialises one into the ordinary workspace."
+        ),
+    },
 ]
 
 
@@ -225,7 +261,14 @@ _R_UNAUTHORIZED: dict = {
 }
 
 _R_EXPERIMENT_NOT_FOUND: dict = {
-    404: {"description": "No experiment in this workspace has that id."},
+    404: {
+        "description": (
+            "No experiment in the selected workspace has that id — or the "
+            "`X-Isaac-Tutorial-Session` header named a worked-example session that "
+            "does not exist. The request is never silently answered from the "
+            "ordinary workspace instead."
+        )
+    },
 }
 
 #: The optimistic-concurrency preconditions every write operation shares.
@@ -250,6 +293,110 @@ _R_PRECONDITION: dict = {
         )
     },
 }
+
+# --- scope resolution: normal workspace vs. an isolated worked-example session --
+#
+# ONE dependency, reused by every record operation and by both example-workspace
+# operations, so a route added later cannot accidentally omit it and silently read
+# the normal workspace while the caller believed it was inside a session.
+#
+# THE FAIL-CLOSED PROPERTY. A header that is present but names no existing session
+# is a 404. It is NEVER treated as "no header", because falling back to the normal
+# workspace would answer a request about one scope with the contents of another —
+# the caller would be told a record does not exist when it does, or (worse, once
+# normal scope can hold real records) shown records it never asked for. A malformed
+# header is a 422: it does not name a session at all.
+
+#: The request header carrying the worked-example session id.
+TUTORIAL_SESSION_HEADER = "X-Isaac-Tutorial-Session"
+
+_TUTORIAL_HEADER_DESCRIPTION = (
+    "Optional. The id of a worked-example session, as returned by "
+    "`POST /api/tutorial/sessions`. Omit it to operate on the ordinary workspace. "
+    "A malformed id is rejected with `422`, and an id that names no existing "
+    "session with `404` — it never falls back to the ordinary workspace."
+)
+
+_R_TUTORIAL_SCOPE: dict = {
+    404: {
+        "description": (
+            "Either no experiment in the selected workspace has that id, or the "
+            "`X-Isaac-Tutorial-Session` header named a worked-example session that "
+            "does not exist (it was discarded, or it expired). The request is never "
+            "silently answered from the ordinary workspace instead."
+        )
+    },
+}
+
+
+class TutorialScopeError(Exception):
+    """A scope-resolution refusal, carried out of a dependency as a typed response.
+
+    A FastAPI dependency cannot return a response, only raise. This exception is
+    translated by ``tutorial_scope_error_handler`` (registered by
+    ``isaac_api.app.create_app``) into the same ``{"error": ...}`` body shape every
+    other refusal in this module uses. The payload is path-free and never echoes
+    the rejected id.
+    """
+
+    def __init__(self, status_code: int, payload: dict) -> None:
+        super().__init__(payload.get("error", "tutorial_scope_error"))
+        self.status_code = status_code
+        self.payload = payload
+
+
+async def tutorial_scope_error_handler(request, exc: TutorialScopeError) -> JSONResponse:
+    """Render a :class:`TutorialScopeError` as its typed JSON body."""
+    return JSONResponse(status_code=exc.status_code, content=exc.payload)
+
+
+def tutorial_scope(
+    x_isaac_tutorial_session: Annotated[
+        str | None,
+        Header(alias=TUTORIAL_SESSION_HEADER, description=_TUTORIAL_HEADER_DESCRIPTION),
+    ] = None,
+) -> str | None:
+    """Resolve the scope this request operates in.
+
+    Returns ``None`` for the ordinary workspace, or the session id for a
+    worked-example session. Raises :class:`TutorialScopeError` (422 malformed / 404
+    unknown) rather than ever degrading to the ordinary workspace.
+    """
+    if x_isaac_tutorial_session is None:
+        return None
+    raw = x_isaac_tutorial_session.strip()
+    if not ws.is_tutorial_session_id(raw):
+        raise TutorialScopeError(
+            422,
+            {
+                "error": "invalid_tutorial_session",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "The worked-example session id is not of the expected form. "
+                    "Create a session with POST /api/tutorial/sessions."
+                ),
+            },
+        )
+    if not ws.tutorial_session_exists(raw):
+        raise TutorialScopeError(
+            404,
+            {
+                "error": "tutorial_session_not_found",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "That worked-example session does not exist — it was discarded "
+                    "or it expired. Create a new one with "
+                    "POST /api/tutorial/sessions. This request was not answered "
+                    "from the ordinary workspace."
+                ),
+            },
+        )
+    return raw
+
+
+#: The resolved scope, injected into every operation that reads or writes records.
+TutorialScopeDep = Annotated[str | None, Depends(tutorial_scope)]
+
 
 #: The path parameter naming an experiment. One description, used by every route
 #: that takes it, so the wording cannot drift between operations.
@@ -561,13 +708,142 @@ def health() -> dict:
     }
 
 
+# --- 1b. worked-example sessions ----------------------------------------------
+#
+# The five built-in example records live ONLY inside a worked-example session, one
+# independent copy per session. The ordinary workspace is never seeded with them.
+# The filesystem is the session registry (see ``workspace``'s module docstring), so
+# these two operations are the whole lifecycle: create and discard. Expiry is swept
+# at create time rather than by a background task, so there is nothing to keep
+# running and nothing to lose on a restart.
+
+
+@router.post(
+    "/tutorial/sessions",
+    status_code=201,
+    tags=[TAG_TUTORIAL],
+    summary="Open a Worked-Example Session",
+    description=(
+        "Creates an isolated worked-example workspace containing the five built-in "
+        "example records, and returns its id together with the record ids actually "
+        "materialised in it. Send that id as the `X-Isaac-Tutorial-Session` header on "
+        "the record and example-workspace operations to work inside the session.\n\n"
+        "The examples exist only inside a session: the ordinary workspace contains "
+        "none of them, and nothing here writes to it. Two sessions are completely "
+        "independent — the same example record can be answered, edited and exported "
+        "in one without being visible from the other.\n\n"
+        "The returned record ids are read back from the session that was just "
+        "created, so they state what is there rather than what was intended. Each "
+        "session expires after the reported number of hours; expired sessions are "
+        "cleaned up whenever a new one is opened."
+    ),
+    response_description=(
+        "The new session's id, the record ids materialised in it, and how many hours "
+        "it survives."
+    ),
+    responses={**_R_UNAUTHORIZED},
+)
+def create_tutorial_session() -> dict:
+    # Sweep FIRST, so expired sessions are retired by ordinary use rather than by a
+    # background task that could die silently. Bounded and idempotent; it can only
+    # ever remove directories inside the worked-example namespace.
+    ws.sweep_stale_tutorial_sessions()
+    session_id, record_ids = ws.create_tutorial_session()
+    return {
+        "session_id": session_id,
+        "record_ids": record_ids,
+        "ttl_hours": ws.TUTORIAL_TTL_HOURS,
+    }
+
+
+#: The path parameter naming a worked-example session.
+TutorialSessionId = Annotated[
+    str,
+    Path(
+        description=(
+            "The id of a worked-example session, as returned by "
+            "`POST /api/tutorial/sessions`."
+        )
+    ),
+]
+
+
+@router.delete(
+    "/tutorial/sessions/{session_id}",
+    status_code=204,
+    tags=[TAG_TUTORIAL],
+    summary="Discard a Worked-Example Session",
+    description=(
+        "Discards a worked-example session and everything in it, including any "
+        "answers, edits and exported artifacts produced inside it. Nothing outside "
+        "the session is touched.\n\n"
+        "Discarding a session that no longer exists succeeds: the outcome the caller "
+        "asked for — that this session is gone — already holds, so repeating the "
+        "request is safe and a client never has to know whether it is retrying. A "
+        "malformed id is rejected instead, because it names no session at all."
+    ),
+    response_description="The session does not exist. No body.",
+    responses={
+        **_R_UNAUTHORIZED,
+        204: {"description": "The session does not exist. No body."},
+    },
+)
+def delete_tutorial_session(session_id: TutorialSessionId) -> Response:
+    # Malformed -> 422 (it names no session). Absent -> 204, deliberately the same as
+    # an existing session, because the POSTCONDITION is identical in both cases.
+    if not ws.is_tutorial_session_id(session_id):
+        raise TutorialScopeError(
+            422,
+            {
+                "error": "invalid_tutorial_session",
+                "message": (
+                    "The worked-example session id is not of the expected form, so "
+                    "it names no session. Nothing was removed."
+                ),
+            },
+        )
+    ws.dispose_tutorial_session(session_id)
+    return Response(status_code=204)
+
+
 # --- 2. demo run --------------------------------------------------------------
 
+#: Refusal payload for an example-workspace operation invoked outside a session.
+#: These two operations act on the built-in example records, and those exist only
+#: inside a worked-example session, so there is nothing for them to act on in the
+#: ordinary workspace. Refusing is not a policy preference: without the header the
+#: canonical target does not exist, and the alternative to a typed refusal is a
+#: misleading drift/classification verdict about records that are simply absent.
+_TUTORIAL_REQUIRED_MESSAGE = (
+    "This operation works on the built-in example records, which exist only inside "
+    "a worked-example session. Open one with POST /api/tutorial/sessions and send "
+    "its id as the X-Isaac-Tutorial-Session header. Nothing was written."
+)
 
-def _demo_baseline(target_id: str) -> Experiment:
+
+def _tutorial_scope_required(operation: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "tutorial_scope_required",
+            "operation": operation,
+            "header": TUTORIAL_SESSION_HEADER,
+            "message": _TUTORIAL_REQUIRED_MESSAGE,
+        },
+    )
+
+
+def _demo_baseline(target_id: str) -> Experiment | None:
     """The canonical seed baseline for a demo target, built IN MEMORY only.
 
-    This is the exact authoritative state ``ensure_seeded`` materialises for
+    Returns ``None`` when ``target_id`` is not a canonical seed id. The lookup used
+    to be a bare ``next(...)`` over ``_seed_specs()``, which raises ``StopIteration``
+    for an unknown id — inside a sync handler that surfaces as an HTTP 500 with a
+    traceback in the server log, rather than as a refusal the caller can act on. The
+    two current call sites pass a server-derived id and so cannot trip it; the
+    default is here so a future caller cannot turn a lookup miss into a 500.
+
+    This is the exact authoritative state ``ensure_tutorial_seeded`` materialises for
     ``target_id`` — the same ``_SeedSpec`` row, the same source, the same draft
     function — reconstructed here purely so its authoritative signature can be
     compared against what is actually on disk. It is NEVER saved, so building it
@@ -585,7 +861,9 @@ def _demo_baseline(target_id: str) -> Experiment:
     re-deriving either of them here would create a second, silently divergent
     copy of the seed's content.
     """
-    spec = next(s for s in ws._seed_specs() if s.id == target_id)
+    spec = next((s for s in ws._seed_specs() if s.id == target_id), None)
+    if spec is None:
+        return None
     return Experiment(
         id=spec.id,
         title=spec.title,
@@ -600,16 +878,29 @@ def _demo_baseline(target_id: str) -> Experiment:
     "/demo/run",
     tags=[TAG_DEMO],
     summary="Run the Worked Example Pipeline",
+    # THE HEADER REQUIREMENT BELONGS IN THE MAIN DESCRIPTION, not only in the `409`
+    # sub-description. A reader consulting the operation to find out how to call it
+    # would have seen no precondition at all, and only discovered the requirement by
+    # reading the failure case they had not yet hit. The handler's own docstring has
+    # always said so; the published contract now does too, first, because it is the
+    # first thing true of every call.
     description=(
+        "REQUIRES the `X-Isaac-Tutorial-Session` header. The built-in example "
+        "records are created only inside a worked-example session, so without one "
+        "there is nothing for this operation to run over: it refuses with `409` "
+        "(`tutorial_scope_required`) and writes nothing. Everything below describes "
+        "what it does inside the session that header names — it addresses no other "
+        "scope, and it can neither read nor write a record in the ordinary "
+        "workspace.\n\n"
         "Runs the committed worked-example pipeline and returns the ordered steps "
         "it executed together with the resulting experiment id and status. "
         "`mode: \"draft_only\"` (the default) extracts a draft from the committed "
         "reference files and runs the no-guessing draft checks; `mode: \"full\"` "
         "additionally applies the committed simulated answers and exports an "
         "official record. It targets one fixed canonical experiment id per mode, "
-        "so re-running never adds a record and never increases the record count. "
-        "It reads only the two committed reference files and accepts no "
-        "uploaded data.\n\n"
+        "so re-running never adds a record and never increases that session's "
+        "record count. It reads only the two committed reference files and accepts "
+        "no uploaded data.\n\n"
         "It never overwrites your work. The target must still hold exactly its "
         "original example content: when it does, running the pipeline would "
         "reproduce that content byte for byte, so nothing at all is written and "
@@ -622,17 +913,24 @@ def _demo_baseline(target_id: str) -> Experiment:
     response_description="The experiment id, the ordered pipeline steps, and the resulting status.",
     responses={
         **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
         409: {
             "description": (
-                "Refused without writing anything: the canonical record this mode "
-                "targets no longer holds its original content, so running the "
-                "example over it would discard a real change. Restore the built-in "
-                "examples with `POST /api/demo/reset` if you want that content back."
+                "Refused without writing anything, for one of two reasons. Either no "
+                "`X-Isaac-Tutorial-Session` header was sent — the built-in examples "
+                "exist only inside a worked-example session, so outside one there is "
+                "nothing for this operation to run over — or the canonical record "
+                "this mode targets no longer holds its original content, so running "
+                "the example over it would discard a real change. The typed `error` "
+                "field distinguishes them: `tutorial_scope_required` or "
+                "`demo_target_drifted`. Restore the built-in examples with "
+                "`POST /api/demo/reset` if you want that content back."
             )
         },
     },
 )
 def demo_run(
+    scope: TutorialScopeDep,
     body: dict = Body(
         default=None,
         description=(
@@ -641,6 +939,18 @@ def demo_run(
         ),
     ),
 ) -> dict:
+    """Run the worked-example pipeline inside a worked-example session.
+
+    REQUIRES tutorial scope. Called without ``X-Isaac-Tutorial-Session`` it refuses
+    with ``409 {"error": "tutorial_scope_required"}`` and writes nothing. That is a
+    correctness requirement, not only a policy one: this build cannot create the
+    canonical target id in the ordinary workspace, so an unscoped run would either
+    report a spurious ``demo_target_drifted`` about a record it has no way to
+    materialise, or seed the ordinary workspace — and the whole point of this slice is
+    that nothing seeds the ordinary workspace.
+    """
+    if scope is None:
+        return _tutorial_scope_required("POST /api/demo/run")
     mode = (body or {}).get("mode", "draft_only")
     if mode not in ("draft_only", "full"):
         return JSONResponse(
@@ -655,7 +965,7 @@ def demo_run(
     # new random experiment. Re-running never increases the record count and
     # preserves canonical identities. It also never WRITES to that id — see the
     # precondition below.
-    ws.ensure_seeded()
+    ws.ensure_tutorial_seeded(scope)
     target_id = ws.SEED_DONE_ID if mode == "full" else ws.SEED_NEW_DRAFT_ID
 
     # [1] build_draft — deterministic extraction from the synthetic fixtures.
@@ -682,17 +992,19 @@ def demo_run(
     )
 
     # The read of the fixed canonical target id is serialised under the same
-    # per-record lock the /answers and /export mutations use, so the drift check
-    # below cannot observe a half-applied concurrent mutation. ensure_seeded/
-    # build_draft/validate_draft above stay outside the lock (ensure_seeded only
-    # creates MISSING ids; neither racily mutates the target's persisted state).
-    with ws.record_lock(target_id):
+    # per-record lock the /answers and /export mutations use, and under the SAME
+    # scope, so the drift check below cannot observe a half-applied concurrent
+    # mutation. ensure_tutorial_seeded/build_draft/validate_draft above stay outside
+    # the lock (the seeder only creates MISSING ids; neither racily mutates the
+    # target's persisted state).
+    with ws.record_lock(target_id, session_id=scope):
         # PRECONDITION — refuse, and never write (W1).
         #
         # This operation targets a fixed canonical id derived server-side from
         # `mode`, so the caller structurally cannot supply an If-Match for it, and
-        # `ensure_seeded()` above guarantees the record exists, which makes
-        # `If-Match: *` vacuous. Its precondition is therefore expressed against
+        # `ensure_tutorial_seeded()` above guarantees the record exists in this
+        # session, which makes `If-Match: *` vacuous. Its precondition is therefore
+        # expressed against
         # content, not against a token: the target must still hold exactly the
         # canonical seed state.
         #
@@ -713,16 +1025,24 @@ def demo_run(
         # the two disagree on a corrupt file (one swallows JSONDecodeError and
         # returns None, the other raises), and only one answer can be right.
         #
-        # An ABSENT record refuses (defence in depth: ``ensure_seeded`` above
-        # already heals a missing id before the lock, so this arm is not expected
-        # to fire — it is not, as an earlier note claimed, protection against a
-        # concurrent ``demo_reset``, which takes the SAME per-record lock for every
-        # canonical id). A CORRUPT state file surfaces as a 500 from
-        # ``load_experiment``, exactly as it already does on every read path; it is
-        # not silently treated as drift.
+        # An ABSENT record refuses (defence in depth: ``ensure_tutorial_seeded``
+        # above already heals a missing id in this session before the lock, so this
+        # arm is not expected to fire — it is not, as an earlier note claimed,
+        # protection against a concurrent ``demo_reset``, which takes the SAME
+        # per-record lock for every canonical id). A CORRUPT state file surfaces as
+        # a 500 from ``load_experiment``, exactly as it already does on every read
+        # path; it is not silently treated as drift.
+        #
+        # A ``None`` baseline would mean ``target_id`` is not a canonical seed id.
+        # ``target_id`` is chosen from ``mode`` two lines above, so it always is; the
+        # arm is written defensively rather than left to raise.
         baseline = _demo_baseline(target_id)
-        exp = ws.load_experiment(target_id)
-        if exp is None or ws._authoritative_signature(exp) != ws._authoritative_signature(baseline):
+        exp = ws.load_experiment(target_id, session_id=scope)
+        if (
+            baseline is None
+            or exp is None
+            or ws._authoritative_signature(exp) != ws._authoritative_signature(baseline)
+        ):
             return JSONResponse(
                 status_code=409,
                 content={
@@ -876,20 +1196,37 @@ def _reset_response(
     "/demo/reset",
     tags=[TAG_DEMO],
     summary="Reset the Example Workspace",
+    # TWO CORRECTIONS, and both are about scope rather than style.
+    #
+    # 1. The header REQUIREMENT was stated only in the `409` sub-description, so the
+    #    main description read as though this operation could be called bare. The
+    #    handler docstring has always required a scope; the contract now says so
+    #    first.
+    # 2. Every "the workspace" here named a scope this operation CANNOT touch.
+    #    `demo_reset` refuses before any other gate when `scope is None`, and
+    #    `reset_to_canonical_seed(session_id=scope)` addresses `scope_root(scope)`
+    #    only. Left as "the workspace", the sentence "Restores the workspace to
+    #    exactly the five canonical built-in example records" describes a destructive
+    #    act on the ordinary workspace that this endpoint has no path to perform.
     description=(
-        "Restores the workspace to exactly the five canonical built-in example "
+        "REQUIRES the `X-Isaac-Tutorial-Session` header, and refuses with `409` "
+        "(`tutorial_scope_required`) without one, mutating nothing. Everything it "
+        "classifies, reports and restores is the worked-example session that header "
+        "names; it addresses no other scope and cannot remove, restore or modify a "
+        "record in the ordinary workspace.\n\n"
+        "Restores that session to exactly the five canonical built-in example "
         "records and reports the before/after counts, the removable set, a state "
         "histogram, and a derived summary of the confirmed work the reset would "
         "discard. `mode: \"preview\"` classifies only and mutates nothing; "
         "`mode: \"execute\"` additionally requires the exact confirmation phrase "
         "and the `plan_digest` the preview returned. It accepts no caller-supplied "
         "ids or paths — any extra field is rejected — it removes only records it "
-        "can classify as records this workspace itself created, and it refuses to "
+        "can classify as records this application itself created, and it refuses to "
         "remove anything at all if any record is ambiguous. No filesystem path "
         "appears in the response.\n\n"
         "**The `plan_digest` precondition.** `preview` returns an opaque digest of "
-        "the workspace it classified. `execute` must send it back, and the reset "
-        "runs only if the workspace still matches it. Without this, a client that "
+        "the session it classified. `execute` must send it back, and the reset "
+        "runs only if that session still matches it. Without this, a client that "
         "previewed, showed a confirmation dialog, and executed a while later would "
         "destroy anything committed in between — the operator would have approved a "
         "classification that no longer held. A missing digest is `428`, a stale one "
@@ -903,6 +1240,7 @@ def _reset_response(
     ),
     responses={
         **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
         403: {
             "description": (
                 "Refused because the deployment is not in synthetic-only data "
@@ -912,9 +1250,13 @@ def _reset_response(
         },
         409: {
             "description": (
-                "Refused without mutating: either the `execute` confirmation "
-                "phrase was missing or wrong, or at least one record could not be "
-                "classified as a record this workspace itself created."
+                "Refused without mutating, for one of three reasons, distinguished by "
+                "the typed reason in the body: no `X-Isaac-Tutorial-Session` header "
+                "was sent, so there is no worked-example session to reset "
+                "(`tutorial_scope_required`); the `execute` confirmation phrase was "
+                "missing or wrong (`confirmation_required`); or at least one record "
+                "could not be classified as a record this session itself created "
+                "(`ambiguous_records_present`)."
             )
         },
         412: {
@@ -929,12 +1271,13 @@ def _reset_response(
             "description": (
                 "Refused without mutating: `plan_digest` was omitted. Every execute "
                 "requires the digest from its own preview, so a reset can never run "
-                "against a workspace nobody looked at."
+                "against a session nobody looked at."
             )
         },
     },
 )
 def demo_reset(
+    scope: TutorialScopeDep,
     req: DemoResetRequest = Body(
         description=(
             "`mode` is `preview` or `execute`. `execute` also requires "
@@ -944,19 +1287,37 @@ def demo_reset(
         ),
     ),
 ):
+    """Reset ONE worked-example session to the canonical five.
+
+    REQUIRES tutorial scope. Called without ``X-Isaac-Tutorial-Session`` it refuses
+    with ``409 {"error": "tutorial_scope_required"}`` and mutates nothing. The
+    refusal is checked before every other gate, including the synthetic-only gate,
+    because without a scope there is no workspace to classify and any counts reported
+    alongside a refusal would be counts about the wrong thing.
+
+    Every safety property of the underlying reset is preserved, merely scoped: the
+    preview -> execute ``plan_digest`` precondition (428 absent / 412 stale) verified
+    inside the same critical section as the mutation, ``record_lock`` held over
+    managed-legacy removal as well as canonical re-materialisation, ``final_count``
+    measured rather than asserted, the ``is_synthetic_only()`` gate, and the
+    provenance rule that a record lacking the managed-source marker classifies
+    AMBIGUOUS and forces a refusal with zero mutation.
+    """
     # demo_reset is a single-user, confirmation-gated admin reset spanning MULTIPLE
     # ids: an rmtree of the managed-legacy records plus a re-materialisation of the
     # five canonical ones. It IS coordinated with the per-record mutation locks —
-    # ``reset_to_canonical_seed`` takes ``record_lock(id)`` around every id it
-    # touches, one at a time — and its cross-record precondition is the
+    # ``reset_to_canonical_seed`` takes ``record_lock(id, session_id=...)`` around
+    # every id it touches, one at a time — and its cross-record precondition is the
     # ``plan_digest`` checked below rather than a single ETag.
+    if scope is None:
+        return _tutorial_scope_required("POST /api/demo/reset")
     mode = req.mode
 
-    # Governance gate FIRST: refuse outside synthetic-only mode, before any
-    # precondition is even considered (classification is read-only, so it is safe to
-    # report counts alongside the refusal).
+    # Governance gate: refuse outside synthetic-only mode, before any precondition is
+    # even considered (classification is read-only, so it is safe to report counts
+    # alongside the refusal).
     if not ws.is_synthetic_only():
-        data = ws.reset_to_canonical_seed(dry_run=True)
+        data = ws.reset_to_canonical_seed(dry_run=True, session_id=scope)
         return _reset_response(
             data,
             mode=mode,
@@ -968,7 +1329,7 @@ def demo_reset(
     # Preview NEVER mutates: classify only. It has no precondition to satisfy — it is
     # what PRODUCES the precondition for the execute that may follow.
     if mode == "preview":
-        data = ws.reset_to_canonical_seed(dry_run=True)
+        data = ws.reset_to_canonical_seed(dry_run=True, session_id=scope)
         return _reset_response(
             data,
             mode=mode,
@@ -981,7 +1342,7 @@ def demo_reset(
     # mistyped phrase keeps its long-standing 409 and stays distinguishable from a
     # precondition problem the operator cannot fix by typing.
     if req.confirmation != _RESET_CONFIRMATION:
-        data = ws.reset_to_canonical_seed(dry_run=True)
+        data = ws.reset_to_canonical_seed(dry_run=True, session_id=scope)
         return _reset_response(
             data,
             mode=mode,
@@ -995,7 +1356,7 @@ def demo_reset(
     # overwrite this slice exists to remove.
     digest = (req.plan_digest or "").strip()
     if not digest:
-        data = ws.reset_to_canonical_seed(dry_run=True)
+        data = ws.reset_to_canonical_seed(dry_run=True, session_id=scope)
         return _reset_response(
             data,
             mode=mode,
@@ -1006,7 +1367,9 @@ def demo_reset(
 
     # Execute, gate 3 — the precondition must MATCH, and the match is verified inside
     # the same critical section as the mutation (so it is not re-checked here).
-    data = ws.reset_to_canonical_seed(dry_run=False, expected_plan_digest=digest)
+    data = ws.reset_to_canonical_seed(
+        dry_run=False, expected_plan_digest=digest, session_id=scope
+    )
     if data["refusal"] == "plan_digest_stale":
         return _reset_response(
             data, mode=mode, status="refused", http=412, refusal_reason="plan_digest_stale"
@@ -1039,10 +1402,10 @@ def demo_reset(
         "any other record. Read-only, and it states no validity verdict."
     ),
     response_description="Every experiment as a summary row.",
-    responses={**_R_UNAUTHORIZED},
+    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
-def list_experiments() -> dict:
-    return {"experiments": [_summary(e) for e in ws.list_experiments()]}
+def list_experiments(scope: TutorialScopeDep) -> dict:
+    return {"experiments": [_summary(e) for e in ws.list_experiments(scope)]}
 
 
 # --- 4. detail ----------------------------------------------------------------
@@ -1075,6 +1438,7 @@ def list_experiments() -> dict:
     },
 )
 def get_experiment(
+    scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     response: Response,
     if_none_match: str | None = Header(
@@ -1086,7 +1450,7 @@ def get_experiment(
         ),
     ),
 ):
-    exp = ws.load_experiment(experiment_id)
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     # Conditional GET (P27.6 live-sync polling): if the client's If-None-Match
@@ -1118,8 +1482,8 @@ def get_experiment(
     response_description="The draft's fields, grouped, with the current `ETag`.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def get_draft(experiment_id: ExperimentId, response: Response):
-    exp = ws.load_experiment(experiment_id)
+def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
@@ -1143,8 +1507,8 @@ def get_draft(experiment_id: ExperimentId, response: Response):
     response_description="The open blocking questions, with the current `ETag`.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def get_pending(experiment_id: ExperimentId, response: Response):
-    exp = ws.load_experiment(experiment_id)
+def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
@@ -1206,6 +1570,7 @@ def _answers_to_apply_shape(answers_by_id: dict, draft: dict, timestamp: str) ->
     },
 )
 def post_answers(
+    scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     response: Response,
     body: dict = Body(
@@ -1229,13 +1594,13 @@ def post_answers(
     # Cheap existence pre-check OUTSIDE the lock so a bogus/non-existent id never
     # creates a permanent entry in the never-evicting per-record lock map (bounds
     # it to ids that actually resolve to a record).
-    if ws.load_experiment(experiment_id) is None:
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
         return _not_found(experiment_id)
     # The per-record lock serialises the entire load->precondition->mutate->save
     # compare-and-swap; the experiment is loaded FRESH inside the lock so two
     # writers holding the same token cannot both succeed.
-    with ws.record_lock(experiment_id):
-        exp = ws.load_experiment(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
         if exp is None:
             return _not_found(experiment_id)  # deleted in the pre-check→lock race window
         if body.get("confirmed_by_user") is not True:
@@ -1328,6 +1693,7 @@ def _has_correction_target(apply_shape: dict) -> bool:
     },
 )
 def post_edit(
+    scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     response: Response,
     body: dict = Body(
@@ -1350,13 +1716,13 @@ def post_edit(
 ):
     # Mirrors post_answers EXACTLY: existence pre-check OUTSIDE the lock so a bogus
     # id never pins a permanent entry in the never-evicting per-record lock map.
-    if ws.load_experiment(experiment_id) is None:
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
         return _not_found(experiment_id)
     # The per-record lock serialises load->precondition->mutate->save; the record is
     # loaded FRESH inside the lock so two writers holding the same token cannot both
     # succeed (compare-and-swap).
-    with ws.record_lock(experiment_id):
-        exp = ws.load_experiment(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
         if exp is None:
             return _not_found(experiment_id)  # deleted in the pre-check→lock race window
         if body.get("confirmed_by_user") is not True:
@@ -1457,6 +1823,7 @@ def _write_record(exp: Experiment, result) -> None:
     },
 )
 def post_export(
+    scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     response: Response,
     if_match: str | None = Header(
@@ -1470,13 +1837,13 @@ def post_export(
 ):
     # Cheap existence pre-check OUTSIDE the lock so a bogus/non-existent id never
     # creates a permanent entry in the never-evicting per-record lock map.
-    if ws.load_experiment(experiment_id) is None:
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
         return _not_found(experiment_id)
     # The per-record lock serialises load->precondition->mutate->save; load FRESH
     # inside the lock. The precondition (400/412) is evaluated BEFORE the export
     # immutability 409 so a stale client refreshes before making a state decision.
-    with ws.record_lock(experiment_id):
-        exp = ws.load_experiment(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
         if exp is None:
             return _not_found(experiment_id)  # deleted in the pre-check→lock race window
 
@@ -1688,6 +2055,7 @@ async def _read_bounded_body(request: Request, max_bytes: int) -> bytes:
     },
 )
 async def post_csv_preview(
+    scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     request: Request,
     response: Response,
@@ -1730,7 +2098,7 @@ async def post_csv_preview(
             },
         )
     # Existence BEFORE If-Match (an unknown id 404s regardless of headers).
-    exp = ws.load_experiment(experiment_id)
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         _log.info("csv_preview outcome=experiment_not_found experiment=%s", experiment_id)
         return _not_found(experiment_id)
@@ -1806,8 +2174,8 @@ async def post_csv_preview(
     response_description="The official-schema verdict, its errors, and whether it was a dry run.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def post_validate(experiment_id: ExperimentId):
-    exp = ws.load_experiment(experiment_id)
+def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
 
@@ -2011,8 +2379,8 @@ async def post_validate_record(request: Request):
     response_description="The audit rows and the rendered text report.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def post_audit(experiment_id: ExperimentId):
-    exp = ws.load_experiment(experiment_id)
+def post_audit(scope: TutorialScopeDep, experiment_id: ExperimentId):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     if not exp.exported():
@@ -2089,8 +2457,8 @@ _WARNINGS_RESPONSE_DESCRIPTION = (
     response_description=_WARNINGS_RESPONSE_DESCRIPTION,
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def get_warnings(experiment_id: ExperimentId):
-    exp = ws.load_experiment(experiment_id)
+def get_warnings(scope: TutorialScopeDep, experiment_id: ExperimentId):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     return _warnings_payload(exp)
@@ -2104,8 +2472,8 @@ def get_warnings(experiment_id: ExperimentId):
     response_description=_WARNINGS_RESPONSE_DESCRIPTION,
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def post_warnings(experiment_id: ExperimentId):
-    exp = ws.load_experiment(experiment_id)
+def post_warnings(scope: TutorialScopeDep, experiment_id: ExperimentId):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     return _warnings_payload(exp)
@@ -2130,8 +2498,8 @@ def post_warnings(experiment_id: ExperimentId):
     response_description="One evidence entry per field carrying a value.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def get_evidence(experiment_id: ExperimentId):
-    exp = ws.load_experiment(experiment_id)
+def get_evidence(scope: TutorialScopeDep, experiment_id: ExperimentId):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     # P4 review FIX C — read DEFENSIVELY (see `post_validate`). `getEvidenceBundle`
@@ -2199,7 +2567,9 @@ _EVIDENCE_CLASSES = (
     ),
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def get_evidence_classification(experiment_id: ExperimentId, response: Response):
+def get_evidence_classification(
+    scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response
+):
     """Typed evidence-support classification for the CURRENT record (P28.4 view).
 
     Read-only; carries ONLY the evidence-support axis — ``field_results`` (from the
@@ -2209,7 +2579,7 @@ def get_evidence_classification(experiment_id: ExperimentId, response: Response)
     (no ``valid``/``ok``/``exportable``/``complete``/``blocking``/``warnings``);
     those stay in their own endpoints. No lock is taken (pure read).
     """
-    exp = ws.load_experiment(experiment_id)
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     field_results = evidence_classify.classify_fields(exp.draft)
@@ -2256,6 +2626,7 @@ def get_evidence_classification(experiment_id: ExperimentId, response: Response)
     },
 )
 def get_source_preview(
+    scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     source: Annotated[
         str,
@@ -2267,7 +2638,7 @@ def get_source_preview(
         ),
     ] = "",
 ):
-    exp = ws.load_experiment(experiment_id)
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     try:
@@ -2319,7 +2690,7 @@ def get_source_preview(
     ),
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
 )
-def get_artifacts(experiment_id: ExperimentId):
+def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
     """Return the written record + sidecar JSON for an exported experiment.
 
     Read-only: it reads ONLY the two files ``export`` wrote inside the workspace,
@@ -2340,7 +2711,7 @@ def get_artifacts(experiment_id: ExperimentId):
     only one of its files is absent. A 404 would say the record is unknown, which is
     false, and would also lose the ``artifact`` distinction above.
     """
-    exp = ws.load_experiment(experiment_id)
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     if not exp.exported():
@@ -2860,16 +3231,22 @@ def _blank_group_rows(group: dict) -> dict:
         "reshapes only content the read operations already expose."
     ),
     response_description="The normalised query, the scope applied, and the two plane groups.",
-    responses={**_R_UNAUTHORIZED},
+    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
 def search_records(
+    # NOT named ``scope``: this operation already has a ``scope`` query parameter
+    # selecting which PLANES to search, which is an unrelated meaning.
+    tutorial_session: TutorialScopeDep,
     q: Annotated[
         str,
         Query(
             description=(
                 "The search text. It is truncated to 256 characters before "
                 "normalisation, and a query shorter than two normalised characters "
-                "returns no rows with the reason `query_too_short` in both groups."
+                "returns no rows with the reason `query_too_short` in both groups. "
+                "When the workspace being searched holds no records at all, the "
+                "`workspace` group reports the reason `scope_has_no_records` — "
+                "distinct from a query that simply matched nothing."
             )
         ),
     ] = "",
@@ -2908,7 +3285,7 @@ def search_records(
     normalized_query = search.normalize((q or "")[:256])
     query_too_short = False
     try:
-        exps = ws.list_experiments()  # hardened, read-race-safe snapshot
+        exps = ws.list_experiments(tutorial_session)  # hardened, read-race-safe snapshot
         wres = search.workspace_search(q, exps, limit=limit, offset=offset)
         normalized_query = wres.normalized_query
         query_too_short = wres.reason == search.QUERY_TOO_SHORT
@@ -3024,9 +3401,10 @@ def search_records(
         "mutation."
     ),
     response_description="The projected rows and the filtered total before pagination.",
-    responses={**_R_UNAUTHORIZED},
+    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
 def runtime_record_projection(
+    scope: TutorialScopeDep,
     status: Annotated[
         str | None,
         Query(
@@ -3086,7 +3464,7 @@ def runtime_record_projection(
     }
     # Fresh scan each call → project → filter. ``total`` is the filtered count
     # BEFORE pagination so a client can page without losing the denominator.
-    records = runtime_records.project_records(ws.list_experiments(), filters=filters)
+    records = runtime_records.project_records(ws.list_experiments(scope), filters=filters)
     total = len(records)
     start = max(0, offset)
     records = records[start:]
@@ -3208,6 +3586,7 @@ _ASSISTANT_BODY_DESCRIPTION = (
     },
 )
 def post_assistant_query(
+    scope: TutorialScopeDep,
     experiment_id: ExperimentId,
     response: Response,
     req: AssistantQueryRequest = Body(..., description=_ASSISTANT_BODY_DESCRIPTION),
@@ -3231,7 +3610,7 @@ def post_assistant_query(
     # history is presentation-only; cap it and never let it influence grounding.
     _ = (req.history or [])[:_ASSISTANT_MAX_HISTORY]
 
-    exp = ws.load_experiment(experiment_id)
+    exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
 

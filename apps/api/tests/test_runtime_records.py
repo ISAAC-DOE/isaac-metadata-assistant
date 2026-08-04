@@ -19,6 +19,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import bind_tutorial_session, tutorial_client, tutorial_ws
+
 # The ONLY keys a projected record may carry — a strict allow-set (governance).
 ALLOWED_KEYS = {
     "experiment_id",
@@ -45,7 +47,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _records(client, query=""):
@@ -161,7 +163,7 @@ def test_crafted_secret_never_reaches_the_projection(client):
 
     from isaac_api.runtime_records import project_records
 
-    exp = ws.load_experiment(ws.SEED_NEW_DRAFT_ID)
+    exp = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID)
     SECRET = "Bearer NOT-A-REAL-SECRET-SYNTHETIC"
     HEX = "a" * 40
     PATH = "/Users/fake/synthetic-not-real.h5"
@@ -230,5 +232,8 @@ def test_requires_auth_when_key_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    # The session is opened in-process rather than over HTTP: this deployment
+    # requires the key, and pinning it as a client default would destroy the 401
+    # this test asserts. Same scope either way.
+    c = bind_tutorial_session(TestClient(create_app()))
     assert c.get("/api/runtime/records").status_code == 401

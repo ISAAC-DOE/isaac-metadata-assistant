@@ -28,6 +28,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import open_tutorial_scope, tutorial_client, tutorial_ws
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
@@ -35,7 +37,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _real_answers_payload():
@@ -70,8 +72,7 @@ def test_version_fields_produces_a_valid_envelope(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
     from isaac_api import version_contract as vc
 
-    ws.ensure_seeded()
-    exp = ws.load_experiment(ws.SEED_NEW_DRAFT_ID)
+    exp = open_tutorial_scope().load_experiment(ws.SEED_NEW_DRAFT_ID)
     fields = vc.version_fields(exp)
     assert set(fields) == {"rev", "updated_utc", "version"}
     # validates against the typed model without error

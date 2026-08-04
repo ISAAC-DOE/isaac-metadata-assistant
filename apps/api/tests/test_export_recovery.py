@@ -97,6 +97,8 @@ import isaac_api.routes as routes
 import isaac_api.workspace as ws
 import isaac_records.export as core_export
 
+from conftest import tutorial_client, tutorial_ws
+
 # Absolute/server/mount markers that must never reach a client (P30.6), kept in
 # step with test_artifact_path_safety.UNSAFE_PATH_MARKERS.
 UNSAFE_PATH_MARKERS = (
@@ -117,7 +119,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 # --- helpers ------------------------------------------------------------------
@@ -144,7 +146,7 @@ def _export(client, exp_id: str):
 
 def _paths(exp_id: str) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
     """(record, sidecar, state) paths for an id, derived exactly as the app does."""
-    exp = ws.load_experiment(exp_id)
+    exp = tutorial_ws().load_experiment(exp_id)
     records_dir = exp.records_dir
     return (
         records_dir / f"{exp_id}.json",
@@ -235,7 +237,7 @@ def _wedge(client, exp_id: str) -> dict:
     assert calls["faulted"] == 1, "the injected state-save fault never fired"
     record, sidecar, _ = _paths(exp_id)
     assert record.exists() and sidecar.exists(), "the wedge requires orphan artifacts on disk"
-    assert ws.load_experiment(exp_id).exported() is False, (
+    assert tutorial_ws().load_experiment(exp_id).exported() is False, (
         "the wedge requires the persisted state to still say NOT exported"
     )
     return before
@@ -266,7 +268,7 @@ def test_wedge_orphan_artifact_does_not_block_a_clean_retry(client):
     assert body["rev"] > before["rev"], (
         f"the healing export must bump rev (was {before['rev']}, now {body['rev']})"
     )
-    assert ws.load_experiment(target).exported() is True
+    assert tutorial_ws().load_experiment(target).exported() is True
     assert _detail(client, target)["artifact"]["state"] == "current"
 
 
@@ -316,7 +318,7 @@ def test_truthtable_row2_exported_with_both_artifacts_present_is_still_409(clien
     """
     target = ws.SEED_DONE_ID
     record_path, sidecar_path, _ = _paths(target)
-    assert ws.load_experiment(target).exported() is True
+    assert tutorial_ws().load_experiment(target).exported() is True
     assert record_path.exists(), "row 2 requires the record artifact on disk"
     assert sidecar_path.exists(), "row 2 requires the SIDECAR on disk too"
     r = _export(client, target)
@@ -356,7 +358,7 @@ def test_truthtable_row3_exported_without_artifact_self_heals_without_bumping_re
     assert after["version"] == before["version"], "the version must be unchanged too"
     assert _etag(client, target) == f'"{before["version"]}"'
     # Prove the no-bump comes from save_versioned's signature comparison, directly.
-    exp = ws.load_experiment(target)
+    exp = tutorial_ws().load_experiment(target)
     assert exp.save_versioned() is False
 
 
@@ -379,7 +381,7 @@ def test_truthtable_row3b_exported_with_only_the_sidecar_missing_self_heals(clie
     record_bytes_before = record_path.read_bytes()
     sidecar_path.unlink()
     assert record_path.exists() and not sidecar_path.exists()
-    assert ws.load_experiment(target).exported() is True
+    assert tutorial_ws().load_experiment(target).exported() is True
     # The UI already told the truth about this state; only the repair was missing.
     assert client.get(f"/api/experiments/{target}/artifacts").json()["artifact"]["state"] == "stale"
 
@@ -442,7 +444,7 @@ def test_a_sidecar_fault_during_the_mirror_self_heal_is_recoverable(client):
     assert calls["faulted"] == 1, "the injected sidecar fault never fired"
     # Exactly the half-repaired state the review measured.
     assert record_path.exists() and not sidecar_path.exists()
-    assert ws.load_experiment(target).exported() is True
+    assert tutorial_ws().load_experiment(target).exported() is True
 
     r = _export(client, target)
     assert r.status_code == 200, f"the half-repaired state is STUCK: {r.status_code} {r.text}"
@@ -501,7 +503,7 @@ def test_precondition_still_precedes_the_409_in_the_wedge_state(client):
     target = ws.SEED_READY_ID
     _wedge(client, target)
     assert client.post(f"/api/experiments/{target}/export").status_code == 428
-    assert ws.load_experiment(target).exported() is False, "a 428 must not have exported"
+    assert tutorial_ws().load_experiment(target).exported() is False, "a 428 must not have exported"
 
 
 # --- 4. retry determinism (anti-swallow) --------------------------------------
@@ -537,7 +539,7 @@ def test_two_consecutive_faults_then_a_clean_retry_still_heals(client):
             with pytest.raises(OSError):
                 _export(client, target)
         assert calls["faulted"] == 1, f"attempt {attempt}: the fault never fired"
-        assert ws.load_experiment(target).exported() is False
+        assert tutorial_ws().load_experiment(target).exported() is False
 
     r = _export(client, target)
     assert r.status_code == 200 and r.json()["ok"] is True, r.text
@@ -566,7 +568,7 @@ def test_sidecar_fault_leaves_a_half_written_pair_and_still_heals(client):
     assert calls["faulted"] == 1, "the injected sidecar fault never fired"
     assert record_path.exists(), "the record write precedes the sidecar write"
     assert not sidecar_path.exists(), "the sidecar must NOT exist after its write faulted"
-    assert ws.load_experiment(target).exported() is False
+    assert tutorial_ws().load_experiment(target).exported() is False
 
     r = _export(client, target)
     assert r.status_code == 200 and r.json()["ok"] is True, r.text
@@ -951,7 +953,7 @@ def test_healed_export_matches_a_clean_export_record_bytes_and_normalised_sideca
 
     # The record's created_utc is DRAFT-DERIVED, which is what licenses a byte
     # comparison. Asserted, not assumed.
-    draft_created = ws.load_experiment(target).draft["fields"]["timestamps.created_utc"]["value"]
+    draft_created = tutorial_ws().load_experiment(target).draft["fields"]["timestamps.created_utc"]["value"]
     for label, raw in (("clean", clean_bytes), ("healed", healed_bytes)):
         got = json.loads(raw)["timestamps"]["created_utc"]
         assert got == draft_created, (
@@ -1047,7 +1049,7 @@ def test_the_clean_vs_healed_comparison_survives_a_second_boundary(client):
 def _missing_artifacts(client, target: str) -> None:
     """Put an EXPORTED record into the state where both artifacts are gone."""
     record_path, sidecar_path, _ = _paths(target)
-    assert ws.load_experiment(target).exported() is True
+    assert tutorial_ws().load_experiment(target).exported() is True
     record_path.unlink()
     sidecar_path.unlink()
 

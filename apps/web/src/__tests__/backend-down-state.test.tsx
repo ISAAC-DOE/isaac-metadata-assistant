@@ -60,9 +60,18 @@ describe('BackendDown — local build (no VITE_API_BASE)', () => {
     expect(headings[0].textContent).toBe('Backend Not Running');
   });
 
-  it('404 stays the Record Not Found branch — no command, no reload', () => {
+  /*
+   * THE PATH IS NOW PART OF THIS TEST'S PRECONDITION, and that is a strengthening
+   * rather than a relaxation. This branch claims a missing RECORD, so it may only be
+   * reached by a request that named one; the assertion used to be made over a 404
+   * with no path at all, which is why the same sentence was also being rendered for a
+   * failed LIST read (see `isRecordPath` and the sibling test below).
+   */
+  it('404 on a RECORD path stays the Record Not Found branch — no command, no reload', () => {
     const view = render(
-      <BackendDown error={new ApiError('Request failed (404).', { status: 404 })} />,
+      <BackendDown
+        error={new ApiError('Request failed (404).', { status: 404, path: '/experiments/EXP-1' })}
+      />,
     );
     expect(view.getByText('Record Not Found')).toBeInTheDocument();
     expect(
@@ -72,6 +81,45 @@ describe('BackendDown — local build (no VITE_API_BASE)', () => {
     ).toBeInTheDocument();
     expect(view.queryByText(RUN_COMMAND)).toBeNull();
     expect(view.queryByRole('button', { name: 'Reload' })).toBeNull();
+  });
+
+  /*
+   * THE DEFECT BROWSER TESTING CAUGHT, pinned as copy.
+   *
+   * A reload holding an expired worked-example pointer issued `GET /api/experiments`
+   * with a session header naming no session; the backend answered 404; and My
+   * Experiments rendered "Record Not Found — this experiment id is not in the local
+   * workspace" over a LIST failure, on a screen whose truthful state was the ordinary
+   * empty workspace. The boot-window desync that issued that request is fixed in
+   * `tutorialController.initialState()`; this pins the second half — that the copy
+   * itself may not describe a collection read as a missing record, which is reachable
+   * from any expiry mid-session and from `/runtime/records`, `/memory/*` and
+   * `/graph/*` as well.
+   */
+  it('404 on a COLLECTION path claims only the 404 — no record, no experiment id', () => {
+    const view = render(
+      <BackendDown error={new ApiError('Request failed (404).', { status: 404, path: '/experiments' })} />,
+    );
+    expect(view.getByText('Not Found')).toBeInTheDocument();
+    expect(view.queryByText('Record Not Found')).toBeNull();
+    const body = view.container.querySelector('.fetch-state-body')!.textContent ?? '';
+    expect(body).toContain('answered HTTP 404 for this request');
+    // The two claims that were false of a list read.
+    expect(body).not.toMatch(/experiment id/i);
+    expect(body).not.toMatch(/may not have been created yet/i);
+    // Still no unactionable local remedy and no unevidenced reload prompt.
+    expect(view.queryByText(RUN_COMMAND)).toBeNull();
+    expect(view.queryByRole('button', { name: 'Reload' })).toBeNull();
+  });
+
+  it('the Retry the caller supplies is still offered on a collection 404', () => {
+    const view = render(
+      <BackendDown
+        error={new ApiError('Request failed (404).', { status: 404, path: '/experiments' })}
+        onRetry={() => {}}
+      />,
+    );
+    expect(view.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
   it('401 is specific even locally — a rejected session is a rejected session', () => {
@@ -267,10 +315,12 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
     expect(view.getByText(/was reached but answered with HTTP 500/)).toBeInTheDocument();
   });
 
-  it('404 keeps its own branch, worded without "local"', async () => {
+  it('404 on a record path keeps its own branch, worded without "local"', async () => {
     const hosted = await loadHosted();
     const view = render(
-      <hosted.BackendDown error={new hosted.ApiError('x', { status: 404 })} />,
+      <hosted.BackendDown
+        error={new hosted.ApiError('x', { status: 404, path: '/experiments/EXP-1' })}
+      />,
     );
     expect(view.getByText('Record Not Found')).toBeInTheDocument();
     expect(
@@ -296,8 +346,21 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
 });
 
 describe('downCopy — the branch table, as a pure function', () => {
+  /*
+   * `notFound` SPLIT IN TWO, because a 404 does not by itself say what was missing.
+   * The record branch requires a record path; a collection path, a build-level path
+   * and an unrecorded path all take the narrower `path_not_found` branch. The old
+   * single row asserted the record claim over a pathless 404, i.e. over the exact
+   * input for which it is unsupported.
+   */
   const kindsFor = (hosted: boolean) => ({
-    notFound: downCopy(new ApiError('x', { status: 404 }), hosted).kind,
+    notFoundRecord: downCopy(
+      new ApiError('x', { status: 404, path: '/experiments/EXP-1' }),
+      hosted,
+    ).kind,
+    notFoundCollection: downCopy(new ApiError('x', { status: 404, path: '/experiments' }), hosted)
+      .kind,
+    notFoundPathless: downCopy(new ApiError('x', { status: 404 }), hosted).kind,
     unauthenticated: downCopy(new ApiError('x', { status: 401 }), hosted).kind,
     forbidden: downCopy(new ApiError('x', { status: 403 }), hosted).kind,
     intercepted: downCopy(new ApiError('x', { status: 200, htmlIntercept: true }), hosted).kind,
@@ -306,9 +369,11 @@ describe('downCopy — the branch table, as a pure function', () => {
     nothing: downCopy(undefined, hosted).kind,
   });
 
-  it('hosted: 404 → not_found, auth signals → auth, other status → http_error, else generic', () => {
+  it('hosted: 404 → not_found only for a record, auth signals → auth, other status → http_error, else generic', () => {
     expect(kindsFor(true)).toEqual({
-      notFound: 'not_found',
+      notFoundRecord: 'not_found',
+      notFoundCollection: 'path_not_found',
+      notFoundPathless: 'path_not_found',
       unauthenticated: 'auth',
       forbidden: 'auth',
       intercepted: 'auth',
@@ -320,7 +385,11 @@ describe('downCopy — the branch table, as a pure function', () => {
 
   it('local: the auth signals still win; everything else keeps today’s local state', () => {
     expect(kindsFor(false)).toEqual({
-      notFound: 'not_found',
+      notFoundRecord: 'not_found',
+      // Deliberately NOT the `local` branch: the API answered, so "Backend Not
+      // Running" would be false. A 404 is a 404 in both builds.
+      notFoundCollection: 'path_not_found',
+      notFoundPathless: 'path_not_found',
       unauthenticated: 'auth',
       forbidden: 'auth',
       intercepted: 'auth',

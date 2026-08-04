@@ -445,8 +445,14 @@ Current state:
   - **Reset is now precondition-gated.** `preview` returns an opaque `plan_digest`; `execute`
     REQUIRES it (**428** absent, **412** stale), and the match is verified *inside the same critical
     section as the mutation*. Managed-legacy removal now holds `record_lock` like canonical
-    re-materialisation always did, and `final_count` is **measured**, not asserted. The displayed
-    confirmation phrase is `RESET EXAMPLE WORKSPACE`.
+    re-materialisation always did, and `final_count` is **measured**, not asserted. **Two different
+    phrases, and this line used to conflate them.** The phrase the operator TYPES is `RESET`
+    (`TYPED_GATE`, `apps/web/src/components/ResetDemoDialog.tsx:61`; `armed = confirmText ===
+    TYPED_GATE`, `:269`; the field's own label reads "Type RESET to confirm this destructive
+    reset", `:442`/`:451`). `RESET EXAMPLE WORKSPACE` is the BACKEND's phrase
+    (`RESET_CONFIRMATION`, `apps/web/src/lib/api.ts:106-118`), sent verbatim on execute and
+    deliberately never surfaced or auto-filled. Do not describe it as the displayed phrase: a
+    tester who types it leaves the confirm button disabled.
   - **Three claims that were FALSE and are now scoped, not deleted.** Governance & Safety and Load
     Materials asserted *"no file is read, parsed, or inspected"* while `RecordValidator` (one tab
     away) and `CsvReconcilePanel` read and POST a chosen file. The refusal claim is true of

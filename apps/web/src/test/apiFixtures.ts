@@ -83,8 +83,21 @@ export interface RouteResult {
  * 304, 304, then 200-with-new-version) with the status, body and ETag advancing
  * in lockstep, and branch on the `If-None-Match` header so the SAME endpoint can
  * serve a plain GET (no token) and a conditional GET (token) differently.
+ *
+ * AN ASYNC THUNK IS ALLOWED, AND SAYING SO IS THE FIX FOR A SILENTLY INERT TEST.
+ * `RouteResult` alone excluded `Promise<RouteResult>`, so a handler written
+ * `async () => { await gate; return … }` type-errored at the call site — and the one
+ * test that needed it silenced that with `as Record<string, RouteEntry>` rather than
+ * being told it was unsupported. `stubFetchRoutes` then did not await the thunk:
+ * `resolved` was the pending Promise, `resolved.status` was `undefined` (so 200) and
+ * the stub answered IMMEDIATELY. The gate blocked nothing, and the regression guard
+ * built on it passed with the defect it was written to catch reintroduced. A route
+ * that means to hold a response open must be able to, and must be able to say so in
+ * the type.
  */
-export type RouteEntry = StubbedRoute | ((init?: RequestInit) => RouteResult);
+export type RouteEntry =
+  | StubbedRoute
+  | ((init?: RequestInit) => RouteResult | Promise<RouteResult>);
 
 /**
  * Stub `fetch` with a `"METHOD /api/path" -> response` map. Returns the list of
@@ -104,7 +117,15 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
     // A whole-route thunk resolves the descriptor once per fetch (status/body/etag
     // in sync); a plain StubbedRoute is used as-is, and its `body` may itself be a
     // thunk re-evaluated per hit (e.g. the experiment list before/after a reset).
-    const resolved: RouteResult = typeof hit === 'function' ? hit(init) : hit;
+    //
+    // `await` is load-bearing, not defensive. Without it an async thunk's Promise WAS
+    // the descriptor: every field read off it was `undefined`, so the stub replied 200
+    // with an undefined body the instant it was called, and a test holding a response
+    // open to assert ordering was asserting nothing. `await` on a non-Promise is a
+    // no-op, so the synchronous thunks (the conditional-GET sequencers) are unaffected
+    // in value — they now resolve a microtask later, which no assertion depends on
+    // because every caller already awaits through `waitFor`/`findBy*`.
+    const resolved: RouteResult = typeof hit === 'function' ? await hit(init) : hit;
     const status = resolved.status ?? 200;
     const body =
       typeof resolved.body === 'function' ? (resolved.body as () => unknown)() : resolved.body;
@@ -124,6 +145,46 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>): string[] {
   };
   vi.stubGlobal('fetch', vi.fn(impl));
   return calls;
+}
+
+/**
+ * A synthetic worked-example session id, shaped like the real thing.
+ *
+ * The backend mints these with `secrets.token_urlsafe(16)` and validates them
+ * against `^[A-Za-z0-9_-]{16,64}$`, so a fixture id must satisfy that pattern —
+ * a test that used a friendly string like `'test-session'` (12 chars) would be
+ * rejected as malformed by the real API and would prove nothing about the path
+ * it claims to cover.
+ */
+export const TUTORIAL_SESSION_ID = 'fixtureSessionId0000000';
+
+/**
+ * The two worked-example session routes, for any test that starts the
+ * walkthrough.
+ *
+ * Needed because starting is no longer a UI-only act: it opens a server-side
+ * session, and the fetch stub throws on an unrouted call — so a tutorial test
+ * without these routes exercises the CREATE-FAILED path rather than the
+ * walkthrough, which is a real state but not the one it means to assert.
+ *
+ * `record_ids` deliberately echoes the canonical five: the backend materialises
+ * exactly those inside a new session, and the walkthrough resolves its targets
+ * from the list it then reads.
+ */
+export function tutorialSessionRoutes(
+  sessionId: string = TUTORIAL_SESSION_ID,
+): Record<string, StubbedRoute> {
+  return {
+    'POST /api/tutorial/sessions': {
+      status: 201,
+      body: {
+        session_id: sessionId,
+        record_ids: [...CANONICAL_RESET_IDS],
+        ttl_hours: 24,
+      },
+    },
+    [`DELETE /api/tutorial/sessions/${sessionId}`]: { status: 204, body: undefined },
+  };
 }
 
 /** Stub `fetch` as a dead backend: every call fails at the network level. */
@@ -876,18 +937,32 @@ export const CANONICAL_RESET_IDS = [
   '01SYNTHXANESSEED0000000005',
 ];
 
-const RESET_TITLE_BASE = 'Synthetic XANES — CuO (Cu K-edge)';
+/**
+ * The shared scientific title base every canonical seed carries.
+ *
+ * MUST equal `workspace._SEED_TITLE_BASE`. It had drifted: this file held
+ * `'Synthetic XANES — CuO (Cu K-edge)'` while the backend had already been renamed
+ * to `'XANES Example — CuO (Cu K-edge)'`, and nothing caught it — the frontend suite
+ * cannot import Python, and the backend suite did not read this file. Pinned now
+ * from the side that can see both, by
+ * `apps/api/tests/test_seed_fixture_parity.py`.
+ */
+export const RESET_TITLE_BASE = 'XANES Example — CuO (Cu K-edge)';
 
 /** The five derived scenario labels the API serves for the canonical seed ids
  * (mirrors `workspace.SEED_SCENARIOS`; derived server-side, never stored). Each
  * names how that fixture was MATERIALISED at setup, in the past tense, so a later
- * mutation cannot falsify it. */
+ * mutation cannot falsify it.
+ *
+ * These had drifted too, to a retired `'Scenario N · seeded: …'` wording — the
+ * development jargon the backend replaced with `'Example N · at setup: …'`. Pinned
+ * by the same backend test as the title base above. */
 export const CANONICAL_SCENARIO_LABELS = [
-  'Scenario 1 · seeded: extraction only',
-  'Scenario 2 · seeded: partial answers applied',
-  'Scenario 3 · seeded: all answers applied',
-  'Scenario 4 · seeded: descriptor uncertainty omitted',
-  'Scenario 5 · seeded: export run at setup',
+  'Example 1 · at setup: extraction only',
+  'Example 2 · at setup: some answers confirmed',
+  'Example 3 · at setup: all answers confirmed',
+  'Example 4 · at setup: descriptor uncertainty omitted',
+  'Example 5 · at setup: export run',
 ];
 
 /** The five canonical scenarios as a summary list (post-reset dashboard).
@@ -1899,7 +1974,7 @@ export const openApiFixture = {
     // Verbatim from `apps/api/isaac_api/app.py` (Slice 2A; title + summary
     // re-synced by P1, which dropped the false "local" from the hosted title).
     summary:
-      'FastAPI wrapper over the deterministic isaac_records core: a synthetic-only example workspace plus one read-only, aggregate-only database diagnostic.',
+      'FastAPI wrapper over the deterministic isaac_records core: a synthetic-only workspace, isolated worked-example sessions holding the built-in example records, and one read-only, aggregate-only database diagnostic.',
   },
   // P36V PR3 slice C — the document now REGISTERS tags, and grouping is derived
   // from them (`lib/apiDocsModel.ts`). Four properties are covered on purpose:
@@ -2097,16 +2172,24 @@ export const openApiFixture = {
  * Explorer's `Full Description` disclosure never hides this API's own
  * boundary/honesty copy.
  *
- * Regenerated on 2026-07-31 with:
+ * Regenerated on 2026-07-31, re-measured 2026-08-04, with:
  *
  *   PYTHONPATH=apps/api .venv/bin/python -c \
  *     "from isaac_api.app import create_app; import json; \
  *      print(json.dumps(create_app().openapi()))"
  *
- * 36 operations · 20,915 description characters · 43 post-lead paragraphs · lead
- * paragraphs 78–594 characters · remainders 0–1,740. The 36th is
- * `GET /api/runtime/database/recon`; `GET /api/health` also gained a paragraph
- * about the database block it now reports, and this copy had gone stale on it.
+ * 38 operations · 23,948 description characters · 49 post-lead paragraphs · lead
+ * paragraphs 78–660 characters · remainders 0–1,744. The two newest are the
+ * worked-example session lifecycle (`POST /api/tutorial/sessions`,
+ * `DELETE /api/tutorial/sessions/{session_id}`); before them the 36th was
+ * `GET /api/runtime/database/recon`.
+ *
+ * THE "POINT-IN-TIME COPY" CAVEAT BELOW IS NOW WEAKER THAN IT READS, and that is
+ * worth stating rather than leaving as a stale warning. Since
+ * `apps/api/tests/test_contract_description_parity.py` this array IS checked
+ * character-for-character against the generated document in both directions — a
+ * changed description and a NEW operation both fail CI. The counts in this comment
+ * are still hand-measured and can go stale; the strings themselves cannot.
  *
  * This fixture is what caught the original defect: the first version of the
  * disclosure had NO length threshold and so collapsed 31 of the then-35
@@ -2127,8 +2210,16 @@ export const openApiFixture = {
  */
 export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: string }[] = [
   { op: "GET /api/health", description: "Liveness banner for platform and container probes: the service status, the runtime data mode, the name of the deterministic core package the app calls in process, the app version, and the build commit when the deployment supplies one (otherwise `null` — it is never guessed). This is the one operation that stays reachable without credentials when the deployment enables authentication. Read-only.\n\nIt also states whether this deployment has an application database configured, how that database is classified, whether hosted display of its per-record content is open, and the outcome of the most recent reconnaissance scan in this process. That block is derived from configuration alone: this operation never opens a database connection, issues a query, or waits on one, so a database problem can never change its result and can never fail a container probe." },
-  { op: "POST /api/demo/run", description: "Runs the committed worked-example pipeline and returns the ordered steps it executed together with the resulting experiment id and status. `mode: \"draft_only\"` (the default) extracts a draft from the committed reference files and runs the no-guessing draft checks; `mode: \"full\"` additionally applies the committed simulated answers and exports an official record. It targets one fixed canonical experiment id per mode, so re-running never adds a record and never increases the record count. It reads only the two committed reference files and accepts no uploaded data.\n\nIt never overwrites your work. The target must still hold exactly its original example content: when it does, running the pipeline would reproduce that content byte for byte, so nothing at all is written and the record's version is untouched. If the target has been changed — an answer confirmed, a field edited, a record exported — the run is refused with `409` and nothing is written.\n\nA body other than `draft_only` or `full` for `mode` is rejected and nothing runs." },
-  { op: "POST /api/demo/reset", description: "Restores the workspace to exactly the five canonical built-in example records and reports the before/after counts, the removable set, a state histogram, and a derived summary of the confirmed work the reset would discard. `mode: \"preview\"` classifies only and mutates nothing; `mode: \"execute\"` additionally requires the exact confirmation phrase and the `plan_digest` the preview returned. It accepts no caller-supplied ids or paths — any extra field is rejected — it removes only records it can classify as records this workspace itself created, and it refuses to remove anything at all if any record is ambiguous. No filesystem path appears in the response.\n\n**The `plan_digest` precondition.** `preview` returns an opaque digest of the workspace it classified. `execute` must send it back, and the reset runs only if the workspace still matches it. Without this, a client that previewed, showed a confirmation dialog, and executed a while later would destroy anything committed in between — the operator would have approved a classification that no longer held. A missing digest is `428`, a stale one is `412`, and neither mutates anything. Every response carries the CURRENT digest, so a `412` can be recovered from in one further request.\n\nThere is deliberately no general per-experiment delete operation." },
+  // RE-TRANSCRIBED from `create_app().openapi()` after both descriptions were
+  // corrected: the `X-Isaac-Tutorial-Session` REQUIREMENT was stated only in each
+  // operation's `409` sub-description, and `/demo/reset` said "the workspace"
+  // throughout for a scope it cannot reach (it refuses when `scope is None`, and
+  // `reset_to_canonical_seed(session_id=scope)` only ever addresses
+  // `scope_root(scope)`). `apps/api/tests/test_contract_description_parity.py` compares
+  // these strings byte for byte against the served document, so the two sides were
+  // updated together.
+  { op: "POST /api/demo/run", description: "REQUIRES the `X-Isaac-Tutorial-Session` header. The built-in example records are created only inside a worked-example session, so without one there is nothing for this operation to run over: it refuses with `409` (`tutorial_scope_required`) and writes nothing. Everything below describes what it does inside the session that header names — it addresses no other scope, and it can neither read nor write a record in the ordinary workspace.\n\nRuns the committed worked-example pipeline and returns the ordered steps it executed together with the resulting experiment id and status. `mode: \"draft_only\"` (the default) extracts a draft from the committed reference files and runs the no-guessing draft checks; `mode: \"full\"` additionally applies the committed simulated answers and exports an official record. It targets one fixed canonical experiment id per mode, so re-running never adds a record and never increases that session's record count. It reads only the two committed reference files and accepts no uploaded data.\n\nIt never overwrites your work. The target must still hold exactly its original example content: when it does, running the pipeline would reproduce that content byte for byte, so nothing at all is written and the record's version is untouched. If the target has been changed — an answer confirmed, a field edited, a record exported — the run is refused with `409` and nothing is written.\n\nA body other than `draft_only` or `full` for `mode` is rejected and nothing runs." },
+  { op: "POST /api/demo/reset", description: "REQUIRES the `X-Isaac-Tutorial-Session` header, and refuses with `409` (`tutorial_scope_required`) without one, mutating nothing. Everything it classifies, reports and restores is the worked-example session that header names; it addresses no other scope and cannot remove, restore or modify a record in the ordinary workspace.\n\nRestores that session to exactly the five canonical built-in example records and reports the before/after counts, the removable set, a state histogram, and a derived summary of the confirmed work the reset would discard. `mode: \"preview\"` classifies only and mutates nothing; `mode: \"execute\"` additionally requires the exact confirmation phrase and the `plan_digest` the preview returned. It accepts no caller-supplied ids or paths — any extra field is rejected — it removes only records it can classify as records this application itself created, and it refuses to remove anything at all if any record is ambiguous. No filesystem path appears in the response.\n\n**The `plan_digest` precondition.** `preview` returns an opaque digest of the session it classified. `execute` must send it back, and the reset runs only if that session still matches it. Without this, a client that previewed, showed a confirmation dialog, and executed a while later would destroy anything committed in between — the operator would have approved a classification that no longer held. A missing digest is `428`, a stale one is `412`, and neither mutates anything. Every response carries the CURRENT digest, so a `412` can be recovered from in one further request.\n\nThere is deliberately no general per-experiment delete operation." },
   { op: "GET /api/experiments", description: "One summary row per experiment currently in the workspace: its id, title, derived status, creation time, how many blocking questions are still open, how many fields carry evidence, whether it has been exported, and the exported record id when there is one. Rows for the five built-in example records also carry a derived, never-stored `scenario` label naming which example the row is; it is null for any other record. Read-only, and it states no validity verdict." },
   { op: "GET /api/experiments/{experiment_id}", description: "The full detail bundle for one experiment: its summary row plus whether the draft passes the no-guessing checks, the exported artifact filenames (basenames only, never a server path), the source files it was extracted from, the derived workflow progression, the exported-artifact freshness state, and the current revision metadata.\n\nThe response carries the record's current `ETag`. Send it back as `If-None-Match` to receive `304` while the record is unchanged. Read-only." },
   { op: "GET /api/experiments/{experiment_id}/draft", description: "This record's draft fields, grouped into the stable sections the record review screen renders. Each field carries its label, official path, current value, the status derived from its evidence, and the kinds of source that evidence came from. Read-only; the response carries the record's current `ETag`." },
@@ -2161,6 +2252,8 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/about", description: "Non-sensitive identity and provenance for this deployment: the app version, the build commit when the deployment supplies one (otherwise `null` — it is never guessed), the official ISAAC record-schema version this build validates against, the runtime data mode, the persistence model, the data regime, and the name of the deterministic core package.\n\nEvery value is reused from the same authoritative source `GET /api/health` reads, so the two can never disagree. Read-only." },
   { op: "GET /api/openapi", description: "This application's own generated OpenAPI document — the same document served at the root `/openapi.json`, but reachable under the deployment's base path so a browser client can fetch it without knowing the root.\n\nIt is generated from the live routes, never hand-maintained, so it cannot drift from what a caller can actually reach. It describes route signatures and documentation only: no runtime state and no configuration values. Read-only." },
   { op: "GET /api/schema", description: "The vendored official ISAAC record schema verbatim, its title and the version this build validates against, plus every controlled vocabulary in the repository keyed by its filename stem.\n\nEvery field, type, required flag, enumeration, description and composition relationship a client renders comes straight from these two sources; the schema is loaded through the same path resolver the validator uses, never a hardcoded copy. This is a read-only reference view of the public canonical schema — there is no propose, review, approve, or edit affordance." },
+  { op: "POST /api/tutorial/sessions", description: "Creates an isolated worked-example workspace containing the five built-in example records, and returns its id together with the record ids actually materialised in it. Send that id as the `X-Isaac-Tutorial-Session` header on the record and example-workspace operations to work inside the session.\n\nThe examples exist only inside a session: the ordinary workspace contains none of them, and nothing here writes to it. Two sessions are completely independent — the same example record can be answered, edited and exported in one without being visible from the other.\n\nThe returned record ids are read back from the session that was just created, so they state what is there rather than what was intended. Each session expires after the reported number of hours; expired sessions are cleaned up whenever a new one is opened." },
+  { op: "DELETE /api/tutorial/sessions/{session_id}", description: "Discards a worked-example session and everything in it, including any answers, edits and exported artifacts produced inside it. Nothing outside the session is touched.\n\nDiscarding a session that no longer exists succeeds: the outcome the caller asked for — that this session is gone — already holds, so repeating the request is safe and a client never has to know whether it is retrying. A malformed id is rejected instead, because it names no session at all." },
   { op: "GET /api/runtime/database/recon", description: "A sanitized, aggregate-only reconnaissance report over this deployment's own application database. It answers one question — do the stored records validate against the vendored official ISAAC schema — and reports the answer as counts.\n\nThe scan is strictly read-only, and no write is possible: the transaction is set AND verified read-only server-side, every statement is checked against a SELECT-only allowlist before it is issued, and values are always bound as parameters. The row count is also compared before and after, but that is a concurrency check rather than a mutation proof — a row-count equality cannot detect an update and cannot distinguish this scan's writes from a concurrent writer's, so it is the verified read-only transaction and the allowlist that carry the guarantee. The statement counters report every statement this service issues through a cursor; they are not a wire-level record, because the driver's own transaction framing never passes through one.\n\nThe response carries aggregates only: record totals, counts by type and domain, validation totals by rule family and by schema path, and the gate results. It never carries a record id, a title, a scientific value, a stored document, a connection detail, or a credential; per-record content stays closed. A serialized-output scan runs over every response shape before it is returned and replaces it with a sanitized failure if it trips. Every shape also carries a fixed `limitations` list saying what the gates cannot establish — in particular that the production-isolation gate is a tripwire rather than proof, and that the confirmed transport encryption does not verify the server certificate.\n\nWhen the deployment has no database configured, the operation reports that and connects to nothing. Repeat calls inside a short window are served from memory, and a scan already in progress is reported as a conflict rather than opening a second connection. The operation takes no parameters and no body." },
 ];
 

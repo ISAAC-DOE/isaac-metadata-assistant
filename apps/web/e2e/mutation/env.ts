@@ -17,11 +17,35 @@ export const MUT_BASE_URL = `http://127.0.0.1:${MUT_WEB_PORT}`;
 export const MUT_API_BASE = `http://127.0.0.1:${MUT_API_PORT}/api`;
 
 /**
+ * The glob matching every API call the page under test makes — THIS suite's
+ * backend, not the read-only suite's. Passing the wrong one would inject a
+ * session id that belongs to a different backend, and the symptom would be an
+ * unexplained 404 rather than an obvious wiring error.
+ */
+export const MUT_API_ROUTE_GLOB = `http://127.0.0.1:${MUT_API_PORT}/api/**`;
+
+/**
+ * Where this suite's `globalSetup` publishes the worked-example session it opens.
+ *
+ * Its own file, with its own name, deliberately NOT the read-only suite's: the
+ * two suites can run side by side on one machine, and a shared handoff path would
+ * mean each run silently pointed the other at a session on the wrong backend.
+ */
+export const MUT_SESSION_FILE =
+  process.env.E2E_MUT_SESSION_FILE ?? join(tmpdir(), 'isaac-e2e-mutation-session.json');
+
+/**
  * A fixed directory, not a random one. Two reasons, and the second is the one that
  * matters: a fixed path lets `reuseExistingServer` actually reuse a warm backend
  * locally, and it means a failed run leaves an INSPECTABLE workspace instead of a
- * directory whose name is gone with the process. The suite never assumes it starts
- * empty — `ensure_seeded()` restores the canonical five on first read either way.
+ * directory whose name is gone with the process.
+ *
+ * IT DOES NOT SELF-HEAL, and this comment used to claim it did: "the suite never
+ * assumes it starts empty — `ensure_seeded()` restores the canonical five on first read
+ * either way". That function no longer exists, reads never seed, and `:59-62` below
+ * already says so. What actually makes the suite hermetic is `globalSetup`: it
+ * `rmSync`s this directory (including the `_tutorial` namespace inside it) and then
+ * opens ONE worked-example session, which is where the canonical five are materialised.
  */
 export const MUT_WORKSPACE = process.env.E2E_MUT_WORKSPACE ?? join(tmpdir(), 'isaac-e2e-mutation-workspace');
 
@@ -37,6 +61,11 @@ export const UVICORN = process.env.E2E_UVICORN ?? 'uvicorn';
  * mutation spec quietly hit the wrong backend. The ids themselves come from
  * `apps/api/isaac_api/workspace.py::CANONICAL_IDS` and are asserted against the
  * live API in `fixtures.ts`, so a drift fails loudly rather than silently.
+ *
+ * WHERE THESE RECORDS LIVE NOW: not in the ordinary workspace. `ensure_seeded()`
+ * no longer materialises them there, so every id below resolves ONLY inside a
+ * worked-example session — the one this suite's `globalSetup` opens. See
+ * `global-setup.ts` and the scope fixture in `fixtures.ts`.
  */
 export const SEED = {
   /** Example 1 — extraction only, five open questions. */

@@ -771,6 +771,19 @@ export interface ApiDemoRunResponse {
   status: ApiExperimentStatus;
 }
 
+/**
+ * `POST /api/tutorial/sessions` — a freshly opened worked-example workspace.
+ *
+ * `record_ids` is read back from the session that was just created, so it states
+ * what is actually there rather than what was intended: a caller must use these
+ * ids and must not assume a fixed set.
+ */
+export interface ApiTutorialSession {
+  session_id: string;
+  record_ids: string[];
+  ttl_hours: number;
+}
+
 export interface ApiUploadsBlocked {
   blocked: boolean;
   reason: string;
