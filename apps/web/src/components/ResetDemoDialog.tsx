@@ -17,9 +17,22 @@
  * POST /api/demo/reset {mode:'preview'}, shows the typed counts + a derived summary
  * of the confirmed work at risk + a plain-language disclosure, and gates execution
  * behind a typed "RESET". Execution sends the exact backend phrase exactly once,
- * then announces the rebuild so any surface showing workspace-derived data refetches
- * it. An ambiguous/refused preview disables execution permanently with no bypass.
- * The UI never authorizes a reset — every count and decision is server-derived.
+ * then announces the rebuild on `lib/workspaceInvalidation.ts`. An ambiguous/refused
+ * preview disables execution permanently with no bypass. The UI never authorizes a
+ * reset — every count and decision is server-derived.
+ *
+ * WHAT THE ANNOUNCEMENT DOES AND DOES NOT DO. This comment used to say the rebuild
+ * is announced "so any surface showing workspace-derived data refetches it", which
+ * was a claim about the whole app that the signal cannot make: it only reaches
+ * surfaces that have SUBSCRIBED, and while that sentence stood there was exactly one
+ * subscriber (`screens/ExperimentsHome.tsx`). Statistics — reachable in one click
+ * from this control, because the bar holding it is mounted on every surface — renders
+ * record counts, workflow readiness and evidence totals from the same workspace, was
+ * keyed only on the SCOPE (which a reset does not change), and therefore went stale
+ * after a reset. It now subscribes too. The honest statement of the contract is: the
+ * signal notifies its subscribers, and a surface that renders workspace-derived data
+ * and does not subscribe WILL go stale — see the subscriber list in
+ * `lib/workspaceInvalidation.ts`.
  *
  * R1 — THE PRECONDITION, and why the UI part of it matters. This dialog is exactly
  * the gap the `plan_digest` closes: the operator reads a classification, thinks, and

@@ -295,6 +295,13 @@ export const TUTORIAL_SESSION_HEADER = 'X-Isaac-Tutorial-Session';
  * load-bearing: after a reload the first record fetch can be issued by a screen
  * mounting before any tutorial code runs, and an unscoped fetch would 404 the
  * reader out of their own session.
+ *
+ * THIS IS THE AUTHORITY ON WHICH SCOPE REQUESTS CARRY, and the tutorial store's
+ * `sessionId` is its React-observable mirror — `tutorialController.ts`'s
+ * `initialState()` seeds itself from `getTutorialScope()` for exactly that reason, so
+ * the two cannot disagree on the first render. Nothing here may import that store
+ * (the dependency runs the other way, which is what guarantees this line has already
+ * executed when the store initialises).
  */
 let tutorialScope: string | null = readTutorialSession()?.sessionId ?? null;
 

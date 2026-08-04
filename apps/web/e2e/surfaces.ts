@@ -161,9 +161,26 @@ export const SURFACES: readonly Surface[] = [
   },
   {
     id: 'statistics',
-    name: 'Statistics',
+    name: 'Statistics (ordinary, empty)',
     path: '/statistics',
     scope: 'ordinary',
+    ready: { role: 'heading', name: 'Workspace at a Glance' },
+  },
+  {
+    // NEW, for the same reason `experiments-example` is, and it was MISSED when that
+    // one was added. `statistics` fell 48 -> 18 tolerated a11y nodes in the
+    // tutorial-scope slice and the drop was NOT compensated: every figure on this
+    // page is derived from `GET /api/runtime/records`, so in the ordinary (permanently
+    // empty) workspace the per-record breakdown rows — the four record cards' real
+    // counts, the workflow spine's bars, the five evidence chips, the export-gate rows
+    // — simply do not render. That markup now exists ONLY inside a worked-example
+    // session, and until this entry existed it was scanned by no surface in any
+    // project: 30 nodes of recorded debt stopped being measured while reading as an
+    // accessibility improvement.
+    id: 'statistics-example',
+    name: 'Statistics (worked example)',
+    path: '/statistics',
+    scope: 'example',
     ready: { role: 'heading', name: 'Workspace at a Glance' },
   },
   {

@@ -726,17 +726,24 @@ def test_safe_aspects_still_match_on_dirty_experiment():
     assert any(x.kind == "draft_field" and x.match.snippet == "Formula" for x in r.results)
 
 
-def test_synthetic_archive_uri_is_not_treated_as_a_path():
+def test_synthetic_archive_uri_is_not_treated_as_a_path(experiments):
     # ssrl-archive:// URIs are already-served legitimate leads (shown in /pending
     # and /evidence); they must NOT be redacted as filesystem paths.
-    r = run("xanes_reduction_v2", experiments_fixture(), limit=search.MAX_RESULTS)
+    #
+    # TAKES THE `experiments` FIXTURE, and the reason is a real defect rather than
+    # tidiness. This test used to take NO fixture and call a module-level
+    # `experiments_fixture()` helper that opened a worked-example session directly.
+    # Nothing had set `ISAAC_UI_WORKSPACE`, and the package's one autouse fixture
+    # only neutralises the packaged memory snapshot — so the session was created in
+    # whatever the AMBIENT default workspace is, which on a developer machine is
+    # `/tmp/isaac-ui-workspace`. It was never disposed, so every run of this file left
+    # one more `_tutorial/<session id>/` directory behind, each holding five
+    # materialised example records: 50 of them had accumulated when this was found.
+    # The `experiments` fixture points the workspace at this test's own `tmp_path` and
+    # seeds exactly the same five records, so the assertion is unchanged and the write
+    # lands where pytest can clean it up.
+    r = run("xanes_reduction_v2", experiments, limit=search.MAX_RESULTS)
     assert r.total > 0
-
-
-def experiments_fixture():
-    # Standalone seeded experiments for the URI test (module-level, no fixture arg).
-    # Opens its own worked-example session, since the normal workspace is not seeded.
-    return open_tutorial_scope().list_experiments()
 
 
 # =============================================================================

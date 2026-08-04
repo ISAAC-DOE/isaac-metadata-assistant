@@ -38,7 +38,7 @@
 
 import { useSyncExternalStore } from 'react';
 
-import { api, setTutorialScope } from './api';
+import { api, getTutorialScope, setTutorialScope } from './api';
 import { isTutorialCompleted, markTutorialCompleted } from './tutorialPreference';
 import {
   clearTutorialSession,
@@ -106,6 +106,42 @@ export interface TutorialState {
   lastDismissal: TutorialDismissal | null;
 }
 
+/**
+ * The store's state at page load.
+ *
+ * `sessionId` IS SEEDED FROM THE API SCOPE, and that single line is a correctness
+ * fix rather than a convenience. It used to be a literal `null`, which meant that
+ * for the whole boot window — from the first render until the asynchronous
+ * `resumeTutorialSession` resolved — the two halves of the app DISAGREED about
+ * which workspace was being addressed: `api.ts` had already entered the persisted
+ * scope at module load (deliberately; see its comment), so every request carried
+ * the session header, while this store said no session was held. Three things
+ * followed, all of them user-visible:
+ *
+ *  1. `screens/ExperimentsHome.tsx` and `screens/statistics/StatisticsPage.tsx` key
+ *     their reads on this value. At boot it was `null`, so the first scoped read
+ *     was issued under the key `null`; when resume then found the session GONE and
+ *     set `sessionId: null`, THE KEY DID NOT CHANGE, so nothing re-read and whatever
+ *     the scoped read had returned stayed on screen. With an expired pointer that
+ *     read was a `404`, and My Experiments told the reader "Record Not Found — this
+ *     experiment id is not in the local workspace" about a request for a LIST, on a
+ *     screen whose truthful state was the ordinary empty workspace.
+ *  2. `useWorkspaceScopeChanged` (`lib/workspaceScope.ts`) compares against the scope
+ *     AT MOUNT. A record surface mounting during the boot window recorded `null`, so
+ *     a successful resume — which changes nothing about which workspace the surface
+ *     is reading, because `api.ts` was already in it — looked like a scope change and
+ *     bounced the reader off their own record back to My Experiments.
+ *  3. The mode chip (`components/TopBar.tsx`) reads this value, so it claimed
+ *     "Workspace" while every request carried a worked-example session header.
+ *
+ * Reading `getTutorialScope()` rather than `readTutorialSession()` again is what
+ * makes the two provably equal instead of coincidentally equal: the api scope is
+ * the authority on what requests carry, and this store is its React-observable
+ * mirror. ES module evaluation guarantees the ordering — this module imports
+ * `./api`, so `api.ts`'s module body (and with it the pointer read) has already
+ * run when this function is first called. `api.ts` does not import this module, so
+ * there is no cycle to invert it.
+ */
 function initialState(): TutorialState {
   return {
     phase: 'idle',
@@ -114,7 +150,7 @@ function initialState(): TutorialState {
     targetsFailed: false,
     dismissedThisSession: false,
     completed: isTutorialCompleted(),
-    sessionId: null,
+    sessionId: getTutorialScope(),
     sessionError: null,
     lastDismissal: null,
   };
@@ -247,7 +283,9 @@ export async function startTutorial(trigger?: HTMLElement | null): Promise<void>
  *
  * Bounded recovery, called once at app boot. `api.ts` has already entered the
  * persisted scope at module load — that ordering is what stops a screen mounting
- * before this runs from issuing an unscoped, 404-ing record fetch. This function
+ * before this runs from issuing an unscoped, 404-ing record fetch — and this
+ * store's `initialState()` mirrors that scope, so a screen mounting before this
+ * runs keys its read on the scope its request actually carries. This function
  * decides whether that scope is still real:
  *
  * - no persisted session -> nothing to do;
@@ -273,9 +311,11 @@ export async function startTutorial(trigger?: HTMLElement | null): Promise<void>
  *
  * WHAT THE UNKNOWN BRANCH DOES, precisely, and why each half is that way:
  *
- *  · the api scope IS dropped. Leaving it set while the store says `sessionId: null`
- *    would make the mode chip read "Workspace" and hide the worked-example bar while
- *    every request still addressed the session — trading one false claim for another.
+ *  · the api scope IS dropped, and the store is told in the same tick. Dropping one
+ *    without the other is precisely the desync `initialState()` was fixed to close:
+ *    an api scope left set while the store says `sessionId: null` makes the mode chip
+ *    read "Workspace" and hides the worked-example bar while every request still
+ *    addresses the session — trading one false claim for another.
  *  · the pointer is NOT dropped. `api.ts` re-enters the persisted scope at module
  *    load and `main.tsx` calls this function again, so a reload is a real retry. The
  *    copy tells the reader exactly that, and names no cause.
@@ -530,9 +570,14 @@ export function shouldOfferTutorial(current: TutorialState = state): boolean {
 
 /**
  * Test seam. Restores the module to its initial state and re-reads the persisted
- * completion flag, exactly like a fresh page load. Named with the same `__`
- * convention as `__resetHealthCache` so it is obvious at a call site that it is
- * not production API.
+ * completion flag, like a fresh page load WITH NO OPEN SESSION — it drops the api
+ * scope and the persisted pointer first, so the state it rebuilds is the ordinary
+ * workspace. (A fresh page load that DOES hold a session is `__bootTutorialStore`.)
+ * Named with the same `__` convention as `__resetHealthCache` so it is obvious at a
+ * call site that it is not production API.
+ *
+ * The two lines that clear the scope must stay AHEAD of `initialState()`, which now
+ * seeds `sessionId` from the api scope.
  */
 export function __resetTutorialStore(): void {
   returnFocusTo = null;
@@ -540,6 +585,26 @@ export function __resetTutorialStore(): void {
   navigation = null;
   setTutorialScope(null);
   clearTutorialSession();
+  state = initialState();
+  for (const listener of listeners) listener();
+}
+
+/**
+ * Test seam — the STORE HALF of a page load, and nothing else.
+ *
+ * It re-runs the production `initialState()` over whatever the api scope and the
+ * persisted flags currently hold, and clears the same per-load scratch state a real
+ * module evaluation would start empty. It deliberately does NOT read the session
+ * pointer itself: the api half of a page load is `api.ts`'s module body, which a
+ * caller stands in for with `setTutorialScope(...)` (that half is pinned separately,
+ * by "the scope is entered at module load, BEFORE the first request"). If this
+ * function derived the pointer on its own it would paper over a missing derivation
+ * in `initialState()` — which is the exact defect it exists to make testable.
+ */
+export function __bootTutorialStore(): void {
+  returnFocusTo = null;
+  resolvingTargets = false;
+  navigation = null;
   state = initialState();
   for (const listener of listeners) listener();
 }

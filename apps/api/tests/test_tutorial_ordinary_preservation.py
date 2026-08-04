@@ -164,6 +164,16 @@ def _build_ordinary_population(plain: TestClient) -> list[str]:
     """One ordinary record of EVERY kind the spec asks to be preserved.
 
     Returned in a fixed order so a failure names a specific kind rather than an index.
+
+    THE SIXTH ENTRY IS A NAME COLLISION, and it is here because independent review
+    found the first five could not detect one. Every one of them is titled
+    ``"Ordinary · …"``, so none collides with anything the worked example creates —
+    and a cleanup that identified the examples by TITLE instead of by SCOPE would have
+    left all five untouched and passed this whole file. Production is correct today
+    (disposal is a scope-rooted ``rmtree`` behind a direct-child guard, and the reset
+    classifier reads provenance inside its own scope), so this closes a
+    FIXTURE-COVERAGE hole rather than a live defect — but the hole is exactly the one
+    a plausible future "tidy up the example records" change would fall into.
     """
     fresh = _make_ordinary("Ordinary · untouched draft", _raw_draft())
     confirmed = _make_ordinary("Ordinary · a confirmed answer", _raw_draft())
@@ -176,7 +186,13 @@ def _build_ordinary_population(plain: TestClient) -> list[str]:
     legacy = _make_ordinary(
         "Ordinary · managed-legacy provenance", _raw_draft(), managed_legacy=True
     )
-    return [fresh, confirmed, edited, exported, legacy]
+    # Titled EXACTLY the base the five built-in examples are named from — the backend
+    # builds theirs as f"{_SEED_TITLE_BASE} · <suffix>", so this is the strongest
+    # collision available: a title-prefix rule, an exact-match rule and a
+    # "startswith" rule would all claim it. It is an ORDINARY record with a
+    # non-canonical id, in the ordinary scope, and it must survive untouched.
+    seed_titled = _make_ordinary(ws._SEED_TITLE_BASE, _raw_draft())
+    return [fresh, confirmed, edited, exported, legacy, seed_titled]
 
 
 def _edit_one_field(plain: TestClient, exp_id: str, field: str, value: object) -> None:
@@ -252,14 +268,18 @@ def test_one_ordinary_record_is_byte_identical_across_the_whole_lifecycle(app, p
     assert _snapshot(plain, exp_id) == before
 
 
-@pytest.mark.parametrize("kind", [0, 1, 2, 3, 4])
+@pytest.mark.parametrize("kind", [0, 1, 2, 3, 4, 5])
 def test_every_kind_of_ordinary_record_is_byte_identical_across_the_lifecycle(
     app, plain, kind
 ):
-    """Fresh / confirmed / edited / exported / managed-legacy, one case per kind.
+    """Fresh / confirmed / edited / exported / managed-legacy / seed-titled.
 
     Parametrized rather than looped so a regression names the KIND that broke instead
     of failing once on whichever came first.
+
+    ``kind == 5`` is the name collision — see ``_build_ordinary_population``. Without
+    it "every kind" was a promise the fixtures did not keep: a cleanup that matched on
+    TITLE rather than on scope would have passed all five other cases.
     """
     population = _build_ordinary_population(plain)
     exp_id = population[kind]
@@ -280,6 +300,12 @@ def test_every_kind_of_ordinary_record_is_byte_identical_across_the_lifecycle(
         assert ws.load_experiment(exp_id).source["description"] == (
             ws.MANAGED_SOURCE_DESCRIPTION
         )
+    if kind == 5:
+        # The collision really is one: same title as the examples' base, and NOT one
+        # of the canonical ids. A test that asserted only the title would still pass
+        # over a record that had quietly become canonical.
+        assert detail["title"] == ws._SEED_TITLE_BASE
+        assert exp_id not in ws.CANONICAL_IDS
 
     _run_whole_tutorial_lifecycle(app)
 

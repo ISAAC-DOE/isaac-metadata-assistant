@@ -42,7 +42,12 @@ export function LoadingPanel({ label = 'Loading…' }: { label?: string }) {
 /**
  * Which failure this is, from the observable signals only.
  *
- * - `not_found`  — HTTP 404: the record is not there. Unchanged behaviour.
+ * - `not_found`  — HTTP 404 for a path that NAMES ONE RECORD: that record is not
+ *                  there. Unchanged behaviour and unchanged copy.
+ * - `path_not_found`
+ *                — HTTP 404 for anything else — a collection read, a build-level
+ *                  read, or a request whose path was not recorded. See
+ *                  `isRecordPath` for why this branch had to exist.
  * - `auth`       — HTTP 401/403, or an HTML page served for an API path. The
  *                  session is no longer authenticated/authorized; a reload
  *                  re-enters the identity flow.
@@ -54,7 +59,13 @@ export function LoadingPanel({ label = 'Loading…' }: { label?: string }) {
  * - `local`      — a local build. Today's copy and the run command, unchanged:
  *                  there the "start the backend" instruction is actionable.
  */
-export type DownKind = 'not_found' | 'auth' | 'http_error' | 'unreachable' | 'local';
+export type DownKind =
+  | 'not_found'
+  | 'path_not_found'
+  | 'auth'
+  | 'http_error'
+  | 'unreachable'
+  | 'local';
 
 export interface DownCopy {
   kind: DownKind;
@@ -68,6 +79,29 @@ export interface DownCopy {
 }
 
 /**
+ * Does this failed API path name ONE record?
+ *
+ * WHY THIS PREDICATE EXISTS. Every 404 used to render "Record Not Found — this
+ * experiment id is not in the local workspace", from all 14 call sites. That is
+ * true of `GET /api/experiments/{id}` and its sub-reads, and FALSE of everything
+ * else that can answer 404 — and the false case was reached. Browser testing
+ * caught My Experiments rendering it: a reload holding an expired worked-example
+ * pointer issued `GET /api/experiments`, the backend rejected the unknown session
+ * with a 404, and this panel reported a LIST failure to the reader as a missing
+ * RECORD, on a screen whose truthful state was the ordinary empty workspace. The
+ * same wording was reachable on `/api/runtime/records`, `/api/memory/*` and
+ * `/api/graph/*`, where "experiment id" names nothing at all.
+ *
+ * The shape is exact rather than heuristic: `api.ts` builds every per-record read
+ * as `/experiments/{id}` plus an optional suffix, and the only other `/experiments`
+ * path is the bare collection. `/memory/concepts/{id}` is deliberately NOT matched —
+ * a concept is not an experiment.
+ */
+export function isRecordPath(path: string | undefined): boolean {
+  return path !== undefined && /^\/experiments\/[^/]/.test(path);
+}
+
+/**
  * Classify + phrase a failure. Exported and pure so both render sites (this
  * panel and the ⌘K search dialog) share ONE source of copy and cannot drift.
  *
@@ -77,7 +111,7 @@ export interface DownCopy {
 export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): DownCopy {
   const status = error?.status;
 
-  if (status === 404) {
+  if (status === 404 && isRecordPath(error?.path)) {
     return {
       kind: 'not_found',
       title: 'Record Not Found',
@@ -85,6 +119,40 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
         hosted
           ? 'This experiment id is not in the workspace — it may not have been created yet.'
           : 'This experiment id is not in the local workspace — it may not have been created yet.',
+      ],
+      showRunCommand: false,
+      offerReload: false,
+    };
+  }
+
+  /*
+   * A 404 THAT IS NOT ABOUT A RECORD, said generically because the cause is not
+   * observable from here.
+   *
+   * A 404 on a collection or build-level read has at least two plausible causes —
+   * the worked-example session named in the request header no longer exists, or the
+   * route is not served at this base path — and nothing in the response separates
+   * them, so neither is asserted. In particular this does NOT name the expired
+   * session: `downCopy` is pure in its arguments, the api scope at render time is
+   * not necessarily the scope the failed request carried, and naming a cause we did
+   * not observe is the same defect as the copy this replaces.
+   *
+   * A pathless 404 lands here too. Every `ApiError` this client raises carries a
+   * path (`httpError`, `readJson` and `request`'s network branch all pass one), so
+   * in production that is the case where the failure did not come from this client
+   * at all — and with no subject observed, the narrower claim is the only honest one.
+   *
+   * No reload is offered: a reload does help when a dead session pointer is the
+   * cause, but that is the cause we just said we cannot establish. The callers that
+   * pass `onRetry` still render Retry.
+   */
+  if (status === 404) {
+    return {
+      kind: 'path_not_found',
+      title: 'Not Found',
+      lines: [
+        'The ISAAC API answered HTTP 404 for this request, so this view has no server-derived data to show.',
+        'This prototype reads only server-derived truth — it will never show placeholder data.',
       ],
       showRunCommand: false,
       offerReload: false,

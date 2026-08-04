@@ -194,14 +194,25 @@ jobs:
           # 2. An unscoped example-workspace call must REFUSE without mutating.
           #    Asserted, not ignored: a silent success would mean /demo/run had
           #    regained the ability to write into the ordinary workspace.
+          #
+          #    THE EXACT STATUS AND THE TYPED ERROR CODE, not "any 4xx". The contract
+          #    is `409 {"error": "tutorial_scope_required"}` (routes.py
+          #    `_tutorial_scope_required`), and a `case 4*)` accepted anything in the
+          #    400s — so a 401 from an authenticating edge, a 404 from a deleted
+          #    route, or a 422 from a rejected body would all have been reported as
+          #    "refused (correct)" while the property under test (this endpoint
+          #    refuses BECAUSE it requires a session scope) had stopped holding.
           code=$(curl -sS -o /tmp/demo_run_unscoped.json -w '%{http_code}' \
             -X POST http://127.0.0.1:8000/api/demo/run \
             -H 'content-type: application/json' -d '{"mode":"draft_only"}')
-          case "$code" in
-            4*) echo "unscoped /demo/run refused with $code (correct)" ;;
-            *)  echo "::error::unscoped /demo/run returned $code, expected a 4xx refusal"
-                cat /tmp/demo_run_unscoped.json; exit 1 ;;
-          esac
+          [ "$code" = "409" ] || {
+            echo "::error::unscoped /demo/run returned $code, expected 409"
+            cat /tmp/demo_run_unscoped.json; exit 1; }
+          err=$(jq -r '.error // empty' /tmp/demo_run_unscoped.json)
+          [ "$err" = "tutorial_scope_required" ] || {
+            echo "::error::unscoped /demo/run refused with error='$err', expected 'tutorial_scope_required'"
+            cat /tmp/demo_run_unscoped.json; exit 1; }
+          echo "unscoped /demo/run refused with 409 tutorial_scope_required (correct)"
           still=$(curl -sS http://127.0.0.1:8000/api/experiments | jq '.experiments | length')
           [ "$still" -eq 0 ] || {
             echo "::error::refused /demo/run still mutated the ordinary scope ($still)"; exit 1; }

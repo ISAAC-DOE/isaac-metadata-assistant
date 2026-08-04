@@ -17,6 +17,21 @@
  * refusal, a stale precondition, or an error, because in every one of those cases the
  * backend wrote nothing and there is nothing to invalidate.
  *
+ * THE SUBSCRIBERS, LISTED — because "any surface showing workspace-derived data
+ * refetches it" is NOT what this module does, and saying so hid a real staleness for
+ * a while. The signal reaches whoever subscribed and nobody else:
+ *
+ *   · `screens/ExperimentsHome.tsx` — the queue.
+ *   · `screens/statistics/StatisticsPage.tsx` — the record read only (its four record
+ *     cards, workflow spine, evidence totals and export gate all come from
+ *     `GET /api/runtime/records`). It was keyed on the workspace SCOPE alone, which a
+ *     reset does not change, so it went stale after every reset even though the
+ *     control that caused it is mounted on that very screen.
+ *
+ * Any FUTURE surface that renders workspace-derived record data must subscribe or it
+ * will go stale — the scope key does not cover a rebuild, and nothing here will warn
+ * you.
+ *
  * Record surfaces deliberately do NOT subscribe. They already poll their own record
  * with a conditional GET (P27.6) and adopt a change when the server reports one, so
  * a second mechanism would give them two paths to the same refresh.

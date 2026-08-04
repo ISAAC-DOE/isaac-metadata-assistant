@@ -61,6 +61,29 @@ import type { RouteEntry } from '../test/apiFixtures';
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
 
+/*
+ * THE TWO STRINGS THIS FILE WILL NOT READ FROM `LABELS`.
+ *
+ * The dialog title and the confirm action are the words that tell an operator what
+ * they are about to destroy, so they are written out here as INDEPENDENT literals.
+ *
+ * WHY, because it was got wrong once and the fix must not be undone. When the
+ * control moved into the worked-example bar its copy changed, and fourteen
+ * assertions in this file were re-pointed from their own literals to
+ * `LABELS.resetDialogTitle` / `LABELS.resetConfirmAction` — the SAME constants the
+ * component renders from. Both sides of every one of those assertions then came from
+ * one place, so the file agreed with the component by construction: a future rewrite
+ * of either string (to something vague, or to something that no longer says a
+ * destructive act is about to happen) would have passed silently, with nothing in the
+ * suite noticing that the guarded control's own words had changed.
+ *
+ * A literal here is not duplication for its own sake — it is the second, independent
+ * copy that makes the comparison meaningful. `LABELS` is still used freely for the
+ * other labels in this file; these two are the ones an operator's safety rests on.
+ */
+const DIALOG_TITLE = 'Reset the Worked Example';
+const CONFIRM_ACTION = 'Reset Example Records';
+
 /**
  * Render My Experiments and open a real worked-example session, the way a reader
  * does: by accepting the first-run offer.
@@ -125,14 +148,14 @@ async function openReset(view: SessionView) {
  * not — so it is not a loosening.
  */
 function dialog(view: SessionView) {
-  return view.getByRole('dialog', { name: new RegExp(LABELS.resetDialogTitle, 'i') });
+  return view.getByRole('dialog', { name: new RegExp(DIALOG_TITLE, 'i') });
 }
 
 /** The reset dialog, or null — the same name-scoped query, for absence assertions.
  *  A bare `queryByRole('dialog')` would now resolve the coach mark and never be null,
  *  which would make every "the dialog closed" assertion below unfalsifiable. */
 function resetDialogOrNull(view: SessionView): HTMLElement | null {
-  return view.queryByRole('dialog', { name: new RegExp(LABELS.resetDialogTitle, 'i') });
+  return view.queryByRole('dialog', { name: new RegExp(DIALOG_TITLE, 'i') });
 }
 
 afterEach(() => {
@@ -147,6 +170,17 @@ afterEach(() => {
 // --- 1–3. presence, synthetic-only gate, non-primary treatment ---------------
 
 describe('P26.0b · Reset Worked Example — presence & treatment', () => {
+  /*
+   * The copy pin, stated once so a rewrite fails with a legible message instead of
+   * as twenty-one "unable to find a dialog named …" errors. See the note on
+   * `DIALOG_TITLE`: these are the two strings this file deliberately does not read
+   * from the same constants the component renders from.
+   */
+  it('the dialog title and confirm action still say what they said', () => {
+    expect(LABELS.resetDialogTitle).toBe(DIALOG_TITLE);
+    expect(LABELS.resetConfirmAction).toBe(CONFIRM_ACTION);
+  });
+
   it('renders the reset control in the worked-example bar in synthetic-only mode', async () => {
     const view = await renderInSession(resetDemoRoutes().routes);
     const reset = await view.findByRole('button', { name: LABELS.actionResetDemo });
@@ -346,7 +380,7 @@ describe('P26.0b · Reset Worked Example — confirmation gate', () => {
     const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const d = within(dialog(view));
-    const action = d.getByRole('button', { name: LABELS.resetConfirmAction }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
     const input = d.getByRole('textbox') as HTMLInputElement;
 
     expect(action.disabled).toBe(true); // nothing typed
@@ -427,7 +461,7 @@ describe('P26.0b · Reset Worked Example — dialog accessibility', () => {
     expect(d.getAttribute('aria-modal')).toBe('true');
     const labelledby = d.getAttribute('aria-labelledby');
     expect(labelledby).toBeTruthy();
-    expect(document.getElementById(labelledby!)!.textContent).toMatch(new RegExp(LABELS.resetDialogTitle, 'i'));
+    expect(document.getElementById(labelledby!)!.textContent).toMatch(new RegExp(DIALOG_TITLE, 'i'));
   });
 
   it('moves focus into the dialog on open', async () => {
@@ -479,7 +513,7 @@ describe('P26.0b · Reset Worked Example — single-submit safety', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     const executes = resetPosts().filter((p) => p.mode === 'execute');
     expect(executes).toHaveLength(1);
@@ -491,7 +525,7 @@ describe('P26.0b · Reset Worked Example — single-submit safety', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    const action = d.getByRole('button', { name: LABELS.resetConfirmAction });
+    const action = d.getByRole('button', { name: CONFIRM_ACTION });
     fireEvent.click(action);
     fireEvent.click(action);
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
@@ -511,7 +545,7 @@ describe('P26.0b · Reset Worked Example — ambiguous refusal', () => {
     // no "delete it yourself" style bypass is offered
     expect(text).not.toMatch(/delete.*manual|manually delete|override/);
     // typing the phrase must NOT enable execution while ambiguous
-    const action = d.getByRole('button', { name: LABELS.resetConfirmAction }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
     expect(action.disabled).toBe(true);
   });
@@ -521,7 +555,7 @@ describe('P26.0b · Reset Worked Example — ambiguous refusal', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    const action = d.getByRole('button', { name: LABELS.resetConfirmAction });
+    const action = d.getByRole('button', { name: CONFIRM_ACTION });
     fireEvent.click(action);
     expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
   });
@@ -574,7 +608,7 @@ describe('P26.0b · Reset Worked Example — a body it cannot interpret fails cl
     expect(dialog(view).textContent ?? '').not.toMatch(/undefined|NaN/);
 
     // Typing the exact phrase does NOT arm the destructive action.
-    const action = d.getByRole('button', { name: LABELS.resetConfirmAction }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
     expect(action.disabled).toBe(true);
     // Pressing it anyway, and pressing Enter in the field, issue nothing.
@@ -628,7 +662,7 @@ describe('P26.0b · Reset Worked Example — success refreshes the dashboard', (
      * execute, which is the property that was always meant.
      */
     const readsBefore = countCalls(view.calls, 'GET /api/experiments');
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
 
     await waitFor(() =>
       expect(countCalls(view.calls, 'GET /api/experiments')).toBeGreaterThan(readsBefore),
@@ -650,7 +684,7 @@ describe('P26.0b · Reset Worked Example — success refreshes the dashboard', (
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     // no unhandled error banner
     expect(view.queryByText(/unexpected error|something went wrong/i)).toBeNull();
@@ -691,7 +725,7 @@ describe('P26.0b · Reset Worked Example — leak safety & coexistence', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
 
     const mock = (globalThis.fetch as unknown as {
@@ -799,7 +833,7 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() => expect(resetPosts().some((p) => p.mode === 'execute')).toBe(true));
     const execute = resetPosts().find((p) => p.mode === 'execute')!;
     expect(execute.plan_digest).toBe(RESET_PLAN_DIGEST);
@@ -813,7 +847,7 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
 
     const alert = await view.findByRole('alert');
     const text = (alert.textContent ?? '').toLowerCase();
@@ -832,7 +866,7 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     const d = within(dialog(view));
     const input = d.getByRole('textbox') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await view.findByRole('alert');
 
     // exactly ONE execute was attempted — nothing auto-retried
@@ -845,7 +879,7 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     );
     // the typed gate was cleared and the destructive action is disarmed again
     expect((d.getByRole('textbox') as HTMLInputElement).value).toBe('');
-    const action = d.getByRole('button', { name: LABELS.resetConfirmAction }) as HTMLButtonElement;
+    const action = d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement;
     expect(action.disabled).toBe(true);
     // and the dialog is still open (the explanation was not flashed away)
     expect(resetDialogOrNull(view)).not.toBeNull();
@@ -862,7 +896,7 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await view.findByRole('alert');
     await waitFor(() =>
       expect(resetPosts().filter((p) => p.mode === 'preview').length).toBeGreaterThanOrEqual(2),
@@ -874,10 +908,10 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
     await waitFor(() =>
       expect(
-        (d.getByRole('button', { name: LABELS.resetConfirmAction }) as HTMLButtonElement).disabled,
+        (d.getByRole('button', { name: CONFIRM_ACTION }) as HTMLButtonElement).disabled,
       ).toBe(false),
     );
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await waitFor(() =>
       expect(resetPosts().filter((p) => p.mode === 'execute')).toHaveLength(2),
     );
@@ -893,7 +927,7 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     await openReset(view);
     const d = within(dialog(view));
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     const alert = await view.findByRole('alert');
     expect((alert.textContent ?? '').toLowerCase()).toContain('nothing was reset');
     expect(view.queryByText(/could not be completed/i)).toBeNull();
@@ -966,7 +1000,7 @@ describe('R1 · Reset Worked Example — what you would lose', () => {
     const d = within(dialog(view));
     expect(dialog(view).textContent).toContain('3 confirmed answers');
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
-    fireEvent.click(d.getByRole('button', { name: LABELS.resetConfirmAction }));
+    fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     await view.findByRole('alert');
     await waitFor(() => expect(dialog(view).textContent).toContain('9 confirmed answers'));
     expect(dialog(view).textContent).not.toContain('3 confirmed answers');

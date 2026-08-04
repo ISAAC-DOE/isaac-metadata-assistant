@@ -39,9 +39,13 @@ import { useTutorialState } from './tutorialController';
  * ordinary workspace, otherwise the open worked-example session id.
  *
  * Read from the tutorial store rather than from `api.getTutorialScope()`, because
- * the store is what notifies React when it changes; the two are kept in step by
- * `tutorialController`, which sets the api scope and the store's `sessionId`
- * together.
+ * the store is what notifies React when it changes. The store is a MIRROR of the api
+ * scope, not a second opinion about it: `tutorialController` sets the api scope and
+ * the store's `sessionId` together on every transition, and its `initialState()`
+ * seeds `sessionId` from `getTutorialScope()` so the two also agree on the FIRST
+ * RENDER after a reload — see the long comment there for the three user-visible
+ * claims that boot-window disagreement produced, of which the worst was a `404` on a
+ * LIST read reported to the reader as a missing record.
  */
 export function useWorkspaceScope(): string | null {
   return useTutorialState().sessionId;
@@ -59,6 +63,13 @@ export function useWorkspaceScope(): string | null {
  * The comparison is against the scope AT MOUNT rather than the previous render, so
  * one glance at the value is enough for a caller to decide — a surface cannot
  * "miss" the change by rendering at the wrong moment.
+ *
+ * THAT MAKES THE MOUNT VALUE LOAD-BEARING, which is why the store seeds it from the
+ * api scope. While `initialState()` hard-coded `sessionId: null`, a record surface
+ * mounting during the boot window recorded `null` even though `api.ts` was already
+ * inside the persisted session; `resumeTutorialSession` then confirming that session
+ * still EXISTS looked like a scope change and bounced the reader off the record they
+ * had just reloaded, in the one case where nothing about their workspace had changed.
  */
 export function useWorkspaceScopeChanged(): boolean {
   const scope = useWorkspaceScope();

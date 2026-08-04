@@ -445,6 +445,36 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'statistics@tablet-768x1024': 4,
       'statistics@mobile-375x812': 3,
       'statistics@zoom-200': 3,
+      /*
+       * THE POPULATED Statistics page, at the same route inside a worked-example
+       * session — ADDED 2026-08-04 to close a gap the tutorial-scope slice left open.
+       *
+       * That slice compensated `experiments`' 48 -> 13 drop with a new
+       * `experiments-example` surface carrying the old numbers, and did NOT do the
+       * same for `statistics`' 48 -> 18 drop. So the per-record markup that moved into
+       * the session — the four record cards' real counts, the workflow spine's bars,
+       * the five evidence chips, the export-gate rows — was scanned by NO surface in
+       * ANY project for the whole of that slice. 30 nodes of recorded debt stopped
+       * being measured, while the lowered `statistics` numbers read as a 30-node
+       * accessibility improvement. Nothing was fixed; the rows were simply not drawn.
+       *
+       * MEASURED, not derived: two consecutive local darwin runs of
+       * `npx playwright test e2e/specs/a11y-axe.spec.ts -g "Statistics (worked
+       * example)"`, identical counts both times. The corroboration is the same one
+       * `experiments-example` has — 10/10/10/9/9 is byte-identical to what
+       * `statistics@*` measured BEFORE the examples left the ordinary workspace
+       * (48 across the five projects), i.e. this surface inherited exactly the
+       * coverage that was lost rather than introducing new debt.
+       *
+       * The LINUX column is UNMEASURED (see the note at the bottom of this file); the
+       * five values are written as scalars because the type system has no way to say
+       * "same as darwin, unverified". CI is the authority.
+       */
+      'statistics-example@desktop-1280x800': 10,
+      'statistics-example@laptop-1024x768': 10,
+      'statistics-example@tablet-768x1024': 10,
+      'statistics-example@mobile-375x812': 9,
+      'statistics-example@zoom-200': 9,
       'validator@desktop-1280x800': 9,
       'validator@laptop-1024x768': 9,
       'validator@tablet-768x1024': 9,
@@ -610,22 +640,37 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // counted under `experiments-example`, which is why that surface was added rather
   // than the number simply being lowered.
   //
+  // REVIEW FOLLOW-UP, 2026-08-04: 1632 -> 1680 on both columns.
+  //
+  // The paragraph above is the reason this correction was needed. It states the
+  // `experiments` rule — a drop that is a measurement artefact must be compensated by
+  // a new surface, or the coverage is silently lost — and then applies it to
+  // `experiments` ONLY. `statistics` fell by exactly the same 30 nodes, for exactly
+  // the same reason, and got no compensating surface. Independent review found it:
+  // `grep statistics e2e/surfaces.ts` returned one entry, ordinary scope, so the
+  // populated page existed in no project's scan grid at all.
+  //
+  // The arithmetic: statistics-example +48 (10/10/10/9/9), a NEW surface holding
+  // exactly the numbers `statistics` held before the examples moved. Net +48.
+  // Nothing regressed and nothing was fixed — 48 nodes that had stopped being
+  // measured are being measured again.
+  //
   // ── The one thing in this file NOT measured on both platforms ───────────────
   //
   // Every number above was measured on darwin (two consecutive local runs, same
-  // counts). The LINUX column for the 16 changed/added keys — the five
-  // `experiments@*`, the five `experiments-example@*`, the five `statistics@*` and
-  // `settings-about@mobile-375x812` — is UNMEASURED: this environment cannot run
-  // the Linux system face, and the file's own type system leaves no way to say
-  // "unknown" (a per-platform pair must carry two DIFFERENT numbers, so an honest
-  // "same as darwin, unverified" can only be written as a scalar). They are
-  // therefore written as scalars and flagged here.
+  // counts). The LINUX column for the 21 changed/added keys — the five
+  // `experiments@*`, the five `experiments-example@*`, the five `statistics@*`, the
+  // five `statistics-example@*` and `settings-about@mobile-375x812` — is UNMEASURED:
+  // this environment cannot run the Linux system face, and the file's own type system
+  // leaves no way to say "unknown" (a per-platform pair must carry two DIFFERENT
+  // numbers, so an honest "same as darwin, unverified" can only be written as a
+  // scalar). They are therefore written as scalars and flagged here.
   //
   // CI (Linux) is the authority. If it disagrees, transcribe ITS numbers into the
   // keys above and correct these two totals — never loosen the assertion. The
   // previously-recorded keys are untouched and their linux values still stand.
-  darwin: 1632,
-  linux: 1632,
+  darwin: 1680,
+  linux: 1680,
 };
 
 /**

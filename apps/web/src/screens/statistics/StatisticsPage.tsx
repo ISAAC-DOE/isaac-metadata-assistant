@@ -19,6 +19,7 @@ import {
 import { api } from '../../lib/api';
 import { useFetch, type FetchState } from '../../lib/useFetch';
 import { useWorkspaceScope } from '../../lib/workspaceScope';
+import { subscribeWorkspaceRebuilt } from '../../lib/workspaceInvalidation';
 import type { RuntimeRecord } from '../../lib/crossRecordTriage';
 import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../../lib/types';
 import { ROUTES } from '../../lib/routes';
@@ -331,6 +332,28 @@ export function StatisticsPage() {
   const graph = useFetch(() => track(api.getGraphStatus()), []);
   const about = useFetch(() => track(api.getAbout()), []);
   const openapi = useFetch(() => track(api.getOpenApi()), []);
+
+  /*
+   * ...AND the record read also listens for a workspace REBUILD, which the scope
+   * key cannot cover.
+   *
+   * The guarded reset (`components/ResetDemoDialog.tsx`, in the worked-example bar
+   * that `AppShell` mounts on EVERY surface including this one) rewrites the record
+   * set without changing the scope — same session, different records. So `[scope]`
+   * is unchanged by it and every record-derived figure on this page — the four
+   * record cards, the workflow spine, the evidence totals, the export gate — went
+   * on describing the records the reset had just discarded. My Experiments already
+   * subscribed; this page renders the same workspace-derived data one click away
+   * from the control and did not.
+   *
+   * SILENT on purpose, exactly as the queue's is: the figures stay on screen while
+   * the fresh ones arrive, so the page does not blank and the reader does not lose
+   * their scroll position. Only the RECORD read is re-issued — the graph status, the
+   * About payload and the OpenAPI schema are properties of the build and a reset
+   * cannot change them.
+   */
+  const { reloadSilent: reloadRecordsSilent } = records;
+  useEffect(() => subscribeWorkspaceRebuilt(reloadRecordsSilent), [reloadRecordsSilent]);
 
   /*
    * Did the latest round come back complete? This reads the round's own TALLY,

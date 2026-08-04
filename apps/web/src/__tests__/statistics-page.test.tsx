@@ -1,18 +1,22 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
 import { ProjectMemory } from '../screens/ProjectMemory';
+import { StatisticsPage } from '../screens/statistics/StatisticsPage';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
+import { TUTORIAL_SESSION_HEADER } from '../lib/api';
 import {
   __resetTutorialStore,
+  dismissTutorial,
   getTutorialState,
   startTutorial,
 } from '../lib/tutorialController';
 import {
   STATISTICS_ROUTE_KEYS,
+  TUTORIAL_SESSION_ID,
   aboutResponse,
   graphStatusAvailable,
   graphStatusPreRegen,
@@ -21,6 +25,7 @@ import {
   memoryConceptsAvailable,
   memoryFilesAvailable,
   openApiFixture,
+  resetDemoRoutes,
   statisticsRecordsBody,
   statisticsRoutes,
   statisticsRuntimeRecords,
@@ -351,6 +356,166 @@ describe('the lead sentence is truthful in each workspace scope', () => {
     ).toBeInTheDocument();
     // The neutral ordinary wording must not leak into the scope that has examples.
     expect(screen.queryByText(/A read-only view of this workspace/)).toBeNull();
+  });
+});
+
+/*
+ * WHICH WORKSPACE THE RECORD READ ADDRESSES — asserted as REQUESTS, because no
+ * assertion about rendered copy can see it.
+ *
+ * WHY THIS BLOCK EXISTS, stated plainly because it is a review finding rather than a
+ * new feature. `StatisticsPage` keys `GET /api/runtime/records` on the workspace
+ * scope, and its own comment says what an empty dependency list cost: "opening or
+ * leaving a session left every record-derived figure on it describing a workspace
+ * that was no longer being addressed". That key had ZERO coverage. Reverting
+ * `[scope]` to `[]` reinstated the defect verbatim and the whole frontend suite —
+ * including the two lead-sentence tests directly above, which render in both scopes
+ * and so read as if they cover this — still passed. A page whose numbers are its
+ * entire purpose was one character away from silently describing the wrong workspace.
+ *
+ * SO THESE TESTS ASSERT THE READ, NOT THE COPY. The lead sentence is derived from
+ * `useWorkspaceScope()` directly and would keep telling the truth about the scope
+ * while every FIGURE beneath it described the other one — which is precisely the
+ * shape of defect that made the gap invisible.
+ *
+ * TWO PROPERTIES, and the second is the one that makes this falsifiable:
+ *   1. a read is ISSUED on entering a session and again on leaving; and
+ *   2. each read carries the RIGHT SCOPE — the session header when one is held,
+ *      none when it is not. A test that only counted requests would pass on a page
+ *      that refetched the ordinary workspace three times.
+ *
+ * THE SURFACE IS MOUNTED UNDER A CATCH-ALL ROUTE ON PURPOSE. The walkthrough
+ * navigates once per step when it starts, so mounting this page through `AppRoutes`
+ * would unmount it at the exact moment the scope changed, and the test would prove
+ * nothing about the dependency. A catch-all keeps ONE mounted `StatisticsPage`
+ * across that navigation, so what is measured is the scope change and not a route
+ * change. Everything else is the real thing: the real store API opens and discards
+ * the session, and the page's own `useFetch` issues the reads.
+ */
+describe('the record read follows the workspace scope', () => {
+  const RECORDS_READ = 'GET /api/runtime/records';
+
+  const countReads = (calls: string[]) => calls.filter((k) => k === RECORDS_READ).length;
+
+  /**
+   * The session header on every `/api/runtime/records` read, in order —
+   * `undefined` for a read that carried none (the ordinary workspace).
+   *
+   * Read from the `fetch` mock rather than from `stubFetchRoutes`'s key list,
+   * because the key records method+path only and the SCOPE lives in a header.
+   */
+  function recordReadScopes(): (string | undefined)[] {
+    const mock = (globalThis.fetch as unknown as { mock: { calls: [unknown, RequestInit?][] } })
+      .mock;
+    return mock.calls
+      .filter(([input]) => String(input).endsWith('/api/runtime/records'))
+      .map(
+        ([, init]) =>
+          (init?.headers as Record<string, string> | undefined)?.[TUTORIAL_SESSION_HEADER],
+      );
+  }
+
+  async function renderSurface(routes: Record<string, RouteEntry>) {
+    const calls = stubFetchRoutes(routes);
+    let view!: ReturnType<typeof render>;
+    // Wrapped because the four reads resolve during mount: without it React warns
+    // about the settle-time `setState` in the page's own round tracker.
+    await act(async () => {
+      view = render(
+        <MemoryRouter
+          initialEntries={[ROUTES.statistics]}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <Routes>
+            <Route path="*" element={<StatisticsPage />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+    return { ...view, calls };
+  }
+
+  afterEach(() => {
+    __resetTutorialStore();
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('re-reads the records when a session is entered, and again when it is left', async () => {
+    const { calls } = await renderSurface({
+      ...statisticsRoutes(),
+      ...tutorialSessionRoutes(),
+      'GET /api/health': { body: healthSynthetic },
+      'GET /api/experiments': { body: { experiments: [] } },
+    });
+    await settled();
+    expect(countReads(calls)).toBe(1);
+
+    await act(async () => {
+      await startTutorial(null);
+    });
+    expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID);
+    await waitFor(() => expect(countReads(calls)).toBe(2));
+
+    await act(async () => {
+      await dismissTutorial('skip');
+    });
+    expect(getTutorialState().sessionId).toBeNull();
+    await waitFor(() => expect(countReads(calls)).toBe(3));
+
+    // The three reads addressed the ordinary workspace, then the session, then the
+    // ordinary workspace again. This is the assertion an unkeyed fetch cannot pass,
+    // and it is also the one a fetch keyed on the wrong thing cannot pass.
+    expect(recordReadScopes()).toEqual([undefined, TUTORIAL_SESSION_ID, undefined]);
+  });
+
+  /*
+   * A RESET does not change the scope — same session, different records — so the
+   * scope key above cannot cover it. This is the staleness the review found: the
+   * guarded reset lives in the worked-example bar, `AppShell` mounts that bar on
+   * every surface INCLUDING this one, and pressing it left every figure here
+   * describing the records it had just discarded. The queue subscribed to the
+   * rebuild signal; this page did not.
+   *
+   * Driven through the REAL control — the trigger in the bar on this very screen,
+   * the preview, the typed gate, the execute — rather than by calling
+   * `notifyWorkspaceRebuilt()` directly, so it also pins that the control is
+   * reachable from here at all.
+   */
+  it('re-reads the records after a reset rebuilds the workspace', async () => {
+    const { calls } = await renderSurface({
+      ...statisticsRoutes(),
+      ...tutorialSessionRoutes(),
+      ...resetDemoRoutes().routes,
+    });
+    await settled();
+    await act(async () => {
+      await startTutorial(null);
+    });
+    const trigger = await screen.findByRole('button', { name: LABELS.actionResetDemo });
+    expect(trigger.closest('.tutorial-session-bar')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(trigger);
+    });
+    const d = await screen.findByRole('dialog', {
+      name: new RegExp(LABELS.resetDialogTitle, 'i'),
+    });
+    fireEvent.change(within(d).getByRole('textbox'), { target: { value: 'RESET' } });
+
+    /*
+     * Measured as an INCREASE captured AFTER the session was entered, so the
+     * scope-change read cannot satisfy it — the same strengthening
+     * `reset-demo.test.tsx` applies to the queue's refetch, for the same reason.
+     */
+    const before = countReads(calls);
+    await act(async () => {
+      fireEvent.click(within(d).getByRole('button', { name: LABELS.resetConfirmAction }));
+    });
+
+    await waitFor(() => expect(countReads(calls)).toBeGreaterThan(before));
+    // The reset did not leave the session, so the refetch still addressed it.
+    const scopes = recordReadScopes();
+    expect(scopes[scopes.length - 1]).toBe(TUTORIAL_SESSION_ID);
   });
 });
 

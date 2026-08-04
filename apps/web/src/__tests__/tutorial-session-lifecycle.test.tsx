@@ -32,8 +32,9 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
 import { LABELS } from '../lib/labels';
-import { TUTORIAL_SESSION_HEADER, getTutorialScope } from '../lib/api';
+import { TUTORIAL_SESSION_HEADER, getTutorialScope, setTutorialScope } from '../lib/api';
 import {
+  __bootTutorialStore,
   __resetTutorialStore,
   getTutorialState,
   resumeTutorialSession,
@@ -744,5 +745,202 @@ describe('worked-example session — scope handling', () => {
     await waitFor(() => expect(sentRequests().length).toBeGreaterThanOrEqual(boundary));
 
     expect(sentRequests().slice(boundary).filter((r) => r.scope !== undefined)).toEqual([]);
+  }, 30000);
+});
+
+// --- the BOOT WINDOW ----------------------------------------------------------
+
+/*
+ * THE BOOT WINDOW: the interval between the first render after a reload and
+ * `resumeTutorialSession` resolving. Every test above this line either renders with
+ * no persisted pointer, or seeds the pointer and then calls
+ * `resumeTutorialSession()` before asserting — so none of them was ever inside this
+ * window, and all of them passed while two user-visible defects sat in it. Browser
+ * testing found them; these are the jsdom reproductions.
+ *
+ * WHAT MAKES THIS WINDOW A REAL STATE, and not a test artefact. `api.ts` enters the
+ * persisted scope at MODULE LOAD, on purpose, so the first record fetch after a
+ * reload is already scoped (pinned by "the scope is entered at module load, BEFORE
+ * the first request" above). `main.tsx` then kicks `resumeTutorialSession()` off
+ * WITHOUT awaiting it — also on purpose, so the first paint is not behind a network
+ * round trip. So there is necessarily a window in which the app is inside a session
+ * whose existence it has not yet confirmed, and everything rendered in it has to be
+ * true.
+ *
+ * HOW THE WINDOW IS ENTERED HERE. Two lines, standing in for the two module bodies a
+ * page load evaluates:
+ *
+ *   setTutorialScope(id)   — what `api.ts`'s module body does (its own derivation
+ *                            from `sessionStorage` is pinned by the test named above,
+ *                            so it is not re-derived here);
+ *   __bootTutorialStore()  — what `tutorialController`'s module body does, i.e. it
+ *                            re-runs the production `initialState()`.
+ *
+ * `__resetTutorialStore()` cannot be used for this: it CLEARS the scope and the
+ * pointer first, which is a page load with no session — the state whose absence of a
+ * disagreement is exactly why the defects were invisible.
+ */
+describe('worked-example session — the boot window after a reload', () => {
+  /** Put the module pair into the state a page load leaves them in. */
+  function bootHoldingSession(index: number): void {
+    sessionStorage.setItem(
+      TUTORIAL_SESSION_KEY,
+      JSON.stringify({ sessionId: TUTORIAL_SESSION_ID, index }),
+    );
+    setTutorialScope(TUTORIAL_SESSION_ID);
+    __bootTutorialStore();
+  }
+
+  /** The backend's own scope behaviour: the session is GONE, the ordinary
+   *  workspace is empty. A blanket 404 would also break the page and would make
+   *  the assertions below unable to tell the two apart. */
+  const expiredSessionRoutes = () =>
+    ({
+      ...readOnlyRoutes([]),
+      'GET /api/experiments': (init?: RequestInit) =>
+        (init?.headers as Record<string, string> | undefined)?.[TUTORIAL_SESSION_HEADER]
+          ? { status: 404, body: { error: 'tutorial_session_not_found' } }
+          : { status: 200, body: { experiments: [] } },
+    }) as never;
+
+  /*
+   * THE INVARIANT, on its own, because both defects below are consequences of it and
+   * a future reader should be able to see the one-line cause without reading either.
+   */
+  it('B1 · the store agrees with the api scope on the FIRST render, not just after resume', () => {
+    bootHoldingSession(3);
+    expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID);
+    expect(getTutorialState().sessionId).toBe(getTutorialScope());
+  });
+
+  /*
+   * DEFECT 1, and the one that shipped a false sentence. With `initialState()`
+   * hard-coding `sessionId: null`, `ExperimentsHome` keyed its list read on `null`
+   * while `api.ts` sent the expired session header, so the read 404ed; and when
+   * resume concluded the session was gone and set `sessionId: null`, THE KEY DID NOT
+   * CHANGE, so nothing re-read. The reader was left on My Experiments being told
+   * "Record Not Found — this experiment id is not in the local workspace" about a
+   * request for a LIST.
+   */
+  it('B2 · an expired pointer ends on the truthful empty workspace, not a record-not-found panel', async () => {
+    bootHoldingSession(3);
+    stubFetchRoutes(expiredSessionRoutes());
+    const view = renderAt();
+
+    // Exactly as `main.tsx` does it: kicked off, not awaited.
+    void resumeTutorialSession();
+
+    // The ordinary empty state — the one true description of this workspace.
+    await screen.findByRole('heading', { name: 'No experiments yet' });
+    // ...and NOT any failure panel. Both titles are named: `Record Not Found` was
+    // the false claim, and `Not Found` is the honest 404 copy that replaced it —
+    // neither belongs on a screen that has successfully read an empty list.
+    expect(view.queryByText('Record Not Found')).toBeNull();
+    expect(view.queryByText('Not Found')).toBeNull();
+    expect(view.container.textContent).not.toMatch(/experiment id is not in the/i);
+
+    // The reader is told what happened to their walkthrough, and nothing was
+    // re-minted or marked complete behind them.
+    const notice = document.querySelector<HTMLElement>('[data-tutorial-notice="expired"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain(LABELS.tutorialSessionExpiredTitle);
+    expect(sentRequests().map((r) => r.key)).not.toContain(SESSION_CREATE);
+    expect(isTutorialCompleted()).toBe(false);
+
+    // The ordering property is NOT regressed by the fix: the very first list read
+    // still went out in the scope the app was actually in.
+    const listReads = sentRequests().filter((r) => r.key === 'GET /api/experiments');
+    expect(listReads[0].scope).toBe(TUTORIAL_SESSION_ID);
+    // and the last one went out in the scope it had moved to, so no read was left
+    // addressing a session the app had just left.
+    expect(listReads[listReads.length - 1].scope).toBeUndefined();
+    // The chip and the requests agree at the end, as they did at the start.
+    expect(getTutorialScope()).toBeNull();
+    expect(getTutorialState().sessionId).toBeNull();
+  }, 30000);
+
+  /*
+   * DEFECT 2, the mirror image: a session that IS still there. `useWorkspaceScopeChanged`
+   * compares against the scope at MOUNT, so a record surface that mounted during the
+   * boot window recorded `null`; resume then CONFIRMING the session looked like a
+   * scope change and bounced the reader off the record they had just reloaded — in the
+   * one case where nothing about their workspace had changed at all.
+   *
+   * Index 2 is `record-readiness`, whose own path is `/record/<anyRecord>` and whose
+   * `anyRecord` resolves to this same id, so the resumed overlay's one navigation
+   * cannot itself move the reader and the assertion is about the scope guard alone.
+   */
+  it('B3 · a live session resumed after a reload does not bounce the reader off the record', async () => {
+    bootHoldingSession(2);
+    stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes() } as never);
+    const view = renderAt(`/record/${PENDING_ID}`);
+
+    void resumeTutorialSession();
+
+    /*
+     * THE BARRIER MATTERS, so it is chosen rather than assumed. `phase === 'running'`
+     * is readable from the store the instant `resumeTutorialSession` emits, which is
+     * BEFORE React has rendered anything that follows from it — an assertion made
+     * there passes on the pre-resume DOM and would have passed with the defect
+     * present. The coach mark, by contrast, is rendered by `GuidedTutorial` FROM that
+     * same emit, so once it is on screen the commit that would also have rendered
+     * `RecordWorkbench`'s `<Navigate>` has happened.
+     */
+    const overlay = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('.tutorial-mark');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(overlay.getAttribute('data-tutorial-step')).toBe('record-readiness');
+
+    // Still on the record. The redirect this replaces landed on My Experiments.
+    expect(view.getByRole('heading', { name: LABELS.screenReview })).toBeInTheDocument();
+    expect(view.queryByRole('heading', { level: 1, name: LABELS.screenExperiments })).toBeNull();
+    // The same session, at the stored step — no second session minted.
+    expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID);
+    expect(getTutorialState().index).toBe(2);
+    expect(sentRequests().map((r) => r.key)).not.toContain(SESSION_CREATE);
+    // Every request the record surface issued was scoped, throughout.
+    expect(
+      sentRequests().filter(
+        (r) => r.key.startsWith('GET /api/experiments/') && r.scope !== TUTORIAL_SESSION_ID,
+      ),
+    ).toEqual([]);
+  }, 30000);
+
+  /*
+   * The UNKNOWN-cause branch, which must keep behaving as designed while the store
+   * now starts out agreeing with the api scope: the scope is dropped (so nothing goes
+   * on addressing a session this tab is no longer presenting), the pointer is KEPT (so
+   * a reload is a real retry), and no cause is named.
+   */
+  it('B4 · resume_failed still drops the scope, keeps the pointer, and names no cause', async () => {
+    bootHoldingSession(1);
+    stubFetchRoutes({
+      ...readOnlyRoutes([]),
+      // A 500 says nothing about whether the session exists.
+      'GET /api/experiments': (init?: RequestInit) =>
+        (init?.headers as Record<string, string> | undefined)?.[TUTORIAL_SESSION_HEADER]
+          ? { status: 500, body: { detail: 'boom' } }
+          : { status: 200, body: { experiments: [] } },
+    } as never);
+    const view = renderAt();
+
+    await resumeTutorialSession();
+
+    expect(getTutorialState().sessionError).toBe('resume_failed');
+    expect(getTutorialScope()).toBeNull();
+    expect(getTutorialState().sessionId).toBeNull();
+    // The pointer survives, so a reload can retry the session that may still exist.
+    expect(readTutorialSession()?.sessionId).toBe(TUTORIAL_SESSION_ID);
+    // The reader ends on the ordinary empty workspace, not on a failure panel about
+    // a record — the 500 was answered for a LIST.
+    await screen.findByRole('heading', { name: 'No experiments yet' });
+    expect(view.queryByText('Record Not Found')).toBeNull();
+    const notice = document.querySelector<HTMLElement>('[data-tutorial-notice]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain(LABELS.tutorialSessionResumeFailedTitle);
+    // No cause is asserted: not expiry, and not a fault of the reader or the app.
+    expect(notice!.textContent).not.toMatch(/expired|no longer exists/i);
   }, 30000);
 });

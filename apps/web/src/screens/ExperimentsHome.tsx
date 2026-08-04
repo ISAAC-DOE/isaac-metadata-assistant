@@ -34,7 +34,14 @@ export function ExperimentsHome() {
    *
    * Read from the tutorial store rather than from `api.getTutorialScope()`, because the
    * store is what notifies React when it changes; the two are kept in step by
-   * `tutorialController`, which sets the api scope and the store's `sessionId` together.
+   * `tutorialController`, which sets the api scope and the store's `sessionId` together
+   * on every transition AND seeds `sessionId` from the api scope at page load. That
+   * last part is what makes this key correct on the FIRST render after a reload: while
+   * it was hard-coded `null`, a reload holding a session pointer issued this read under
+   * the key `null` WITH the session header, so an expired pointer 404ed — and because
+   * concluding the session was gone also set `sessionId: null`, the key never changed
+   * and this screen never re-read. It stayed on the failure panel, telling the reader a
+   * record was missing when what had failed was a list.
    *
    * A LIST re-reads; a RECORD surface leaves. The same scope value drives both, from
    * one hook — see `lib/workspaceScope.ts` for why the two answers differ.

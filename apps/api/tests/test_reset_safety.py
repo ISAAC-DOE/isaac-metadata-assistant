@@ -339,8 +339,53 @@ def test_d1_no_response_leaks_a_filesystem_path(client):
 
 
 @contextlib.contextmanager
-def _lock_spy(monkeypatch, held: set[str], entered: list[str]):
-    """Replace ``ws.record_lock`` with a spy that records which ids are held."""
+def _record_lock_keys(monkeypatch, keys: list[str]):
+    """Record every key the REAL ``record_lock`` computes, then delegate.
+
+    WHY THIS EXISTS SEPARATELY FROM THE SPIES BELOW. Each spy in this file accepts
+    ``session_id`` and forwards it to the real lock, and independent review found that
+    nothing pinned the forwarding: deleting ``session_id=session_id`` left every spy
+    compiling, delegating and passing, while the lock it took became ``"/<id>"``
+    instead of ``"<session>/<id>"`` (``workspace._lock_key``) — a DIFFERENT key from
+    the one production and any concurrent writer use, so nothing would have serialised.
+
+    An assertion written inside a spy cannot catch that, because it can only restate
+    the ``session_id`` the spy already has. So the key is captured where it is actually
+    computed, by wrapping ``ws._lock_key`` (which ``record_lock`` reaches as a module
+    global). This observes; it changes no behaviour.
+    """
+    real_key = ws._lock_key
+
+    def recording(experiment_id: str, session_id: str | None) -> str:
+        key = real_key(experiment_id, session_id)
+        keys.append(key)
+        return key
+
+    monkeypatch.setattr(ws, "_lock_key", recording)
+    yield
+
+
+def _assert_scope_qualified(keys: list[str], session_id: str, ids) -> None:
+    """Every lock taken for ``ids`` was qualified by ``session_id``."""
+    assert keys, "no record lock was taken at all"
+    for exp_id in ids:
+        expected = f"{session_id}/{exp_id}"
+        assert expected in keys, (
+            f"{exp_id} was locked as one of {sorted(set(keys))}, expected {expected!r} — "
+            f"an unscoped lock contends on a different key than production's"
+        )
+    unscoped = sorted({k for k in keys if not k.startswith(f"{session_id}/")})
+    assert not unscoped, f"these locks were not scope-qualified: {unscoped}"
+
+
+@contextlib.contextmanager
+def _lock_spy(monkeypatch, held: set[str], entered: list[str], keys: list[str] | None = None):
+    """Replace ``ws.record_lock`` with a spy that records which ids are held.
+
+    ``keys``, when given, additionally collects the scope-qualified key the REAL lock
+    computed for each acquisition — see :func:`_record_lock_keys` for why that is not
+    the same thing as recording the ``session_id`` this spy received.
+    """
     real_lock = ws.record_lock
 
     @contextlib.contextmanager
@@ -354,7 +399,11 @@ def _lock_spy(monkeypatch, held: set[str], entered: list[str]):
                 held.discard(experiment_id)
 
     monkeypatch.setattr(ws, "record_lock", spy)
-    yield
+    if keys is None:
+        yield
+        return
+    with _record_lock_keys(monkeypatch, keys):
+        yield
 
 
 def test_d2_managed_legacy_removal_runs_under_that_records_lock(client, monkeypatch):
@@ -368,6 +417,7 @@ def test_d2_managed_legacy_removal_runs_under_that_records_lock(client, monkeypa
 
     held: set[str] = set()
     entered: list[str] = []
+    keys: list[str] = []
     removed_under_lock: dict[str, bool] = {}
     real_remove = ws.remove_experiment
 
@@ -375,7 +425,7 @@ def test_d2_managed_legacy_removal_runs_under_that_records_lock(client, monkeypa
         removed_under_lock[exp.id] = exp.id in held
         real_remove(exp)
 
-    with _lock_spy(monkeypatch, held, entered):
+    with _lock_spy(monkeypatch, held, entered, keys):
         monkeypatch.setattr(ws, "remove_experiment", spy_remove)
         tutorial_ws().reset_to_canonical_seed(dry_run=False)
 
@@ -385,6 +435,10 @@ def test_d2_managed_legacy_removal_runs_under_that_records_lock(client, monkeypa
     assert legacy.id in entered
     # no lock is left held
     assert held == set()
+    # ...and every one of those locks was the SESSION's, not the ordinary workspace's.
+    # Without this the spy would survive `session_id` being dropped from the
+    # forwarding, and would then contend on a key production never uses.
+    _assert_scope_qualified(keys, tutorial_ws().session_id, {*CANONICAL_IDS, legacy.id})
 
 
 def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatch):
@@ -407,6 +461,7 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
 
     held: set[str] = set()
     entered: list[str] = []
+    keys: list[str] = []
     high_water = []
     real_lock = ws.record_lock
 
@@ -422,10 +477,16 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
                 held.discard(experiment_id)
 
     monkeypatch.setattr(ws, "record_lock", spy)
-    tutorial_ws().reset_to_canonical_seed(dry_run=False)
+    with _record_lock_keys(monkeypatch, keys):
+        tutorial_ws().reset_to_canonical_seed(dry_run=False)
 
     assert high_water, "the reset took no record lock at all"
     assert max(high_water) == 1, f"the reset held {max(high_water)} record locks at once"
+    # "At most one at a time" is only the property that matters if the ONE is the
+    # right lock. This spy also survived `session_id` being dropped from the
+    # forwarding, which would have made every acquisition here contend on a key the
+    # production reset never takes — so the key is pinned too.
+    _assert_scope_qualified(keys, tutorial_ws().session_id, CANONICAL_IDS)
 
 
 def test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub(
