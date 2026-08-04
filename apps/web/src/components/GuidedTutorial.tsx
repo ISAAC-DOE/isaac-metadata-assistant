@@ -9,14 +9,17 @@ import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import {
   acknowledgeTutorialSessionError,
+  claimStepNavigation,
   claimTargetResolution,
   closeCompletion,
   dismissTutorial,
   failTutorialTargets,
   goToNextStep,
   goToPreviousStep,
+  markStepArrived,
   setTutorialTargets,
   startTutorial,
+  stepHasArrived,
   tutorialReturnFocusTarget,
   useTutorialState,
   type TutorialSessionError,
@@ -131,14 +134,47 @@ export function GuidedTutorial({
     };
   }, [running, state.targets]);
 
-  // --- 2. be on the surface the step describes -------------------------------
+  // --- 2. go to the surface the step describes, ONCE PER STEP -----------------
+  /*
+   * IT NAVIGATES ON A STEP CHANGE, NOT CONTINUOUSLY, and that is a behaviour fix
+   * rather than an optimisation.
+   *
+   * This effect used to navigate on every render where the location differed from
+   * the current step's path, which UNDID any navigation the reader performed.
+   * Three consequences, all real:
+   *
+   *   · the worked-example bar's "Open the Worked Example" could never work. It
+   *     navigates to `/load`, and the bar renders only while a session is open —
+   *     which is only while the walkthrough runs — so the pin returned the reader
+   *     instantly. A control that looks like it acts and does not.
+   *   · Settings → Replay Tutorial was unreachable for the same reason: arriving
+   *     at Settings was undone and the button was detached mid-click.
+   *   · the bar's own comment claimed it was present "on every surface the reader
+   *     wanders to inside the session", while the reader could not wander at all.
+   *
+   * So the claim is now enforced instead of asserted. `claimStepNavigation` grants
+   * exactly one navigation per step+path (it lives in the module store because
+   * `AppShell`, and therefore this component, is remounted by the very navigation
+   * a ref would have to survive). A reader who then walks away keeps the step they
+   * were on, and the coach mark tells them where its control is — the same honest
+   * degradation a step with no available record already gets, rather than a yank.
+   */
   const targetPath = step && state.targets !== undefined ? stepPath(step, targets) : null;
   const here = `${location.pathname}${location.search}`;
+  /** "this step, on this surface" — null when the step cannot be routed at all. */
+  const navKey = step !== undefined && targetPath !== null ? `${step.id}|${targetPath}` : null;
+  const onTargetSurface = navKey !== null && here === targetPath;
   useEffect(() => {
-    if (targetPath === null) return;
-    if (here === targetPath) return;
+    if (navKey === null || targetPath === null) return;
+    if (onTargetSurface) {
+      // Arriving also spends the step's claim, so being already on the right
+      // surface cannot leave an unspent one that fires when the reader leaves.
+      markStepArrived(navKey);
+      return;
+    }
+    if (!claimStepNavigation(navKey)) return;
     navigate(targetPath);
-  }, [targetPath, here, navigate]);
+  }, [navKey, onTargetSurface, targetPath, navigate]);
 
   // --- 3. resolve the step's control -----------------------------------------
   // `settled` distinguishes "still looking" from "looked, and it is not there".
@@ -148,6 +184,10 @@ export function GuidedTutorial({
   const [anchorSettled, setAnchorSettled] = useState(false);
   const missingRecord = step ? stepNeedsMissingRecord(step, targets) : false;
   const waitingOnTargets = running && state.targets === undefined;
+  /** The reader has moved off the surface this step describes — knowable only for a
+   *  step whose surface was actually reached first (see the effect below). */
+  const offTargetSurface =
+    running && step !== undefined && navKey !== null && !onTargetSurface && stepHasArrived(navKey);
 
   useEffect(() => {
     setAnchorEl(null);
@@ -156,7 +196,21 @@ export function GuidedTutorial({
     if (missingRecord || waitingOnTargets) return;
     // Do not start looking until we are on the right surface, or the previous
     // screen's DOM would be searched and a stale control could be highlighted.
-    if (targetPath !== null && here !== targetPath) return;
+    if (targetPath !== null && here !== targetPath) {
+      /*
+       * Two situations, and conflating them was the bug:
+       *
+       *   · the step's own navigation has been issued and has not landed yet —
+       *     keep waiting, and search nothing;
+       *   · the surface WAS reached and the reader has since gone elsewhere, which
+       *     they are now allowed to do. Settle, so the mark comes back and says
+       *     the control is on another screen. Waiting instead made the whole
+       *     walkthrough vanish — taking Skip, Close and its Escape handling with
+       *     it — for as long as the reader stayed away.
+       */
+      if (navKey !== null && stepHasArrived(navKey)) setAnchorSettled(true);
+      return;
+    }
 
     const selector = tutorialAnchorSelector(step.anchor);
     let done = false;
@@ -191,6 +245,10 @@ export function GuidedTutorial({
       observer.disconnect();
       window.clearTimeout(giveUp);
     };
+    // `navKey` is deliberately absent from the deps: it is derived from `step` and
+    // `targetPath`, which are both here, so adding it would only re-run this effect
+    // for no change of input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, step, missingRecord, waitingOnTargets, targetPath, here, anchorTimeoutMs]);
 
   // --- 4. mark the control, and bring it into view ----------------------------
@@ -407,6 +465,11 @@ export function GuidedTutorial({
         aria-describedby="tutorial-mark-body"
         data-tutorial-step={current.id}
         data-tutorial-step-available={unavailable ? 'false' : 'true'}
+        /* A separate attribute rather than a third value of the one above: "the
+           control is not on the screen you are on" and "the control is not in this
+           build / this workspace" are different facts with different remedies, and
+           `data-tutorial-step-available="false"` already means the second. */
+        data-tutorial-step-off-surface={offTargetSurface ? 'true' : undefined}
         tabIndex={-1}
         style={
           unavailable || position === null
@@ -424,10 +487,24 @@ export function GuidedTutorial({
         </p>
         <div id="tutorial-mark-body">
           <p className="tutorial-body">{current.body}</p>
-          {unavailable && (
+          {/*
+            TWO DIFFERENT REASONS THE CONTROL IS NOT BEING POINTED AT, and they must
+            not borrow each other's words. The step's own `unavailable` copy explains
+            an absent RECORD or an absent control ("nothing was un-answered or reset
+            to create one") — none of which is true when the only thing that happened
+            is that the reader navigated to another screen. Using it there would state
+            a cause that did not occur.
+          */}
+          {offTargetSurface ? (
             <p className="tutorial-unavailable">
-              <strong>Not shown on this visit —</strong> {current.unavailable}
+              <strong>Not on this screen —</strong> {LABELS.tutorialStepOffSurface}
             </p>
+          ) : (
+            unavailable && (
+              <p className="tutorial-unavailable">
+                <strong>Not shown on this visit —</strong> {current.unavailable}
+              </p>
+            )
           )}
         </div>
 

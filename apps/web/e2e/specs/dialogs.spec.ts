@@ -2,9 +2,11 @@
  * Dialog semantics — the three overlays this app owns.
  * @interaction
  *
- *   ⌘K Search        modal, focus-trapped, Escape closes, focus restored
- *   Help             non-modal popover dialog, Escape closes, focus restored
- *   Reset Demo       modal, focus-trapped, typed-confirmation gate
+ *   ⌘K Search            modal, focus-trapped, Escape closes, focus restored
+ *   Help                 non-modal popover dialog, Escape closes, focus restored
+ *   Reset Worked Example modal, focus-trapped, typed-confirmation gate — now
+ *                        reached from the worked-example bar inside a real
+ *                        session, because that is the only place it exists
  *
  * Runs at desktop AND at 375px, because the `max-width: 640px` breakpoint
  * changes the chrome these dialogs are anchored in.
@@ -131,7 +133,8 @@ test.describe('@interaction assistant slide-over (narrow viewports only)', () =>
   // 375px and vacuous at 1280px — it skips explicitly rather than pretending.
   test('opens as a modal dialog, traps Tab, closes on Escape, restores focus', async ({ page, app }) => {
     const { SEED } = await import('../env');
-    await app.goto(`/record/${SEED.partial}`);
+    // Record surface → the shared worked-example session.
+    await app.gotoExample(`/record/${SEED.partial}`);
 
     const trigger = page.locator('button.assistant-drawer-trigger');
     await expect(trigger).toHaveCount(1);
@@ -168,12 +171,43 @@ test.describe('@interaction assistant slide-over (narrow viewports only)', () =>
   });
 });
 
-test.describe('@interaction reset-demo confirmation dialog', () => {
-  // READ-ONLY: this test opens the dialog and asserts its gate. It NEVER types
-  // the confirmation phrase and NEVER submits, so the shared synthetic
-  // workspace the other four viewport projects are reading is untouched.
-  test('is a labelled modal with a typed-confirmation gate, and Escape cancels', async ({ page, app }) => {
+test.describe('@interaction reset-worked-example confirmation dialog', () => {
+  /*
+   * WHERE THIS CONTROL LIVES NOW, because the locator moved and the reason
+   * matters more than the new string.
+   *
+   * It was `Reset Workspace` on `/experiments`. `POST /api/demo/reset` now
+   * REQUIRES a worked-example session and refuses without one, writing nothing,
+   * so the control was rehomed into the persistent worked-example bar
+   * (`TutorialSessionBar`) and renamed `Reset Worked Example` — the old name
+   * would have described a scope it cannot reach. On My Experiments it would be
+   * a control that looks like it acts and does not, which is exactly the failure
+   * the note below was written about, so it is NOT there any more and asserting
+   * that it is would be asserting a design the app does not have.
+   *
+   * The bar renders only while a session is open, and the ONLY way a reader
+   * opens one is by starting the walkthrough. So this test starts the real
+   * walkthrough — which mints a session of its OWN, not the shared read-only one
+   * — and drives the control where it actually is.
+   *
+   * STILL READ-ONLY over any shared state, and now over a private session too:
+   * it opens the dialog (whose preview is a read-only `mode: 'preview'` POST),
+   * asserts the gate, and NEVER types the phrase or submits. The `tutorial`
+   * fixture disposes the session this test created afterwards.
+   */
+  test('is a labelled modal with a typed-confirmation gate, and Escape cancels', async ({
+    page,
+    app,
+    tutorial,
+  }) => {
     await app.open(experiments);
+
+    await page.getByRole('button', { name: 'Start Tutorial' }).click();
+    // The bar is chrome and appears as soon as the session exists — before any
+    // coach mark has settled.
+    const bar = page.getByRole('complementary', { name: 'Worked example session' });
+    await expect(bar).toBeVisible({ timeout: 20_000 });
+    expect(tutorial.sessionsCreated().length, 'starting the walkthrough must mint one session').toBe(1);
 
     // Asserted, NOT skipped. This used to read
     //   `if ((await trigger.count()) === 0) test.skip(true, 'nothing removable …')`
@@ -186,35 +220,57 @@ test.describe('@interaction reset-demo confirmation dialog', () => {
     // dialog's focus trap and typed-confirmation gate — silently vacuous. The
     // backend this suite asserts as a precondition always runs synthetic-only, so
     // the trigger is always present; if it is not, that is a defect and must fail.
-    const trigger = page.getByRole('button', { name: /Reset Workspace/i });
+    const trigger = bar.getByRole('button', { name: /Reset Worked Example/i });
     await expect(
       trigger,
-      'the Reset Workspace trigger is absent from /experiments. Either the control ' +
-        'was renamed again (update this locator) or the app is not reporting ' +
-        'mode: synthetic-only. Both are failures, not reasons to skip.'
+      'the Reset Worked Example trigger is absent from the worked-example bar. Either the ' +
+        'control was renamed or rehomed again (update this locator) or the app is not ' +
+        'reporting mode: synthetic-only. Both are failures, not reasons to skip.'
     ).toBeVisible();
     await trigger.click();
 
-    const dialog = page.getByRole('dialog');
+    /*
+     * `page.getByRole('dialog')` is deliberately NOT used here any more, and this
+     * is not a style change. The coach mark is ALSO a `role="dialog"`
+     * (`GuidedTutorial.tsx`), so with the walkthrough running there are two, and a
+     * bare role query is a strict-mode violation — or, worse, resolves to the
+     * wrong one. `aria-modal="true"` is the exact discriminator the app itself
+     * relies on: the coach mark deliberately does not set it (the control it
+     * describes must stay operable), and the app's own Escape guard keys off
+     * precisely this attribute.
+     */
+    const MODAL = '[role="dialog"][aria-modal="true"]';
+    const dialog = page.locator(MODAL);
+    await expect(dialog).toHaveCount(1);
     await expect(dialog).toBeVisible();
-    await expect(dialog).toHaveAttribute('aria-modal', 'true');
     await expect(dialog).toHaveAttribute('aria-labelledby', /\S/);
+    // Named by the rescoped title, so a silent revert to workspace-wide wording
+    // fails here rather than in a screenshot review.
+    await expect(dialog).toContainText(/Reset the Worked Example/i);
 
     // The destructive action is gated behind a typed phrase and starts disabled.
     const confirmField = dialog.getByRole('textbox');
     await expect(confirmField.first()).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Reset Example Records' })).toBeDisabled();
 
     for (let i = 0; i < 20; i++) await page.keyboard.press('Tab');
     expect(
-      await page.evaluate(() => {
-        const d = document.querySelector('[role="dialog"]');
+      await page.evaluate((sel) => {
+        const d = document.querySelector(sel);
         return !!d && !!document.activeElement && d.contains(document.activeElement);
-      }),
+      }, MODAL),
       'Tab escaped the modal reset dialog'
     ).toBe(true);
 
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator(MODAL)).toHaveCount(0);
     await expect(trigger).toBeFocused();
+
+    // AND the walkthrough is still running. This is the app's own documented
+    // guard: the coach mark registers Escape in the CAPTURE phase on `document`
+    // and would otherwise see it first, silently leaving the walkthrough while a
+    // destructive confirmation was still on screen. The bar's continued presence
+    // is proof the session was not discarded by that keystroke.
+    await expect(bar).toBeVisible();
   });
 });

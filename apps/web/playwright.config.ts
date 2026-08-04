@@ -70,6 +70,14 @@
  * backend is an asserted external precondition; `global-setup.ts` fails fast
  * with the exact command if it is missing. It runs with no database and no
  * credentials.
+ *
+ * ── Workspace scopes ────────────────────────────────────────────────────────
+ * TWO scopes are in play and the suite is explicit about which one each spec is
+ * in. The ordinary workspace is permanently EMPTY; the five built-in example
+ * records exist only inside a worked-example session. `global-setup.ts` opens
+ * ONE such session for the whole run and `global-teardown.ts` discards it, and
+ * the suite stays read-only against BOTH — which is what still lets the five
+ * viewport projects share one backend. See `e2e/worked-example.ts`.
  */
 
 import { defineConfig, type PlaywrightTestConfig, type Project } from '@playwright/test';
@@ -114,7 +122,11 @@ const REPORTER: PlaywrightTestConfig['reporter'] = process.env.CI
 export default defineConfig({
   testDir: './e2e',
   testMatch: /.*\.spec\.ts$/,
+  // Setup opens the ONE worked-example session this run's record surfaces live
+  // in and publishes its id; teardown discards it. Teardown is idempotent and
+  // never fails the run — see the two files.
   globalSetup: './e2e/global-setup.ts',
+  globalTeardown: './e2e/global-teardown.ts',
 
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

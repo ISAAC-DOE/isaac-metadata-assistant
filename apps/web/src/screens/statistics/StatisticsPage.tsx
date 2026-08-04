@@ -18,6 +18,7 @@ import {
 } from '../../components/icons';
 import { api } from '../../lib/api';
 import { useFetch, type FetchState } from '../../lib/useFetch';
+import { useWorkspaceScope } from '../../lib/workspaceScope';
 import type { RuntimeRecord } from '../../lib/crossRecordTriage';
 import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../../lib/types';
 import { ROUTES } from '../../lib/routes';
@@ -281,7 +282,22 @@ export function StatisticsPage() {
     );
   }
 
-  const records = useFetch(() => track(api.getRuntimeRecords()), []);
+  /*
+   * D1 — the RECORD read is keyed on the workspace scope, the other three are not.
+   *
+   * `GET /api/runtime/records` is scope-sensitive exactly as the experiment list
+   * is: nothing in the ordinary workspace, the five built-in examples inside a
+   * worked-example session. With an empty dependency list this page read once, so
+   * opening or leaving a session left every record-derived figure on it describing
+   * a workspace that was no longer being addressed. This is a LIST-shaped surface,
+   * so the right answer is to re-read (unlike the record surfaces, which leave —
+   * see `lib/workspaceScope.ts`).
+   *
+   * The graph status, the About payload and the OpenAPI schema are properties of
+   * the build rather than of a workspace, so they are deliberately left unkeyed.
+   */
+  const scope = useWorkspaceScope();
+  const records = useFetch(() => track(api.getRuntimeRecords()), [scope]);
   const graph = useFetch(() => track(api.getGraphStatus()), []);
   const about = useFetch(() => track(api.getAbout()), []);
   const openapi = useFetch(() => track(api.getOpenApi()), []);

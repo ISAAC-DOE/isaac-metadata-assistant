@@ -3,19 +3,24 @@
  * `playwright.config.ts`, and the separation is the whole design.
  *
  * WHY NOT JUST ADD SPECS TO THE EXISTING SUITE. That suite is read-only by
- * contract: `e2e/global-setup.ts` seeds once via a GET (it never resets, never
- * creates, never deletes), and five viewport projects then run against ONE shared
- * workspace in parallel. Its assertions are about canonical seed CONTENT — a
- * pending count, a specific answered value, an export state. A spec that answers a
- * question or exports a record changes exactly those things, so adding mutation
- * specs there would make the read-only specs fail depending on scheduling. That is
- * not a flaky test; it is two suites with incompatible requirements sharing state.
+ * contract: `e2e/global-setup.ts` opens ONE worked-example session and never
+ * writes into it (it never resets, never creates a record, never deletes one), and
+ * five viewport projects then read that one session in parallel. Its assertions
+ * are about canonical seed CONTENT — a pending count, a specific answered value,
+ * an export state. A spec that answers a question or exports a record changes
+ * exactly those things, so adding mutation specs there would make the read-only
+ * specs fail depending on scheduling. That is not a flaky test; it is two suites
+ * with incompatible requirements sharing state.
  *
  * SO THIS SUITE GETS ITS OWN EVERYTHING:
  *
  *   · its own backend process, on its own port,
- *   · its own `ISAAC_UI_WORKSPACE` directory (so `ensure_seeded()` materialises a
- *     fresh canonical five that nothing else is reading),
+ *   · its own `ISAAC_UI_WORKSPACE` directory, wiped by `globalSetup`,
+ *   · its own WORKED-EXAMPLE SESSION inside that workspace — which is where the
+ *     canonical five now live at all, the ordinary workspace being permanently
+ *     empty. `globalSetup` opens it and publishes its id; `globalTeardown`
+ *     discards it; the auto-use `scope` fixture puts every page and every direct
+ *     API read into it,
  *   · its own Vite dev server, built with `VITE_API_BASE` pointing at that
  *     backend — this is load-bearing and easy to get wrong: the APP reads
  *     `VITE_API_BASE`, while `E2E_API_BASE` only configures the test harness. Set
@@ -41,8 +46,10 @@ import { MUT_API_BASE, MUT_API_PORT, MUT_BASE_URL, MUT_WEB_PORT, MUT_WORKSPACE, 
 export default defineConfig({
   testDir: './e2e/mutation',
   // Wipes the isolated workspace so a run cannot inherit the previous run's
-  // mutations. See the file for why a directory wipe rather than the reset route.
+  // mutations, then opens the worked-example session the canonical records live
+  // in. See the file for why a directory wipe rather than the reset route.
   globalSetup: './e2e/mutation/global-setup.ts',
+  globalTeardown: './e2e/mutation/global-teardown.ts',
   testMatch: /.*\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
@@ -56,9 +63,23 @@ export default defineConfig({
     baseURL: MUT_BASE_URL,
     ...devices['Desktop Chrome'],
     viewport: { width: 1280, height: 800 },
-    // Same animation kill as the read-only suite: a measurement or a click taken
-    // mid-transition is the classic source of flaky browser assertions.
-    reducedMotion: 'reduce',
+    /*
+     * Same animation kill as the read-only suite: a measurement or a click taken
+     * mid-transition is the classic source of flaky browser assertions.
+     *
+     * IT WAS WRITTEN AS A BARE `reducedMotion: 'reduce'` AND SILENTLY DID NOTHING.
+     * `reducedMotion` is not a top-level test option in @playwright/test 1.62 (only
+     * `colorScheme`, `deviceScaleFactor`, `hasTouch`, `isMobile`, `locale` and
+     * `timezoneId` are) — it is a browser-CONTEXT option, which is why
+     * `playwright.config.ts` sets it under `contextOptions` and says so in a
+     * comment. An unknown key in `use` is not a runtime error, so the comment above
+     * claimed an animation kill that was never applied.
+     *
+     * It surfaced the moment this config was added to `e2e/tsconfig.json`'s
+     * `include` (it was the one Playwright config the typecheck did not see):
+     * TS2769, "'reducedMotion' does not exist in type 'UseOptions<…>'".
+     */
+    contextOptions: { reducedMotion: 'reduce' },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

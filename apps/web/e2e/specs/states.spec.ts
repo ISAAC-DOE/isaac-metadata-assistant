@@ -8,11 +8,16 @@
  * projects are reading the same server in parallel.
  */
 
-import { API_BASE, MISSING_RECORD_ID, SEED } from '../env';
+import { API_BASE, API_ROUTE_GLOB, MISSING_RECORD_ID, SEED } from '../env';
 import { ASSISTANT_MOUNTS } from '../surfaces';
 import { expect, LOADING_PANEL, test } from '../fixtures';
 
-const API_GLOB = `${API_BASE.replace(/\/api$/, '')}/api/**`;
+// Was computed locally here; the same expression is now needed by
+// `worked-example.ts` (it is the glob the scope header is attached on), so it
+// lives in `env.ts` and both read the one definition. Two independently-derived
+// copies of "which URLs are the API" is exactly the kind of duplication that
+// drifts silently when a port or prefix changes.
+const API_GLOB = API_ROUTE_GLOB;
 
 /**
  * Return the Assistant panel, opening the drawer first when the viewport is
@@ -100,7 +105,26 @@ test('@interaction ERROR: the error state is announced and keyboard-reachable', 
 });
 
 test('@interaction NOT FOUND: an unknown record id says so instead of guessing', async ({ page }) => {
+  // ORDINARY scope, and deliberately an id that is in NO scope. A canonical
+  // seed id would ALSO 404 here now that the examples live only inside a
+  // worked-example session — which is a different fact, asserted in
+  // `specs/workspace-scope.spec.ts`. Keeping them apart means this test still
+  // proves the "unknown record" state itself: `MISSING_RECORD_ID` stays a 404
+  // even inside a session, so this cannot start passing for the wrong reason.
   await page.goto(`/record/${MISSING_RECORD_ID}`, { waitUntil: 'domcontentloaded' });
+  const alert = page.getByRole('alert');
+  await expect(alert).toBeVisible({ timeout: 20_000 });
+  await expect(alert).toContainText(/Record Not Found/i);
+});
+
+test('@interaction NOT FOUND: an unknown record id says so inside a worked-example session too', async ({
+  page,
+  app,
+}) => {
+  // The same state, reached from INSIDE the scope where the five canonical ids
+  // do resolve. Without this the test above would only prove that the ordinary
+  // workspace is empty.
+  await app.gotoExample(`/record/${MISSING_RECORD_ID}`);
   const alert = page.getByRole('alert');
   await expect(alert).toBeVisible({ timeout: 20_000 });
   await expect(alert).toContainText(/Record Not Found/i);
@@ -145,7 +169,11 @@ test('@interaction REFUSED: the upload endpoint itself answers 403', async ({ re
 test.describe('@interaction assistant panel', () => {
   for (const mount of ASSISTANT_MOUNTS) {
     test(`EMPTY state is honest and labelled on ${mount.id}`, async ({ page, app }) => {
-      await app.goto(mount.path);
+      // Four of the five mounts are record surfaces, which exist only inside a
+      // worked-example session. The scope is declared on the mount, not guessed
+      // here — see `surfaces.ts`.
+      if (mount.scope === 'example') await app.gotoExample(mount.path);
+      else await app.goto(mount.path);
 
       const aside = await openAssistant(page);
 
@@ -171,7 +199,7 @@ test.describe('@interaction assistant panel', () => {
     // Read-only: `POST /experiments/{id}/assistant/query` is documented and
     // implemented as advisory and non-mutating — it never changes the record,
     // its revision, its evidence or its export.
-    await app.goto(`/record/${SEED.partial}`);
+    await app.gotoExample(`/record/${SEED.partial}`);
     const aside = await openAssistant(page);
     const log = aside.getByRole('log');
     await expect(log.locator('.assistant-msg')).toHaveCount(0);

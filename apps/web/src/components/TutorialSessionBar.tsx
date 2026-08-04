@@ -31,8 +31,18 @@ import { useTutorialState } from '../lib/tutorialController';
  * surfaces, is dismissed by Escape, and is a `role="dialog"`. A destructive control
  * must not live inside something that transient, and must not be reachable only
  * while a particular step happens to be showing. This bar sits in `AppShell` between
- * the top bar and the screen body, so it is present on every surface the walkthrough
- * visits and on every surface the reader wanders to inside the session.
+ * the top bar and the screen body, so it is present on every surface the session can
+ * reach.
+ *
+ * ITS FIRST BUTTON WAS DEAD, AND THIS COMMENT SAID SO WITHOUT NOTICING. It used to
+ * end "…and on every surface the reader wanders to inside the session", which was
+ * FALSE: `GuidedTutorial` re-navigated to the current step's own path on every
+ * render where the location differed, so the reader could not wander anywhere, and
+ * "Open the Worked Example" — which navigates to `/load` — was returned instantly
+ * every time it was pressed. Nothing about the bar was wrong; the overlay's pin was.
+ * The overlay now navigates ONCE PER STEP (`claimStepNavigation`), so both controls
+ * here work, Settings → Replay Tutorial is reachable again, and a reader who walks
+ * away is told by the coach mark where its control is instead of being dragged back.
  *
  * IT MAKES NO CLAIM IT DOES NOT ENFORCE. The body sentence states that the records
  * are this session's own copy, that they are absent from My Experiments, and that

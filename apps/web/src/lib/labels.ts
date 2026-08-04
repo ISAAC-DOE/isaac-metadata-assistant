@@ -319,6 +319,33 @@ export const LABELS = {
     'bar above. That restores all five built-in examples in this session and discards these ' +
     'edits with them.',
   demoDriftedScenario: 'Edited record',
+
+  /*
+   * The OTHER typed 409 on `POST /api/demo/run`: no worked-example session was open,
+   * so the built-in examples this operation acts on do not exist to act on
+   * (`_TUTORIAL_REQUIRED_MESSAGE` / `tutorial_scope_required` in
+   * `apps/api/isaac_api/routes.py`).
+   *
+   * THIS COPY EXISTS BECAUSE THE SCREEN WAS CALLING A HEALTHY BACKEND DEAD.
+   * `LoadMaterials.startDemo` recognised only `demo_target_drifted`, so this refusal
+   * fell through to the error state and rendered "Backend Not Running" about a
+   * backend that had answered correctly and instantly.
+   *
+   * THREE THINGS IT MUST NOT SAY, each because the alternative would be false: it
+   * must not name a backend failure (there was none), it must not suggest anything
+   * was written (the server's own message ends "Nothing was written."), and it must
+   * not restate the server's API-facing remedy — a reader is not going to send an
+   * HTTP header, so the remedy names the product control that opens a session.
+   */
+  demoScopeRequiredTitle: 'Example not run — no worked example is open',
+  demoScopeRequiredBody:
+    'The built-in example records exist only inside a worked example of their own, and none is ' +
+    'open right now — so there was nothing here for this to run. Nothing was written and nothing ' +
+    'changed.',
+  demoScopeRequiredRemedy:
+    'Opening the guided walkthrough opens a worked example, and this control works inside one. ' +
+    'It lives in Settings & API → Help & Tutorial.',
+  actionGoToHelpAndTutorial: 'Go to Help & Tutorial',
   actionGoToExperiments: 'Go to My Experiments',
   actionReviewAnswer: 'Review & Answer',
   actionConfirm: 'Confirm',
@@ -369,6 +396,26 @@ export const LABELS = {
   actionTutorialFinish: 'Finish',
   actionCloseTutorial: 'Close Tutorial',
   actionReplayTutorial: 'Replay Tutorial',
+
+  /*
+   * The reader walked away from the screen the current step describes.
+   *
+   * THIS EXISTS BECAUSE WALKING AWAY IS NOW ALLOWED. The overlay used to navigate
+   * back to the step's own path on every render, so this state was unreachable — and
+   * that pin is what made the worked-example bar's own controls dead. With the pin
+   * gone, the step needs something true to say, and the step catalog's `unavailable`
+   * copy is not it: those sentences explain a missing RECORD ("nothing was
+   * un-answered or reset to create one"), which is a cause that has not occurred
+   * here.
+   *
+   * It states only what is known — the control is on another screen and nothing was
+   * changed — and names the two controls that are already in the mark, rather than
+   * promising a "take me there" button that does not exist.
+   */
+  tutorialStepOffSurface:
+    'this step points at a control on another screen, and you have moved away from it. Nothing ' +
+    'was changed. Next and Back carry on through the walkthrough, and each step takes you to the ' +
+    'screen it describes.',
 
   /*
    * The persistent worked-example bar (D2). It exists ONLY while a worked-example

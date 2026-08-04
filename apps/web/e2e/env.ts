@@ -45,10 +45,27 @@ export const API_BASE = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8000/api';
 export const MANAGE_WEB_SERVER = process.env.E2E_EXTERNAL_WEB_SERVER !== '1';
 
 /**
- * The five canonical synthetic seed ids materialised by the backend workspace
+ * Backend API base with the trailing `/api` removed, plus `/**` — the glob that
+ * matches every API call the page makes. Used by the specs that intercept
+ * requests and by `enterWorkedExample()` (see `worked-example.ts`).
+ */
+export const API_ROUTE_GLOB = `${API_BASE.replace(/\/api$/, '')}/api/**`;
+
+/**
+ * The five canonical synthetic seed ids
  * (`apps/api/isaac_api/workspace.py` → `CANONICAL_IDS`). Fixed ids and fixed
  * `created_utc` are what make these specs deterministic — nothing here invents
  * a record, and nothing here writes one.
+ *
+ * WHERE THESE RECORDS LIVE, and this changed: they are NOT in the ordinary
+ * workspace. `ensure_seeded()` no longer materialises them on read; they exist
+ * only inside a worked-example session created by
+ * `POST /api/tutorial/sessions`, one independent copy per session. So every id
+ * below is a **404 in the ordinary scope** and resolves only on a request
+ * carrying `X-Isaac-Tutorial-Session`. A spec that wants one must enter the
+ * scope first — `enterWorkedExample(page)` in `worked-example.ts`, or a
+ * surface declared `scope: 'example'` in `surfaces.ts`, which the `app` fixture
+ * enters automatically.
  */
 export const SEED = {
   /** 5 pending blockers → `needs_attention`. */
@@ -63,5 +80,15 @@ export const SEED = {
   done: '01SYNTHXANESSEED0000000005',
 } as const;
 
-/** An id that matches the record-id shape but is not in the workspace → a real 404. */
+/**
+ * An id that matches the record-id shape and exists in NO scope → a real 404.
+ *
+ * Kept deliberately, even though every id in `SEED` is now also a 404 in the
+ * ordinary scope. The two are different tests: a canonical id outside a session
+ * proves the scope boundary (asserted in `specs/workspace-scope.spec.ts`), while
+ * this id proves the "unknown record" state itself and stays a 404 in EVERY
+ * scope — including inside a worked-example session, where the canonical five
+ * resolve. Reusing a canonical id here would have made the not-found spec pass
+ * for the wrong reason the moment a session was in play.
+ */
 export const MISSING_RECORD_ID = '01SYNTHXANESSEED0000000099';

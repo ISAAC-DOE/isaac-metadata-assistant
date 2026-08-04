@@ -20,6 +20,10 @@ type RunPhase =
   // The server refused to re-seed an edited scenario (409 `demo_target_drifted`).
   // A refusal is NOT an error: the backend answered, and answered correctly.
   | { name: 'drifted'; experimentId?: string }
+  // The server refused because no worked-example session is open (409
+  // `tutorial_scope_required`). Also a refusal, also not an error — and this is the
+  // one that used to render as "Backend Not Running".
+  | { name: 'scopeRequired' }
   | { name: 'error'; error: ApiError }
   | { name: 'done'; result: ApiDemoRunResponse };
 
@@ -43,28 +47,57 @@ type UploadPhase =
 const UPLOADS_GATED_FALLBACK =
   'Uploads are approval-gated and not enabled in this workspace.';
 
-/** The `error` discriminator the backend sends with its 409 demo-run refusal. */
+/**
+ * The two `error` discriminators the backend sends with its 409 demo-run refusals.
+ * Both are values from `apps/api/isaac_api/routes.py` — read from there, never
+ * guessed, because a code this screen invented would silently never match.
+ */
 const DEMO_TARGET_DRIFTED = 'demo_target_drifted';
+const TUTORIAL_SCOPE_REQUIRED = 'tutorial_scope_required';
 
 /**
- * Recognise the ONE refusal this screen states differently: `POST /api/demo/run`
- * answering 409 `demo_target_drifted` because the canonical scenario has been
- * edited and re-seeding would discard that work.
+ * The typed `error` code on a 409 refusal body, or null.
  *
- * Narrow on purpose. Anything else — a different 409, a missing/garbled body, an
- * edge sign-in page, an unreachable backend — falls through to the existing
- * error state, because claiming "your scenario was protected" about a failure we
- * did not observe would be exactly the same class of lie as the `BackendDown`
- * this branch replaces. Returns the refusal's scenario id when the body carries
- * one; the id is optional, its absence must not suppress the refusal.
+ * An HTML intercept is excluded first: an edge sign-in page can carry any status
+ * and is never a typed refusal. A 409 with a missing, non-object or unrecognised
+ * body yields null and falls through to the error state — claiming a specific
+ * refusal we did not observe would be exactly the class of lie the honest failure
+ * state exists to avoid.
  */
-function driftRefusal(error: ApiError): { experimentId?: string } | null {
+function refusalCode(error: ApiError): string | null {
   if (error.status !== 409 || error.htmlIntercept) return null;
   const body = error.body;
   if (typeof body !== 'object' || body === null) return null;
-  const { error: code, experiment_id: id } = body as Record<string, unknown>;
-  if (code !== DEMO_TARGET_DRIFTED) return null;
+  const { error: code } = body as Record<string, unknown>;
+  return typeof code === 'string' ? code : null;
+}
+
+/**
+ * Recognise `POST /api/demo/run` answering 409 `demo_target_drifted` because the
+ * canonical record has been edited and re-seeding would discard that work.
+ *
+ * Returns the refusal's record id when the body carries one; the id is optional,
+ * and its absence must not suppress the refusal.
+ */
+function driftRefusal(error: ApiError): { experimentId?: string } | null {
+  if (refusalCode(error) !== DEMO_TARGET_DRIFTED) return null;
+  const { experiment_id: id } = error.body as Record<string, unknown>;
   return { experimentId: typeof id === 'string' && id !== '' ? id : undefined };
+}
+
+/**
+ * Recognise `POST /api/demo/run` answering 409 `tutorial_scope_required`: the
+ * request carried no `X-Isaac-Tutorial-Session` header, the built-in examples exist
+ * only inside such a session, and so there was nothing to run over.
+ *
+ * WHY THIS BRANCH EXISTS. Without it this refusal fell through to `{name:'error'}`
+ * → `BackendDown`, i.e. the screen reported a backend that had answered correctly
+ * and instantly as not running. The status alone was never enough to reach it: a
+ * `demo_target_drifted` 409 means something different and has a different remedy,
+ * so the typed discriminator is what is matched.
+ */
+function scopeRefusal(error: ApiError): boolean {
+  return refusalCode(error) === TUTORIAL_SCOPE_REQUIRED;
 }
 
 /**
@@ -85,12 +118,14 @@ export function LoadMaterials() {
       .runDemo('draft_only')
       .then((result) => setRun({ name: 'done', result }))
       .catch((error: ApiError) => {
-        const refusal = driftRefusal(error);
-        setRun(
-          refusal
-            ? { name: 'drifted', experimentId: refusal.experimentId }
-            : { name: 'error', error },
-        );
+        const drift = driftRefusal(error);
+        if (drift) {
+          setRun({ name: 'drifted', experimentId: drift.experimentId });
+        } else if (scopeRefusal(error)) {
+          setRun({ name: 'scopeRequired' });
+        } else {
+          setRun({ name: 'error', error });
+        }
       });
   };
 
@@ -240,6 +275,43 @@ export function LoadMaterials() {
                 onClick={() => navigate(ROUTES.experiments)}
               >
                 {LABELS.actionGoToExperiments}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/*
+         * The scope refusal. Same protective treatment as the drift refusal above
+         * and the governance refusal at the top of the screen — never the red error
+         * treatment, because nothing failed: the server answered, correctly, that
+         * the records this control acts on are not in the workspace this request
+         * addressed. `role="alert"` because it appears in answer to a click.
+         *
+         * The remedy is a NAVIGATION, not a repair. It does not offer to open a
+         * worked example from here: that would be this screen quietly starting the
+         * guided walkthrough on the reader's behalf, and the control that does it
+         * has its own home, its own copy about what it discards, and its own place
+         * in the walkthrough's lifecycle.
+         */}
+        {run.name === 'scopeRequired' && (
+          <div
+            className="upload-blocked demo-refused"
+            role="alert"
+            aria-labelledby="demo-scope-required-title"
+          >
+            <ShieldCheck size={14} strokeWidth={2.1} aria-hidden="true" />
+            <div>
+              <p id="demo-scope-required-title" className="demo-refused-title">
+                <strong>{LABELS.demoScopeRequiredTitle}</strong>
+              </p>
+              <p>{LABELS.demoScopeRequiredBody}</p>
+              <p>{LABELS.demoScopeRequiredRemedy}</p>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate(ROUTES.settingsTab('help'))}
+              >
+                {LABELS.actionGoToHelpAndTutorial}
               </button>
             </div>
           </div>

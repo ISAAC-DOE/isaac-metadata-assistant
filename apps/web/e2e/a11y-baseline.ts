@@ -262,11 +262,42 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'evidence@tablet-768x1024': 71,
       'evidence@mobile-375x812': 68,
       'evidence@zoom-200': 69,
-      'experiments@desktop-1280x800': 10,
-      'experiments@laptop-1024x768': 10,
-      'experiments@tablet-768x1024': 10,
-      'experiments@mobile-375x812': 9,
-      'experiments@zoom-200': 9,
+      /*
+       * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
+       * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
+       * they MOVED, to `experiments-example` below, which measured exactly the old
+       * numbers (10/10/10/9/9).
+       *
+       * WHY. `ensure_seeded()` no longer materialises the five built-in examples
+       * into the ordinary workspace; they exist only inside a worked-example
+       * session. So this surface is now the real EMPTY state — a heading, two
+       * sentences, two buttons and the first-run offer — and the low-contrast nodes
+       * that used to be counted here were the queue's own (`.exp-row` metadata, the
+       * `--text-tertiary` and `--text-quaternary` row text, the `.exp-row.done`
+       * opacity composites). The remaining 3 (2 at the two narrow projects) are the
+       * offer card and the empty-state hints.
+       *
+       * The pair is the point: lowering this number without adding
+       * `experiments-example` would have looked like a 35-node accessibility
+       * improvement while the same 35 nodes were simply no longer being scanned.
+       */
+      'experiments@desktop-1280x800': 3,
+      'experiments@laptop-1024x768': 3,
+      'experiments@tablet-768x1024': 3,
+      'experiments@mobile-375x812': 2,
+      'experiments@zoom-200': 2,
+      /*
+       * The POPULATED queue, at the same route inside a worked-example session.
+       * These five numbers are byte-identical to what `experiments@*` measured
+       * before the examples moved out of the ordinary workspace, which is the
+       * corroboration that this surface inherited that coverage rather than
+       * introducing new debt: same markup, same tokens, same counts.
+       */
+      'experiments-example@desktop-1280x800': 10,
+      'experiments-example@laptop-1024x768': 10,
+      'experiments-example@tablet-768x1024': 10,
+      'experiments-example@mobile-375x812': 9,
+      'experiments-example@zoom-200': 9,
       'export-readiness@desktop-1280x800': 7,
       'export-readiness@laptop-1024x768': 6,
       'export-readiness@tablet-768x1024': 6,
@@ -376,7 +407,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-about@desktop-1280x800': 15,
       'settings-about@laptop-1024x768': 15,
       'settings-about@tablet-768x1024': 15,
-      'settings-about@mobile-375x812': 14,
+      // 14 -> 13 at 375 only, MEASURED in the tutorial-scope slice (2026-08-04).
+      // A genuine improvement, lowered rather than left stale. The About tab
+      // renders a workspace-derived line that is shorter now that the ordinary
+      // workspace is empty, and at 375 the shorter string stops wrapping — so one
+      // rendered text node fewer exists to fail. The other four projects are
+      // unchanged, which is what a wrap-boundary effect looks like.
+      'settings-about@mobile-375x812': 13,
       'settings-about@zoom-200': 14,
       'settings-api@desktop-1280x800': 18,
       'settings-api@laptop-1024x768': 18,
@@ -396,11 +433,18 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-privacy@tablet-768x1024': 8,
       'settings-privacy@mobile-375x812': 7,
       'settings-privacy@zoom-200': 7,
-      'statistics@desktop-1280x800': 10,
-      'statistics@laptop-1024x768': 10,
-      'statistics@tablet-768x1024': 10,
-      'statistics@mobile-375x812': 9,
-      'statistics@zoom-200': 9,
+      // 10/10/10/9/9 -> 4/4/4/3/3, MEASURED in the tutorial-scope slice
+      // (2026-08-04). "Workspace at a Glance" is derived from
+      // `GET /api/runtime/records`, which now answers about the EMPTY ordinary
+      // workspace, so the per-record breakdown rows this surface used to render are
+      // simply not there. Lowered rather than left stale — but read it as "fewer
+      // rows are drawn", NOT as "the contrast tokens were fixed": the surviving 4
+      // fail on the same `--text-tertiary`/`--text-quaternary` tokens as before.
+      'statistics@desktop-1280x800': 4,
+      'statistics@laptop-1024x768': 4,
+      'statistics@tablet-768x1024': 4,
+      'statistics@mobile-375x812': 3,
+      'statistics@zoom-200': 3,
       'validator@desktop-1280x800': 9,
       'validator@laptop-1024x768': 9,
       'validator@tablet-768x1024': 9,
@@ -552,8 +596,36 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // tab changes how that tab row wraps, the split disappears, and darwin rises by 2
   // where linux rises by 1. So this is not '+1 per surface' arithmetic and must not
   // be re-derived that way.
-  darwin: 1650,
-  linux: 1650,
+  // TUTORIAL-SCOPE SLICE, 2026-08-04: 1650 -> 1632 on both columns.
+  //
+  // The arithmetic, so a reviewer can check it without a run: experiments
+  // 48 -> 13 (-35); experiments-example +48 (a NEW surface holding exactly the
+  // numbers `experiments` used to hold); statistics 48 -> 18 (-30);
+  // settings-about@mobile-375x812 14 -> 13 (-1). Net -18.
+  //
+  // Read the net as a MEASUREMENT ARTEFACT, not as accessibility work. Nothing was
+  // fixed: the built-in example records moved out of the ordinary workspace into a
+  // worked-example session, so My Experiments and Statistics now render far less
+  // text in the ordinary scope. The 48 queue nodes did not go away — they are
+  // counted under `experiments-example`, which is why that surface was added rather
+  // than the number simply being lowered.
+  //
+  // ── The one thing in this file NOT measured on both platforms ───────────────
+  //
+  // Every number above was measured on darwin (two consecutive local runs, same
+  // counts). The LINUX column for the 16 changed/added keys — the five
+  // `experiments@*`, the five `experiments-example@*`, the five `statistics@*` and
+  // `settings-about@mobile-375x812` — is UNMEASURED: this environment cannot run
+  // the Linux system face, and the file's own type system leaves no way to say
+  // "unknown" (a per-platform pair must carry two DIFFERENT numbers, so an honest
+  // "same as darwin, unverified" can only be written as a scalar). They are
+  // therefore written as scalars and flagged here.
+  //
+  // CI (Linux) is the authority. If it disagrees, transcribe ITS numbers into the
+  // keys above and correct these two totals — never loosen the assertion. The
+  // previously-recorded keys are untouched and their linux values still stand.
+  darwin: 1632,
+  linux: 1632,
 };
 
 /**

@@ -6,7 +6,11 @@ import { LABELS } from '../lib/labels';
 import { __resetTutorialStore } from '../lib/tutorialController';
 import {
   EXP_ID,
+  aboutResponse,
   demoRunDraftOnly,
+  graphStatusUnavailable,
+  healthSynthetic,
+  openApiFixture,
   resetDemoRoutes,
   stubFetchDown,
   stubFetchRoutes,
@@ -31,6 +35,22 @@ import type { RouteEntry } from '../test/apiFixtures';
  */
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
+
+/**
+ * The OTHER 409 body `POST /api/demo/run` sends, copied from
+ * `_tutorial_scope_required` / `_TUTORIAL_REQUIRED_MESSAGE` in
+ * `apps/api/isaac_api/routes.py`. Every field is the server's; the `error`
+ * discriminator is the only part the client may branch on.
+ */
+const scopeRequiredBody = {
+  error: 'tutorial_scope_required',
+  operation: 'POST /api/demo/run',
+  header: 'X-Isaac-Tutorial-Session',
+  message:
+    'This operation works on the built-in example records, which exist only inside ' +
+    'a worked-example session. Open one with POST /api/tutorial/sessions and send ' +
+    'its id as the X-Isaac-Tutorial-Session header. Nothing was written.',
+};
 
 /** The 409 body the backend sends. Prose is the server's; only the shape is contractual. */
 const driftedBody = {
@@ -67,6 +87,17 @@ function runDemoWith(
   const view = renderLoad();
   fireEvent.click(view.getByText(LABELS.actionRunDemoShort));
   return view;
+}
+
+/** Everything Settings & API reads, so a navigation INTO it can be asserted on the
+ *  live panel rather than on a pathname string. */
+function settingsRoutes(): Record<string, RouteEntry> {
+  return {
+    'GET /api/health': { body: healthSynthetic },
+    'GET /api/about': { body: aboutResponse },
+    'GET /api/openapi': { body: openApiFixture },
+    'GET /api/graph/status': { body: graphStatusUnavailable },
+  } as Record<string, RouteEntry>;
 }
 
 /** The refusal panel, queried the way a screen reader reaches it. */
@@ -148,6 +179,127 @@ describe('S2 · demo run — 409 demo_target_drifted is a refusal, not a failure
     expect(await view.findByText(LABELS.demoDriftedTitle)).toBeInTheDocument();
     expect(view.queryByText('Backend Not Running')).toBeNull();
     expect(within(refusal(view) as HTMLElement).queryByText(EXP_ID)).toBeNull();
+  });
+});
+
+/*
+ * THE SECOND TYPED 409, and the same defect one code later.
+ *
+ * `POST /api/demo/run` now also refuses with `409 {"error":"tutorial_scope_required"}`
+ * when the request carries no `X-Isaac-Tutorial-Session` header: the built-in example
+ * records exist only inside a worked-example session, so outside one there is nothing
+ * for this operation to run over. `startDemo` recognised only `demo_target_drifted`,
+ * so this refusal fell through to `{name:'error'}` → `BackendDown`, and pressing the
+ * button in the ordinary workspace reported a healthy backend as not running.
+ *
+ * These tests are deliberately the same SHAPE as the drift ones above, because the
+ * property is the same one: a typed refusal gets its own truthful state, and nothing
+ * else does.
+ */
+describe('S2 · demo run — 409 tutorial_scope_required is a refusal, not a failure', () => {
+  /** The scope-refusal panel, queried the way a screen reader reaches it. */
+  function scopeRefusal(view: ReturnType<typeof renderLoad>) {
+    return view.queryByRole('alert', {
+      name: new RegExp(LABELS.demoScopeRequiredTitle, 'i'),
+    });
+  }
+
+  it('renders the refusal and never the backend-down state', async () => {
+    const view = runDemoWith({ status: 409, body: scopeRequiredBody });
+
+    expect(await view.findByText(LABELS.demoScopeRequiredTitle)).toBeInTheDocument();
+    // The exact false statement this branch exists to prevent — the backend answered
+    // correctly and instantly.
+    expect(view.queryByText('Backend Not Running')).toBeNull();
+    expect(view.queryByText('ISAAC Is Not Responding')).toBeNull();
+    expect(view.queryByText('ISAAC Returned an Error')).toBeNull();
+    // …and it is not confused with the OTHER 409, which has a different cause and a
+    // different remedy.
+    expect(view.queryByText(LABELS.demoDriftedTitle)).toBeNull();
+    // No half-run pipeline is drawn.
+    expect(view.queryByText('Build Draft')).toBeNull();
+    expect(view.queryByText('Open the Record →')).toBeNull();
+  });
+
+  it('states that nothing ran, that nothing was written, and where a worked example is opened', async () => {
+    const view = runDemoWith({ status: 409, body: scopeRequiredBody });
+    await view.findByText(LABELS.demoScopeRequiredTitle);
+    const text = (scopeRefusal(view) as HTMLElement).textContent ?? '';
+
+    expect(text).toMatch(/not run/i); // it did not run
+    // The server's own message ends "Nothing was written." — the screen must not
+    // suggest otherwise, and must not hedge it either.
+    expect(text).toMatch(/nothing was written/i);
+    expect(text).toMatch(/nothing changed/i);
+    // WHY: the records this acts on are not in the workspace the request addressed.
+    expect(text).toMatch(/exist only inside a worked example/i);
+    expect(text).toMatch(/none is open/i);
+    // WHERE the reader goes, named as a product surface.
+    expect(text).toMatch(/Help & Tutorial/i);
+    // It must not misdescribe a healthy server, and must not claim a loss.
+    expect(text).not.toMatch(/not running|unreachable|not responding|offline|\bdown\b/i);
+    expect(text).not.toMatch(/lost|deleted|corrupt|error|failed/i);
+    // It must not restate the server's API-facing remedy: a reader does not send a
+    // header, and copy that told them to would be unactionable.
+    expect(text).not.toMatch(/X-Isaac-Tutorial-Session|POST \/api/i);
+  });
+
+  it('is an alert region named by its visible title', async () => {
+    const view = runDemoWith({ status: 409, body: scopeRequiredBody });
+    await view.findByText(LABELS.demoScopeRequiredTitle);
+
+    const region = scopeRefusal(view);
+    expect(region).not.toBeNull();
+    const labelledby = region!.getAttribute('aria-labelledby');
+    expect(labelledby).toBeTruthy();
+    expect(document.getElementById(labelledby!)!.textContent).toContain(
+      LABELS.demoScopeRequiredTitle,
+    );
+  });
+
+  it('offers a keyboard-reachable control that lands on Settings → Help & Tutorial', async () => {
+    // The destination is stubbed too, so this asserts the control lands on a LIVE
+    // Help & Tutorial panel rather than that a pathname string changed.
+    const view = runDemoWith({ status: 409, body: scopeRequiredBody }, settingsRoutes());
+    await view.findByText(LABELS.demoScopeRequiredTitle);
+
+    const go = within(scopeRefusal(view) as HTMLElement).getByRole('button', {
+      name: LABELS.actionGoToHelpAndTutorial,
+    }) as HTMLButtonElement;
+    expect(go.tagName).toBe('BUTTON'); // natively focusable, no tabindex needed
+    expect(go.disabled).toBe(false);
+    go.focus();
+    expect(document.activeElement).toBe(go);
+
+    fireEvent.click(go);
+    expect(view.getByTestId('pathname').textContent).toBe('/settings');
+    // The destination really rendered the control the copy sends the reader to,
+    // rather than merely a pathname changing.
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: LABELS.actionReplayTutorial })).toBeInTheDocument(),
+    );
+  });
+
+  it('does not start a worked example on the reader’s behalf', async () => {
+    const calls = stubFetchRoutes({
+      'POST /api/demo/run': { status: 409, body: scopeRequiredBody },
+    });
+    const view = renderLoad();
+    fireEvent.click(view.getByText(LABELS.actionRunDemoShort));
+    await view.findByText(LABELS.demoScopeRequiredTitle);
+    // A screen that quietly opened a session here would be writing on a press the
+    // reader made for something else — and it would then have to explain what that
+    // discarded, which is the walkthrough control's own job, in its own place.
+    expect(calls.filter((k) => k.includes('/tutorial/sessions'))).toEqual([]);
+    // The refused run is the only request it made.
+    expect(calls).toEqual(['POST /api/demo/run']);
+  });
+
+  it('leaves Run Demo enabled so the refusal is not a dead end', async () => {
+    const view = runDemoWith({ status: 409, body: scopeRequiredBody });
+    await view.findByText(LABELS.demoScopeRequiredTitle);
+    const run = view.getByText(LABELS.actionRunDemoShort) as HTMLButtonElement;
+    expect(run.disabled).toBe(false);
   });
 });
 

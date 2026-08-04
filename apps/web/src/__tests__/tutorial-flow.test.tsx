@@ -13,11 +13,16 @@
  * accidentally includes a destructive route would silence the structural one.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
+import { HelpAndTutorialPanel } from '../screens/settings/HelpAndTutorial';
 import { LABELS } from '../lib/labels';
 import {
   TUTORIAL_ID,
@@ -25,7 +30,11 @@ import {
   TUTORIAL_VERSION,
   isTutorialCompleted,
 } from '../lib/tutorialPreference';
-import { __resetTutorialStore } from '../lib/tutorialController';
+import {
+  __resetTutorialStore,
+  getTutorialState,
+  startTutorial,
+} from '../lib/tutorialController';
 import { TUTORIAL_SESSION_KEY } from '../lib/tutorialSession';
 import { TUTORIAL_STEPS, tutorialAnchorSelector } from '../lib/tutorialSteps';
 import {
@@ -497,7 +506,27 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     expect(screen.getByText('Not finished in this browser yet.')).toBeInTheDocument();
   });
 
-  it('says the completion flag is browser-local, and that replay changes nothing', async () => {
+  /*
+   * THE COPY THIS ASSERTION PINS WAS CORRECTED, AND THE ASSERTIONS GREW WITH IT.
+   *
+   * It used to require the ABSOLUTES `no field is answered, no record is exported`
+   * and `nothing is restored or removed`, and those were true when starting the
+   * walkthrough wrote nothing at all. They are not true any more, in two ways the
+   * old wording could not distinguish:
+   *
+   *   · starting opens a worked-example session (`POST /api/tutorial/sessions`) and
+   *     the backend materialises five example records inside it — a write;
+   *   · if a session is ALREADY open, starting DELETEs it first
+   *     (`releaseTutorialSession` runs before `createTutorialSession`), discarding
+   *     anything confirmed inside it. The old copy told a reader mid-walkthrough
+   *     that "nothing is restored or removed" and then removed their session.
+   *
+   * The claims are therefore SCOPED to the reader's own work rather than dropped,
+   * and the two facts the absolutes were hiding are asserted here as well — so this
+   * test now pins strictly more than it did. It is checked in the OTHER direction
+   * too: the bare absolute must not come back.
+   */
+  it('says the completion flag is browser-local, and scopes what replay does not touch', async () => {
     stubFetchRoutes(readOnlyRoutes() as never);
     renderAt('/settings?tab=help');
     await screen.findByRole('button', { name: LABELS.actionReplayTutorial });
@@ -507,10 +536,79 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     expect(panel.textContent).toMatch(/remembered by this browser only/i);
     expect(panel.textContent).toMatch(/no account/i);
     expect(panel.textContent).toMatch(/another browser, another device/i);
-    // ...and it must promise, in the reader's words, what the code enforces.
-    expect(panel.textContent).toMatch(/no field is answered, no record is exported/i);
-    expect(panel.textContent).toMatch(/nothing is restored or removed/i);
+    // The promise the code does keep, in the reader's words: their OWN work is
+    // untouched.
+    expect(panel.textContent).toMatch(/no field of yours is answered/i);
+    expect(panel.textContent).toMatch(/no record of yours is exported/i);
+    expect(panel.textContent).toMatch(/nothing of yours is restored or removed/i);
+    // And the promise the code does NOT keep must not be made. These are the exact
+    // absolutes that went stale; if either returns, this fails.
+    expect(panel.textContent).not.toMatch(/\bit changes nothing\b/i);
+    expect(panel.textContent).not.toMatch(/nothing is restored or removed/i);
+    // What starting actually does, disclosed rather than omitted.
+    expect(panel.textContent).toMatch(/opens a worked example of its own/i);
+    expect(panel.textContent).toMatch(/discarded when the walkthrough ends/i);
+    // Where the in-progress pointer lives, since "nothing else is stored" was false
+    // while a session was open.
+    expect(panel.textContent).toMatch(/this tab also holds/i);
+    expect(panel.textContent).toMatch(/no record content, no field value, and no identity/i);
   });
+
+  /*
+   * THE CLAIM THAT WAS FALSE, PINNED IN BOTH DIRECTIONS.
+   *
+   * The panel's own doc comment asserted "`Reset Workspace` on My Experiments
+   * remains the only control that discards work". There is no `Reset Workspace`, it
+   * is not on My Experiments, and it is not the only such control. A comment is not
+   * rendered, so no copy guard could catch it — this asserts on the SOURCE, which is
+   * the only place the claim ever existed.
+   */
+  it('does not name a control that has moved, in copy or in comment', async () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../screens/settings/HelpAndTutorial.tsx'),
+      'utf8',
+    );
+    // Non-trivial: a file reduced to a stub would satisfy every negative below.
+    expect(source.length).toBeGreaterThan(1000);
+    // The retired label may appear ONLY as a recorded correction, never as a live
+    // claim about where a control is. `Reset Workspace` on My Experiments is exactly
+    // the sentence that went stale.
+    expect(source).not.toMatch(/`?Reset Workspace`? on My\s+Experiments/);
+    expect(source).not.toMatch(/only control that discards work/);
+    // The control's real name and real home, so the correction is not merely a
+    // deletion.
+    expect(source).toContain(LABELS.actionResetDemo);
+    expect(source).toMatch(/worked-example bar/);
+  });
+
+  /*
+   * The panel is rendered on its OWN here, not through `AppRoutes`, and that is
+   * required rather than convenient: starting the walkthrough moves the reader to
+   * step one's surface, so a test that pressed Replay inside the routed app would
+   * leave Settings and have no panel left to read. The condition under test belongs
+   * to the panel and the store, so the panel and the store are what is mounted.
+   */
+  it('warns, only while a session is open, that starting again discards it', async () => {
+    stubFetchRoutes(readOnlyRoutes() as never);
+    const view = render(<HelpAndTutorialPanel />);
+
+    // No session: no warning. A permanent one would be false most of the time —
+    // there is usually nothing to discard.
+    expect(view.container.textContent).not.toMatch(/A worked example is open now/i);
+
+    await act(async () => {
+      await startTutorial(null);
+    });
+    expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID);
+
+    // A session IS open, and the panel now says what pressing the button again costs
+    // — which is exactly what `startTutorial` does before it creates the next one.
+    await waitFor(() =>
+      expect(view.container.textContent).toMatch(/A worked example is open now/i),
+    );
+    expect(view.container.textContent).toMatch(/discards it first/i);
+    expect(view.container.textContent).toMatch(/anything you have confirmed inside it/i);
+  }, 30000);
 });
 
 // --- 6. nothing is written, anywhere ----------------------------------------

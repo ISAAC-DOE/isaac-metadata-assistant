@@ -13,12 +13,13 @@
  * the walkthrough (Settings, My Experiments) start it with one call.
  *
  * WHAT THIS STORE MAY HOLD: a phase, a step index, the open worked-example
- * session id, the resolved target record ids, and whether the reader has
- * dismissed the offer in this session. It holds NO record content, NO field
- * value, NO credential and NO identity value. Two things outlive the tab or the
- * reload: the completion flag in `tutorialPreference.ts` (survives both) and the
- * open session pointer in `tutorialSession.ts` (survives a reload, dies with the
- * tab), each behind its own documented contract.
+ * session id, the resolved target record ids, whether the reader has dismissed
+ * the offer in this session, and — outside `state`, because no render depends on
+ * it — which step the walkthrough has already routed to. It holds NO record
+ * content, NO field value, NO credential and NO identity value. Two things outlive
+ * the tab or the reload: the completion flag in `tutorialPreference.ts` (survives
+ * both) and the open session pointer in `tutorialSession.ts` (survives a reload,
+ * dies with the tab), each behind its own documented contract.
  *
  * THE WALKTHROUGH NOW OWNS A SERVER-SIDE WORKSPACE. Starting creates an isolated
  * worked-example session over HTTP; the built-in example records exist ONLY
@@ -122,6 +123,22 @@ let returnFocusTo: HTMLElement | null = null;
  *  overlay remounting on each navigation cannot fire a second identical read. */
 let resolvingTargets = false;
 
+/**
+ * The walkthrough's ONE navigation per step, and whether that step's own surface
+ * has been reached.
+ *
+ * WHY IT LIVES HERE AND NOT IN A REF INSIDE THE OVERLAY. `AppShell` — and with it
+ * `GuidedTutorial` — is unmounted and remounted by every route change, so a ref
+ * would be reset by the very navigation it exists to remember. Same reason
+ * `resolvingTargets` is here.
+ *
+ * WHY A SINGLE SLOT IS ENOUGH. The only question asked of it is "has the CURRENT
+ * step already been routed to?", so a one-entry memory keyed by step is exact:
+ * moving to any other step (Next, Back, a jump, a replay) replaces it, and coming
+ * back to a step later legitimately re-navigates.
+ */
+let navigation: { key: string; arrived: boolean } | null = null;
+
 function emit(next: TutorialState): void {
   state = next;
   for (const listener of listeners) listener();
@@ -173,9 +190,20 @@ export async function startTutorial(trigger?: HTMLElement | null): Promise<void>
 
   // Discard any prior session BEFORE opening a new one, so a replay is
   // exactly-one-session by construction rather than by the caller remembering.
-  await releaseTutorialSession();
-
-  emit({ ...state, phase: 'starting', index: 0, targets: undefined, targetsFailed: false });
+  // The scope is left locally first, and the store is told in the same tick, so a
+  // surface reading the old session stops presenting its records immediately
+  // instead of at the end of the DELETE.
+  const previous = heldSessionId();
+  leaveTutorialScopeLocally();
+  emit({
+    ...state,
+    phase: 'starting',
+    index: 0,
+    targets: undefined,
+    targetsFailed: false,
+    sessionId: null,
+  });
+  await disposeTutorialSession(previous);
 
   let session;
   try {
@@ -226,14 +254,14 @@ export async function resumeTutorialSession(): Promise<void> {
     // dependency 404s an unknown session before any record work happens.
     await api.listExperiments();
   } catch {
-    setTutorialScope(null);
-    clearTutorialSession();
+    leaveTutorialScopeLocally();
     emit({ ...state, phase: 'idle', index: 0, sessionId: null, sessionError: 'expired' });
     return;
   }
 
   const index = Math.min(persisted.index, TUTORIAL_STEPS.length - 1);
   resolvingTargets = false;
+  navigation = null;
   emit({
     ...state,
     phase: 'running',
@@ -243,27 +271,6 @@ export async function resumeTutorialSession(): Promise<void> {
     sessionId: persisted.sessionId,
     sessionError: null,
   });
-}
-
-/**
- * Leave whatever session is held, locally and server-side.
- *
- * BEST EFFORT BY DESIGN. The local scope and the persisted pointer are cleared
- * whether or not the DELETE succeeds, because the alternative — keeping the
- * reader inside a scope because cleanup failed — is strictly worse than leaving
- * a directory for the backend's TTL sweep to reclaim. The backend treats
- * discarding an absent session as success, so a retry is always safe.
- */
-async function releaseTutorialSession(): Promise<void> {
-  const held = state.sessionId ?? readTutorialSession()?.sessionId ?? null;
-  setTutorialScope(null);
-  clearTutorialSession();
-  if (held === null) return;
-  try {
-    await api.disposeTutorialSession(held);
-  } catch {
-    /* the TTL sweep reclaims it; the reader is already out of the scope */
-  }
 }
 
 /** Record the resolved target records for this run. */
@@ -285,6 +292,80 @@ export function claimTargetResolution(): boolean {
   if (resolvingTargets) return false;
   resolvingTargets = true;
   return true;
+}
+
+/**
+ * Claim the one navigation a step is allowed, keyed on `"<step id>|<path>"`.
+ *
+ * Returns true exactly once per step+path, which is what makes the walkthrough
+ * NAVIGATE ON A STEP CHANGE rather than pin the reader to a route. The overlay
+ * used to re-navigate on every render where the location differed from the step's
+ * path, which undid any navigation the reader performed — and that made two real
+ * controls dead: the worked-example bar's "Open the Worked Example" (it goes to
+ * `/load`, and the bar only exists while a session is open) and Settings →
+ * Replay Tutorial.
+ */
+export function claimStepNavigation(key: string): boolean {
+  if (navigation?.key === key) return false;
+  navigation = { key, arrived: false };
+  return true;
+}
+
+/**
+ * Record that the reader is on this step's own surface.
+ *
+ * It also OCCUPIES the claim slot, deliberately: a step whose surface the reader
+ * was already on never needs a navigation, and without this it would keep an
+ * unspent claim that would fire the moment they walked away — reintroducing the
+ * pinning this replaced.
+ */
+export function markStepArrived(key: string): void {
+  if (navigation?.key === key && navigation.arrived) return;
+  navigation = { key, arrived: true };
+}
+
+/** Has this step's surface been reached at least once? A step that has arrived and
+ *  is no longer on its surface was left by the READER, which is allowed; one that
+ *  has not is still waiting for its own navigation to land. */
+export function stepHasArrived(key: string): boolean {
+  return navigation?.key === key && navigation.arrived;
+}
+
+/** The session id currently held — from the store, or (immediately after a reload,
+ *  before `resumeTutorialSession` has run) from the persisted pointer. */
+function heldSessionId(): string | null {
+  return state.sessionId ?? readTutorialSession()?.sessionId ?? null;
+}
+
+/**
+ * Leave the scope LOCALLY: synchronous, issues no request, always safe.
+ *
+ * Split out from the DELETE so callers can stop addressing a session — and tell
+ * React they have — BEFORE waiting on a network round trip. That ordering is the
+ * difference between a record surface noticing at once that the workspace it was
+ * reading is gone and noticing a whole HTTP request later, during which it went
+ * on presenting a record that no longer existed.
+ */
+function leaveTutorialScopeLocally(): void {
+  setTutorialScope(null);
+  clearTutorialSession();
+  navigation = null;
+}
+
+/**
+ * Discard a session server-side. BEST EFFORT BY DESIGN: the caller has already
+ * left the scope locally, because keeping the reader inside a scope because
+ * cleanup failed is strictly worse than leaving a directory for the backend's TTL
+ * sweep to reclaim. The backend treats discarding an absent session as success, so
+ * a retry is always safe.
+ */
+async function disposeTutorialSession(held: string | null): Promise<void> {
+  if (held === null) return;
+  try {
+    await api.disposeTutorialSession(held);
+  } catch {
+    /* the TTL sweep reclaims it; the reader is already out of the scope */
+  }
 }
 
 /** Advance, keeping the persisted step in sync so a reload resumes here rather
@@ -327,9 +408,17 @@ export function goToStep(index: number): void {
  * The example records vanish from the reader's experience here, because they only
  * ever existed inside the discarded session — the ordinary workspace never held
  * them and is left exactly as it was.
+ *
+ * THE STATE CHANGE IS PUBLISHED BEFORE THE DELETE IS AWAITED, and that ordering is
+ * a correctness fix. The api scope is dropped synchronously, so from that instant
+ * every request addresses the ordinary workspace; publishing `sessionId: null`
+ * afterwards left React unaware for the length of a whole HTTP round trip, during
+ * which a record surface went on rendering a record that had already ceased to
+ * exist. Disposal is best effort and its outcome changes nothing here.
  */
 export async function dismissTutorial(reason: TutorialDismissal): Promise<void> {
-  await releaseTutorialSession();
+  const held = heldSessionId();
+  leaveTutorialScopeLocally();
   emit({
     ...state,
     phase: 'idle',
@@ -338,6 +427,7 @@ export async function dismissTutorial(reason: TutorialDismissal): Promise<void> 
     sessionId: null,
     lastDismissal: reason,
   });
+  await disposeTutorialSession(held);
 }
 
 /**
@@ -347,12 +437,24 @@ export async function dismissTutorial(reason: TutorialDismissal): Promise<void> 
  *
  * Completion is recorded BEFORE disposal is attempted, so a failed DELETE cannot
  * cost the reader credit for a walkthrough they actually finished.
+ *
+ * The scope is also dropped before the DELETE is awaited, for the same reason
+ * `dismissTutorial` does it: the session stops being the workspace the moment the
+ * api scope is cleared, so nothing may go on presenting its records while a
+ * network round trip completes.
  */
 export async function finishTutorial(): Promise<void> {
   markTutorialCompleted();
-  emit({ ...state, phase: 'finished', completed: true, lastDismissal: null });
-  await releaseTutorialSession();
-  emit({ ...state, sessionId: null });
+  const held = heldSessionId();
+  leaveTutorialScopeLocally();
+  emit({
+    ...state,
+    phase: 'finished',
+    completed: true,
+    lastDismissal: null,
+    sessionId: null,
+  });
+  await disposeTutorialSession(held);
 }
 
 /** Dismiss the completion panel. The version stays recorded — this closes a
@@ -391,6 +493,7 @@ export function shouldOfferTutorial(current: TutorialState = state): boolean {
 export function __resetTutorialStore(): void {
   returnFocusTo = null;
   resolvingTargets = false;
+  navigation = null;
   setTutorialScope(null);
   clearTutorialSession();
   state = initialState();

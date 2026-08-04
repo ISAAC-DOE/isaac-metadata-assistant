@@ -2,7 +2,7 @@ import './screens.css';
 import '../components/assistant.css';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
@@ -21,6 +21,7 @@ import { api, ApiError } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
+import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { answerValuePreview, pendingItemToBlocker } from '../lib/adapt';
 import type {
   ApiExperimentDetail,
@@ -47,6 +48,16 @@ export function GuidedCompletion() {
       })),
     [id],
   );
+  // D1 — the blockers on this screen belong to the workspace scope it was opened
+  // in. See `lib/workspaceScope.ts`, and the matching guard on the other three
+  // record surfaces: a scope change destroys the record, so there is nothing to
+  // re-read and nothing here may keep describing it.
+  const scopeChanged = useWorkspaceScopeChanged();
+
+  // Before the fetch-state branches, so no question, answered row or heading from
+  // the discarded workspace reaches the DOM. `replace`, so Back does not return
+  // the reader to a record that no longer exists.
+  if (scopeChanged) return <Navigate to={ROUTES.experiments} replace />;
 
   if (load.status !== 'data') {
     return (

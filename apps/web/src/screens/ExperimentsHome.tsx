@@ -11,7 +11,7 @@ import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
-import { useTutorialState } from '../lib/tutorialController';
+import { useWorkspaceScope } from '../lib/workspaceScope';
 import { subscribeWorkspaceRebuilt } from '../lib/workspaceInvalidation';
 import { queueSubcount, summariesToQueueGroups } from '../lib/adapt';
 
@@ -35,8 +35,11 @@ export function ExperimentsHome() {
    * Read from the tutorial store rather than from `api.getTutorialScope()`, because the
    * store is what notifies React when it changes; the two are kept in step by
    * `tutorialController`, which sets the api scope and the store's `sessionId` together.
+   *
+   * A LIST re-reads; a RECORD surface leaves. The same scope value drives both, from
+   * one hook — see `lib/workspaceScope.ts` for why the two answers differ.
    */
-  const scope = useTutorialState().sessionId;
+  const scope = useWorkspaceScope();
   const result = useFetch(() => api.listExperiments(), [scope]);
 
   // P27.6 — the dashboard is NOT tightly polled (no interval). It only refetches

@@ -1,7 +1,7 @@
 import './screens.css';
 import '../components/evidence.css';
 import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
@@ -18,6 +18,7 @@ import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
+import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
@@ -42,6 +43,11 @@ import type { ApiEvidenceEntry, RecordBundle } from '../lib/types';
 export function RecordWorkbench() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getRecordBundle(id), [id]);
+  // D1 — this record belongs to the workspace scope the surface was opened in. If
+  // that scope changes (the walkthrough's temporary workspace was discarded, and
+  // with it these records) nothing loaded here describes anything any more. See
+  // `lib/workspaceScope.ts` for why the answer is to leave rather than to re-read.
+  const scopeChanged = useWorkspaceScopeChanged();
 
   // P29.4 — the ONE shared record-session owner for this record: the single
   // poller + the authoritative version + the live P29.3 AgentContext the
@@ -62,6 +68,19 @@ export function RecordWorkbench() {
     session.refresh();
     bundle.reloadSilent();
   };
+
+  /*
+   * The workspace this record was read from is no longer the workspace being
+   * addressed. Return the reader to a surface that is real in the scope they are
+   * now in, replacing this entry so Back does not walk them into it again.
+   *
+   * Rendered BEFORE the fetch-state branches so no already-loaded field, banner or
+   * heading reaches the DOM in the changed scope, and deliberately WITHOUT issuing
+   * a fresh request: a 404 here would be true and useless, and its copy would read
+   * as a fault when the only thing that happened is that a temporary workspace was
+   * discarded exactly as it said it would be.
+   */
+  if (scopeChanged) return <Navigate to={ROUTES.experiments} replace />;
 
   if (bundle.status !== 'data') {
     return (
