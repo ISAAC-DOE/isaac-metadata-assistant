@@ -122,20 +122,49 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
 
   /*
    * `/statistics` was in the one-h1 suite above but absent from this one — the
-   * only screen whose outline goes THREE levels deep (its Evidence and Validation
-   * card nests `Evidence Support` and `Export Gate` under its own h2), which is
-   * precisely the shape a skip or a backwards step hides in. Its real outline is
-   * h1 → h2×6, with two h3s inside the third h2: [1,2,2,2,3,3,2,2,2].
+   * only screen whose outline goes THREE levels deep, which is precisely the shape
+   * a skip or a backwards step hides in.
+   *
+   * THE EXPECTED OUTLINE CHANGED WITH THE TAB RESTRUCTURE, and the reason is
+   * worth writing down because it is the interesting part. Its General ISAAC tab
+   * is now h1 → four h2 sections (Workspace at a Glance · Workflow Distribution ·
+   * Evidence and Validation, which nests `Evidence Support` and `Export Gate` as
+   * h3 · This Application Collects No Analytics) → a fifth h2 `Technical Details`
+   * which nests THREE h3 sections (Runtime · Project Memory · API Surface).
+   *
+   * The three trailing h3s are inside a `<details>` that is CLOSED by default, and
+   * they are counted here on purpose: `querySelectorAll` sees the whole DOM, so
+   * this asserts the outline is well-formed in BOTH states of the disclosure.
+   * (`e2e/specs/structure.spec.ts` filters by computed style and therefore checks
+   * the collapsed state as a real browser renders it — the two are complementary,
+   * and neither alone would catch a heading that is only wrong when open.)
    */
-  it('Statistics (all six sections loaded)', async () => {
+  it('Statistics · General ISAAC (every section loaded, Technical Details closed)', async () => {
     stubFetchRoutes(statisticsRoutes());
     const view = renderAt('/statistics');
-    // Settles /api/about, which is the last of the four sections to paint.
+    // Settles /api/about, which is the last of the four reads to paint.
     await view.findByText('Synthetic-Only');
 
     const found = levels(view.container);
-    expect(found).toEqual([1, 2, 2, 2, 3, 3, 2, 2, 2]);
-    assertMonotonic(found, 'Statistics page');
+    expect(found).toEqual([1, 2, 2, 2, 3, 3, 2, 2, 3, 3, 3]);
+    assertMonotonic(found, 'Statistics page · General ISAAC');
+  });
+
+  /*
+   * ...AND THE MY STATS TAB, which has its own outline and would otherwise be
+   * checked by nothing: it is a `?tab=` deep link, so a page-level render at
+   * `/statistics` never reaches it. h1 → h2 `Personal Statistics` → h2 `Views
+   * Prepared for Your Account` → one h3 per planned view.
+   */
+  it('Statistics · My Stats', async () => {
+    stubFetchRoutes(statisticsRoutes());
+    const view = renderAt('/statistics?tab=mine');
+    await view.findByText('Not Available in This Preview');
+
+    const found = levels(view.container);
+    expect(found.slice(0, 3)).toEqual([1, 2, 2]);
+    expect(found.slice(3)).toEqual([3, 3, 3, 3, 3, 3, 3, 3]);
+    assertMonotonic(found, 'Statistics page · My Stats');
   });
 
   it('Project Memory · Graph · About This Graph drawer', async () => {

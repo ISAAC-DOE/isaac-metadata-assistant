@@ -97,6 +97,7 @@ export function CopyAnnouncer({ message }: { message: string }) {
  */
 export function RovingTabs<T extends string>({
   className,
+  tabClassName,
   label,
   tabs,
   active,
@@ -105,6 +106,19 @@ export function RovingTabs<T extends string>({
   panelId,
 }: {
   className: string;
+  /**
+   * Class for each tab BUTTON. Defaults to `${className}-tab`, which is what the
+   * code-sample language tabs use.
+   *
+   * It is a separate prop so the app's SHARED page-tab styling
+   * (`screens.css` `.section-tabs` / `.section-tab`, already worn by Project
+   * Memory, Governance & Safety and Settings & API) can be reused here without
+   * renaming that pair to `.section-tabs-tab`. Without it, a fourth page-level
+   * tablist could only reuse this component's KEYBOARD behaviour by inventing a
+   * fourth visual language — which is how a codebase ends up with three tab
+   * paradigms.
+   */
+  tabClassName?: string;
   label: string;
   tabs: { id: T; label: string }[];
   active: T;
@@ -112,6 +126,7 @@ export function RovingTabs<T extends string>({
   tabId: (id: T) => string;
   panelId: (id: T) => string;
 }) {
+  const tabClass = tabClassName ?? `${className}-tab`;
   function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     let next: number | null = null;
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (index + 1) % tabs.length;
@@ -139,7 +154,7 @@ export function RovingTabs<T extends string>({
             aria-selected={selected}
             aria-controls={selected ? panelId(t.id) : undefined}
             tabIndex={selected ? 0 : -1}
-            className={`${className}-tab${selected ? ' active' : ''}`}
+            className={`${tabClass}${selected ? ' active' : ''}`}
             onClick={() => onSelect(t.id)}
             onKeyDown={(e) => onKeyDown(e, i)}
           >

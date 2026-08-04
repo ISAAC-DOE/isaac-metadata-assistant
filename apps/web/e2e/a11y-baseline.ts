@@ -214,8 +214,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       '`signals.css:199 .advisory-nongating { opacity: .85 }`; --text-tertiary renders ' +
       '#8e98a2 under the same .done rule. Darkening the tokens will NOT fix these five — the ' +
       'opacity has to go. (c) Two saturated category/status colours that land just under AA ' +
-      'at small sizes: --verified-text/--stats-cat-2 #2f7d78 on the #e6f1f0 chip tint ' +
-      '(4.2:1, 265 occurrences) and --src-derivation/--stats-cat-5 #7a6bb0 (4.25:1, 15). ' +
+      'at small sizes: --verified-text #2f7d78 on the #e6f1f0 chip tint ' +
+      '(4.2:1, 265 occurrences) and --src-derivation #7a6bb0 (4.25:1, 15). ' +
       'Measured range across all 43 (fg, bg, size) combinations: 1.56:1 to 4.25:1, all ' +
       'against a 4.5:1 requirement; nothing needs the 3:1 large-text threshold because every ' +
       'failing node is 9.5–13px.',
@@ -229,8 +229,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       '#78838f', // --text-tertiary
       '#9aa4af', // --text-quaternary / --idle
       '#c0c8d0', // --text-disabled  (worst: 1.56:1)
-      '#2f7d78', // --verified-text / --stats-cat-2
-      '#7a6bb0', // --src-derivation / --stats-cat-5
+      // The `/ --stats-cat-2` and `/ --stats-cat-5` aliases these two lines used
+      // to carry are GONE: Statistics no longer declares six page-scoped
+      // categorical slots (no chart on it encodes identity by hue). The tokens
+      // themselves are unchanged, and so are these two failing colours.
+      '#2f7d78', // --verified-text
+      '#7a6bb0', // --src-derivation
       '#8e98a2', // --text-tertiary   @ opacity .82  (.exp-row.done)
       '#777f89', // --text-muted      @ opacity .82  (.exp-row.done)
       '#778493', // --text-slate      @ opacity .82  (.exp-row.done)
@@ -433,39 +437,56 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-privacy@tablet-768x1024': 8,
       'settings-privacy@mobile-375x812': 7,
       'settings-privacy@zoom-200': 7,
-      // 10/10/10/9/9 -> 4/4/4/3/3, MEASURED in the tutorial-scope slice
-      // (2026-08-04). "Workspace at a Glance" is derived from
-      // `GET /api/runtime/records`, which now answers about the EMPTY ordinary
-      // workspace, so the per-record breakdown rows this surface used to render are
-      // simply not there. Lowered rather than left stale — but read it as "fewer
-      // rows are drawn", NOT as "the contrast tokens were fixed": the surviving 4
-      // fail on the same `--text-tertiary`/`--text-quaternary` tokens as before.
-      'statistics@desktop-1280x800': 4,
-      'statistics@laptop-1024x768': 4,
-      'statistics@tablet-768x1024': 4,
       /*
-       * SPLIT BY PLATFORM 2026-08-04, from a MEASURED CI run — not a guess and not
-       * a tuning-to-green. The first exact-SHA CI run of the tutorial-scope slice
-       * reported this surface at 2 on linux while darwin measures 3, and the
-       * ratchet failed the build to say so:
+       * ── STATISTICS-TAB SLICE, 2026-08-04 ──────────────────────────────────
        *
-       *   IMPROVED statistics @ mobile-375x812 on linux: rule "color-contrast"
-       *   fell from 3 to 2 node(s) (-1) … a stale number would re-admit the defect.
+       * 4/4/4/3-or-2/3 -> 3/3/3/2/2, and the arithmetic is TWO changes that do not
+       * cancel. Read it as a MEASUREMENT ARTEFACT, not as accessibility work:
        *
-       * Read it the same way as the four entries above: FEWER NODES ARE DRAWN on
-       * the empty ordinary page, not "a contrast token was fixed". The one node
-       * that differs between the platforms is a wrap-boundary artefact of the
-       * 375px layout — darwin and linux disagree about whether one label wraps at
-       * that width, so one extra text node is present to be scanned. The surviving
-       * nodes fail on the same `--text-tertiary`/`--text-quaternary` tokens as
-       * before, on both platforms.
+       *   -2  The two `/api/about` cards (`Runtime Mode`, `Persistence`) moved out
+       *       of Workspace at a Glance and into a collapsed `Technical Details`
+       *       `<details>`. Their `.stat-card-note` lines are `--text-tertiary`
+       *       #78838f at 11.5px on #fbfcfd — 3.75:1, a genuine pre-existing AA
+       *       failure — and axe does not scan a closed disclosure, so the two
+       *       nodes stopped being counted. NOTHING WAS FIXED. (On mobile/zoom only
+       *       one of the two was in scan range before, hence -1 there.)
+       *   +1  The surface gained a page-level tablist, so there is now one INACTIVE
+       *       `.section-tab` button (`aria-selected="false"`) on it. That colour
+       *       (#78838f on #f4f6f9, 3.56:1) is the SAME known, pre-existing shortfall
+       *       in a shared pattern that Settings, Governance and Project Memory
+       *       already carry; the R0 note above records the identical +1 when
+       *       Settings gained a tab. It is one more instance of documented debt, not
+       *       a new defect, and it is NOT a licence to relax the rule.
        *
-       * Lowering is the safe direction (it tightens the ratchet); the darwin
-       * column is left where two local runs measured it rather than lowered to
-       * match, because nothing has measured darwin at 2.
+       * THE COVERAGE THIS COSTS, stated rather than glossed. Two instances of the
+       * `.stat-card-note` defect are now unscanned, and no `SURFACES` entry can
+       * reach them: a native `<details>` has no URL state, so there is no path to
+       * open it with. What keeps the DEFECT under ratchet is `statistics-example`,
+       * which still measures FOUR instances of exactly the same
+       * `--text-tertiary` `.stat-card-note` failure — so the class is still one
+       * node away from red, and only two extra instances of it went unmeasured.
+       * (`e2e/specs/charts.spec.ts` does open the region, for layout and structure,
+       * but it runs no axe scan.)
+       *
+       * MEASURED on darwin, two consecutive local runs of
+       * `npx playwright test e2e/specs/a11y-axe.spec.ts`, identical counts. The
+       * exact failing nodes at desktop are now `kbd` (the ⌘K hint), `.nav-version`
+       * and `#statistics-tab-mine` — all three shared chrome, none of them new
+       * markup from this slice.
+       *
+       * `statistics@mobile-375x812` was `{ darwin: 3, linux: 2 }` and is now a
+       * SCALAR 2. The pair existed because one node's wrap boundary differed
+       * between the fonts; that node is one of the two that moved into the
+       * disclosure, so both columns land on 2. darwin is measured; LINUX IS
+       * INFERRED — and the type system has no way to say "same as darwin,
+       * unverified", so a scalar is the only honest form (see the note at the
+       * bottom of this file). CI is the authority.
        */
-      'statistics@mobile-375x812': { darwin: 3, linux: 2 },
-      'statistics@zoom-200': 3,
+      'statistics@desktop-1280x800': 3,
+      'statistics@laptop-1024x768': 3,
+      'statistics@tablet-768x1024': 3,
+      'statistics@mobile-375x812': 2,
+      'statistics@zoom-200': 2,
       /*
        * THE POPULATED Statistics page, at the same route inside a worked-example
        * session — ADDED 2026-08-04 to close a gap the tutorial-scope slice left open.
@@ -491,11 +512,44 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * five values are written as scalars because the type system has no way to say
        * "same as darwin, unverified". CI is the authority.
        */
-      'statistics-example@desktop-1280x800': 10,
-      'statistics-example@laptop-1024x768': 10,
-      'statistics-example@tablet-768x1024': 10,
-      'statistics-example@mobile-375x812': 9,
-      'statistics-example@zoom-200': 9,
+      /*
+       * 10/10/10/9/9 -> 9/9/9/8/8, STATISTICS-TAB SLICE. Same two changes and the
+       * same net -1 as `statistics@*` above, for the same two reasons: the two
+       * runtime `.stat-card-note` nodes moved into the collapsed disclosure (-2, or
+       * -1 at the narrow widths) and one inactive `.section-tab` appeared (+1).
+       *
+       * The nine that remain, measured at desktop: `kbd`, `.nav-version`, the
+       * inactive tab, the FOUR record cards' `.stat-card-note` lines, and the
+       * `.chip-ev-supported` / `.chip-ev-unknown` chip labels. Every one is a
+       * pre-existing token shortfall this file already records; not one is a chart.
+       */
+      'statistics-example@desktop-1280x800': 9,
+      'statistics-example@laptop-1024x768': 9,
+      'statistics-example@tablet-768x1024': 9,
+      'statistics-example@mobile-375x812': 8,
+      'statistics-example@zoom-200': 8,
+      /*
+       * THE MY STATS TAB — a NEW surface (`/statistics?tab=mine`), added with the
+       * tab restructure because neither `statistics` nor `statistics-example` opens
+       * it: both land on the default `general` tab, so the personal tab's gate and
+       * its eight planned-view cards were in no project's scan grid.
+       *
+       * ALL THREE NODES ARE SHARED CHROME, and that is the interesting result:
+       * `kbd` (the ⌘K hint, #9aa4af, 2.52:1), `.nav-version` (#9aa4af, 2.46:1) and
+       * the inactive `#statistics-tab-general` (#78838f, 3.56:1). NOT ONE comes
+       * from the markup this slice authored — no gate panel, no plan card, no
+       * heading, no chart. At 375px and at 200% zoom the ⌘K hint is not rendered,
+       * so those two projects measure 2.
+       *
+       * MEASURED on darwin, two consecutive local runs. The LINUX column is
+       * UNMEASURED — this environment cannot run the Linux system face — so the
+       * five values are written as scalars and flagged here. CI is the authority.
+       */
+      'statistics-mine@desktop-1280x800': 3,
+      'statistics-mine@laptop-1024x768': 3,
+      'statistics-mine@tablet-768x1024': 3,
+      'statistics-mine@mobile-375x812': 2,
+      'statistics-mine@zoom-200': 2,
       'validator@desktop-1280x800': 9,
       'validator@laptop-1024x768': 9,
       'validator@tablet-768x1024': 9,
@@ -713,8 +767,38 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   //
   // The remaining 20 linux keys are still unmeasured; expect more single-node
   // corrections of this benign kind, each one an entry AND a total.
-  darwin: 1680,
-  linux: 1679,
+  //
+  // ── STATISTICS-TAB SLICE, 2026-08-04: darwin 1680 -> 1683, linux 1679 -> 1683 ──
+  //
+  // The two columns CONVERGE, and that is not a coincidence to wave at: the one
+  // key where they disagreed (`statistics@mobile-375x812`, `{ darwin: 3, linux: 2 }`)
+  // owed its difference to a wrap boundary on a node that has since moved into a
+  // collapsed disclosure and is no longer scanned on either platform. With that
+  // node gone the disagreement has nothing left to be about, so both columns read 2
+  // and every statistics key is now a scalar.
+  //
+  // The arithmetic, per platform, so a reviewer can check it without a run:
+  //
+  //   darwin  statistics       4,4,4,3,3 -> 3,3,3,2,2            = -5
+  //           statistics-example 10,10,10,9,9 -> 9,9,9,8,8       = -5
+  //           statistics-mine  NEW 3,3,3,2,2                     = +13
+  //                                                          net  = +3  (1680 -> 1683)
+  //
+  //   linux   statistics       4,4,4,2,3 -> 3,3,3,2,2            = -4
+  //           statistics-example 10,10,10,9,9 -> 9,9,9,8,8       = -5
+  //           statistics-mine  NEW 3,3,3,2,2                     = +13
+  //                                                          net  = +4  (1679 -> 1683)
+  //
+  // NOTHING WAS FIXED AND NOTHING REGRESSED. The -10/-9 is two pre-existing
+  // `.stat-card-note` failures per surface going unscanned inside a collapsed
+  // `<details>`, minus one new instance of the documented `.section-tab` shortfall;
+  // the +13 is a genuinely new surface whose every failing node is shared chrome.
+  // Both sums are CHECKED by the suite itself, per platform, so neither is my
+  // arithmetic — but the linux PER-KEY values for all fifteen touched keys are
+  // darwin measurements written as scalars. If CI disagrees, transcribe ITS numbers
+  // and correct the total; never loosen the assertion.
+  darwin: 1683,
+  linux: 1683,
 };
 
 /**

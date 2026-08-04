@@ -184,6 +184,27 @@ export const SURFACES: readonly Surface[] = [
     ready: { role: 'heading', name: 'Workspace at a Glance' },
   },
   {
+    /*
+     * The My Stats tab — a NEW surface, added with the tab restructure because it
+     * is genuinely new markup that no existing entry reaches: `statistics` and
+     * `statistics-example` both open the default `general` tab, so nothing here
+     * would have scanned the personal tab's gate, its eight planned-view cards, or
+     * their headings.
+     *
+     * ORDINARY scope on purpose, and it is the honest one for this surface: the
+     * tab renders identically in a worked-example session, because it reads
+     * nothing at all. Opening it in a session would scan the same DOM twice.
+     *
+     * `ready` waits on the gate's own title rather than on the page `h1`, so the
+     * scan cannot race a tab that has not painted its panel yet.
+     */
+    id: 'statistics-mine',
+    name: 'Statistics — My Stats',
+    path: '/statistics?tab=mine',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Personal Statistics' },
+  },
+  {
     id: 'settings',
     name: 'Settings & API — Overview',
     path: '/settings',
@@ -282,5 +303,16 @@ export const TABBED_SURFACES = [
       'Help & Tutorial',
     ],
     panelIdPrefix: 'settings-tabpanel-',
+  },
+  {
+    // Statistics is the FOURTH page-level tablist, and it reuses the shared
+    // `RovingTabs` component and the shared `.section-tabs` / `.section-tab`
+    // styling rather than introducing a paradigm of its own — so the APG-structure,
+    // keyboard and deep-link specs above apply to it unchanged.
+    id: 'statistics',
+    path: '/statistics',
+    tablistName: 'Statistics sections',
+    tabs: ['General ISAAC', 'My Stats'],
+    panelIdPrefix: 'statistics-tabpanel-',
   },
 ] as const;
