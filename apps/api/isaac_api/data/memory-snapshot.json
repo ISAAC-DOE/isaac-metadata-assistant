@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "20e6774350fd2e35c18af34540822e1f3f71c92c49ae4d234ec85abdf2bb1f28"
+        "sha256": "01901212549ee642cdf74adbd5372d25452ab9603712365f5eec43701c7ce15d"
       },
       {
         "path": "AGENTS.md",
@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "d8d44c6cea5fbd1da14f7e89f1f199ddd2046de36de1cac7778ed064e06d2703"
+        "sha256": "720e62215fda8957923ee9a3a24c356e315bd9b25b7420eb923887c65cde69a1"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "85f12195b6ef36ebfc9c010707a90cb19644f9882048ff191118d290abf534af"
+        "sha256": "f5b0694e003082660ab2942900c021e75305fa030d534f4afe87a55388ce6f5e"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10436,7 +10436,7 @@
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "306c349e27d2c1a402fa78ab0d0c36789137104e5097d2c952448adfb0787a7f"
+        "sha256": "b22af0e38f5a4d2f9eda06b729e4ab0c01581033ae801d4591540861b6ba93d1"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10484,7 +10484,7 @@
       },
       {
         "path": "apps/web/src/components/TopBar.tsx",
-        "sha256": "76739a4835447543e8894d471081679ade7f73200484152e9a6b0f110d0f50fe"
+        "sha256": "8c104b2ef6a26771ec3760efc125043abf3d7aa6ea63d340afa4d82399ee0819"
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "2cc5a749ff28eeabe08c4ff41773529b0daf7d598fb67ee7515f0bd2568c7b19"
+        "sha256": "3f262cac9631a24e5f4671a9bd44c16c88bb77012353587dbf08944d1f321d08"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "634e22c5bdc1b42c261a0383231eef33b099ff878d0a47f00a79576bcd2ed8fe"
+        "sha256": "e219ca0d701f0c5d0f50a80065542dee177d2c3d19434f1850c92f979b3054d8"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10540,7 +10540,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "46bd152ae855ed2acec52830f7a1f03a4b5dfdf29683b0ea582a5fedb089fed2"
+        "sha256": "e84764e2c47e28de67f95c00930801c99547d8a106de27e126b10d1c9db10b8d"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "eaf7aa09c5c64588030a5fe6b746a8f38149504abb5caa4e466297a675480439"
+        "sha256": "68d415b77fd99c73fa9d1ae5e9f90cd1dc63a066118b0229016d89c5ca591205"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "5fbf02c81b4e8e9ecfcab6e145fc7be88bce68b9388dc11aabe081656d44d6a8"
+    "served_manifest_fingerprint": "0c924e35e2d926580d22effc4e18ae99d6985a9dd928edee233b67f52e2ad32a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
