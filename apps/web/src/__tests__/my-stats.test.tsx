@@ -73,6 +73,66 @@ function textOf(root: HTMLElement): string {
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
+/* ── the emptiness matcher, and why it is shaped like this ──────────────────
+ *
+ * TRAP 4's guards used to be DIGIT-SHAPED — `/\b\d+\b/`, `/\b0\b/` — plus a
+ * per-sentence check that fired on three literal phrases:
+ *
+ *     if (!/no records|no activity|nothing to show/i.test(sentence)) continue;
+ *
+ * "zero" is in neither list, so the whole suite passed with this sentence
+ * inserted into the panel — a FALSE PERSONAL ZERO, stated in words, on the one
+ * tab in the app that cannot know the answer:
+ *
+ *     Zero records are attributed to you, and your export count is zero.
+ *
+ * The lesson is not "add zero to the list". A list of phrases guards phrases; the
+ * claim being guarded is a CLASS — an emptiness value applied to a countable
+ * unit of the reader's work — so the matcher below describes that class, and
+ * `the emptiness matcher itself` (below) pins its polarity against worked
+ * examples in BOTH directions. A guard whose positives are never exercised is a
+ * guard nobody has seen work.
+ */
+
+/** A quantity noun this tab could state a personal count of. */
+const COUNT_NOUN = 'records?|experiments?|exports?|fields?|figures?|activity|drafts?|issues?|questions?|counts?';
+
+const EMPTINESS_PATTERNS: readonly RegExp[] = [
+  // Prepositive: "zero records", "no record", "none of the figures".
+  new RegExp(`\\b(?:zero|none|nil|nought|no)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`, 'i'),
+  // Postpositive: "your export count is zero", "the figures are none".
+  new RegExp(`\\b(?:${COUNT_NOUN})\\b[^.;]{0,40}?\\b(?:is|are|was|were)\\s+(?:zero|none|nil|nought)\\b`, 'i'),
+  // Negated-verb form: "you have not authored any records", "you haven't exported any".
+  new RegExp(`\\byou(?:r|rs)?\\b[^.;]{0,60}?\\b(?:not|never|n't)\\b[^.;]{0,40}?\\bany\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`, 'i'),
+];
+
+/**
+ * The one escape, and it is deliberately NOT plain negation.
+ *
+ * The tab's most important sentence is "A count of zero WOULD say you have no
+ * records" — a hypothetical that denies the claim, and a page-wide ban on the
+ * word would flag exactly the copy doing the honest work. So a triggered
+ * sentence passes only when it is framed as a HYPOTHETICAL or as a statement
+ * about what this build CANNOT DO.
+ *
+ * `\bnot\b` is not in this list on purpose. It was the obvious escape and it is
+ * a hole: "You have not exported any records" is a false personal claim that
+ * wears a negation, which is why pattern 3 above exists and why the frame has to
+ * be about modality rather than polarity.
+ */
+const DENIAL_FRAME = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brather than\b|\b(?:is|are) absent\b/i;
+
+/** True when `sentence` asserts that the reader has nothing. */
+function assertsEmptiness(sentence: string): boolean {
+  if (!EMPTINESS_PATTERNS.some((p) => p.test(sentence))) return false;
+  return !DENIAL_FRAME.test(sentence);
+}
+
+/** Every sentence of `text` that asserts the reader has nothing. */
+function emptinessClaims(text: string): string[] {
+  return text.split(/(?<=[.;])\s+/).filter(assertsEmptiness);
+}
+
 // --- the tablist ------------------------------------------------------------
 
 describe('the two top-level tabs', () => {
@@ -270,14 +330,22 @@ describe('My Stats invents no personal figure — the six traps', () => {
      * and NOTHING else does. `stubFetchRoutes` records each call as
      * `"<METHOD> <path>"`, so this asserts the method too — every request is a GET,
      * and this tab therefore cannot mutate anything either.
+     *
+     * THE MULTISET, NOT THE SET. This was `new Set(calls)`, which de-duplicates —
+     * so a SECOND read of an already-fetched path was undetectable. An independent
+     * reviewer added a bare `void api.getRuntimeRecords();` to `MyStats` (the
+     * realistic wrong implementation, since nothing on this surface writes
+     * `fetch(` by hand) and this trap passed. Sorted, so the assertion is about
+     * WHICH calls and HOW MANY, not about mount order, which React may legally
+     * change.
      */
-    expect(new Set(calls)).toEqual(
-      new Set([
-        'GET /api/runtime/records',
-        'GET /api/graph/status',
+    expect([...calls].sort()).toEqual(
+      [
         'GET /api/about',
+        'GET /api/graph/status',
         'GET /api/openapi',
-      ]),
+        'GET /api/runtime/records',
+      ].sort(),
     );
     expect(calls.filter((c) => c.includes('/api/experiments'))).toEqual([]);
     expect(calls.filter((c) => c.includes('/api/demo'))).toEqual([]);
@@ -298,7 +366,7 @@ describe('My Stats invents no personal figure — the six traps', () => {
    * activity. The truth is that this build cannot attribute activity to anyone,
    * and the copy has to say THAT.
    */
-  it('4 — renders no zero, and says explicitly that absence is not zero', async () => {
+  it('4 — renders no zero, in digits OR IN WORDS, and says explicitly that absence is not zero', async () => {
     const { container } = await renderMineTab();
     const panel = container.querySelector('#statistics-tabpanel-mine') as HTMLElement;
     const text = textOf(panel);
@@ -308,19 +376,32 @@ describe('My Stats invents no personal figure — the six traps', () => {
     expect(text).toMatch(/cannot tell whose records these are/);
 
     /*
-     * …and no sentence ASSERTS that the reader has nothing. Checked per sentence
-     * rather than over the whole page, because the tab legitimately says "A count
-     * of zero WOULD say you have no records" — a hypothetical that denies the
-     * claim, and the most important sentence on the tab. A page-wide substring
-     * scan would flag exactly the copy that is doing the honest work, and the
-     * likely response would be to delete it.
+     * …and NO SENTENCE ASSERTS THAT THE READER HAS NOTHING — in digits or in
+     * words. Checked per sentence, with the modal escape documented above, so the
+     * three sentences that legitimately DENY a zero stay legal while the sentence
+     * that states one cannot.
+     *
+     * The whole set is reported rather than the first match, so a copy edit that
+     * introduces two says so once.
      */
-    for (const sentence of text.split(/(?<=[.;])\s+/)) {
-      if (!/no records|no activity|nothing to show/i.test(sentence)) continue;
-      expect(
-        /\bwould\b|\bcannot\b|\bnot\b/i.test(sentence),
-        `an emptiness claim must be framed as one this build cannot make: "${sentence}"`,
-      ).toBe(true);
+    expect(
+      emptinessClaims(text),
+      'a sentence on the personal tab asserts the reader has nothing; this build cannot know that',
+    ).toEqual([]);
+
+    /*
+     * …and the three honest sentences really do reach the matcher rather than
+     * slipping past it untriggered. Without this, a future narrowing of
+     * `EMPTINESS_PATTERNS` would look like a passing test instead of a hole: the
+     * assertion above is satisfied both by "nothing matched" and by "everything
+     * matched and every match was excused", and only one of those is the design.
+     */
+    const triggered = text
+      .split(/(?<=[.;])\s+/)
+      .filter((s) => EMPTINESS_PATTERNS.some((p) => p.test(s)));
+    expect(triggered.length, 'the tab\'s own zero-denying sentences must reach the matcher').toBeGreaterThanOrEqual(3);
+    for (const sentence of triggered) {
+      expect(DENIAL_FRAME.test(sentence), `must be modally framed: "${sentence}"`).toBe(true);
     }
   });
 
@@ -357,13 +438,96 @@ describe('My Stats invents no personal figure — the six traps', () => {
 
     const source = String((await import('../screens/statistics/MyStats?raw')).default);
     const contract = String((await import('../lib/myStatsContract?raw')).default);
-    for (const module of [source, contract]) {
+    for (const [name, module] of [
+      ['MyStats.tsx', source],
+      ['myStatsContract.ts', contract],
+    ] as const) {
       // No header read, and no fetch of any kind, in either module. `X-authentik`
       // appears only inside the prose that explains why it must not be used.
-      expect(module).not.toMatch(/headers\s*[.[]/);
-      expect(module).not.toMatch(/\bfetch\s*\(/);
-      expect(module).not.toMatch(/getHeader|request\.headers/);
+      expect(module, name).not.toMatch(/headers\s*[.[]/);
+      expect(module, name).not.toMatch(/\bfetch\s*\(/);
+      expect(module, name).not.toMatch(/getHeader|request\.headers/);
+
+      /*
+       * …AND NO REQUEST THROUGH THIS APP'S OWN CLIENT, which is the form the
+       * defect would actually take. The `/\bfetch\s*\(/` scan above is a source
+       * scan for a call NOTHING on this surface makes by hand: every read in this
+       * app goes through `lib/api.ts`'s `api` object, so a reviewer's
+       * `void api.getRuntimeRecords();` was invisible to it — and to trap 2, which
+       * de-duplicated its call list. Both holes are closed; this is the one that
+       * closes it at the source rather than at the call log.
+       *
+       * Neither module contains the substring `api.` in prose (checked), so this
+       * needs no comment stripping.
+       */
+      expect(module, `${name} must not call this app's API client`).not.toMatch(/\bapi\s*\.\s*[a-zA-Z]/);
+      expect(module, `${name} must not open a transport of its own`).not.toMatch(
+        /XMLHttpRequest|EventSource|sendBeacon|WebSocket|\bimport\s*\(/,
+      );
+
+      // …and it cannot even IMPORT the client. Matched against the import
+      // statements, per trap 1's reasoning: a whole-text scan would be satisfied
+      // by deleting the explanation rather than the dependency.
+      // (`myStatsContract.ts` imports NOTHING at all, which is the strongest
+      // possible form of this and is asserted as such.)
+      const imports = module.match(/^import[\s\S]*?from\s+'[^']+';$/gm) ?? [];
+      for (const line of imports) {
+        expect(line, `${name} must not import the API client`).not.toMatch(/lib\/api'|\/api'$/);
+      }
+      if (name === 'myStatsContract.ts') expect(imports).toEqual([]);
     }
+  });
+});
+
+// --- the matcher itself -----------------------------------------------------
+
+/**
+ * THE GUARD, GUARDED. Polarity is pinned in both directions against worked
+ * examples, because a matcher that flags nothing passes every test above.
+ *
+ * The first entry is the exact sentence an independent reviewer inserted into
+ * `MyStats.tsx`, which the previous digit-shaped guards let through along with
+ * all 2,667 frontend tests and all 8 browser tests in `e2e/specs/charts.spec.ts`
+ * — including the one titled "renders the gate, and no chart, no skeleton and no
+ * zero".
+ */
+describe('the emptiness matcher', () => {
+  const MUST_FLAG: readonly string[] = [
+    'Zero records are attributed to you, and your export count is zero.',
+    'You have no records.',
+    'Your export count is zero.',
+    'No records are attributed to you.',
+    'You have not authored any records.',
+    'Nothing to show — zero exports.',
+    'Your evidence fields are none.',
+    'There are no experiments of yours in this workspace.',
+  ];
+
+  /** The tab's real copy. Every one of these is TRUE and must stay sayable. */
+  const MUST_PASS: readonly string[] = [
+    'A count of zero would say you have no records;',
+    'Nothing on this tab is hidden from you, and none of the figures below are zero — they are absent.',
+    'Two things are missing today, and both are properties of this preview rather than of your work: nothing here establishes who you are, and no record in this workspace carries an author, so there is no way to select the records that are yours.',
+    'It is not showing zero — it has no way to select your records at all.',
+    'what is true is that this build cannot tell whose records these are.',
+    'None of them is drawing anything right now.',
+    'Records in this preview are not associated with an account, so this view cannot tell which of them are yours.',
+    'how many records you author sit at each step of the five-step workflow, counted once each at their first unsatisfied step.',
+  ];
+
+  it.each(MUST_FLAG)('flags a false personal zero: %s', (sentence) => {
+    expect(assertsEmptiness(sentence)).toBe(true);
+  });
+
+  it.each(MUST_PASS)('leaves the honest copy alone: %s', (sentence) => {
+    expect(assertsEmptiness(sentence)).toBe(false);
+  });
+
+  it('rejects plain negation as a frame — "not" is not an escape', () => {
+    // The hole the first version of this escape had. "not" reads as a denial and
+    // is not one: it is exactly how an emptiness ASSERTION is normally phrased.
+    expect(DENIAL_FRAME.test('You have not exported any records.')).toBe(false);
+    expect(assertsEmptiness('You have not exported any records.')).toBe(true);
   });
 });
 
@@ -416,6 +580,36 @@ describe('the gated state', () => {
     expect(container.querySelector('figure.stats-chart')).toBeNull();
     // The payload's own figure never reaches the DOM.
     expect(textOf(container)).not.toContain('Export 3');
+  });
+
+  /*
+   * THE PAGE LEAD IS PART OF THIS TAB'S CLAIM SURFACE, even though it renders
+   * outside the panel.
+   *
+   * It sits directly above the tablist, so on `?tab=mine` it was reading as a
+   * promise about the panel below it while naming four sections that are on the
+   * OTHER tab — workflow readiness, evidence, Project Memory and the API surface.
+   * `StatisticsPage.tsx` recorded that as deliberate; it is now tab-scoped, and
+   * this is the assertion that keeps it so.
+   *
+   * The emptiness rule is applied here too, because the lead is the one piece of
+   * copy on this tab that trap 4's panel-scoped guard cannot see.
+   */
+  it('the page lead describes THIS tab, not the sections on the other one', async () => {
+    const { container } = await renderMineTab();
+    const lead = container.querySelector('.placeholder > p') as HTMLElement;
+    expect(lead, 'the page lead must exist').not.toBeNull();
+    const text = textOf(lead);
+
+    for (const promise of ['workflow readiness', 'evidence', 'Project Memory', 'API surface']) {
+      expect(text, `the My Stats lead must not promise ${promise}`).not.toContain(promise);
+    }
+    // …nor name a workspace: this tab reads nothing in either scope, so a
+    // workspace clause would imply the gate depends on which one is open.
+    expect(text).not.toMatch(/workspace/i);
+    expect(text).toContain('once records are associated with a signed-in account');
+    expect(emptinessClaims(text)).toEqual([]);
+    expect(text).not.toMatch(/\b\d+\b/);
   });
 
   it('offers a route back to the workspace figures and to the privacy settings', async () => {
@@ -518,10 +712,33 @@ describe('unconfiguredMyStatsSource', () => {
        * No sentence tells the reader they have nothing. The word "zero" IS
        * allowed, and one sentence uses it — "It is not showing zero" — because
        * denying the zero is the point; what is forbidden is asserting one.
+       *
+       * ONE DEFINITION FOR BOTH SURFACES. This used to be its own narrower
+       * pattern — `(you have|there are|there is) (no|none|zero)` — while the
+       * RENDERED panel was guarded only by digit shapes. Two definitions of the
+       * same rule, of unequal strength, and the weaker one covered the surface a
+       * copy edit actually lands on. `assertsEmptiness` is now the single
+       * definition, applied to the constants here and to the rendered panel in
+       * trap 4.
        */
-      expect(copy, reason).not.toMatch(/\b(you have|there are|there is) (no|none|zero)\b/i);
+      expect(emptinessClaims(copy), reason).toEqual([]);
       expect(copy, reason).not.toMatch(/\b0\b/);
       expect(copy, reason).toMatch(/this (preview|view)/i);
+    }
+  });
+
+  /*
+   * …and the same rule over every other string this module hands the tab. The
+   * pending copy was guarded and the view descriptions were not, which is the
+   * same asymmetry one level down.
+   */
+  it('no view title, description or gate label asserts an emptiness either', () => {
+    for (const view of MY_STATS_VIEWS) {
+      expect(emptinessClaims(view.title), view.id).toEqual([]);
+      expect(emptinessClaims(view.description), view.id).toEqual([]);
+    }
+    for (const [reason, label] of Object.entries(MY_STATS_PENDING_LABEL)) {
+      expect(emptinessClaims(label), reason).toEqual([]);
     }
   });
 });

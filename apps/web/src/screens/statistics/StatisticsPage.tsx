@@ -226,16 +226,36 @@ function announceRound(round: Round, lastSuccess: Date | null): string {
  * below), so this page really does describe either workspace: only the session
  * scope holds examples, and only the ordinary scope can be named without them.
  *
- * THE TAB SPLIT DID NOT CHANGE THIS SENTENCE'S SUBJECT, and it deliberately does
- * not mention personal statistics. Everything it lists is on the General ISAAC
- * tab; the My Stats tab states its own condition in its own words, and promising
- * personal figures in the page lead — where nothing can qualify them — is exactly
- * the claim this build cannot support. Workflow readiness and evidence are
- * derived from whichever records were read, while Project Memory and the API
- * surface are properties of the build.
+ * THE TAB SPLIT DID CHANGE WHAT THIS SENTENCE PROMISES, and the previous version
+ * of this comment denied it. It said "the tab split did not change this
+ * sentence's subject … everything it lists is on the General ISAAC tab", and then
+ * rendered that sentence ABOVE THE TABLIST on both tabs. So at `?tab=mine` the
+ * page lead named workflow readiness, evidence, Project Memory and the API
+ * surface — four things, none of which is on the panel the reader is looking at —
+ * while the comment recorded the choice as deliberate. Both halves were true and
+ * their conjunction was the defect: a lead that is correct about the page reads as
+ * a promise about the panel, because it sits directly above it.
+ *
+ * So the lead is now TAB-SCOPED. The reasoning the old comment gave still stands
+ * and is preserved: the General lead must not mention personal statistics,
+ * because promising personal figures where nothing can qualify them is exactly
+ * the claim this build cannot support. What changes is that the My Stats tab gets
+ * its own lead instead of inheriting one about a panel it is not showing — and
+ * that lead states the tab's condition rather than a figure, in the same terms
+ * `MyStats.tsx` and `lib/myStatsContract.ts` use.
+ *
+ * The WORKSPACE clause stays on the General lead only. On My Stats it would be
+ * actively misleading: that tab reads nothing at all, in either scope, so naming
+ * a workspace there would imply the gate is a property of which workspace is open.
  */
-function leadSentence(scope: string | null): string {
+function leadSentence(scope: string | null, tab: StatisticsTabId): string {
   const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
+  if (tab === 'mine') {
+    return (
+      'What this tab will show once records are associated with a signed-in account. This ' +
+      'preview cannot tell whose records these are, so it states that rather than a figure.'
+    );
+  }
   return (
     `A read-only view of ${workspace}, workflow readiness, evidence, Project ` +
     'Memory, and the API surface.'
@@ -480,7 +500,7 @@ export function StatisticsPage() {
       <div className="placeholder">
         <span className="eyebrow">Workspace Insights</span>
         <h1>Statistics</h1>
-        <p>{leadSentence(scope)}</p>
+        <p>{leadSentence(scope, activeTab)}</p>
 
         {/* The app's shared page-tab pattern, reused rather than reimplemented:
             `RovingTabs` is the same component the Settings code-sample tabs use
@@ -978,13 +998,22 @@ function evidenceClassLabel(key: string): string {
  * FORM CHOICE — a figure list, and DELIBERATELY NOT A CHART.
  *
  * Every chart form for these five numbers would state something false.
- * `Stale Artifacts` OVERLAPS the four status rows — an exported record whose
- * draft has since changed is both `Exported` and stale — so a stacked bar would
- * imply a partition that does not exist, and a bar chart on one shared axis would
- * invite adding the rows up. The four status counts alone would chart honestly,
- * but splitting the five across a chart and a list would separate the very rows
- * whose relationship the copy below has to explain. So they stay a labelled list
- * with the overlap stated in words.
+ * `Stale Artifacts` is a SUBSET OF `Exported`, not a fifth bucket, so a stacked
+ * bar would imply a partition that does not exist and a bar chart on one shared
+ * axis would invite adding the rows up. The four status counts alone would chart
+ * honestly, but splitting the five across a chart and a list would separate the
+ * very rows whose relationship the copy below has to explain. So they stay a
+ * labelled list with the overlap stated in words.
+ *
+ * "OVERLAPS the four status rows" is what this used to say, and it is looser than
+ * the truth in a way that matters: it implies a record could be stale while
+ * sitting in `Ready Now` or one of the two blocked rows, which cannot happen.
+ * `artifact_state` returns `none` unless `exp.exported()`
+ * (`apps/api/isaac_api/dependencies.py:56-57`), and `status()` returns `DONE` if
+ * and only if `exported()` is true (`workspace.py:549-566`, checked) — which is
+ * also the field `deriveExportGate` buckets on. So stale ⊆ Exported, and the
+ * overlap is with exactly ONE row. The decision not to chart is unchanged; only
+ * the reason is stated at its real strength.
  */
 function ExportGateGroup({ records }: { records: RuntimeRecord[] }) {
   const gate = deriveExportGate(records);
@@ -1017,9 +1046,10 @@ function ExportGateGroup({ records }: { records: RuntimeRecord[] }) {
           <p className="stats-note">
             Ready Now means no open questions remain and the official export dry-run passes. Blocked
             by the Export Gate means no open questions remain but the dry-run does not pass. Blocked
-            by Open Questions means the gate has not been reached yet. Stale Artifacts overlaps the
-            rows above — an exported record whose draft has since changed is both — so it must not be
-            added to them, and for that reason these five are not charted on a shared scale.
+            by Open Questions means the gate has not been reached yet. Stale Artifacts is a subset of
+            Exported, not a fifth bucket — a record whose exported file no longer matches its draft
+            is counted in both — so it must not be added to the four, and for that reason these five
+            are not charted on a shared scale.
           </p>
           <p className="stats-note">
             These positions are recomputed from the current drafts on every read and are never

@@ -194,6 +194,68 @@ const ALL_FORMS: [string, string, () => void][] = [
   ],
 ];
 
+/**
+ * Every value `StatsCharts.tsx` exports that is NOT a chart form.
+ *
+ * ── Why this list exists ────────────────────────────────────────────────────
+ *
+ * The `it.each(ALL_FORMS)` block below used to claim that a sixth chart form
+ * "cannot be added with only four of the five guarantees". `ALL_FORMS` is a
+ * HAND-WRITTEN list, so it claimed nothing of the sort: an independent reviewer
+ * added `StatsDonut` — no summary sentence, no data table, no `aria-hidden`, no
+ * `focusable="false"`, and colour as its only encoding — mounted it in
+ * production and gave it its own wrapper class, and all 2,667 frontend tests plus
+ * all 93 browser tests passed. Omitting a form from a list is not a failure; it
+ * is the default.
+ *
+ * So the guard is driven off the MODULE'S OWN EXPORTS instead. The export set
+ * must be exactly `ALL_FORMS` plus this list, which means a new export cannot
+ * ship until someone classifies it — and classifying it as a form puts it
+ * through the five guarantees.
+ *
+ * The remaining hole, stated rather than papered over: a chart form could be
+ * mis-filed HERE. `no chart form is mis-filed as a helper` below closes the
+ * shape of it the reviewer actually used (a `Stats*`-named component), which is
+ * this file's naming convention for a chart form; a chart form named
+ * `PieChart` would still have to be caught by review.
+ */
+const NON_CHART_EXPORTS = [
+  'CHART_FALLBACK_WIDTH',
+  'CHART_MIN_WIDTH',
+  'IN_SEGMENT_LABEL_SLOTS',
+  'ChartAccessPending',
+  'ChartEmpty',
+  'ChartError',
+  'ChartFrame',
+  'ChartLegend',
+  'ChartLoading',
+  'ChartSourceUnavailable',
+  'TechnicalDetails',
+  'estimateTextWidth',
+  'useChartWidth',
+] as const;
+
+describe('ALL_FORMS is driven by the module, not by convention', () => {
+  it('accounts for every export — a new chart form cannot ship unlisted', async () => {
+    const module = await import('../screens/statistics/StatsCharts');
+    expect(Object.keys(module).sort()).toEqual(
+      [...ALL_FORMS.map(([name]) => name), ...NON_CHART_EXPORTS].sort(),
+    );
+  });
+
+  it('no chart form is mis-filed as a helper', () => {
+    // `Stats*` is this module's naming convention for a chart form, so a
+    // `Stats*` component parked in the helper list is the mis-classification
+    // that would re-open the hole above.
+    for (const name of NON_CHART_EXPORTS) {
+      expect(name, `${name} is named like a chart form; it belongs in ALL_FORMS`).not.toMatch(
+        /^Stats[A-Z]/,
+      );
+    }
+    for (const [name] of ALL_FORMS) expect(name).toMatch(/^Stats[A-Z]/);
+  });
+});
+
 describe('every chart form carries BOTH text equivalents', () => {
   it.each(ALL_FORMS)('%s — an always-present summary sentence', (_name, caption, mount) => {
     mount();
@@ -320,6 +382,317 @@ describe('colour is never the only encoding', () => {
 });
 
 // --- selective labelling -----------------------------------------------------
+
+// --- the domain: the largest value, never the total -------------------------
+
+/**
+ * THE SCALE RULE, PINNED.
+ *
+ * "The domain is a nice maximum over the LARGEST VALUE, not the total" is the
+ * headline claim of this whole slice — it is what makes these bars a chart
+ * rather than the row of progress bars `StageBars` drew, it is stated three
+ * times in `StatsCharts.tsx` and, unlike the other two, it is PRINTED ON SCREEN:
+ * `StatisticsPage.tsx` tells the reader "The scale runs to the largest bucket,
+ * not to the total, so small differences stay visible."
+ *
+ * Nothing asserted it. Changing both call sites to `niceMax(total ?? …)` —
+ * reinstating exactly the deleted behaviour and making that on-screen sentence
+ * false — passed all 2,667 frontend tests.
+ *
+ * The fixture is chosen so the two domains cannot be confused: a maximum of 2
+ * against a total of 40 gives ticks `0 · 1 · 2` under the rule and
+ * `0 · 10 · 20 · 30 · 40 · 50` under the total. One assertion per scaled form.
+ */
+const SMALL_OF_MANY = [
+  { key: 'a', label: 'Alpha', value: 1 },
+  { key: 'b', label: 'Beta', value: 2 },
+];
+const BIG_TOTAL = 40;
+
+const ticksOf = (caption: string, selector: string): string[] =>
+  [...figure(caption).querySelectorAll(selector)].map((t) => t.textContent ?? '');
+
+describe('the domain is the largest value, not the total', () => {
+  it('StatsBarChart labels its shared axis 0 · 1 · 2 for a max of 2 out of 40', () => {
+    render(
+      <StatsBarChart
+        caption="Records by workflow step"
+        rows={SMALL_OF_MANY}
+        unit="records"
+        total={BIG_TOTAL}
+        categoryHeader="Workflow Step"
+      />,
+    );
+    expect(ticksOf('Records by workflow step', '.stats-chart-axis .stats-chart-tick')).toEqual([
+      '0',
+      '1',
+      '2',
+    ]);
+    // …and the largest bar therefore spans the whole plot, which is the visible
+    // consequence the on-screen sentence promises.
+    const widest = Math.max(
+      ...[...figure('Records by workflow step').querySelectorAll('.stats-chart-bar')].map((b) =>
+        Number(b.getAttribute('width')),
+      ),
+    );
+    expect(widest).toBe(CHART_FALLBACK_WIDTH);
+  });
+
+  it('StatsColumnChart labels its y axis 0 · 1 · 2 for a max of 2 out of 40', () => {
+    render(
+      <StatsColumnChart
+        caption="Operations by method"
+        rows={SMALL_OF_MANY}
+        unit="operations"
+        total={BIG_TOTAL}
+        categoryHeader="HTTP Method"
+      />,
+    );
+    expect(ticksOf('Operations by method', '.stats-chart-tick-y')).toEqual(['0', '1', '2']);
+  });
+
+  it('StatsComparisonRows gives the largest row the full track — it draws no axis', () => {
+    render(
+      <StatsComparisonRows
+        caption="Operations by group"
+        rows={SMALL_OF_MANY}
+        unit="operations"
+        total={BIG_TOTAL}
+        categoryHeader="Group"
+      />,
+    );
+    const fig = figure('Operations by group');
+    // No tick strip at all on this form (see its own doc comment), so the domain
+    // has to be read off the marks: 2-of-40 fills the track, 1-of-40 is half of
+    // it. Against the TOTAL these would be 5% and 2.5% slivers.
+    expect(ticksOf('Operations by group', '.stats-chart-tick')).toEqual([]);
+    const widths = [...fig.querySelectorAll('.stats-chart-bar')].map((b) =>
+      Number(b.getAttribute('width')),
+    );
+    expect(widths).toEqual([CHART_FALLBACK_WIDTH / 2, CHART_FALLBACK_WIDTH]);
+  });
+
+  it('StatsLineChart labels its y axis 0 · 1 · 2 for a max of 2', () => {
+    render(
+      <StatsLineChart
+        caption="Exports per week"
+        rows={SMALL_OF_MANY}
+        unit="records"
+        xAxisLabel="Week"
+      />,
+    );
+    expect(ticksOf('Exports per week', '.stats-chart-tick-y')).toEqual(['0', '1', '2']);
+  });
+});
+
+// --- the declared palette ---------------------------------------------------
+
+/**
+ * THE PALETTE, PINNED — and pinned as a CSS FACT, because that is what it is.
+ *
+ * "COLOUR NEVER ENCODES IDENTITY. The six `--stats-cat-*` slots are gone" is the
+ * second headline claim of the slice, and nothing asserted it either: an
+ * independent reviewer re-declared all six `--stats-cat-1..6` and painted the
+ * first three bars of every one-series chart with them — the exact anti-pattern
+ * `StatsPrimitives.tsx`'s `StageBars` note says was eliminated — and all 2,667
+ * frontend tests plus all 93 browser tests passed.
+ *
+ * A rendered-DOM assertion could not have caught it (jsdom applies no
+ * stylesheet, and `data-slot` was unchanged), so the stylesheet is read as text.
+ */
+/** WCAG 2.x relative luminance and contrast ratio. Six lines, no dependency. */
+const srgbOf = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+const luminance = (hex: string) =>
+  srgbOf(hex)
+    .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+    .reduce((acc, c, i) => acc + [0.2126, 0.7152, 0.0722][i] * c, 0);
+const contrastRatio = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+function declaredHex(name: string, from: string): string {
+  const found = new RegExp(`${name}\\s*:\\s*(#[0-9a-fA-F]{6})`).exec(from);
+  expect(found, `${name} must be declared as a 6-digit hex`).not.toBeNull();
+  return found![1].toLowerCase();
+}
+
+describe('the chart palette declared on .statistics', () => {
+  /**
+   * The stylesheet with every `/* … *\/` comment removed.
+   *
+   * Stripped for the same reason `my-stats.test.tsx`'s trap 1 matches against
+   * import statements rather than whole text: this file's own header NAMES the
+   * six slots in order to explain that they are gone, so a raw-text scan would
+   * be satisfied by deleting the explanation. What must be absent is the CODE.
+   */
+  async function statisticsCss(): Promise<string> {
+    const raw = String((await import('../screens/statistics/statistics.css?raw')).default);
+    return raw.replace(/\/\*[\s\S]*?\*\//g, '');
+  }
+
+  it('declares and references no categorical slots anywhere', async () => {
+    const css = await statisticsCss();
+    // Not scoped to the `.statistics` block: a `--stats-cat-*` slot re-declared
+    // under any selector, or referenced by any rule, is the same regression.
+    expect(css).not.toMatch(/--stats-cat-/);
+    // …and the explanation of their removal is still in the file, so this test
+    // cannot be made to pass by deleting the reasoning.
+    const raw = String((await import('../screens/statistics/statistics.css?raw')).default);
+    expect(raw, 'the removed slots are still named in the file').toMatch(/--stats-cat-/);
+    expect(raw, 'and the reason they were removed is still stated').toMatch(/slots are gone/i);
+  });
+
+  it('declares exactly one series colour and a five-step ordinal ramp, and nothing else', async () => {
+    const css = await statisticsCss();
+    const block = /^\.statistics\s*\{([\s\S]*?)^\}/m.exec(css);
+    expect(block, 'the .statistics page-root block must exist').not.toBeNull();
+    const declared = [...block![1].matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((m) => m[1]);
+    expect(declared.sort()).toEqual([
+      '--stats-ramp-1',
+      '--stats-ramp-2',
+      '--stats-ramp-3',
+      '--stats-ramp-4',
+      '--stats-ramp-5',
+      '--stats-series',
+    ]);
+  });
+
+  /**
+   * THE IN-SEGMENT LABEL RULE, COMPUTED rather than trusted.
+   *
+   * `statistics.css` used to put `--surface` (white) on ramp slots 1–3 and
+   * justify slot 3 as "4.06:1 clears the 3:1 that applies to an 11px semibold
+   * label as large-ish text". Three things were wrong: the ratio is 4.32:1, 11px
+   * semibold is not WCAG large text, and the applicable threshold is 4.5:1 —
+   * which 4.32:1 fails. It was unexercised at the fallback width and lands in
+   * axe's `incomplete` bucket in a browser, so no ratchet would ever have seen it.
+   *
+   * This test recomputes the whole table from the stylesheet and the token file
+   * every run, so re-stepping the ramp or repainting a label re-derives the
+   * answer instead of leaving a stale sentence behind.
+   */
+  it('draws an in-segment label only where its colour clears 4.5:1 on the fill', async () => {
+    const css = await statisticsCss();
+    const tokens = String((await import('../styles/tokens.css?raw')).default);
+
+    const hexOf = declaredHex;
+    const contrast = contrastRatio;
+
+    const ramp = [1, 2, 3, 4, 5].map((n) => hexOf(`--stats-ramp-${n}`, css));
+    // The two colours the rule may choose between, read from the token file so a
+    // token change is picked up rather than re-hard-coded here.
+    const candidates = {
+      '--surface': hexOf('--surface', tokens),
+      '--text-heading': hexOf('--text-heading', tokens),
+    };
+
+    /** Which slots the stylesheet actually paints a label on, and with what. */
+    const painted = new Map<number, string>();
+    for (const [, selectors, decl] of css.matchAll(
+      /((?:\.statistics \.stats-chart-inlabel\[data-slot='\d'\],?\s*)+)\{([^}]*)\}/g,
+    )) {
+      const colour = /color\s*:\s*var\((--[a-z-]+)\)/.exec(decl)?.[1];
+      expect(colour, 'an in-segment label must wear a token, not a literal').toBeTruthy();
+      for (const [, slot] of selectors.matchAll(/data-slot='(\d)'/g)) {
+        painted.set(Number(slot), colour!);
+      }
+    }
+
+    const { IN_SEGMENT_LABEL_SLOTS } = await import('../screens/statistics/StatsCharts');
+
+    for (let slot = 1; slot <= ramp.length; slot++) {
+      const fill = ramp[slot - 1];
+      const best = Math.max(...Object.values(candidates).map((c) => contrast(c, fill)));
+      const legible = best >= 4.5;
+
+      // The component's list and the measured answer must agree, in both
+      // directions: a legible slot must be labelled, an illegible one must not.
+      expect(
+        IN_SEGMENT_LABEL_SLOTS.includes(slot),
+        `slot ${slot} (${fill}): best available label contrast is ${best.toFixed(2)}:1, so it ` +
+          `${legible ? 'MUST' : 'must NOT'} be in IN_SEGMENT_LABEL_SLOTS`,
+      ).toBe(legible);
+
+      if (!legible) {
+        expect(painted.has(slot), `slot ${slot} must have no label colour rule`).toBe(false);
+        continue;
+      }
+      const token = painted.get(slot);
+      expect(token, `slot ${slot} is labelled and needs a colour rule`).toBeTruthy();
+      const ratio = contrast(candidates[token as keyof typeof candidates], fill);
+      expect(
+        ratio,
+        `slot ${slot}: ${token} on ${fill} is ${ratio.toFixed(2)}:1, below the 4.5:1 that applies ` +
+          `to an 11px semibold label (WCAG large text starts at 18.66px bold)`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  /**
+   * EVERY PIECE OF CHART TEXT CLEARS AA ON BOTH CARD SURFACES.
+   *
+   * The axis ticks shipped at `--text-tertiary` #78838f — 3.86:1 on #ffffff,
+   * 3.76:1 on #fbfcfd, at 10.5px, against a 4.5:1 requirement. A brand-new WCAG
+   * 1.4.3 failure on markup this slice authored, and the automated ratchet was
+   * close to blind to it: axe reported ONE of the y-ticks as a violation, put
+   * five more in `incomplete` (the SVG behind them defeats background
+   * resolution) and never saw the three x-axis ticks, which sit in the
+   * uncollapsed main flow. A count-based baseline cannot protect a defect it
+   * cannot see, so this computes the ratio instead of counting nodes.
+   *
+   * `.stats-chart-inlabel` is excluded because it sits on a ramp fill, not on a
+   * card surface — the test above covers it against the fill it actually has.
+   *
+   * SCOPED TO `.stats-chart-*` on purpose. `.stat-card-note` still uses
+   * `--text-tertiary` at 11.5px and still fails; that is PRE-EXISTING, app-wide
+   * debt recorded in `e2e/a11y-baseline.ts` (four instances on
+   * `statistics-example` alone), and fixing that token moves counts on many
+   * surfaces at once. Widening this test to the whole file would therefore fail
+   * today — which is exactly why the limit is stated rather than assumed.
+   */
+  it('every chart text token clears 4.5:1 on both card surfaces', async () => {
+    const css = await statisticsCss();
+    const tokens = String((await import('../styles/tokens.css?raw')).default);
+    const surfaces = ['--surface', '--surface-subtle'].map((t) => declaredHex(t, tokens));
+
+    const seen: string[] = [];
+    for (const [, selectors, decl] of css.matchAll(
+      /((?:\.statistics \.stats-chart-[a-z-]*(?:\[[^\]]*\])?,?\s*)+)\{([^}]*)\}/g,
+    )) {
+      if (selectors.includes('inlabel')) continue; // sits on a fill; see above
+      const token = /(?:^|[\s;])color\s*:\s*var\((--[a-z-]+)\)/.exec(decl)?.[1];
+      if (token === undefined) continue;
+      const fg = declaredHex(token, tokens);
+      seen.push(token);
+      for (const bg of surfaces) {
+        const ratio = contrastRatio(fg, bg);
+        expect(
+          ratio,
+          `${selectors.trim().split('\n')[0]} uses ${token} ${fg}, which is ${ratio.toFixed(2)}:1 ` +
+            `on ${bg} — below the 4.5:1 WCAG 1.4.3 requires for text under 18.66px bold`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    // Vacuity guard: the regex above must actually be finding rules.
+    expect(seen.length, 'no chart text rule was inspected — the scan is broken').toBeGreaterThanOrEqual(8);
+    expect(seen, 'the axis ticks in particular must be covered').toContain('--text-muted');
+  });
+
+  it('every mark rule draws from those six slots and no other colour', async () => {
+    const css = await statisticsCss();
+    // Every `fill:` / `stroke:` on a chart-mark rule resolves through a custom
+    // property. A raw hex on a mark would be a seventh colour outside the
+    // validated set, which is how a categorical slot comes back under a new name.
+    for (const [, decl] of css.matchAll(/\.stats-chart-[a-z-]*(?:\[[^\]]*\])?\s*\{([^}]*)\}/g)) {
+      for (const [, value] of decl.matchAll(/\b(?:fill|stroke)\s*:\s*([^;]+)/g)) {
+        expect(value.trim(), 'a chart mark must not carry a literal colour').not.toMatch(
+          /#[0-9a-fA-F]{3,8}|\brgba?\(|\bhsla?\(/,
+        );
+      }
+    }
+  });
+});
 
 describe('labels are selective, and never clipped', () => {
   it('a column chart labels the SOLE maximum and nothing else', () => {

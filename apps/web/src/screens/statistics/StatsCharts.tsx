@@ -81,22 +81,31 @@ import {
  * ── NO TEXT LIVES INSIDE AN SVG HERE ───────────────────────────────────────
  *
  * Axis ticks, the one direct value label and the in-segment shares are HTML
- * elements positioned over the plot, not `<text>` nodes. Three reasons, and the
- * third is the one that forced it:
+ * elements positioned over the plot, not `<text>` nodes. TWO reasons carry the
+ * decision, and both are properties of the medium rather than of any one probe:
  *
  *   · real text is selectable, translatable by the browser, and honours a
  *     reader's own minimum-font-size — SVG `<text>` is none of those;
  *   · it keeps the SVG purely MARKS, which is what makes "the picture claims
- *     nothing" true of the element and not just of an attribute on it;
- *   · `scrollWidth` on an SVG-namespaced element reports the SVG VIEWPORT's
- *     width, not the glyph's. `e2e/helpers/layout.ts`'s content-loss tier
- *     compares painted width against `scrollWidth`, so a one-character tick read
- *     as "7px visible of 520px of content (1%)" — a false report of total text
- *     loss, and it fired on four viewports. The tick was perfectly legible. The
- *     probe's comparison is simply not defined for SVG children (it already
- *     documents the sibling limitation for inline elements), and the honest fix
- *     was to stop putting text where the comparison does not apply rather than
- *     to carve an exception into a shared probe.
+ *     nothing" true of the element and not just of an attribute on it.
+ *
+ * A THIRD REASON USED TO BE RECORDED HERE AS "the one that forced it", and it
+ * DOES NOT REPRODUCE. It claimed that `scrollWidth` on an SVG-namespaced element
+ * reports the SVG VIEWPORT's width rather than the glyph's, so
+ * `e2e/helpers/layout.ts`'s content-loss tier read a one-character tick as "7px
+ * visible of 520px of content (1%)". Measured in this app's own headless Chromium
+ * on a `<text>` reading `7` at 11px inside a 520px `<svg>`: `scrollWidth` 11,
+ * `clientWidth` 11, client rect width 7 — the GLYPH box, three px of rounding
+ * above the painted width. The `<svg>` element itself does report 520, so the
+ * rule holds for the container and not for its children, and `layout.ts:86-89`
+ * independently records the same small magnitude for the graph canvas ("20 vs
+ * 25"). At 7-of-11 the tier's own 0.6 visible-fraction narrowing would not even
+ * have fired.
+ *
+ * What IS true is that the content-loss tier reported these ticks on four
+ * viewports and the ticks were perfectly legible. The mechanism was never
+ * isolated, so it is recorded as an observation rather than as an explanation,
+ * and it is not load-bearing: reasons one and two decide this on their own.
  *
  * ── Values, and the absence of them ────────────────────────────────────────
  *
@@ -117,8 +126,18 @@ import {
  */
 export const CHART_FALLBACK_WIDTH = 560;
 
-/** The smallest plot width a chart will draw into. Below this the marks stop
- *  shrinking and the plot column's own `overflow-x` takes over. */
+/**
+ * The smallest plot width a chart will draw into: below this the measured width
+ * is clamped and the SVG stops being re-laid-out at 1:1.
+ *
+ * What happens then is `max-width: 100%` on the four SVG rules in
+ * `statistics.css` — the drawing SCALES DOWN uniformly to fit its column. It does
+ * NOT scroll. This comment used to say "the plot column's own `overflow-x` takes
+ * over", and there is no such rule: the only `overflow-x: auto` in the file is on
+ * `.stats-scroll`, which wraps the chart DATA TABLES (see its own comment), and
+ * `.stats-chart-plot` is a plain `display: flex` column with no overflow
+ * declaration at all.
+ */
 export const CHART_MIN_WIDTH = 120;
 
 /**
@@ -128,16 +147,23 @@ export const CHART_MIN_WIDTH = 120;
  * TWO SOURCES OF MEASUREMENT, and the synchronous one is not belt-and-braces —
  * it is the fix for a defect the browser suite caught. A `ResizeObserver` alone
  * left the two charts inside the collapsed `Technical Details` region stuck at
- * the fallback width FOREVER, including after the reader opened it:
+ * the fallback width FOREVER, including after the reader opened it. Every claim
+ * below is a headless-Chromium measurement on this app, re-taken 2026-08-04:
  *
- *   · Chromium renders a closed `<details>`' content with `content-visibility:
- *     hidden`, not `display: none`. A `content-visibility: hidden` subtree is
- *     SKIPPED by `ResizeObserver` — the spec says a skipped element gets no
- *     observation — so the callback simply never ran for those two plots, and
- *     nothing fired when the region later opened either.
+ *   · A closed `<details>` does NOT hide its content with `display: none`.
+ *     Chromium's UA stylesheet puts `content-visibility: hidden` on the
+ *     `::details-content` pseudo-element — measured directly:
+ *     `getComputedStyle(details, '::details-content').contentVisibility` is
+ *     `hidden` while the plot INSIDE it computes `display: flex` and
+ *     `content-visibility: visible` in its own right. A `content-visibility:
+ *     hidden` subtree is SKIPPED by `ResizeObserver` (the spec says a skipped
+ *     element gets no observation), so the callback never ran for those two
+ *     plots — and, measured with the synchronous read removed, nothing fired when
+ *     the region later opened either: both SVGs still carried `width="560"` a
+ *     full 1.5s after the summary was clicked.
  *   · But the element still has a layout box, so a DIRECT read returns the real
- *     width. Measured in the browser: 918px, while the observer had reported
- *     nothing at all.
+ *     width. Measured: `getBoundingClientRect().width` is 918 with the region
+ *     CLOSED, before any click, while the observer had reported nothing at all.
  *
  * So the ref callback reads the box itself, once, and the observer handles every
  * later change (a window resize, a breakpoint reflow). `getBoundingClientRect`
@@ -835,12 +861,15 @@ export function StatsStackedBar({
           </svg>
           {/* In-segment shares, as HTML over the bar. Drawn ONLY where the text
               measurably fits inside the segment with padding on both sides —
-              never clipped, and never `overflow: hidden` over a cropped glyph.
-              A share that does not fit stays in the legend and the table, so
-              nothing is gated by the decision. */}
+              never clipped, and never `overflow: hidden` over a cropped glyph —
+              AND only on a ramp slot where a label colour clears 4.5:1 against
+              the fill ({@link IN_SEGMENT_LABEL_SLOTS}). A share that is not drawn
+              for either reason stays in the legend, the summary sentence and the
+              table, so nothing is gated by the decision. */}
           {rows.map((row, i) => {
             const segment = segmentFor.get(row.key);
             if (segment === undefined || segment.sharePct === null) return null;
+            if (!IN_SEGMENT_LABEL_SLOTS.includes(i + 1)) return null;
             const label = `${segment.sharePct}%`;
             if (segment.width < estimateTextWidth(label) + 12) return null;
             return (
@@ -879,6 +908,35 @@ function legendDetail(value: number, total: number, unit: string): string {
 export function estimateTextWidth(text: string): number {
   return text.length * 7.2;
 }
+
+/**
+ * Ramp slots whose in-segment share label can be drawn AT ALL — i.e. the ones
+ * where either `--surface` or `--text-heading` clears WCAG 1.4.3's 4.5:1 against
+ * the ramp fill it would sit on.
+ *
+ * 11px semibold is NOT large text (that threshold is 18.66px bold / 24px
+ * regular), so 4.5:1 applies rather than 3:1. Measured over the ramp declared in
+ * `statistics.css` — the full table is in the `.stats-chart-inlabel` comment
+ * there — the middle step #587ca7 gives 4.32:1 with white and 4.06:1 with ink.
+ * NEITHER clears it, so slot 3 carries no label.
+ *
+ * WHY NOT RE-STEP THE RAMP INSTEAD, which would keep all five labelled: the dead
+ * band is an intrinsic property of an evenly-stepped five-step ramp over this
+ * range. White clears 4.5:1 only below relative luminance 0.1833 and ink only
+ * above 0.2194, and the ramp's own steps sit at 0.118 / 0.193 / 0.297 in that
+ * measure — the middle one lands inside the band. Nudging step 3 out of it breaks
+ * the `dataviz` ordinal check the ramp currently PASSES: measured with
+ * `dataviz/scripts/validate_palette.js --ordinal`, #50749f and #4d739f both fail
+ * "Adjacent ΔL >= 0.06" against step 2 (0.060 and 0.056 in OKLab L). Re-stepping
+ * all five to skip the band would make the ramp non-uniform and re-open a palette
+ * that is currently validated on both card surfaces — a much larger change than
+ * the defect, which is one unlabelled segment out of five.
+ *
+ * Nothing is gated: an unlabelled slot's share is still in the legend (name +
+ * count + share, as text), in the summary sentence and in the data table — the
+ * same relief the fit rule below already relies on.
+ */
+export const IN_SEGMENT_LABEL_SLOTS: readonly number[] = Object.freeze([1, 2, 4, 5]);
 
 /* ---- StatsComparisonRows (compact horizontal comparison) --------------- */
 

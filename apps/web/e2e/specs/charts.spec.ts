@@ -4,10 +4,12 @@
  *
  * ── Why this cannot be a jsdom test ────────────────────────────────────────
  *
- * Every chart on the Statistics surface measures its own plot column with
- * `ResizeObserver` and renders SVG at 1:1 pixel scale. jsdom has no
- * `ResizeObserver` and no layout, so the vitest suite necessarily renders at the
- * hook's documented fallback width and can prove nothing about real geometry.
+ * Every chart on the Statistics surface measures its own plot column — a direct
+ * `getBoundingClientRect()` read at mount, plus a `ResizeObserver` for later
+ * changes — and renders SVG at 1:1 pixel scale. jsdom has neither layout (its
+ * `getBoundingClientRect` returns 0, which the hook ignores) nor
+ * `ResizeObserver`, so the vitest suite necessarily renders at the hook's
+ * documented fallback width and can prove nothing about real geometry.
  * Four things are therefore only checkable here, and all four are the ones that
  * actually break:
  *
@@ -34,15 +36,36 @@ const STATISTICS_MINE = SURFACES.find((s) => s.id === 'statistics-mine')!;
 
 /**
  * Open the Technical Details disclosure, which holds two of the four charts, and
- * WAIT FOR THE CHARTS INSIDE IT TO BE MEASURED.
+ * ASSERT THAT EVERY CHART PLOT IS ON ITS MEASURED WIDTH.
  *
- * The wait is the interesting part. Those two charts mount inside a closed
- * `<details>`, i.e. inside `display: none`, where `ResizeObserver` reports a
- * content width of 0. The hook deliberately ignores a zero measurement and holds
- * its documented fallback width rather than collapsing the plot to nothing — so
- * on open, the observer fires again with the real width and React re-renders one
- * frame later. Asserting geometry immediately after the click would be racing
- * that frame, and the failure would look like a layout bug.
+ * ── What the poll is, and what it is NOT ────────────────────────────────────
+ *
+ * It is not a race-guard. This docstring used to say those two charts mount
+ * "inside `display: none`, where `ResizeObserver` reports a content width of 0",
+ * and that "on open, the observer fires again with the real width and React
+ * re-renders one frame later". All three claims are false, they contradict
+ * `StatsCharts.tsx:132-160` — which was right — in the same commit, and a
+ * maintainer who trusted them would delete the line that makes these charts work.
+ *
+ * MEASURED in this suite's own headless Chromium, disclosure CLOSED: the plot
+ * computes `display: flex` and `content-visibility: visible`, its
+ * `getBoundingClientRect().width` is 918, and the SVG already carries
+ * `width="918"` BEFORE any click. Nothing is racing. (What is `content-visibility:
+ * hidden` is the UA's `::details-content` pseudo-element, measured on the
+ * `<details>` itself — which is why the subtree is skipped by `ResizeObserver`
+ * while still having a layout box.)
+ *
+ * So the poll is an ASSERTION: it says every plot's SVG width equals its column,
+ * which is only true because `useChartWidth` reads the box SYNCHRONOUSLY in its
+ * ref callback. Negative control, run 2026-08-04: delete
+ * `apply(node.getBoundingClientRect().width)` and this poll never settles — both
+ * SVGs sit at the 560px fallback while their columns measure 918, and 5 of the 8
+ * tests in this file fail here. The observer alone never delivers, not even 1.5s
+ * after the region is opened.
+ *
+ * It is spelled as a poll rather than a bare assertion only so that a genuine
+ * future re-render (a breakpoint reflow) is tolerated rather than turned into a
+ * flake. The value it converges on is fixed at mount.
  */
 async function openTechnicalDetails(page: import('@playwright/test').Page): Promise<void> {
   const summary = page.locator('details.stats-technical > summary');
@@ -270,6 +293,45 @@ test.describe('@responsive Statistics · My Stats', () => {
     // display a count, and "0" is a count.
     const text = (await panel.innerText()).replace(/\s+/g, ' ');
     expect(text, 'no numeral may appear on the personal tab').not.toMatch(/\d/);
+
+    /*
+     * …AND NO ZERO IN WORDS. `/\d/` above is digit-shaped, and so was every other
+     * emptiness guard on this tab, so an independent reviewer's insertion —
+     * "Zero records are attributed to you, and your export count is zero." —
+     * passed all 8 tests in this file, INCLUDING THIS ONE, whose title claims to
+     * check for "no zero".
+     *
+     * The rule is checked per sentence with a MODAL escape, because three
+     * sentences on this tab legitimately deny a zero ("A count of zero WOULD say
+     * you have no records") and a page-wide ban would flag exactly the copy doing
+     * the honest work. Plain `not` is deliberately NOT an escape: "you have not
+     * exported any records" is an assertion wearing a negation.
+     *
+     * DUPLICATED FROM `src/__tests__/my-stats.test.tsx`, which is the authority and
+     * carries the two-directional polarity table. The two cannot share a module:
+     * `tsconfig.app.json` includes only `src`, `e2e/tsconfig.json` is a separate
+     * standalone project (see its own header), and the production build must not
+     * depend on Playwright types. Keep them in lockstep.
+     */
+    const COUNT_NOUN =
+      'records?|experiments?|exports?|fields?|figures?|activity|drafts?|issues?|questions?|counts?';
+    const emptiness = [
+      new RegExp(`\\b(?:zero|none|nil|nought|no)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`, 'i'),
+      new RegExp(`\\b(?:${COUNT_NOUN})\\b[^.;]{0,40}?\\b(?:is|are|was|were)\\s+(?:zero|none|nil|nought)\\b`, 'i'),
+      new RegExp(`\\byou(?:r|rs)?\\b[^.;]{0,60}?\\b(?:not|never|n't)\\b[^.;]{0,40}?\\bany\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`, 'i'),
+    ];
+    const modalFrame = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brather than\b|\b(?:is|are) absent\b/i;
+    const sentences = text.split(/(?<=[.;])\s+/);
+    const claims = sentences.filter(
+      (s) => emptiness.some((p) => p.test(s)) && !modalFrame.test(s),
+    );
+    expect(claims, 'a sentence on the personal tab asserts the reader has nothing').toEqual([]);
+    // …and the honest zero-denying sentences really do reach the matcher, so
+    // "nothing matched" cannot be mistaken for "the rule holds".
+    expect(
+      sentences.filter((s) => emptiness.some((p) => p.test(s))).length,
+      "the tab's own zero-denying sentences must reach the matcher",
+    ).toBeGreaterThanOrEqual(3);
   });
 
   test('lists all eight planned views as headings', async ({ page, app }) => {

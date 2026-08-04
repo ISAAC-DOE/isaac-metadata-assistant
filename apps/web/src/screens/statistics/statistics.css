@@ -76,16 +76,28 @@
  * #ffffff and #fbfcfd. Contrast vs #ffffff / #fbfcfd:
  *
  *   ramp 1  #1c4a7a   9.09:1 / 8.85:1   (= --action-pressed, verbatim)
- *   ramp 2  #3a6390   5.98:1 / 5.82:1
- *   ramp 3  #587ca7   4.06:1 / 3.95:1
- *   ramp 4  #7597be   2.85:1 / 2.78:1
+ *   ramp 2  #3a6390   6.24:1 / 6.07:1
+ *   ramp 3  #587ca7   4.32:1 / 4.21:1
+ *   ramp 4  #7597be   3.03:1 / 2.95:1
  *   ramp 5  #93b4d6   2.16:1 / 2.10:1
  *
- * Steps 4 and 5 sit below 3:1 by design — an ordinal ramp's light end is
- * ALLOWED to recede toward the surface, and the relief for it is that colour is
- * never the only encoding here: 2px surface gaps separate the segments, a
- * legend pairs every swatch with the class name plus its count and share, and
- * the whole composition is restated in a summary sentence and a data table.
+ * THREE OF THOSE FIVE ROWS WERE WRONG and are corrected here: steps 2, 3 and 4
+ * were recorded as 5.98/5.82, 4.06/3.95 and 2.85/2.78. Every number above is a
+ * WCAG 2.x relative-luminance computation over the exact hex pairs, re-measured
+ * when the error was found; steps 1 and 5 and `--stats-series` were already
+ * exact. The mis-statements all understated the ratio, which is the direction
+ * that makes a palette look worse than it is — but an understated measurement is
+ * not "safe", it is just an unreliable measurement, and one of them changed the
+ * conclusion below.
+ *
+ * Step 5 sits below 3:1 on both surfaces by design, and step 4 sits below it on
+ * #fbfcfd only (2.95:1) while clearing it on #ffffff (3.03:1) — this used to read
+ * "steps 4 and 5 sit below 3:1", which the corrected step-4 figure no longer
+ * supports on the white card. An ordinal ramp's light end is ALLOWED to recede
+ * toward the surface, and the relief for it is that colour is never the only
+ * encoding here: 2px surface gaps separate the segments, a legend pairs every
+ * swatch with the class name plus its count and share, and the whole composition
+ * is restated in a summary sentence and a data table.
  *
  * `--assist*` (lavender) is reserved for Assistant surfaces and is absent.
  * `--pass-*` (green) and `--fail-*` (red) are reserved validation-verdict hues
@@ -741,10 +753,31 @@
  *
  * Axis text wears TEXT tokens, never the series colour, and `tabular-nums` so a
  * column of ticks aligns.
+ *
+ * ── WHY `--text-muted` AND NOT `--text-tertiary` ───────────────────────────
+ *
+ * This rule used `--text-tertiary` #78838f, which MEASURES 3.86:1 on `--surface`
+ * #ffffff and 3.76:1 on `--surface-subtle` #fbfcfd. At 10.5px that is ordinary
+ * body text under WCAG 1.4.3, so the requirement is 4.5:1 and every tick on
+ * every chart failed it — a NEW AA failure introduced by this slice, and one the
+ * automated ratchet could barely see: axe caught exactly ONE of the y-ticks as a
+ * violation, put five more in its `incomplete` bucket (the SVG behind them
+ * defeats background resolution), and never saw the three x-axis ticks at all.
+ *
+ * `--text-muted` #5b6570 MEASURES 5.93:1 / 5.77:1 (and 5.48:1 on the #f4f6f9 app
+ * background), so all of them clear 4.5:1 — the five axe could not resolve
+ * included, which is the point of fixing the TOKEN rather than the one node axe
+ * happened to flag.
+ *
+ * `--text-secondary` #46515f (8.07:1 / 7.86:1) would also clear it and was
+ * REJECTED: it is what `.stats-chart-cat` uses for the category names under the
+ * columns, so ticks would stop being recessive chrome and start competing with
+ * the labels they measure. `#5f6b78` (5.44:1 / 5.30:1) would clear it too and
+ * was rejected for being a seventh literal outside the token set.
  */
 .statistics .stats-chart-tick {
   position: absolute;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: 10.5px;
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
@@ -855,15 +888,31 @@
  * The in-segment share, as HTML centred over its own segment.
  *
  * A label set INSIDE a coloured fill is the one place text may leave the text
- * tokens — it has to clear contrast against the fill it sits on, so it is white
- * on the three dark ramp steps and ink on the two light ones. Ramp 3 (#587ca7,
- * 4.06:1 vs white) takes white: 4.06:1 clears the 3:1 that applies to an 11px
- * semibold label as large-ish text, whereas `--text-heading` on it would be
- * 2.5:1. Ramp 4 (#7597be) and ramp 5 (#93b4d6) are light enough that ink wins.
+ * tokens — it has to clear contrast against the fill it sits on. Measured, at
+ * 11px semibold (which is NOT WCAG large text: that threshold is 18.66px bold or
+ * 24px regular, so the requirement is 4.5:1, not 3:1):
+ *
+ *          ramp fill   --surface #ffffff   --text-heading #111a24
+ *   slot 1  #1c4a7a          9.09:1                1.93:1     -> white
+ *   slot 2  #3a6390          6.24:1                2.81:1     -> white
+ *   slot 3  #587ca7          4.32:1                4.06:1     -> NEITHER
+ *   slot 4  #7597be          3.03:1                5.79:1     -> ink
+ *   slot 5  #93b4d6          2.16:1                8.14:1     -> ink
+ *
+ * SLOT 3 IS THE MIDDLE OF THE RAMP AND NEITHER LABEL COLOUR CLEARS 4.5:1 ON IT,
+ * so no in-segment label is drawn there at all — see `IN_SEGMENT_LABEL_SLOTS` in
+ * `StatsCharts.tsx`, which is where the decision is made and where the reasoning
+ * for not re-stepping the ramp is recorded. This rule previously put `--surface`
+ * on slots 1–3 and justified slot 3 with "4.06:1 clears the 3:1 that applies to
+ * an 11px semibold label as large-ish text": the ratio was really 4.32:1, 3:1 was
+ * the wrong threshold, and 4.32:1 fails the right one.
  *
  * Never clipped: the component measures the text against the segment and simply
  * does not render this element unless it fits with padding on both sides, so
- * there is no `overflow: hidden` here to crop a glyph.
+ * there is no `overflow: hidden` here to crop a glyph. A slot that carries no
+ * label — because it does not fit, or because of the contrast rule above — keeps
+ * its share in the legend, the summary sentence and the data table, so nothing
+ * is gated by either decision.
  */
 .statistics .stats-chart-inlabel {
   position: absolute;
@@ -877,8 +926,7 @@
   pointer-events: none;
 }
 .statistics .stats-chart-inlabel[data-slot='1'],
-.statistics .stats-chart-inlabel[data-slot='2'],
-.statistics .stats-chart-inlabel[data-slot='3'] {
+.statistics .stats-chart-inlabel[data-slot='2'] {
   color: var(--surface);
 }
 .statistics .stats-chart-inlabel[data-slot='4'],

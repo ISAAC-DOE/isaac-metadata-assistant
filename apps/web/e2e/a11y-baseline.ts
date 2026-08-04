@@ -458,35 +458,77 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        *       Settings gained a tab. It is one more instance of documented debt, not
        *       a new defect, and it is NOT a licence to relax the rule.
        *
-       * THE COVERAGE THIS COSTS, stated rather than glossed. Two instances of the
-       * `.stat-card-note` defect are now unscanned, and no `SURFACES` entry can
-       * reach them: a native `<details>` has no URL state, so there is no path to
-       * open it with. What keeps the DEFECT under ratchet is `statistics-example`,
-       * which still measures FOUR instances of exactly the same
-       * `--text-tertiary` `.stat-card-note` failure — so the class is still one
-       * node away from red, and only two extra instances of it went unmeasured.
-       * (`e2e/specs/charts.spec.ts` does open the region, for layout and structure,
-       * but it runs no axe scan.)
+       * ── REVIEW FOLLOW-UP, 2026-08-04: THE COVERAGE GAP IS CLOSED, AND THE NOTE
+       *    THAT DESCRIBED IT WAS FALSE ─────────────────────────────────────────
+       *
+       * The `+2 / -2` arithmetic above still holds and is left standing, because
+       * it is what a reader needs to reconcile the history. What followed it did
+       * not. It said two instances went unmeasured, that they were all
+       * `.stat-card-note`, and — in the `statistics-example` note below — that
+       * "not one is a chart". MEASURED, opening the region on `statistics-example`
+       * raised the failing node count from 9 to 12 at desktop/laptop/tablet and
+       * from 8 to 11 at mobile/zoom. The THIRD node was
+       *
+       *     .stats-chart-tick-y.stats-chart-tick[aria-hidden="true"]
+       *
+       * — A CHART AXIS TICK, `--text-tertiary` #78838f at 10.5px, which axe scored
+       * at 3.85:1 against a 4.5:1 requirement. So a brand-new WCAG 1.4.3 failure
+       * on markup that slice authored was shipping behind a note asserting no such
+       * thing existed.
+       *
+       * TWO SEPARATE FIXES, because the count was only ever going to see one node
+       * of it:
+       *
+       *   1. THE TOKEN, not the node. `.stats-chart-tick` is now `--text-muted`
+       *      #5b6570 — 5.93:1 on #ffffff, 5.77:1 on #fbfcfd (WCAG 2.x relative
+       *      luminance over the exact hexes). That clears the FIVE further y-ticks
+       *      axe files under `incomplete` (the SVG behind them defeats background
+       *      resolution, so no count can ever include them) and the three x-axis
+       *      ticks in the uncollapsed main flow, which appear in NEITHER bucket. A
+       *      node count cannot protect any of those, so the durable guard is
+       *      computational, in `src/__tests__/stats-charts.test.tsx` → "every chart
+       *      text token clears 4.5:1 on both card surfaces".
+       *   2. THE SCAN, not the note. `specs/a11y-axe.spec.ts` now calls
+       *      `openUnreachableDisclosures` before scanning, which opens
+       *      `details.stats-technical`. A native `<details>` still has no URL
+       *      state — that part of the old note was true — so the sweep opens it
+       *      instead of recording the loss. The two `.stat-card-note` nodes are
+       *      therefore back under ratchet, which is the +2 below.
+       *
+       * PROOF THAT THE TWO FIXES ARE INDEPENDENT, both runs local darwin: with the
+       * scan step in place and the token REVERTED to `--text-tertiary`,
+       * `statistics-example` measures 9 -> 12 / 8 -> 11 (+3) at all five projects,
+       * reproducing the reviewer's number exactly. With the token fixed it is +2.
+       * The third node is the tick, and it is gone.
+       *
+       * STILL NOT SCANNED, stated rather than left to be discovered: each chart's
+       * own data-table `<details class="stats-chart-table-wrap">`. Those are closed
+       * by default for every reader, and opening four of them at five viewports
+       * would move counts for a reason unrelated to this gap.
        *
        * MEASURED on darwin, two consecutive local runs of
        * `npx playwright test e2e/specs/a11y-axe.spec.ts`, identical counts. The
-       * exact failing nodes at desktop are now `kbd` (the ⌘K hint), `.nav-version`
-       * and `#statistics-tab-mine` — all three shared chrome, none of them new
-       * markup from this slice.
+       * exact five failing nodes at desktop are `kbd` (the ⌘K hint, #9aa4af,
+       * 2.52:1), `.nav-version` (#9aa4af, 2.46:1), the inactive
+       * `#statistics-tab-mine` (#78838f, 3.56:1) and the two runtime
+       * `.stat-card-note` lines (#78838f, 3.75:1). Not one is a chart — and unlike
+       * the last time that sentence was written here, the disclosure was OPEN when
+       * it was measured.
        *
        * `statistics@mobile-375x812` was `{ darwin: 3, linux: 2 }` and is now a
-       * SCALAR 2. The pair existed because one node's wrap boundary differed
+       * SCALAR. The pair existed because one node's wrap boundary differed
        * between the fonts; that node is one of the two that moved into the
-       * disclosure, so both columns land on 2. darwin is measured; LINUX IS
-       * INFERRED — and the type system has no way to say "same as darwin,
-       * unverified", so a scalar is the only honest form (see the note at the
-       * bottom of this file). CI is the authority.
+       * disclosure — and is now scanned again on both platforms, at a width where
+       * only one of the two was ever in range, so both columns land on 4. darwin is
+       * measured; LINUX IS INFERRED — and the type system has no way to say "same
+       * as darwin, unverified", so a scalar is the only honest form (see the note at
+       * the bottom of this file). CI is the authority.
        */
-      'statistics@desktop-1280x800': 3,
-      'statistics@laptop-1024x768': 3,
-      'statistics@tablet-768x1024': 3,
-      'statistics@mobile-375x812': 2,
-      'statistics@zoom-200': 2,
+      'statistics@desktop-1280x800': 5,
+      'statistics@laptop-1024x768': 5,
+      'statistics@tablet-768x1024': 5,
+      'statistics@mobile-375x812': 4,
+      'statistics@zoom-200': 4,
       /*
        * THE POPULATED Statistics page, at the same route inside a worked-example
        * session — ADDED 2026-08-04 to close a gap the tutorial-scope slice left open.
@@ -518,16 +560,29 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * runtime `.stat-card-note` nodes moved into the collapsed disclosure (-2, or
        * -1 at the narrow widths) and one inactive `.section-tab` appeared (+1).
        *
-       * The nine that remain, measured at desktop: `kbd`, `.nav-version`, the
-       * inactive tab, the FOUR record cards' `.stat-card-note` lines, and the
-       * `.chip-ev-supported` / `.chip-ev-unknown` chip labels. Every one is a
-       * pre-existing token shortfall this file already records; not one is a chart.
+       * ── REVIEW FOLLOW-UP, 2026-08-04: 9/9/9/8/8 -> 11/11/11/10/10 ────────────
+       *
+       * "not one is a chart" was the sentence that used to end this note, and IT
+       * WAS FALSE — this is the surface where the unscanned chart tick was found.
+       * The full account is in the `statistics@*` note above; in one line, the
+       * sweep now opens `details.stats-technical`, so the two runtime
+       * `.stat-card-note` nodes are counted again (+2), and the chart tick that
+       * would have been a THIRD is fixed at the token rather than baselined.
+       *
+       * The ELEVEN, measured at desktop with the disclosure open: `kbd`,
+       * `.nav-version`, the inactive `#statistics-tab-mine`, SIX
+       * `.stat-card-note` lines (four record cards at 3.75:1 plus the two runtime
+       * cards, and the two `dl[data-tone]` ones at 3.43:1 / 3.42:1), and the
+       * `.chip-ev-supported` (#2f7d78, 4.2:1) / `.chip-ev-unknown` (#78838f,
+       * 3.62:1) chip labels. Every one is a pre-existing token shortfall this file
+       * already records. NOW not one is a chart — and this time the region was open
+       * when that was checked.
        */
-      'statistics-example@desktop-1280x800': 9,
-      'statistics-example@laptop-1024x768': 9,
-      'statistics-example@tablet-768x1024': 9,
-      'statistics-example@mobile-375x812': 8,
-      'statistics-example@zoom-200': 8,
+      'statistics-example@desktop-1280x800': 11,
+      'statistics-example@laptop-1024x768': 11,
+      'statistics-example@tablet-768x1024': 11,
+      'statistics-example@mobile-375x812': 10,
+      'statistics-example@zoom-200': 10,
       /*
        * THE MY STATS TAB — a NEW surface (`/statistics?tab=mine`), added with the
        * tab restructure because neither `statistics` nor `statistics-example` opens
@@ -797,8 +852,37 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // arithmetic — but the linux PER-KEY values for all fifteen touched keys are
   // darwin measurements written as scalars. If CI disagrees, transcribe ITS numbers
   // and correct the total; never loosen the assertion.
-  darwin: 1683,
-  linux: 1683,
+  //
+  // ── REVIEW FOLLOW-UP, 2026-08-04: 1683 -> 1703 on both columns ──────────────
+  //
+  // NOTHING REGRESSED AND NOTHING BROKE. The sweep now OPENS the Statistics
+  // `Technical Details` disclosure before scanning (`openUnreachableDisclosures`
+  // in `specs/a11y-axe.spec.ts`), so two pre-existing `.stat-card-note` failures
+  // per Statistics surface are counted again instead of being recorded as a
+  // coverage gap. That is +2 on ten keys:
+  //
+  //   statistics          3,3,3,2,2  ->  5,5,5,4,4        = +10
+  //   statistics-example  9,9,9,8,8  -> 11,11,11,10,10    = +10
+  //   statistics-mine     3,3,3,2,2  ->  unchanged        =   0
+  //                                                   net = +20
+  //
+  // `statistics-mine` does not move because the My Stats tab renders no
+  // `details.stats-technical` — the disclosure lives on the General tab.
+  //
+  // A THIRD node would have come back with them and DID NOT, which is the part
+  // worth remembering: it was a chart axis tick at `--text-tertiary`, a NEW WCAG
+  // 1.4.3 failure that the previous note asserted did not exist. It is fixed at
+  // the token (`--text-muted`, 5.93:1 / 5.77:1) rather than added here, because
+  // five sibling ticks sit in axe's `incomplete` bucket and three more in neither
+  // bucket, so no count in this file could ever have held them. See the
+  // `statistics@*` note for the +3-vs-+2 measurement that separates the two fixes.
+  //
+  // Both sums are CHECKED by the suite itself, per platform. The linux PER-KEY
+  // values for these ten keys remain darwin measurements written as scalars, as
+  // they already were; if CI disagrees, transcribe ITS numbers and correct the
+  // total — never loosen the assertion.
+  darwin: 1703,
+  linux: 1703,
 };
 
 /**
