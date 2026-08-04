@@ -1058,7 +1058,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 38 operations, 49 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 38 operations, 51 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(38);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1123,8 +1123,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `DELETE /api/tutorial/sessions/{session_id}` (2 paragraphs). Net +1,274
     // characters across the two new operations; no existing description changed, and
     // the parity test named below proves that rather than leaving it asserted here.
-    expect(total).toBe(23850);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(49);
+    //
+    // 23,850 -> 24,623 and 49 -> 51 paragraphs: `POST /api/demo/run` and
+    // `POST /api/demo/reset` each gained a LEADING paragraph stating the
+    // `X-Isaac-Tutorial-Session` REQUIREMENT, which until now appeared only inside each
+    // operation's `409` sub-description — so a reader consulting the operation to learn
+    // how to call it saw no precondition at all and could only discover it by reading a
+    // failure case. `/demo/reset` additionally stopped saying "the workspace" for a
+    // scope it cannot reach: it refuses when `scope is None`, and
+    // `reset_to_canonical_seed(session_id=scope)` only ever addresses
+    // `scope_root(scope)`, so "Restores the workspace to exactly the five canonical
+    // built-in example records" described a destructive act on the ordinary workspace
+    // that this endpoint has no path to perform. Net +773 characters in TWO operations;
+    // operation count unchanged at 38. The paragraph count moves by exactly 2 because a
+    // new FIRST paragraph makes the requirement the lead and pushes each old lead into
+    // `rest` — it is one added `\n\n` per operation, not a reflow.
+    expect(total).toBe(24623);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(51);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

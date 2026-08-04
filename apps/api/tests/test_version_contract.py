@@ -239,8 +239,11 @@ def test_noop_demo_run_does_not_churn_the_token(client):
 # --- 2b. the demo run is precondition-gated on content (W1) -------------------
 #
 # ``POST /api/demo/run`` targets a FIXED canonical id derived server-side from
-# ``mode``, so a caller structurally cannot send an If-Match for it and
-# ``ensure_seeded`` makes ``If-Match: *`` vacuous. Its precondition is therefore
+# ``mode``, so a caller structurally cannot send an If-Match for it, and the
+# ``ensure_tutorial_seeded(scope)`` call at the top of the handler makes ``If-Match: *``
+# vacuous — the target always exists by the time the write is considered. (This cited
+# ``ensure_seeded``, which ran on every read and no longer exists at all; the vacuity
+# argument is unchanged, only its cause is now scoped to the session.) Its precondition is therefore
 # content-shaped: the target must still hold exactly its canonical seed state.
 # Matching -> the write would be byte-identical, so NOTHING is written. Drifted ->
 # 409, and still nothing is written. Either way the demo can never overwrite a

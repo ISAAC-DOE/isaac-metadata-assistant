@@ -160,7 +160,8 @@ export const LABELS = {
    *
    * A chip is still rendered rather than nothing, for two reasons that are about
    * truth rather than decoration: it is the ONLY surface that reports an
-   * UNEXPECTED `health.mode` (see `modeLabel` in `components/TopBar.tsx`), and its
+   * UNEXPECTED `health.mode` (see `anomalousMode` in `components/TopBar.tsx` — this
+   * cited `modeLabel`, which that file no longer has), and its
    * accessible name is where this deployment's two unconditional claims — file
    * upload is refused, no official institutional record is shown — are carried on
    * every screen. Neither has anywhere else to go on a record surface.
@@ -423,32 +424,73 @@ export const LABELS = {
    * built-in examples — both of which now REQUIRE the session header and refuse
    * without it (`POST /api/demo/run`, `POST /api/demo/reset`).
    *
-   * The body sentence states the two facts a reader needs before they spend time
-   * answering fields in here, and both are enforced rather than promised: the
-   * records are this session's own copies (one directory per session), and they are
-   * discarded when the walkthrough ends (`releaseTutorialSession` DELETEs on
-   * finish, skip, close and escape).
+   * THE BODY MADE THREE CLAIMS WHILE THIS COMMENT ENUMERATED TWO, AND THE
+   * UNENUMERATED THIRD WAS THE FALSE ONE. It read "they are not visible in My
+   * Experiments", which is not true and, because `AppShell` mounts this bar on every
+   * surface, was rendered directly above the five rows it denied. Entering a session
+   * changes the SCOPE every request carries, not the screen: `api.ts` attaches
+   * `X-Isaac-Tutorial-Session` in its single `request()` choke point, `ExperimentsHome`
+   * keys its fetch on the scope, and `e2e/specs/tutorial.spec.ts` asserts `.exp-row`
+   * count 5 on `/experiments` immediately after a session opens (and 0 before).
+   *
+   * The three facts the body now states, each checked against code rather than
+   * promised:
+   *
+   *  1. THE RECORDS ARE THIS SESSION'S OWN COPY. `_materialise_seed`
+   *     (`apps/api/isaac_api/workspace.py:806`) REQUIRES a `session_id` and has no
+   *     normal-scope form, and it writes under `workspace_root()/_tutorial/<id>/`.
+   *  2. NO REQUEST MADE OUTSIDE THE SESSION REACHES THEM. A scope is a directory
+   *     namespace, not a filter: `_experiment_dirs` enumerates one root and skips
+   *     `_`-prefixed entries unconditionally (`:839-861`), so exclusion is
+   *     structural. This is also why the bar says plainly that the app's own screens
+   *     — My Experiments included — are showing this walkthrough while it is open.
+   *  3. THEY ARE DISCARDED WHEN THE WALKTHROUGH ENDS. Every exit path drops the
+   *     scope and the pointer synchronously (`leaveTutorialScopeLocally`), so the
+   *     reader's access ends unconditionally. The server-side DELETE is best effort
+   *     (`disposeTutorialSession` swallows a failure) with `sweep_stale_tutorial_sessions`
+   *     as the fallback — which is why this comment no longer claims "every exit path
+   *     DELETEs", and why the function is `disposeTutorialSession`, not the
+   *     `releaseTutorialSession` five sites used to cite and which never existed.
    */
   tutorialSessionBarTitle: 'Worked Example',
   tutorialSessionBarBody:
-    'These five example records belong to this walkthrough only. They are a temporary copy, ' +
-    'they are not visible in My Experiments, and they are discarded when the walkthrough ends.',
+    'These five example records belong to this walkthrough only: they are its own copy, in a ' +
+    'temporary workspace of its own, and no request made outside it reaches them. While this bar ' +
+    'is showing, every screen in the app — My Experiments included — is showing this ' +
+    'walkthrough rather than the ordinary workspace. They are discarded when the walkthrough ends.',
   tutorialSessionBarRegion: 'Worked example session',
 
   /*
-   * The two ways a worked-example session can fail the reader, stated to them.
+   * The three ways a worked-example session can fail the reader, stated to them.
    *
    * These exist because `tutorialController` set `sessionError` and NOTHING rendered
    * it — the field's own comment claimed it was "surfaced to the reader as a truthful
    * message; never silently swallowed" while the only reader-visible consequence of a
    * failed start was that nothing happened when they pressed the button.
    *
-   * NEITHER SENTENCE CLAIMS MORE THAN IS KNOWN, and the create case is the careful one.
+   * NO SENTENCE CLAIMS MORE THAN IS KNOWN, and the create case is the careful one.
    * A failed `POST /api/tutorial/sessions` does NOT establish that no session was
    * created: the request may have succeeded and its response been lost, leaving an
    * orphan the backend's TTL sweep reclaims. So the copy states what IS known — the
    * walkthrough did not start, and the ordinary workspace was not touched — and does
    * not assert that nothing was created anywhere.
+   *
+   * THE EXPIRED SENTENCE IS THE STRONGEST OF THE THREE, AND IT IS NOW EARNED. It
+   * asserts the server no longer holds the workspace, which for a while was said on
+   * the strength of a bare `catch` — a network blip, a 401 at the authenticating edge
+   * and a 500 all produced it. It is now reached only when the backend has ANSWERED
+   * `404` with `{"error": "tutorial_session_not_found"}` (see
+   * `api.tutorialSessionState` and `tutorialController.resumeTutorialSession`), which
+   * is the one observation that supports it.
+   *
+   * `resume_failed` is what everything else degrades into, and it is deliberately the
+   * emptiest of the three. It names no cause, because from the client a blip, an edge
+   * redirect and a 500 are indistinguishable; it does not say the session is gone,
+   * because that is unknown; it does not say it is still there either. What it CAN say
+   * is checkable: one GET was issued and nothing was written, the pointer is kept
+   * (`resumeTutorialSession` does not clear `sessionStorage` on this branch), and
+   * `api.ts` re-enters the persisted scope at module load — so a reload really is a
+   * retry rather than advice that happens to sound helpful.
    */
   tutorialSessionCreateFailedTitle: 'The worked example could not be opened',
   tutorialSessionCreateFailedBody:
@@ -459,23 +501,65 @@ export const LABELS = {
     'The temporary workspace this walkthrough was using no longer exists, so its five example ' +
     'records are gone and the walkthrough has closed. Nothing in My Experiments was changed. ' +
     'You can start the walkthrough again from Settings & API → Help & Tutorial.',
+  tutorialSessionResumeFailedTitle: 'The worked example could not be resumed',
+  tutorialSessionResumeFailedBody:
+    'Checking the walkthrough you had open did not succeed, so it has not been resumed. Whether ' +
+    'it is still there is not something this screen can tell you. Nothing was written and ' +
+    'nothing in My Experiments was changed. Reloading the page tries again, and you can start a ' +
+    'new walkthrough from Settings & API → Help & Tutorial.',
   actionDismissTutorialNotice: 'Dismiss',
 
+  /*
+   * The first-run offer (`components/TutorialPromotion.tsx`).
+   *
+   * "It only reads — it answers nothing and changes nothing" WAS FALSE, and it sat
+   * next to the button that made it false. `startTutorial` POSTs
+   * `/api/tutorial/sessions`, and `create_tutorial_session` mints a new directory and
+   * calls `ensure_tutorial_seeded`, which materialises five records into it. That is a
+   * write. `screens/settings/HelpAndTutorial.tsx` had already identified this exact
+   * defect and corrected its own copy while the offer — the surface almost every
+   * reader meets first — went on making the claim.
+   *
+   * The reassurance is kept rather than deleted, and it is the true one: what is
+   * protected is the READER's work, not the absence of a write. The precise form is
+   * "no record of yours is created, changed, or removed", which is exactly what the
+   * code enforces — `_materialise_seed` requires a `session_id` and has no
+   * normal-scope form, so nothing this button does can address a record outside the
+   * session it opens.
+   */
   tutorialOfferTitle: 'Take the Guided Walkthrough',
   tutorialOfferBody:
     'A short guided tour of this app, pointing at the real controls on the real screens: what this ' +
     'list holds, how a record shows what it still needs, how evidence and confirmation work, and ' +
-    'why export stays closed until a record earns it. It only reads — it answers nothing and ' +
-    'changes nothing.',
+    'why export stays closed until a record earns it. Starting it opens a worked example of its ' +
+    'own — a temporary workspace holding five example records, discarded when the tour ends. No ' +
+    'record of yours is created, changed, or removed.',
 
-  // The mandated completion copy. Sentence case is deliberate here: it is an
-  // outcome statement rather than the name of a surface, and it matches
-  // `demoDriftedTitle` above, the other outcome statement in this file.
+  /*
+   * The mandated completion copy. Sentence case is deliberate here: it is an
+   * outcome statement rather than the name of a surface, and it matches
+   * `demoDriftedTitle` above, the other outcome statement in this file.
+   *
+   * "Nothing you have looked at was changed" WAS FALSE at the moment it rendered.
+   * `finishTutorial` drops the scope and the pointer and then DELETEs the session, so
+   * by the time this panel is on screen the five records the reader spent the
+   * walkthrough looking at are unreachable to them — destroyed, not unchanged. The
+   * expired-session copy below already tells a reader plainly that its records are
+   * gone; the SUCCESS path has to meet the same standard, or the app is honest only
+   * when something goes wrong.
+   *
+   * "gone" rather than "deleted" is deliberate and is the weakest true word: the
+   * reader's access ends unconditionally (`leaveTutorialScopeLocally` is synchronous),
+   * whereas the server-side DELETE is best effort with the TTL sweep as its fallback.
+   * And "start it again" replaces "reopen this walkthrough", because a replay mints a
+   * NEW session at step one; the one just finished cannot be reopened.
+   */
   tutorialCompleteTitle: 'Tutorial complete',
   tutorialCompleteBody:
-    'That is the whole workflow. Nothing you have looked at was changed, and any work already in ' +
-    'this workspace is untouched. You can reopen this walkthrough from Settings & API → Help & ' +
-    'Tutorial at any time.',
+    'That is the whole workflow. The worked example you were walking through is gone now, and so ' +
+    'is anything you answered inside it — it was a temporary copy of the five examples, kept apart ' +
+    'from your own work, and no record of yours was changed. You can start it again from ' +
+    'Settings & API → Help & Tutorial at any time.',
 
   settingsTabHelp: 'Help & Tutorial',
 

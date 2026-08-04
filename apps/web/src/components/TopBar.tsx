@@ -112,7 +112,8 @@ function chipText(health: ApiHealth | undefined, inExampleSession: boolean): str
  * test DB diagnostics"; it now names the scope alone. What the chip is responsible
  * for asserting has NOT shrunk with it — this accessible name states all of it:
  *
- *   · what the records in THIS scope are (or that there are none);
+ *   · what the built-in example records are in THIS scope (present and rebuilt from
+ *     committed reference files, or structurally absent);
  *   · file upload is refused;
  *   · no official institutional record is shown;
  *   · and, when `health.database` says so, the protected read-only test-database
@@ -127,19 +128,47 @@ function chipText(health: ApiHealth | undefined, inExampleSession: boolean): str
  * sentence used to open with "the records here are rebuilt from reference files
  * committed to this build". That was true when the five built-in examples were
  * materialised into the ordinary workspace on every read. They are not any more:
- * they exist only inside a worked-example session, and the ordinary workspace holds
- * no records at all — so in the ordinary scope the clause described records that are
- * not there.
+ * they exist only inside a worked-example session, so in the ordinary scope the clause
+ * described records that are not there.
  *
  * Split, so each scope states what is actually true of it. The two claims that hold
  * unconditionally — upload refused, no official institutional record shown — are
  * shared and must never be dropped from either branch.
+ *
+ * THE ORDINARY BRANCH'S FIRST FIX OVERSHOT, AND IS ITSELF CORRECTED. It replaced the
+ * stale clause with "this workspace holds no records of its own" — an EMPTINESS claim
+ * that nothing in this app measures. See `ORDINARY_ONLY` below for why that is false on
+ * a deployment whose workspace survived this deploy, and for the narrower claim (the
+ * built-in examples are structurally absent) that is true of every deployment.
  */
 export const CHIP_CLAIMS_ALWAYS =
   'file upload is refused, and no official institutional record is shown.';
 
-/** Ordinary workspace: no records exist here, so nothing is claimed about any. */
-const ORDINARY_ONLY = `this workspace holds no records of its own; ${CHIP_CLAIMS_ALWAYS}`;
+/**
+ * Ordinary workspace: the STRUCTURAL claim, not a measured one.
+ *
+ * IT USED TO CLAIM EMPTINESS, AND NOTHING MEASURED IT. The string was "this workspace
+ * holds no records of its own", derived from `sessionId === null` alone — the chip never
+ * reads a count and never asks the backend what is in the scope. Meanwhile
+ * `list_experiments(None)` enumerates whatever is on disk under the workspace root and
+ * there is NO startup migration, so a deployment whose workspace survives this deploy
+ * already holding the previously-seeded five WILL list them on My Experiments while this
+ * chip denies they exist. `apps/api/isaac_api/workspace.py` names the affected
+ * deployments in `_SEED_TITLE_BASE`'s note (a developer's uncleared
+ * `/tmp/isaac-ui-workspace`, and the Railway deployment's persistent volume at
+ * `/data/isaac-workspace`, which is still live); and those records are then undeletable
+ * through the UI, because reset is session-scoped and `remove_experiment` refuses a
+ * canonical id.
+ *
+ * What IS enforced — and enforced structurally rather than checked — is that the
+ * BUILT-IN EXAMPLES are not in this scope: `_materialise_seed` REQUIRES a `session_id`
+ * and has no normal-scope form, so no code path in this build can put one here. That is
+ * the claim the chip makes now. It is narrower than the one it replaces, and unlike it,
+ * it is true of every deployment.
+ */
+const ORDINARY_ONLY =
+  'the built-in example records are not in this workspace — they exist only inside a ' +
+  `guided-walkthrough session; ${CHIP_CLAIMS_ALWAYS}`;
 
 /** Inside a worked-example session: the examples ARE rebuilt from committed
  *  reference files, and they are discarded with the session. */

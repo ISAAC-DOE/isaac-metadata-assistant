@@ -399,8 +399,8 @@ export function GuidedTutorial({
 
   /*
    * The session-failure notice. Rendered whether or not the overlay is open, because
-   * neither failure leaves an overlay: a failed create never opens one, and an expired
-   * session closes the one that was open.
+   * none of the three failures leaves an overlay: a failed create never opens one, and
+   * an expired or unresumable session leaves the walkthrough in `phase: 'idle'`.
    *
    * WHY IT IS HERE. `sessionError` was being set and rendered NOWHERE — the field's own
    * comment claimed it was surfaced to the reader while the only visible consequence of
@@ -545,25 +545,49 @@ export function GuidedTutorial({
 /**
  * A worked-example session failed, said plainly.
  *
- * TWO REASONS, TWO SENTENCES, and neither over-claims — see the copy's own comment in
+ * THREE REASONS, THREE SENTENCES, and none over-claims — see the copy's own comment in
  * `lib/labels.ts` for why the create case deliberately does not say "nothing was
- * created". Both say what the reader most needs to know, which is the same thing in
- * both cases: their own records were not touched.
+ * created", and why `resume_failed` names no cause at all. All three say what the
+ * reader most needs to know, which is the same thing in every case: their own records
+ * were not touched.
+ *
+ * THE THIRD REASON IS NOT A NEW STATE, IT IS ONE THAT USED TO BE MISLABELLED. Anything
+ * that made the resume probe fail — a blip, a 401 at the authenticating edge, a 500 —
+ * rendered the EXPIRED sentence, which tells the reader their five records "are gone".
+ * `resumeTutorialSession` now reserves that for an observed
+ * `404 {"error": "tutorial_session_not_found"}` and routes every other failure here.
+ *
+ * The mapping is an exhaustive `Record<TutorialSessionError, …>` rather than a pair of
+ * ternaries, deliberately: the previous shape treated `expired` as the special case and
+ * let EVERYTHING else fall through to the create-failed copy, so a fourth reason would
+ * have been silently mislabelled. A `Record` keyed by the union makes that a type
+ * error instead — `tsc` refuses a missing key.
  *
  * `role="alert"` because it appears in answer to something the reader did (pressing
  * Start / Replay) or to something that happened to them (an expiry discovered at boot),
  * and in neither case is there an overlay left to carry the message. It is dismissible
  * so it does not outlive its own relevance; dismissing it retries nothing.
  */
+const SESSION_NOTICE_COPY: Record<
+  TutorialSessionError,
+  { title: string; body: string }
+> = {
+  create_failed: {
+    title: LABELS.tutorialSessionCreateFailedTitle,
+    body: LABELS.tutorialSessionCreateFailedBody,
+  },
+  expired: {
+    title: LABELS.tutorialSessionExpiredTitle,
+    body: LABELS.tutorialSessionExpiredBody,
+  },
+  resume_failed: {
+    title: LABELS.tutorialSessionResumeFailedTitle,
+    body: LABELS.tutorialSessionResumeFailedBody,
+  },
+};
+
 function TutorialSessionNotice({ reason }: { reason: TutorialSessionError }) {
-  const title =
-    reason === 'expired'
-      ? LABELS.tutorialSessionExpiredTitle
-      : LABELS.tutorialSessionCreateFailedTitle;
-  const body =
-    reason === 'expired'
-      ? LABELS.tutorialSessionExpiredBody
-      : LABELS.tutorialSessionCreateFailedBody;
+  const { title, body } = SESSION_NOTICE_COPY[reason];
   return (
     <div className="tutorial-session-notice" role="alert" data-tutorial-notice={reason}>
       <div className="tutorial-session-notice-copy">

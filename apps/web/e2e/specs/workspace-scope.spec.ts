@@ -54,7 +54,26 @@ test.describe('@interaction the ordinary workspace', () => {
 
     // The two things a reader CAN do instead are offered and operable.
     await expect(page.getByRole('button', { name: 'Open Validator' })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toBeEnabled();
+    /*
+     * RE-POINTED, AND THE DESTINATION IS ASSERTED RATHER THAN THE LABEL ALONE.
+     *
+     * This control was labelled "Replay Tutorial" — the exact name of the button in
+     * Settings that starts the walkthrough — while it only navigated, and navigated to
+     * `/settings` with no `?tab=`, which `SettingsPage` resolves to `overview`: a tab
+     * with no tutorial control on it. The label now names navigation
+     * (`actionGoToHelpAndTutorial`, the same pair `LoadMaterials`'s refusal state
+     * already used) and the landing is checked, because a name-only assertion is what
+     * let the wrong destination ship.
+     */
+    const go = page.getByRole('button', { name: 'Go to Help & Tutorial' });
+    await expect(go).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
+    await go.click();
+    await expect(page.getByRole('tab', { name: 'Help & Tutorial' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toBeVisible();
   });
 
   test('names itself "Workspace" in the mode chip, and claims nothing about records', async ({ page, app }) => {
@@ -73,7 +92,14 @@ test.describe('@interaction the ordinary workspace', () => {
     const name = await chip.getAttribute('aria-label');
     expect(name, 'the mode chip must have an accessible name').toBeTruthy();
     expect(name!.startsWith('Workspace'), `accessible name must open with the visible text: ${name}`).toBe(true);
-    expect(name).toMatch(/holds no records of its own/i);
+    // RE-POINTED: `holds no records of its own` was an emptiness claim derived from
+    // `sessionId === null` and measured by nothing — `list_experiments(None)` enumerates
+    // whatever is on disk, and there is no startup migration, so a workspace that
+    // survived this deploy holding the previously-seeded five would list them while the
+    // chip denied it. The enforced claim is that the built-in examples cannot be in this
+    // scope: `_materialise_seed` requires a `session_id` and has no normal-scope form.
+    expect(name).toMatch(/the built-in example records are not in this workspace/i);
+    expect(name).not.toMatch(/holds no records of its own/i);
     expect(name).toMatch(/file upload is refused/i);
     expect(name).toMatch(/no official institutional record is shown/i);
   });

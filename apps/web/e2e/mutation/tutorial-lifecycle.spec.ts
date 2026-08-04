@@ -81,7 +81,18 @@ test.describe('worked-example session lifecycle', () => {
     // reacquire the old "shared, hosted example workspace" wording, which is false
     // of a per-walkthrough session.
     await expect(dialog.locator('.reset-disclosure')).toContainText(/temporary worked-example workspace/i);
-    await expect(dialog.locator('.reset-disclosure')).toContainText(/Nothing in My Experiments is in this scope/i);
+    // RE-POINTED, and stronger: "Nothing in My Experiments is in this scope" was
+    // FALSE — while a walkthrough is open, My Experiments lists these same five
+    // records, because the scope changed rather than the screen. The enforced
+    // direction is required, the fact the old sentence hid is required, and the
+    // false sentence is forbidden.
+    await expect(dialog.locator('.reset-disclosure')).toContainText(
+      /the ordinary workspace is not in this scope/i
+    );
+    await expect(dialog.locator('.reset-disclosure')).toContainText(/so they are what is reset/i);
+    await expect(dialog.locator('.reset-disclosure')).not.toContainText(
+      /Nothing in My Experiments is in this scope/i
+    );
 
     // The typed gate: the destructive button is inert until the phrase is typed.
     const confirm = dialog.getByRole('button', { name: 'Reset Example Records' });
@@ -225,7 +236,7 @@ test.describe('worked-example session lifecycle', () => {
   test('replaying WHILE a session is open discards it first — still exactly one', async ({ page, lifecycle }) => {
     /*
      * The other half of "exactly one session": `startTutorial` calls
-     * `releaseTutorialSession()` BEFORE `createTutorialSession()`, so a replay from
+     * `disposeTutorialSession()` BEFORE `createTutorialSession()`, so a replay from
      * inside a running walkthrough must leave one session open, not two.
      *
      * WHY THIS WALKS TO THE LAST STEP INSTEAD OF NAVIGATING TO SETTINGS. The

@@ -22,10 +22,22 @@ import { useTutorialState } from '../lib/tutorialController';
  *
  * VISIBLE ONLY WHILE A SESSION IS OPEN, and that is `sessionId !== null` rather than
  * a phase check. The session is the thing these controls need; it is opened by
- * `startTutorial`, restored by `resumeTutorialSession` after a reload, and discarded
- * by every exit path (finish, skip, close, escape), so the bar's lifetime is exactly
- * the scope's lifetime. In the ordinary workspace it renders nothing at all — not a
- * disabled control, not a hint that one exists.
+ * `startTutorial`, restored by `resumeTutorialSession` after a reload, and released by
+ * every exit path (finish, skip, close, escape), so the bar's lifetime is exactly the
+ * lifetime of the scope THIS TAB HOLDS. In the ordinary workspace it renders nothing at
+ * all — not a disabled control, not a hint that one exists.
+ *
+ * THAT IS DELIBERATELY NOT THE SAME AS THE SERVER-SIDE DIRECTORY'S LIFETIME, and this
+ * comment used to conflate the two ("discarded by every exit path", "exactly the
+ * scope's lifetime"). What every exit path does unconditionally is synchronous and
+ * local: `leaveTutorialScopeLocally` drops the api scope and the `sessionStorage`
+ * pointer, so the bar goes and no further request is scoped. The DELETE that removes
+ * the directory is BEST EFFORT — `tutorialController.ts::disposeTutorialSession`
+ * swallows a failure by design — and closing the tab runs no exit path at all, in
+ * which case the directory survives until `sweep_stale_tutorial_sessions` reclaims it,
+ * and that sweep runs when the NEXT session is created rather than on a timer.
+ * `lib/settingsContent.ts`'s "What Is Stored" card hedges this correctly for the
+ * reader; this file now matches that standard.
  *
  * WHY IT IS CHROME AND NOT PART OF THE OVERLAY. The coach mark moves between
  * surfaces, is dismissed by Escape, and is a `role="dialog"`. A destructive control
@@ -44,11 +56,17 @@ import { useTutorialState } from '../lib/tutorialController';
  * here work, Settings → Replay Tutorial is reachable again, and a reader who walks
  * away is told by the coach mark where its control is instead of being dragged back.
  *
- * IT MAKES NO CLAIM IT DOES NOT ENFORCE. The body sentence states that the records
- * are this session's own copy, that they are absent from My Experiments, and that
- * they are discarded when the walkthrough ends. All three are structural: the
- * backend materialises them into `workspace_root()/_tutorial/<session_id>/`, ordinary
- * enumeration excludes that namespace, and every exit path DELETEs the session.
+ * ONE OF ITS THREE CLAIMS WAS FALSE, AND IT WAS THE ONE THIS COMMENT DID NOT LIST.
+ * The body used to say the records "are not visible in My Experiments". They are:
+ * entering a session changes the SCOPE every request carries, not the screen, so with
+ * this bar on screen `/experiments` lists these five rows — `e2e/specs/tutorial.spec.ts`
+ * asserts exactly that, 0 rows before starting and 5 after. Because `AppShell` mounts
+ * the bar on every surface, the sentence was rendered directly above the rows it
+ * denied. The body now states what IS enforced (the records are this walkthrough's own
+ * copy under `workspace_root()/_tutorial/<session_id>/`, and no request made outside
+ * the session reaches them, because `_experiment_dirs` enumerates ONE root and skips
+ * `_`-prefixed entries unconditionally) and tells the reader plainly that the screens
+ * are showing this walkthrough. See the copy's own comment in `lib/labels.ts`.
  */
 export function TutorialSessionBar() {
   const navigate = useNavigate();

@@ -66,9 +66,21 @@ export type TutorialDismissal = 'skip' | 'escape' | 'close';
  * Why the walkthrough could not run.
  *
  *   create_failed — opening a worked-example session failed; nothing was entered
- *   expired       — a session resumed after a reload no longer exists server-side
+ *   expired       — a session resumed after a reload is OBSERVABLY gone: the backend
+ *                   answered `404` with `{"error": "tutorial_session_not_found"}`
+ *   resume_failed — the resume probe failed for a reason this client cannot name, so
+ *                   whether the session still exists is UNKNOWN and its pointer is kept
+ *
+ * The third member exists because the second used to absorb it. `resumeTutorialSession`
+ * wrapped its probe in a bare `catch` and concluded `'expired'`, which meant a network
+ * blip, a 401 from the authenticating edge, or a 500 all told the reader that their
+ * workspace "no longer exists, so its five example records are gone" — an assertion
+ * about the server made from a failure that says nothing about the server — and then
+ * permanently discarded the pointer to a session that may well still have been there.
+ * `startTutorial`'s own catch has always refused to name a cause for exactly this
+ * reason; this splits the resume path to the same standard.
  */
-export type TutorialSessionError = 'create_failed' | 'expired';
+export type TutorialSessionError = 'create_failed' | 'expired' | 'resume_failed';
 
 export interface TutorialState {
   phase: TutorialPhase;
@@ -240,20 +252,52 @@ export async function startTutorial(trigger?: HTMLElement | null): Promise<void>
  *
  * - no persisted session -> nothing to do;
  * - the session still exists -> resume the overlay at the stored step;
- * - the session is gone (expired, or discarded in another tab) -> leave the
- *   scope, forget the pointer, and surface `sessionError: 'expired'`. Completion
- *   is NOT recorded: an expired session is not a finished walkthrough.
+ * - the session is OBSERVABLY gone (the backend answered `404` with the typed body
+ *   `{"error": "tutorial_session_not_found"}`, i.e. it expired or was discarded in
+ *   another tab) -> leave the scope, forget the pointer, and surface
+ *   `sessionError: 'expired'`. Completion is NOT recorded: an expired session is not
+ *   a finished walkthrough;
+ * - the probe failed any OTHER way -> `sessionError: 'resume_failed'`, and the
+ *   pointer is KEPT.
+ *
+ * THAT LAST BRANCH IS THE FIX, AND IT REPLACES A BARE `catch`. The probe used to be
+ * `api.listExperiments()` inside `catch { … 'expired' }`, so a network blip, a 401
+ * from the authenticating edge, and a 500 were all reported to the reader as "the
+ * temporary workspace this walkthrough was using no longer exists, so its five
+ * example records are gone" — a claim about the server derived from a failure that
+ * carries no information about the server — and each of them permanently deleted the
+ * `sessionStorage` pointer, destroying the reader's only route back into a session
+ * that may still have existed. Expiry is now claimed only on the OBSERVED typed 404
+ * (`api.tutorialSessionState`, which is the only place in this app that reads that
+ * body).
+ *
+ * WHAT THE UNKNOWN BRANCH DOES, precisely, and why each half is that way:
+ *
+ *  · the api scope IS dropped. Leaving it set while the store says `sessionId: null`
+ *    would make the mode chip read "Workspace" and hide the worked-example bar while
+ *    every request still addressed the session — trading one false claim for another.
+ *  · the pointer is NOT dropped. `api.ts` re-enters the persisted scope at module
+ *    load and `main.tsx` calls this function again, so a reload is a real retry. The
+ *    copy tells the reader exactly that, and names no cause.
  */
 export async function resumeTutorialSession(): Promise<void> {
   const persisted = readTutorialSession();
   if (!persisted) return;
 
   setTutorialScope(persisted.sessionId);
+  let existence: 'present' | 'gone';
   try {
-    // A scoped read is the cheapest existence probe there is: the shared scope
-    // dependency 404s an unknown session before any record work happens.
-    await api.listExperiments();
+    existence = await api.tutorialSessionState(persisted.sessionId);
   } catch {
+    // Cause unknown, and deliberately not guessed. Leave the scope so nothing goes on
+    // addressing a session this tab is no longer presenting; keep the pointer so a
+    // reload can still resume it.
+    setTutorialScope(null);
+    navigation = null;
+    emit({ ...state, phase: 'idle', index: 0, sessionId: null, sessionError: 'resume_failed' });
+    return;
+  }
+  if (existence === 'gone') {
     leaveTutorialScopeLocally();
     emit({ ...state, phase: 'idle', index: 0, sessionId: null, sessionError: 'expired' });
     return;

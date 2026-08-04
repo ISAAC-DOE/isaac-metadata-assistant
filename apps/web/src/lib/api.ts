@@ -415,6 +415,44 @@ export const api = {
     if (!res.ok) throw httpError(res, path);
   },
 
+  /**
+   * Does this worked-example session still exist? `'present'`, `'gone'`, or a throw.
+   *
+   * A scoped read of the experiment list is the cheapest existence probe there is:
+   * the shared scope dependency answers an unknown session with `404` and the typed
+   * body `{"error": "tutorial_session_not_found"}` BEFORE any record work happens
+   * (`apps/api/isaac_api/routes.py::tutorial_scope`). The header is passed
+   * explicitly rather than relied on from `tutorialScope`, so the probe asks about
+   * the session it was given and not about whatever scope the module happens to
+   * hold.
+   *
+   * WHY THIS IS NOT `listExperiments()` WRAPPED IN A `catch`. It was, and that was a
+   * defect: `getJson` builds its failure through `httpError`, which deliberately does
+   * NOT read the response body, so every caller saw an untyped `status` and could not
+   * tell the backend's stated reason from any other 404 — let alone from a 401 at the
+   * authenticating edge, a 500, or an unreachable backend. `'gone'` is therefore
+   * returned ONLY on the observed typed body. Everything else is rethrown as the
+   * `ApiError` it is, which forces the caller to decide what to do about a cause it
+   * cannot name instead of guessing "expired".
+   *
+   * Read-only, and it takes no lock.
+   */
+  async tutorialSessionState(sessionId: string): Promise<'present' | 'gone'> {
+    const path = '/experiments';
+    const res = await request(path, {
+      headers: { [TUTORIAL_SESSION_HEADER]: sessionId },
+    });
+    if (res.ok) return 'present';
+    const err = httpError(res, path);
+    // An HTML answer on an `/api/*` path is an edge intercept, never our 404 — do
+    // not try to read a typed reason out of a sign-in page.
+    if (res.status === 404 && !err.htmlIntercept) {
+      const body = (await res.json().catch(() => undefined)) as { error?: unknown } | undefined;
+      if (body?.error === 'tutorial_session_not_found') return 'gone';
+    }
+    throw err;
+  },
+
   // S1 — the experiment queue.
   async listExperiments(): Promise<ApiExperimentSummary[]> {
     const body = await getJson<{ experiments: ApiExperimentSummary[] }>('/experiments');

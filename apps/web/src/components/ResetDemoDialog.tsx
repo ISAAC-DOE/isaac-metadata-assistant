@@ -319,13 +319,30 @@ export function ResetDemoDialog() {
                  *    workspace also holds what users store. It was replaced with a MODE
                  *    claim, which the control is already gated on, plus two
                  *    independently checkable facts. That structure is unchanged.
+                 *
+                 * 3. "Nothing in My Experiments is in this scope." was FALSE, and it was
+                 *    false in the confirmation copy of the app's one destructive path,
+                 *    which is the worst place in the app for it. Opening a walkthrough
+                 *    changes the SCOPE every request carries, not the screen: `api.ts`
+                 *    attaches `X-Isaac-Tutorial-Session` in its single `request()` choke
+                 *    point, so while this dialog is reachable at all, My Experiments is
+                 *    listing THESE five records — `e2e/specs/tutorial.spec.ts` measures 0
+                 *    rows before a session opens and 5 after. An operator reading the old
+                 *    sentence would have concluded that the rows they had just been
+                 *    working on were out of reach of the button they were about to press.
+                 *    The claim that IS enforced is the other direction — the ordinary
+                 *    workspace is not in this scope and this control cannot reach it,
+                 *    because a scope is a directory namespace and `reset_to_canonical_seed`
+                 *    only ever addresses `scope_root(session_id)` — so that is what the
+                 *    copy now says, together with the fact the old sentence hid.
                  */}
                 This is a <strong>temporary worked-example workspace</strong>, belonging to this
                 walkthrough alone. Resetting discards the current progress on the built-in
-                examples in it and restores all five to their original state. Nothing in My
-                Experiments is in this scope. Real data is unaffected — this workspace runs in
-                synthetic-only mode: the examples come from committed files and every upload is
-                refused.
+                examples in it and restores all five to their original state. The rows on My
+                Experiments are this walkthrough&rsquo;s own copies, so they are what is reset; the
+                ordinary workspace is not in this scope and this control cannot reach it. Real
+                data is unaffected — this workspace runs in synthetic-only mode: the examples
+                come from committed files and every upload is refused.
               </p>
 
               {preview.status === 'error' && (

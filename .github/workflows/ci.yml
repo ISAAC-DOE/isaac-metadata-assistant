@@ -80,14 +80,22 @@ jobs:
     # `frontend`; those two remain exactly as they were.
     #
     # What it does: boots the FastAPI backend with NO database and NO
-    # credentials, seeds the committed synthetic fixtures through the
-    # seeding read GET /api/experiments (ensure_seeded), then runs the Playwright suite
-    # (Chromium only) across five viewport/zoom projects.
+    # credentials, then runs the Playwright suite (Chromium only) across five
+    # viewport/zoom projects. `e2e/global-setup.ts` opens ONE worked-example
+    # session (POST /api/tutorial/sessions) for the whole run and publishes its
+    # id to the workers; that is where the five committed example records are
+    # materialised.
+    #
+    # CORRECTED: this said the job "seeds the committed synthetic fixtures
+    # through the seeding read GET /api/experiments (ensure_seeded)". There is no
+    # seeding read any more — `list_experiments` / `load_experiment` never seed,
+    # `ensure_seeded()` is gone, and setup ASSERTS the ordinary workspace is
+    # empty rather than filling it.
     #
     # What it deliberately does NOT do: contact any database (no PG* variable
-    # is ever set), publish an image, write to the workspace beyond the
-    # synthetic seed, or touch the hosted /krish deployment — which is behind
-    # an Authentik edge and is not reachable from CI at all.
+    # is ever set), publish an image, write to the workspace beyond the one
+    # worked-example session, or touch the hosted /krish deployment — which is
+    # behind an Authentik edge and is not reachable from CI at all.
 
     env:
       # Must stay 5173: it is the port the backend's DEFAULT CORS allow-list

@@ -108,6 +108,48 @@ afterEach(() => {
   localStorage.clear();
 });
 
+// --- 0 · the bar's own copy, checked against the rows beside it ----------------
+
+describe('worked-example bar — what it may claim', () => {
+  /*
+   * THE CLAIM THAT WAS FALSE, PINNED AGAINST THE VERY ROWS IT DENIED.
+   *
+   * `tutorialSessionBarBody` read "they are not visible in My Experiments".
+   * `AppShell` mounts the bar on every surface, so with a session open that sentence
+   * rendered directly above five `.exp-row`s. Entering a session changes the SCOPE
+   * every request carries — `api.ts` attaches the header in its single `request()`
+   * choke point and `ExperimentsHome` keys its fetch on it — not the screen. This test
+   * renders both at once, which is the only arrangement in which the defect is
+   * visible, and pins the correction in both directions.
+   */
+  it('T0 · does not deny the example rows it is rendered above', async () => {
+    stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes() } as never);
+    const view = renderAt();
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
+    await waitFor(() => expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID));
+
+    // The rows are there, on the route the bar sits above.
+    await waitFor(() =>
+      expect(view.container.querySelectorAll('.exp-row')).toHaveLength(
+        canonicalFiveSummaries.length,
+      ),
+    );
+    const bar = view.container.querySelector<HTMLElement>('.tutorial-session-bar');
+    expect(bar).not.toBeNull();
+    const copy = bar!.textContent ?? '';
+    // The false sentence, forbidden.
+    expect(copy).not.toMatch(/not visible in My Experiments/i);
+    // What is enforced instead: the records are this walkthrough's own copy
+    // (`_materialise_seed` requires a session id), no request outside the session
+    // reaches them (`_experiment_dirs` enumerates one root and skips `_`-prefixed
+    // entries), and the reader is told plainly which scope the screens are showing.
+    expect(copy).toMatch(/belong to this walkthrough only/i);
+    expect(copy).toMatch(/no request made outside it reaches them/i);
+    expect(copy).toMatch(/My Experiments included/i);
+    expect(copy).toMatch(/discarded when the walkthrough ends/i);
+  }, 30000);
+});
+
 // --- 1/2 · replay opens exactly one session, and never two ---------------------
 
 describe('worked-example session — replay', () => {
@@ -176,12 +218,18 @@ describe('worked-example session — expiry recovery', () => {
     );
   }
 
-  it('T3 · a 404 on resume clears the scope, says so truthfully, and marks NOTHING complete', async () => {
+  it('T3 · a TYPED 404 on resume clears the scope, says so truthfully, and marks NOTHING complete', async () => {
     seedExpiredPointer();
     // Scope-sensitive exactly as the backend is: the scoped existence probe 404s
     // because the session is gone, while the ordinary list answers normally. Both
     // halves matter — a blanket 404 would also break the page, and the notice would
     // then be indistinguishable from a backend-down state.
+    //
+    // THE TYPED BODY IS NOW LOAD-BEARING, not decoration. `resumeTutorialSession`
+    // claims expiry only on `404` carrying `{"error": "tutorial_session_not_found"}`
+    // (`apps/api/isaac_api/routes.py::tutorial_scope` is what emits it); every other
+    // failure takes the `resume_failed` branch asserted in T3c/T3d below. This stub
+    // already sent that body, so this test is unchanged apart from saying why.
     stubFetchRoutes({
       ...readOnlyRoutes([]),
       'GET /api/experiments': (init?: RequestInit) =>
@@ -248,6 +296,88 @@ describe('worked-example session — expiry recovery', () => {
     expect(view.container.textContent).not.toMatch(/XANES Example/);
     // and the worked-example bar is gone with the session
     expect(view.container.querySelector('.tutorial-session-bar')).toBeNull();
+  });
+
+  /*
+   * T3c/T3d · A FAILURE THAT IS NOT AN EXPIRY MUST NOT BE REPORTED AS ONE, AND MUST
+   * NOT DESTROY THE POINTER.
+   *
+   * `resumeTutorialSession` used to wrap its probe in a bare `catch` and conclude
+   * `'expired'`. That did two separate harms at once. It ASSERTED to the reader that
+   * "the temporary workspace this walkthrough was using no longer exists, so its five
+   * example records are gone" — a statement about the server inferred from a failure
+   * that carries no information about the server; and it cleared `sessionStorage`,
+   * permanently discarding the only pointer back into a session that, on a 500 or a
+   * blip, was very probably still there. `startTutorial`'s own catch has always
+   * refused to name a cause in the same situation.
+   *
+   * Both branches are covered: an untyped 404 (T3c — the status alone is NOT enough,
+   * because the same status is what a proxy or a stray rewrite produces) and a 500
+   * (T3d). Each asserts the pointer survives, which is the half a copy-only guard
+   * would miss.
+   */
+  function resumeProbeFails(entry: { status: number; body: unknown }) {
+    return {
+      ...readOnlyRoutes([]),
+      'GET /api/experiments': (init?: RequestInit) =>
+        (init?.headers as Record<string, string> | undefined)?.[TUTORIAL_SESSION_HEADER]
+          ? entry
+          : { status: 200, body: { experiments: [] } },
+    };
+  }
+
+  /** The properties every non-expiry resume failure must satisfy. */
+  async function expectCauseFreeResumeFailure() {
+    expect(getTutorialState().sessionError).toBe('resume_failed');
+    // NOT reported as an expiry: the strongest sentence in this family is reserved for
+    // the one observation that supports it.
+    expect(document.querySelector('[data-tutorial-notice="expired"]')).toBeNull();
+    const alert = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(
+        '[data-tutorial-notice="resume_failed"]',
+      );
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toContain(LABELS.tutorialSessionResumeFailedTitle);
+    // It must not claim the records are gone, and must not name a cause it cannot know.
+    expect(alert.textContent).not.toMatch(/no longer exists|records are gone|expired/i);
+    expect(alert.textContent).not.toMatch(/\b500\b|\b404\b|\b401\b|http|server error/i);
+    // It must say what IS known, including that a retry is real.
+    expect(alert.textContent).toMatch(/has not been resumed/i);
+    expect(alert.textContent).toMatch(/nothing was written/i);
+    expect(alert.textContent).toMatch(/reloading the page tries again/i);
+    // THE POINTER SURVIVES. This is what makes the advice above true rather than
+    // merely comforting: `api.ts` re-enters the persisted scope at module load, so a
+    // reload calls `resumeTutorialSession` again against the same session.
+    expect(sessionStorage.getItem(TUTORIAL_SESSION_KEY)).not.toBeNull();
+    expect(readTutorialSession()?.sessionId).toBe(TUTORIAL_SESSION_ID);
+    // The scope IS dropped, though: leaving it set while the store says "no session"
+    // would make the mode chip and the missing bar lie about which workspace the
+    // requests address.
+    expect(getTutorialScope()).toBeNull();
+    // An unresumable session is not a finished walkthrough either.
+    expect(isTutorialCompleted()).toBe(false);
+  }
+
+  it('T3c · an UNTYPED 404 is not called an expiry, and keeps the pointer', async () => {
+    seedExpiredPointer();
+    // A 404 whose body does not carry the backend's typed reason. Only
+    // `{"error": "tutorial_session_not_found"}` establishes that the session is gone;
+    // a bare 404 is equally consistent with a proxy or a rewritten path.
+    stubFetchRoutes(resumeProbeFails({ status: 404, body: { detail: 'Not Found' } }) as never);
+    renderAt();
+    await resumeTutorialSession();
+    await expectCauseFreeResumeFailure();
+  });
+
+  it('T3d · a 500 on resume is not called an expiry, and keeps the pointer', async () => {
+    seedExpiredPointer();
+    stubFetchRoutes(resumeProbeFails({ status: 500, body: { detail: 'boom' } }) as never);
+    renderAt();
+    await resumeTutorialSession();
+    await expectCauseFreeResumeFailure();
   });
 });
 
@@ -463,10 +593,33 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     expect(view.container.textContent).toMatch(/cannot yet create or import a record/i);
     // What it MAY point at.
     expect(view.getByRole('button', { name: 'Open Validator' })).toBeInTheDocument();
-    expect(view.getByRole('button', { name: LABELS.actionReplayTutorial })).toBeInTheDocument();
+    /*
+     * RE-POINTED, AND THE DESTINATION IS NOW PINNED TOO.
+     *
+     * This used to require `actionReplayTutorial` ("Replay Tutorial") here, which is
+     * the exact label of the button in Settings that actually starts the walkthrough —
+     * while this one merely navigated, and navigated to `ROUTES.settings` with no
+     * `?tab=`. `SettingsPage` resolves an absent tab to `overview`, which carries no
+     * tutorial control, so the reader arrived at a screen holding nothing that matched
+     * the button they pressed. A label-only assertion could not see that, which is why
+     * the click and its landing are asserted below rather than the name alone.
+     */
+    expect(view.queryByRole('button', { name: LABELS.actionReplayTutorial })).toBeNull();
+    const go = view.getByRole('button', { name: LABELS.actionGoToHelpAndTutorial });
+    expect(go).toBeInTheDocument();
     // And no unscoped request was made to an example-workspace endpoint.
     const keys = sentRequests().map((r) => r.key);
     expect(keys.filter((k) => k.includes('/demo/'))).toEqual([]);
+
+    // The destination really holds the replay control the hint sends the reader to.
+    fireEvent.click(go);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: LABELS.actionReplayTutorial })).toBeInTheDocument(),
+    );
+    // ...and it is the Help & Tutorial tab that is selected, not `overview`.
+    expect(
+      screen.getByRole('tab', { name: LABELS.settingsTabHelp }).getAttribute('aria-selected'),
+    ).toBe('true');
   });
 
   it('T7b · no ordinary request carries a tutorial scope', async () => {

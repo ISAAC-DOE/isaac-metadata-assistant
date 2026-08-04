@@ -96,7 +96,13 @@ export default defineConfig({
       cwd: '../..',
       url: `${MUT_API_BASE}/health`,
       env: {
-        // Isolated workspace. `ensure_seeded()` fills it on first read.
+        // Isolated workspace, and it STAYS EMPTY. (This said "`ensure_seeded()`
+        // fills it on first read"; that function is gone. `list_experiments` and
+        // `load_experiment` never seed, and `_materialise_seed` requires a
+        // `session_id`.) The five examples this suite mutates are materialised by
+        // `globalSetup`'s `POST /api/tutorial/sessions` into
+        // `<workspace>/_tutorial/<id>/`; setup then ASSERTS the ordinary scope is
+        // empty, so a leak fails the run rather than being absorbed.
         ISAAC_UI_WORKSPACE: MUT_WORKSPACE,
         // REQUIRED, and the failure it prevents is very confusing without this
         // comment. The backend's CORS allowlist defaults to the standard Vite dev

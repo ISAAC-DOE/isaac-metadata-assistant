@@ -215,9 +215,19 @@ OPENAPI_TAGS: list[dict] = [
     {
         "name": TAG_TUTORIAL,
         "description": (
+            # "the ordinary workspace holds no example records at all" was a claim
+            # about the CONTENTS of a directory this API never inspects to say it.
+            # ``list_experiments(None)`` enumerates whatever is on disk under the
+            # workspace root and there is no startup migration, so a deployment whose
+            # workspace survives an upgrade still holding the previously-seeded five
+            # would serve them from the ordinary scope while this sentence denied
+            # they were there. What is genuinely enforced is structural, not a
+            # measurement: ``_materialise_seed`` REQUIRES a ``session_id`` and has no
+            # normal-scope form, so no code path in this build can create an example
+            # record outside a session. That is what is stated.
             "Creating and discarding an isolated worked-example workspace. The "
-            "built-in example records exist only inside one of these; the ordinary "
-            "workspace holds no example records at all."
+            "built-in example records are created only inside one of these — no "
+            "operation in this API materialises one into the ordinary workspace."
         ),
     },
 ]
@@ -851,16 +861,29 @@ def _demo_baseline(target_id: str) -> Experiment | None:
     "/demo/run",
     tags=[TAG_DEMO],
     summary="Run the Worked Example Pipeline",
+    # THE HEADER REQUIREMENT BELONGS IN THE MAIN DESCRIPTION, not only in the `409`
+    # sub-description. A reader consulting the operation to find out how to call it
+    # would have seen no precondition at all, and only discovered the requirement by
+    # reading the failure case they had not yet hit. The handler's own docstring has
+    # always said so; the published contract now does too, first, because it is the
+    # first thing true of every call.
     description=(
+        "REQUIRES the `X-Isaac-Tutorial-Session` header. The built-in example "
+        "records are created only inside a worked-example session, so without one "
+        "there is nothing for this operation to run over: it refuses with `409` "
+        "(`tutorial_scope_required`) and writes nothing. Everything below describes "
+        "what it does inside the session that header names — it addresses no other "
+        "scope, and it can neither read nor write a record in the ordinary "
+        "workspace.\n\n"
         "Runs the committed worked-example pipeline and returns the ordered steps "
         "it executed together with the resulting experiment id and status. "
         "`mode: \"draft_only\"` (the default) extracts a draft from the committed "
         "reference files and runs the no-guessing draft checks; `mode: \"full\"` "
         "additionally applies the committed simulated answers and exports an "
         "official record. It targets one fixed canonical experiment id per mode, "
-        "so re-running never adds a record and never increases the record count. "
-        "It reads only the two committed reference files and accepts no "
-        "uploaded data.\n\n"
+        "so re-running never adds a record and never increases that session's "
+        "record count. It reads only the two committed reference files and accepts "
+        "no uploaded data.\n\n"
         "It never overwrites your work. The target must still hold exactly its "
         "original example content: when it does, running the pipeline would "
         "reproduce that content byte for byte, so nothing at all is written and "
@@ -1156,20 +1179,37 @@ def _reset_response(
     "/demo/reset",
     tags=[TAG_DEMO],
     summary="Reset the Example Workspace",
+    # TWO CORRECTIONS, and both are about scope rather than style.
+    #
+    # 1. The header REQUIREMENT was stated only in the `409` sub-description, so the
+    #    main description read as though this operation could be called bare. The
+    #    handler docstring has always required a scope; the contract now says so
+    #    first.
+    # 2. Every "the workspace" here named a scope this operation CANNOT touch.
+    #    `demo_reset` refuses before any other gate when `scope is None`, and
+    #    `reset_to_canonical_seed(session_id=scope)` addresses `scope_root(scope)`
+    #    only. Left as "the workspace", the sentence "Restores the workspace to
+    #    exactly the five canonical built-in example records" describes a destructive
+    #    act on the ordinary workspace that this endpoint has no path to perform.
     description=(
-        "Restores the workspace to exactly the five canonical built-in example "
+        "REQUIRES the `X-Isaac-Tutorial-Session` header, and refuses with `409` "
+        "(`tutorial_scope_required`) without one, mutating nothing. Everything it "
+        "classifies, reports and restores is the worked-example session that header "
+        "names; it addresses no other scope and cannot remove, restore or modify a "
+        "record in the ordinary workspace.\n\n"
+        "Restores that session to exactly the five canonical built-in example "
         "records and reports the before/after counts, the removable set, a state "
         "histogram, and a derived summary of the confirmed work the reset would "
         "discard. `mode: \"preview\"` classifies only and mutates nothing; "
         "`mode: \"execute\"` additionally requires the exact confirmation phrase "
         "and the `plan_digest` the preview returned. It accepts no caller-supplied "
         "ids or paths — any extra field is rejected — it removes only records it "
-        "can classify as records this workspace itself created, and it refuses to "
+        "can classify as records this application itself created, and it refuses to "
         "remove anything at all if any record is ambiguous. No filesystem path "
         "appears in the response.\n\n"
         "**The `plan_digest` precondition.** `preview` returns an opaque digest of "
-        "the workspace it classified. `execute` must send it back, and the reset "
-        "runs only if the workspace still matches it. Without this, a client that "
+        "the session it classified. `execute` must send it back, and the reset "
+        "runs only if that session still matches it. Without this, a client that "
         "previewed, showed a confirmation dialog, and executed a while later would "
         "destroy anything committed in between — the operator would have approved a "
         "classification that no longer held. A missing digest is `428`, a stale one "
@@ -1214,7 +1254,7 @@ def _reset_response(
             "description": (
                 "Refused without mutating: `plan_digest` was omitted. Every execute "
                 "requires the digest from its own preview, so a reset can never run "
-                "against a workspace nobody looked at."
+                "against a session nobody looked at."
             )
         },
     },

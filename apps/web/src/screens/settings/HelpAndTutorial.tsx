@@ -19,7 +19,7 @@ import { TUTORIAL_ANCHORS, TUTORIAL_STEP_COUNT } from '../../lib/tutorialSteps';
  *     touched, which is the part they actually need to know, but the copy may not
  *     go on claiming the walkthrough "changes nothing".
  *  3. WHAT IT DISCARDS. If a worked example is already open, starting again
- *     DELETEs it first (`releaseTutorialSession` before `createTutorialSession`),
+ *     DELETEs it first (`disposeTutorialSession` before `createTutorialSession`),
  *     taking anything confirmed inside it. The old copy promised the opposite —
  *     "nothing is restored or removed" — so a reader mid-walkthrough was invited to
  *     press a button that would silently throw their session away.
@@ -29,6 +29,23 @@ import { TUTORIAL_ANCHORS, TUTORIAL_STEP_COUNT } from '../../lib/tutorialSteps';
  *     (`tutorialSession.ts`, `sessionStorage`). Saying "saved" without saying
  *     "here" would imply a profile this build does not have; saying "nothing else
  *     is stored" without the session pointer was simply untrue.
+ *
+ *     THE SCOPING WORD IN THAT LAST SENTENCE IS LOAD-BEARING AND WAS ONCE DROPPED.
+ *     It read "Nothing else ABOUT IT is stored: no record content, no field value,
+ *     and no identity" — a claim about the two walkthrough entries. Without "about
+ *     it" the same sentence becomes a whole-app privacy claim, and that claim is
+ *     FALSE: `lib/assistantSession.ts` writes assistant transcripts to
+ *     `sessionStorage` under `isaac.assistant.session.<id>` (`writeStorage`, and
+ *     `SAFE_KEYS` deliberately keeps `text`, `field` and `value`), and
+ *     `lib/settingsContent.ts`'s "Assistant Conversations" note records that only
+ *     credentials, absolute paths, long hex digests and record verdicts are stripped
+ *     first. So field values and record text ARE stored, elsewhere, by a different
+ *     module. The copy is therefore scoped back to the two entries it is about — and
+ *     it now points at the surface that owns the assistant disclosure rather than
+ *     implying there is nothing to disclose. The two entries themselves are
+ *     `{tutorialId, version, completed, completedAt}` and `{sessionId, index}`
+ *     (`tutorialPreference.ts:49-56`, `tutorialSession.ts:27-33`), which is what
+ *     makes the narrowed claim checkable.
  *
  * WHAT THE PREVIOUS VERSION OF THIS FILE CLAIMED, recorded so it is not restored —
  * paraphrased on purpose, because a false sentence written out verbatim in the file
@@ -97,8 +114,10 @@ export function HelpAndTutorialPanel() {
         no account to file it under — so another browser, another device, or a cleared browser will
         be offered it again. While a walkthrough is open, this tab also holds which worked example it
         is using and which step you reached, so a reload puts you back where you were; both are
-        forgotten when the walkthrough ends. Nothing else is stored: no record content, no field
-        value, and no identity.
+        forgotten when the walkthrough ends. Nothing else about the walkthrough is stored: neither
+        of those two entries holds record content, a field value, or an identity. What the
+        assistant panel keeps is separate and is described under Settings &amp; API &rarr; Data &amp;
+        Privacy.
       </p>
     </>
   );

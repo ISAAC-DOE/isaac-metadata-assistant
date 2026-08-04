@@ -390,10 +390,16 @@ def test_d2_managed_legacy_removal_runs_under_that_records_lock(client, monkeypa
 def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatch):
     """Deadlock-freedom by construction, pinned.
 
-    A mutation handler CAN hold two record locks (it holds ``record_lock(id)`` and
-    then calls ``load_experiment`` -> ``ensure_seeded``, which may take another id's
-    lock to heal a missing canonical). If the reset also held two, a lock-ordering
-    cycle would be possible. It must therefore take them strictly one at a time.
+    A caller CAN hold two record locks at once. The example this docstring used to
+    give no longer exists — it said a mutation handler holds ``record_lock(id)`` and
+    then calls ``load_experiment`` -> ``ensure_seeded``, which might take another id's
+    lock to heal a missing canonical; ``workspace.py:290-297`` records that reads no
+    longer seed, and ``ensure_seeded`` is gone (``ensure_tutorial_seeded`` runs only at
+    session creation and holds at most one lock at a time by construction). The
+    PROPERTY under test never depended on that example: if the reset held two locks
+    while any other caller held two, a lock-ordering cycle would be possible, so the
+    reset must take them strictly one at a time. That is what is asserted below, and
+    it is asserted about the reset alone.
     """
     tutorial_ws().ensure_tutorial_seeded()
     _make_managed_legacy()

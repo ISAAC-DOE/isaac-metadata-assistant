@@ -277,8 +277,10 @@ def test_ensure_seeded_materialise_observes_record_lock(tmp_ws):
     record lock — is asserted at exactly the same strength; only the caller that
     reaches it has changed."""
     tmp_ws.ensure_tutorial_seeded()
-    # Make SEED_READY_ID missing so load_experiment -> ensure_seeded must materialise
-    # it (the branch that takes the lock).
+    # Make SEED_READY_ID missing so ``ensure_tutorial_seeded`` must materialise it (the
+    # branch that takes the lock). This comment said "load_experiment -> ensure_seeded",
+    # contradicting the docstring directly above it: reads no longer seed, and the
+    # seeder is invoked directly below.
     shutil.rmtree(tmp_ws.workspace_root() / tmp_ws.SEED_READY_ID)
 
     holder_acquired = threading.Event()

@@ -119,12 +119,28 @@ export function ExperimentsHome() {
               </span>
             </li>
             <li>
+              {/*
+                THIS CONTROL POINTED AT A SCREEN THAT DOES NOT HOLD WHAT ITS LABEL
+                PROMISED. It read "Replay Tutorial" — the exact label of the button in
+                Settings that actually starts the walkthrough — and navigated to
+                `ROUTES.settings`, with no `?tab=`. `SettingsPage` resolves an absent or
+                unrecognised tab to `overview`, which carries no tutorial control at
+                all, so the reader arrived at a screen with nothing on it matching the
+                button they had just pressed.
+
+                Both halves are now the honest pair, and the pair already existed: the
+                sibling refusal state in `LoadMaterials.tsx` uses
+                `actionGoToHelpAndTutorial` with `ROUTES.settingsTab('help')`, which
+                names navigation rather than an action and lands on the tab that owns
+                the replay control. Reusing it also removes the duplicate "Replay
+                Tutorial" label, so the name identifies exactly one control in the app.
+              */}
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => navigate(ROUTES.settings)}
+                onClick={() => navigate(ROUTES.settingsTab('help'))}
               >
-                {LABELS.actionReplayTutorial}
+                {LABELS.actionGoToHelpAndTutorial}
               </button>
               <span className="queue-empty-hint">
                 Walk through a complete worked example in a temporary workspace of its own.

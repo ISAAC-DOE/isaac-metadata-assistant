@@ -663,8 +663,13 @@ CANONICAL_IDS = frozenset(
 #: that says the user's record has been edited — when nothing of theirs changed;
 #: the baseline's definition did. Auto-healing titles by content is deliberately
 #: NOT done (it would let a deploy silently overwrite a record's authoritative
-#: state); the remedy is the Reset Workspace control, which removes and
-#: re-materialises each canonical id from the current specs.
+#: state); the remedy is the **Reset Worked Example** control, which removes and
+#: re-materialises each canonical id from the current specs. Named correctly here
+#: because it was named wrongly: there is no "Reset Workspace" control, and this one
+#: is NOT on My Experiments — it lives in the worked-example bar
+#: (``apps/web/src/components/TutorialSessionBar.tsx``), which renders only while a
+#: session is open, because ``POST /api/demo/reset`` refuses without a session header.
+#: So the remedy is reachable only from inside the stranded session itself.
 #:
 #: WHICH DEPLOYMENTS ARE AFFECTED, and the exposure is now much narrower than it
 #: was. Only a SESSION can be stranded, and a session is created on demand and swept

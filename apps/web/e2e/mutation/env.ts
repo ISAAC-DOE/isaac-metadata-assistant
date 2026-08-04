@@ -38,8 +38,14 @@ export const MUT_SESSION_FILE =
  * A fixed directory, not a random one. Two reasons, and the second is the one that
  * matters: a fixed path lets `reuseExistingServer` actually reuse a warm backend
  * locally, and it means a failed run leaves an INSPECTABLE workspace instead of a
- * directory whose name is gone with the process. The suite never assumes it starts
- * empty — `ensure_seeded()` restores the canonical five on first read either way.
+ * directory whose name is gone with the process.
+ *
+ * IT DOES NOT SELF-HEAL, and this comment used to claim it did: "the suite never
+ * assumes it starts empty — `ensure_seeded()` restores the canonical five on first read
+ * either way". That function no longer exists, reads never seed, and `:59-62` below
+ * already says so. What actually makes the suite hermetic is `globalSetup`: it
+ * `rmSync`s this directory (including the `_tutorial` namespace inside it) and then
+ * opens ONE worked-example session, which is where the canonical five are materialised.
  */
 export const MUT_WORKSPACE = process.env.E2E_MUT_WORKSPACE ?? join(tmpdir(), 'isaac-e2e-mutation-workspace');
 

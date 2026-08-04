@@ -145,9 +145,28 @@ describe('mode chip — scope parity (visible text and accessible name)', () => 
     for (const [what, pattern] of ALWAYS) {
       expect(name, `the ordinary chip must still claim: ${what}`).toMatch(pattern);
     }
-    expect(name).toMatch(/holds no records of its own/i);
-    // FORBIDDEN here: there are no records in this scope to be rebuilt from anything,
-    // and no walkthrough whose end could discard them.
+    /*
+     * RE-POINTED FROM A MEASUREMENT-FREE EMPTINESS CLAIM TO THE STRUCTURAL ONE.
+     *
+     * This required `holds no records of its own`, which the chip derived from
+     * `sessionId === null` alone — it reads no count and asks the backend nothing.
+     * `list_experiments(None)` enumerates whatever is on disk and there is no startup
+     * migration, so a deployment whose workspace survived this deploy holding the
+     * previously-seeded five lists them on My Experiments while the chip denies it
+     * (`workspace.py`'s `_SEED_TITLE_BASE` note names the Railway persistent volume and
+     * an uncleared `/tmp/isaac-ui-workspace`).
+     *
+     * The replacement is narrower but enforced: `_materialise_seed` REQUIRES a
+     * `session_id` and has no normal-scope form, so no code path in this build can put a
+     * built-in example here. The retired claim is now FORBIDDEN in BOTH scopes below,
+     * which is strictly more than this file asserted before — it was previously
+     * required here and merely absent there.
+     */
+    expect(name).toMatch(/the built-in example records are not in this workspace/i);
+    expect(name).toMatch(/only inside a guided-walkthrough session/i);
+    expect(name).not.toMatch(/holds no records of its own/i);
+    // FORBIDDEN here: no built-in example is in this scope to be rebuilt from anything,
+    // and no walkthrough whose end could discard one.
     expect(name).not.toMatch(/reference files committed to this build/i);
     expect(name).not.toMatch(/discarded when the walkthrough ends/i);
   });
@@ -166,7 +185,11 @@ describe('mode chip — scope parity (visible text and accessible name)', () => 
     expect(name).toMatch(/reference files committed to this build/i);
     expect(name).toMatch(/discarded when the walkthrough ends/i);
     expect(name).toMatch(/belong to this walkthrough only/i);
-    // FORBIDDEN here: five records are present, so this scope must not claim emptiness.
+    // FORBIDDEN here: five examples ARE present, so this scope must not claim they are
+    // absent...
+    expect(name).not.toMatch(/the built-in example records are not in this workspace/i);
+    // ...and the retired emptiness claim must not reappear in EITHER scope, because
+    // nothing in this app ever measured it.
     expect(name).not.toMatch(/holds no records of its own/i);
   });
 

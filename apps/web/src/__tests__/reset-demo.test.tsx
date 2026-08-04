@@ -269,7 +269,28 @@ describe('P26.0b · Reset Worked Example — preview (non-mutating) & disclosure
     expect(text).toContain('temporary');
     // the scope, both halves: what it IS, and what it is not
     expect(text).toMatch(/belonging to this walkthrough alone/);
-    expect(text).toMatch(/nothing in my experiments is in this scope/);
+    /*
+     * THIS ASSERTION WAS RE-POINTED, AND IT IS STRICTLY STRONGER THAN THE ONE IT
+     * REPLACES.
+     *
+     * It required `nothing in my experiments is in this scope`, which is FALSE — and
+     * false in the confirmation copy of the app's one destructive path. Entering a
+     * walkthrough changes the SCOPE every request carries, not the screen (`api.ts`
+     * attaches `X-Isaac-Tutorial-Session` in its single `request()` choke point), so
+     * whenever this dialog is reachable, My Experiments is listing the very records the
+     * reset is about. An operator reading the old sentence would have concluded the
+     * rows they had been working on were out of reach of the button they were pressing.
+     *
+     * Three things are now required where one was: the direction that IS enforced (the
+     * ordinary workspace is not in this scope, and `reset_to_canonical_seed` only ever
+     * addresses `scope_root(session_id)`), the fact the old sentence hid (those rows
+     * ARE what gets reset), and the forbidding of the false sentence itself.
+     */
+    expect(text).toMatch(/the ordinary workspace is not in this scope/);
+    expect(text).toMatch(/this control cannot reach it/);
+    expect(text).toMatch(/rows on my experiments are this walkthrough/);
+    expect(text).toMatch(/so they are what is reset/);
+    expect(text).not.toMatch(/nothing in my experiments is in this scope/);
     // the retired claim must not come back — a session is not shared with anyone
     expect(text).not.toMatch(/\bshared\b/);
     // P1: was `toContain('synthetic')`. The disclosure now names the thing being

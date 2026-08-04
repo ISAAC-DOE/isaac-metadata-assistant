@@ -434,7 +434,47 @@ describe('R0 · finishing the walkthrough', () => {
     // route in this app, and naming one would name a surface that does not exist.
     expect(panel.textContent).not.toMatch(/dashboard/i);
     expect(isTutorialCompleted()).toBe(true);
+    // THE COMPLETION COPY MUST NOT CLAIM THE OPPOSITE OF WHAT FINISHING DID. It said
+    // "Nothing you have looked at was changed" while `finishTutorial` drops the scope
+    // and DELETEs the session as this very panel renders — so what the reader had been
+    // looking at was destroyed, not left alone. The expired-session copy already says
+    // its records are gone; the success path is held to the same standard here, and the
+    // retired absolute is forbidden so it cannot come back.
+    expect(panel.textContent).toMatch(/is gone now/i);
+    expect(panel.textContent).toMatch(/so is anything you answered inside it/i);
+    expect(panel.textContent).toMatch(/no record of yours was changed/i);
+    expect(panel.textContent).not.toMatch(/nothing you have looked at was changed/i);
+    // ...and it must not offer to reopen the session it just discarded: a replay mints
+    // a NEW one at step one.
+    expect(panel.textContent).not.toMatch(/reopen this walkthrough/i);
   }, 60000);
+
+  /*
+   * THE OFFER'S OWN CLAIM, PINNED IN BOTH DIRECTIONS.
+   *
+   * `tutorialOfferBody` read "It only reads — it answers nothing and changes nothing",
+   * two lines above the button that POSTs `/api/tutorial/sessions` and causes five
+   * records to be materialised server-side. `screens/settings/HelpAndTutorial.tsx` had
+   * already corrected the identical claim for ITSELF while leaving it on the surface
+   * most readers actually meet, so this asserts the offer to the same standard: the
+   * write is disclosed, the reassurance is scoped to the reader's own records, and the
+   * absolutes are forbidden.
+   */
+  it('the offer discloses the write it performs, and scopes its reassurance', async () => {
+    stubFetchRoutes(readOnlyRoutes() as never);
+    renderAt();
+    await screen.findByRole('heading', { name: LABELS.tutorialOfferTitle });
+    const offer = document.querySelector<HTMLElement>('section.tutorial-offer');
+    expect(offer).not.toBeNull();
+    const copy = offer!.textContent ?? '';
+    expect(copy).toMatch(/opens a worked example of its own/i);
+    expect(copy).toMatch(/discarded when the tour ends/i);
+    expect(copy).toMatch(/no record of yours is created, changed, or removed/i);
+    // The exact absolutes that were false. If either returns, this fails.
+    expect(copy).not.toMatch(/only reads/i);
+    expect(copy).not.toMatch(/changes nothing/i);
+    expect(copy).not.toMatch(/answers nothing/i);
+  });
 
   it('the primary action returns to My Experiments, closes the overlay, and the offer is gone', async () => {
     stubFetchRoutes(readOnlyRoutes() as never);
@@ -517,7 +557,7 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
    *   · starting opens a worked-example session (`POST /api/tutorial/sessions`) and
    *     the backend materialises five example records inside it — a write;
    *   · if a session is ALREADY open, starting DELETEs it first
-   *     (`releaseTutorialSession` runs before `createTutorialSession`), discarding
+   *     (`disposeTutorialSession` runs before `createTutorialSession`), discarding
    *     anything confirmed inside it. The old copy told a reader mid-walkthrough
    *     that "nothing is restored or removed" and then removed their session.
    *
@@ -551,7 +591,29 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     // Where the in-progress pointer lives, since "nothing else is stored" was false
     // while a session was open.
     expect(panel.textContent).toMatch(/this tab also holds/i);
-    expect(panel.textContent).toMatch(/no record content, no field value, and no identity/i);
+    /*
+     * THIS ASSERTION WAS RE-POINTED BECAUSE THE SENTENCE IT PINNED LOST ITS SCOPE.
+     *
+     * It required `no record content, no field value, and no identity`, which was
+     * written as "Nothing else ABOUT IT is stored: no record content, …" — a claim
+     * about the two walkthrough entries. This branch dropped "about it", turning it
+     * into a whole-app privacy claim that is FALSE: `lib/assistantSession.ts` writes
+     * transcripts to `sessionStorage` under `isaac.assistant.session.<id>`, keeping
+     * `text`, `field` and `value` (`SAFE_KEYS`), and `lib/settingsContent.ts` states
+     * that only credentials, absolute paths, long hex digests and record verdicts are
+     * stripped. The pin below is STRONGER than the one it replaces: it still requires
+     * the three "no …" clauses, it additionally requires the scoping words that make
+     * them true, and it forbids the unscoped form outright — a guard that accepted the
+     * bare list is exactly what let the scoping word be deleted silently.
+     */
+    expect(panel.textContent).toMatch(/nothing else about the walkthrough is stored/i);
+    expect(panel.textContent).toMatch(/neither of those two entries holds/i);
+    expect(panel.textContent).toMatch(/record content, a field value, or an identity/i);
+    expect(panel.textContent).not.toMatch(/nothing else is stored/i);
+    // The assistant transcript is not denied — the reader is sent to the surface that
+    // actually describes it, so the narrowing is not a silent omission.
+    expect(panel.textContent).toMatch(/assistant panel/i);
+    expect(panel.textContent).toMatch(/Data & Privacy/i);
   });
 
   /*

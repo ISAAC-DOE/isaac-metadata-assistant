@@ -65,8 +65,19 @@ test.describe('@interaction the first-run offer', () => {
     const offer = page.getByRole('region', { name: 'Take the Guided Walkthrough' });
     await expect(offer.or(page.locator('section.tutorial-offer')).first()).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Take the Guided Walkthrough' })).toBeVisible();
-    // The copy must not promise a change: the walkthrough only reads.
-    await expect(page.locator('section.tutorial-offer')).toContainText(/only reads/i);
+    // THIS ASSERTION WAS RE-POINTED, AND IT IS NOW STRICTLY STRONGER. It used to
+    // require `/only reads/i`, pinning the sentence "It only reads — it answers
+    // nothing and changes nothing" — which is FALSE: pressing the button two lines
+    // below POSTs `/api/tutorial/sessions`, and the backend materialises five records
+    // into a new directory. The offer must instead disclose the write and scope the
+    // reassurance to the reader's own records, so all three are required and the
+    // retired absolute is forbidden.
+    const offerCopy = page.locator('section.tutorial-offer');
+    await expect(offerCopy).toContainText(/opens a worked example of its own/i);
+    await expect(offerCopy).toContainText(/discarded when the tour ends/i);
+    await expect(offerCopy).toContainText(/no record of yours is created, changed, or removed/i);
+    await expect(offerCopy).not.toContainText(/only reads/i);
+    await expect(offerCopy).not.toContainText(/changes nothing/i);
     await expect(page.getByRole('button', { name: 'Start Tutorial' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Skip for Now' })).toBeEnabled();
   });
@@ -95,9 +106,12 @@ test.describe('@interaction the first-run offer', () => {
     await tutorial.markCompleted();
     await app.open(experiments);
     await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
-    // …and the permanent home of the replay control is where the empty state
-    // points, not a card in the primary workflow.
-    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toBeVisible();
+    // …and the empty state POINTS AT the permanent home of the replay control rather
+    // than duplicating its label. It used to render a second "Replay Tutorial" button
+    // here that only navigated — and navigated to `/settings` with no `?tab=`, which
+    // resolves to `overview` and holds no tutorial control at all.
+    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Go to Help & Tutorial' })).toBeVisible();
   });
 });
 
@@ -159,6 +173,20 @@ test.describe('@interaction starting the walkthrough', () => {
     // It makes three structural claims; all three are true of a session, and a
     // reader is told them in visible text rather than only in an aria-label.
     await expect(region).toContainText(/this walkthrough/i);
+    await expect(region).toContainText(/no request made outside it reaches them/i);
+    await expect(region).toContainText(/discarded when the walkthrough ends/i);
+    /*
+     * THE CLAIM THE BAR MUST NOT MAKE, ASSERTED BESIDE THE ROWS THAT DISPROVE IT.
+     *
+     * The body used to read "they are not visible in My Experiments". `AppShell`
+     * mounts this bar on every surface, so that sentence rendered directly above the
+     * five rows asserted below — entering a session changes the SCOPE every request
+     * carries, not the screen. The positive statement is required and the false one
+     * is forbidden, on the one route where both are checkable at once.
+     */
+    await expect(page.locator('.exp-row')).toHaveCount(5);
+    await expect(region).toContainText(/My Experiments included/i);
+    await expect(region).not.toContainText(/not visible in My Experiments/i);
     await expect(region.getByRole('button', { name: 'Open the Worked Example' })).toBeVisible();
     await expect(region.getByRole('button', { name: /Reset Worked Example/i })).toBeVisible();
   });

@@ -81,27 +81,64 @@ readable at a narrow window.
 
 ---
 
+## 2b. Precondition for §3 and §4 — open the worked example first (1 min)
+
+**This step is new, and §3 and §4 were UNPERFORMABLE without it.** Both used to start
+from an example record on `/krish/experiments`. The five built-in examples are no longer
+in that workspace at all — they exist only inside a **worked-example session**, and
+`/krish/experiments` is empty until you open one.
+
+1. Open `/krish/experiments`. Expect **"No experiments yet"** and zero rows. That is
+   correct, not a broken deployment.
+2. Start the walkthrough — either the **Take the Guided Walkthrough** card (first visit
+   in this browser), or **`/krish/settings?tab=help` → Replay Tutorial** (always
+   available). The empty state's **Go to Help & Tutorial** button takes you there.
+3. A **Worked Example** bar now sits under the top bar on every screen, and
+   `/krish/experiments` lists **five** rows. The mode chip reads **Worked Example**.
+   Those five rows are the session's own copies — the scope changed, not the screen.
+4. Do §3 and §4 **without leaving the walkthrough**. Skip, Close, Escape and Finish all
+   discard the session and everything you did inside it. A **reload is safe** (the tab
+   remembers which session it is in), and pressing Replay again is **not** — it discards
+   the open session first.
+
+---
+
 ## 3. Reset safety (5 min) — the highest-priority fix
 
-Route: **`/krish/experiments` → Reset Workspace**.
+Route: the **Worked Example** bar → **Reset Worked Example**. (It was
+`/krish/experiments` → "Reset Workspace". There is no such control: `POST /api/demo/reset`
+now refuses without a session header, so its trigger moved into the bar, which only exists
+while a walkthrough is open. Complete §2b first.)
 
 1. Open the dialog. It must state a **derived** count of what would be lost
    (confirmed answers / examples carrying progress / exported records) — real numbers,
    not "some data".
-2. The typed phrase is now **`RESET EXAMPLE WORKSPACE`** (it used to be
-   `RESET SYNTHETIC DEMO`).
-3. **The important one.** With the dialog still open, open a second tab, answer a
-   question on any example, then come back and complete the reset. It must **refuse**
-   and re-check the workspace rather than proceeding — the state it showed you no longer
-   holds. Nothing should be destroyed.
-4. Then reset normally and confirm you get exactly five examples back.
+2. The typed phrase is still **`RESET EXAMPLE WORKSPACE`** (it used to be
+   `RESET SYNTHETIC DEMO`). The dialog's own title is **Reset the Worked Example**.
+3. Read the disclosure. It must say the ordinary workspace is **not** in this scope and
+   that this control cannot reach it — and it must say that the rows on My Experiments
+   **are** what gets reset. If it claims "Nothing in My Experiments is in this scope",
+   that is the false sentence this phase removed; report it.
+4. **The important one — and the two-tab trick now needs care.** The session pointer lives
+   in `sessionStorage`, which is **per tab**. A freshly opened tab is *not* in the
+   walkthrough and will show an empty workspace, so the old instruction ("open a second
+   tab") no longer reaches the examples. Use Chrome's **Duplicate tab** on the tab that is
+   already in the walkthrough — a duplicate inherits `sessionStorage`, so it is in the
+   same worked example. Then: leave the reset dialog open in the first tab, answer a
+   question on any example in the duplicate, come back and complete the reset. It must
+   **refuse** and re-check rather than proceeding — the state it showed you no longer
+   holds. Nothing should be destroyed. If Duplicate tab does not carry the session
+   (browser-dependent), say so in your report rather than recording this step as passed.
+5. Then reset normally and confirm you get exactly five examples back.
 
 ---
 
 ## 4. Answers · edit · export (10 min)
 
+Inside the worked example from §2b — these records do not exist outside it.
+
 1. Open an example with open questions → answer one → **reload the page** → the answer
-   is still there.
+   is still there, and you are still in the same worked example.
 2. Press **"I don't know"** → nothing is sent, the question stays open, and the list says
    the decision is **not saved / this visit only**. Reload: the question is open again.
    That is correct — it was never persisted, and the copy now says so.
@@ -110,6 +147,10 @@ Route: **`/krish/experiments` → Reset Workspace**.
    a second artifact.
 4. On the export screen press **Re-Validate** with the network throttled or offline → it
    must **say** the refresh failed. A silent no-op here is the defect that was fixed.
+5. Finish or close the walkthrough. The bar goes, the chip returns to **Workspace**, and
+   `/krish/experiments` is empty again — everything from §3 and §4 went with the session.
+   The completion panel must **say** that; if it claims "Nothing you have looked at was
+   changed", report it.
 
 ---
 
@@ -118,9 +159,15 @@ Route: **`/krish/experiments` → Reset Workspace**.
 - No `isaac validate --official · exit 0` line under the verdict — that was a fabricated
   command transcript; no CLI ever ran.
 - No **"Answer 5 Fields →"** button on the worked-example screen — it was dead and its
-  count was hard-coded.
+  count was hard-coded. (Needs the §2b session; that screen is unreachable without one.)
 - **Create API Key** is disabled with a visible reason. Correct and intentional: there is
   no key-issuing operation in this build.
+- On the **ordinary** `/krish/experiments` (no walkthrough open) there must be **no**
+  "Reset Worked Example" button, no "Open the Worked Example" button, and no second
+  **"Replay Tutorial"** button — the empty state points at Help & Tutorial with **Go to
+  Help & Tutorial** instead. The mode chip must read **Workspace**, and its tooltip /
+  accessible name must claim only that the built-in examples are not in this workspace,
+  not that the workspace is empty (nothing measures that).
 
 ---
 

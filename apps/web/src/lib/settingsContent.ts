@@ -215,8 +215,10 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       // Every clause below is checked against the backend, and nothing stronger is
       // claimed than the code enforces:
       //
-      //  · TWO PLACES, both files on the server. `workspace.py:16-19` gives the
-      //    layout under the workspace root; `scope_root` (`:170-180`) returns
+      //  · TWO PLACES, both files on the server. `workspace.py:10-13` gives the
+      //    layout under the workspace root (this cited `:16-19`, which is the
+      //    status-is-derived-on-read paragraph, not the layout block);
+      //    `scope_root` (`:170-180`) returns
       //    `workspace_root()` for the ordinary scope and
       //    `workspace_root()/_tutorial/<session_id>` for a session.
       //  · ITS OWN COPY OF THE EXAMPLES. `create_tutorial_session`

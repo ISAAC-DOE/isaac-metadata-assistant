@@ -38,7 +38,7 @@
  * — so a surface sweep seeded this way cannot stay on the surface under test,
  * and every measurement would be of the overlay instead. Leaving the overlay is
  * not an escape either: Skip, Close and Escape all route through
- * `dismissTutorial` → `releaseTutorialSession`, which **DELETEs the session
+ * `dismissTutorial` → `disposeTutorialSession`, which **DELETEs the session
  * server-side**. Doing that would destroy the one session the five viewport
  * projects share. There is no app-level way to be inside the scope without the
  * walkthrough running, so the sweeps take the scope at the transport layer and

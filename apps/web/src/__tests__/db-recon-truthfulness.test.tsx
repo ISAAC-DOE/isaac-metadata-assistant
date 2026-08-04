@@ -298,9 +298,15 @@ describe('mode chip — the shortening moved claims rather than dropping them', 
     // The two claims that hold unconditionally, in EVERY scope.
     expect(name).toMatch(/file upload is refused/i);
     expect(name).toMatch(/no official institutional record is shown/i);
-    // The scope-specific claim: this scope holds no records of its own, so the
-    // "rebuilt from reference files" clause would describe records that are not here.
-    expect(name).toMatch(/holds no records of its own/i);
+    // The scope-specific claim. RE-POINTED: it required `holds no records of its own`,
+    // an emptiness claim the chip derives from `sessionId === null` and never measures —
+    // false on any deployment whose workspace survived this deploy still holding the
+    // previously-seeded five. The claim that IS enforced is that the built-in examples
+    // cannot be here at all (`_materialise_seed` requires a `session_id`), and the
+    // "rebuilt from reference files" clause would therefore describe records that are
+    // not in this scope.
+    expect(name).toMatch(/the built-in example records are not in this workspace/i);
+    expect(name).not.toMatch(/holds no records of its own/i);
     expect(name).not.toMatch(/reference files committed to this build/i);
   });
 });
