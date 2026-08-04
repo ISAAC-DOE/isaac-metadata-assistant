@@ -4,13 +4,20 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
 import { ProjectMemory } from '../screens/ProjectMemory';
+import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
+import {
+  __resetTutorialStore,
+  getTutorialState,
+  startTutorial,
+} from '../lib/tutorialController';
 import {
   STATISTICS_ROUTE_KEYS,
   aboutResponse,
   graphStatusAvailable,
   graphStatusPreRegen,
   graphStatusUnavailable,
+  healthSynthetic,
   memoryConceptsAvailable,
   memoryFilesAvailable,
   openApiFixture,
@@ -19,6 +26,7 @@ import {
   statisticsRuntimeRecords,
   stubFetchDown,
   stubFetchRoutes,
+  tutorialSessionRoutes,
   type RouteEntry,
 } from '../test/apiFixtures';
 
@@ -250,6 +258,101 @@ function pageTextWithout(container: HTMLElement, selector: string): string {
 const NO_ANALYTICS_SECTION = 'section[aria-labelledby="stats-no-analytics"]';
 /** That section's heading — the accessible name `regionOf` resolves it by. */
 const NO_ANALYTICS_HEADING = 'This Application Collects No Analytics';
+
+/*
+ * THE LEAD SENTENCE NAMES A WORKSPACE, so it is a claim about contents and is
+ * pinned in BOTH scopes.
+ *
+ * It used to read "the current example workspace" unconditionally. The five
+ * built-in example records exist only inside a worked-example session, and the
+ * ordinary workspace is never auto-seeded, so on every ordinary screen that
+ * sentence asserted contents that are not there — the same defect the mode chip was
+ * corrected for, and `mode-chip.test.tsx` pins that correction the same way.
+ *
+ * Asserted on three axes per scope, because a single-scope test cannot catch the
+ * defect: what the sentence says, what it must NOT say, and (for the ordinary
+ * scope) that the retired phrase is gone from the whole page rather than moved.
+ */
+describe('the lead sentence is truthful in each workspace scope', () => {
+  /**
+   * A held scope always means a running walkthrough — `startTutorial` and
+   * `resumeTutorialSession` are the only things that set `sessionId`, and both set
+   * `phase: 'running'`. So the session case does not manufacture a scope: it starts
+   * the walkthrough, mounts on the surface step one lives on, and then walks to
+   * Statistics the way a reader does. The overlay navigates ONCE PER STEP, so that
+   * navigation sticks (see `workspace-scope-invalidation.test.tsx` · D2).
+   */
+  async function renderIn(scope: 'ordinary' | 'session') {
+    const routes = {
+      ...statisticsRoutes(),
+      ...tutorialSessionRoutes(),
+      // Chrome the shell mounts in a session: the mode chip reads health, and the
+      // overlay resolves its target records from the experiment list.
+      'GET /api/health': { body: healthSynthetic },
+      'GET /api/experiments': { body: { experiments: [] } },
+    } as Record<string, RouteEntry>;
+    if (scope === 'ordinary') {
+      const view = renderStatistics(routes);
+      await settled();
+      return view;
+    }
+    stubFetchRoutes(routes);
+    await act(async () => {
+      await startTutorial(null);
+    });
+    expect(getTutorialState().sessionId).not.toBeNull();
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(
+        <MemoryRouter
+          initialEntries={[ROUTES.experiments]}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <AppRoutes />
+        </MemoryRouter>,
+      );
+    });
+    const toStatistics = await screen.findByRole('link', { name: LABELS.navStatistics });
+    await act(async () => {
+      fireEvent.click(toStatistics);
+    });
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Statistics' }),
+    ).toBeInTheDocument();
+    await settled();
+    return view;
+  }
+
+  afterEach(() => {
+    __resetTutorialStore();
+    sessionStorage.clear();
+  });
+
+  it('ordinary scope: names the workspace without claiming it holds examples', async () => {
+    const { container } = await renderIn('ordinary');
+
+    expect(
+      screen.getByText(
+        'A read-only view of this workspace, workflow readiness, evidence, Project Memory, and the API surface.',
+      ),
+    ).toBeInTheDocument();
+    // The retired claim is gone from the PAGE, not relocated within it.
+    expect(pageText(container)).not.toContain('example workspace');
+    expect(pageText(container)).not.toMatch(/read-only view of the current/i);
+  });
+
+  it('worked-example scope: names the scope that really does hold the examples', async () => {
+    await renderIn('session');
+
+    expect(
+      screen.getByText(
+        'A read-only view of the open worked-example workspace, workflow readiness, evidence, Project Memory, and the API surface.',
+      ),
+    ).toBeInTheDocument();
+    // The neutral ordinary wording must not leak into the scope that has examples.
+    expect(screen.queryByText(/A read-only view of this workspace/)).toBeNull();
+  });
+});
 
 // --- 1 · Workspace at a Glance -----------------------------------------------
 

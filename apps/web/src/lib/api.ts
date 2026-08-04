@@ -235,6 +235,50 @@ async function readJson<T>(res: Response, path: string): Promise<T> {
   }
 }
 
+/**
+ * The statuses on which `POST /api/demo/reset` answers with a typed RESET RESULT
+ * rather than an error: 200 (preview or a completed execute) and the four safe
+ * refusals 403 / 409 / 412 / 428. Named because the fail-closed check below has to
+ * apply to exactly this set and nothing wider.
+ */
+const RESET_RESULT_STATUSES = [200, 403, 409, 412, 428];
+
+/**
+ * Is this body actually a reset result?
+ *
+ * WHY THIS EXISTS, on the one destructive path in the app. `resetDemo` decodes five
+ * statuses as a typed result, and every genuine reset result is built by ONE
+ * backend helper (`routes._reset_response`), which always sets `status` to `"ok"`
+ * or `"refused"`. But those statuses are not exclusively its: `POST /api/demo/reset`
+ * also answers **409** `{"error": "tutorial_scope_required", …}` when the request
+ * carries no worked-example session (`routes.py:1254-1255` → `_tutorial_scope_required`,
+ * `:795-805`), and that body has no `status`, no counts and no `plan_digest`.
+ *
+ * Read as an `ApiDemoResetResult` it produced a HALF-BUILT object, and the failure
+ * was silent in the dangerous direction: `ResetDemoDialog`'s `refused` is
+ * `data.status === 'refused' || data.ambiguous_count > 0`, and with both fields
+ * `undefined` that is `false` — so the dialog would have rendered `undefined`
+ * counts and left the execute button armable by typing the phrase. Rejecting
+ * instead lands the dialog in its existing preview-`error` state, where
+ * `actionDisabled` is true because `preview.status !== 'data'`.
+ *
+ * Believed unreachable today (the dialog only mounts inside a session, so the
+ * request always carries the header), but it is a guard rather than an assertion
+ * about reachability: the invariant it would rest on is two module-level variables
+ * — `api.ts`'s `tutorialScope` and the tutorial store's `sessionId` — staying in
+ * step, and a destructive control must not be armed by that holding.
+ *
+ * Narrow on purpose: it tests ONLY the discriminator, so every currently-handled
+ * refusal (`not_synthetic_only`, `confirmation_required`, `plan_digest_required`,
+ * `plan_digest_stale`, `ambiguous_records_present`) keeps working exactly as it
+ * does now.
+ */
+function isResetResult(body: unknown): body is ApiDemoResetResult {
+  if (typeof body !== 'object' || body === null) return false;
+  const status = (body as { status?: unknown }).status;
+  return status === 'ok' || status === 'refused';
+}
+
 /** The header the backend resolves the workspace scope from. Must match
  *  `TUTORIAL_SESSION_HEADER` in `apps/api/isaac_api/routes.py`. */
 export const TUTORIAL_SESSION_HEADER = 'X-Isaac-Tutorial-Session';
@@ -755,10 +799,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    if ([200, 403, 409, 412, 428].includes(res.status)) {
+    if (RESET_RESULT_STATUSES.includes(res.status)) {
       // readJson still guards the HTML-intercept case: an edge sign-in page can
       // carry any status, and it is never a typed reset result.
-      return readJson<ApiDemoResetResult>(res, '/demo/reset');
+      const body = await readJson<unknown>(res, '/demo/reset');
+      // FAIL CLOSED on a body this client cannot interpret. See
+      // `isResetResult` — a half-built result leaves a destructive control armed.
+      if (!isResetResult(body)) {
+        throw new ApiError(
+          `The reset API answered ${res.status} with a body that is not a reset result.`,
+          { status: res.status, path: '/demo/reset', contentType: contentTypeOf(res) },
+        );
+      }
+      return body;
     }
     throw httpError(res, '/demo/reset');
   },

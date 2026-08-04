@@ -1953,7 +1953,7 @@ export const openApiFixture = {
     // Verbatim from `apps/api/isaac_api/app.py` (Slice 2A; title + summary
     // re-synced by P1, which dropped the false "local" from the hosted title).
     summary:
-      'FastAPI wrapper over the deterministic isaac_records core: a synthetic-only example workspace plus one read-only, aggregate-only database diagnostic.',
+      'FastAPI wrapper over the deterministic isaac_records core: a synthetic-only workspace, isolated worked-example sessions holding the built-in example records, and one read-only, aggregate-only database diagnostic.',
   },
   // P36V PR3 slice C — the document now REGISTERS tags, and grouping is derived
   // from them (`lib/apiDocsModel.ts`). Four properties are covered on purpose:

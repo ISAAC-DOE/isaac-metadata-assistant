@@ -506,6 +506,87 @@ describe('P26.0b · Reset Worked Example — ambiguous refusal', () => {
   });
 });
 
+/*
+ * AN UNINTERPRETABLE PREVIEW BODY MUST NOT ARM THE DESTRUCTIVE CONTROL.
+ *
+ * `POST /api/demo/reset` answers 409 `{"error": "tutorial_scope_required", …}` when
+ * the request carries no worked-example session — a body with no `status`, no counts
+ * and no `plan_digest` (`routes.py::_tutorial_scope_required`). 409 is also one of
+ * the statuses `api.resetDemo` decodes as a typed result, so that body used to be
+ * returned AS a result: `refused` is computed from `data.status === 'refused' ||
+ * data.ambiguous_count > 0`, both fields were `undefined`, and the expression is
+ * therefore `false`. The dialog rendered `undefined` counts and the execute button
+ * stayed armable by typing the phrase.
+ *
+ * This is believed unreachable today — the dialog is mounted only by
+ * `TutorialSessionBar`, which requires a non-null `sessionId` — but the invariant it
+ * would rest on is two module-level variables staying in step (`api.ts`'s
+ * `tutorialScope` and the tutorial store's `sessionId`), and a destructive control
+ * must fail closed rather than depend on that holding. The state is reached here the
+ * way the code would reach it: the endpoint answers that body, whatever the reason.
+ */
+describe('P26.0b · Reset Worked Example — a body it cannot interpret fails closed', () => {
+  const SCOPE_REQUIRED: RouteEntry = {
+    status: 409,
+    body: {
+      error: 'tutorial_scope_required',
+      operation: 'POST /api/demo/reset',
+      header: TUTORIAL_SESSION_HEADER,
+      message:
+        'This operation works on the built-in example records, which exist only inside ' +
+        'a worked-example session. Nothing was written.',
+    },
+  };
+
+  it('the execute control cannot be armed, and no execute is ever issued', async () => {
+    const view = await renderInSession({
+      ...resetDemoRoutes().routes,
+      'POST /api/demo/reset': SCOPE_REQUIRED,
+    });
+    await openReset(view);
+    const d = within(dialog(view));
+
+    // The dialog is in its honest preview-failure state…
+    expect(d.getByRole('note').textContent).toMatch(/preview could not be loaded/i);
+    // …and no count table was drawn from a body that carries no counts.
+    expect(dialog(view).querySelector('.reset-counts')).toBeNull();
+    expect(dialog(view).textContent ?? '').not.toMatch(/undefined|NaN/);
+
+    // Typing the exact phrase does NOT arm the destructive action.
+    const action = d.getByRole('button', { name: LABELS.resetConfirmAction }) as HTMLButtonElement;
+    fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
+    expect(action.disabled).toBe(true);
+    // Pressing it anyway, and pressing Enter in the field, issue nothing.
+    fireEvent.click(action);
+    fireEvent.keyDown(d.getByRole('textbox'), { key: 'Enter' });
+    expect(resetPosts().some((p) => p.mode === 'execute')).toBe(false);
+    expect(resetPosts().every((p) => p.mode === 'preview')).toBe(true);
+  });
+
+  it('presents no plan at all — no counts, and no "what you would lose" sentence', async () => {
+    const view = await renderInSession({
+      ...resetDemoRoutes().routes,
+      'POST /api/demo/reset': SCOPE_REQUIRED,
+    });
+    await openReset(view);
+
+    /*
+     * Both blocks below render on `data &&`, i.e. on "a preview body arrived". They
+     * are what the defect produced: an at-risk sentence and a count table built from
+     * a body that carries neither. Asserting their ABSENCE is what makes this test
+     * falsifiable — it fails if `resetDemo` ever returns the refusal body again.
+     */
+    expect(dialog(view).querySelector('.reset-counts')).toBeNull();
+    expect(dialog(view).querySelector('.reset-at-risk')).toBeNull();
+    const text = dialog(view).textContent ?? '';
+    expect(text).not.toContain(LABELS.resetAtRiskLabel);
+    // Nothing classified this workspace, so no classification verdict may be shown…
+    expect(text).not.toMatch(/refused for safety/i);
+    // …and the wire-level error code is not product copy.
+    expect(text).not.toMatch(/tutorial_scope_required/);
+  });
+});
+
 // --- 22–24. success refreshes from the backend to the canonical five ----------
 
 describe('P26.0b · Reset Worked Example — success refreshes the dashboard', () => {

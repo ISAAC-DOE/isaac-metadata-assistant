@@ -661,7 +661,7 @@ describe('Settings — Data & Privacy', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     openTab('Data & Privacy');
-    await screen.findByText(/only the example workspace/i);
+    await screen.findByText(/two things are stored/i);
 
     const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
     expect(concepts.map((c) => c.heading)).toEqual([
@@ -693,13 +693,67 @@ describe('Settings — Data & Privacy', () => {
     }
   });
 
+  /*
+   * "WHAT IS STORED" MUST COUNT BOTH PLACES, not just the workspace.
+   *
+   * The retired copy said the workspace is the only thing stored ("Just the example
+   * workspace" / "Only the example workspace is stored"). That was true while the
+   * five built-in examples were materialised into the ordinary workspace on every
+   * read. Since the examples moved into a per-session scope the server ALSO creates
+   * a temporary directory for each worked-example session — `workspace.py`'s
+   * `scope_root` returns `workspace_root()/_tutorial/<session_id>` for one — writes
+   * that session's own copies of the five examples into it
+   * (`create_tutorial_session` → `ensure_tutorial_seeded`), and keeps every answer,
+   * edit and exported artifact made inside it there (`Experiment.dir` /
+   * `records_dir` are rooted at the scope). It is removed on
+   * `DELETE /api/tutorial/sessions/{id}`, or swept once expired.
+   *
+   * This test replaces a needle that was only a settle point. It is strictly
+   * stronger than what it replaces on two counts: it pins each clause of the new
+   * truth by name, and it FORBIDS the retired only-one-place claim from returning
+   * in either the summary or the definition — which the old assertion, being a
+   * substring match on that very claim, could not do.
+   */
+  it('counts the per-walkthrough directory as well as the workspace', async () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+    openTab('Data & Privacy');
+    await screen.findByText(/two things are stored/i);
+
+    const stored = screen.getByText(/two things are stored/i).textContent ?? '';
+    // Both places, and that neither is shared between deployments.
+    expect(stored).toMatch(/both as files on the server for this deployment/i);
+    expect(stored).toMatch(/neither is shared between deployments/i);
+    expect(stored).toMatch(/the workspace itself/i);
+    expect(stored).toMatch(
+      /a temporary directory the server creates for each worked-example walkthrough/i,
+    );
+    // What is written into it, and that it is written there INSTEAD of the workspace.
+    expect(stored).toMatch(/its own copy of the five built-in example records/i);
+    expect(stored).toMatch(
+      /every answer, edit and exported artifact you produce inside it is written there rather than into the workspace/i,
+    );
+    // When it goes away — both arms, and no promised deletion time. The first arm
+    // is deliberately hedged: `tutorialController`'s DELETE is best effort and a
+    // failure is swallowed, so the copy must not promise the removal outright.
+    expect(stored).toMatch(/the app discards that directory when the walkthrough ends/i);
+    expect(stored).toMatch(/if that request does not reach the server/i);
+    expect(stored).toMatch(/an expired one is removed the next time a walkthrough is opened/i);
+
+    // The retired claim must not survive anywhere on this tab, in either register:
+    // it asserted that the workspace is the only thing stored.
+    const tabText = norm(document.body.textContent ?? '');
+    expect(tabText).not.toContain(norm('Only the example workspace is stored'));
+    expect(tabText).not.toContain(norm('Just the example workspace'));
+  });
+
   /** Data & Privacy owns the paragraphs Overview used to duplicate verbatim or
    *  paraphrase: the synthetic-data claim, telemetry, and authentication. */
   it('is the one canonical home of the definitions Overview only summarizes', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     openTab('Data & Privacy');
-    await screen.findByText(/only the example workspace/i);
+    await screen.findByText(/two things are stored/i);
 
     // Slice 2A (I5) sweep. Both needles named copy that has been retired for
     // being untrue of the deployment, and both are replaced by a needle from
@@ -738,7 +792,7 @@ describe('Settings — Data & Privacy', () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
     openTab('Data & Privacy');
-    await screen.findByText(/only the example workspace/i);
+    await screen.findByText(/two things are stored/i);
 
     const disclosures = Array.from(
       container.querySelectorAll('details.settings-more'),
@@ -783,7 +837,7 @@ describe('Settings — Data & Privacy', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     openTab('Data & Privacy');
-    await screen.findByText(/only the example workspace/i);
+    await screen.findByText(/two things are stored/i);
 
     // Governance: refusal is a blanket upload block, NOT real-data detection —
     // the CSV preview and record validator really do read what they are given.
@@ -1374,7 +1428,7 @@ const SURFACES: { name: string; open: () => void; settle: () => Promise<unknown>
   {
     name: 'Data & Privacy',
     open: () => openTab('Data & Privacy'),
-    settle: () => screen.findByText(/only the example workspace/i),
+    settle: () => screen.findByText(/two things are stored/i),
   },
   { name: 'About', open: () => openTab('About'), settle: () => screen.findByText('0.1.0') },
   {

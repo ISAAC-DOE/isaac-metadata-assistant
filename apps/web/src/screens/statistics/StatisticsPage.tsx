@@ -178,6 +178,36 @@ function announceRound(round: Round, lastSuccess: Date | null): string {
 }
 
 /**
+ * The lead sentence, which names WHICH workspace the figures below describe.
+ *
+ * IT USED TO NAME THE WRONG ONE, unconditionally: "the current example
+ * workspace". The five built-in example records exist ONLY inside a
+ * worked-example session — `apps/api/isaac_api/workspace.py:22-32` states it as a
+ * structural property ("the NORMAL scope … is **never** auto-seeded: on a fresh
+ * deployment it is empty and it stays empty until something explicitly creates a
+ * record in it", against "a TUTORIAL scope … The five canonical worked-example
+ * records live ONLY here") — so on every ordinary screen that sentence asserted
+ * contents that are not there. Same defect class, and same correction, as the mode
+ * chip: see `components/TopBar.tsx`, "THE SCOPE DECIDES THE LABEL".
+ *
+ * ONE SENTENCE CANNOT BE TRUE OF BOTH SCOPES, which is why this is a branch rather
+ * than a rewording. The record read is keyed on the same `scope` value (see D1
+ * below), so this page really does describe either workspace: only the session
+ * scope holds examples, and only the ordinary scope can be named without them.
+ *
+ * The four other things listed are unchanged and are not scope claims: workflow
+ * readiness and evidence are derived from whichever records were read, while
+ * Project Memory and the API surface are properties of the build.
+ */
+function leadSentence(scope: string | null): string {
+  const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
+  return (
+    `A read-only view of ${workspace}, workflow readiness, evidence, Project ` +
+    'Memory, and the API surface.'
+  );
+}
+
+/**
  * A compact, localized failure note. Neutral rather than alarm-coloured, with
  * the recourse (a real button, keyboard reachable) still offered.
  *
@@ -353,10 +383,7 @@ export function StatisticsPage() {
       <div className="placeholder">
         <span className="eyebrow">Workspace Insights</span>
         <h1>Statistics</h1>
-        <p>
-          A read-only view of the current example workspace, workflow readiness, evidence, Project
-          Memory, and the API surface.
-        </p>
+        <p>{leadSentence(scope)}</p>
       </div>
 
       <div className="statistics">

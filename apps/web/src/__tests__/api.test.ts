@@ -5,6 +5,7 @@ import {
   answersAfterNotebook,
   answersStaleWrite,
   bundleRoutes,
+  demoResetPreviewClean,
   demoRunDraftOnly,
   draftResponse,
   experimentSummary,
@@ -482,6 +483,83 @@ describe('typed API client — edge intercepts and non-JSON bodies', () => {
       const error = (await call().catch((e: unknown) => e)) as ApiError;
       expect(error).toBeInstanceOf(ApiError);
       expect(error.htmlIntercept).toBe(true);
+    }
+  });
+
+  /*
+   * `resetDemo` FAILS CLOSED on a body it cannot interpret as a reset plan.
+   *
+   * It decodes five statuses — 200/403/409/412/428 — as a typed `ApiDemoResetResult`,
+   * and every genuine one is built by the backend's single `_reset_response` helper,
+   * which always sets `status` to `"ok"` or `"refused"`. But 409 is not exclusively
+   * that helper's: `POST /api/demo/reset` also answers 409
+   * `{"error": "tutorial_scope_required", …}` when the request carries no
+   * worked-example session, and that body has no `status`, no counts and no
+   * `plan_digest`.
+   *
+   * Read as a result it produced a HALF-BUILT object whose `status` and
+   * `ambiguous_count` were both `undefined` — and `ResetDemoDialog` computes
+   * `refused` from exactly those two fields, so it evaluated to `false` and left a
+   * DESTRUCTIVE control armable. Rejecting is the only safe reading.
+   *
+   * The three cases below are the discriminator's boundary: the real refusal body,
+   * a body with a `status` this client does not know, and a JSON non-object. Each
+   * must reject; none may return.
+   */
+  it('resetDemo rejects a 409 body that is not a reset result (fail closed)', async () => {
+    stubFetchRoutes({
+      'POST /api/demo/reset': {
+        status: 409,
+        body: {
+          error: 'tutorial_scope_required',
+          operation: 'POST /api/demo/reset',
+          header: 'X-Isaac-Tutorial-Session',
+          message: 'This operation works on the built-in example records. Nothing was written.',
+        },
+      },
+    });
+    const error = (await api.resetDemo('preview').catch((e: unknown) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(409);
+    expect(error.path).toBe('/demo/reset');
+    expect(error.htmlIntercept).toBe(false);
+    expect(error.message).toMatch(/not a reset result/i);
+  });
+
+  it('resetDemo rejects an unknown status value and a non-object body alike', async () => {
+    for (const body of [{ status: 'partially_ok' }, { mode: 'preview' }, [], 'ok', 7, null]) {
+      stubFetchRoutes({ 'POST /api/demo/reset': { status: 200, body } });
+      const error = (await api.resetDemo('preview').catch((e: unknown) => e)) as ApiError;
+      expect(error, `body ${JSON.stringify(body)} must be refused`).toBeInstanceOf(ApiError);
+      expect(error.message).toMatch(/not a reset result/i);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('resetDemo still returns every typed refusal it already handled', async () => {
+    // The guard tests ONLY the discriminator, so each existing refusal arm — and the
+    // 200 preview — must come back as a value, not as a throw.
+    for (const [status, refusal] of [
+      [200, null],
+      [403, 'not_synthetic_only'],
+      [409, 'ambiguous_records_present'],
+      [412, 'plan_digest_stale'],
+      [428, 'plan_digest_required'],
+    ] as [number, string | null][]) {
+      stubFetchRoutes({
+        'POST /api/demo/reset': {
+          status,
+          body: {
+            ...demoResetPreviewClean,
+            status: refusal === null ? 'ok' : 'refused',
+            refusal_reason: refusal,
+          },
+        },
+      });
+      const result = await api.resetDemo('preview');
+      expect(result.status, `status ${status}`).toBe(refusal === null ? 'ok' : 'refused');
+      expect(result.refusal_reason).toBe(refusal);
+      vi.unstubAllGlobals();
     }
   });
 

@@ -65,10 +65,19 @@ def create_app() -> FastAPI:
         # deterministic isaac_records core.") was a flat whole-API claim, and this
         # API now also publishes a read-only database diagnostic. The synthetic
         # guarantee is scoped to the workspace; the diagnostic is named, not denied.
+        #
+        # AND THE WORKSPACE IS NO LONGER AN "EXAMPLE" ONE. The five built-in example
+        # records used to be materialised into the ordinary workspace on every read;
+        # they now exist only inside a worked-example session, and the ordinary
+        # workspace is empty until something explicitly creates a record in it. So
+        # "a synthetic-only example workspace" named contents the ordinary workspace
+        # does not have — the same defect already corrected in the mode chip and on
+        # the Statistics page. Both scopes are now named, because both exist.
         summary=(
             "FastAPI wrapper over the deterministic isaac_records core: a "
-            "synthetic-only example workspace plus one read-only, aggregate-only "
-            "database diagnostic."
+            "synthetic-only workspace, isolated worked-example sessions holding the "
+            "built-in example records, and one read-only, aggregate-only database "
+            "diagnostic."
         ),
         # Documentation metadata only (consumed when the OpenAPI document is
         # generated, never at request time): the group descriptions for the tags
