@@ -543,19 +543,42 @@ describe('the chart palette declared on .statistics', () => {
     expect(raw, 'and the reason they were removed is still stated').toMatch(/slots are gone/i);
   });
 
+  /** The six chart colours this surface is allowed to declare, and no more. */
+  const CHART_COLOUR_TOKENS = [
+    '--stats-ramp-1',
+    '--stats-ramp-2',
+    '--stats-ramp-3',
+    '--stats-ramp-4',
+    '--stats-ramp-5',
+    '--stats-series',
+  ] as const;
+
   it('declares exactly one series colour and a five-step ordinal ramp, and nothing else', async () => {
     const css = await statisticsCss();
     const block = /^\.statistics\s*\{([\s\S]*?)^\}/m.exec(css);
     expect(block, 'the .statistics page-root block must exist').not.toBeNull();
     const declared = [...block![1].matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((m) => m[1]);
-    expect(declared.sort()).toEqual([
-      '--stats-ramp-1',
-      '--stats-ramp-2',
-      '--stats-ramp-3',
-      '--stats-ramp-4',
-      '--stats-ramp-5',
-      '--stats-series',
-    ]);
+    expect(declared.sort()).toEqual([...CHART_COLOUR_TOKENS]);
+
+    /*
+     * …AND NOWHERE ELSE IN THE FILE. The assertion above is scoped to the
+     * page-root block, so a custom property declared under ANY descendant
+     * selector was invisible to it — which is the round-1 categorical-slot
+     * regression coming back under a new name. Measured, an independent reviewer
+     * shipped this and passed 2697 tests:
+     *
+     *     .statistics .stats-chart-plot { --ident-a: #b0522c; … }
+     *     .statistics .stats-chart-bar[data-slot='1'] { fill: var(--ident-a); }
+     *
+     * Declarations only — `var(--surface)` and friends are REFERENCES to tokens
+     * this file does not own, and there are 33 of those, all of which are fine.
+     * What must not exist is a seventh colour declared here.
+     */
+    const declaredAnywhere = [...css.matchAll(/(?:^|[{;\s])(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]);
+    expect(
+      [...new Set(declaredAnywhere)].sort(),
+      'a custom property is declared outside the page-root block',
+    ).toEqual([...CHART_COLOUR_TOKENS]);
   });
 
   /**
@@ -679,18 +702,67 @@ describe('the chart palette declared on .statistics', () => {
     expect(seen, 'the axis ticks in particular must be covered').toContain('--text-muted');
   });
 
-  it('every mark rule draws from those six slots and no other colour', async () => {
+  /*
+   * THE TITLE USED TO ASSERT MORE THAN THE BODY, which is its own defect.
+   *
+   * It read "every mark rule draws from those six slots and no other colour" while
+   * the body only rejected a literal `#hex` / `rgb()` / `hsl()`. It never inspected
+   * the var NAME, so `fill: var(--anything)` passed — and an independent reviewer
+   * used exactly that, declaring three identity hues on a descendant selector and
+   * painting three slots with them, through 2697 passing tests.
+   *
+   * So the name is now resolved against a MEASURED allowlist, and the title says
+   * what is checked. The allowlist is not the six colour tokens alone: measured off
+   * this stylesheet, chart marks legitimately also wear three tokens this file does
+   * not own — `--surface` for the marker ring, `--border-faint` for the gridlines
+   * and `--border` for the axis rule — plus the keyword `transparent` on the
+   * pointer hit area. Those are CHROME, not data ink, and they are listed
+   * separately so a ramp colour cannot be smuggled in as chrome or vice versa.
+   */
+  it('every mark rule wears a NAMED token from the data-ink or chrome set, and no other colour', async () => {
     const css = await statisticsCss();
-    // Every `fill:` / `stroke:` on a chart-mark rule resolves through a custom
-    // property. A raw hex on a mark would be a seventh colour outside the
-    // validated set, which is how a categorical slot comes back under a new name.
+
+    /** Data ink: the only colours that may encode a value. */
+    const DATA_INK: readonly string[] = [...CHART_COLOUR_TOKENS];
+    /** Chrome: tokens this file references but does not own. Never data. */
+    const CHROME: readonly string[] = ['--surface', '--border-faint', '--border'];
+    /** Non-colour keywords a mark may legally carry. */
+    const KEYWORDS: readonly string[] = ['transparent', 'none', 'currentColor'];
+
+    const seen: string[] = [];
     for (const [, decl] of css.matchAll(/\.stats-chart-[a-z-]*(?:\[[^\]]*\])?\s*\{([^}]*)\}/g)) {
       for (const [, value] of decl.matchAll(/\b(?:fill|stroke)\s*:\s*([^;]+)/g)) {
-        expect(value.trim(), 'a chart mark must not carry a literal colour').not.toMatch(
-          /#[0-9a-fA-F]{3,8}|\brgba?\(|\bhsla?\(/,
+        const raw = value.trim();
+        seen.push(raw);
+
+        // 1 · no literal colour of any notation.
+        expect(raw, 'a chart mark must not carry a literal colour').not.toMatch(
+          /#[0-9a-fA-F]{3,8}|\brgba?\(|\bhsla?\(|\bcolor-mix\(|\boklch\(|\blab\(/,
         );
+
+        if (KEYWORDS.includes(raw)) continue;
+
+        // 2 · it is a single `var()` reference and nothing else — no fallback
+        //     colour hiding in the second argument, no space-separated list.
+        const ref = /^var\(\s*(--[a-z0-9-]+)\s*\)$/.exec(raw);
+        expect(ref, `a chart mark must be one plain var() or a listed keyword: "${raw}"`).not.toBeNull();
+
+        // 3 · and the NAME is on the allowlist. This is the assertion the title
+        //     always claimed and the body never made.
+        expect(
+          [...DATA_INK, ...CHROME],
+          `"${raw}" is not a validated chart colour — a new custom property is how a ` +
+            `categorical slot comes back under a new name`,
+        ).toContain(ref![1]);
       }
     }
+
+    // Vacuity guard: the scan must actually be finding mark declarations. Measured
+    // today: 11 — five ramp fills, two series, the marker ring, the grid, the axis
+    // rule, and the transparent hit area.
+    expect(seen.length, 'no chart mark rule was inspected — the scan is broken').toBe(11);
+    expect(seen, 'the ramp fills in particular must be covered').toContain('var(--stats-ramp-3)');
+    expect(seen).toContain('transparent');
   });
 });
 
@@ -775,6 +847,83 @@ describe('labels are selective, and never clipped', () => {
       '5%',
       '8%',
     ]);
+  });
+
+  /*
+   * THE CONTRAST RULE IS HONOURED BY THE COMPONENT, not merely declared next to it.
+   *
+   * `IN_SEGMENT_LABEL_SLOTS` is checked against measured contrast above, and
+   * `statistics.css` is checked for painting only legible slots. NEITHER of those
+   * asserts that the renderer consults the list — and an independent reviewer
+   * replaced the one line that does
+   *
+   *     if (!IN_SEGMENT_LABEL_SLOTS.includes(i + 1)) return null;
+   *
+   * with a comment and passed 2697 vitest tests and 30 browser tests. Deleting it
+   * silently restores a 4.32:1 white-on-#587ca7 label in any workspace with a
+   * flatter distribution than the seeded one.
+   *
+   * Both existing exercises are blind to it for the same reason: NEITHER FIXTURE
+   * REACHES THE RULE. The `EVIDENCE` fixture makes slot 3 a 5% segment — 28px at
+   * the fallback width, which fails the FIT rule anyway — and the seeded browser
+   * distribution is 99%/1%, where the reviewer's probe found only one label at all.
+   * So the discriminating fixture is FIVE EQUAL ROWS: measured here, every segment
+   * is 110–112px wide, comfortably past `estimateTextWidth('20%') + 12` = 33.6, so
+   * the fit rule excludes nothing and the drawn set is decided by the slot list
+   * alone.
+   *
+   * Measured with the line present: slots 1, 2, 4, 5 at 20% each. Measured with the
+   * line removed: slot 3 joins them.
+   */
+  it('honours IN_SEGMENT_LABEL_SLOTS where the FIT rule excludes nothing', async () => {
+    const equal = [
+      { key: 'a', label: 'A', value: 8 },
+      { key: 'b', label: 'B', value: 8 },
+      { key: 'c', label: 'C', value: 8 },
+      { key: 'd', label: 'D', value: 8 },
+      { key: 'e', label: 'E', value: 8 },
+    ];
+    render(
+      <StatsStackedBar
+        caption="Five equal classes"
+        rows={equal}
+        total={40}
+        unit="fields"
+        categoryHeader="Class"
+      />,
+    );
+    const fig = figure('Five equal classes');
+
+    // Every segment is wide enough for its own label — so nothing below is
+    // explained by the fit rule.
+    const widths = [...fig.querySelectorAll('.stats-chart-segment')].map((s) =>
+      Number(s.getAttribute('width')),
+    );
+    expect(widths).toHaveLength(5);
+    for (const w of widths) {
+      expect(w, 'the fit rule must exclude nothing in this fixture').toBeGreaterThan(
+        estimateTextWidth('20%') + 12,
+      );
+    }
+
+    // …so the DRAWN set is exactly the slot list, in order, and slot 3 — the one
+    // step of the ramp no label colour clears 4.5:1 on — carries no label.
+    const drawn = [...fig.querySelectorAll('.stats-chart-inlabel')].map((n) => [
+      n.getAttribute('data-slot'),
+      n.textContent,
+    ]);
+    expect(drawn).toEqual([
+      ['1', '20%'],
+      ['2', '20%'],
+      ['4', '20%'],
+      ['5', '20%'],
+    ]);
+
+    const { IN_SEGMENT_LABEL_SLOTS } = await import('../screens/statistics/StatsCharts');
+    expect(drawn.map(([slot]) => Number(slot))).toEqual([...IN_SEGMENT_LABEL_SLOTS]);
+
+    // …and slot 3's share is still reachable, as text, in the table.
+    expect(tableOf('Five equal classes')[2]).toEqual(['C', '8', '20%']);
   });
 });
 

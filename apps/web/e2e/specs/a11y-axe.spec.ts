@@ -71,7 +71,17 @@ import { SURFACES } from '../surfaces';
  */
 async function openUnreachableDisclosures(page: import('@playwright/test').Page): Promise<void> {
   const technical = page.locator('details.stats-technical');
-  if ((await technical.count()) === 0) return;
+  const mounted = await technical.count();
+  if (mounted === 0) return;
+  /*
+   * ONE, ASSERTED. `technical.locator('> summary').click()` resolves through a
+   * strict-mode locator, so a second `details.stats-technical` on any surface
+   * would throw "resolved to 2 elements" from inside a helper whose job is
+   * coverage — an opaque failure in every a11y scan at every viewport, naming
+   * neither the surface nor the cause. Asserted here so the second mount names
+   * itself.
+   */
+  expect(mounted, 'a surface must mount exactly one details.stats-technical').toBe(1);
   await technical.locator('> summary').click();
   await expect(technical).toHaveAttribute('open', '');
 }

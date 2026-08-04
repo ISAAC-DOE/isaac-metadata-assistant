@@ -73,10 +73,10 @@ function textOf(root: HTMLElement): string {
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-/* ── the emptiness matcher, and why it is shaped like this ──────────────────
+/* ── the emptiness matcher, and the two generations of hole it has had ───────
  *
- * TRAP 4's guards used to be DIGIT-SHAPED — `/\b\d+\b/`, `/\b0\b/` — plus a
- * per-sentence check that fired on three literal phrases:
+ * GENERATION 1 — DIGIT-SHAPED GUARDS. Trap 4 used `/\b\d+\b/` and `/\b0\b/`, plus
+ * a per-sentence check that fired on three literal phrases:
  *
  *     if (!/no records|no activity|nothing to show/i.test(sentence)) continue;
  *
@@ -86,24 +86,122 @@ function textOf(root: HTMLElement): string {
  *
  *     Zero records are attributed to you, and your export count is zero.
  *
- * The lesson is not "add zero to the list". A list of phrases guards phrases; the
- * claim being guarded is a CLASS — an emptiness value applied to a countable
- * unit of the reader's work — so the matcher below describes that class, and
- * `the emptiness matcher itself` (below) pins its polarity against worked
- * examples in BOTH directions. A guard whose positives are never exercised is a
- * guard nobody has seen work.
+ * The lesson was not "add zero to the list": a list of phrases guards phrases,
+ * and the claim being guarded is a CLASS — an emptiness value applied to a
+ * countable unit of the reader's work.
+ *
+ * GENERATION 2 — A CLASS MATCHER WITH A SENTENCE-WIDE ESCAPE. The replacement was
+ * a whole-sentence OR: a trigger anywhere plus a modal token anywhere excused the
+ * whole sentence. A second independent reviewer inserted, into the production
+ * copy, and passed 117 files / 2697 vitest tests and all 8 browser tests:
+ *
+ *     You have no records, and this preview cannot tell you more than that.
+ *     Nothing to show.
+ *
+ * `cannot` sat in the SECOND clause and excused the first — and this tab's whole
+ * house voice is built from `would` / `cannot` / `rather than`, so the likeliest
+ * copy edit on this surface was also the evasion. It could not be fixed by
+ * editing the token list, because the legitimate copy "A count of zero WOULD say
+ * you have no records" has exactly the same shape.
+ *
+ * The fix is therefore SCOPE, not vocabulary: the trigger and the escape are
+ * evaluated together, PER CLAUSE. And the second sentence exposed a separate
+ * regression — the class matcher had LOST `nothing to show`, which the retired
+ * literal list caught. Measured, at 9494bdb: `Nothing to show.` → old literal
+ * list `true`, class matcher `false`. That loss was invisible in the polarity
+ * table because its `MUST_FLAG` entry ("Nothing to show — zero exports.") is
+ * flagged by "zero exports" and not by the phrase. Hence
+ * `retired literal parity` below: whenever a class matcher replaces a literal
+ * list, assert the new one flags everything the old one did.
+ */
+
+/* >>> SHARED-EMPTINESS-MATCHER-START >>>
+ *
+ * THIS BLOCK EXISTS TWICE, BYTE FOR BYTE, between these two sentinels:
+ * `src/__tests__/my-stats.test.tsx` (the authority) and
+ * `e2e/specs/charts.spec.ts`. The two cannot share a module —
+ * `tsconfig.app.json` includes only `src`, `e2e/tsconfig.json` is a separate
+ * standalone project, and the production build must not depend on Playwright
+ * types — so the lockstep is ASSERTED by `the two copies are byte-identical` in
+ * `my-stats.test.tsx` rather than asked for in a comment. Edit both, or the
+ * assertion fails.
  */
 
 /** A quantity noun this tab could state a personal count of. */
 const COUNT_NOUN = 'records?|experiments?|exports?|fields?|figures?|activity|drafts?|issues?|questions?|counts?';
 
-const EMPTINESS_PATTERNS: readonly RegExp[] = [
-  // Prepositive: "zero records", "no record", "none of the figures".
-  new RegExp(`\\b(?:zero|none|nil|nought|no)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`, 'i'),
-  // Postpositive: "your export count is zero", "the figures are none".
-  new RegExp(`\\b(?:${COUNT_NOUN})\\b[^.;]{0,40}?\\b(?:is|are|was|were)\\s+(?:zero|none|nil|nought)\\b`, 'i'),
-  // Negated-verb form: "you have not authored any records", "you haven't exported any".
-  new RegExp(`\\byou(?:r|rs)?\\b[^.;]{0,60}?\\b(?:not|never|n't)\\b[^.;]{0,40}?\\bany\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`, 'i'),
+/** The emptiness values a count can be given. */
+const EMPTY_WORD = 'zero|none|nil|nought|naught|nothing|empty';
+
+/** The reader, named. */
+const PERSONAL = /\byou\b|\byour\b|\byours\b/i;
+
+/**
+ * Emptiness applied to a countable unit. A CLAIM ONLY WHERE THE READER IS NAMED,
+ * because the class this file guards is "an emptiness value applied to a
+ * countable unit of THE READER'S work" and the reader is part of that definition.
+ *
+ * That narrowing is deliberate and it has a cost worth stating: this tab really
+ * does say, truthfully, "no record in this workspace carries an author" — a
+ * WORKSPACE fact with no personal subject. Under a sentence-wide escape that
+ * clause was excused by a `no way` three clauses later, which is an accident;
+ * under clause scoping without this gate it would be reported, which is a false
+ * positive on true copy. A workspace figure leaking onto this tab is trap 1's
+ * job, and trap 1 forbids the import that would supply one.
+ */
+const PERSONAL_EMPTINESS: readonly RegExp[] = [
+  // Prepositive: "no records", "zero records", "none of the figures",
+  // "not a single record".
+  new RegExp(
+    `\\b(?:zero|none|nil|nought|naught|no|not a single)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`,
+    'i',
+  ),
+  // Postpositive: "your export count is zero", "your records number zero",
+  // "your record count stands at zero", "your records list is empty".
+  new RegExp(
+    `\\b(?:${COUNT_NOUN})\\b[^.;]{0,40}?\\b(?:is|are|was|were|remains?|numbers?|stands?|sits?)\\b(?:\\s+at)?\\s+(?:${EMPTY_WORD})\\b`,
+    'i',
+  ),
+];
+
+/**
+ * Forms that carry the reader inside the pattern, so they need no separate
+ * personal gate — and that a count noun would miss.
+ */
+const NAMES_THE_READER: readonly RegExp[] = [
+  // Negated-verb: "you have not authored any records", "you haven't exported any".
+  new RegExp(
+    `\\byou(?:r|rs)?\\b[^.;]{0,60}?\\b(?:not|never|n't)\\b[^.;]{0,40}?\\bany\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`,
+    'i',
+  ),
+  // Direct personal predicate with NO count noun at all: "you have zero",
+  // "you have authored nothing", "you have no work here".
+  new RegExp(
+    `\\byou\\b\\s+(?:have|has|had|hold|own)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${EMPTY_WORD}|no)\\b`,
+    'i',
+  ),
+  // Attribution: "nothing is attributed to you", "none of it belongs to you".
+  // `you(?:rs)?` and not `you(?:r|rs)?`, so the honest "…rather than of your
+  // work" is not swept in by the possessive.
+  new RegExp(`\\b(?:${EMPTY_WORD})\\b[^.;]{0,40}?\\b(?:to|for|of)\\s+you(?:rs)?\\b`, 'i'),
+];
+
+/**
+ * Emptiness with NO subject, which on a personal tab reads as personal anyway.
+ * "Nothing to show." names nobody and means "you have nothing".
+ *
+ * The first two entries are the retired literal list's own idioms, kept as
+ * literals on purpose: they have no grammatical subject for a class rule to bind
+ * to. `there is nothing` is matched only at a clause end, so the tab's true
+ * "there is nothing measured to read" is not swept in.
+ */
+const SUBJECTLESS_EMPTINESS: readonly RegExp[] = [
+  /\bnothing\s+to\s+(?:show|see|display|report|list)\b/i,
+  /\bthere\s+(?:is|are|was|were)\s+(?:none|nothing)\b(?=\s*[.;,!?]|$)/i,
+  new RegExp(
+    `\\bthere\\s+(?:is|are|was|were)\\s+(?:no|zero)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`,
+    'i',
+  ),
 ];
 
 /**
@@ -111,27 +209,51 @@ const EMPTINESS_PATTERNS: readonly RegExp[] = [
  *
  * The tab's most important sentence is "A count of zero WOULD say you have no
  * records" — a hypothetical that denies the claim, and a page-wide ban on the
- * word would flag exactly the copy doing the honest work. So a triggered
- * sentence passes only when it is framed as a HYPOTHETICAL or as a statement
- * about what this build CANNOT DO.
+ * word would flag exactly the copy doing the honest work. So a triggered clause
+ * passes only when IT — not some other clause of the same sentence — is framed as
+ * a HYPOTHETICAL or as a statement about what this build CANNOT DO.
  *
  * `\bnot\b` is not in this list on purpose. It was the obvious escape and it is
  * a hole: "You have not exported any records" is a false personal claim that
- * wears a negation, which is why pattern 3 above exists and why the frame has to
- * be about modality rather than polarity.
+ * wears a negation, which is why the negated-verb pattern exists and why the
+ * frame has to be about modality rather than polarity.
  */
 const DENIAL_FRAME = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brather than\b|\b(?:is|are) absent\b/i;
 
-/** True when `sentence` asserts that the reader has nothing. */
-function assertsEmptiness(sentence: string): boolean {
-  if (!EMPTINESS_PATTERNS.some((p) => p.test(sentence))) return false;
-  return !DENIAL_FRAME.test(sentence);
+/**
+ * A sentence's coordinate clauses. Split on the coordinators that join two
+ * independent claims — `, and`, `, so`, `, but`, `, or`, `, yet`, `; ` — and NOT
+ * on the em-dash, which on this surface introduces an appositive that continues
+ * the same claim ("none of the figures below are zero — they are absent").
+ */
+function clausesOf(sentence: string): string[] {
+  return sentence.split(/,\s+(?:and|but|so|or|yet)\s+|;\s+/i);
 }
 
-/** Every sentence of `text` that asserts the reader has nothing. */
-function emptinessClaims(text: string): string[] {
-  return text.split(/(?<=[.;])\s+/).filter(assertsEmptiness);
+/** True when `clause` states that a countable unit of the reader's work is empty. */
+function triggersEmptiness(clause: string): boolean {
+  if (SUBJECTLESS_EMPTINESS.some((p) => p.test(clause))) return true;
+  if (NAMES_THE_READER.some((p) => p.test(clause))) return true;
+  return PERSONAL.test(clause) && PERSONAL_EMPTINESS.some((p) => p.test(clause));
 }
+
+/** Every CLAUSE of `text` that asserts the reader has nothing. */
+function emptinessClaims(text: string): string[] {
+  const claims: string[] = [];
+  for (const sentence of text.split(/(?<=[.;])\s+/)) {
+    for (const clause of clausesOf(sentence)) {
+      if (triggersEmptiness(clause) && !DENIAL_FRAME.test(clause)) claims.push(clause.trim());
+    }
+  }
+  return claims;
+}
+
+/** True when any clause of `sentence` asserts that the reader has nothing. */
+function assertsEmptiness(sentence: string): boolean {
+  return emptinessClaims(sentence).length > 0;
+}
+
+/* <<< SHARED-EMPTINESS-MATCHER-END <<< */
 
 // --- the tablist ------------------------------------------------------------
 
@@ -376,33 +498,53 @@ describe('My Stats invents no personal figure — the six traps', () => {
     expect(text).toMatch(/cannot tell whose records these are/);
 
     /*
-     * …and NO SENTENCE ASSERTS THAT THE READER HAS NOTHING — in digits or in
-     * words. Checked per sentence, with the modal escape documented above, so the
-     * three sentences that legitimately DENY a zero stay legal while the sentence
-     * that states one cannot.
+     * …and NO CLAUSE ASSERTS THAT THE READER HAS NOTHING — in digits or in words.
+     * Checked per clause, with the modal escape documented above, so the sentences
+     * that legitimately DENY a zero stay legal while a clause that states one
+     * cannot borrow the denial from its neighbour.
      *
      * The whole set is reported rather than the first match, so a copy edit that
      * introduces two says so once.
      */
     expect(
       emptinessClaims(text),
-      'a sentence on the personal tab asserts the reader has nothing; this build cannot know that',
+      'a clause on the personal tab asserts the reader has nothing; this build cannot know that',
     ).toEqual([]);
 
     /*
-     * …and the three honest sentences really do reach the matcher rather than
-     * slipping past it untriggered. Without this, a future narrowing of
-     * `EMPTINESS_PATTERNS` would look like a passing test instead of a hole: the
-     * assertion above is satisfied both by "nothing matched" and by "everything
-     * matched and every match was excused", and only one of those is the design.
+     * …AND THE GUARD BITES ON THIS TAB'S OWN RENDERED COPY, proved by mutating
+     * that copy rather than by counting how many honest sentences happen to trip
+     * the trigger.
+     *
+     * The previous form of this check was `triggered.length >= 3` plus "every
+     * triggered sentence is modally framed". Both are satisfied by "everything
+     * matched and everything was excused" — which is precisely the state a
+     * sentence-wide escape is in when it lets a false clause through, so the
+     * check could not distinguish the design from the defect. These two mutations
+     * can only pass if the trigger reaches real rendered text AND the escape is
+     * what excuses it AND the escape is scoped to the clause.
+     *
+     * Mutation 1: delete ONE modal word from the tab's own zero-denying sentence.
      */
-    const triggered = text
-      .split(/(?<=[.;])\s+/)
-      .filter((s) => EMPTINESS_PATTERNS.some((p) => p.test(s)));
-    expect(triggered.length, 'the tab\'s own zero-denying sentences must reach the matcher').toBeGreaterThanOrEqual(3);
-    for (const sentence of triggered) {
-      expect(DENIAL_FRAME.test(sentence), `must be modally framed: "${sentence}"`).toBe(true);
-    }
+    const withoutModal = text.replace(
+      'A count of zero would say you have no records',
+      'A count of zero says you have no records',
+    );
+    expect(withoutModal, 'mutation 1 must actually apply to the rendered text').not.toBe(text);
+    expect(emptinessClaims(withoutModal)).toEqual(['A count of zero says you have no records;']);
+
+    /*
+     * Mutation 2: append the exact two sentences the second independent reviewer
+     * inserted into `MyStats.tsx` above the actions row. Both passed the whole
+     * suite at 9494bdb. The first is the clause-scope evasion; the second is the
+     * phrase the class matcher had lost from the retired literal list.
+     */
+    const reviewerInsertion =
+      'You have no records, and this preview cannot tell you more than that. Nothing to show.';
+    expect(emptinessClaims(`${text} ${reviewerInsertion}`)).toEqual([
+      'You have no records',
+      'Nothing to show.',
+    ]);
   });
 
   /*
@@ -485,14 +627,24 @@ describe('My Stats invents no personal figure — the six traps', () => {
  * THE GUARD, GUARDED. Polarity is pinned in both directions against worked
  * examples, because a matcher that flags nothing passes every test above.
  *
- * The first entry is the exact sentence an independent reviewer inserted into
- * `MyStats.tsx`, which the previous digit-shaped guards let through along with
- * all 2,667 frontend tests and all 8 browser tests in `e2e/specs/charts.spec.ts`
- * — including the one titled "renders the gate, and no chart, no skeleton and no
- * zero".
+ * The list is ordered by generation, and every entry after the first eight was
+ * MEASURED to pass at some point:
+ *
+ *   · entries 1–8 predate the class matcher — entry 1 is the sentence generation
+ *     1's digit-shaped guards let through;
+ *   · entries 9–10 are the exact two sentences a SECOND independent reviewer
+ *     inserted into `MyStats.tsx` production copy at 9494bdb, which passed
+ *     117 files / 2697 vitest tests and all 8 browser tests in
+ *     `e2e/specs/charts.spec.ts` — including the one titled "renders the gate,
+ *     and no chart, no skeleton and no zero";
+ *   · entries 11–16 are six further sentences the reviewer measured as passing
+ *     the sentence-wide escape, re-measured here before being listed;
+ *   · entries 17–20 are the four the class matcher lost relative to the two
+ *     narrower guards it replaced.
  */
 describe('the emptiness matcher', () => {
   const MUST_FLAG: readonly string[] = [
+    // 1–8 · the original table.
     'Zero records are attributed to you, and your export count is zero.',
     'You have no records.',
     'Your export count is zero.',
@@ -501,6 +653,21 @@ describe('the emptiness matcher', () => {
     'Nothing to show — zero exports.',
     'Your evidence fields are none.',
     'There are no experiments of yours in this workspace.',
+    // 9–10 · the second reviewer's insertion, verbatim.
+    'You have no records, and this preview cannot tell you more than that.',
+    'Nothing to show.',
+    // 11–16 · measured to pass the sentence-wide escape.
+    'Nothing is attributed to you.',
+    'Your records list is empty.',
+    'Not a single record is attributed to you.',
+    'You have authored nothing.',
+    'Your record count stands at zero.',
+    'Your records number zero.',
+    // 17–20 · lost when the class matcher replaced the two narrower guards.
+    'There are none.',
+    'There is none.',
+    'You have zero.',
+    'You have no work here.',
   ];
 
   /** The tab's real copy. Every one of these is TRUE and must stay sayable. */
@@ -513,6 +680,12 @@ describe('the emptiness matcher', () => {
     'None of them is drawing anything right now.',
     'Records in this preview are not associated with an account, so this view cannot tell which of them are yours.',
     'how many records you author sit at each step of the five-step workflow, counted once each at their first unsatisfied step.',
+    // The `not_recorded` sentence, which is the closest true copy to a false one:
+    // "there is nothing measured to read" is emptiness about the BUILD's records
+    // of activity, not about the reader's work, and the subjectless idiom is
+    // deliberately anchored to a clause end so this is not swept in.
+    'Nothing is being withheld; there is nothing measured to read.',
+    'This view needs a signed-in account, and this preview has none, so there is nobody to describe.',
   ];
 
   it.each(MUST_FLAG)('flags a false personal zero: %s', (sentence) => {
@@ -528,6 +701,100 @@ describe('the emptiness matcher', () => {
     // is not one: it is exactly how an emptiness ASSERTION is normally phrased.
     expect(DENIAL_FRAME.test('You have not exported any records.')).toBe(false);
     expect(assertsEmptiness('You have not exported any records.')).toBe(true);
+  });
+
+  /*
+   * SCOPE, NOT VOCABULARY. The generation-2 hole was that a modal token anywhere
+   * in a sentence excused a trigger anywhere else in it. These four pairs differ
+   * ONLY in whether the modal governs the trigger's own clause, so they cannot
+   * both pass unless the escape is clause-scoped.
+   */
+  it.each([
+    ['You have no records, and this preview cannot tell you more than that.', 'A count of zero would say you have no records.'],
+    ['Your export count is zero, so nothing further can be shown.', 'Your export count would be zero, which is not what this says.'],
+    ['You have not authored any records; this preview is unable to say more.', 'It would be false to say you have not authored any records.'],
+    ['Nothing is attributed to you, and that cannot be established here.', 'Nothing would be attributed to you rather than to an account.'],
+  ])('an escape in ANOTHER clause does not excuse: %s', (claim, denial) => {
+    expect(assertsEmptiness(claim), `must be FLAGGED: ${claim}`).toBe(true);
+    expect(assertsEmptiness(denial), `must PASS: ${denial}`).toBe(false);
+  });
+
+  /*
+   * RETIRED LITERAL PARITY.
+   *
+   * The class matcher replaced this per-sentence filter:
+   *
+   *     /no records|no activity|nothing to show/i
+   *
+   * and silently lost one of its three phrases. Measured at 9494bdb:
+   * `Nothing to show.` → retired list `true`, class matcher `false`. The loss was
+   * invisible in the table above because the entry that looks like it covers the
+   * phrase ("Nothing to show — zero exports.") is flagged by "zero exports".
+   *
+   * So the retired literals get their own explicit assertion. WHENEVER A CLASS
+   * MATCHER REPLACES A LITERAL LIST, ASSERT THE NEW ONE FLAGS EVERYTHING THE OLD
+   * ONE DID.
+   *
+   * One honest exception is recorded rather than hidden: the retired list fired
+   * on any sentence containing the substring, including impersonal ones like
+   * "this build has no records", which the class matcher deliberately does not
+   * flag — see `PERSONAL_EMPTINESS`. Each literal is therefore exercised in the
+   * personal form this tab could actually state it in.
+   */
+  const RETIRED_LITERAL_SENTENCES: readonly [string, string][] = [
+    ['no records', 'You have no records.'],
+    ['no activity', 'There is no activity on your account.'],
+    ['nothing to show', 'Nothing to show.'],
+  ];
+
+  it.each(RETIRED_LITERAL_SENTENCES)(
+    'still flags what the retired literal list caught: %s',
+    (literal, sentence) => {
+      expect(sentence.toLowerCase(), 'the fixture must contain the retired literal').toContain(
+        literal,
+      );
+      expect(assertsEmptiness(sentence)).toBe(true);
+    },
+  );
+
+  /*
+   * THE LOCKSTEP, TESTED RATHER THAN REQUESTED.
+   *
+   * `e2e/specs/charts.spec.ts` carries the same matcher, because the two suites
+   * cannot share a module (`tsconfig.app.json` includes only `src`;
+   * `e2e/tsconfig.json` is a separate standalone project; the production build
+   * must not depend on Playwright types). That file used to say "Keep them in
+   * lockstep" in a comment — and they then drifted in the way this whole
+   * describe-block exists to prevent, because a comment cannot fail.
+   *
+   * Both copies are delimited by the same sentinels and compared byte for byte.
+   */
+  it('the two copies are byte-identical — the browser suite is in lockstep', async () => {
+    const START = '/* >>> SHARED-EMPTINESS-MATCHER-START >>>';
+    const END = '/* <<< SHARED-EMPTINESS-MATCHER-END <<< */';
+
+    function sharedBlock(raw: string, where: string): string {
+      const from = raw.indexOf(START);
+      const to = raw.indexOf(END);
+      expect(from, `${where} must carry the start sentinel`).toBeGreaterThanOrEqual(0);
+      expect(to, `${where} must carry the end sentinel after the start`).toBeGreaterThan(from);
+      return raw.slice(from, to + END.length);
+    }
+
+    const here = sharedBlock(
+      String((await import('./my-stats.test.tsx?raw')).default),
+      'my-stats.test.tsx',
+    );
+    const there = sharedBlock(
+      String((await import('../../e2e/specs/charts.spec.ts?raw')).default),
+      'e2e/specs/charts.spec.ts',
+    );
+
+    // Vacuity guard: the block must be the real thing, not two empty slices.
+    expect(here).toContain('function emptinessClaims');
+    expect(here).toContain('SUBJECTLESS_EMPTINESS');
+    expect(here.length).toBeGreaterThan(2000);
+    expect(there, 'the browser copy of the emptiness matcher has drifted').toBe(here);
   });
 });
 
@@ -607,9 +874,44 @@ describe('the gated state', () => {
     // …nor name a workspace: this tab reads nothing in either scope, so a
     // workspace clause would imply the gate depends on which one is open.
     expect(text).not.toMatch(/workspace/i);
-    expect(text).toContain('once records are associated with a signed-in account');
+    expect(text).toContain('cannot tell whose records these are');
     expect(emptinessClaims(text)).toEqual([]);
     expect(text).not.toMatch(/\b\d+\b/);
+  });
+
+  /*
+   * …AND IT DOES NOT REPEAT A SECTION SUBTITLE.
+   *
+   * The lead's first sentence used to be byte-identical to the `stats-mine-gate`
+   * section's `sub`, which renders a few lines below it in the same viewport —
+   * the same sentence twice, which is not emphasis. The duplicate was removed
+   * from the LEAD, because the subtitle is the component's own self-description
+   * and is the only place that sentence appears when `MyStats` is mounted alone.
+   *
+   * Compared per SENTENCE rather than as whole strings, so a lead that merely
+   * embeds the subtitle inside a longer paragraph is caught too.
+   */
+  it('the page lead does not repeat a section subtitle', async () => {
+    const { container } = await renderMineTab();
+    const sentencesOf = (el: HTMLElement) =>
+      textOf(el)
+        .split(/(?<=[.;])\s+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 12);
+
+    const lead = sentencesOf(container.querySelector('.placeholder > p') as HTMLElement);
+    expect(lead.length, 'the lead must have at least one sentence').toBeGreaterThan(0);
+
+    const subs = [...container.querySelectorAll('p.stats-card-sub')] as HTMLElement[];
+    expect(subs.length, 'the panel must render section subtitles to compare against').toBe(2);
+
+    for (const sub of subs) {
+      for (const sentence of sentencesOf(sub)) {
+        expect(lead, `the page lead repeats a section subtitle: "${sentence}"`).not.toContain(
+          sentence,
+        );
+      }
+    }
   });
 
   it('offers a route back to the workspace figures and to the privacy settings', async () => {
@@ -713,13 +1015,26 @@ describe('unconfiguredMyStatsSource', () => {
        * allowed, and one sentence uses it — "It is not showing zero" — because
        * denying the zero is the point; what is forbidden is asserting one.
        *
-       * ONE DEFINITION FOR BOTH SURFACES. This used to be its own narrower
-       * pattern — `(you have|there are|there is) (no|none|zero)` — while the
-       * RENDERED panel was guarded only by digit shapes. Two definitions of the
-       * same rule, of unequal strength, and the weaker one covered the surface a
-       * copy edit actually lands on. `assertsEmptiness` is now the single
-       * definition, applied to the constants here and to the rendered panel in
-       * trap 4.
+       * ONE DEFINITION FOR BOTH SURFACES. This used to be its own pattern —
+       * `(you have|there are|there is) (no|none|zero)` — while the RENDERED panel
+       * was guarded only by digit shapes. Two definitions of one rule, and only
+       * the constants here were covered by the stricter of the two;
+       * `assertsEmptiness` is now the single definition, applied to these
+       * constants and to the rendered panel in trap 4.
+       *
+       * BUT THE FIRST UNIFICATION WAS PARTLY A LOSS, and the comment that
+       * replaced this one called the retired pattern "the weaker one", which was
+       * not measured and was wrong. Measured at 9494bdb, the class matcher did NOT
+       * flag four sentences this pattern did: `There are none.` ·
+       * `There is none.` · `You have zero.` · `You have no work here.` — none of
+       * which names a count noun, which is what the class rule was keyed on. All
+       * four are in `MUST_FLAG` (entries 17–20) and are now covered by
+       * `NAMES_THE_READER` and `SUBJECTLESS_EMPTINESS`.
+       *
+       * The honest summary is that the current matcher is a superset of the
+       * retired pattern on every PERSONAL form, and deliberately narrower on
+       * impersonal ones — see `PERSONAL_EMPTINESS` for why, and
+       * `retired literal parity` for the assertion.
        */
       expect(emptinessClaims(copy), reason).toEqual([]);
       expect(copy, reason).not.toMatch(/\b0\b/);

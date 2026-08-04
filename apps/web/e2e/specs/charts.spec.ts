@@ -34,6 +34,159 @@ const STATISTICS_EXAMPLE = SURFACES.find((s) => s.id === 'statistics-example')!;
 const STATISTICS_ORDINARY = SURFACES.find((s) => s.id === 'statistics')!;
 const STATISTICS_MINE = SURFACES.find((s) => s.id === 'statistics-mine')!;
 
+/*
+ * ── the emptiness matcher, duplicated from `src/__tests__/my-stats.test.tsx` ──
+ *
+ * That file is the AUTHORITY: it carries the two-directional polarity table, the
+ * clause-scope pairs, the retired-literal parity assertion, and the record of the
+ * two generations of hole this matcher has had. This is a byte-identical copy, and
+ * the lockstep is now a TEST there ("the two copies are byte-identical") rather
+ * than the request-in-a-comment it used to be — the previous version of this block
+ * said "Keep them in lockstep", and a comment cannot fail.
+ *
+ * Declared at module scope, not inside the test, so the two blocks are identical
+ * down to the indentation.
+ */
+/* >>> SHARED-EMPTINESS-MATCHER-START >>>
+ *
+ * THIS BLOCK EXISTS TWICE, BYTE FOR BYTE, between these two sentinels:
+ * `src/__tests__/my-stats.test.tsx` (the authority) and
+ * `e2e/specs/charts.spec.ts`. The two cannot share a module —
+ * `tsconfig.app.json` includes only `src`, `e2e/tsconfig.json` is a separate
+ * standalone project, and the production build must not depend on Playwright
+ * types — so the lockstep is ASSERTED by `the two copies are byte-identical` in
+ * `my-stats.test.tsx` rather than asked for in a comment. Edit both, or the
+ * assertion fails.
+ */
+
+/** A quantity noun this tab could state a personal count of. */
+const COUNT_NOUN = 'records?|experiments?|exports?|fields?|figures?|activity|drafts?|issues?|questions?|counts?';
+
+/** The emptiness values a count can be given. */
+const EMPTY_WORD = 'zero|none|nil|nought|naught|nothing|empty';
+
+/** The reader, named. */
+const PERSONAL = /\byou\b|\byour\b|\byours\b/i;
+
+/**
+ * Emptiness applied to a countable unit. A CLAIM ONLY WHERE THE READER IS NAMED,
+ * because the class this file guards is "an emptiness value applied to a
+ * countable unit of THE READER'S work" and the reader is part of that definition.
+ *
+ * That narrowing is deliberate and it has a cost worth stating: this tab really
+ * does say, truthfully, "no record in this workspace carries an author" — a
+ * WORKSPACE fact with no personal subject. Under a sentence-wide escape that
+ * clause was excused by a `no way` three clauses later, which is an accident;
+ * under clause scoping without this gate it would be reported, which is a false
+ * positive on true copy. A workspace figure leaking onto this tab is trap 1's
+ * job, and trap 1 forbids the import that would supply one.
+ */
+const PERSONAL_EMPTINESS: readonly RegExp[] = [
+  // Prepositive: "no records", "zero records", "none of the figures",
+  // "not a single record".
+  new RegExp(
+    `\\b(?:zero|none|nil|nought|naught|no|not a single)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`,
+    'i',
+  ),
+  // Postpositive: "your export count is zero", "your records number zero",
+  // "your record count stands at zero", "your records list is empty".
+  new RegExp(
+    `\\b(?:${COUNT_NOUN})\\b[^.;]{0,40}?\\b(?:is|are|was|were|remains?|numbers?|stands?|sits?)\\b(?:\\s+at)?\\s+(?:${EMPTY_WORD})\\b`,
+    'i',
+  ),
+];
+
+/**
+ * Forms that carry the reader inside the pattern, so they need no separate
+ * personal gate — and that a count noun would miss.
+ */
+const NAMES_THE_READER: readonly RegExp[] = [
+  // Negated-verb: "you have not authored any records", "you haven't exported any".
+  new RegExp(
+    `\\byou(?:r|rs)?\\b[^.;]{0,60}?\\b(?:not|never|n't)\\b[^.;]{0,40}?\\bany\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`,
+    'i',
+  ),
+  // Direct personal predicate with NO count noun at all: "you have zero",
+  // "you have authored nothing", "you have no work here".
+  new RegExp(
+    `\\byou\\b\\s+(?:have|has|had|hold|own)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${EMPTY_WORD}|no)\\b`,
+    'i',
+  ),
+  // Attribution: "nothing is attributed to you", "none of it belongs to you".
+  // `you(?:rs)?` and not `you(?:r|rs)?`, so the honest "…rather than of your
+  // work" is not swept in by the possessive.
+  new RegExp(`\\b(?:${EMPTY_WORD})\\b[^.;]{0,40}?\\b(?:to|for|of)\\s+you(?:rs)?\\b`, 'i'),
+];
+
+/**
+ * Emptiness with NO subject, which on a personal tab reads as personal anyway.
+ * "Nothing to show." names nobody and means "you have nothing".
+ *
+ * The first two entries are the retired literal list's own idioms, kept as
+ * literals on purpose: they have no grammatical subject for a class rule to bind
+ * to. `there is nothing` is matched only at a clause end, so the tab's true
+ * "there is nothing measured to read" is not swept in.
+ */
+const SUBJECTLESS_EMPTINESS: readonly RegExp[] = [
+  /\bnothing\s+to\s+(?:show|see|display|report|list)\b/i,
+  /\bthere\s+(?:is|are|was|were)\s+(?:none|nothing)\b(?=\s*[.;,!?]|$)/i,
+  new RegExp(
+    `\\bthere\\s+(?:is|are|was|were)\\s+(?:no|zero)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`,
+    'i',
+  ),
+];
+
+/**
+ * The one escape, and it is deliberately NOT plain negation.
+ *
+ * The tab's most important sentence is "A count of zero WOULD say you have no
+ * records" — a hypothetical that denies the claim, and a page-wide ban on the
+ * word would flag exactly the copy doing the honest work. So a triggered clause
+ * passes only when IT — not some other clause of the same sentence — is framed as
+ * a HYPOTHETICAL or as a statement about what this build CANNOT DO.
+ *
+ * `\bnot\b` is not in this list on purpose. It was the obvious escape and it is
+ * a hole: "You have not exported any records" is a false personal claim that
+ * wears a negation, which is why the negated-verb pattern exists and why the
+ * frame has to be about modality rather than polarity.
+ */
+const DENIAL_FRAME = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brather than\b|\b(?:is|are) absent\b/i;
+
+/**
+ * A sentence's coordinate clauses. Split on the coordinators that join two
+ * independent claims — `, and`, `, so`, `, but`, `, or`, `, yet`, `; ` — and NOT
+ * on the em-dash, which on this surface introduces an appositive that continues
+ * the same claim ("none of the figures below are zero — they are absent").
+ */
+function clausesOf(sentence: string): string[] {
+  return sentence.split(/,\s+(?:and|but|so|or|yet)\s+|;\s+/i);
+}
+
+/** True when `clause` states that a countable unit of the reader's work is empty. */
+function triggersEmptiness(clause: string): boolean {
+  if (SUBJECTLESS_EMPTINESS.some((p) => p.test(clause))) return true;
+  if (NAMES_THE_READER.some((p) => p.test(clause))) return true;
+  return PERSONAL.test(clause) && PERSONAL_EMPTINESS.some((p) => p.test(clause));
+}
+
+/** Every CLAUSE of `text` that asserts the reader has nothing. */
+function emptinessClaims(text: string): string[] {
+  const claims: string[] = [];
+  for (const sentence of text.split(/(?<=[.;])\s+/)) {
+    for (const clause of clausesOf(sentence)) {
+      if (triggersEmptiness(clause) && !DENIAL_FRAME.test(clause)) claims.push(clause.trim());
+    }
+  }
+  return claims;
+}
+
+/** True when any clause of `sentence` asserts that the reader has nothing. */
+function assertsEmptiness(sentence: string): boolean {
+  return emptinessClaims(sentence).length > 0;
+}
+
+/* <<< SHARED-EMPTINESS-MATCHER-END <<< */
+
 /**
  * Open the Technical Details disclosure, which holds two of the four charts, and
  * ASSERT THAT EVERY CHART PLOT IS ON ITS MEASURED WIDTH.
@@ -57,11 +210,24 @@ const STATISTICS_MINE = SURFACES.find((s) => s.id === 'statistics-mine')!;
  *
  * So the poll is an ASSERTION: it says every plot's SVG width equals its column,
  * which is only true because `useChartWidth` reads the box SYNCHRONOUSLY in its
- * ref callback. Negative control, run 2026-08-04: delete
+ * ref callback. Negative control, re-run 2026-08-04: delete
  * `apply(node.getBoundingClientRect().width)` and this poll never settles — both
- * SVGs sit at the 560px fallback while their columns measure 918, and 5 of the 8
- * tests in this file fail here. The observer alone never delivers, not even 1.5s
- * after the region is opened.
+ * SVGs sit at the 560px fallback while their columns measure 918. Measured across
+ * all five viewport projects, 25 of the file's 40 runs fail, i.e. 5 of its 8 tests
+ * per project; an isolated single-project run failed 3 of 8, so WHICH of the eight
+ * fail is load-dependent while the poll not settling is not.
+ *
+ * WHY THE HOOK'S OBSERVER DOES NOT DELIVER AFTER OPEN IS NOT ISOLATED, and this
+ * paragraph used to assert a cause it does not have. It said "The observer alone
+ * never delivers, not even 1.5s after the region is opened", chaining that to the
+ * skipped-subtree rule stated above. The rule explains the CLOSED state only.
+ * Measured on the same node in the same session: a separately hand-installed
+ * `ResizeObserver` on that `.stats-chart-plot`, while the `<details>` was still
+ * closed, reported `[]` for 1.5s and then DID deliver `[918]` on open. So an
+ * observer on that element can receive a post-open observation. The hook's does
+ * not, the effect reproduces, and the mechanism is recorded as unidentified —
+ * see `StatsCharts.tsx`, "THE POST-OPEN FAILURE IS OBSERVED AND ITS MECHANISM IS
+ * NOT ISOLATED".
  *
  * It is spelled as a poll rather than a bare assertion only so that a genuine
  * future re-render (a breakpoint reflow) is tolerated rather than turned into a
@@ -296,42 +462,50 @@ test.describe('@responsive Statistics · My Stats', () => {
 
     /*
      * …AND NO ZERO IN WORDS. `/\d/` above is digit-shaped, and so was every other
-     * emptiness guard on this tab, so an independent reviewer's insertion —
-     * "Zero records are attributed to you, and your export count is zero." —
-     * passed all 8 tests in this file, INCLUDING THIS ONE, whose title claims to
-     * check for "no zero".
+     * emptiness guard on this tab, so a first reviewer's insertion — "Zero records
+     * are attributed to you, and your export count is zero." — passed all 8 tests
+     * in this file, INCLUDING THIS ONE, whose title claims to check for "no zero".
      *
-     * The rule is checked per sentence with a MODAL escape, because three
-     * sentences on this tab legitimately deny a zero ("A count of zero WOULD say
-     * you have no records") and a page-wide ban would flag exactly the copy doing
-     * the honest work. Plain `not` is deliberately NOT an escape: "you have not
-     * exported any records" is an assertion wearing a negation.
+     * The word-shaped replacement then had its OWN hole, and it was scope rather
+     * than vocabulary: a modal token anywhere in a sentence excused a trigger
+     * anywhere else in it. A second reviewer inserted, and this test passed:
      *
-     * DUPLICATED FROM `src/__tests__/my-stats.test.tsx`, which is the authority and
-     * carries the two-directional polarity table. The two cannot share a module:
-     * `tsconfig.app.json` includes only `src`, `e2e/tsconfig.json` is a separate
-     * standalone project (see its own header), and the production build must not
-     * depend on Playwright types. Keep them in lockstep.
+     *     You have no records, and this preview cannot tell you more than that.
+     *     Nothing to show.
+     *
+     * So trigger and escape are now evaluated PER CLAUSE, by the shared matcher at
+     * the top of this file — see `src/__tests__/my-stats.test.tsx`, which is the
+     * authority for the rule and carries the polarity table.
      */
-    const COUNT_NOUN =
-      'records?|experiments?|exports?|fields?|figures?|activity|drafts?|issues?|questions?|counts?';
-    const emptiness = [
-      new RegExp(`\\b(?:zero|none|nil|nought|no)\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`, 'i'),
-      new RegExp(`\\b(?:${COUNT_NOUN})\\b[^.;]{0,40}?\\b(?:is|are|was|were)\\s+(?:zero|none|nil|nought)\\b`, 'i'),
-      new RegExp(`\\byou(?:r|rs)?\\b[^.;]{0,60}?\\b(?:not|never|n't)\\b[^.;]{0,40}?\\bany\\b(?:\\s+\\S+){0,2}?\\s+\\b(?:${COUNT_NOUN})\\b`, 'i'),
-    ];
-    const modalFrame = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brather than\b|\b(?:is|are) absent\b/i;
-    const sentences = text.split(/(?<=[.;])\s+/);
-    const claims = sentences.filter(
-      (s) => emptiness.some((p) => p.test(s)) && !modalFrame.test(s),
+    const claims = emptinessClaims(text);
+    expect(claims, 'a clause on the personal tab asserts the reader has nothing').toEqual([]);
+
+    /*
+     * …and the guard BITES on the copy this browser actually rendered. Mutation,
+     * not a count: the previous check here counted how many sentences reached the
+     * trigger and required each to be modally framed, which is satisfied by
+     * "everything matched and everything was excused" — the exact state that let
+     * the second reviewer's sentence through. Removing one modal word from the
+     * tab's own zero-denying sentence must produce a report.
+     */
+    const withoutModal = text.replace(
+      'A count of zero would say you have no records',
+      'A count of zero says you have no records',
     );
-    expect(claims, 'a sentence on the personal tab asserts the reader has nothing').toEqual([]);
-    // …and the honest zero-denying sentences really do reach the matcher, so
-    // "nothing matched" cannot be mistaken for "the rule holds".
+    expect(withoutModal, 'the mutation must apply to the rendered text').not.toBe(text);
+    expect(emptinessClaims(withoutModal)).toEqual(['A count of zero says you have no records;']);
+
+    // …and the second reviewer's two sentences, verbatim, are both reported —
+    // both as a whole-sentence verdict and when appended to the rendered text.
     expect(
-      sentences.filter((s) => emptiness.some((p) => p.test(s))).length,
-      "the tab's own zero-denying sentences must reach the matcher",
-    ).toBeGreaterThanOrEqual(3);
+      assertsEmptiness('You have no records, and this preview cannot tell you more than that.'),
+    ).toBe(true);
+    expect(assertsEmptiness('Nothing to show.')).toBe(true);
+    expect(
+      emptinessClaims(
+        `${text} You have no records, and this preview cannot tell you more than that. Nothing to show.`,
+      ),
+    ).toEqual(['You have no records', 'Nothing to show.']);
   });
 
   test('lists all eight planned views as headings', async ({ page, app }) => {

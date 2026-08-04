@@ -247,15 +247,28 @@ function announceRound(round: Round, lastSuccess: Date | null): string {
  * The WORKSPACE clause stays on the General lead only. On My Stats it would be
  * actively misleading: that tab reads nothing at all, in either scope, so naming
  * a workspace there would imply the gate is a property of which workspace is open.
+ *
+ * AND IT MUST NOT REPEAT THE PANEL'S OWN SUBTITLE. The first version of the My
+ * Stats lead opened with "What this tab will show once records are associated with
+ * a signed-in account." — BYTE-IDENTICAL to `MyStats.tsx`'s `stats-mine-gate`
+ * section `sub`, which renders a few lines below it in the same viewport. The
+ * duplicate is dropped HERE rather than there, because the section subtitle is the
+ * component's own self-description and is the only place that sentence appears
+ * when `MyStats` is mounted on its own (which two tests do). `the page lead does
+ * not repeat a section subtitle` in `my-stats.test.tsx` is the assertion that
+ * keeps them distinct.
+ *
+ * `workspace` is computed AFTER the `mine` branch returns, not before it. It was
+ * dead on that path — the My Stats lead names no workspace, by the paragraph above.
  */
 function leadSentence(scope: string | null, tab: StatisticsTabId): string {
-  const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
   if (tab === 'mine') {
     return (
-      'What this tab will show once records are associated with a signed-in account. This ' +
-      'preview cannot tell whose records these are, so it states that rather than a figure.'
+      'This preview cannot tell whose records these are, so this tab states that ' +
+      'rather than a figure.'
     );
   }
+  const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
   return (
     `A read-only view of ${workspace}, workflow readiness, evidence, Project ` +
     'Memory, and the API surface.'

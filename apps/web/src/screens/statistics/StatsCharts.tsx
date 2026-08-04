@@ -158,12 +158,35 @@ export const CHART_MIN_WIDTH = 120;
  *     `content-visibility: visible` in its own right. A `content-visibility:
  *     hidden` subtree is SKIPPED by `ResizeObserver` (the spec says a skipped
  *     element gets no observation), so the callback never ran for those two
- *     plots — and, measured with the synchronous read removed, nothing fired when
- *     the region later opened either: both SVGs still carried `width="560"` a
- *     full 1.5s after the summary was clicked.
+ *     plots while the region was CLOSED.
  *   · But the element still has a layout box, so a DIRECT read returns the real
  *     width. Measured: `getBoundingClientRect().width` is 918 with the region
  *     CLOSED, before any click, while the observer had reported nothing at all.
+ *
+ * ── THE POST-OPEN FAILURE IS OBSERVED AND ITS MECHANISM IS NOT ISOLATED ─────
+ *
+ * This block used to run the two bullets together — "so the callback never ran
+ * for those two plots — and … nothing fired when the region later opened either"
+ * — presenting the skipped-element rule as the cause of BOTH states. It is not,
+ * and the correction is recorded here rather than substituted silently, because
+ * the confident wrong cause is the more dangerous of the two errors: it invites a
+ * maintainer to "fix" the open state and delete the synchronous read.
+ *
+ * The failure is real. Measured 2026-08-04 with `apply(node.getBoundingClientRect
+ * ().width)` removed and the observer left in place: both SVGs stay at the 560px
+ * fallback while their columns measure 918, and `e2e/specs/charts.spec.ts` fails
+ * — 25 of its 40 runs across the five viewport projects, i.e. 5 of its 8 tests in
+ * each. (An isolated single-project run of the same file failed only 3 of 8, so
+ * WHICH of the eight fail is load-dependent; that the poll never settles is not.)
+ *
+ * But the skipped-element rule does not explain it. Measured on the same node, in
+ * the same session: a SEPARATELY installed `ResizeObserver` on that
+ * `.stats-chart-plot` inside the still-closed `<details>` reported nothing for
+ * 1.5s while closed — `[]`, consistent with the rule — and then DID deliver on
+ * open: `[918]`. So an observer on that element does receive a post-open
+ * observation. Why the hook's own observer does not is unidentified, and is
+ * recorded as an observation rather than as an explanation — the same treatment
+ * this file already gives the `scrollWidth` claim two sections above.
  *
  * So the ref callback reads the box itself, once, and the observer handles every
  * later change (a window resize, a breakpoint reflow). `getBoundingClientRect`
