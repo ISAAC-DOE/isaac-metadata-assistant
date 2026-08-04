@@ -690,8 +690,31 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // CI (Linux) is the authority. If it disagrees, transcribe ITS numbers into the
   // keys above and correct these two totals — never loosen the assertion. The
   // previously-recorded keys are untouched and their linux values still stand.
+  //
+  // ── CI ANSWERED, 2026-08-04: linux 1680 -> 1679 ────────────────────────────
+  //
+  // The paragraph above said CI is the authority on the 21 unmeasured linux keys.
+  // It has now ruled on exactly one of them. Run 30924684494 on `5a31bc0` reported
+  // `statistics@mobile-375x812` color-contrast at 2 on linux where darwin measures
+  // 3, so that key is now `{ darwin: 3, linux: 2 }` and only the LINUX total moves.
+  //
+  // darwin stays 1680 and is NOT lowered to match: nothing has measured darwin at
+  // 2, and collapsing the pair to one number would assert a value no run produced.
+  // That is the same mistake the R1b note above records — "arithmetic on a total is
+  // only safe when the per-surface delta is itself measured on that platform".
+  //
+  // Worth recording because it cost a CI cycle: the entry edit and THIS total are
+  // one atomic change, and a darwin-only local run cannot tell you so. Lowering the
+  // linux key left this constant stale at 1680 against a 1679 sum, which failed the
+  // well-formedness guard in all five projects while every per-surface scan passed.
+  // Locally the guard was green, because darwin's column never moved. A linux-column
+  // edit is only verifiable in CI — so change the key and the total together, and
+  // expect CI, not the local run, to confirm it.
+  //
+  // The remaining 20 linux keys are still unmeasured; expect more single-node
+  // corrections of this benign kind, each one an entry AND a total.
   darwin: 1680,
-  linux: 1680,
+  linux: 1679,
 };
 
 /**
