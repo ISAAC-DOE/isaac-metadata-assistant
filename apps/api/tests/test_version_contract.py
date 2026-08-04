@@ -63,6 +63,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import client_ws, open_tutorial_scope, tutorial_client, tutorial_ws
+
 # strong ETag: a double-quoted opaque token, no W/ prefix.
 _STRONG_ETAG_RE = re.compile(r'^"[^"\\]+"$')
 # the token payload we mint: <generation>.<rev>, generation = lowercase hex.
@@ -75,13 +77,19 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 @pytest.fixture()
 def tmp_ws(tmp_path, monkeypatch):
+    """The store bound to an isolated worked-example session (no HTTP).
+
+    Re-pointed from the normal workspace, which is no longer auto-seeded. The five
+    canonical records and every assertion about them are unchanged; only the
+    directory they live in is.
+    """
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    return ws
+    return open_tutorial_scope()
 
 
 def _fresh_draft():
@@ -173,7 +181,7 @@ def test_token_contains_no_secret_path_or_content(client):
 
 def test_recreation_changes_the_token_even_at_rev_zero(tmp_ws):
     """A deleted-and-recreated canonical record at rev 0 must NOT reuse its token."""
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     before = tmp_ws.load_experiment(tmp_ws.SEED_NEW_DRAFT_ID)
     assert before.rev == 0
     token_before = before.version_token()
@@ -182,7 +190,7 @@ def test_recreation_changes_the_token_even_at_rev_zero(tmp_ws):
     import shutil
 
     shutil.rmtree(before.dir)
-    tmp_ws.ensure_seeded()  # recreates the missing canonical id at rev 0
+    tmp_ws.ensure_tutorial_seeded()  # recreates the missing canonical id at rev 0
 
     after = tmp_ws.load_experiment(tmp_ws.SEED_NEW_DRAFT_ID)
     assert after.rev == 0, "recreated canonical is rev 0 (same integer as before)"
@@ -196,10 +204,18 @@ def test_pre_reset_token_cannot_mutate_recreated_record(client):
     recreation is rejected 412 afterward, even though both are rev 0."""
     stale_token = _token_of(client, ws.SEED_NEW_DRAFT_ID)
 
-    # wipe + let the next request reseed the missing canonical id at rev 0
+    # Wipe the record, then reseed the missing canonical id at rev 0.
+    #
+    # RE-POINTED: this used to rely on the NEXT REQUEST reseeding it, because every
+    # read called ``ensure_seeded``. Reads no longer seed anything, so the recreation
+    # is now performed explicitly. What is asserted is unchanged — a token captured
+    # before a lifecycle recreation must be rejected 412 afterwards, even though both
+    # sides are rev 0 — and it is still asserted end-to-end through HTTP.
     import shutil
 
-    shutil.rmtree(ws.workspace_root() / ws.SEED_NEW_DRAFT_ID)
+    scoped = client_ws(client)
+    shutil.rmtree(scoped.workspace_root() / ws.SEED_NEW_DRAFT_ID)
+    scoped.ensure_tutorial_seeded()
 
     r = client.post(
         f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/answers",
@@ -233,7 +249,7 @@ def test_noop_demo_run_does_not_churn_the_token(client):
 
 def _state_of(exp_id):
     """``(rev, version, updated_utc)`` read straight off disk, bypassing HTTP."""
-    exp = ws.load_experiment(exp_id)
+    exp = tutorial_ws().load_experiment(exp_id)
     assert exp is not None, exp_id
     return exp.rev, exp.version_token(), exp.updated_utc
 
@@ -251,7 +267,7 @@ def _state_file_identity(exp_id):
     ``updated_utc`` from the fixed seed ``created_utc``, so every one of them comes
     out unchanged while the file was in fact rewritten.
     """
-    st = (ws.workspace_root() / exp_id / "experiment.json").stat()
+    st = (tutorial_ws().workspace_root() / exp_id / "experiment.json").stat()
     return st.st_ino, st.st_mtime_ns
 
 
@@ -283,7 +299,7 @@ def test_demo_run_cannot_destroy_a_confirmed_edit_or_replay_a_token(client):
     assert body["experiment_id"] == ws.SEED_NEW_DRAFT_ID, body
     assert "/api/demo/reset" in body["message"], body
     # No filesystem path ever leaks out of a refusal.
-    assert str(ws.workspace_root()) not in json.dumps(body), body
+    assert str(tutorial_ws().workspace_root()) not in json.dumps(body), body
 
     assert _token_of(client, ws.SEED_NEW_DRAFT_ID) == edited_token, (
         "a refused demo run must not move the token"
@@ -333,12 +349,12 @@ def test_refused_demo_run_preserves_the_answer_log(client):
         headers={"If-Match": _quote(token)},
     )
     assert r.status_code == 200, r.text
-    before = copy.deepcopy(ws.load_experiment(ws.SEED_NEW_DRAFT_ID).answer_log)
+    before = copy.deepcopy(tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID).answer_log)
     assert before, "the confirmed edit must have left an audit entry to preserve"
 
     r = client.post("/api/demo/run", json={"mode": "draft_only"})
     assert r.status_code == 409, r.text
-    assert ws.load_experiment(ws.SEED_NEW_DRAFT_ID).answer_log == before
+    assert tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID).answer_log == before
 
 
 def test_refused_demo_run_does_not_rewrite_the_state_file(client):
@@ -374,7 +390,7 @@ def test_full_mode_demo_run_refuses_on_drift(client):
     full run or never refuse a drifted one; only a drift test for this mode pins it.
     """
     target = ws.SEED_DONE_ID
-    exp = ws.load_experiment(target)
+    exp = tutorial_ws().load_experiment(target)
     exp.title = f"{exp.title} (edited)"
     exp.save_versioned()
     before_file = _state_file_identity(target)
@@ -557,7 +573,7 @@ def test_stale_export_performs_no_export(client):
     token = _token_of(client, ws.SEED_READY_ID)
     # An out-of-band authoritative bump makes the client's token stale WITHOUT
     # exporting anything.
-    exp = ws.load_experiment(ws.SEED_READY_ID)
+    exp = tutorial_ws().load_experiment(ws.SEED_READY_ID)
     exp.title = exp.title + " (bumped out of band)"
     assert exp.save_versioned() is True
     assert exp.exported() is False
@@ -568,7 +584,7 @@ def test_stale_export_performs_no_export(client):
     )
     assert r.status_code == 412, r.text
     assert r.json()["error"] == "stale_write"
-    assert ws.load_experiment(ws.SEED_READY_ID).exported() is False, (
+    assert tutorial_ws().load_experiment(ws.SEED_READY_ID).exported() is False, (
         "a stale export must not have written a record"
     )
 
@@ -601,7 +617,7 @@ def test_current_client_still_gets_409_on_already_exported(client):
 
 
 def test_record_lock_serializes_compare_and_swap(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     exp_id = tmp_ws.SEED_NEW_DRAFT_ID
     token = tmp_ws.load_experiment(exp_id).version_token()
 
@@ -634,7 +650,7 @@ def test_record_lock_serializes_compare_and_swap(tmp_ws):
 
 
 def test_two_writers_same_token_only_one_persists(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     exp_id = tmp_ws.SEED_PARTIAL_ID
     token = tmp_ws.load_experiment(exp_id).version_token()
     barrier = threading.Barrier(2)
@@ -669,7 +685,7 @@ def _cors_client(tmp_path, monkeypatch, origin="https://isaac-demo-web.vercel.ap
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app()), origin
+    return tutorial_client(create_app()), origin
 
 
 def test_cors_exposes_etag_header(tmp_path, monkeypatch):
@@ -717,7 +733,7 @@ def test_answers_endpoint_reads_fresh_state_under_lock(client):
     proving the handler never trusts a stale client token against cached state."""
     token = _token_of(client, ws.SEED_NEW_DRAFT_ID)
     # advance the on-disk state directly, bypassing the HTTP endpoint entirely
-    exp = ws.load_experiment(ws.SEED_NEW_DRAFT_ID)
+    exp = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID)
     exp.title = exp.title + " (edited out of band)"
     assert exp.save_versioned() is True
     r = client.post(
@@ -726,7 +742,7 @@ def test_answers_endpoint_reads_fresh_state_under_lock(client):
         headers={"If-Match": _quote(token)},
     )
     assert r.status_code == 412, r.text
-    assert r.json()["current_version"] == ws.load_experiment(ws.SEED_NEW_DRAFT_ID).version_token()
+    assert r.json()["current_version"] == tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID).version_token()
 
 
 def test_no_deprecation_header_on_stale_412(client):

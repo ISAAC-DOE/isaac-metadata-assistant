@@ -40,6 +40,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import tutorial_client, tutorial_ws
+
 CANONICAL_ORDER = [
     "load_record",
     "complete_metadata",
@@ -63,7 +65,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _workflow(client, exp_id):
@@ -207,7 +209,7 @@ def test_workflow_is_not_persisted_in_state(client):
     """No hidden second workflow store: the persisted experiment state carries no
     step/completion field — the workflow is derived on read only."""
     client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}")  # force a read
-    exp = ws.load_experiment(ws.SEED_NEW_DRAFT_ID)
+    exp = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID)
     state = exp.to_state()
     for forbidden in ("workflow", "ordered_steps", "steps", "current_step", "completed_steps"):
         assert forbidden not in state, f"{forbidden!r} must not be persisted (completion is derived)"
@@ -223,11 +225,11 @@ def test_reopened_exported_record_is_route_reachable(client):
     Built deterministically from seeds; the tmp workspace fixture keeps it hermetic.
     """
     # Borrow a real, serialize-accepted pending entry from the fresh-draft seed.
-    fresh = ws.load_experiment(ws.SEED_NEW_DRAFT_ID)
+    fresh = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID)
     borrowed_pending = copy.deepcopy(fresh.pending()[0])
 
     # Reintroduce a pending blocker on the EXPORTED seed while it stays exported.
-    exp = ws.load_experiment(ws.SEED_DONE_ID)
+    exp = tutorial_ws().load_experiment(ws.SEED_DONE_ID)
     assert exp.exported() and exp.record_id is not None  # precondition: exported
     exp.draft.setdefault("pending", []).append(borrowed_pending)
     assert exp.pending_count() > 0

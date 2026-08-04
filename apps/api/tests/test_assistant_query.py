@@ -26,6 +26,8 @@ from fastapi.testclient import TestClient
 import isaac_api.workspace as ws
 from isaac_api import assistant_query as aq
 
+from conftest import bind_tutorial_session, tutorial_client
+
 # --- classify() unit tests (pure; no workspace) -------------------------------
 
 # question -> expected intent (one representative alias per family, plus more).
@@ -137,7 +139,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _query(client, exp_id, question, **body):
@@ -322,7 +324,7 @@ def test_memory_lead_returns_cited_leads_with_advisory_framing(tmp_path, monkeyp
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    c = tutorial_client(create_app())
     body = _query(c, ws.SEED_READY_ID, "what does project memory know about copper").json()
     assert body["result"] == "answered"
     assert body["grounding"] == ["graph"]
@@ -396,7 +398,10 @@ def test_requires_auth_when_key_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    # The session is opened in-process rather than over HTTP: this deployment
+    # requires the key, and pinning it as a client default would destroy the 401
+    # this test asserts. Same scope either way.
+    c = bind_tutorial_session(TestClient(create_app()))
     r = c.post(f"/api/experiments/{ws.SEED_READY_ID}/assistant/query",
                json={"question": "what still needs me?"})
     assert r.status_code == 401
@@ -422,7 +427,7 @@ def test_memory_scope_answers_memory_question_with_cited_leads(tmp_path, monkeyp
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    c = tutorial_client(create_app())
     r = _mem_query(c, "what does project memory know about copper")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -525,7 +530,10 @@ def test_memory_scope_requires_auth_when_key_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    # The session is opened in-process rather than over HTTP: this deployment
+    # requires the key, and pinning it as a client default would destroy the 401
+    # this test asserts. Same scope either way.
+    c = bind_tutorial_session(TestClient(create_app()))
     r = c.post("/api/assistant/memory/query", json={"question": "docs about xanes"})
     assert r.status_code == 401
 

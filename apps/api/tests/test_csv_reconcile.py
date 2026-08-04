@@ -29,6 +29,8 @@ import isaac_api.csv_ingest as csv_ingest
 import isaac_api.workspace as ws
 from isaac_api.serialize import evidence_trail_from_draft
 
+from conftest import tutorial_client
+
 URL = "/api/experiments/{id}/ingestion/csv/preview"
 CT = {"Content-Type": "text/csv"}
 
@@ -49,7 +51,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _etag(client, exp_id):

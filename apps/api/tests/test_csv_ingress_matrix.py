@@ -18,6 +18,8 @@ import isaac_api.csv_ingest as ci
 import isaac_api.routes as routes
 import isaac_api.workspace as ws
 
+from conftest import tutorial_client
+
 BOM = b"\xef\xbb\xbf"  # UTF-8 byte-order mark
 
 URL = "/api/experiments/{id}/ingestion/csv/preview"
@@ -43,7 +45,7 @@ def client(ws_dir, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _etag(client, exp_id):

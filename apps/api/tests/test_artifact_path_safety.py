@@ -19,6 +19,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import tutorial_client
+
 # Absolute/server/mount markers that must NEVER reach the client.
 UNSAFE_PATH_MARKERS = ["/data/", "/Users/", "/var/", "/tmp/", "/app/", "/private/", "isaac-workspace", "\\"]
 
@@ -29,7 +31,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _export(client, exp_id):

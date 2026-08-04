@@ -31,6 +31,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import tutorial_client, tutorial_ws
+
 CONFIRM = "RESET EXAMPLE WORKSPACE"
 
 CANONICAL_IDS = frozenset(ws.CANONICAL_IDS)
@@ -55,7 +57,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _post(client, body: dict):
@@ -88,12 +90,12 @@ def _ids(client) -> set[str]:
 def _dirs_on_disk() -> set[str]:
     """Ids present on disk, read WITHOUT ``ensure_seeded`` (so a missing canonical
     stays missing and a resurrected directory is visible as itself)."""
-    return {e.id for e in ws._load_all_experiments()}
+    return {e.id for e in tutorial_ws()._load_all_experiments()}
 
 
 def _make_managed_legacy(title: str = "Older example record (example run)"):
     """A pre-canonical managed record: random id + the committed provenance marker."""
-    return ws.create_experiment(
+    return tutorial_ws().create_experiment(
         title=title,
         source={
             "description": ws.MANAGED_SOURCE_DESCRIPTION,
@@ -105,7 +107,7 @@ def _make_managed_legacy(title: str = "Older example record (example run)"):
 
 def _make_unrelated(title: str = "Some other experiment"):
     """A record with NO managed marker — classifies ambiguous, never removed."""
-    return ws.create_experiment(
+    return tutorial_ws().create_experiment(
         title=title,
         source={"description": "hand-authored / unknown provenance", "files": []},
         draft=ws.build_draft(ws.CSV_PATH, ws.LISTING_PATH),
@@ -146,7 +148,7 @@ def test_d1_preview_returns_a_plan_digest(client):
     body = _preview(client)
     assert isinstance(body.get("plan_digest"), str) and body["plan_digest"]
     # path-free, exactly like every other field on this response
-    assert str(ws.workspace_root()) not in body["plan_digest"]
+    assert str(tutorial_ws().workspace_root()) not in body["plan_digest"]
 
 
 def test_d1_execute_without_a_plan_digest_mutates_nothing(client):
@@ -155,7 +157,7 @@ def test_d1_execute_without_a_plan_digest_mutates_nothing(client):
     PRE-FIX OBSERVED: 200 + ``removed_count: 1`` — the managed-legacy record was
     gone and the confirmed answer on the canonical example was rebuilt away.
     """
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
     _confirm_an_answer(client)
     before = _dirs_on_disk()
@@ -171,7 +173,7 @@ def test_d1_execute_without_a_plan_digest_mutates_nothing(client):
 
 def test_d1_stale_execute_cannot_destroy_work_committed_after_the_preview(client):
     """The exact 30-seconds-later scenario, end to end through the HTTP contract."""
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     token = _plan_digest(client)  # the dialog opens and the operator reads the counts
 
     # ...and then, before they press the button, work is committed.
@@ -190,7 +192,7 @@ def test_d1_stale_execute_cannot_destroy_work_committed_after_the_preview(client
 
 
 def test_d1_a_record_created_after_the_preview_makes_the_token_stale(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     token = _plan_digest(client)
     legacy = _make_managed_legacy()
     r = _execute(client, token=token)
@@ -201,15 +203,15 @@ def test_d1_a_record_created_after_the_preview_makes_the_token_stale(client):
 def test_d1_a_record_removed_after_the_preview_makes_the_token_stale(client):
     import shutil
 
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
     token = _plan_digest(client)
-    shutil.rmtree(ws.workspace_root() / legacy.id)
+    shutil.rmtree(tutorial_ws().workspace_root() / legacy.id)
     assert _execute(client, token=token).status_code == 412
 
 
 def test_d1_an_export_after_the_preview_makes_the_token_stale(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     token = _plan_digest(client)
     detail = client.get(f"/api/experiments/{ws.SEED_READY_ID}")
     r = client.post(
@@ -222,7 +224,7 @@ def test_d1_an_export_after_the_preview_makes_the_token_stale(client):
 
 def test_d1_an_unchanged_workspace_keeps_its_token_stable(client):
     """The token must not churn on its own, or every reset would 412 spuriously."""
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     first = _plan_digest(client)
     # reads, previews and a no-op re-preview change nothing
     client.get("/api/experiments")
@@ -231,7 +233,7 @@ def test_d1_an_unchanged_workspace_keeps_its_token_stable(client):
 
 
 def test_d1_a_fresh_token_executes_and_reports_a_measured_result(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     _make_managed_legacy()
     token = _plan_digest(client)
     r = _execute(client, token=token)
@@ -246,7 +248,7 @@ def test_d1_a_fresh_token_executes_and_reports_a_measured_result(client):
 
 def test_d1_the_confirmation_phrase_is_still_required_and_is_checked_first(client):
     """409 stays 409: a wrong phrase is distinguishable from a stale precondition."""
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
     token = _plan_digest(client)
     for bad in (None, "", "reset", "RESET", "reset example workspace", "RESET SYNTHETIC DEMO"):
@@ -257,7 +259,7 @@ def test_d1_the_confirmation_phrase_is_still_required_and_is_checked_first(clien
 
 
 def test_d1_an_ambiguous_record_still_refuses_with_409_not_412(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     unrelated = _make_unrelated()
     legacy = _make_managed_legacy()
     token = _plan_digest(client)
@@ -270,7 +272,7 @@ def test_d1_an_ambiguous_record_still_refuses_with_409_not_412(client):
 def test_d1_a_stale_token_beats_an_ambiguous_record_to_the_refusal(client):
     """Precondition first: a client holding a stale plan must be told to re-preview,
     not handed a classification verdict about a workspace it has not seen."""
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     token = _plan_digest(client)
     _make_unrelated()
     r = _execute(client, token=token)
@@ -279,7 +281,7 @@ def test_d1_a_stale_token_beats_an_ambiguous_record_to_the_refusal(client):
 
 
 def test_d1_the_stale_refusal_echoes_the_current_token_for_a_one_hop_recovery(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     stale = _plan_digest(client)
     _make_managed_legacy()
     r = _execute(client, token=stale)
@@ -291,14 +293,14 @@ def test_d1_the_stale_refusal_echoes_the_current_token_for_a_one_hop_recovery(cl
 
 
 def test_d1_repeated_reset_with_a_fresh_token_is_idempotent_in_content(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     _make_managed_legacy()
     first: dict | None = None
     for _ in range(3):
         r = _execute(client, token=_plan_digest(client))
         assert r.status_code == 200, r.text
         content = {
-            e.id: (e.title, e.status(), e.exported()) for e in ws.list_experiments()
+            e.id: (e.title, e.status(), e.exported()) for e in tutorial_ws().list_experiments()
         }
         if first is None:
             first = content
@@ -309,7 +311,7 @@ def test_d1_repeated_reset_with_a_fresh_token_is_idempotent_in_content(client):
 
 def test_d1_a_preview_never_needs_or_accepts_a_token(client):
     """A preview mutates nothing, so it has no precondition to satisfy."""
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     assert _post(client, {"mode": "preview"}).status_code == 200
     # ...but the request model still refuses anything it does not name
     assert _post(client, {"mode": "preview", "ids": ["x"]}).status_code == 422
@@ -317,9 +319,9 @@ def test_d1_a_preview_never_needs_or_accepts_a_token(client):
 
 
 def test_d1_no_response_leaks_a_filesystem_path(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     _make_managed_legacy()
-    root = str(ws.workspace_root())
+    root = str(tutorial_ws().workspace_root())
     bodies = [
         _preview(client),
         _execute(client, token=None).json(),
@@ -342,9 +344,9 @@ def _lock_spy(monkeypatch, held: set[str], entered: list[str]):
     real_lock = ws.record_lock
 
     @contextlib.contextmanager
-    def spy(experiment_id: str):
+    def spy(experiment_id: str, *, session_id: str | None = None):
         entered.append(experiment_id)
-        with real_lock(experiment_id):
+        with real_lock(experiment_id, session_id=session_id):
             held.add(experiment_id)
             try:
                 yield
@@ -361,7 +363,7 @@ def test_d2_managed_legacy_removal_runs_under_that_records_lock(client, monkeypa
     PRE-FIX OBSERVED: ``{legacy.id: False}`` — the ``rmtree`` ran with no lock held
     for that id, while the canonical re-materialisation beside it held one.
     """
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
 
     held: set[str] = set()
@@ -375,7 +377,7 @@ def test_d2_managed_legacy_removal_runs_under_that_records_lock(client, monkeypa
 
     with _lock_spy(monkeypatch, held, entered):
         monkeypatch.setattr(ws, "remove_experiment", spy_remove)
-        ws.reset_to_canonical_seed(dry_run=False)
+        tutorial_ws().reset_to_canonical_seed(dry_run=False)
 
     assert removed_under_lock == {legacy.id: True}
     # ...and the canonical re-materialisation is still locked, as it always was
@@ -393,7 +395,7 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
     lock to heal a missing canonical). If the reset also held two, a lock-ordering
     cycle would be possible. It must therefore take them strictly one at a time.
     """
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     _make_managed_legacy()
     _make_managed_legacy()
 
@@ -403,9 +405,9 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
     real_lock = ws.record_lock
 
     @contextlib.contextmanager
-    def spy(experiment_id: str):
+    def spy(experiment_id: str, *, session_id: str | None = None):
         entered.append(experiment_id)
-        with real_lock(experiment_id):
+        with real_lock(experiment_id, session_id=session_id):
             held.add(experiment_id)
             high_water.append(len(held))
             try:
@@ -414,7 +416,7 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
                 held.discard(experiment_id)
 
     monkeypatch.setattr(ws, "record_lock", spy)
-    ws.reset_to_canonical_seed(dry_run=False)
+    tutorial_ws().reset_to_canonical_seed(dry_run=False)
 
     assert high_water, "the reset took no record lock at all"
     assert max(high_water) == 1, f"the reset held {max(high_water)} record locks at once"
@@ -437,9 +439,9 @@ def test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub(
       directory it was mid-way through deleting (``mkdir(parents=True)``) — leaving a
       resurrected stub holding a lone ``experiment.json`` and no ``records/``.
     """
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
-    state_path = ws.workspace_root() / legacy.id / "experiment.json"
+    state_path = tutorial_ws().workspace_root() / legacy.id / "experiment.json"
 
     reset_wants_the_lock = threading.Event()
     writer_is_holding = threading.Event()
@@ -448,16 +450,20 @@ def test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub(
     real_lock = ws.record_lock
 
     @contextlib.contextmanager
-    def announcing_lock(experiment_id: str):
+    def announcing_lock(experiment_id: str, *, session_id: str | None = None):
         # Announce the INTENT before blocking, so the writer can finish first.
         if experiment_id == legacy.id:
             reset_wants_the_lock.set()
-        with real_lock(experiment_id):
+        with real_lock(experiment_id, session_id=session_id):
             yield
+
+    session_id = tutorial_ws().session_id
 
     def writer():
         try:
-            with real_lock(legacy.id):
+            # The SAME scope-qualified lock the reset takes — the point of the test is
+            # that the two contend, and a differently-scoped key would not.
+            with real_lock(legacy.id, session_id=session_id):
                 writer_is_holding.set()
                 state = json.loads(state_path.read_text(encoding="utf-8"))
                 state["title"] = "written by a concurrent operator"
@@ -470,7 +476,7 @@ def test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub(
 
     def resetter():
         try:
-            ws.reset_to_canonical_seed(dry_run=False)
+            tutorial_ws().reset_to_canonical_seed(dry_run=False)
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
@@ -491,7 +497,7 @@ def test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub(
     assert errors == [], f"concurrent write + reset raised: {errors!r}"
 
     # No partially-removed / resurrected directory, and no lost canonical.
-    assert not (ws.workspace_root() / legacy.id).exists()
+    assert not (tutorial_ws().workspace_root() / legacy.id).exists()
     assert _dirs_on_disk() == CANONICAL_IDS
 
 
@@ -504,29 +510,29 @@ def test_d3_final_count_is_measured_after_the_mutation(client, monkeypatch):
 
     PRE-FIX OBSERVED: ``final_count == 5`` while the workspace really held 6.
     """
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     real_load = ws._load_all_experiments
     appeared: list[str] = []
 
-    def load_then_create_once():
-        out = real_load()
+    def load_then_create_once(session_id=None):
+        out = real_load(session_id)
         if not appeared:
             appeared.append(_make_unrelated("appeared after classification").id)
         return out
 
     monkeypatch.setattr(ws, "_load_all_experiments", load_then_create_once)
-    data = ws.reset_to_canonical_seed(dry_run=False)
+    data = tutorial_ws().reset_to_canonical_seed(dry_run=False)
 
     assert data["refused"] is False
     assert len(appeared) == 1
-    on_disk = {e.id for e in real_load()}
+    on_disk = {e.id for e in real_load(tutorial_ws().session_id)}
     assert appeared[0] in on_disk
     assert len(on_disk) == 6
     assert data["final_count"] == 6, "final_count must be measured, not asserted"
 
 
 def test_d3_a_refused_preview_reports_the_count_it_measured(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     _make_unrelated()
     body = _preview(client)
     assert body["status"] == "refused"
@@ -549,19 +555,19 @@ def test_a_failure_mid_reset_never_reports_success(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    c = TestClient(create_app(), raise_server_exceptions=False)
-    ws.ensure_seeded()
+    c = tutorial_client(create_app(), raise_server_exceptions=False)
+    tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
     token = _plan_digest(c)
 
     real_materialise = ws._materialise_seed
     calls: list[str] = []
 
-    def boom(spec):
+    def boom(spec, *, session_id):
         calls.append(spec.id)
         if len(calls) == 3:
             raise RuntimeError("injected mid-reset failure")
-        return real_materialise(spec)
+        return real_materialise(spec, session_id=session_id)
 
     monkeypatch.setattr(ws, "_materialise_seed", boom)
     r = _execute(c, token=token)
@@ -585,7 +591,7 @@ def test_a_failure_mid_reset_never_reports_success(tmp_path, monkeypatch):
 
 
 def test_at_risk_is_zero_on_an_untouched_workspace(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     at_risk = _preview(client)["at_risk"]
     assert at_risk == {
         "confirmed_answers": 0,
@@ -595,7 +601,7 @@ def test_at_risk_is_zero_on_an_untouched_workspace(client):
 
 
 def test_at_risk_counts_a_confirmed_answer_and_the_example_carrying_it(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     _confirm_an_answer(client)
     at_risk = _preview(client)["at_risk"]
     assert at_risk["confirmed_answers"] == 1
@@ -604,7 +610,7 @@ def test_at_risk_counts_a_confirmed_answer_and_the_example_carrying_it(client):
 
 
 def test_at_risk_counts_a_second_answer_on_the_same_example_separately(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     _confirm_an_answer(client, ws.SEED_PARTIAL_ID)
     _confirm_an_answer(client, ws.SEED_NEW_DRAFT_ID)
     at_risk = _preview(client)["at_risk"]
@@ -613,7 +619,7 @@ def test_at_risk_counts_a_second_answer_on_the_same_example_separately(client):
 
 
 def test_at_risk_counts_an_export_the_operator_made(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     detail = client.get(f"/api/experiments/{ws.SEED_READY_ID}")
     r = client.post(
         f"/api/experiments/{ws.SEED_READY_ID}/export",
@@ -627,7 +633,7 @@ def test_at_risk_counts_an_export_the_operator_made(client):
 
 
 def test_at_risk_ignores_ambiguous_records_which_the_reset_never_touches(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     unrelated = _make_unrelated()
     # give the unrelated record an answer of its own
     _confirm_an_answer(client, unrelated.id)
@@ -636,7 +642,7 @@ def test_at_risk_ignores_ambiguous_records_which_the_reset_never_touches(client)
 
 
 def test_at_risk_counts_answers_on_a_managed_legacy_record_that_will_be_removed(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
     _confirm_an_answer(client, legacy.id)
     at_risk = _preview(client)["at_risk"]
@@ -647,7 +653,7 @@ def test_at_risk_counts_answers_on_a_managed_legacy_record_that_will_be_removed(
 
 
 def test_at_risk_returns_to_zero_after_a_reset(client):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     _confirm_an_answer(client)
     assert _preview(client)["at_risk"]["confirmed_answers"] == 1
     assert _execute(client, token=_plan_digest(client)).status_code == 200
@@ -662,7 +668,7 @@ def test_at_risk_returns_to_zero_after_a_reset(client):
 
 
 def test_the_synthetic_only_gate_precedes_every_precondition(client, monkeypatch):
-    ws.ensure_seeded()
+    tutorial_ws().ensure_tutorial_seeded()
     token = _plan_digest(client)
     monkeypatch.setattr(ws, "is_synthetic_only", lambda: False, raising=False)
     for body in (

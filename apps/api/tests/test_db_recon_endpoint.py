@@ -35,6 +35,8 @@ from fastapi.testclient import TestClient
 
 from isaac_api import db_recon, routes
 
+from conftest import client_ws, tutorial_client
+
 RECON_PATH = "/api/runtime/database/recon"
 
 # --- obviously-fake sensitive content ----------------------------------------
@@ -1769,8 +1771,14 @@ def test_a_configured_database_does_not_seed_synthetic_records(client, monkeypat
     body = client.get(RECON_PATH).json()
     assert body["dataset"]["total_records"] == 1
     assert body["dataset"]["records_scanned"] == 1
-    # and the synthetic demo workspace is untouched by this operation
-    assert len(client.get("/api/experiments").json()["experiments"]) == 5
+    # ...and the worked-example workspace is untouched by this operation. Re-pointed:
+    # the five examples now live in a worked-example session, so the check opens one
+    # and asserts the same five records are there afterwards, unchanged in count.
+    scoped = client_ws(tutorial_client(client.app))
+    assert len(scoped.list_experiments()) == 5
+    body_again = client.get(RECON_PATH).json()
+    assert body_again["dataset"]["records_scanned"] == 1
+    assert len(scoped.list_experiments()) == 5
 
 
 # =============================================================================

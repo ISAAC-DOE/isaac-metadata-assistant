@@ -35,6 +35,8 @@ import copy
 
 import pytest
 
+from conftest import open_tutorial_scope
+
 ALLOWED = {
     "supported",
     "inferred_candidate",
@@ -241,11 +243,11 @@ def test_empty_draft_yields_empty_list_no_crash():
 @pytest.fixture()
 def seeded_ws(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    import isaac_api.workspace as ws
-    from isaac_api.app import create_app
+    from conftest import open_tutorial_scope
 
-    create_app()  # seeds the five canonical scenarios into the isolated workspace
-    return ws
+    # The five canonical scenarios now live in a worked-example session; creating the
+    # app no longer seeds anything (the normal workspace is never auto-seeded).
+    return open_tutorial_scope()
 
 
 def test_seed_ready_is_predominantly_supported_and_never_unknown(seeded_ws):

@@ -50,6 +50,15 @@ MAX_RESULTS = 50  # hard cap on total materialized results
 MIN_QUERY_LEN = 2  # measured after normalization
 QUERY_TOO_SHORT = "query_too_short"
 
+#: Reported when the scope searched holds NO records at all. ``total: 0`` alone is
+#: ambiguous — it reads as "your query matched nothing", which invites the reader to
+#: rephrase — and since the ordinary workspace is no longer seeded with the built-in
+#: examples, an empty scope is the ordinary first-run state rather than an oddity. So
+#: the two are distinguished: nothing to search, versus nothing matched. It is a
+#: REASON, not an error: the plane is available and answered correctly, and the
+#: envelope still returns ``200`` with ``available: true``.
+SCOPE_HAS_NO_RECORDS = "scope_has_no_records"
+
 _MAX_INPUT_LEN = 256  # raw query truncated to this before normalization (determinism)
 _SNIPPET_WHOLE_MAX = 120  # values at or below this are echoed whole
 _SNIPPET_WINDOW = 80  # window width for long text (locators / quotes)
@@ -540,10 +549,19 @@ def workspace_search(
     A too-short normalized query short-circuits with ``reason=QUERY_TOO_SHORT`` and
     no rows. Otherwise every match across all experiments is collected, ranked,
     truncated to ``MAX_RESULTS`` (that truncated list is ``total``), then paginated.
+
+    When the scope holds no records at all, the result carries
+    ``reason=SCOPE_HAS_NO_RECORDS`` instead of a bare ``total: 0``, so a caller can
+    tell "there is nothing here to search" from "your query matched nothing". The
+    query-length check runs FIRST, because a too-short query is a fact about the
+    request and it is true regardless of what the scope contains.
     """
     normalized = _normalize_query(query)
     clamped_limit = max(0, min(limit, MAX_RESULTS))
     clamped_offset = max(0, offset)
+    # Materialised once: ``experiments`` is an Iterable and may be a generator, which
+    # a length check would otherwise consume before the search could read it.
+    snapshots = list(experiments)
 
     if len(normalized) < MIN_QUERY_LEN:
         return WorkspaceSearchResults(
@@ -557,10 +575,22 @@ def workspace_search(
             results=(),
         )
 
+    if not snapshots:
+        return WorkspaceSearchResults(
+            query=query,
+            normalized_query=normalized,
+            total=0,
+            returned=0,
+            limit=clamped_limit,
+            offset=clamped_offset,
+            reason=SCOPE_HAS_NO_RECORDS,
+            results=(),
+        )
+
     tokens = tuple(normalized.split())
 
     ranked: list[_Ranked] = []
-    for exp in experiments:
+    for exp in snapshots:
         status = exp.status()  # derived in-memory view; no workspace file is read here
         for cand in _candidates(exp):
             row = _rank_candidate(exp, status, cand, normalized, tokens)

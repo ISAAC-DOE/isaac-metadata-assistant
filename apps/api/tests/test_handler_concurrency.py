@@ -7,7 +7,7 @@ critical section guarded by ``ws.record_lock`` is race-safe — but it proves it
 a compare-and-swap **re-implemented in the test body** out of workspace primitives
 (``record_lock`` / ``load_experiment`` / ``version_token`` / ``save_versioned``).
 Neither of those two tests calls an HTTP handler. So if someone moved
-``exp = ws.load_experiment(...)`` OUTSIDE ``with ws.record_lock(...)`` in
+``exp = tutorial_ws().load_experiment(...)`` OUTSIDE ``with ws.record_lock(...)`` in
 ``routes.post_answers``, both of them would still pass while production silently
 lost updates. The suite could not see it.
 
@@ -50,6 +50,8 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import tutorial_client, tutorial_ws
+
 # Safety-net ceilings. NOTHING synchronises on these: every passing path trips its
 # rendezvous/event immediately, and the tests assert the net was never hit. They
 # exist so a genuine deadlock fails the run instead of hanging it.
@@ -84,7 +86,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 # --- read-only helpers (assertions only; never used to perform a mutation) -----
@@ -103,7 +105,7 @@ def _etag(client, exp_id) -> str:
 
 
 def _persisted(exp_id):
-    exp = ws.load_experiment(exp_id)
+    exp = tutorial_ws().load_experiment(exp_id)
     assert exp is not None, exp_id
     return exp
 
@@ -136,9 +138,10 @@ class _LockRendezvous:
     *when* the acquisition attempt is made.
 
     Arrivals are counted for the target id only, and only the first ``parties`` of
-    them block; every later call (including a re-entrant one from ``ensure_seeded``
-    under the same RLock) passes straight through, so the seam cannot deadlock the
-    reentrancy the real lock depends on.
+    them block; every later call (including any re-entrant one under the same
+    ``RLock``) passes straight through, so the seam cannot deadlock the reentrancy the
+    real lock retains. It forwards ``session_id`` through to the real lock, so it
+    contends on the same scope-qualified key the handler would.
     """
 
     def __init__(self, monkeypatch, target: str, parties: int = 2):
@@ -151,7 +154,7 @@ class _LockRendezvous:
         real = ws.record_lock
 
         @contextlib.contextmanager
-        def _patched(experiment_id: str):
+        def _patched(experiment_id: str, *, session_id: str | None = None):
             rendezvous = False
             last = False
             with self._guard:
@@ -166,7 +169,7 @@ class _LockRendezvous:
                     # Never reached on a healthy run; recorded so the test can fail
                     # with a real explanation instead of hanging.
                     self.timed_out = True
-            with real(experiment_id):
+            with real(experiment_id, session_id=session_id):
                 yield
 
         monkeypatch.setattr(ws, "record_lock", _patched)
@@ -385,7 +388,7 @@ def test_read_during_in_flight_write_sees_a_consistent_state(client, monkeypatch
     write_reached = threading.Event()
     read_done = threading.Event()
     real_write = ws.atomic_write_text
-    state_path = ws.workspace_root() / target / "experiment.json"
+    state_path = tutorial_ws().workspace_root() / target / "experiment.json"
 
     def _suspended_write(path, text):
         # Only the target's own state file is suspended; everything else (records,

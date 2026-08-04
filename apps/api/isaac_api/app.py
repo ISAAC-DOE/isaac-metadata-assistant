@@ -23,7 +23,12 @@ from . import __version__
 from . import runtime_mode
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
-from .routes import OPENAPI_TAGS, router
+from .routes import (
+    OPENAPI_TAGS,
+    TutorialScopeError,
+    router,
+    tutorial_scope_error_handler,
+)
 from .spa import mount_spa
 
 # Default: the Vite dev server origins. Deployed environments override via
@@ -122,10 +127,18 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_cors_origins(),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        # DELETE is allowed because discarding a worked-example session is a DELETE.
+        # Without it, a cross-origin caller (the Vite dev server, or a deployment
+        # whose frontend is served from another origin) would have its preflight
+        # refused and could never clean a session up.
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["ETag"],
     )
+    # Scope-resolution refusals (a malformed or unknown worked-example session id)
+    # are raised from a dependency, which cannot return a response. This renders them
+    # with the same typed `{"error": ...}` body shape every other refusal uses.
+    app.add_exception_handler(TutorialScopeError, tutorial_scope_error_handler)
     # ISAAC_BASE_PATH prefixes every route (the router keeps its own /api
     # prefix, so routes land at {base}/api/*). Unset, prefix="" is byte-identical
     # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR

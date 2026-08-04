@@ -38,11 +38,19 @@ from fastapi.testclient import TestClient
 
 import isaac_api.workspace as ws
 
+from conftest import client_ws, open_tutorial_scope, tutorial_client, tutorial_ws
+
 
 @pytest.fixture()
 def tmp_ws(tmp_path, monkeypatch):
+    """The store bound to an isolated worked-example session (no HTTP).
+
+    Re-pointed from the normal workspace, which is no longer auto-seeded. The five
+    canonical records and every assertion about them are unchanged; only the
+    directory they live in is.
+    """
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    return ws
+    return open_tutorial_scope()
 
 
 @pytest.fixture()
@@ -51,7 +59,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 _EXPECTED_DISTRIBUTION = {
@@ -82,7 +90,7 @@ def _baseline_by_id(tmp_ws):
 
 
 def test_reset_restores_mutated_canonical_title_and_draft(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     specs = _baseline_by_id(tmp_ws)
     # drift EVERY canonical record away from its baseline
     for exp in tmp_ws.list_experiments():
@@ -100,7 +108,7 @@ def test_reset_restores_mutated_canonical_title_and_draft(tmp_ws):
             assert exp.draft == spec.draft_fn(), f"{exp.id} draft not restored to baseline"
 
 
-def test_reset_removes_partial_answers(client, tmp_ws):
+def test_reset_removes_partial_answers(client):
     # apply real answers to the raw NEW-DRAFT seed (drives pending 5 -> fewer)
     v = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json()["version"]
     answers = ws.load_demo_answers()
@@ -109,12 +117,12 @@ def test_reset_removes_partial_answers(client, tmp_ws):
         json={"confirmed_by_user": True, "answers": {"series": answers.get("series")}},
         headers={"If-Match": f'"{v}"'},
     )
-    before = ws.load_experiment(ws.SEED_NEW_DRAFT_ID)
+    before = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID)
     assert before.answer_log, "precondition: an answer was logged"
 
-    ws.reset_to_canonical_seed(dry_run=False)
+    tutorial_ws().reset_to_canonical_seed(dry_run=False)
 
-    after = ws.load_experiment(ws.SEED_NEW_DRAFT_ID)
+    after = tutorial_ws().load_experiment(ws.SEED_NEW_DRAFT_ID)
     assert after.answer_log == [], "reset must clear partial answers"
     assert after.draft == _baseline_by_id(ws)[ws.SEED_NEW_DRAFT_ID].draft_fn()
 
@@ -122,23 +130,23 @@ def test_reset_removes_partial_answers(client, tmp_ws):
 # --- 2. exported drift is un-done; only the DONE scenario stays exported ------
 
 
-def test_reset_unexports_a_wrongly_exported_scenario(client, tmp_ws):
+def test_reset_unexports_a_wrongly_exported_scenario(client):
     # export the READY scenario (it passes export) — it should NOT stay exported
     v = client.get(f"/api/experiments/{ws.SEED_READY_ID}").json()["version"]
     r = client.post(f"/api/experiments/{ws.SEED_READY_ID}/export", headers={"If-Match": f'"{v}"'})
     assert r.status_code == 200 and r.json().get("ok") is True
-    assert ws.load_experiment(ws.SEED_READY_ID).exported() is True
+    assert tutorial_ws().load_experiment(ws.SEED_READY_ID).exported() is True
 
-    ws.reset_to_canonical_seed(dry_run=False)
+    tutorial_ws().reset_to_canonical_seed(dry_run=False)
 
-    restored = ws.load_experiment(ws.SEED_READY_ID)
+    restored = tutorial_ws().load_experiment(ws.SEED_READY_ID)
     assert restored.exported() is False, "reset must un-export a wrongly-exported scenario"
     # and its on-disk record artifact must be gone
     assert not (restored.records_dir / f"{ws.SEED_READY_ID}.json").exists()
 
 
 def test_reset_done_scenario_keeps_its_artifact(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     tmp_ws.reset_to_canonical_seed(dry_run=False)
     done = tmp_ws.load_experiment(tmp_ws.SEED_DONE_ID)
     assert done.exported() is True
@@ -149,19 +157,20 @@ def test_reset_done_scenario_keeps_its_artifact(tmp_ws):
 # --- 3. exact state distribution ---------------------------------------------
 
 
-def test_reset_restores_exact_distribution(client, tmp_ws):
+def test_reset_restores_exact_distribution(client):
     # drift a couple scenarios via HTTP, then reset
     v = client.get(f"/api/experiments/{ws.SEED_READY_ID}").json()["version"]
     client.post(f"/api/experiments/{ws.SEED_READY_ID}/export", headers={"If-Match": f'"{v}"'})
-    ws.reset_to_canonical_seed(dry_run=False)
-    assert _distribution(ws) == _EXPECTED_DISTRIBUTION
+    scoped = client_ws(client)
+    scoped.reset_to_canonical_seed(dry_run=False)
+    assert _distribution(scoped) == _EXPECTED_DISTRIBUTION
 
 
 # --- 4. pre-reset tokens are stale afterward ---------------------------------
 
 
 def test_pre_reset_tokens_are_all_stale_after_reset(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     before = {e.id: e.version_token() for e in tmp_ws.list_experiments() if e.id in tmp_ws.CANONICAL_IDS}
     tmp_ws.reset_to_canonical_seed(dry_run=False)
     for exp in tmp_ws.list_experiments():
@@ -175,7 +184,7 @@ def test_pre_reset_tokens_are_all_stale_after_reset(tmp_ws):
 
 
 def test_repeated_reset_is_idempotent_in_content(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     tmp_ws.reset_to_canonical_seed(dry_run=False)
     first = {
         e.id: (e.title, e.status(), e.exported()) for e in tmp_ws.list_experiments()
@@ -185,14 +194,14 @@ def test_repeated_reset_is_idempotent_in_content(tmp_ws):
         e.id: (e.title, e.status(), e.exported()) for e in tmp_ws.list_experiments()
     }
     assert first == second
-    assert _distribution(ws) == _EXPECTED_DISTRIBUTION
+    assert _distribution(tmp_ws) == _EXPECTED_DISTRIBUTION
 
 
 # --- 6. preview is non-mutating ----------------------------------------------
 
 
 def test_preview_does_not_restore_or_mutate(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     exp = tmp_ws.load_experiment(tmp_ws.SEED_NEW_DRAFT_ID)
     exp.title = "drifted-title"
     exp.save_versioned()
@@ -205,7 +214,7 @@ def test_preview_does_not_restore_or_mutate(tmp_ws):
 
 
 def test_ambiguous_record_still_refuses_and_makes_no_change(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     # an ambiguous record: not canonical, no managed-demo provenance marker
     amb = tmp_ws.create_experiment(
         title="unrelated user record",
@@ -228,7 +237,7 @@ def test_ambiguous_record_still_refuses_and_makes_no_change(tmp_ws):
 
 
 def test_concurrent_readers_safe_during_reset(tmp_ws):
-    tmp_ws.ensure_seeded()
+    tmp_ws.ensure_tutorial_seeded()
     stop = threading.Event()
     errors: list[Exception] = []
 
@@ -253,14 +262,21 @@ def test_concurrent_readers_safe_during_reset(tmp_ws):
 
 
 def test_ensure_seeded_materialise_observes_record_lock(tmp_ws):
-    """DETERMINISTIC proof the reset-vs-reader race is closed: a reader's
-    ``ensure_seeded`` (triggered by ``load_experiment``) that must materialise a
-    MISSING canonical id acquires ``record_lock(id)`` first — the SAME lock the
-    reset holds around its remove+re-materialise. So while that lock is held by
-    another thread, the reader cannot materialise (and thus cannot write into a dir
-    a concurrent reset is rmtree-ing). We assert the loader BLOCKS while the lock is
-    held and completes promptly after release."""
-    tmp_ws.ensure_seeded()
+    """DETERMINISTIC proof the seeder-vs-reset race is closed: the seeder, when it
+    must materialise a MISSING canonical id, acquires ``record_lock(id)`` first — the
+    SAME lock the reset holds around its remove+re-materialise. So while that lock is
+    held by another thread, the seeder cannot materialise (and thus cannot write into
+    a dir a concurrent reset is rmtree-ing). We assert the seeder BLOCKS while the
+    lock is held and completes promptly after release.
+
+    RE-POINTED, and one contract genuinely changed. It used to trigger the seeder
+    through ``load_experiment`` — reads called ``ensure_seeded`` on every access. They
+    no longer do (the normal workspace is never auto-seeded, and a worked-example
+    session is seeded once at creation), so the seeder is invoked directly here. The
+    property under test — the materialise of a missing id happens under that id's own
+    record lock — is asserted at exactly the same strength; only the caller that
+    reaches it has changed."""
+    tmp_ws.ensure_tutorial_seeded()
     # Make SEED_READY_ID missing so load_experiment -> ensure_seeded must materialise
     # it (the branch that takes the lock).
     shutil.rmtree(tmp_ws.workspace_root() / tmp_ws.SEED_READY_ID)
@@ -275,9 +291,9 @@ def test_ensure_seeded_materialise_observes_record_lock(tmp_ws):
             release_holder.wait(timeout=5)  # hold until the main thread lets go
 
     def loader():
-        # Triggers ensure_seeded, which must block on record_lock(SEED_READY_ID)
-        # because the missing id forces the materialise-under-lock branch.
-        tmp_ws.load_experiment(tmp_ws.SEED_READY_ID)
+        # Must block on record_lock(SEED_READY_ID): the missing id forces the
+        # materialise-under-lock branch.
+        tmp_ws.ensure_tutorial_seeded()
         loader_done.set()
 
     h = threading.Thread(target=holder)
@@ -289,8 +305,8 @@ def test_ensure_seeded_materialise_observes_record_lock(tmp_ws):
     # While the lock is held, the loader must NOT complete (it is blocked on the
     # missing-id materialise under record_lock).
     assert not loader_done.wait(timeout=0.3), (
-        "loader completed while the record lock was held — ensure_seeded did not "
-        "observe the lock (reset-vs-reader race still open)"
+        "the seeder completed while the record lock was held — it did not observe "
+        "the lock (seeder-vs-reset race still open)"
     )
     # Release the lock; the loader must now finish promptly and materialise the id.
     release_holder.set()

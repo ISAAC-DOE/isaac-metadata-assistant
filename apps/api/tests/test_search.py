@@ -31,21 +31,27 @@ import pytest
 import isaac_api.search as search
 import isaac_api.workspace as ws
 
+from conftest import open_tutorial_scope, tutorial_client
+
 
 # --- fixtures -----------------------------------------------------------------
 
 
 @pytest.fixture()
 def workspace(tmp_path, monkeypatch):
-    """An isolated tmp workspace seeded with exactly the canonical five scenarios."""
+    """An isolated worked-example session holding exactly the canonical five scenarios.
+
+    Re-pointed from the normal workspace (which is no longer auto-seeded) to a
+    worked-example session. The five records, their content, and every assertion
+    below are unchanged; only the directory they live in is.
+    """
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
-    ws.ensure_seeded()
-    return tmp_path / "ws"
+    return open_tutorial_scope()
 
 
 @pytest.fixture()
 def experiments(workspace):
-    exps = ws.list_experiments()
+    exps = workspace.list_experiments()
     assert len(exps) == 5  # sanity: the P26.0a canonical seed
     return exps
 
@@ -444,8 +450,8 @@ def test_search_is_pure_over_snapshot_after_dirs_removed(experiments, workspace)
     """Search consumes the already-loaded snapshot; removing the backing dirs
     afterwards cannot make it raise or change its answer — it never re-reads disk."""
     before = ids(run("cu", experiments, limit=search.MAX_RESULTS))
-    for child in workspace.iterdir():
-        shutil.rmtree(child)
+    for child in workspace.workspace_root().iterdir():
+        shutil.rmtree(child) if child.is_dir() else child.unlink()
     after = ids(run("cu", experiments, limit=search.MAX_RESULTS))
     assert before == after
 
@@ -509,7 +515,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
     from isaac_api.app import create_app
 
-    return TestClient(create_app())
+    return tutorial_client(create_app())
 
 
 def _walk_dict_keys(obj):
@@ -591,7 +597,7 @@ def test_route_memory_available_via_snapshot(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_MEMORY_SNAPSHOT", str(_GOLDEN_SNAPSHOT))
     from isaac_api.app import create_app
 
-    c = TestClient(create_app())
+    c = tutorial_client(create_app())
     body = c.get("/api/search", params={"q": "fake"}).json()
     assert body["memory"]["available"] is True
     assert body["memory"]["results"]
@@ -620,6 +626,9 @@ def test_route_is_auth_gated(tmp_path, monkeypatch):
     monkeypatch.setenv("ISAAC_UI_API_KEY", "demo-secret")
     from isaac_api.app import create_app
 
+    # Deliberately NOT the worked-example client: this test is about the auth gate,
+    # and opening a session over HTTP would itself need the key. The gate applies
+    # identically in either scope.
     c = TestClient(create_app())
     assert c.get("/api/search", params={"q": "xanes"}).status_code == 401
     ok = c.get("/api/search", params={"q": "xanes"}, headers={"Authorization": "Bearer demo-secret"})
@@ -726,7 +735,8 @@ def test_synthetic_archive_uri_is_not_treated_as_a_path():
 
 def experiments_fixture():
     # Standalone seeded experiments for the URI test (module-level, no fixture arg).
-    return ws.list_experiments()
+    # Opens its own worked-example session, since the normal workspace is not seeded.
+    return open_tutorial_scope().list_experiments()
 
 
 # =============================================================================
