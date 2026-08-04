@@ -11,6 +11,8 @@ import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
+import { useTutorialState } from '../lib/tutorialController';
+import { subscribeWorkspaceRebuilt } from '../lib/workspaceInvalidation';
 import { queueSubcount, summariesToQueueGroups } from '../lib/adapt';
 
 /**
@@ -20,7 +22,22 @@ import { queueSubcount, summariesToQueueGroups } from '../lib/adapt';
  */
 export function ExperimentsHome() {
   const navigate = useNavigate();
-  const result = useFetch(() => api.listExperiments(), []);
+  /*
+   * THE LIST IS KEYED ON THE WORKSPACE SCOPE, and that is a correctness fix rather
+   * than an optimisation. `GET /api/experiments` answers about whichever scope the
+   * request carries: nothing in the ordinary workspace, the five built-in examples
+   * inside a worked-example session. With an empty dependency list this screen read
+   * once and never again, so opening a session left the reader looking at the ordinary
+   * empty state while the walkthrough's first step pointed at "the queue" — a queue
+   * that was not there — and closing one left the five examples on screen after the
+   * session that held them had been discarded.
+   *
+   * Read from the tutorial store rather than from `api.getTutorialScope()`, because the
+   * store is what notifies React when it changes; the two are kept in step by
+   * `tutorialController`, which sets the api scope and the store's `sessionId` together.
+   */
+  const scope = useTutorialState().sessionId;
+  const result = useFetch(() => api.listExperiments(), [scope]);
 
   // P27.6 — the dashboard is NOT tightly polled (no interval). It only refetches
   // the list once when the tab regains visibility, so a cross-tab reset/export
@@ -34,6 +51,16 @@ export function ExperimentsHome() {
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [reloadSilent]);
+
+  /*
+   * The guarded reset used to be rendered by this screen and was handed this very
+   * `reload`, so a successful reset refetched this list. The control moved into the
+   * persistent worked-example bar, which owns no list, so the refetch is now driven
+   * by the signal that control publishes on a 200 execute. Silent on purpose: the
+   * queue keeps its rows while the fresh ones arrive, exactly as the visibility
+   * refetch above does.
+   */
+  useEffect(() => subscribeWorkspaceRebuilt(reloadSilent), [reloadSilent]);
 
   let subcount = '';
   let body: ReactNode;

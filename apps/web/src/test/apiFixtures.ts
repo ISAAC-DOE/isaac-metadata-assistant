@@ -916,18 +916,32 @@ export const CANONICAL_RESET_IDS = [
   '01SYNTHXANESSEED0000000005',
 ];
 
-const RESET_TITLE_BASE = 'Synthetic XANES — CuO (Cu K-edge)';
+/**
+ * The shared scientific title base every canonical seed carries.
+ *
+ * MUST equal `workspace._SEED_TITLE_BASE`. It had drifted: this file held
+ * `'Synthetic XANES — CuO (Cu K-edge)'` while the backend had already been renamed
+ * to `'XANES Example — CuO (Cu K-edge)'`, and nothing caught it — the frontend suite
+ * cannot import Python, and the backend suite did not read this file. Pinned now
+ * from the side that can see both, by
+ * `apps/api/tests/test_seed_fixture_parity.py`.
+ */
+export const RESET_TITLE_BASE = 'XANES Example — CuO (Cu K-edge)';
 
 /** The five derived scenario labels the API serves for the canonical seed ids
  * (mirrors `workspace.SEED_SCENARIOS`; derived server-side, never stored). Each
  * names how that fixture was MATERIALISED at setup, in the past tense, so a later
- * mutation cannot falsify it. */
+ * mutation cannot falsify it.
+ *
+ * These had drifted too, to a retired `'Scenario N · seeded: …'` wording — the
+ * development jargon the backend replaced with `'Example N · at setup: …'`. Pinned
+ * by the same backend test as the title base above. */
 export const CANONICAL_SCENARIO_LABELS = [
-  'Scenario 1 · seeded: extraction only',
-  'Scenario 2 · seeded: partial answers applied',
-  'Scenario 3 · seeded: all answers applied',
-  'Scenario 4 · seeded: descriptor uncertainty omitted',
-  'Scenario 5 · seeded: export run at setup',
+  'Example 1 · at setup: extraction only',
+  'Example 2 · at setup: some answers confirmed',
+  'Example 3 · at setup: all answers confirmed',
+  'Example 4 · at setup: descriptor uncertainty omitted',
+  'Example 5 · at setup: export run',
 ];
 
 /** The five canonical scenarios as a summary list (post-reset dashboard).
@@ -2137,16 +2151,24 @@ export const openApiFixture = {
  * Explorer's `Full Description` disclosure never hides this API's own
  * boundary/honesty copy.
  *
- * Regenerated on 2026-07-31 with:
+ * Regenerated on 2026-07-31, re-measured 2026-08-04, with:
  *
  *   PYTHONPATH=apps/api .venv/bin/python -c \
  *     "from isaac_api.app import create_app; import json; \
  *      print(json.dumps(create_app().openapi()))"
  *
- * 36 operations · 20,915 description characters · 43 post-lead paragraphs · lead
- * paragraphs 78–594 characters · remainders 0–1,740. The 36th is
- * `GET /api/runtime/database/recon`; `GET /api/health` also gained a paragraph
- * about the database block it now reports, and this copy had gone stale on it.
+ * 38 operations · 23,948 description characters · 49 post-lead paragraphs · lead
+ * paragraphs 78–660 characters · remainders 0–1,744. The two newest are the
+ * worked-example session lifecycle (`POST /api/tutorial/sessions`,
+ * `DELETE /api/tutorial/sessions/{session_id}`); before them the 36th was
+ * `GET /api/runtime/database/recon`.
+ *
+ * THE "POINT-IN-TIME COPY" CAVEAT BELOW IS NOW WEAKER THAN IT READS, and that is
+ * worth stating rather than leaving as a stale warning. Since
+ * `apps/api/tests/test_contract_description_parity.py` this array IS checked
+ * character-for-character against the generated document in both directions — a
+ * changed description and a NEW operation both fail CI. The counts in this comment
+ * are still hand-measured and can go stale; the strings themselves cannot.
  *
  * This fixture is what caught the original defect: the first version of the
  * disclosure had NO length threshold and so collapsed 31 of the then-35
@@ -2201,6 +2223,8 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/about", description: "Non-sensitive identity and provenance for this deployment: the app version, the build commit when the deployment supplies one (otherwise `null` — it is never guessed), the official ISAAC record-schema version this build validates against, the runtime data mode, the persistence model, the data regime, and the name of the deterministic core package.\n\nEvery value is reused from the same authoritative source `GET /api/health` reads, so the two can never disagree. Read-only." },
   { op: "GET /api/openapi", description: "This application's own generated OpenAPI document — the same document served at the root `/openapi.json`, but reachable under the deployment's base path so a browser client can fetch it without knowing the root.\n\nIt is generated from the live routes, never hand-maintained, so it cannot drift from what a caller can actually reach. It describes route signatures and documentation only: no runtime state and no configuration values. Read-only." },
   { op: "GET /api/schema", description: "The vendored official ISAAC record schema verbatim, its title and the version this build validates against, plus every controlled vocabulary in the repository keyed by its filename stem.\n\nEvery field, type, required flag, enumeration, description and composition relationship a client renders comes straight from these two sources; the schema is loaded through the same path resolver the validator uses, never a hardcoded copy. This is a read-only reference view of the public canonical schema — there is no propose, review, approve, or edit affordance." },
+  { op: "POST /api/tutorial/sessions", description: "Creates an isolated worked-example workspace containing the five built-in example records, and returns its id together with the record ids actually materialised in it. Send that id as the `X-Isaac-Tutorial-Session` header on the record and example-workspace operations to work inside the session.\n\nThe examples exist only inside a session: the ordinary workspace contains none of them, and nothing here writes to it. Two sessions are completely independent — the same example record can be answered, edited and exported in one without being visible from the other.\n\nThe returned record ids are read back from the session that was just created, so they state what is there rather than what was intended. Each session expires after the reported number of hours; expired sessions are cleaned up whenever a new one is opened." },
+  { op: "DELETE /api/tutorial/sessions/{session_id}", description: "Discards a worked-example session and everything in it, including any answers, edits and exported artifacts produced inside it. Nothing outside the session is touched.\n\nDiscarding a session that no longer exists succeeds: the outcome the caller asked for — that this session is gone — already holds, so repeating the request is safe and a client never has to know whether it is retrying. A malformed id is rejected instead, because it names no session at all." },
   { op: "GET /api/runtime/database/recon", description: "A sanitized, aggregate-only reconnaissance report over this deployment's own application database. It answers one question — do the stored records validate against the vendored official ISAAC schema — and reports the answer as counts.\n\nThe scan is strictly read-only, and no write is possible: the transaction is set AND verified read-only server-side, every statement is checked against a SELECT-only allowlist before it is issued, and values are always bound as parameters. The row count is also compared before and after, but that is a concurrency check rather than a mutation proof — a row-count equality cannot detect an update and cannot distinguish this scan's writes from a concurrent writer's, so it is the verified read-only transaction and the allowlist that carry the guarantee. The statement counters report every statement this service issues through a cursor; they are not a wire-level record, because the driver's own transaction framing never passes through one.\n\nThe response carries aggregates only: record totals, counts by type and domain, validation totals by rule family and by schema path, and the gate results. It never carries a record id, a title, a scientific value, a stored document, a connection detail, or a credential; per-record content stays closed. A serialized-output scan runs over every response shape before it is returned and replaces it with a sanitized failure if it trips. Every shape also carries a fixed `limitations` list saying what the gates cannot establish — in particular that the production-isolation gate is a tripwire rather than proof, and that the confirmed transport encryption does not verify the server certificate.\n\nWhen the deployment has no database configured, the operation reports that and connects to nothing. Repeat calls inside a short window are served from memory, and a scan already in progress is reported as a conflict rather than opening a second connection. The operation takes no parameters and no body." },
 ];
 

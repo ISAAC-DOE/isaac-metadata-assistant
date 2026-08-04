@@ -26,9 +26,11 @@ import {
   isTutorialCompleted,
 } from '../lib/tutorialPreference';
 import { __resetTutorialStore } from '../lib/tutorialController';
+import { TUTORIAL_SESSION_KEY } from '../lib/tutorialSession';
 import { TUTORIAL_STEPS, tutorialAnchorSelector } from '../lib/tutorialSteps';
 import {
   CANONICAL_RESET_IDS,
+  TUTORIAL_SESSION_ID,
   aboutResponse,
   bundleRoutes,
   canonicalFiveSummaries,
@@ -40,7 +42,14 @@ import {
   stubFetchRoutes,
 } from '../test/apiFixtures';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  // The open-session pointer outlives a test otherwise: it is a module singleton plus
+  // a `sessionStorage` key, and `api.ts` reads that key at module load to decide which
+  // scope the FIRST request of a fresh page carries.
+  __resetTutorialStore();
+  sessionStorage.clear();
+});
 
 const PENDING_ID = CANONICAL_RESET_IDS[0];
 const READY_ID = CANONICAL_RESET_IDS[2];
@@ -360,6 +369,7 @@ describe('R0 · a step that needs a record state the workspace does not have', (
       status: 'ready_to_export',
     }));
     stubFetchRoutes({
+      ...tutorialSessionRoutes(),
       ...exportReadyRoutes(allAnswered[0].id),
       'GET /api/health': { body: healthSynthetic },
       'GET /api/experiments': { body: { experiments: allAnswered } },
@@ -505,7 +515,24 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
 
 // --- 6. nothing is written, anywhere ----------------------------------------
 
-describe('R0 · the walkthrough never changes anything', () => {
+/*
+ * SECTION 6 WAS RENAMED, AND THE RENAME IS THE POINT.
+ *
+ * It read "the walkthrough never changes anything". That is no longer true, and
+ * pretending otherwise would be exactly the class of false claim this repository keeps
+ * catching. Starting the walkthrough now opens a server-side worked-example workspace
+ * (`POST /api/tutorial/sessions`) and every exit path discards it
+ * (`DELETE /api/tutorial/sessions/{id}`). Those are two real writes.
+ *
+ * What is STILL true, and is what the section now asserts, is the property the old
+ * title was reaching for: the walkthrough never changes a RECORD and never touches the
+ * ordinary workspace. Its two writes create and destroy its own scope, and nothing
+ * else. The assertions below are therefore not weakened but redirected — and they are
+ * tightened in three ways the old version could not express: the session lifecycle
+ * endpoints are the ONLY non-GET requests outside the two read-only dry-run POSTs,
+ * the create happens EXACTLY ONCE, and the DELETE names the session that was created.
+ */
+describe('R0 · the walkthrough changes nothing but its own scope', () => {
   it('issues no destructive request while walking every step', async () => {
     const calls = stubFetchRoutes(readOnlyRoutes() as never);
     renderAt();
@@ -517,6 +544,9 @@ describe('R0 · the walkthrough never changes anything', () => {
 
     /*
      * The walkthrough must never reset, reseed, answer, edit, export or upload.
+     * UNCHANGED, and this list is the load-bearing one: every entry is a write to a
+     * RECORD or to the workspace's contents, and none of them may happen.
+     *
      * Note WHAT IS NOT ON THIS LIST: `POST .../validate` and `POST .../audit`
      * are POSTs the record screens issue on mount, dry-run and read-only, and
      * they happen whether or not a walkthrough is running — banning every POST
@@ -535,27 +565,59 @@ describe('R0 · the walkthrough never changes anything', () => {
         `the walkthrough issued a request to ${forbidden}`,
       ).toEqual([]);
     }
+    /*
+     * Every non-GET must be one of exactly three things: a read-only dry-run POST the
+     * record screens make anyway, the session CREATE, or the session DISCARD. An
+     * unexpected write still fails here — the allowance is enumerated, not widened to
+     * "any POST".
+     */
+    const SESSION_CREATE = 'POST /api/tutorial/sessions';
+    const SESSION_DISCARD = `DELETE /api/tutorial/sessions/${TUTORIAL_SESSION_ID}`;
     for (const call of calls) {
       const method = call.split(' ')[0];
       if (method === 'GET') continue;
+      if (call === SESSION_CREATE || call === SESSION_DISCARD) continue;
       expect(method, `unexpected ${method} request: ${call}`).toBe('POST');
       expect(call, `unexpected write: ${call}`).toMatch(/\/(validate|audit)$/);
     }
+    // Exactly ONE scope was opened for this run. Two would mean a leaked session.
+    expect(calls.filter((c) => c === SESSION_CREATE)).toHaveLength(1);
     // The walkthrough's own read really did happen — the assertions above would
     // also pass if it had made no request at all.
     expect(calls).toContain('GET /api/experiments');
   }, 60000);
 
-  it('replay writes nothing to storage beyond the completion flag it already had', async () => {
+  /*
+   * RE-POINTED, AND THE PROPERTY IS SPLIT BY STORAGE RATHER THAN WEAKENED.
+   *
+   * This asserted that replay wrote NOTHING to storage. It now writes one thing — the
+   * open session's id and step index, to `sessionStorage`, which is what makes a reload
+   * mid-walkthrough a resume rather than a restart. So the assertion is split along the
+   * line that actually matters: `localStorage` (the durable completion record) must
+   * still receive nothing at all, and `sessionStorage` may hold exactly the one
+   * documented key and nothing else. Both halves are exact — no `toContain`, no
+   * subset — so a second key in either store fails.
+   */
+  it('replay writes nothing durable, and only the session pointer to sessionStorage', async () => {
     seedCompleted();
-    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const localSetItem = vi.spyOn(Storage.prototype, 'setItem');
     stubFetchRoutes(readOnlyRoutes() as never);
     renderAt('/settings?tab=help');
     fireEvent.click(await screen.findByRole('button', { name: LABELS.actionReplayTutorial }));
     await markForStep(0);
 
-    expect(setItem).not.toHaveBeenCalled();
+    // Nothing durable was written: the completion flag was already there and is not
+    // rewritten, and no new localStorage key appears.
     expect(Object.keys({ ...localStorage })).toEqual([TUTORIAL_PREFERENCE_KEY]);
-    setItem.mockRestore();
+    // The ONLY storage write is the session pointer, and it is session-scoped.
+    expect(Object.keys({ ...sessionStorage })).toEqual([TUTORIAL_SESSION_KEY]);
+    const writtenKeys = localSetItem.mock.calls.map(([key]) => key);
+    expect([...new Set(writtenKeys)]).toEqual([TUTORIAL_SESSION_KEY]);
+    // ...and it points at the session that was actually minted, not a fabricated id.
+    expect(JSON.parse(sessionStorage.getItem(TUTORIAL_SESSION_KEY)!)).toEqual({
+      sessionId: TUTORIAL_SESSION_ID,
+      index: 0,
+    });
+    localSetItem.mockRestore();
   }, 30000);
 });

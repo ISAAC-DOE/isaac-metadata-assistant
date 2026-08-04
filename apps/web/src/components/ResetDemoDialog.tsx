@@ -1,5 +1,15 @@
 /*
- * P26.0b · Reset Workspace — the guarded control for the shared example workspace.
+ * P26.0b · Reset Worked Example — the guarded control for the built-in examples.
+ *
+ * SCOPE, first, because it changed and everything else follows from it. These five
+ * example records exist ONLY inside a worked-example session, one independent copy
+ * per session, and `POST /api/demo/reset` now REQUIRES the session header and
+ * refuses without it. So this control renders only inside the persistent
+ * worked-example bar (`components/TutorialSessionBar.tsx`), it can only ever affect
+ * that one session's copies, and it can never touch the ordinary workspace — not
+ * because it checks, but because the request it issues addresses a directory
+ * namespace that contains nothing else. It is NOT rendered on My Experiments, where
+ * it had become a control that looks like it acts and does not.
  *
  * Fail-closed: the whole control renders ONLY when GET /api/health reports the
  * authoritative synthetic-only mode. It is a restrained *destructive* action, not
@@ -7,9 +17,9 @@
  * POST /api/demo/reset {mode:'preview'}, shows the typed counts + a derived summary
  * of the confirmed work at risk + a plain-language disclosure, and gates execution
  * behind a typed "RESET". Execution sends the exact backend phrase exactly once,
- * then refreshes the list from the backend. An ambiguous/refused preview disables
- * execution permanently with no bypass. The UI never authorizes a reset — every
- * count and decision is server-derived.
+ * then announces the rebuild so any surface showing workspace-derived data refetches
+ * it. An ambiguous/refused preview disables execution permanently with no bypass.
+ * The UI never authorizes a reset — every count and decision is server-derived.
  *
  * R1 — THE PRECONDITION, and why the UI part of it matters. This dialog is exactly
  * the gap the `plan_digest` closes: the operator reads a classification, thinks, and
@@ -27,6 +37,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { api, RESET_CONFIRMATION } from '../lib/api';
 import { clearAllSessions } from '../lib/assistantSession';
+import { notifyWorkspaceRebuilt } from '../lib/workspaceInvalidation';
 import { useFetch } from '../lib/useFetch';
 import { LABELS } from '../lib/labels';
 import { TriangleAlert } from './icons';
@@ -76,7 +87,7 @@ export function atRiskSentence(at: ApiDemoResetAtRisk | undefined): string {
   return `${listed}. Resetting discards ${parts.length === 1 ? 'it' : 'them'} permanently.`;
 }
 
-export function ResetDemoDialog({ onResetComplete }: { onResetComplete: () => void }) {
+export function ResetDemoDialog() {
   // Fail-closed synthetic-only gate (authoritative, from GET /api/health).
   const health = useFetch(() => api.health(), []);
   const synthetic = health.status === 'data' && health.data.mode === 'synthetic-only';
@@ -155,7 +166,10 @@ export function ResetDemoDialog({ onResetComplete }: { onResetComplete: () => vo
           // fresh built-in examples.
           clearAllSessions();
           setExecuteState('done');
-          onResetComplete(); // re-fetch the list from the backend
+          // The record set was rebuilt on the server, so every surface showing
+          // workspace-derived data must re-read it. Announced rather than called
+          // directly: this control is chrome now and owns no list of its own.
+          notifyWorkspaceRebuilt();
           closeDialog();
         } else if (
           res.refusal_reason === 'plan_digest_stale' ||
@@ -287,18 +301,31 @@ export function ResetDemoDialog({ onResetComplete }: { onResetComplete: () => vo
             <div className="reset-dialog-body">
               <p className="reset-disclosure">
                 {/*
-                 * HISTORY of the last clause. A positive whole-content claim was
-                 * tried here ("this workspace is built only from committed example
-                 * files") and it was false: a confirmed answer or an edit is
-                 * persisted into the record's workspace state, so the workspace also
-                 * holds what users store. It was replaced with a MODE claim, which
-                 * the control is already gated on, plus two independently checkable
-                 * facts.
+                 * TWO CORRECTIONS ARE RECORDED IN THIS COPY, not one.
+                 *
+                 * 1. "shared, hosted example workspace" was true of the single
+                 *    ordinary workspace the examples used to live in. It is FALSE of a
+                 *    worked-example session: each session is its own directory and two
+                 *    sessions are mutually invisible, so nothing another reader does
+                 *    can appear here and nothing done here can appear to them. Saying
+                 *    "shared" would over-state the blast radius in one direction and
+                 *    under-state the privacy of the scope in the other. What IS true
+                 *    and matters more is that the scope is temporary.
+                 *
+                 * 2. HISTORY of the last clause, kept: a positive whole-content claim
+                 *    was tried here ("this workspace is built only from committed
+                 *    example files") and it was false, because a confirmed answer or an
+                 *    edit is persisted into the record's workspace state, so the
+                 *    workspace also holds what users store. It was replaced with a MODE
+                 *    claim, which the control is already gated on, plus two
+                 *    independently checkable facts. That structure is unchanged.
                  */}
-                This is a <strong>shared, hosted example workspace</strong>. Resetting discards
-                the current progress on the built-in examples and restores all five to their
-                original state. Real data is unaffected — this workspace runs in synthetic-only
-                mode: the examples come from committed files and every upload is refused.
+                This is a <strong>temporary worked-example workspace</strong>, belonging to this
+                walkthrough alone. Resetting discards the current progress on the built-in
+                examples in it and restores all five to their original state. Nothing in My
+                Experiments is in this scope. Real data is unaffected — this workspace runs in
+                synthetic-only mode: the examples come from committed files and every upload is
+                refused.
               </p>
 
               {preview.status === 'error' && (

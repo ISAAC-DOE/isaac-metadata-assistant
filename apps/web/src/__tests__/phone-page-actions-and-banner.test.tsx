@@ -28,12 +28,19 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
-import { EXP_ID, bundleRoutes, healthSynthetic, stubFetchRoutes } from '../test/apiFixtures';
+import {
+  EXP_ID,
+  bundleRoutes,
+  healthSynthetic,
+  stubFetchRoutes,
+  tutorialSessionRoutes,
+} from '../test/apiFixtures';
 import { LABELS } from '../lib/labels';
+import { __resetTutorialStore } from '../lib/tutorialController';
 
 const cssFiles = import.meta.glob('../**/*.css', {
   query: '?raw',
@@ -137,11 +144,19 @@ describe('I1 · the page actions can wrap inside a phone-width header', () => {
 
   it('DOM: the page actions are direct children of .page-actions', async () => {
     /*
-     * P1 changed WHAT this row holds, not the property under test. The screen used
-     * to render three controls — Reset Demo, Run Synthetic Demo and a "New Record"
-     * button that navigated to the same route as the one beside it and promised a
-     * capability the build does not have. The duplicate is gone, so the row is now
-     * Reset Workspace + Open the Worked Example.
+     * P1 changed WHAT this row holds; D2 changed WHERE it is. Neither changed the
+     * property under test.
+     *
+     * P1: the screen used to render three controls — Reset Demo, Run Synthetic Demo
+     * and a "New Record" button that navigated to the same route as the one beside it
+     * and promised a capability the build does not have. The duplicate is gone.
+     *
+     * D2: both remaining controls act on the built-in example records, and both of
+     * their endpoints now REQUIRE a worked-example session header and refuse without
+     * one — so on the ordinary My Experiments they were dead controls. They moved
+     * together into the persistent worked-example bar, and `.page-actions` moved with
+     * them: it is still the row that holds them, reused rather than duplicated,
+     * precisely so the ≤640px rules asserted above keep governing these two buttons.
      *
      * The measured 447.7px overflow in the header comment above was a THREE-button
      * row; that measurement is history and is left as written. It is not re-derived
@@ -152,8 +167,15 @@ describe('I1 · the page actions can wrap inside a phone-width header', () => {
      * control is (correctly, fail-closed) absent and this row would hold ONE child,
      * which would let the direct-child assertion pass on a single element.
      */
-    stubFetchRoutes({ ...bundleRoutes(), 'GET /api/health': { body: healthSynthetic } });
-    const { container } = renderAt('/experiments');
+    stubFetchRoutes({
+      ...tutorialSessionRoutes(),
+      ...bundleRoutes(),
+      'GET /api/health': { body: healthSynthetic },
+    });
+    const view = renderAt('/experiments');
+    const { container } = view;
+    // Enter the session the bar — and therefore this row — is gated on.
+    fireEvent.click(await view.findByRole('button', { name: LABELS.actionStartTutorial }));
     await waitFor(() => expect(container.querySelector('.page-actions')).not.toBeNull());
     const actions = container.querySelector('.page-actions')!;
     await waitFor(() => expect(actions.children.length).toBeGreaterThanOrEqual(2));
@@ -164,6 +186,26 @@ describe('I1 · the page actions can wrap inside a phone-width header', () => {
     expect(labels).toContain(LABELS.actionRunDemo);
     // and nothing here offers record creation, which this build cannot do
     expect(labels.join(' ')).not.toMatch(/new record/i);
+    __resetTutorialStore();
+    sessionStorage.clear();
+  });
+
+  /*
+   * ADDED WITH THE MOVE, because the move created a way for the four CSS-source
+   * assertions above to go vacuous: `.page-actions` is now rendered ONLY by the
+   * worked-example bar, so a slice that stopped rendering the bar would leave them
+   * describing a selector nothing uses — green, and about nothing. This pins the other
+   * half of the arrangement, which is also the D1 property that the ordinary My
+   * Experiments offers no example-workspace action at all.
+   */
+  it('DOM: .page-actions is absent in the ordinary workspace', async () => {
+    stubFetchRoutes({ ...bundleRoutes(), 'GET /api/health': { body: healthSynthetic } });
+    const view = renderAt('/experiments');
+    // wait for the loaded screen, so this cannot pass on a page that has not rendered
+    await view.findByRole('button', { name: LABELS.actionStartTutorial });
+    expect(view.container.querySelector('.page-actions')).toBeNull();
+    expect(view.queryByRole('button', { name: LABELS.actionResetDemo })).toBeNull();
+    expect(view.queryByRole('button', { name: LABELS.actionRunDemo })).toBeNull();
   });
 });
 

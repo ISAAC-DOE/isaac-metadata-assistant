@@ -164,34 +164,59 @@ async function chipTextAfterHealth(health: ApiHealth | 'down', expected: string)
 }
 
 /*
- * R0 renamed the chip's BASE label "Synthetic workspace" -> "Example workspace".
- * What changed is one product-facing WORD; what did not change is anything this
- * file is guarding. The runtime mode is still `synthetic-only` on the wire, the
- * two database qualifiers are byte-for-byte the same, and the chip still refuses
- * to claim reachability, liveness, or a completed check it has not observed.
+ * THE CHIP'S VISIBLE LABEL HAS NOW BEEN SHORTENED TWICE, and this block records both
+ * so the next reader can tell a correction from an erosion.
  *
- * The claim the retired word carried is not gone either — it moved into the
- * chip's ACCESSIBLE NAME, which now spells out that the records are rebuilt from
- * reference files committed to the build, that upload is refused, and that no
- * official institutional record is shown. That is asserted below, in
- * `the accessible name carries the claim the visible label no longer spells out`,
- * so this rename cannot be repeated as a quiet weakening.
+ * R0 renamed the BASE label "Synthetic workspace" -> "Example workspace" — one
+ * product-facing word, with the runtime mode untouched on the wire.
+ *
+ * D3 changed two further things, and both are corrections of false or misplaced copy:
+ *
+ *   1. "Example workspace" was FALSE in the ordinary scope. The five built-in examples
+ *      used to be materialised into the ordinary workspace on every read; they now
+ *      exist only inside a worked-example session, so the ordinary workspace holds no
+ *      examples at all and the chip names the SCOPE instead: "Workspace" ordinarily,
+ *      "Worked Example" inside a session. `renderChip` below mounts the TopBar with no
+ *      session open, so every case in this file is the ordinary scope.
+ *
+ *   2. The database qualifier is NO LONGER APPENDED TO THE VISIBLE TEXT. It put an
+ *      infrastructure disclosure in the primary header of every product screen. It is
+ *      NOT dropped: it is derived from the same `health.database` input and stated in
+ *      the chip's ACCESSIBLE NAME, which is what §"the accessible name" cases below
+ *      now assert per state — at the same strength, on the same three inputs, plus a
+ *      new assertion that it is ABSENT from the visible text. Nothing this file guards
+ *      was relaxed: the chip still refuses to claim reachability, liveness, or a
+ *      completed check it has not observed, and still leaks nothing (§6 scans the
+ *      visible text AND the accessible name together, unchanged).
  */
-const SYNTHETIC = 'Example workspace';
-const DIAGNOSTICS = 'Example workspace · test DB diagnostics';
-const FAILED = 'Example workspace · test DB check failed';
+const SYNTHETIC = 'Workspace';
+
+/** The accessible-name clause the `diagnostics` state must state, and the `failed`
+ *  state must not. */
+const DIAGNOSTICS_CLAUSE =
+  /configured to run a protected, read-only diagnostic against an isolated test database/i;
+/** The accessible-name clause the `failed` state must state, and `diagnostics` must not. */
+const FAILED_CLAUSE =
+  /most recent protected, read-only test-database diagnostic recorded by this deployment did not complete/i;
 
 // --- 1/2/3: the three chip states -------------------------------------------
 
 describe('mode chip — no database configured', () => {
-  it('renders the plain synthetic label with no database qualifier (block absent)', async () => {
+  it('renders the plain scope label with no database disclosure at all (block absent)', async () => {
     const chip = await chipTextAfterHealth(healthNoBlock, SYNTHETIC);
     expect(chip.textContent).not.toMatch(/test DB|diagnostic|database/i);
+    // and nothing is claimed about a database in the accessible name either
+    const name = chip.getAttribute('aria-label') ?? '';
+    expect(name).not.toMatch(DIAGNOSTICS_CLAUSE);
+    expect(name).not.toMatch(FAILED_CLAUSE);
   });
 
-  it('renders the plain synthetic label when the block says configured:false', async () => {
+  it('renders the plain scope label when the block says configured:false', async () => {
     const chip = await chipTextAfterHealth(healthUnconfigured, SYNTHETIC);
     expect(chip.textContent).not.toMatch(/test DB|diagnostic|database/i);
+    const name = chip.getAttribute('aria-label') ?? '';
+    expect(name).not.toMatch(DIAGNOSTICS_CLAUSE);
+    expect(name).not.toMatch(FAILED_CLAUSE);
   });
 });
 
@@ -200,22 +225,36 @@ describe('mode chip — database configured, diagnostics not known to have faile
     ['no scan has run in this process', null],
     ['the last scan succeeded', { status: 'ok', at: AT }],
     ['a scan is in flight', { status: 'busy', at: AT }],
-  ])('qualifies the chip with the test-DB diagnostics status when %s', async (_case, last) => {
-    const chip = await chipTextAfterHealth(healthConfigured(last), DIAGNOSTICS);
-    // The qualifier is a CAPABILITY statement. It must not claim the diagnostic
+  ])('discloses the test-DB diagnostics status when %s', async (_case, last) => {
+    const chip = await chipTextAfterHealth(healthConfigured(last), SYNTHETIC);
+    // RE-POINTED, NOT WEAKENED. The same three inputs must still produce the
+    // diagnostics disclosure and not the failed one; it is now read in the accessible
+    // name rather than in the visible suffix, and its ABSENCE from the visible text is
+    // additionally required.
+    const name = chip.getAttribute('aria-label') ?? '';
+    expect(name).toMatch(DIAGNOSTICS_CLAUSE);
+    expect(name).not.toMatch(FAILED_CLAUSE);
+    expect(chip.textContent).not.toMatch(/test DB|diagnostic|database/i);
+    // The disclosure is a CAPABILITY statement. It must not claim the diagnostic
     // is running now, nor that a database is reachable — health does zero I/O.
     expect(chip.textContent).not.toMatch(/running|connected|reachable|online|live/i);
+    expect(name).not.toMatch(/currently (running|connected|reachable|online)/i);
   });
 });
 
 describe('mode chip — the last recorded diagnostic did not complete', () => {
   it.each<ApiDbReconStatus>(['refused', 'error'])(
-    'renders the truthful failed-check status for %s',
+    'discloses the truthful failed-check status for %s',
     async (status) => {
-      const chip = await chipTextAfterHealth(healthConfigured({ status, at: AT }), FAILED);
+      const chip = await chipTextAfterHealth(healthConfigured({ status, at: AT }), SYNTHETIC);
+      const name = chip.getAttribute('aria-label') ?? '';
+      expect(name).toMatch(FAILED_CLAUSE);
+      expect(name).not.toMatch(DIAGNOSTICS_CLAUSE);
+      expect(chip.textContent).not.toMatch(/test DB|diagnostic|database/i);
       // NOT "unavailable": /api/health performs no I/O, so nothing here measured
       // present unreachability. Only the last recorded CHECK is being reported.
       expect(chip.textContent).not.toMatch(/unavailable|unreachable|down|offline/i);
+      expect(name).not.toMatch(/unavailable|unreachable|offline/i);
     },
   );
 });
@@ -223,36 +262,46 @@ describe('mode chip — the last recorded diagnostic did not complete', () => {
 // --- 4: absent / failed health ------------------------------------------------
 
 describe('mode chip — health absent or failed', () => {
-  it('still shows the example-workspace indicator and never implies otherwise', async () => {
+  it('still shows the workspace indicator and never implies otherwise', async () => {
     const chip = await chipTextAfterHealth('down', SYNTHETIC);
-    expect(chip.textContent).toContain('Example workspace');
+    expect(chip.textContent).toContain(SYNTHETIC);
     expect(chip.textContent).not.toMatch(/production|real data|non-synthetic/i);
     // We know nothing about the database, so we claim nothing about it either —
-    // neither qualifier may be guessed into existence.
+    // neither disclosure may be guessed into existence.
     expect(chip.textContent).not.toMatch(/test DB/i);
     expect(chip.getAttribute('aria-label')).not.toMatch(/test.database|diagnostic/i);
   });
 });
 
-// --- 4b: the rename did not drop a claim --------------------------------------
+// --- 4b: the shortening did not drop a claim ----------------------------------
 
 /*
  * WHY THIS TEST EXISTS. The visible label used to carry the word "Synthetic",
  * which did a lot of work in a very small space. R0 replaced it with product
- * language, and the failure mode of that kind of change — in this repository,
- * repeatedly — is that the true claim leaves with the jargon. So the claim is
- * pinned where it now lives: the accessible name. If a later slice simplifies the
- * accessible name back down, this fails.
+ * language and D3 shortened it again, and the failure mode of that kind of change —
+ * in this repository, repeatedly — is that the true claim leaves with the jargon. So
+ * the claims are pinned where they now live: the accessible name. If a later slice
+ * simplifies the accessible name back down, this fails.
+ *
+ * ONE CLAUSE MOVED SCOPE RATHER THAN BEING DROPPED. "the records are rebuilt from
+ * reference files committed to this build" is required of the WORKED-EXAMPLE scope,
+ * where it is true, and is FORBIDDEN in the ordinary scope, where there are no records
+ * to be rebuilt. Both halves are asserted, in `__tests__/mode-chip.test.tsx`, which
+ * can mount both scopes; here the ordinary half is pinned, including the negative.
  */
-describe('mode chip — the rename moved a claim rather than dropping one', () => {
-  it('the accessible name carries the claim the visible label no longer spells out', async () => {
+describe('mode chip — the shortening moved claims rather than dropping them', () => {
+  it('the accessible name carries the claims the visible label no longer spells out', async () => {
     const chip = await chipTextAfterHealth(healthNoBlock, SYNTHETIC);
     const name = chip.getAttribute('aria-label') ?? '';
     // WCAG 2.5.3: the accessible name still OPENS with the exact visible text.
     expect(name.startsWith(chip.textContent ?? '')).toBe(true);
-    expect(name).toMatch(/reference files committed to this build/i);
+    // The two claims that hold unconditionally, in EVERY scope.
     expect(name).toMatch(/file upload is refused/i);
     expect(name).toMatch(/no official institutional record is shown/i);
+    // The scope-specific claim: this scope holds no records of its own, so the
+    // "rebuilt from reference files" clause would describe records that are not here.
+    expect(name).toMatch(/holds no records of its own/i);
+    expect(name).not.toMatch(/reference files committed to this build/i);
   });
 });
 
@@ -264,12 +313,25 @@ describe('mode chip — unexpected health.mode', () => {
     expect(chip.textContent).not.toContain('Synthetic');
   });
 
-  it('composes the anomalous mode with the database qualifier', async () => {
+  /*
+   * RE-POINTED. This asserted the composed visible string
+   * `'Production · test DB diagnostics'`. The database disclosure left the visible text
+   * (D3), so the composition it pinned no longer exists — but the property it was
+   * protecting does, and it is asserted in full: the anomalous mode still WINS the
+   * visible label (it is not masked by the scope name), and the database disclosure is
+   * still made, in the accessible name, in the same state. Neither half is dropped.
+   */
+  it('surfaces the anomalous mode AND the database disclosure together', async () => {
     const chip = await chipTextAfterHealth(
       { ...healthConfigured(null), mode: 'production' },
-      'Production · test DB diagnostics',
+      'Production',
     );
     expect(chip.textContent).not.toContain('Synthetic');
+    // the scope name must not have displaced the anomaly
+    expect(chip.textContent).not.toContain(SYNTHETIC);
+    const name = chip.getAttribute('aria-label') ?? '';
+    expect(name.startsWith('Production')).toBe(true);
+    expect(name).toMatch(DIAGNOSTICS_CLAUSE);
   });
 });
 
@@ -332,7 +394,10 @@ describe('mode chip — exposes no record content and no connection detail', () 
     }
   });
 
-  it('states the same distinction in the accessible name as the visible qualifier', async () => {
+  // Retitled only: since D3 the accessible name is the ONLY place this distinction is
+  // stated, so "the same distinction as the visible qualifier" named a comparison that
+  // no longer has two sides. The assertions are unchanged.
+  it('states the database distinction in the accessible name', async () => {
     const diagnostics = await renderChip(healthConfigured(null));
     await waitFor(() =>
       expect(diagnostics.getAttribute('aria-label')).toMatch(

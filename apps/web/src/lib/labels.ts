@@ -149,7 +149,21 @@ export const LABELS = {
   chipMentorReview: 'Mentor Review',
   chipDraft: 'Draft',
   /*
-   * The mode chip's BASE label.
+   * The mode chip's base label in the ORDINARY workspace.
+   *
+   * DELIBERATELY NEUTRAL, and this replaces "Example workspace" — which was a
+   * FALSE label here, not merely a stale one. The five built-in examples used to
+   * be materialised into the ordinary workspace on every read; they now exist only
+   * inside a worked-example session, so the ordinary workspace contains no
+   * examples at all. A chip on every ordinary screen reading "Example workspace"
+   * asserted contents that are not there.
+   *
+   * A chip is still rendered rather than nothing, for two reasons that are about
+   * truth rather than decoration: it is the ONLY surface that reports an
+   * UNEXPECTED `health.mode` (see `modeLabel` in `components/TopBar.tsx`), and its
+   * accessible name is where this deployment's two unconditional claims — file
+   * upload is refused, no official institutional record is shown — are carried on
+   * every screen. Neither has anywhere else to go on a record surface.
    *
    * "workspace" scopes the claim to what the reader is looking at: since Slice 2A
    * the deployment may additionally run a protected read-only diagnostic over an
@@ -157,39 +171,37 @@ export const LABELS = {
    * over-claim. That scoping is why the word "workspace" is load-bearing and must
    * survive any rewording.
    *
-   * R0 replaced the first word. "Synthetic" is the name of the runtime MODE — it
-   * is what `GET /api/health` reports, it is what `runtime_mode.py` refuses to
-   * boot without, and none of that changed — but as the persistent chip on every
-   * screen it was the app describing itself in the vocabulary of its own test
-   * harness. "Example workspace" is the product-facing name for the same thing.
-   *
-   * THE CLAIM THE OLD WORD CARRIED IS NOT DROPPED, it is moved somewhere it fits:
-   * `CHIP_ARIA_DETAIL` in `components/TopBar.tsx` now spells out, in plain
-   * language, that the records are rebuilt from reference files committed to the
-   * build, that file upload is refused, and that no official institutional record
-   * is shown. The full disclosure still lives in the Governance banner, the
+   * The full governance disclosure still lives in the Governance banner, the
    * Governance & Safety policy tab and the Help panel, whose exact technical
    * wording is deliberately UNCHANGED — a chip is not the place to make a
    * governance guarantee, but it must not be the place a guarantee quietly
    * disappears either.
    */
-  modeSynthetic: 'Example workspace',
+  modeOrdinaryWorkspace: 'Workspace',
   /*
-   * Shown INSTEAD of `modeSynthetic` while a worked-example session is open.
+   * Shown INSTEAD of `modeOrdinaryWorkspace` while a worked-example session is
+   * open — the one scope in which example records really are present.
    *
-   * "temporary" is the load-bearing word: the records in this scope are discarded
-   * when the walkthrough ends, and a reader who spends time answering fields in
-   * them is entitled to know that before they do. `modeSynthetic` is retained for
-   * the ordinary scope and reads as "this is a demonstration workspace", which
-   * stays true there — the accessible name supplies the precision that it now
-   * holds no records of its own.
+   * The temporariness of the scope (these records are discarded when the
+   * walkthrough ends) is stated in the accessible name rather than crammed into
+   * the label, and the persistent worked-example bar states it in visible text
+   * beside the controls that act on the scope.
    */
-  modeWorkedExample: 'Worked example · temporary',
+  modeWorkedExample: 'Worked Example',
   // Deliberate register exception (see the header: register 1 is Title Case).
-  // These two are QUALIFIERS appended after "·" to the base chip label above,
-  // not standalone labels — Title-Casing them ("Test DB Diagnostics") would read
-  // as the name of a feature the app does not have. "DB" is a generic word, not
-  // a database name; neither string names a host, database, user, or secret.
+  // "DB" is a generic word, not a database name; neither string names a host,
+  // database, user, or secret.
+  //
+  // THESE ARE NO LONGER APPENDED TO THE CHIP'S VISIBLE TEXT. They were, as
+  // "Example workspace · test DB diagnostics", which put an infrastructure
+  // disclosure in the primary header of every product screen. The disclosure did
+  // not move OUT of the chip — it is still derived from `health.database` and
+  // still stated in the chip's accessible name, alongside four other surfaces
+  // that already carry it at length (the Governance banner, Governance & Safety →
+  // Policy, the Help panel, and Settings → Data & Privacy). Only the visible
+  // suffix is gone. Retained as labels because the accessible name and the
+  // technical surfaces still read them, and because `product-facing-language`
+  // pins their exact wording.
   modeTestDbDiagnostics: 'test DB diagnostics',
   // NOT "unavailable": /api/health does zero I/O, so this reflects the last
   // diagnostic RUN recorded in the server process, which may be stale. See the
@@ -223,12 +235,36 @@ export const LABELS = {
   // record — its second on-ramp is a permanent governance refusal — so the
   // breadcrumb names what the screen actually offers.
   actionOpenRecord: 'Open a Record',
-  actionResetDemo: 'Reset Workspace',
+  /*
+   * The guarded reset, RENAMED because the thing it resets changed.
+   *
+   * It was "Reset Workspace", on My Experiments, when the five examples lived in
+   * the ordinary workspace. `POST /api/demo/reset` now REQUIRES a worked-example
+   * session and refuses without one, so the control lives in the worked-example
+   * bar and acts on that session alone. "Reset Workspace" would name the wrong
+   * scope — a reader would reasonably read it as "reset everything I have".
+   *
+   * `demoDriftedRemedy` below names this control by this label; the two are pinned
+   * to each other in `__tests__/demo-run-drift-refusal.test.tsx`.
+   */
+  actionResetDemo: 'Reset Worked Example',
   actionCancel: 'Cancel',
 
-  // Guarded example-workspace reset (P26.0b)
-  resetDialogTitle: 'Reset the Shared Workspace',
-  resetConfirmAction: 'Reset Shared Workspace',
+  /*
+   * Guarded worked-example reset (P26.0b), rescoped.
+   *
+   * "Shared" is deliberately gone from both strings. It was true of the old single
+   * ordinary workspace, and it is FALSE of a worked-example session: sessions are
+   * one directory each and are mutually invisible (`test_two_sessions_are_
+   * independently_mutable_and_mutually_invisible`), so nothing another reader does
+   * can appear here and nothing done here can appear to them.
+   *
+   * The confirm action is deliberately NOT the same string as the trigger: two
+   * controls with one accessible name would be indistinguishable in a screen
+   * reader's control list while the dialog is open.
+   */
+  resetDialogTitle: 'Reset the Worked Example',
+  resetConfirmAction: 'Reset Example Records',
   resetCountCurrent: 'Current Experiments',
   resetCountCanonical: 'Built-in Examples Restored',
   resetCountLegacy: 'Additional Records Removed',
@@ -261,20 +297,27 @@ export const LABELS = {
   // The worked example refused to re-run because its target record has been
   // edited (POST /api/demo/run → 409 `demo_target_drifted`). The server protected
   // the edits instead of overwriting them, so this copy states three things and
-  // guesses nothing further: the example did NOT run, why, and that Reset
-  // Workspace is the deliberate — and equally destructive — way back to the
+  // guesses nothing further: the example did NOT run, why, and that Reset Worked
+  // Example is the deliberate — and equally destructive — way back to the
   // baseline. It must never read as a backend failure (the server answered,
   // correctly) and must never imply anything was lost. The remedy sentence names
   // the reset control by its EXACT rendered label (`actionResetDemo`) — if that
   // label changes, this string changes with it.
+  //
+  // WHERE IT POINTS ALSO CHANGED, and that is a correctness fix rather than a
+  // rewording: it used to say "on My Experiments", where the control no longer is.
+  // `POST /api/demo/run` now requires a worked-example session, so this refusal can
+  // only be seen while one is open — and the reset control is therefore already on
+  // screen, in the worked-example bar, when this sentence is read.
   demoDriftedTitle: 'Example not re-run — this record has been edited',
   demoDriftedBody:
     'The built-in example is restored from fixed reference files. This record has been ' +
     'edited since it was created, and restoring it would discard those edits — so the ' +
     'server refused. Nothing ran and nothing changed.',
   demoDriftedRemedy:
-    'To return to the baseline deliberately, use Reset Workspace on My Experiments. That ' +
-    'restores all five built-in examples and discards these edits with them.',
+    'To return to the baseline deliberately, use Reset Worked Example in the worked-example ' +
+    'bar above. That restores all five built-in examples in this session and discards these ' +
+    'edits with them.',
   demoDriftedScenario: 'Edited record',
   actionGoToExperiments: 'Go to My Experiments',
   actionReviewAnswer: 'Review & Answer',
@@ -326,6 +369,50 @@ export const LABELS = {
   actionTutorialFinish: 'Finish',
   actionCloseTutorial: 'Close Tutorial',
   actionReplayTutorial: 'Replay Tutorial',
+
+  /*
+   * The persistent worked-example bar (D2). It exists ONLY while a worked-example
+   * session is open, and it is the one home of the two controls that act on the
+   * built-in examples — both of which now REQUIRE the session header and refuse
+   * without it (`POST /api/demo/run`, `POST /api/demo/reset`).
+   *
+   * The body sentence states the two facts a reader needs before they spend time
+   * answering fields in here, and both are enforced rather than promised: the
+   * records are this session's own copies (one directory per session), and they are
+   * discarded when the walkthrough ends (`releaseTutorialSession` DELETEs on
+   * finish, skip, close and escape).
+   */
+  tutorialSessionBarTitle: 'Worked Example',
+  tutorialSessionBarBody:
+    'These five example records belong to this walkthrough only. They are a temporary copy, ' +
+    'they are not visible in My Experiments, and they are discarded when the walkthrough ends.',
+  tutorialSessionBarRegion: 'Worked example session',
+
+  /*
+   * The two ways a worked-example session can fail the reader, stated to them.
+   *
+   * These exist because `tutorialController` set `sessionError` and NOTHING rendered
+   * it — the field's own comment claimed it was "surfaced to the reader as a truthful
+   * message; never silently swallowed" while the only reader-visible consequence of a
+   * failed start was that nothing happened when they pressed the button.
+   *
+   * NEITHER SENTENCE CLAIMS MORE THAN IS KNOWN, and the create case is the careful one.
+   * A failed `POST /api/tutorial/sessions` does NOT establish that no session was
+   * created: the request may have succeeded and its response been lost, leaving an
+   * orphan the backend's TTL sweep reclaims. So the copy states what IS known — the
+   * walkthrough did not start, and the ordinary workspace was not touched — and does
+   * not assert that nothing was created anywhere.
+   */
+  tutorialSessionCreateFailedTitle: 'The worked example could not be opened',
+  tutorialSessionCreateFailedBody:
+    'The walkthrough did not start, and nothing in My Experiments was changed. You can try ' +
+    'again from Settings & API → Help & Tutorial.',
+  tutorialSessionExpiredTitle: 'The worked example has expired',
+  tutorialSessionExpiredBody:
+    'The temporary workspace this walkthrough was using no longer exists, so its five example ' +
+    'records are gone and the walkthrough has closed. Nothing in My Experiments was changed. ' +
+    'You can start the walkthrough again from Settings & API → Help & Tutorial.',
+  actionDismissTutorialNotice: 'Dismiss',
 
   tutorialOfferTitle: 'Take the Guided Walkthrough',
   tutorialOfferBody:

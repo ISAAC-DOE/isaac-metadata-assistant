@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { GuidedTutorial } from './GuidedTutorial';
+import { TutorialSessionBar } from './TutorialSessionBar';
 
 type ShellVariant = 'full' | 'record' | 'evidence';
 
@@ -91,6 +92,20 @@ export function AppShell({
       </a>
       <div className="screen-card" data-variant={variant}>
         {topBar}
+        {/*
+          The persistent worked-example bar. Renders NOTHING unless a worked-example
+          session is open, so in the ordinary application this is a no-op — no
+          reserved space, no disabled control, no hint that one exists.
+
+          Placed HERE, between the top bar and the screen body, for the same reason
+          `GuidedTutorial` is mounted in this component: the session outlives every
+          route change the walkthrough performs, and the two controls that act on the
+          session's records must be reachable from every surface it visits. It is a
+          `flex: none` sibling of `.screen-body`, so it displaces content downward
+          rather than overlaying it — a destructive control must never sit on top of
+          the thing it might destroy.
+        */}
+        <TutorialSessionBar />
         <div className={`screen-body ${variant}`}>
           {sidebar}
           {/* `width` is optional: React omits the attribute entirely when it is

@@ -217,3 +217,125 @@
     transition: none;
   }
 }
+
+/*
+ * The persistent worked-example bar (D2) — chrome, not a page element.
+ *
+ * A `flex: none` sibling of `.screen-body` inside `.screen-card`, so it displaces
+ * the screen downward instead of overlaying it: a destructive control must never
+ * sit on top of the thing it might destroy. Rendered only while a worked-example
+ * session is open, so it occupies no space at all in the ordinary application.
+ *
+ * Treated as an INFORMATIONAL band rather than a warning: the scope is temporary
+ * and that is worth stating, but nothing is wrong, and the one destructive control
+ * in it carries its own quiet-danger treatment.
+ *
+ * The action row itself is `.page-actions` (screens.css), reused rather than
+ * duplicated — see the comment at its use site in `TutorialSessionBar.tsx`. That
+ * class already carries the measured ≤640px wrap behaviour these two controls
+ * need.
+ */
+.tutorial-session-bar {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 18px;
+  background: var(--surface-alt, var(--surface));
+  border-bottom: 1px solid var(--border);
+}
+
+.tutorial-session-icon {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--text-tertiary);
+}
+
+.tutorial-session-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.tutorial-session-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.tutorial-session-body {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* At a phone width the copy and the actions stack, so neither is squeezed into a
+   column too narrow to read — the same failure `.page-actions` was measured
+   overflowing in the page header at 375px. */
+@media (max-width: 640px) {
+  .tutorial-session-bar {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+  .tutorial-session-copy {
+    flex: 1 1 100%;
+  }
+}
+
+/*
+ * The worked-example session-failure notice.
+ *
+ * FIXED, not in the page flow, because it must be able to appear on any surface —
+ * including a record screen the reader was mid-way through when their session
+ * expired — without any screen having to make room for it. Bottom-anchored so it
+ * never covers the top bar or the surface's own heading, and capped against the
+ * viewport so it stays readable at a phone width and at 200% zoom.
+ */
+.tutorial-session-notice {
+  position: fixed;
+  z-index: 60;
+  left: 16px;
+  bottom: 16px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card, 8px);
+  box-shadow: var(--shadow-screen);
+}
+
+.tutorial-session-notice-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.tutorial-session-notice-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.tutorial-session-notice-body {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .tutorial-session-notice {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+    flex-wrap: wrap;
+  }
+}

@@ -1058,8 +1058,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 36 operations, 44 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(36);
+  it('describes the contract it claims to: 38 operations, 49 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(38);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1116,8 +1116,15 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // what the operation does, and folding it into the lead would have buried the one
     // sentence that explains why an execute can be refused. Operation count is
     // unchanged at 36.
-    expect(total).toBe(22576);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(46);
+    // 22,576 -> 23,850 and 36 -> 38 operations, 46 -> 49 paragraphs: the built-in
+    // examples moved out of the ordinary workspace and into an isolated
+    // worked-example session, so the contract publishes that session's lifecycle —
+    // `POST /api/tutorial/sessions` (3 paragraphs) and
+    // `DELETE /api/tutorial/sessions/{session_id}` (2 paragraphs). Net +1,274
+    // characters across the two new operations; no existing description changed, and
+    // the parity test named below proves that rather than leaving it asserted here.
+    expect(total).toBe(23850);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(49);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

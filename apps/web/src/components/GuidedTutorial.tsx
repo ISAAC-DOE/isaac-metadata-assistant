@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import {
+  acknowledgeTutorialSessionError,
   claimTargetResolution,
   closeCompletion,
   dismissTutorial,
@@ -18,6 +19,7 @@ import {
   startTutorial,
   tutorialReturnFocusTarget,
   useTutorialState,
+  type TutorialSessionError,
 } from '../lib/tutorialController';
 import {
   NO_TARGETS,
@@ -307,6 +309,24 @@ export function GuidedTutorial({
     if (!overlayOpen) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Escape') return;
+      /*
+       * A REAL MODAL DIALOG OWNS ESCAPE, and this guard is why.
+       *
+       * This listener is registered in the capture phase on `document`, and
+       * `AppShell` mounts this overlay before any screen or chrome inside it — so
+       * without this check the walkthrough would see Escape FIRST and call
+       * `stopPropagation`, and a modal opened over it (the guarded reset in the
+       * worked-example bar) could never be closed with Escape. Worse, the reader's
+       * Escape would silently do something they did not ask for: leave the
+       * walkthrough while a confirmation dialog was still on screen.
+       *
+       * Detected structurally rather than by asking each dialog to register
+       * itself: `aria-modal="true"` is exactly the contract "this thing is modal",
+       * the coach mark deliberately does not set it (it is not modal — the control
+       * it describes must stay operable), and any future modal that sets it is
+       * covered without touching this file.
+       */
+      if (document.querySelector('[aria-modal="true"]') !== null) return;
       e.stopPropagation();
       if (finished) {
         closeCompletion();
@@ -319,10 +339,28 @@ export function GuidedTutorial({
     return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [overlayOpen, finished, leave, releaseFocus]);
 
-  if (!overlayOpen) return null;
+  /*
+   * The session-failure notice. Rendered whether or not the overlay is open, because
+   * neither failure leaves an overlay: a failed create never opens one, and an expired
+   * session closes the one that was open.
+   *
+   * WHY IT IS HERE. `sessionError` was being set and rendered NOWHERE — the field's own
+   * comment claimed it was surfaced to the reader while the only visible consequence of
+   * a failed start was that pressing the button did nothing. This component is mounted
+   * by `AppShell` on every screen, so it is the one place a notice can reach a reader
+   * whose session expired while they were on a record surface.
+   */
+  const notice =
+    state.sessionError !== null ? (
+      <TutorialSessionNotice reason={state.sessionError} />
+    ) : null;
+
+  if (!overlayOpen) return notice;
 
   if (finished) {
     return (
+      <>
+        {notice}
       <CompletionPanel
         markRef={markRef}
         onGoToExperiments={() => {
@@ -332,6 +370,7 @@ export function GuidedTutorial({
         }}
         onReplay={() => startTutorial(tutorialReturnFocusTarget())}
       />
+      </>
     );
   }
 
@@ -343,6 +382,7 @@ export function GuidedTutorial({
 
   return (
     <>
+      {notice}
       {/* The announcement. Separate from the dialog's own accessible name so a
           step CHANGE is announced too — the dialog node is reused between steps,
           and a reused node's label is not re-read. */}
@@ -422,6 +462,45 @@ export function GuidedTutorial({
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * A worked-example session failed, said plainly.
+ *
+ * TWO REASONS, TWO SENTENCES, and neither over-claims — see the copy's own comment in
+ * `lib/labels.ts` for why the create case deliberately does not say "nothing was
+ * created". Both say what the reader most needs to know, which is the same thing in
+ * both cases: their own records were not touched.
+ *
+ * `role="alert"` because it appears in answer to something the reader did (pressing
+ * Start / Replay) or to something that happened to them (an expiry discovered at boot),
+ * and in neither case is there an overlay left to carry the message. It is dismissible
+ * so it does not outlive its own relevance; dismissing it retries nothing.
+ */
+function TutorialSessionNotice({ reason }: { reason: TutorialSessionError }) {
+  const title =
+    reason === 'expired'
+      ? LABELS.tutorialSessionExpiredTitle
+      : LABELS.tutorialSessionCreateFailedTitle;
+  const body =
+    reason === 'expired'
+      ? LABELS.tutorialSessionExpiredBody
+      : LABELS.tutorialSessionCreateFailedBody;
+  return (
+    <div className="tutorial-session-notice" role="alert" data-tutorial-notice={reason}>
+      <div className="tutorial-session-notice-copy">
+        <p className="tutorial-session-notice-title">{title}</p>
+        <p className="tutorial-session-notice-body">{body}</p>
+      </div>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={acknowledgeTutorialSessionError}
+      >
+        {LABELS.actionDismissTutorialNotice}
+      </button>
+    </div>
   );
 }
 
