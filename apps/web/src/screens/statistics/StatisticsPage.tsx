@@ -182,14 +182,21 @@ function announceRound(round: Round, lastSuccess: Date | null): string {
  * The lead sentence, which names WHICH workspace the figures below describe.
  *
  * IT USED TO NAME THE WRONG ONE, unconditionally: "the current example
- * workspace". The five built-in example records exist ONLY inside a
+ * workspace". The five built-in example records are created ONLY inside a
  * worked-example session — `apps/api/isaac_api/workspace.py:22-32` states it as a
  * structural property ("the NORMAL scope … is **never** auto-seeded: on a fresh
  * deployment it is empty and it stays empty until something explicitly creates a
  * record in it", against "a TUTORIAL scope … The five canonical worked-example
- * records live ONLY here") — so on every ordinary screen that sentence asserted
- * contents that are not there. Same defect class, and same correction, as the mode
- * chip: see `components/TopBar.tsx`, "THE SCOPE DECIDES THE LABEL".
+ * records live ONLY here") — so on every ordinary screen that sentence named this
+ * scope after content this build never puts there. Same defect class, and same
+ * correction, as the mode chip: see `components/TopBar.tsx`, "THE SCOPE DECIDES
+ * THE LABEL".
+ *
+ * KEEP THE QUALIFIER THE QUOTE CARRIES. This conclusion used to read "so on every
+ * ordinary screen that sentence asserted contents that are not there" — dropping
+ * "on a fresh deployment" and turning a statement about what the build DOES into
+ * one about what a directory HOLDS. Nothing here measures contents: there is no
+ * startup migration, so a workspace that already held the five still lists them.
  *
  * ONE SENTENCE CANNOT BE TRUE OF BOTH SCOPES, which is why this is a branch rather
  * than a rewording. The record read is keyed on the same `scope` value (see D1

@@ -265,14 +265,20 @@ const NO_ANALYTICS_SECTION = 'section[aria-labelledby="stats-no-analytics"]';
 const NO_ANALYTICS_HEADING = 'This Application Collects No Analytics';
 
 /*
- * THE LEAD SENTENCE NAMES A WORKSPACE, so it is a claim about contents and is
- * pinned in BOTH scopes.
+ * THE LEAD SENTENCE NAMES A WORKSPACE, so it names a scope after what is in it, and
+ * is pinned in BOTH scopes.
  *
  * It used to read "the current example workspace" unconditionally. The five
- * built-in example records exist only inside a worked-example session, and the
- * ordinary workspace is never auto-seeded, so on every ordinary screen that
- * sentence asserted contents that are not there — the same defect the mode chip was
- * corrected for, and `mode-chip.test.tsx` pins that correction the same way.
+ * built-in example records are created only inside a worked-example session, and the
+ * ordinary workspace is never auto-seeded, so on every ordinary screen that sentence
+ * named this scope after content this build never puts there — the same defect the
+ * mode chip was corrected for, and `mode-chip.test.tsx` pins that correction the
+ * same way.
+ *
+ * PHRASED AS WHAT THE BUILD DOES. This comment used to conclude "that sentence
+ * asserted contents that are not there", which is itself a claim about CONTENTS and
+ * is not measured anywhere: there is no startup migration, so a workspace that
+ * already held the five still lists them.
  *
  * Asserted on three axes per scope, because a single-scope test cannot catch the
  * defect: what the sentence says, what it must NOT say, and (for the ordinary

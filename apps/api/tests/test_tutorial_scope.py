@@ -24,11 +24,13 @@ unchanged truth core. No real data, no network, no database.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import shutil
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -160,6 +162,85 @@ def test_the_seeding_functions_still_take_no_default_session_id():
             f"{fn.__name__} has a default session_id, so a caller that omits it "
             "silently addresses whatever that default names"
         )
+
+
+def test_create_experiment_has_no_caller_in_the_api_package():
+    """SOURCE-LEVEL. The refusals above do NOT close ``create_experiment``, and what
+    keeps it shut is the absence of a caller — a property no behavioural test can see.
+
+    ``create_experiment(title, source, draft, id=SEED_READY_ID, session_id=None)``
+    writes a canonical record into the ORDINARY root: ``rid = id or new_record_id()``
+    (``workspace.py``), so a fresh ULID is minted only when no explicit id is given,
+    and then ``exp.save()`` lands under ``scope_root(None)`` == ``workspace_root()``.
+    It is not one of the three seeding functions, so ``InvalidTutorialSession`` never
+    fires for it. That path is reachable in-process today.
+
+    So the product claim carried on three surfaces — nothing in this build adds a
+    built-in example record to the ordinary workspace (the mode chip's accessible name,
+    the OpenAPI ``tutorial`` tag description, the Statistics lead sentence) — does not
+    rest on the ULID default, which was the reason two of those comments gave and it
+    was wrong. It rests on something stronger: this build exposes no record-creation
+    surface at all. There is no ``POST /api/experiments``, and nothing under
+    ``apps/api/isaac_api/`` calls ``create_experiment``.
+
+    A future route taking a client-supplied id would falsify the claim with the entire
+    suite green, which is exactly the failure mode this file was written to stop. This
+    test makes adding such a caller a deliberate, reviewed act: whoever adds one has to
+    re-derive the three product strings first.
+
+    TESTS ARE DELIBERATELY NOT SCANNED. They are the function's legitimate users
+    (``test_versioning``, ``test_reset*``, ``test_tutorial_ordinary_preservation`` and
+    this file) and they build ordinary records on purpose.
+    """
+    package = Path(ws.__file__).resolve().parent
+    sources = sorted(p for p in package.rglob("*.py") if "__pycache__" not in p.parts)
+    # NON-TRIVIAL: a mis-rooted or empty scan would satisfy the assertion below without
+    # having read anything, so the scan proves its own reach first.
+    assert len(sources) >= 5, f"expected the isaac_api package, scanned {len(sources)} files"
+    assert package / "routes.py" in sources
+    assert package / "workspace.py" in sources
+
+    defined_in: list[str] = []
+    callers: list[str] = []
+    for path in sources:
+        rel = f"isaac_api/{path.relative_to(package).as_posix()}"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "create_experiment"
+            ):
+                defined_in.append(f"{rel}:{node.lineno}")
+                continue
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            # ``create_experiment(...)`` and ``ws.create_experiment(...)`` alike; the
+            # name is what a reader greps for either way.
+            called = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if called == "create_experiment":
+                callers.append(f"{rel}:{node.lineno}")
+
+    # A rename would make every "no caller" assertion vacuously true, so the target of
+    # the guard is asserted to still exist.
+    assert defined_in, (
+        "create_experiment is no longer defined in the isaac_api package, so this "
+        "guard is asserting the absence of callers of nothing — re-point it"
+    )
+    assert callers == [], (
+        f"create_experiment is called from the isaac_api package at {callers}. With an "
+        "explicit `id` and `session_id=None` it writes a canonical record into the "
+        "ordinary workspace, which falsifies the claim made on the mode chip, the "
+        "OpenAPI `tutorial` tag description and the Statistics lead sentence that "
+        "nothing in this build adds a built-in example record there. If the caller is "
+        "intended, re-derive those three strings in the same change."
+    )
 
 
 # =============================================================================

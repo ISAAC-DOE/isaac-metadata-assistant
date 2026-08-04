@@ -148,6 +148,18 @@ describe('worked-example bar — what it may claim', () => {
     expect(copy).toMatch(/no request made outside it reaches them/i);
     expect(copy).toMatch(/My Experiments included/i);
     expect(copy).toMatch(/discarded when the walkthrough ends/i);
+    /*
+     * THE SCOPE OF THE "IS SHOWING THIS WALKTHROUGH" CLAIM, WHICH WAS UNPINNED.
+     *
+     * The sentence said "every screen in the app", and `AppShell` does mount the bar
+     * everywhere — but Concepts, Schema Reference, Project Memory, the API docs and the
+     * Governance policy tab show neither scope's records, so that was an over-claim. It
+     * was corrected to "every screen that shows records", and reverting the correction
+     * left the whole suite green. Both directions, so the narrower phrase cannot be
+     * widened again silently.
+     */
+    expect(copy).toMatch(/every screen that shows records/i);
+    expect(copy).not.toMatch(/every screen in the app/i);
   }, 30000);
 });
 

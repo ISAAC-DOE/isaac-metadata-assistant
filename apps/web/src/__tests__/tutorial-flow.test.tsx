@@ -614,6 +614,26 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     // actually describes it, so the narrowing is not a silent omission.
     expect(panel.textContent).toMatch(/assistant panel/i);
     expect(panel.textContent).toMatch(/Data & Privacy/i);
+    /*
+     * THE `resume_failed` EXCEPTION, WHICH WAS UNPINNED.
+     *
+     * "Both are forgotten when the walkthrough ends" was an unqualified absolute, and
+     * `tutorialController.resumeTutorialSession` makes it false in exactly one branch:
+     * on an unidentifiable probe failure it drops the scope but KEEPS the session
+     * pointer, so a reload is a real retry (`tutorial-session-lifecycle.test.tsx` · B4).
+     * The disclosure of that exception carried no test, so deleting it left the suite
+     * green while the copy went back to over-promising. Pinned in both directions: the
+     * exception must be stated, and the bare absolute must not return.
+     */
+    expect(panel.textContent).toMatch(
+      /forgotten when the walkthrough ends\s*—\s*with one deliberate exception/i,
+    );
+    expect(panel.textContent).toMatch(/fails for a reason it cannot identify/i);
+    expect(panel.textContent).toMatch(/that note is kept/i);
+    expect(panel.textContent).toMatch(
+      /only route back into a walkthrough that may still be open/i,
+    );
+    expect(panel.textContent).not.toMatch(/forgotten when the walkthrough ends[.,;]/i);
   });
 
   /*

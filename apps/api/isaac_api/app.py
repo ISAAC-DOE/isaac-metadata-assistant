@@ -68,11 +68,17 @@ def create_app() -> FastAPI:
         #
         # AND THE WORKSPACE IS NO LONGER AN "EXAMPLE" ONE. The five built-in example
         # records used to be materialised into the ordinary workspace on every read;
-        # they now exist only inside a worked-example session, and the ordinary
-        # workspace is empty until something explicitly creates a record in it. So
-        # "a synthetic-only example workspace" named contents the ordinary workspace
-        # does not have — the same defect already corrected in the mode chip and on
-        # the Statistics page. Both scopes are now named, because both exist.
+        # they are created only inside a worked-example session, and on a FRESH
+        # deployment the ordinary workspace is empty and stays empty until something
+        # explicitly creates a record in it. So "a synthetic-only example workspace"
+        # named this scope after content this build never puts there — the same defect
+        # already corrected in the mode chip and on the Statistics page.
+        #
+        # NOTE THE "on a fresh deployment" QUALIFIER, which this comment previously
+        # dropped: the claim is about what the build DOES, not about what the directory
+        # holds. ``list_experiments(None)`` enumerates whatever is on disk and there is
+        # no startup migration, so a workspace that already held the five still lists
+        # them. Both scopes are now named, because both exist.
         summary=(
             "FastAPI wrapper over the deterministic isaac_records core: a "
             "synthetic-only workspace, isolated worked-example sessions holding the "

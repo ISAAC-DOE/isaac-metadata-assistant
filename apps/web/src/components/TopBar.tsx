@@ -179,10 +179,19 @@ export const CHIP_CLAIMS_ALWAYS =
  * REFUSE a `None` session id at runtime with `InvalidTutorialSession` — not merely
  * "require" one, which was the over-reading: `scope_root(None)` returns
  * `workspace_root()` silently, and an explicit `session_id=None` was measured writing a
- * canonical record into the ordinary root before the refusal was added. There is no other
- * producer of a built-in example: `POST /api/uploads` is an unconditional 403, and record
- * creation mints a fresh ULID rather than a canonical id
+ * canonical record into the ordinary root before the refusal was added
  * (`apps/api/tests/test_tutorial_scope.py::test_the_seeding_functions_refuse_an_unscoped_call`).
+ *
+ * THERE IS NO OTHER PRODUCER OF A BUILT-IN EXAMPLE, and the reason given here was wrong.
+ * `POST /api/uploads` is an unconditional 403 — that part holds. But "record creation mints
+ * a fresh ULID rather than a canonical id" is false as stated: `create_experiment` does
+ * `rid = id or new_record_id()` (`apps/api/isaac_api/workspace.py:608`), so it mints a fresh
+ * ULID only when no explicit id is given, and `create_experiment(..., id=SEED_READY_ID,
+ * session_id=None)` writes a canonical record into the ordinary root. The real reason is
+ * stronger: this build exposes no record-creation surface at all — there is no
+ * `POST /api/experiments`, and `create_experiment` has no caller under
+ * `apps/api/isaac_api/`, pinned by
+ * `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package`.
  *
  * DO NOT REPLACE THIS WITH AN ABSENCE CLAIM WITHOUT MEASURING ONE. The honest way to
  * assert absence would be to read the scope's count, which this chip deliberately does

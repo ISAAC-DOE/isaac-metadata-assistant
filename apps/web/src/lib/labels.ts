@@ -153,10 +153,18 @@ export const LABELS = {
    *
    * DELIBERATELY NEUTRAL, and this replaces "Example workspace" — which was a
    * FALSE label here, not merely a stale one. The five built-in examples used to
-   * be materialised into the ordinary workspace on every read; they now exist only
-   * inside a worked-example session, so the ordinary workspace contains no
-   * examples at all. A chip on every ordinary screen reading "Example workspace"
-   * asserted contents that are not there.
+   * be materialised into the ordinary workspace on every read; they are created
+   * only inside a worked-example session, so on every ordinary screen "Example
+   * workspace" named this scope after content this build never puts there.
+   *
+   * PHRASED AS WHAT THE BUILD DOES, never as what the directory holds. "The
+   * ordinary workspace contains no examples at all" is what this comment used to
+   * say, and it is a claim about CONTENTS that nothing measures:
+   * `list_experiments(None)` enumerates whatever is on disk and there is no startup
+   * migration, so a workspace that already held the five still lists them. See
+   * `ORDINARY_ONLY` in `components/TopBar.tsx`, where two successive versions of
+   * that contents claim had to be retired, and note that the second was written by
+   * a reader of the first correction.
    *
    * A chip is still rendered rather than nothing, for two reasons that are about
    * truth rather than decoration: it is the ONLY surface that reports an

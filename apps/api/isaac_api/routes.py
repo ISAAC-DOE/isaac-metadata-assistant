@@ -224,8 +224,20 @@ OPENAPI_TAGS: list[dict] = [
             # they were there. What is genuinely enforced is a REFUSAL, not merely a
             # required parameter: ``_materialise_seed``, ``reset_to_canonical_seed`` and
             # ``ensure_tutorial_seeded`` each raise ``InvalidTutorialSession`` on a
-            # ``None`` session id, so no code path in this build can create an example
-            # record outside a session. That is what is stated. ("Requires a session_id"
+            # ``None`` session id, so no SEEDING path can create an example record
+            # outside a session. That is what is stated.
+            #
+            # "NO CODE PATH IN THIS BUILD CAN" is what this comment used to claim, and it
+            # was too strong: ``create_experiment(title, source, draft, id=SEED_READY_ID,
+            # session_id=None)`` is exactly such a path — ``rid = id or new_record_id()``
+            # (``workspace.py:608``), then ``exp.save()`` into ``scope_root(None)``. The
+            # sentence above survives for a DIFFERENT and stronger reason: this build
+            # exposes no record-creation surface at all. There is no ``POST
+            # /api/experiments``, and ``create_experiment`` has no caller anywhere under
+            # ``apps/api/isaac_api/`` — pinned by
+            # ``test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package``,
+            # so a future route that took a client-supplied id could not be added
+            # silently. ("Requires a session_id"
             # was the earlier justification and it was too weak to carry the sentence:
             # ``scope_root(None)`` returns ``workspace_root()`` silently, and an explicit
             # ``session_id=None`` was measured writing a canonical record into the

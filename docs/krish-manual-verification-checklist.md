@@ -77,8 +77,10 @@ Upload in manifest order. For each: click **Upload JSON File**, pick the file, c
    PASS with no signal at all.
 2. **File 5 `invalid-date-time.json`** → **PASS**. Also correct-and-a-finding: declared
    `format` is not enforced. Do **not** "fix" the file. This is Dean question **Q20**.
-3. **Every JSON file** shows an advisory `NO_LINKS`. Expected — each declares
-   `links: []`, which the schema permits.
+3. **Every JSON file that parses** shows an advisory `NO_LINKS`. Expected — each declares
+   `links: []`, which the schema permits. File 15 `malformed-json.json` is the exception and
+   is not a failure of this check: it cannot be parsed, so it is refused as unreadable with
+   no verdict card and therefore no advisories at all.
 
 Also confirm, once each: no stack trace or server path in any message; switching files
 clears the previous result; keyboard-only upload works (Tab to the control, Enter);
@@ -109,8 +111,10 @@ in that workspace at all — they exist only inside a **worked-example session**
    `synthetic` into ⌘K. Expect **five** hits. If they show *"Synthetic XANES campaign …
    committed demo fixtures"* or a filename `mock_campaign.csv`, that is **known and NOT
    yet fixed** — see §7, and it is not a regression. Run this **inside** the walkthrough:
-   run in the ordinary workspace it returns zero hits because there is nothing there to
-   search, and zero hits would read as the defect being fixed.
+   run in the ordinary workspace it returns zero **workspace** hits because there are no
+   records there to search (project-memory leads still appear — ⌘K renders both groups, so
+   you get "No workspace matches." above a list of memory leads), and zero workspace hits
+   would read as the defect being fixed.
 
 ---
 
@@ -124,8 +128,12 @@ while a walkthrough is open. Complete §2b first.)
 1. Open the dialog. It must state a **derived** count of what would be lost
    (confirmed answers / examples carrying progress / exported records) — real numbers,
    not "some data".
-2. The typed phrase is still **`RESET EXAMPLE WORKSPACE`** (it used to be
-   `RESET SYNTHETIC DEMO`). The dialog's own title is **Reset the Worked Example**.
+2. The dialog arms on typing **`RESET`** — short, and shown in the field's own label
+   ("Type RESET to confirm this destructive reset"). The longer
+   `RESET EXAMPLE WORKSPACE` is the **backend's** phrase, sent internally on execute and
+   deliberately never surfaced; you never type it. (This step used to tell you to type
+   the long phrase, which leaves the confirm button disabled and stalls §3 at its most
+   important step.) The dialog's own title is **Reset the Worked Example**.
 3. Read the disclosure. It must say the ordinary workspace is **not** in this scope and
    that this control cannot reach it — and it must say that the rows on My Experiments
    **are** what gets reset. If it claims "Nothing in My Experiments is in this scope",
