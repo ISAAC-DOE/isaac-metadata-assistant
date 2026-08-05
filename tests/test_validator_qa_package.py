@@ -186,6 +186,98 @@ def test_the_archive_contains_every_fixture_and_the_user_facing_documents():
     )
 
 
+def test_the_archive_contains_NOTHING_BEYOND_what_a_human_needs():
+    """No extra entry, named or unnamed.
+
+    The test above is a SUBSET check (`required <= names`) plus two named
+    exclusions, so it passes with an arbitrary extra file in the archive as long
+    as that file is neither the archive itself nor `ENGINEERING-NOTES.md`. This
+    one pins the SET, which is the property that actually matters: the archive is
+    the only thing a human downloads, so anything inside it is something they
+    were handed — and nothing else in the repository re-measures a file that got
+    in by accident.
+    """
+    with zipfile.ZipFile(ARCHIVE) as zf:
+        names = set(zf.namelist())
+    expected = {e["filename"] for e in ENTRIES} | {"UPLOAD-GUIDE.md", "MANIFEST.json"}
+    assert names == expected, (
+        "the archive's contents are not exactly the eighteen files plus the two "
+        f"user-facing documents.\n  unexpected: {sorted(names - expected)}\n"
+        f"  missing:    {sorted(expected - names)}"
+    )
+    assert not any("/" in n for n in names), (
+        f"the archive contains a directory entry or nested path: "
+        f"{sorted(n for n in names if '/' in n)}. It is built flat so that a human "
+        "who unzips it gets the files themselves, not a folder to dig through."
+    )
+
+
+def test_the_archive_metadata_is_normalised_so_the_build_is_reproducible():
+    """The archive rebuilds to identical bytes — enforced via its metadata.
+
+    WHY THIS IS NOT A sha256 PIN. A pinned archive digest would be the most
+    direct assertion and it would be the wrong one: a ZIP's bytes include DEFLATE
+    output, and DEFLATE is a property of the linked zlib rather than of the ZIP
+    format. The same content at the same nominal level can compress to a
+    different (perfectly valid) byte stream under a different zlib, so a digest
+    pin would fail on a machine where nothing was wrong. Verified locally: the
+    committed archive reproduces bit-for-bit at zlib's DEFAULT level and differs
+    at levels 1 and 9.
+
+    What IS portable is the metadata normalisation that makes the build
+    reproducible in the first place, and it is the part a careless rebuild
+    destroys. `zip -r` from a shell, or `zipfile` without an explicit `ZipInfo`,
+    stamps every entry with the current wall-clock time and the umask of whoever
+    ran it — so the archive's bytes change on every rebuild while its contents do
+    not, and the checksum quoted to an operator in
+    `docs/krish-manual-verification-checklist.md` becomes noise.
+
+    The recipe these assertions describe: entries sorted by name; each
+    `ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))` with
+    `external_attr = 0o644 << 16`, `create_system = 3` and `ZIP_DEFLATED` at
+    zlib's default level; no extra fields, no comments, no directory entries.
+    """
+    with zipfile.ZipFile(ARCHIVE) as zf:
+        infos = zf.infolist()
+        assert zf.comment == b"", "the archive carries a comment, which a rebuild would not"
+
+    assert [i.filename for i in infos] == sorted(i.filename for i in infos), (
+        "the archive's entries are not in sorted order, so two rebuilds from the "
+        "same directory can disagree — directory iteration order is not stable "
+        "across filesystems"
+    )
+
+    epoch = (1980, 1, 1, 0, 0, 0)
+    stamped = {i.filename: i.date_time for i in infos if i.date_time != epoch}
+    assert not stamped, (
+        "these entries do not carry the fixed ZIP epoch, so the archive was built "
+        f"with wall-clock timestamps and cannot rebuild to the same bytes: {stamped}"
+    )
+
+    modes = {i.external_attr >> 16 for i in infos}
+    assert modes == {0o644}, (
+        f"entry permission bits are not uniformly 0644: {[oct(m) for m in sorted(modes)]}. "
+        "A umask-dependent mode makes the archive's bytes depend on who built it."
+    )
+
+    assert {i.compress_type for i in infos} == {zipfile.ZIP_DEFLATED}, (
+        "entries are not uniformly DEFLATE-compressed; a mixed archive is a sign "
+        "of a hand-edited or appended-to file rather than a clean rebuild"
+    )
+    assert {i.create_system for i in infos} == {3}, (
+        "entries do not uniformly declare create_system 3 (Unix), so the archive "
+        "would rebuild differently on a different platform"
+    )
+
+    decorated = {
+        i.filename: (len(i.extra), i.comment) for i in infos if i.extra or i.comment
+    }
+    assert not decorated, (
+        "these entries carry extra fields or per-entry comments, which macOS "
+        f"archive tools add and which are not reproducible: {decorated}"
+    )
+
+
 # --- the measurement ----------------------------------------------------------
 
 
