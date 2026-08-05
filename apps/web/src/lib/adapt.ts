@@ -262,21 +262,36 @@ export const NO_SERIES_COVERAGE_NOTE =
  * `.statusbar` is a fixed 52px single-line flex row (`components/chrome.css`) with
  * no wrap: three signal segments plus a right tail already fill it, and dropping a
  * 74-character sentence in squeezes the other two segments rather than adding a
- * line. So the footer shows the consequence clause — the half that qualifies the
- * NUMBER standing next to it — and carries the whole sentence in an `.sr-only`
- * span and a `title`, so nothing is only available to a hovering mouse.
+ * line. So the footer shows ONE clause and carries the whole sentence in an
+ * `.sr-only` span and a `title`, so nothing is only available to a hovering mouse.
+ *
+ * WHICH CLAUSE, AND WHY IT CHANGED (F6). This was the CONSEQUENCE clause, "no
+ * series target is counted", on the reasoning that it is the half that qualifies
+ * the number. Read alone — which is exactly how it renders, immediately after
+ * `evidence 32/32 · Coverage` — it has no antecedent, so it reads as "the coverage
+ * metric does not count series": a claim about the METRIC, and the opposite of
+ * `CoverageBadge`'s "Counted from what this record contains: … series …". Both
+ * strings render simultaneously on Export Readiness, so an ambiguity that inverts
+ * one of them is not survivable. The footer therefore shows the OBSERVATION clause,
+ * which carries its own subject and cannot be read as a statement about the metric.
+ * It is 41 characters against the consequence's 27 and the full sentence's 74 — the
+ * reason for shortening at all is the fixed row, and this is still 33 characters
+ * shorter than the sentence. That trade-off is a visual judgement, and no test in
+ * this repo measures it: the seeded records all carry a series, so no e2e surface
+ * renders this segment at any viewport.
  *
  * The split is on the sentence's own `, so ` hinge and FAILS SAFE: if a future
  * edit removes that hinge, this falls back to the full sentence (visually long in
  * the footer, still true) rather than to a truncated or empty string.
  * `apps/api/tests/test_coverage_denominator_disclosure.py` pins that both halves
- * of the sentence survive the derivation.
+ * of the sentence survive the derivation, and that the half shown here keeps a
+ * subject.
  */
 export const NO_SERIES_COVERAGE_NOTE_SHORT = ((): string => {
   const hinge = ', so ';
   const i = NO_SERIES_COVERAGE_NOTE.indexOf(hinge);
   if (i < 0) return NO_SERIES_COVERAGE_NOTE;
-  return NO_SERIES_COVERAGE_NOTE.slice(i + hinge.length).replace(/\.$/, '');
+  return NO_SERIES_COVERAGE_NOTE.slice(0, i);
 })();
 
 /**

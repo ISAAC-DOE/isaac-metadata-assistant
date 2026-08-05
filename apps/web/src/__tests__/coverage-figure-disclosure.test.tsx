@@ -30,6 +30,18 @@
  * same `detail.workflow`, said "Not ready to export yet". §4 renders the screen
  * and asserts the two strings cannot contradict.
  *
+ * §4 ALSO CARRIES TWO CORRECTIONS TO ITSELF, because its first version pinned
+ * claims that were false in the same way as the code it was guarding:
+ *  - F3: it required `/^Draft complete/` for EVERY step, justified as "pending==0
+ *    establishes that every value is confirmed". It does not — `draft_ok` is a
+ *    separate computation, and the `review_evidence` step exists precisely for
+ *    `pending_count == 0` with the draft validator FAILING. The per-step strings
+ *    are now pinned individually, plus the property that a step whose banner denies
+ *    the evidence checks carries no completion claim.
+ *  - F2: nothing here looked at the phase DOT, which was `'ready'` — painted with
+ *    `--pass-solid`, the reserved verdict hue — beside the corrected sentence. Two
+ *    tests now cover it, one on the derivation and one on the rendered class.
+ *
  * WHAT THIS FILE CANNOT CATCH, stated plainly.
  *
  *  - §1–§2 check the three NAMED surfaces (`StatusBar`, and via `signals.test.tsx`
@@ -43,9 +55,12 @@
  *    the footer is truthful for a step the backend has not shipped yet; an
  *    unrecognised `current_step` deliberately produces a phase with NO readiness
  *    claim, which is asserted, but "no claim" is the fallback, not a proof.
- *  - Nothing here checks colour, contrast or layout. `.statusbar` is a fixed 52px
- *    single-line row; that the short form fits and the full sentence would not is
- *    a visual judgement no assertion in this file makes.
+ *  - Nothing here checks a computed colour, contrast or layout. The dot test
+ *    asserts a CLASS NAME (`dot-attention`, never `dot-ready`); that the class maps
+ *    to a non-reserved token is `styles/base.css`'s to keep, and jsdom loads no CSS
+ *    so no assertion here could read the painted value. Likewise `.statusbar` is a
+ *    fixed 52px single-line row: that the short form fits and the full sentence
+ *    would not is a visual judgement no assertion in this file makes.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -54,7 +69,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { StatusBar } from '../components/StatusBar';
 import { AppRoutes } from '../App';
-import { draftPhaseFromWorkflow } from '../screens/RecordWorkbench';
+import { draftPhaseDotFromWorkflow, draftPhaseFromWorkflow } from '../screens/RecordWorkbench';
 import {
   NO_MEASUREMENT_SERIES_CODE,
   NO_SERIES_COVERAGE_NOTE,
@@ -201,11 +216,22 @@ describe('C1 §3 · the short footer form is derived from the one shared sentenc
     expect(NO_SERIES_COVERAGE_NOTE_SHORT.length).toBeLessThan(NO_SERIES_COVERAGE_NOTE.length);
   });
 
-  it('keeps the clause that qualifies the NUMBER, which is the half the footer needs', () => {
-    // The footer stands beside `evidence 32/32`; the consequence clause is what
-    // tells a reader the denominator excludes a series. Asserted on content, not
-    // on the exact sentence, so rewording the sentence is not gratuitously broken.
-    expect(NO_SERIES_COVERAGE_NOTE_SHORT).toContain('no series target is counted');
+  it('keeps a SUBJECT, so the footer form cannot be read as a claim about the metric', () => {
+    // F6 — THIS ASSERTION USED TO PIN THE OPPOSITE HALF, and pinned an ambiguity.
+    // It required the CONSEQUENCE clause, `no series target is counted`, on the
+    // reasoning that it is the half qualifying the number. Rendered alone, right
+    // after `evidence 32/32 · Coverage`, that clause has no antecedent and reads as
+    // "the coverage metric does not count series" — a claim about the METRIC, and
+    // the exact opposite of `CoverageBadge`'s "Counted from what this record
+    // contains: … series …", which renders on the same Export Readiness screen at
+    // the same time. So the footer now shows the OBSERVATION clause, which carries
+    // its own subject. Asserted on the subject rather than on the exact wording, so
+    // rewording the sentence is not gratuitously broken.
+    expect(NO_SERIES_COVERAGE_NOTE_SHORT.toLowerCase()).toContain('this record');
+    expect(NO_SERIES_COVERAGE_NOTE_SHORT.toLowerCase()).toContain('no measurement series');
+    // and it must NOT be the bare consequence, which is the form this test pinned
+    // before and the reason the footer was ambiguous
+    expect(NO_SERIES_COVERAGE_NOTE_SHORT).not.toBe('no series target is counted');
     expect(NO_SERIES_COVERAGE_NOTE_SHORT).not.toMatch(/\.$/);
   });
 });
@@ -291,18 +317,77 @@ describe('I2 §4 · the Review phase line comes from the server workflow, not fr
       null,
       { ordered_steps: [], current_step: null, record_rev: 3 },
     ] as (ApiWorkflow | null)[]) {
-      expect(draftPhaseFromWorkflow(degenerate)).toBe('Draft complete');
+      expect(draftPhaseFromWorkflow(degenerate)).toBe('No open questions');
     }
   });
 
-  it('every phase this helper can produce starts from the same confirmed-values claim', () => {
-    // The one thing pending==0 DOES establish is that every value is confirmed;
-    // what it does not establish is export readiness. So each phase keeps the
-    // former and only `export` adds the latter.
-    for (const id of ['load_record', 'review_evidence', 'review_export_readiness', 'export']) {
-      expect(
-        draftPhaseFromWorkflow({ ordered_steps: [], current_step: id, record_rev: 3 }),
-      ).toMatch(/^Draft complete/);
+  it('no step whose banner denies the evidence checks carries a completion claim', () => {
+    // F3 — WHAT THIS TEST USED TO DO. It asserted `/^Draft complete/` for EVERY
+    // step, justified in a comment as "the one thing pending==0 DOES establish is
+    // that every value is confirmed". `pending_count` does not establish that.
+    // `derive_workflow` leaves `review_evidence` current exactly when
+    // `pending_count == 0 and draft_ok` is false, `draft_ok` is
+    // `validate_draft(draft).ok`, and the two counts are computed independently — an
+    // evidence-less finalized field is a draft-validator error that never appears in
+    // `pending`. So the old test locked a false claim in: it required the string
+    // "Draft complete" in the one state where the no-guessing validator is FAILING
+    // and the banner on the same screen says the evidence checks aren't passing.
+    // Pinned per step, so a future edit cannot reintroduce the prefix by accident.
+    const phase = (id: string) =>
+      draftPhaseFromWorkflow({ ordered_steps: [], current_step: id, record_rev: 3 });
+
+    expect(phase('export')).toBe('Draft complete · ready to export');
+    expect(phase('review_export_readiness')).toBe('Draft complete · review export readiness');
+    // the banner's own heading for this step (WorkflowProgressBanner `contentFor`)
+    expect(phase('review_evidence')).toBe('Evidence review needed');
+    expect(phase('load_record')).toBe('No open questions');
+    expect(phase('a_step_this_build_does_not_know')).toBe('No open questions');
+
+    // The property, asserted rather than left to the per-step strings: the steps
+    // whose banner copy denies something is passing may not claim completion. Both
+    // `derive_workflow` steps that leave the draft validator failing or the official
+    // dry-run failing are listed; `review_export_readiness` is NOT among them,
+    // because there the server reports `draft_ok` true and only the official schema
+    // check is outstanding — which the phase names instead of claiming.
+    for (const blocked of ['review_evidence']) {
+      expect(phase(blocked).toLowerCase()).not.toContain('complete');
+      expect(phase(blocked).toLowerCase()).not.toContain('ready to export');
     }
+  });
+
+  it('the phase DOT comes from the same derivation, and `ready` is not among its tones', () => {
+    // F2 — the sentence was corrected and the COLOUR was left making the same claim
+    // one line away: `phaseDot` was `pending.length > 0 ? 'attention' : exported ?
+    // 'idle' : 'ready'`, and `.dot-ready` is `var(--pass-solid)`, the reserved
+    // validation-verdict hue (styles/tokens.css, "signal 1 … RESERVED, hard gate").
+    // The tones now mirror WorkflowProgressBanner's for the same step ids.
+    const dotTone = (id: string) =>
+      draftPhaseDotFromWorkflow({ ordered_steps: [], current_step: id, record_rev: 3 });
+
+    expect(dotTone('export')).toBe('progress');
+    expect(dotTone('review_export_readiness')).toBe('attention');
+    expect(dotTone('review_evidence')).toBe('attention');
+    expect(dotTone('a_step_this_build_does_not_know')).toBe('idle');
+    expect(draftPhaseDotFromWorkflow(null)).toBe('idle');
+    // No step, known or unknown, may return the reserved-hue tone. `StatusBar`'s
+    // `phaseDot` union also no longer contains `'ready'`, so a regression here is a
+    // type error as well — this asserts the derivation, tsc asserts the prop.
+    for (const id of ['load_record', 'export', 'review_export_readiness', 'review_evidence', 'x']) {
+      expect(dotTone(id)).not.toBe('ready');
+    }
+  });
+
+  it('renders that dot in the DOM, not only in the helper', async () => {
+    // The rendered class, because a literal `dot-ready` written into the markup
+    // would satisfy the helper test above. The failing-dry-run record: the banner
+    // denies readiness, so the disc beside the phase must not be pass-green.
+    stubFetchRoutes(reviewRoutes(false));
+    const { findByText, getByLabelText } = renderReview();
+    await findByText('Not ready to export yet');
+    const phaseEl = getByLabelText('Trust readout').querySelector('.statusbar-phase');
+    const dot = phaseEl?.querySelector('.dot');
+    expect(dot).not.toBeNull();
+    expect(dot?.className).not.toContain('dot-ready');
+    expect(dot?.className).toContain('dot-attention');
   });
 });

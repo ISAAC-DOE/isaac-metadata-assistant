@@ -335,10 +335,42 @@ function LoadedCompletion({
 
   const statusBar =
     remaining === 0 ? (
+      /*
+       * F4 — WHAT WAS FALSE HERE, and it was the stronger version of the defect the
+       * Review screen's footer was corrected for. This read
+       * `phase="All blockers resolved · ready to export"`, `phaseDot="ready"`,
+       * `note="Every field is confirmed or resolved — export is now unlocked."` on
+       * the sole basis of `remaining === pending.length === 0`. "Export is now
+       * unlocked" is measurably false: `POST /api/experiments/{id}/export` runs
+       * `export_draft` and returns `ok: false` having written NOTHING when the
+       * official report fails (`apps/api/isaac_api/routes.py`), independently of the
+       * pending count — the canonical seed `…SEED0000000004` is exactly that record
+       * (full answers minus the descriptor's required `uncertainty`, so pending 0
+       * and the dry-run failing). And the reader reaches Review THROUGH this screen,
+       * so the corrected footer there was preceded by a stronger uncorrected claim
+       * here.
+       *
+       * WEAKENED TO WHAT `pending.length === 0` ESTABLISHES rather than fetched:
+       * `detail.workflow` is on this screen, but it is the value from the parent's
+       * last load, and this branch is reached by answering the last question in
+       * THIS component's local state (`pending` comes from the answer responses),
+       * so that workflow object can be a revision behind the sentence it would be
+       * justifying. The honest claim from local state alone is that no confirmation
+       * questions remain, plus a statement of what decides export — which is what
+       * the body copy of the panel below has always said.
+       *
+       * The dot is `progress`, not `ready`: `.dot-ready` is `var(--pass-solid)`,
+       * reserved for the validation verdict (see `StatusBar`'s `phaseDot` type).
+       *
+       * The note stays at or under the length of the false one it replaces (61 vs 62
+       * characters, measured): the sibling branch below records that a longer note
+       * wrapped at the 640px/200%-zoom layout viewport and pushed the status bar 1px
+       * past the screen card.
+       */
       <StatusBar
-        phase="All blockers resolved · ready to export"
-        phaseDot="ready"
-        note="Every field is confirmed or resolved — export is now unlocked."
+        phase="All blockers resolved"
+        phaseDot="progress"
+        note="The official ISAAC schema check runs next and decides export."
       />
     ) : (
       // R1b — the note used to read "Export unlocks automatically once every field
@@ -618,8 +650,10 @@ function LoadedCompletion({
     </div>
   );
 
-  // Finished: 0 remaining -> ready to export (route to S6). Also covers the
-  // "0 blockers on arrival" case.
+  // Finished: 0 remaining -> the official schema check is what remains (route to
+  // S6). Also covers the "0 blockers on arrival" case. Deliberately no longer
+  // described as "-> ready to export": `pending_count == 0` is not export
+  // readiness (see the F4 note on `statusBar` above).
   if (remaining === 0) {
     return shell(
       <>
@@ -633,10 +667,19 @@ function LoadedCompletion({
         {answeredRows}
         {editImpactNote}
         {answerNotAppliedNote}
+        {/* F4, second site on this screen. The title read "This record is ready to
+            export." — the same claim the footer below it was corrected for, from the
+            same basis (`remaining === 0`), and it renders SIMULTANEOUSLY with that
+            footer, so leaving it would have made the screen contradict itself an inch
+            apart. The body sentence already stated the truthful sequence and is
+            unchanged; the title now claims only what the empty pending list
+            establishes. The disc is `.dot-progress` for the reason in
+            `styles/base.css`: `.dot-ready` is the reserved validation-verdict hue and
+            this is workflow progress. */}
         <div className="completion-done" role="status">
-          <span className="dot dot-ready" aria-hidden="true" />
+          <span className="dot dot-progress" aria-hidden="true" />
           <div>
-            <div className="completion-done-title">This record is ready to export.</div>
+            <div className="completion-done-title">Nothing is left for you to confirm.</div>
             <p className="completion-done-text">
               Every blocker the system refused to guess is now confirmed or resolved. The official
               schema check runs next, on the Ready to Export screen.

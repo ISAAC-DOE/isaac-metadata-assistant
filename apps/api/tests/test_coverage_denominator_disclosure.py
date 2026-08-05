@@ -405,6 +405,52 @@ def _forbidden_verdict_words() -> tuple[str, ...]:
     return words
 
 
+def _declared_code() -> str:
+    """The VALUE of `NO_MEASUREMENT_SERIES_CODE`, parsed out of `adapt.ts`.
+
+    Parsed rather than imported because the declaration is TypeScript — the same
+    reason `_forbidden_verdict_words` gives. The parse is deliberately strict: the
+    declaration must be a bare single-quoted literal, so a computed or concatenated
+    value fails here loudly instead of yielding something that merely looks parsed.
+    """
+    source = _DISCLOSURE_SOURCE.read_text(encoding="utf-8")
+    marker = "export const NO_MEASUREMENT_SERIES_CODE = "
+    assert marker in source, (
+        f"{_DISCLOSURE_SOURCE.name} must declare NO_MEASUREMENT_SERIES_CODE — the "
+        "frontend surfaces key the coverage disclosure on it"
+    )
+    declaration = source.split(marker, 1)[1].split(";", 1)[0].strip()
+    match = re.fullmatch(r"'([^']+)'", declaration)
+    assert match, (
+        "NO_MEASUREMENT_SERIES_CODE must be a bare string literal so this guard can "
+        f"compare its VALUE; found {declaration!r}"
+    )
+    return match.group(1)
+
+
+def test_the_typescript_constant_holds_the_value_python_emits():
+    """The two literals are EQUAL — a value comparison, not a substring search.
+
+    This is the assertion that actually closes the rename hole, and it exists
+    because the docstring of the test below used to claim the hole was closed
+    elsewhere and it was not (see there). If `portal_warnings` renames the code and
+    `adapt.ts` does not, nothing throws anywhere: the advisory arrives with a code no
+    surface recognises, `carriesNoMeasurementSeries` returns false, and a record with
+    no measured data silently goes back to reading as a full count.
+
+    What this CANNOT do: it compares the value the Python check emits today for
+    `{"measurement": {"series": []}}` against the value the TypeScript source
+    declares. It says nothing about whether any surface still calls the predicate —
+    `test_named_disclosure_consumers_use_the_shared_predicate` is that guard, with
+    its own stated limit.
+    """
+    assert _declared_code() == _emitted_code(), (
+        f"{_DISCLOSURE_SOURCE.name} declares NO_MEASUREMENT_SERIES_CODE = "
+        f"{_declared_code()!r} while portal_warnings emits {_emitted_code()!r} — the "
+        "coverage disclosure would silently stop rendering"
+    )
+
+
 def test_the_frontend_keys_on_the_code_python_actually_emits():
     """A cross-language guard, because the disclosure fails OPEN on a rename.
 
@@ -415,12 +461,24 @@ def test_the_frontend_keys_on_the_code_python_actually_emits():
     WHAT THIS ASSERTION ALONE CANNOT DO, recorded because it is easy to overrate.
     It is a substring search over the whole of `adapt.ts`, so a mention of the code
     inside a COMMENT satisfies it while the real constant is stale — this test would
-    stay green through exactly the rename it exists to catch. What closes that is
-    the frontend side: `signals.test.tsx` and `coverage-figure-disclosure.test.tsx`
-    render with an advisory carrying the code from `NO_MEASUREMENT_SERIES_CODE` and
-    assert the disclosure appears, so a stale constant fails there (measured by
-    negative control: three failures). The COMBINED set holds; this test on its own
-    does not.
+    stay green through exactly the rename it exists to catch.
+
+    F5 — THE CLAIM THAT USED TO SIT HERE WAS FALSE, and it is corrected rather than
+    deleted. It said: "What closes that is the frontend side: `signals.test.tsx` and
+    `coverage-figure-disclosure.test.tsx` render with an advisory carrying the code
+    from `NO_MEASUREMENT_SERIES_CODE` and assert the disclosure appears, so a stale
+    constant fails there (measured by negative control: three failures). The COMBINED
+    set holds." Those tests close nothing of the sort. Every one of them BUILDS its
+    fixture warning from the same constant (`signals.test.tsx`,
+    `coverage-figure-disclosure.test.tsx`, `assistantComposer.test.ts` all set
+    `code: NO_MEASUREMENT_SERIES_CODE`), so a stale constant is self-consistent on
+    both sides of the render and all three stay green. The negative control the old
+    docstring cited proves a different thing — that the surfaces disclose when the
+    code matches — not that the code matches what Python emits.
+
+    What closes it is `test_the_typescript_constant_holds_the_value_python_emits`
+    above, which compares the two VALUES. This test is kept as the cheaper
+    smoke-level check; it is not sufficient and no longer says it is.
     """
     code = _emitted_code()
     source = _DISCLOSURE_SOURCE.read_text(encoding="utf-8")
@@ -493,13 +551,22 @@ def test_the_footer_short_form_is_derived_and_keeps_both_halves():
     """The StatusBar footer shows a SHORTENED disclosure, and it must stay derived.
 
     `.statusbar` is a fixed 52px single-line flex row, so the full sentence squeezes
-    the two neighbouring segments; the footer shows the consequence clause and
-    carries the whole sentence in an `.sr-only` span plus a `title`. The clause is
-    computed in `adapt.ts` by splitting the sentence on its own `, so ` hinge, which
-    is only safe while the hinge exists — so this pins the hinge and pins that
-    neither half is empty. If the sentence is reworded without a hinge the
-    derivation falls back to the full sentence (long, still true), and this test
-    tells the next editor that the footer has silently gone back to long.
+    the two neighbouring segments; the footer shows ONE clause and carries the whole
+    sentence in an `.sr-only` span plus a `title`. The clause is computed in
+    `adapt.ts` by splitting the sentence on its own `, so ` hinge, which is only safe
+    while the hinge exists — so this pins the hinge and pins that neither half is
+    empty. If the sentence is reworded without a hinge the derivation falls back to
+    the full sentence (long, still true), and this test tells the next editor that
+    the footer has silently gone back to long.
+
+    WHICH CLAUSE, AND WHY THIS ASSERTION FLIPPED (F6). It used to require that the
+    CONSEQUENCE half — "no series target is counted" — be the one shown, on the
+    reasoning that it qualifies the number it sits beside. Read alone, straight after
+    `evidence 32/32 · Coverage`, that clause has no antecedent and reads as a claim
+    about the METRIC ("coverage does not count series"), which is the opposite of
+    `CoverageBadge`'s "Counted from what this record contains: … series …" — and both
+    render on Export Readiness at the same time. The footer now shows the
+    OBSERVATION half, so what this pins is that the shown half keeps a SUBJECT.
 
     The rendered outcome is asserted on the frontend
     (`coverage-figure-disclosure.test.tsx` §1/§3); this side only pins the string.
@@ -513,5 +580,16 @@ def test_the_footer_short_form_is_derived_and_keeps_both_halves():
     observation, consequence = sentence.split(hinge, 1)
     assert observation.strip(), "the observation half must not be empty"
     assert consequence.strip().rstrip("."), "the consequence half must not be empty"
-    # The short form must remain the half that qualifies the NUMBER it sits beside.
+    # The half the footer shows must keep a subject, so it cannot be read as a
+    # statement about the coverage metric rather than about this record.
+    assert "this record" in observation, (
+        "the observation half lost its subject — the footer renders it alone beside "
+        "`evidence N/N`, where a subject-less clause reads as a claim about the metric"
+    )
+    assert "no measurement series" in observation, (
+        "the observation half must still name what the record lacks; the footer's "
+        "short form is derived from exactly this half"
+    )
+    # The consequence half is not shown in the footer any more, but it is still what
+    # the full sentence (sr-only + title, and the badge's own line) carries.
     assert "no series target is counted" in consequence

@@ -330,9 +330,28 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // .advisory-nongating, .ready-note, the two .artifact-sub, .artifact-pathcount,
       // .artifact-hint, .assistant-note, .statusbar-right. NONE of the three
       // elements this slice adds (.coverage-sub, .coverage-sub-scope,
-      // .statusbar-cover-scope) appears — consistent with their computed colours:
-      // --text-slate/--cover-text #5b6b7d on --cover-bg #eef2f6 is 4.85:1 and
-      // --text-secondary #46515f is above 8:1, both clearing AA at these sizes.
+      // .statusbar-cover-scope) appears — consistent with their computed colours,
+      // RE-MEASURED per (foreground, background) pair rather than per token, because
+      // the earlier version of this note said --text-secondary #46515f is "above 8:1"
+      // full stop, and 8.07:1 is its ratio on PURE WHITE (--surface) only. It is not
+      // the background either of these elements has:
+      //   #46515f on --surface-subtle #fbfcfd = 7.86:1  <- .statusbar-cover-scope
+      //     (chrome.css: .statusbar { background: var(--surface-subtle) })
+      //   #46515f on --cover-bg      #eef2f6 = 7.17:1
+      //   #46515f on --surface       #ffffff = 8.07:1   <- not used by either
+      //   #5b6b7d on --cover-bg      #eef2f6 = 4.86:1  <- .coverage-sub /
+      //     .coverage-sub-scope, both inside .coverage (signals.css: background
+      //     var(--cover-bg)); --text-slate and --cover-text are both #5b6b7d
+      // Computed with the WCAG 2.x formulae directly — per-channel sRGB linearisation
+      // (c/12.92 below 0.03928, else ((c+0.055)/1.055)^2.4), luminance
+      // 0.2126R+0.7152G+0.0722B, ratio (L_light+0.05)/(L_dark+0.05) — not read off a
+      // tool and not copied from another comment. Unrounded: 7.8553, 7.1724, 8.0687,
+      // 4.8561. All four clear the 4.5:1 AA requirement at these sizes, which is what
+      // this note is for; the smallest margin is the coverage card's 4.86:1, so a
+      // darker --cover-bg or a lighter --cover-text would move that pair first.
+      // (styles/statistics.css records "#46515f (8.07:1 / 7.86:1)" — the same two
+      // numbers, for the same two backgrounds; 4.85:1 elsewhere in the repo is 4.8561
+      // truncated rather than rounded.)
       //
       // So the +1 on linux is a PRE-EXISTING failing node being counted twice
       // instead of once: CoverageBadge's denominator explanation went from one

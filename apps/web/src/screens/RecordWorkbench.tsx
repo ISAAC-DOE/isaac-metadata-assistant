@@ -34,7 +34,9 @@ import type { ApiEvidenceEntry, ApiWorkflow, RecordBundle } from '../lib/types';
 
 /**
  * The draft-phase half of the status-bar readout, taken from the SERVER'S OWN
- * workflow derivation instead of from `pending.length === 0`.
+ * workflow derivation instead of from `pending.length === 0`. Called only where
+ * `pending.length === 0` (see `LoadedWorkbench`), which is the ONLY thing the
+ * caller establishes — see the completion note below.
  *
  * I2 — WHAT WAS FALSE. This read `pending.length > 0 ? 'Draft assembled · N fields
  * to confirm' : 'Draft complete · ready to export'`, and `pending == 0` does not
@@ -47,11 +49,31 @@ import type { ApiEvidenceEntry, ApiWorkflow, RecordBundle } from '../lib/types';
  * export" while `WorkflowProgressBanner` on the SAME screen, from the SAME
  * `detail.workflow`, said "Not ready to export yet".
  *
- * Nothing is re-derived here and no cause is invented: the readiness claim is made
- * only for the one step the server reports as `export`, and every other step maps
- * to the action the banner already names ('Review Export Readiness' / 'Review
- * Evidence'), so the two strings cannot contradict. An unrecognised or absent
- * `current_step` makes NO readiness claim at all rather than guessing one.
+ * F3 — WHAT WAS STILL FALSE AFTER THAT FIX, and what this comment used to claim.
+ * It said "every other step maps to the action the banner already names … so the
+ * two strings cannot contradict". That was untrue of the retained `Draft complete`
+ * PREFIX on the `review_evidence` step. `derive_workflow` leaves `review_evidence`
+ * unsatisfied exactly when `pending_count == 0 and draft_ok` is false
+ * (`apps/api/isaac_api/workflow.py`), and `draft_ok` is
+ * `validate_draft(self.draft).ok` (`workspace.py`) — the no-guessing DRAFT
+ * VALIDATOR is failing. `pending_count` is computed independently of it, so an
+ * evidence-less finalized field is a draft-validator error that never appears in
+ * `pending`. In that state the banner on this screen says "Evidence review needed /
+ * This record's evidence checks aren't passing yet." while this line asserted the
+ * draft was complete. The state is real, not hypothetical:
+ * `apps/api/tests/test_corpus_mutation.py` asserts
+ * `derive_workflow(pending_count=0, draft_ok=False, …)['current_step'] ==
+ * 'review_evidence'`.
+ *
+ * So `review_evidence` now carries the banner's OWN words and no completion claim,
+ * and the two remaining `Draft complete` prefixes are made only where the server
+ * reports `draft_ok` true (`export` and `review_export_readiness` are both
+ * downstream of the `review_evidence` step being satisfied). What THIS function
+ * guarantees is therefore narrow and checkable: the positive readiness claim is
+ * made for exactly one step id, no step whose banner denies the evidence checks
+ * carries a completion claim, and an unrecognised or absent `current_step` claims
+ * neither readiness nor completion — it states only the thing the caller
+ * established, that no confirmation questions are open.
  *
  * Deliberately not worded "not ready to export yet": that phrase contains "ready
  * to export" as a substring, and a footer whose truthfulness is pinned by tests
@@ -64,9 +86,42 @@ export function draftPhaseFromWorkflow(workflow: ApiWorkflow | null): string {
     case 'review_export_readiness':
       return 'Draft complete · review export readiness';
     case 'review_evidence':
-      return 'Draft complete · review evidence';
+      // The banner's own heading, verbatim. No "Draft complete": `draft_ok` is
+      // false in this state, which is exactly what makes the step current.
+      return 'Evidence review needed';
     default:
-      return 'Draft complete';
+      return 'No open questions';
+  }
+}
+
+/**
+ * The phase DOT for the same readout, from the same derivation as the text above.
+ *
+ * F2 — WHAT WAS FALSE, one line away from the corrected sentence. The dot read
+ * `pending.length > 0 ? 'attention' : detail.exported ? 'idle' : 'ready'`, and
+ * `.dot-ready` is painted `var(--pass-solid)` (`styles/base.css`), a token declared
+ * under "signal 1 — validation verdict (RESERVED, hard gate)"
+ * (`styles/tokens.css`). So a record with `pending_count == 0` and a FAILING
+ * official dry-run rendered the corrected text "Draft complete · review export
+ * readiness" beside a PASS-GREEN dot, while the banner above it said "Not ready to
+ * export yet": the sentence was fixed and the colour went on making the claim.
+ *
+ * The tones now mirror `WorkflowProgressBanner`'s two tones for the same step ids —
+ * amber `attention` while something still blocks, and the banner's calm action-blue
+ * "this is the next step" treatment as `.dot-progress`, which borrows no verdict
+ * token. An unrecognised or absent step is `idle` (neutral grey): no claim.
+ */
+export function draftPhaseDotFromWorkflow(
+  workflow: ApiWorkflow | null,
+): 'attention' | 'progress' | 'idle' {
+  switch (workflow?.current_step) {
+    case 'export':
+      return 'progress';
+    case 'review_export_readiness':
+    case 'review_evidence':
+      return 'attention';
+    default:
+      return 'idle';
   }
 }
 
@@ -217,7 +272,9 @@ function LoadedWorkbench({
   const advisoryLive = toAdvisoryResult(warnings);
 
   // The readiness claim comes from `detail.workflow`, never from the pending
-  // residual — see `draftPhaseFromWorkflow` above for the measurement.
+  // residual — see `draftPhaseFromWorkflow` above for the measurement. The DOT
+  // beside it comes from the same derivation (`draftPhaseDotFromWorkflow`), so the
+  // colour cannot claim what the sentence declines to.
   const phase = detail.exported
     ? `Exported · ${detail.record_id}`
     : pending.length > 0
@@ -281,7 +338,13 @@ function LoadedWorkbench({
       statusBar={
         <StatusBar
           phase={phase}
-          phaseDot={pending.length > 0 ? 'attention' : detail.exported ? 'idle' : 'ready'}
+          phaseDot={
+            pending.length > 0
+              ? 'attention'
+              : detail.exported
+                ? 'idle'
+                : draftPhaseDotFromWorkflow(detail.workflow)
+          }
           validation={validationLive}
           coverage={coverageLive}
           advisory={advisoryLive}
