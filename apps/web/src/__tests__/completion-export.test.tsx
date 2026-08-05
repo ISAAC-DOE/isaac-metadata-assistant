@@ -682,9 +682,12 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // verdict (the on-mount auto-reply was removed).
     fireEvent.click(panel.getByText('Is coverage the same as valid?').closest('button')!);
     expect(
+      // "targets", not "fields": the audit denominator counts one target per
+      // series / asset / descriptor / link / contributor plus `qc:status`, so it was
+      // never a field count. Same live numbers, same never-a-verdict property.
       await panel.findByText(
-        'Coverage is 33/33 evidenced fields. It describes how many expected fields carry ' +
-          'evidence; the schema check is separate.',
+        'Coverage is 33/33 evidenced targets. It describes how many of the targets this ' +
+          'record contains carry evidence; the schema check is separate.',
       ),
     ).toBeInTheDocument();
     expect(panel.getByText('Source: Evidence Audit')).toBeInTheDocument();

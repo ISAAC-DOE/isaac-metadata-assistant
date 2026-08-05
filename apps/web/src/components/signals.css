@@ -158,6 +158,15 @@
   font-size: 12px;
   color: var(--text-slate);
 }
+/* The record-specific denominator disclosure. Weighted so it is not skimmed past
+   next to the large figure, but kept in the SAME neutral slate family as the rest
+   of the badge — it is a scope statement about the count, never a verdict and
+   never an advisory, so it must not borrow the amber advisory or verdict hues. */
+.coverage-sub-scope {
+  margin-top: 6px;
+  font-weight: 600;
+  color: var(--cover-text);
+}
 .coverage-cmd {
   margin-top: 8px;
   font-size: 11px;

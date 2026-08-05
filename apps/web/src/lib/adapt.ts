@@ -199,6 +199,45 @@ export function toAdvisoryResult(w: ApiWarningsResponse): AdvisoryResult {
   return { advisory: true, gating: false, warnings: w.warnings };
 }
 
+/**
+ * The advisory code the backend emits when a record carries no measured series —
+ * `src/isaac_records/portal_warnings.py::_no_measurement_series`. Declared ONCE
+ * here because two surfaces that show the coverage figure key on it, and a second
+ * copy of the literal is a second thing to forget when the code is renamed.
+ * `apps/api/tests/test_coverage_denominator_disclosure.py` pins this file against
+ * the code the Python check actually emits, so a rename on either side fails.
+ */
+export const NO_MEASUREMENT_SERIES_CODE = 'NO_MEASUREMENT_SERIES';
+
+/**
+ * WHY THE COVERAGE FIGURE NEEDS THIS, stated where the predicate lives.
+ *
+ * `isaac_records.audit` enumerates the coverage DENOMINATOR from the record's own
+ * content — one block target per series present, so a record whose
+ * `measurement.series` is `[]` contributes NO series target at all. Measured on the
+ * canonical worked example: 33 / 33 expected targets with its series, 32 / 32 with
+ * the series emptied. Both read as full coverage. So the number alone cannot
+ * distinguish "everything is evidenced" from "there is less to evidence", and a
+ * record holding no measured data can reach a reader as 100 % complete.
+ *
+ * The sentence states only what is observable from the record and from the
+ * enumeration rule. It deliberately does NOT say the record is invalid,
+ * incomplete, or not applicable: `measurement.series` has no `minItems` in the
+ * vendored schema, so `[]` validates with zero errors, and which of those four
+ * meanings an empty series has is a scientific decision for a domain owner. It is
+ * not made here, and nothing here gates on it.
+ *
+ * Position-neutral on purpose: the badge renders it under the figure and the
+ * Assistant appends it to a sentence, so it must not say "above".
+ */
+export const NO_SERIES_COVERAGE_NOTE =
+  'This record carries no measurement series, so no series target is counted.';
+
+/** True when the advisory reports that this record carries no measured series. */
+export function carriesNoMeasurementSeries(advisory: AdvisoryResult): boolean {
+  return advisory.warnings.some((w) => w.code === NO_MEASUREMENT_SERIES_CODE);
+}
+
 // --- S4 completion blockers ---------------------------------------------
 // The /pending items (id / kind / question / about / demo_answer) become the
 // render blockers. Asset blockers take a pasted sha256; series/descriptor carry

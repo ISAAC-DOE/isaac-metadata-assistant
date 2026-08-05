@@ -23,6 +23,7 @@ import {
   joinCapped,
   technicalPaths,
 } from './assistantPaths';
+import { NO_SERIES_COVERAGE_NOTE, carriesNoMeasurementSeries, toAdvisoryResult } from './adapt';
 import { ROUTES } from './routes';
 import type {
   ApiValidateResult,
@@ -271,7 +272,7 @@ export const EXPORT_CATALOG: GroundedChip[] = [
     source: 'audit',
     resolve(state): AssistantMessage | null {
       if (state.context !== 'export') return null;
-      const { audit } = state.bundle;
+      const { audit, warnings } = state.bundle;
       if (!audit) return null; // audit payload absent → chip disabled
       const record = audit.records[0];
       if (!record) {
@@ -283,8 +284,24 @@ export const EXPORT_CATALOG: GroundedChip[] = [
           answeredFrom: 'audit',
         };
       }
+      // TWO corrections in one sentence, both about the DENOMINATOR.
+      //
+      // 1. It said "evidenced fields" / "expected fields". The denominator is not
+      //    fields: `isaac_records.audit._block_targets` adds one target per series,
+      //    asset, descriptor, link and contributor, plus `qc:status`. "Targets" is
+      //    what the audit counts and what `CoverageBadge` already enumerates.
+      // 2. A record with no measured series has a SMALLER denominator (measured:
+      //    33 → 32 on the canonical worked example) and still reads as a full
+      //    count. The Assistant asserting "32/32" with no qualification is the
+      //    same claim of completeness the badge makes, on a surface with nothing
+      //    beside it — so it carries the same disclosure, from the same constant.
+      //    `warnings` is already in this bundle (`getExportReadiness`); nothing new
+      //    is fetched and nothing is re-derived from record content.
+      const scope = warnings && carriesNoMeasurementSeries(toAdvisoryResult(warnings))
+        ? ` ${NO_SERIES_COVERAGE_NOTE}`
+        : '';
       return {
-        text: `Coverage is ${record.evidence_present}/${record.evidence_expected} evidenced fields. It describes how many expected fields carry evidence; the schema check is separate.`,
+        text: `Coverage is ${record.evidence_present}/${record.evidence_expected} evidenced targets. It describes how many of the targets this record contains carry evidence; the schema check is separate.${scope}`,
         answeredFrom: 'audit',
       };
     },
