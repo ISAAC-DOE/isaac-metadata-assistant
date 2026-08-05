@@ -24,6 +24,7 @@ import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { answerValuePreview, pendingItemToBlocker } from '../lib/adapt';
 import type {
+  ApiAnswersResponse,
   ApiExperimentDetail,
   ApiInvalidation,
   ApiPendingItem,
@@ -92,6 +93,57 @@ export function GuidedCompletion() {
   );
 }
 
+/**
+ * Was the answer to `blockerId` APPLIED? Read off the server's own report — never
+ * off "the promise resolved".
+ *
+ * A 200 is not a report that anything was written. `routes.py::_answers_to_apply_shape`
+ * drops a blank or unrecognised answer ("Unknown keys are ignored — never invented
+ * into the draft"), and `complete.py::apply_answers` leaves a malformed sha256, a
+ * wrong-typed series/descriptor or an off-enum qc unapplied and puts the blocker
+ * straight back into `remaining_pending`. Both come back 200 with `rev` unmoved.
+ *
+ * TWO SIGNALS, and both must agree:
+ *  1. `pending` — the list the server RECOMPUTED from the post-mutation draft
+ *     (`serialize.pending_to_list`). This is the only PER-FIELD statement the
+ *     response makes: an applied answer resolves its blocker, an unapplied one is
+ *     re-added verbatim. It is the signal to trust for this path.
+ *  2. `invalidation.changed` — `exp.save_versioned()`'s own return, i.e. whether the
+ *     authoritative draft actually moved. It is a WHOLE-DRAFT fact, so on its own it
+ *     cannot say WHICH field landed, and `invalidation.changed_fields` is no better:
+ *     it is an echo of the request keys gated on `changed` (`routes.py`:
+ *     `changed_fields = submitted_fields if changed else []`).
+ *
+ * In today's backend the two cannot disagree — resolving a blocker rewrites
+ * `pending`, which moves the draft. `&&` is deliberately the direction anyway: if
+ * they ever disagree we do not KNOW the value landed, and this screen must not put a
+ * "Confirmed by You" chip over a value it cannot support. Fail closed.
+ */
+function answerWasApplied(resp: ApiAnswersResponse, blockerId: string): boolean {
+  const stillOpen = resp.pending.some((p) => p.id === blockerId);
+  return resp.invalidation.changed === true && !stillOpen;
+}
+
+/**
+ * Was the CORRECTION applied? One signal only, and that is a property of the
+ * backend rather than a shortcut: `complete.py::apply_corrections` "NEVER touches
+ * pending", so the recomputed `pending` list is byte-identical whether the
+ * correction landed or was refused and carries no information here. The whole-draft
+ * signal is also SUFFICIENT on this path, because `apply_corrections` writes nothing
+ * outside the submitted keys — so a draft that moved can only be this correction.
+ *
+ * `changed: false` covers two real outcomes that the response cannot tell apart: a
+ * value `apply_corrections` refused (a malformed sha256 leaves the current value
+ * untouched) and a submit identical to what is already recorded. That is why the
+ * copy below reports only that nothing was applied and never names a cause — and
+ * why it never renders `invalidation.reason`, which asserts the second cause ("the
+ * submitted value was identical") for BOTH. That wording is recorded as known-wrong
+ * and deliberately unchanged in `apps/api/tests/test_export_recovery.py:1361`.
+ */
+function editWasApplied(resp: ApiAnswersResponse): boolean {
+  return resp.invalidation.changed === true;
+}
+
 interface Answered {
   id: string;
   label: string;
@@ -119,6 +171,13 @@ function LoadedCompletion({
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
+  // The blocker id of the last answer the SERVER did not report as applied (200,
+  // nothing written). Not an ApiError — no exception was thrown — so it needs its
+  // own state, and it is keyed by blocker id so the note stays attached to the
+  // question it belongs to and cannot follow the reader to the next one.
+  const [answerNotApplied, setAnswerNotApplied] = useState<string | null>(null);
+  // Same, for a correction the server did not report as applied.
+  const [editNotApplied, setEditNotApplied] = useState<string | null>(null);
   // P28.3 — summary-first edit of an already-confirmed field. `editingId` is the
   // answered row currently in inline edit mode (null = all read-only summary).
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -165,11 +224,26 @@ function LoadedCompletion({
   const confirmAnswer = (blocker: PendingBlocker, value: unknown) => {
     setSubmitting(true);
     setSubmitError(null);
+    setAnswerNotApplied(null);
     api
       .submitAnswer(id, { [blocker.id]: value }, currentVersion)
       .then((resp) => {
+        // Server-reported state first, unconditionally: the recomputed question list
+        // and the fresh If-Match token are facts either way.
         setPending(resp.pending);
         setCurrentVersion(resp.version); // adopt the fresh token for the next submit
+        if (!answerWasApplied(resp, blocker.id)) {
+          // The server did not report this value as applied, so this screen may not
+          // show it as answered. No `answered` row (so no "Confirmed by You" chip
+          // over a value the record does not hold), no counter movement — `total` is
+          // `answered.length + pending.length`, so not pushing here is also what
+          // keeps the count honest — and the question stays exactly where the server
+          // left it: open. The typed input survives, because `pending` still holds
+          // this blocker so `GuidedPrompt`'s `key` is unchanged and it is not
+          // remounted.
+          setAnswerNotApplied(blocker.id);
+          return;
+        }
         setSkipped((prev) => {
           if (!prev.has(blocker.id)) return prev;
           const next = new Set(prev);
@@ -197,25 +271,38 @@ function LoadedCompletion({
     setEditingId(rowId);
     setEditError(null);
     setEditImpact(null);
+    setEditNotApplied(null);
   };
   const cancelEdit = () => {
     setEditingId(null);
     setEditError(null);
+    setEditNotApplied(null);
   };
 
   // Save a correction: POST /edit with the held If-Match token (P27.5), adopt the
   // fresh version, update the summary row's value, and surface the server-reported
   // downstream impact. A 412 keeps the editor mounted (input preserved) and shows
-  // the existing stale-write recovery banner. An unchanged submit is a backend
-  // no-op (200) — the row simply stays as it was.
+  // the existing stale-write recovery banner. A submit the server does not report as
+  // applied (200 with `invalidation.changed:false` — a refused value, or a submit
+  // identical to what is already recorded) leaves the row's value ALONE and keeps the
+  // editor open, because the recorded value did not become the typed one.
   const saveEdit = (blocker: PendingBlocker, value: unknown) => {
     setEditSubmitting(true);
     setEditError(null);
+    setEditNotApplied(null);
     api
       .editField(id, { [blocker.id]: value }, currentVersion)
       .then((resp) => {
         setCurrentVersion(resp.version);
         setPending(resp.pending);
+        if (!editWasApplied(resp)) {
+          // Nothing was written, so nothing here may move: the summary row keeps the
+          // value the server last confirmed, the editor stays mounted with what was
+          // typed (as on a 412), and no `editImpact` is rendered — its
+          // `invalidation.reason` would name a cause the response cannot know.
+          setEditNotApplied(blocker.id);
+          return;
+        }
         setAnswered((prev) =>
           prev.map((a) =>
             a.id === blocker.id
@@ -232,6 +319,10 @@ function LoadedCompletion({
 
   const leaveMissing = (blockerId: string) => {
     setSkipped((prev) => new Set(prev).add(blockerId));
+    // The reader has moved on from this question; the not-applied note described the
+    // submit they just abandoned, so it must not be waiting for them if they come
+    // back to it via "Answer Now".
+    setAnswerNotApplied((prev) => (prev === blockerId ? null : prev));
   };
 
   const answerLater = (blockerId: string) => {
@@ -408,6 +499,25 @@ function LoadedCompletion({
     </div>
   );
 
+  // A correction the SERVER did not report as applied. It answered 200, so there is
+  // no `ApiError` and nothing threw — the old code took that as proof and rewrote the
+  // row to the typed value, putting a "Confirmed by You" chip over something the
+  // record had refused. Every claim here is one the response supports: `changed:false`
+  // means the authoritative draft did not move, so the field still holds what it held,
+  // and `apply_corrections` never writes a substitute. NO CAUSE IS NAMED: a refused
+  // value and a submit identical to the recorded one are indistinguishable in this
+  // response (see `editWasApplied`), so guessing between them would be the same class
+  // of defect this note exists to fix.
+  const editNotAppliedNote = (rowId: string) =>
+    editNotApplied === rowId && (
+      <div style={{ marginTop: 10 }}>
+        <div className="completion-submit-error" role="alert">
+          Nothing was applied — this field still holds its previously confirmed value, and nothing
+          was invented in its place. Try again, or Cancel to keep it.
+        </div>
+      </div>
+    );
+
   // Each confirmed field renders READ-ONLY (value + Confirmed chip + an explicit
   // Edit button). Editing one swaps that row for an inline GuidedPrompt prefilled
   // with the current value; Cancel restores the summary with no mutation.
@@ -429,6 +539,7 @@ function LoadedCompletion({
           onDontKnow={cancelEdit}
         />
         {editErrorBanner}
+        {editNotAppliedNote(ans.id)}
       </div>
     ) : (
       <div className="answered-row" key={ans.id}>
@@ -464,6 +575,31 @@ function LoadedCompletion({
     ),
   );
 
+  // An answer the SERVER did not report as applied. The response was 200 and nothing
+  // threw, which is exactly why this state needs its own note: the old code read a
+  // resolved promise as proof and added an answered row, so the screen claimed a value
+  // under a "Confirmed by You" chip that the truth core had dropped, while the same
+  // question re-rendered below as still open.
+  //
+  // Rendered on `answerNotApplied` alone rather than on it MATCHING the current
+  // question, and on BOTH loaded branches. Keying it to the question read better and
+  // silently showed nothing in the cases the guard exists for: in the fail-closed
+  // disagreement (the blocker resolved but the draft did not move) the refused question
+  // is no longer current — and if it was the last one, the screen switches to the
+  // all-resolved branch — so an unapplied write would have been reported by neither a
+  // row nor a note. `leaveMissing` clears it, so moving on does not carry it along.
+  //
+  // Both sentences hold in every not-applied case: a blocker the server re-added is one
+  // whose value `apply_answers` did not write, a draft that did not move was not written
+  // to at all, and neither path substitutes a value. No cause is named — the response
+  // does not carry one.
+  const answerNotAppliedNote = answerNotApplied !== null && (
+    <div className="completion-submit-error" role="alert" style={{ marginTop: 10 }}>
+      That answer was not applied. The record was not updated with the value you entered, and
+      nothing was invented in its place — try again, or say you don't know to leave it missing.
+    </div>
+  );
+
   // The honest downstream-impact of the last successful edit (P28.2): the server's
   // reason, plus a stale-artifact / reopened-steps note where deterministically
   // known. role="status" (announced, not color-only); never locally re-derived.
@@ -496,6 +632,7 @@ function LoadedCompletion({
         </div>
         {answeredRows}
         {editImpactNote}
+        {answerNotAppliedNote}
         <div className="completion-done" role="status">
           <span className="dot dot-ready" aria-hidden="true" />
           <div>
@@ -565,6 +702,8 @@ function LoadedCompletion({
           />
         </div>
       )}
+
+      {answerNotAppliedNote}
 
       {upcomingItems.map((item, i) => (
         <div className="upcoming-row" key={item.id}>

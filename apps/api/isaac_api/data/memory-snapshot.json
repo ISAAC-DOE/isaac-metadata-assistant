@@ -10340,7 +10340,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "6d3486b632ae713e01052948cc8da3671d20974bd4259cc6b8ed1549e2706ba6"
+        "sha256": "1183c9dc3d2d01e6b5d9f0a3d47762056553efef43463e9eea530b0572bac8d0"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10488,7 +10488,7 @@
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
-        "sha256": "f15ce5430b4416a022099983701316a134b0afbdbf40c4eb7f4addacc5238784"
+        "sha256": "3e60e8a161a8f4587f9c9e40047538b1695a22c0132ed76e160db3373364ee7a"
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "aca029e4484a607d4d5b7a391152317195b6404b817ac49c7ca18fa941f08df2"
+        "sha256": "eb6414b3e1ef3d3e966e45a3fcce206b18869eff1dc6ac3b97485ddbdd413d38"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "0cb6077fdbb063fe889e0e4f14e877b99a85842a35b67b8123902c7b4810a6c2"
+        "sha256": "d6950eac56a1bddeea1433397c202ec6044bd88a4d8afff0eeb56796b82da517"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "cc2487856984de277ca5e375e3de69cdd638d6a709ad7b7fddf3a368b26f0c2c"
+    "served_manifest_fingerprint": "0699b5212a28fd5f2a8ef097ba197f7fdfaec4ff0c6968941187ffdb1a0524cf"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
