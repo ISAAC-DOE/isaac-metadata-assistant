@@ -1,7 +1,7 @@
 import '../screens.css';
 import './statistics.css';
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { AppShell } from '../../components/AppShell';
 import { TopBar } from '../../components/TopBar';
@@ -13,6 +13,7 @@ import {
   FileJson,
   LayoutList,
   Network,
+  Settings,
   Shield,
   ShieldCheck,
 } from '../../components/icons';
@@ -22,10 +23,14 @@ import { useWorkspaceScope } from '../../lib/workspaceScope';
 import { subscribeWorkspaceRebuilt } from '../../lib/workspaceInvalidation';
 import type { RuntimeRecord } from '../../lib/crossRecordTriage';
 import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../../lib/types';
-import { ROUTES } from '../../lib/routes';
+import {
+  ROUTES,
+  STATISTICS_TAB_PARAM,
+  isStatisticsTab,
+  type StatisticsTabId,
+} from '../../lib/routes';
 import { EVIDENCE_CLASS_CHIP } from '../../lib/status';
 import {
-  ALL_COMPLETE_STAGE_ID,
   EVIDENCE_CLASSES,
   deriveApiSurface,
   deriveEvidenceTotals,
@@ -34,23 +39,35 @@ import {
   deriveWorkflowStages,
   deriveWorkspaceTotals,
 } from '../../lib/statisticsModel';
-import { CANONICAL_STEPS } from '../../lib/workflowSteps';
+import { RovingTabs } from '../settings/apiShared';
+import {
+  ChartEmpty,
+  ChartError,
+  ChartLoading,
+  StatsBarChart,
+  StatsColumnChart,
+  StatsComparisonRows,
+  StatsStackedBar,
+  TechnicalDetails,
+} from './StatsCharts';
 import {
   FigureList,
   MiniBreakdown,
-  StageBars,
   StatCard,
   StatsSection,
   UnavailableNote,
 } from './StatsPrimitives';
+import { MyStats } from './MyStats';
 
 /**
- * Statistics — the read-only workspace insights surface.
+ * Statistics — the read-only insights surface, in two tabs.
  *
- * COMPOSITION ONLY. Every number below is produced by `lib/statisticsModel.ts`
- * from one of four read-only GETs (`/api/runtime/records`, `/api/graph/status`,
- * `/api/about`, `/api/openapi`); this file fetches them, formats the strings the
- * primitives display, and owns the states. It computes no figure of its own.
+ * COMPOSITION ONLY. Every number on the General ISAAC tab is produced by
+ * `lib/statisticsModel.ts` from one of four read-only GETs
+ * (`/api/runtime/records`, `/api/graph/status`, `/api/about`, `/api/openapi`);
+ * this file fetches them, formats the strings the primitives display, and owns
+ * the states. It computes no figure of its own. The My Stats tab reads NOTHING —
+ * see `MyStats.tsx`.
  *
  * The four fetches are deliberately INDEPENDENT — that independence is the
  * partial-failure design. One dead endpoint degrades the sections that read it
@@ -80,6 +97,26 @@ import {
  * a reading that never happened. When any read in the latest round failed, the
  * page states that, names how many, and leaves the figures' timestamp at the
  * last read that actually returned a body.
+ *
+ * ── THE TWO TABS, and what belongs in each ─────────────────────────────────
+ *
+ * `general` holds material that is genuinely workspace- or build-derived:
+ * Workspace at a Glance, Workflow Distribution, Evidence and Validation, and the
+ * no-analytics disclosure. `mine` holds personal statistics, which this build
+ * cannot produce — the honest gate lives in `MyStats.tsx` and is the whole of
+ * that tab.
+ *
+ * BUILD INTERNALS MOVED INTO ONE COLLAPSED REGION. Project Memory's snapshot
+ * counts and provenance commits, the API surface breakdown, and the two runtime
+ * facts `/api/about` reports (runtime mode and persistence) are properties of the
+ * DEPLOYMENT rather than answers to "how is this workspace doing", and they used
+ * to sit in the main flow with equal weight to the record figures. They are now
+ * inside `Technical Details`, collapsed by default. Nothing was deleted, nothing
+ * became unreachable, and no figure changed its label or its scope on the way.
+ *
+ * The no-analytics section stays in the MAIN flow, uncollapsed. It is a
+ * governance claim about what this application does and does not measure, not
+ * clutter, and hiding a privacy statement behind a disclosure would weaken it.
  */
 
 /** The one literal used wherever a figure genuinely was not returned. */
@@ -130,20 +167,6 @@ function titleCaseTokenOrNull(value: unknown): string | null {
 function formatInstant(when: Date): string {
   return when.toLocaleString();
 }
-
-/**
- * Stable categorical colour slot per workflow bucket, keyed by CANONICAL
- * POSITION rather than by array index, so a stage keeps its colour even if a
- * seventh (unrecognized) bucket appears. `Unrecognized Step` is deliberately
- * absent from this map: it is not a canonical stage, so it renders on the
- * neutral default instead of borrowing another stage's colour.
- */
-const STAGE_TONE: Readonly<Record<string, number>> = Object.freeze(
-  Object.fromEntries([
-    ...CANONICAL_STEPS.map((step, index) => [step.id, index] as const),
-    [ALL_COMPLETE_STAGE_ID, CANONICAL_STEPS.length] as const,
-  ]),
-);
 
 /**
  * One round of reads: how many were STARTED while the page was busy, and how
@@ -203,11 +226,48 @@ function announceRound(round: Round, lastSuccess: Date | null): string {
  * below), so this page really does describe either workspace: only the session
  * scope holds examples, and only the ordinary scope can be named without them.
  *
- * The four other things listed are unchanged and are not scope claims: workflow
- * readiness and evidence are derived from whichever records were read, while
- * Project Memory and the API surface are properties of the build.
+ * THE TAB SPLIT DID CHANGE WHAT THIS SENTENCE PROMISES, and the previous version
+ * of this comment denied it. It said "the tab split did not change this
+ * sentence's subject … everything it lists is on the General ISAAC tab", and then
+ * rendered that sentence ABOVE THE TABLIST on both tabs. So at `?tab=mine` the
+ * page lead named workflow readiness, evidence, Project Memory and the API
+ * surface — four things, none of which is on the panel the reader is looking at —
+ * while the comment recorded the choice as deliberate. Both halves were true and
+ * their conjunction was the defect: a lead that is correct about the page reads as
+ * a promise about the panel, because it sits directly above it.
+ *
+ * So the lead is now TAB-SCOPED. The reasoning the old comment gave still stands
+ * and is preserved: the General lead must not mention personal statistics,
+ * because promising personal figures where nothing can qualify them is exactly
+ * the claim this build cannot support. What changes is that the My Stats tab gets
+ * its own lead instead of inheriting one about a panel it is not showing — and
+ * that lead states the tab's condition rather than a figure, in the same terms
+ * `MyStats.tsx` and `lib/myStatsContract.ts` use.
+ *
+ * The WORKSPACE clause stays on the General lead only. On My Stats it would be
+ * actively misleading: that tab reads nothing at all, in either scope, so naming
+ * a workspace there would imply the gate is a property of which workspace is open.
+ *
+ * AND IT MUST NOT REPEAT THE PANEL'S OWN SUBTITLE. The first version of the My
+ * Stats lead opened with "What this tab will show once records are associated with
+ * a signed-in account." — BYTE-IDENTICAL to `MyStats.tsx`'s `stats-mine-gate`
+ * section `sub`, which renders a few lines below it in the same viewport. The
+ * duplicate is dropped HERE rather than there, because the section subtitle is the
+ * component's own self-description and is the only place that sentence appears
+ * when `MyStats` is mounted on its own (which two tests do). `the page lead does
+ * not repeat a section subtitle` in `my-stats.test.tsx` is the assertion that
+ * keeps them distinct.
+ *
+ * `workspace` is computed AFTER the `mine` branch returns, not before it. It was
+ * dead on that path — the My Stats lead names no workspace, by the paragraph above.
  */
-function leadSentence(scope: string | null): string {
+function leadSentence(scope: string | null, tab: StatisticsTabId): string {
+  if (tab === 'mine') {
+    return (
+      'This preview cannot tell whose records these are, so this tab states that ' +
+      'rather than a figure.'
+    );
+  }
   const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
   return (
     `A read-only view of ${workspace}, workflow readiness, evidence, Project ` +
@@ -231,10 +291,9 @@ function leadSentence(scope: string | null): string {
  * `BackendDown`, because there is then nothing left to localize.
  *
  * `/api/about` is the one deliberate exception, and it is quieter rather than
- * louder: its failure costs two supporting cards inside a section whose four
- * record cards are still fine, so it states itself with this note at its only
- * reader. An alarm panel there would out-shout the figures beside it that were
- * read successfully.
+ * louder: its failure costs two supporting cards in the collapsed Technical
+ * Details region, so it states itself with this note at its only reader. An alarm
+ * panel there would out-shout the figures beside it that were read successfully.
  *
  * (The earlier wording of this comment said the alarm is "stated once" full
  * stop, which read as a page-level promise the code never made — the code and
@@ -253,7 +312,43 @@ function SectionUnavailable({ message, onRetry }: { message: string; onRetry: ()
   );
 }
 
+/* ---- the two tabs ------------------------------------------------------ */
+
+const STATISTICS_TABS: { id: StatisticsTabId; label: string }[] = [
+  { id: 'general', label: 'General ISAAC' },
+  { id: 'mine', label: 'My Stats' },
+];
+
+const tabId = (id: StatisticsTabId) => `statistics-tab-${id}`;
+const panelId = (id: StatisticsTabId) => `statistics-tabpanel-${id}`;
+
 export function StatisticsPage() {
+  /*
+   * THE ACTIVE TAB IS DERIVED FROM THE URL, not held in `useState`.
+   *
+   * A tab in component state cannot be linked to, bookmarked, reloaded back into,
+   * or reached from another surface — and that is not hypothetical here: the
+   * Governance & Safety Validator shipped exactly that way and had to be fixed
+   * (`GovernancePage.tsx`, "the Validator was unreachable by link"). This uses the
+   * same `?tab=` parameter and the same fallback discipline: anything
+   * unrecognised — a typo, an empty value, an absent param — resolves to
+   * `general` without throwing.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get(STATISTICS_TAB_PARAM);
+  const activeTab: StatisticsTabId = isStatisticsTab(requestedTab) ? requestedTab : 'general';
+
+  function selectTab(tab: StatisticsTabId) {
+    const next = new URLSearchParams(searchParams);
+    next.set(STATISTICS_TAB_PARAM, tab);
+    /* `replace` for a within-page tab click, matching Governance: switching tabs
+       is not a destination, and pushing each one would bury the screen the reader
+       arrived from behind a stack of Back presses. Copying the existing params
+       (rather than building a fresh URL from `ROUTES.statisticsTab`) is what keeps
+       any other query parameter on the URL alive. */
+    setSearchParams(next, { replace: true });
+  }
+
   /*
    * Round tracking. `useFetch` exposes no completion callback, so the four
    * fetchers are wrapped here: `track` is what `useFetch` actually calls, on the
@@ -333,6 +428,11 @@ export function StatisticsPage() {
    *
    * The graph status, the About payload and the OpenAPI schema are properties of
    * the build rather than of a workspace, so they are deliberately left unkeyed.
+   *
+   * THE READS ARE NOT KEYED ON THE TAB, and that is deliberate rather than an
+   * oversight: they are issued on mount regardless of which tab is showing, so
+   * switching tabs never costs a round trip and never resets the read clock. The
+   * My Stats tab adds no read of its own — it has nothing to read.
    */
   const scope = useWorkspaceScope();
   const records = useFetch(() => track(api.getRuntimeRecords()), [scope]);
@@ -413,88 +513,133 @@ export function StatisticsPage() {
       <div className="placeholder">
         <span className="eyebrow">Workspace Insights</span>
         <h1>Statistics</h1>
-        <p>{leadSentence(scope)}</p>
+        <p>{leadSentence(scope, activeTab)}</p>
+
+        {/* The app's shared page-tab pattern, reused rather than reimplemented:
+            `RovingTabs` is the same component the Settings code-sample tabs use
+            and the same contract Project Memory's and Governance's local tablists
+            implement (automatic activation, Arrow/Home/End, exactly one tab in the
+            tab order, `aria-controls` on the selected tab only) — and it wears the
+            same `.section-tabs` / `.section-tab` styling those three pages do.
+            NOT a fourth paradigm. */}
+        <RovingTabs
+          className="section-tabs"
+          tabClassName="section-tab"
+          label="Statistics sections"
+          tabs={STATISTICS_TABS}
+          active={activeTab}
+          onSelect={selectTab}
+          tabId={tabId}
+          panelId={panelId}
+        />
       </div>
 
-      <div className="statistics">
-        <div className="stats-meta">
-          {/* Three mutually exclusive states, and the labels are not
-              interchangeable. `Last Read From the API` is rendered from
-              `lastSuccess` ONLY, so it can never date the figures to an attempt
-              that returned nothing. With no successful read at all there is a
-              time but no reading, so the row says `Last Read Attempt`; before
-              the first settle there is neither, and a placeholder there would be
-              a fabricated reading time. */}
-          {lastSuccess !== null ? (
-            <p className="stats-meta-read">
-              <span className="stats-meta-label">Last Read From the API</span>
-              <time className="mono" dateTime={lastSuccess.toISOString()}>
-                {formatInstant(lastSuccess)}
-              </time>
-            </p>
-          ) : lastAttempt !== null ? (
-            <p className="stats-meta-read">
-              <span className="stats-meta-label">Last Read Attempt</span>
-              <time className="mono" dateTime={lastAttempt.toISOString()}>
-                {formatInstant(lastAttempt)}
-              </time>
-            </p>
-          ) : (
-            <p className="stats-meta-read">
-              <span className="stats-meta-label">Reading From the API</span>
-            </p>
-          )}
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={refreshAll}
-            aria-busy={refreshing}
-          >
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
-        {/* The failure of a round is stated in the page's own words, next to the
-            timestamp it qualifies. Suppressed when EVERY read failed, because
-            the page-level `BackendDown` below already says so and there are then
-            no figures left to caveat. Neutral (`UnavailableNote`), not an alert:
-            each affected section carries its own alert and its own Retry. */}
-        {degraded && !allFailed && lastAttempt !== null && (
-          <div className="stats-block">
-            <UnavailableNote>
-              <p>
-                {round.failed} of {round.attempted} reads failed on the most recent attempt, at{' '}
-                {formatInstant(lastAttempt)}.{' '}
-                {lastSuccess !== null
-                  ? 'Nothing was substituted for what did not arrive, so any figure a failed read feeds is either absent or older than the last-read time above.'
-                  : 'No read has succeeded yet, so nothing on this page has been read from the API.'}
+      {activeTab === 'general' && (
+        <div
+          className="statistics"
+          id={panelId('general')}
+          role="tabpanel"
+          aria-labelledby={tabId('general')}
+          tabIndex={0}
+        >
+          <div className="stats-meta">
+            {/* Three mutually exclusive states, and the labels are not
+                interchangeable. `Last Read From the API` is rendered from
+                `lastSuccess` ONLY, so it can never date the figures to an attempt
+                that returned nothing. With no successful read at all there is a
+                time but no reading, so the row says `Last Read Attempt`; before
+                the first settle there is neither, and a placeholder there would be
+                a fabricated reading time. */}
+            {lastSuccess !== null ? (
+              <p className="stats-meta-read">
+                <span className="stats-meta-label">Last Read From the API</span>
+                <time className="mono" dateTime={lastSuccess.toISOString()}>
+                  {formatInstant(lastSuccess)}
+                </time>
               </p>
-            </UnavailableNote>
+            ) : lastAttempt !== null ? (
+              <p className="stats-meta-read">
+                <span className="stats-meta-label">Last Read Attempt</span>
+                <time className="mono" dateTime={lastAttempt.toISOString()}>
+                  {formatInstant(lastAttempt)}
+                </time>
+              </p>
+            ) : (
+              <p className="stats-meta-read">
+                <span className="stats-meta-label">Reading From the API</span>
+              </p>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={refreshAll}
+              aria-busy={refreshing}
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
           </div>
-        )}
-        {/* Present from FIRST render so a change to its text is what gets
-            announced — a live region that appears with its message is
-            unreliable. This page never auto-polls, so it only ever speaks in
-            response to the reader pressing Refresh. */}
-        <p className="sr-only" role="status">
-          {refreshMessage}
-        </p>
+          {/* The failure of a round is stated in the page's own words, next to the
+              timestamp it qualifies. Suppressed when EVERY read failed, because
+              the page-level `BackendDown` below already says so and there are then
+              no figures left to caveat. Neutral (`UnavailableNote`), not an alert:
+              each affected section carries its own alert and its own Retry. */}
+          {degraded && !allFailed && lastAttempt !== null && (
+            <div className="stats-block">
+              <UnavailableNote>
+                <p>
+                  {round.failed} of {round.attempted} reads failed on the most recent attempt, at{' '}
+                  {formatInstant(lastAttempt)}.{' '}
+                  {lastSuccess !== null
+                    ? 'Nothing was substituted for what did not arrive, so any figure a failed read feeds is either absent or older than the last-read time above.'
+                    : 'No read has succeeded yet, so nothing on this page has been read from the API.'}
+                </p>
+              </UnavailableNote>
+            </div>
+          )}
+          {/* Present from FIRST render so a change to its text is what gets
+              announced — a live region that appears with its message is
+              unreliable. This page never auto-polls, so it only ever speaks in
+              response to the reader pressing Refresh. */}
+          <p className="sr-only" role="status">
+            {refreshMessage}
+          </p>
 
-        {allFailed ? (
-          <BackendDown
-            error={records.status === 'error' ? records.error : undefined}
-            onRetry={retryAll}
-          />
-        ) : (
-          <>
-            <WorkspaceGlance records={records} about={about} />
-            <WorkflowDistribution records={records} />
-            <EvidenceAndValidation records={records} />
-            <ProjectMemoryFacts graph={graph} />
-            <ApiSurface openapi={openapi} />
-            <NoAnalytics />
-          </>
-        )}
-      </div>
+          {allFailed ? (
+            <BackendDown
+              error={records.status === 'error' ? records.error : undefined}
+              onRetry={retryAll}
+            />
+          ) : (
+            <>
+              <WorkspaceGlance records={records} />
+              <WorkflowDistribution records={records} />
+              <EvidenceAndValidation records={records} />
+              <NoAnalytics />
+              <TechnicalDetails
+                id="stats-technical"
+                title="Technical Details"
+                sub="What this build reports about itself: the runtime mode, the served memory snapshot, and the shape of the API. Properties of the deployment, not of your records."
+              >
+                <RuntimeFacts about={about} />
+                <ProjectMemoryFacts graph={graph} />
+                <ApiSurface openapi={openapi} />
+              </TechnicalDetails>
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'mine' && (
+        <div
+          className="statistics"
+          id={panelId('mine')}
+          role="tabpanel"
+          aria-labelledby={tabId('mine')}
+          tabIndex={0}
+        >
+          <MyStats />
+        </div>
+      )}
     </AppShell>
   );
 }
@@ -511,43 +656,38 @@ type GraphFetch = Fetched<ApiGraphStatus>;
 type OpenApiFetch = Fetched<ApiOpenApiResponse>;
 
 /**
- * The at-a-glance row. The four record cards and the two runtime cards read
- * DIFFERENT endpoints, so they fail independently: a dead `/api/about` leaves
- * the record cards in place and states the two runtime facts as unavailable.
+ * The at-a-glance row — the KPI form, deliberately not a chart.
  *
- * There is no "Database Online" card and no health score here. `Persistence` is
- * reported verbatim from the API and never dressed up as a durable database.
+ * Four headline numbers with no shared scale and no ordering between them are a
+ * row of stat tiles; a four-bar chart of "Total / Need Attention / Ready /
+ * Exported" would put a total and its own subsets on one axis, which invites
+ * reading the parts as a partition of the whole when `Total Records` is the API's
+ * workspace denominator and the other three describe only the records received.
+ *
+ * The two runtime cards this section used to carry (`Runtime Mode`,
+ * `Persistence`) moved into `Technical Details`: they are facts about the build,
+ * not about the workspace, and they sat here only because they arrived in the
+ * same round of reads. This section therefore reads exactly one endpoint now, so
+ * its sub-line no longer promises anything about the build.
  */
-function WorkspaceGlance({ records, about }: { records: RecordsFetch; about: AboutFetch }) {
+function WorkspaceGlance({ records }: { records: RecordsFetch }) {
   return (
     <StatsSection
       id="stats-glance"
       title="Workspace at a Glance"
-      sub="Counts for the records this workspace holds right now, plus what this build reports about itself."
+      sub="Counts for the records this workspace holds right now."
       icon={<LayoutList size={18} strokeWidth={2} aria-hidden="true" />}
     >
       {records.status === 'loading' && <LoadingPanel label="Loading the workspace summary…" />}
       {records.status === 'error' && <BackendDown error={records.error} onRetry={records.reload} />}
       {records.status === 'data' && <GlanceRecordCards body={records.data} />}
-
-      {about.status === 'loading' && (
-        <LoadingPanel label="Loading the runtime mode and persistence…" />
-      )}
-      {about.status === 'error' && (
-        <div className="stats-block">
-          <SectionUnavailable
-            message="This build's runtime mode and persistence could not be read from the API, so neither is stated here."
-            onRetry={about.reload}
-          />
-        </div>
-      )}
-      {about.status === 'data' && <GlanceRuntimeCards body={about.data} />}
     </StatsSection>
   );
 }
 
 /**
- * The two runtime facts `/api/about` reports about this build.
+ * The two runtime facts `/api/about` reports about this build, inside Technical
+ * Details.
  *
  * Each is stated only if the response actually carried a usable string. A
  * malformed field becomes the same unavailable literal every other absent figure
@@ -555,6 +695,29 @@ function WorkspaceGlance({ records, about }: { records: RecordsFetch; about: Abo
  * guessed default such as "Synthetic-Only", which would be the one substitution
  * this project forbids outright. Rendering never throws on this body.
  */
+function RuntimeFacts({ about }: { about: AboutFetch }) {
+  return (
+    <StatsSection
+      id="stats-runtime"
+      title="Runtime"
+      sub="What this build reports about its own data regime and storage."
+      icon={<Settings size={18} strokeWidth={2} aria-hidden="true" />}
+      headingLevel={3}
+    >
+      {about.status === 'loading' && (
+        <LoadingPanel label="Loading the runtime mode and persistence…" />
+      )}
+      {about.status === 'error' && (
+        <SectionUnavailable
+          message="This build's runtime mode and persistence could not be read from the API, so neither is stated here."
+          onRetry={about.reload}
+        />
+      )}
+      {about.status === 'data' && <GlanceRuntimeCards body={about.data} />}
+    </StatsSection>
+  );
+}
+
 function GlanceRuntimeCards({ body }: { body: ApiAboutResponse }) {
   const runtimeMode = titleCaseTokenOrNull(body.runtime_mode);
   const persistence = titleCaseTokenOrNull(body.persistence);
@@ -676,10 +839,10 @@ function WorkflowDistribution({ records }: { records: RecordsFetch }) {
       icon={<BarChart3 size={18} strokeWidth={2} aria-hidden="true" />}
     >
       {records.status === 'loading' && (
-        <LoadingPanel label="Loading the workflow distribution…" />
+        <ChartLoading label="Loading the workflow distribution…" />
       )}
       {records.status === 'error' && (
-        <SectionUnavailable
+        <ChartError
           message="The workspace records could not be read, so there is no workflow distribution to show."
           onRetry={records.reload}
         />
@@ -689,26 +852,41 @@ function WorkflowDistribution({ records }: { records: RecordsFetch }) {
   );
 }
 
+/**
+ * FORM CHOICE — a horizontal bar chart over a shared value axis.
+ *
+ * The job is comparing counts across up to seven named buckets whose labels are
+ * long ("Review Export Readiness"), which is the horizontal bar's exact case: the
+ * label gets a line of real text that wraps, and one axis lets the eye compare
+ * lengths. A column chart would clip or rotate those names; a single stacked bar
+ * would turn five records into five indistinguishable 20% slices and hide the
+ * zeros the canonical axis is deliberately keeping.
+ *
+ * AND IT IS NOT THE ROW OF PROGRESS BARS THIS SECTION USED TO DRAW. The old
+ * `StageBars` scaled every bar against the TOTAL, drew no axis and offered no
+ * table, so six buckets over five records were six near-empty tracks that could
+ * not be read as numbers. The scale is now a nice maximum over the LARGEST
+ * bucket, gridlines and tick labels are shared across the rows, and the figure
+ * carries both a summary sentence and a data table.
+ */
 function WorkflowBars({ records }: { records: RuntimeRecord[] }) {
   if (records.length === 0) {
     return (
-      <p className="stats-note">
+      <ChartEmpty title="No Records to Distribute">
         No records were returned, so there is no distribution to show. No bar is drawn rather than a
         row of zeros.
-      </p>
+      </ChartEmpty>
     );
   }
   const stages = deriveWorkflowStages(records);
   return (
-    <StageBars
+    <StatsBarChart
       caption={`Records by current workflow step, out of ${count(records.length)} counted`}
-      rows={stages.map((stage) => ({
-        id: stage.id,
-        label: stage.label,
-        count: stage.count,
-        toneIndex: STAGE_TONE[stage.id],
-      }))}
+      rows={stages.map((stage) => ({ key: stage.id, label: stage.label, value: stage.count }))}
+      unit="records"
       total={records.length}
+      categoryHeader="Workflow Step"
+      note="Bars share one scale, marked beneath them. The scale runs to the largest bucket, not to the total, so small differences stay visible."
     />
   );
 }
@@ -724,10 +902,10 @@ function EvidenceAndValidation({ records }: { records: RecordsFetch }) {
       icon={<ShieldCheck size={18} strokeWidth={2} aria-hidden="true" />}
     >
       {records.status === 'loading' && (
-        <LoadingPanel label="Loading evidence and export-gate counts…" />
+        <ChartLoading label="Loading evidence and export-gate counts…" />
       )}
       {records.status === 'error' && (
-        <SectionUnavailable
+        <ChartError
           message="The workspace records could not be read, so neither the evidence counts nor the export-gate counts can be stated."
           onRetry={records.reload}
         />
@@ -742,6 +920,17 @@ function EvidenceAndValidation({ records }: { records: RecordsFetch }) {
   );
 }
 
+/**
+ * FORM CHOICE — chips for the counts, and ONE stacked bar for the composition.
+ *
+ * These are two different questions and they are answered separately rather than
+ * twice. The chip row states each class's COUNT with the app's own status glyph
+ * and colour, which is where those hues belong (a `StatusChip` carries an icon
+ * and a label, so colour is never alone). The stacked bar states each class's
+ * SHARE of one whole, which is the part-to-whole job and the one thing a row of
+ * counts cannot show at a glance: the five classes are mutually exclusive and
+ * exhaustive over classified fields, so they genuinely sum to the total.
+ */
 function EvidenceGroup({ records }: { records: RuntimeRecord[] }) {
   const evidence = deriveEvidenceTotals(records);
   return (
@@ -767,6 +956,25 @@ function EvidenceGroup({ records }: { records: RuntimeRecord[] }) {
               };
             })}
           />
+          {/* A composition needs a whole. With no classified field there is no
+              denominator, so the stack is omitted rather than drawn empty — the
+              chip row above still states the five zeros as measurements. */}
+          {evidence.totalFields > 0 && (
+            <div className="stats-block">
+              <StatsStackedBar
+                caption="Share of classified fields by evidence-support class"
+                rows={EVIDENCE_CLASSES.map((cls) => ({
+                  key: cls.key,
+                  label: evidenceClassLabel(cls.key),
+                  value: evidence[cls.field],
+                }))}
+                total={evidence.totalFields}
+                unit="fields"
+                categoryHeader="Evidence-Support Class"
+                note="Segment shade marks position in the order above — it is not a magnitude and it does not rank severity. The class name carries the meaning."
+              />
+            </div>
+          )}
           <FigureList
             rows={[
               { label: 'Total Fields Counted', value: count(evidence.totalFields), mono: true },
@@ -783,6 +991,43 @@ function EvidenceGroup({ records }: { records: RuntimeRecord[] }) {
   );
 }
 
+/**
+ * The evidence-class name as words, for the legend and the data table.
+ *
+ * The chip row above renders `StatusChip`, which supplies its own label from
+ * `LABELS`; a chart legend cannot embed a chip (a swatch keys the ramp step), so
+ * it needs the class name as a plain string. Derived from the backend's own
+ * histogram key rather than authored per class, so a class added to
+ * `EVIDENCE_CLASSES` cannot arrive here with no name at all.
+ */
+function evidenceClassLabel(key: string): string {
+  return key
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
+ * FORM CHOICE — a figure list, and DELIBERATELY NOT A CHART.
+ *
+ * Every chart form for these five numbers would state something false.
+ * `Stale Artifacts` is a SUBSET OF `Exported`, not a fifth bucket, so a stacked
+ * bar would imply a partition that does not exist and a bar chart on one shared
+ * axis would invite adding the rows up. The four status counts alone would chart
+ * honestly, but splitting the five across a chart and a list would separate the
+ * very rows whose relationship the copy below has to explain. So they stay a
+ * labelled list with the overlap stated in words.
+ *
+ * "OVERLAPS the four status rows" is what this used to say, and it is looser than
+ * the truth in a way that matters: it implies a record could be stale while
+ * sitting in `Ready Now` or one of the two blocked rows, which cannot happen.
+ * `artifact_state` returns `none` unless `exp.exported()`
+ * (`apps/api/isaac_api/dependencies.py:56-57`), and `status()` returns `DONE` if
+ * and only if `exported()` is true (`workspace.py:549-566`, checked) — which is
+ * also the field `deriveExportGate` buckets on. So stale ⊆ Exported, and the
+ * overlap is with exactly ONE row. The decision not to chart is unchanged; only
+ * the reason is stated at its real strength.
+ */
 function ExportGateGroup({ records }: { records: RuntimeRecord[] }) {
   const gate = deriveExportGate(records);
   return (
@@ -814,9 +1059,10 @@ function ExportGateGroup({ records }: { records: RuntimeRecord[] }) {
           <p className="stats-note">
             Ready Now means no open questions remain and the official export dry-run passes. Blocked
             by the Export Gate means no open questions remain but the dry-run does not pass. Blocked
-            by Open Questions means the gate has not been reached yet. Stale Artifacts overlaps the
-            rows above — an exported record whose draft has since changed is both — so it must not be
-            added to them.
+            by Open Questions means the gate has not been reached yet. Stale Artifacts is a subset of
+            Exported, not a fifth bucket — a record whose exported file no longer matches its draft
+            is counted in both — so it must not be added to the four, and for that reason these five
+            are not charted on a shared scale.
           </p>
           <p className="stats-note">
             These positions are recomputed from the current drafts on every read and are never
@@ -829,7 +1075,7 @@ function ExportGateGroup({ records }: { records: RuntimeRecord[] }) {
   );
 }
 
-/* ---- 4 · Project Memory ----------------------------------------------- */
+/* ---- Technical Details · Project Memory -------------------------------- */
 
 function ProjectMemoryFacts({ graph }: { graph: GraphFetch }) {
   return (
@@ -838,6 +1084,7 @@ function ProjectMemoryFacts({ graph }: { graph: GraphFetch }) {
       title="Project Memory"
       sub="What the served memory snapshot reports about itself. This is the memory and query plane — it is never the authority on record validity."
       icon={<Network size={18} strokeWidth={2} aria-hidden="true" />}
+      headingLevel={3}
     >
       {graph.status === 'loading' && <LoadingPanel label="Loading Project Memory provenance…" />}
       {graph.status === 'error' && (
@@ -939,7 +1186,7 @@ function MemoryBody({ graph }: { graph: Parameters<typeof deriveMemoryFacts>[0] 
   );
 }
 
-/* ---- 5 · API Surface --------------------------------------------------- */
+/* ---- Technical Details · API Surface ----------------------------------- */
 
 function ApiSurface({ openapi }: { openapi: OpenApiFetch }) {
   return (
@@ -948,6 +1195,7 @@ function ApiSurface({ openapi }: { openapi: OpenApiFetch }) {
       title="API Surface"
       sub="The shape of the API this build documents, read from its own generated contract. These are the operations that exist — not traffic, which is not recorded anywhere."
       icon={<FileJson size={18} strokeWidth={2} aria-hidden="true" />}
+      headingLevel={3}
     >
       {openapi.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
       {openapi.status === 'error' && (
@@ -958,6 +1206,21 @@ function ApiSurface({ openapi }: { openapi: OpenApiFetch }) {
   );
 }
 
+/**
+ * FORM CHOICE — two different forms for two differently-shaped breakdowns of the
+ * same contract, because the shape of the LABELS decides the form.
+ *
+ * By METHOD: at most five categories whose names are three to six characters
+ * (`GET`, `DELETE`). Columns are right — the names sit under the marks with no
+ * wrapping, rotation or truncation, and heights compare against one baseline.
+ * Only the sole maximum is labelled on its cap; the y-axis carries the rest
+ * approximately and the table exactly.
+ *
+ * By GROUP: as many categories as the document has tags, with names that come
+ * from the contract itself and can be anything. Compact comparison rows are
+ * right — the name gets a wrapping line of real text, and the tracks stay short
+ * enough that ten groups still fit without a per-row axis strip.
+ */
 function ApiSurfaceBody({ doc }: { doc: Parameters<typeof deriveApiSurface>[0] }) {
   const surface = deriveApiSurface(doc);
 
@@ -987,30 +1250,29 @@ function ApiSurfaceBody({ doc }: { doc: Parameters<typeof deriveApiSurface>[0] }
         ]}
       />
       <div className="stats-block">
-        <StageBars
+        <StatsColumnChart
           caption="Documented operations by HTTP method"
-          rows={surface.byMethod.map((row, index) => ({
-            id: row.method,
+          rows={surface.byMethod.map((row) => ({
+            key: row.method,
             label: row.method.toUpperCase(),
-            count: row.count,
-            toneIndex: index,
+            value: row.count,
           }))}
+          unit="operations"
           total={surface.operationCount}
+          categoryHeader="HTTP Method"
         />
       </div>
-      {/* The one wide block on this page: group names come from the contract's
-          own tags and can be long, so this scrolls inside itself rather than
-          widening the page. */}
-      <div className="stats-block stats-scroll">
-        <StageBars
+      <div className="stats-block">
+        <StatsComparisonRows
           caption="Documented operations by group, in the contract's own tag order"
-          rows={surface.byGroup.map((row, index) => ({
-            id: row.group,
+          rows={surface.byGroup.map((row) => ({
+            key: row.group,
             label: row.group,
-            count: row.count,
-            toneIndex: index,
+            value: row.count,
           }))}
+          unit="operations"
           total={surface.operationCount}
+          categoryHeader="Group"
         />
       </div>
       <p className="stats-actions">
@@ -1020,13 +1282,19 @@ function ApiSurfaceBody({ doc }: { doc: Parameters<typeof deriveApiSurface>[0] }
   );
 }
 
-/* ---- 6 · No analytics -------------------------------------------------- */
+/* ---- No analytics ------------------------------------------------------ */
 
 /**
  * Absence of telemetry is a PRIVACY FEATURE, so this section is informational,
  * not a failure: neutral colours, no alert role, no warning glyph, no empty
  * chart, no zero-filled placeholder. The shield is the privacy mark this app
  * already uses, and it is decorative.
+ *
+ * IT STAYS IN THE MAIN FLOW. Project Memory and the API surface moved into a
+ * collapsed Technical Details region; this did not, because it is a claim about
+ * what the application measures and stores, and a governance claim behind a
+ * disclosure is a weaker claim. It sits directly after the record figures, where
+ * a reader wondering why there is no traffic figure will look.
  *
  * SCOPE IS THE WHOLE POINT of the copy below. An earlier version of this section
  * claimed the preview "does not track visits, users, source IPs, request

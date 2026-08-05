@@ -305,7 +305,29 @@ export interface ExportGate {
  *
  * `staleArtifacts` is a separate axis, not a fifth bucket: an exported record
  * whose draft has since changed is both `exported` and stale, so this count
- * overlaps the others by design and must never be added to them.
+ * overlaps by design and must never be added to the four status counts. It
+ * overlaps EXACTLY ONE of them — `exported` — and is in fact a subset of it:
+ * `artifact_state` returns `none` unless `exp.exported()`
+ * (`apps/api/isaac_api/dependencies.py:56-57`), and `status()` is `DONE` iff
+ * `exported()` (`workspace.py:549-566`). A record cannot be stale while counted
+ * under `readyNow`, `blockedByGate` or `blockedByQuestions`.
+ *
+ * That is a BACKEND invariant, and no frontend test can enforce it — this
+ * function would happily count a body that violated it. What holds it is the
+ * CODE guarantee cited above: `artifact_state` returns `none` unless
+ * `exp.exported()` (`apps/api/isaac_api/dependencies.py:56-57`), which is
+ * unconditional and covers `stale` as well as `current`.
+ *
+ * THE TEST CITED HERE IS NARROWER THAN THIS COMMENT USED TO SAY, and the
+ * difference matters because it is the difference between an asserted invariant
+ * and an unasserted one. It read "which asserts `exported is True` for every
+ * record with a non-`none` artifact state".
+ * `apps/api/tests/test_runtime_records.py::test_artifact_filter_current_only_for_exported`
+ * queries `?artifact=current` and asserts `artifact_state == 'current'` and
+ * `exported is True` for THAT SUBSET ONLY. No test pairs `artifact_state ==
+ * 'stale'` with `exported` — the canonical seed produces no stale artifact, so
+ * there is nothing for such a test to observe. The invariant still holds; it is
+ * the code, not the test, that holds all of it.
  *
  * ONE FIELD FOR ONE WORD. `exported` reads `status === 'done'` — the same field
  * {@link deriveWorkspaceTotals} buckets on — and NOT the `exported` boolean it

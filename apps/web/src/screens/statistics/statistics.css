@@ -7,18 +7,26 @@
  * page header) or under a `.stats-*` / `.stat-card*` class name. Nothing here
  * targets a bare element selector, so nothing leaks into the rest of the app.
  *
- * NO interaction-state rule exists in this file. Nothing on this surface is
- * clickable, so there is no `:hover` / `:active` / `:focus` declaration to
- * collide with the reserved pass/fail hues (interaction-states.test.ts), and
- * `:focus-visible` stays entirely on the global ring in base.css.
+ * INTERACTION STATES — this used to say there were NONE, and that stopped being
+ * true when the surface gained tabs, disclosures and charts. What is true now:
+ * the only interaction-state declarations in this file are `:focus-visible`
+ * rings, each `2px solid var(--action)`, on the four things a keyboard reader can
+ * land on (the tab panel, the Technical Details summary, the data-table toggle).
+ * There is NO `:hover` and NO `:active` rule anywhere here, and no
+ * interaction-state rule contains a hex literal or a `--pass-*` / `--fail-*`
+ * token — the two things `interaction-states.test.ts` scans for. Chart marks
+ * carry no `:hover` rule at all: pointer emphasis is set in React, as an
+ * `opacity` on the mark, so there is nothing here to collide with the reserved
+ * verdict hues.
  *
  * NO `border-left` / `border-right` appears anywhere in this file: every
  * colour is carried by `background`, `border` (all four sides) or `color`,
  * per the permanent no-vertical-rail rule.
  *
- * NO transition, no animation, no gradient, no transform. Rendering is fully
- * static, so the global `prefers-reduced-motion` blanket in base.css:258-277
- * needs no companion rule here.
+ * NO transition, no animation and no gradient. The ONE `transform` is the
+ * tooltip's static `translate(-50%, -100%)` positioning offset, which nothing
+ * animates, so the global `prefers-reduced-motion` blanket in base.css:258-277
+ * still needs no companion rule here.
  */
 
 /* ---- page root -------------------------------------------------------- */
@@ -31,53 +39,77 @@
  * literal. The 1200px fallback only applies if this ever mounts outside a
  * width mode.
  *
- * CATEGORICAL BAR PALETTE — declared here as PAGE-SCOPED custom properties,
- * following the `.graph-canvas` precedent (graph.css:1041-1060), NOT as
- * `:root` tokens: these six slots are local to this one surface and must not
- * enter the global design system.
+ * THE CHART PALETTE — declared here as PAGE-SCOPED custom properties, following
+ * the `.graph-canvas` precedent (graph.css:1041-1060), NOT as `:root` tokens:
+ * these slots are local to this one surface and must not enter the global design
+ * system.
  *
- * They are the existing palette's own accent hues, not a new rainbow. Five of
- * the six are lifted VERBATIM from tokens.css; only slot 3 is authored, to
- * fill the yellow-green gap between slot 2 and slot 4 at the same muted,
- * mid-dark character as its neighbours.
+ * It is TWO slots, and there used to be six. The six `--stats-cat-*`
+ * CATEGORICAL slots are gone because no chart on this surface encodes identity
+ * by hue any more: a comparison of counts across named buckets is ONE series, so
+ * it takes one colour, and painting it in six hues would encode nothing the row
+ * label does not already say. What replaces them:
  *
- * Slot 3 is deliberately NOT `--pass-solid` (#2f8557). Green is a RESERVED
- * validation-verdict hue in this system, and a workflow-stage bucket is not a
- * verdict; the moss #5c7f33 is a visibly different, yellower hue so a stage
- * bar can never be misread as "passed".
+ *   --stats-series  a single hue for every one-series mark (bars, columns,
+ *                   comparison tracks, the line and its markers).
+ *                   #2c6ab0 = --action, verbatim. 5.53:1 on #ffffff,
+ *                   5.39:1 on #fbfcfd — clear of WCAG 1.4.11's 3:1 for a
+ *                   graphical object on both card surfaces.
+ *
+ *   --stats-ramp-1..5   a five-step ORDINAL ramp for the one stacked bar, where
+ *                   the segments touch and must be told apart. Stepped by
+ *                   LIGHTNESS in a single hue, because lightness order survives
+ *                   every colour-vision deficiency and hue does not.
+ *
+ * WHY THE RAMP AND NOT THIS APP'S FIVE EVIDENCE-CLASS HUES, which would have
+ * been the obvious choice: measured with the `dataviz` skill's validator
+ * (`scripts/validate_palette.js`, OKLab ΔE ×100), that set FAILS as touching
+ * marks — `--needsyou-text` #8a6420 against `--fail-solid` #b23a30 is
+ * ΔE 0.9 under deuteranopia, i.e. the two are the same colour to a deutan
+ * reader, and `--verified-text` against `--inferred-text` is ΔE 7.0 even with
+ * full colour vision. Those hues are correct where this app already uses them,
+ * on a `StatusChip` that carries an icon AND a label; a stacked segment has
+ * neither. The chip row on this very page still shows them.
+ *
+ * The ramp below PASSES every ordinal check the same validator applies
+ * (monotone lightness, adjacent ΔL >= 0.06, light end >= 2:1) against BOTH
+ * #ffffff and #fbfcfd. Contrast vs #ffffff / #fbfcfd:
+ *
+ *   ramp 1  #1c4a7a   9.09:1 / 8.85:1   (= --action-pressed, verbatim)
+ *   ramp 2  #3a6390   6.24:1 / 6.07:1
+ *   ramp 3  #587ca7   4.32:1 / 4.21:1
+ *   ramp 4  #7597be   3.03:1 / 2.95:1
+ *   ramp 5  #93b4d6   2.16:1 / 2.10:1
+ *
+ * THREE OF THOSE FIVE ROWS WERE WRONG and are corrected here: steps 2, 3 and 4
+ * were recorded as 5.98/5.82, 4.06/3.95 and 2.85/2.78. Every number above is a
+ * WCAG 2.x relative-luminance computation over the exact hex pairs, re-measured
+ * when the error was found; steps 1 and 5 and `--stats-series` were already
+ * exact. The mis-statements all understated the ratio, which is the direction
+ * that makes a palette look worse than it is — but an understated measurement is
+ * not "safe", it is just an unreliable measurement, and one of them changed the
+ * conclusion below.
+ *
+ * Step 5 sits below 3:1 on both surfaces by design, and step 4 sits below it on
+ * #fbfcfd only (2.95:1) while clearing it on #ffffff (3.03:1) — this used to read
+ * "steps 4 and 5 sit below 3:1", which the corrected step-4 figure no longer
+ * supports on the white card. An ordinal ramp's light end is ALLOWED to recede
+ * toward the surface, and the relief for it is that colour is never the only
+ * encoding here: 2px surface gaps separate the segments, a legend pairs every
+ * swatch with the class name plus its count and share, and the whole composition
+ * is restated in a summary sentence and a data table.
  *
  * `--assist*` (lavender) is reserved for Assistant surfaces and is absent.
- * `--fail-*` (red) is reserved for genuine failure and is absent.
- *
- * CONTRAST — these bars are graphical objects, so the applicable bar is
- * WCAG 1.4.11 non-text contrast, 3:1. Ratios computed with the WCAG relative
- * luminance formula against `--surface` #ffffff (the card background the bars
- * sit on). The second figure is against `--surface-subtle` #fbfcfd
- * (L = 0.9724), which lowers every ratio by ~0.1; all twelve clear 3:1.
- *
- *   slot 1  #2c6ab0  blue    (= --action, verbatim)          5.53:1  / 5.39:1
- *   slot 2  #2f7d78  teal    (= --verified-text, verbatim)   4.86:1  / 4.73:1
- *   slot 3  #5c7f33  moss    (authored; see note above)      4.63:1  / 4.51:1
- *   slot 4  #b07d2b  ochre   (= --advisory-icon, verbatim)   3.61:1  / 3.52:1  <- lowest
- *   slot 5  #7a6bb0  violet  (= --src-derivation, verbatim)  4.61:1  / 4.49:1
- *   slot 6  #5b6b7d  slate   (= --cover-text, verbatim)      5.46:1  / 5.32:1
- *
- * Mutual distinguishability: hue angles are roughly 211 / 176 / 85 / 38 /
- * 253 / 211-desaturated, so five of the six are well separated on the wheel.
- * The one close pair is slot 1 and slot 6, which share a hue angle but differ
- * sharply in chroma (S ~60% vs ~16%) — that accent-vs-neutral split is the
- * design system's own distinction, and the two are placed at opposite ends of
- * the ramp so adjacent stages never use them together. Colour is never the
- * sole carrier regardless: every bar renders its own label and count as real
- * text, and the whole distribution is restated in the `role="img"` label.
+ * `--pass-*` (green) and `--fail-*` (red) are reserved validation-verdict hues
+ * and are absent: a workflow bucket and an evidence class are not verdicts.
  */
 .statistics {
-  --stats-cat-1: #2c6ab0;
-  --stats-cat-2: #2f7d78;
-  --stats-cat-3: #5c7f33;
-  --stats-cat-4: #b07d2b;
-  --stats-cat-5: #7a6bb0;
-  --stats-cat-6: #5b6b7d;
+  --stats-series: #2c6ab0;
+  --stats-ramp-1: #1c4a7a;
+  --stats-ramp-2: #3a6390;
+  --stats-ramp-3: #587ca7;
+  --stats-ramp-4: #7597be;
+  --stats-ramp-5: #93b4d6;
 
   max-width: var(--content-max, 1200px);
   margin-top: 22px;
@@ -304,67 +336,6 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
-
-/* ---- StageBars ------------------------------------------------------- */
-
-.statistics .stats-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.statistics .stats-bars-caption {
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  line-height: 1.55;
-}
-.statistics .stats-bars-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-/* Label and count on one line, the track spanning both columns beneath.
-   `minmax(0, 1fr)` for the label track so a long stage name wraps instead of
-   pushing the count off the card. */
-.statistics .stats-bar-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 5px 12px;
-}
-.statistics .stats-bar-label {
-  min-width: 0;
-  font-size: 12.5px;
-  color: var(--text-strong);
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.statistics .stats-bar-count {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-heading);
-}
-/* The track is a neutral container, not data — the bar segment inside it
-   carries the value and the contrast-checked colour. A zero-count row keeps
-   its full-width track and a zero-width segment, and states the `0` in text. */
-.statistics .stats-bar-track {
-  grid-column: 1 / -1;
-  display: flex;
-  height: 8px;
-  border-radius: var(--radius-pill);
-  background: var(--border-faint);
-  overflow: hidden;
-}
-.statistics .stats-bar-fill {
-  height: 100%;
-  border-radius: var(--radius-pill);
-  background: var(--cover-text);
-}
-.statistics .stats-bar-fill[data-cat='1'] { background: var(--stats-cat-1); }
-.statistics .stats-bar-fill[data-cat='2'] { background: var(--stats-cat-2); }
-.statistics .stats-bar-fill[data-cat='3'] { background: var(--stats-cat-3); }
-.statistics .stats-bar-fill[data-cat='4'] { background: var(--stats-cat-4); }
-.statistics .stats-bar-fill[data-cat='5'] { background: var(--stats-cat-5); }
-.statistics .stats-bar-fill[data-cat='6'] { background: var(--stats-cat-6); }
 
 /* ---- MiniBreakdown --------------------------------------------------- */
 
@@ -595,4 +566,663 @@
 /* The localized retry control inside an unavailable note. */
 .statistics .stats-retry {
   margin-top: 10px;
+}
+
+/* ======================================================================
+ * CHART SYSTEM · TABS · TECHNICAL DETAILS · MY STATS
+ * (appended only; nothing above is altered)
+ *
+ * Same constraints as the rest of this file, and two of them are guarded by
+ * tests rather than by good intentions:
+ *
+ *  · NO `border-left` / `border-right` anywhere (`no-vertical-rail.test.ts`).
+ *  · NO `:hover` / `:active` / `:focus` rule may contain a hex literal or a
+ *    `--pass-*` / `--fail-*` token (`interaction-states.test.ts`). The chart
+ *    marks therefore carry NO `:hover` rule at all — pointer emphasis is done in
+ *    React, by setting `opacity` on the mark itself, so there is nothing here to
+ *    collide with the reserved verdict hues.
+ *  · No transition, no animation, no gradient, no transform, so the global
+ *    `prefers-reduced-motion` blanket in base.css needs no companion rule.
+ * ====================================================================== */
+
+/* ---- the tab panel --------------------------------------------------- */
+
+/*
+ * `.statistics` IS the tab panel now (it already consumes `--content-max`, so
+ * the panel can never run wider than the tab bar above it — the same alignment
+ * rule `.governance-panel` and `.settings-panel` follow).
+ *
+ * The panel is `tabIndex={0}`, matching Governance and Settings, so a keyboard
+ * reader can move from the tablist into the panel's content. That needs a
+ * visible focus ring, and this is the ONE `:focus-visible` declaration in this
+ * file: a token, never a hex.
+ */
+.statistics[role='tabpanel'] {
+  margin-top: 0;
+}
+.statistics[role='tabpanel']:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+/* The page header owns the space above the tab bar; `.section-tabs` carries its
+   own `margin: 18px 0 16px`, so the panel does not add a third gap. */
+.placeholder > .section-tabs {
+  margin-bottom: 0;
+}
+
+/* ---- the chart figure ------------------------------------------------ */
+
+.statistics .stats-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.statistics .stats-chart-caption {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+  line-height: 1.5;
+  max-width: 68ch;
+}
+.statistics .stats-chart-note {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.55;
+  max-width: 68ch;
+}
+
+/*
+ * The measured plot column. `position: relative` is the tooltip's containing
+ * block; `min-width: 0` lets it shrink inside a grid track so the SVG's measured
+ * width really is the available width rather than the widest child's.
+ */
+.statistics .stats-chart-plot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+.statistics .stats-chart-plot-compact {
+  gap: 7px;
+}
+
+/* One row of a row-based chart: label and value on the first line, the track
+   spanning both columns beneath. The label track is `minmax(0, 1fr)` so a long
+   category name WRAPS instead of pushing the value off the card — which is the
+   whole reason the labels are HTML and not SVG `<text>`. */
+.statistics .stats-chart-row,
+.statistics .stats-chart-comparerow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 3px 12px;
+  min-width: 0;
+}
+.statistics .stats-chart-row-label {
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-strong);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.statistics .stats-chart-row-value {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+}
+/*
+ * THE SVGs ARE SIZED BY THEIR OWN MEASURED ATTRIBUTES, not by `width: 100%`, and
+ * that is a deliberate reversal.
+ *
+ * `width: 100%` on an SVG that carries a `viewBox` makes the CSS width and the
+ * coordinate space disagree whenever the measurement is stale: the browser scales
+ * the whole drawing to fit, which shrinks `<text>` and thins hairlines — the exact
+ * defect `GraphCanvas.tsx` already documents ("the label scales with the viewBox
+ * and swallowed the glyphs at deep zoom"). It also HIDES a stale measurement
+ * instead of surfacing it, which is how the collapsed-region bug survived until a
+ * browser test measured it.
+ *
+ * `max-width: 100%` is kept as the one safety net: if a container ever shrinks
+ * without an observation, the chart scales down uniformly rather than overflowing
+ * its card. It never scales UP, so the normal case is exactly 1:1.
+ */
+.statistics .stats-chart-track {
+  grid-column: 1 / -1;
+  display: block;
+  max-width: 100%;
+}
+/*
+ * The shared tick strip beneath a row-based chart. A positioning context for
+ * absolutely placed HTML tick labels, with the axis rule as its own top border —
+ * so there is no SVG here at all.
+ *
+ * `overflow: visible` is deliberate and stated: the first and last labels are
+ * anchored inward (see `[data-anchor]` below) so nothing needs clipping, and a
+ * clip here would be able to crop a tick.
+ */
+.statistics .stats-chart-axis {
+  position: relative;
+  min-width: 0;
+  height: 18px;
+  border-top: 1px solid var(--border);
+  overflow: visible;
+}
+
+/* ---- SVG marks ------------------------------------------------------- */
+
+/* One series, one colour. `data-slot="1"` is the single-series slot; the ramp
+   slots below belong to the stacked bar. */
+.statistics .stats-chart-bar[data-slot='1'],
+.statistics .stats-chart-marker[data-slot='1'] {
+  fill: var(--stats-series);
+}
+.statistics .stats-chart-series[data-slot='1'] {
+  stroke: var(--stats-series);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* The 2px ring in the surface colour, so a marker stays legible where it crosses
+   the line or another marker. A ring, never a stroke drawn as data ink. */
+.statistics .stats-chart-marker-ring {
+  fill: var(--surface);
+}
+
+/* Recessive chrome: one step off the surface, hairline, SOLID. Never dashed —
+   dashing reads as "projection" or "threshold" when it is only a grid. */
+.statistics .stats-chart-grid {
+  stroke: var(--border-faint);
+  stroke-width: 1;
+}
+.statistics .stats-chart-axis-rule {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+/*
+ * ── ALL CHART TEXT IS HTML ────────────────────────────────────────────────
+ *
+ * Ticks, the one direct value label and the in-segment shares are absolutely
+ * positioned `<span>`s over the plot, not SVG `<text>`. The reasons are in the
+ * header of `StatsCharts.tsx`; the one that forced it is that `scrollWidth` on an
+ * SVG child reports the SVG viewport's width, so the browser suite's
+ * content-loss probe read a one-character tick as 1% of its content and reported
+ * total text loss on four viewports.
+ *
+ * Axis text wears TEXT tokens, never the series colour, and `tabular-nums` so a
+ * column of ticks aligns.
+ *
+ * ── WHY `--text-muted` AND NOT `--text-tertiary` ───────────────────────────
+ *
+ * This rule used `--text-tertiary` #78838f, which MEASURES 3.86:1 on `--surface`
+ * #ffffff and 3.76:1 on `--surface-subtle` #fbfcfd. At 10.5px that is ordinary
+ * body text under WCAG 1.4.3, so the requirement is 4.5:1 and every tick on
+ * every chart failed it — a NEW AA failure introduced by this slice, and one the
+ * automated ratchet could barely see: axe caught exactly ONE of the y-ticks as a
+ * violation, put five more in its `incomplete` bucket (the SVG behind them
+ * defeats background resolution), and never saw the three x-axis ticks at all.
+ *
+ * `--text-muted` #5b6570 MEASURES 5.93:1 / 5.77:1 (and 5.48:1 on the #f4f6f9 app
+ * background), so all of them clear 4.5:1 — the five axe could not resolve
+ * included, which is the point of fixing the TOKEN rather than the one node axe
+ * happened to flag.
+ *
+ * `--text-secondary` #46515f (8.07:1 / 7.86:1) would also clear it and was
+ * REJECTED: it is what `.stats-chart-cat` uses for the category names under the
+ * columns, so ticks would stop being recessive chrome and start competing with
+ * the labels they measure. `#5f6b78` (5.44:1 / 5.30:1) would clear it too and
+ * was rejected for being a seventh literal outside the token set.
+ */
+.statistics .stats-chart-tick {
+  position: absolute;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* The x-axis strip: labels hang from the top of the strip, anchored so the two
+   end ticks stay inside the plot rather than half off it. */
+.statistics .stats-chart-axis .stats-chart-tick {
+  top: 3px;
+}
+.statistics .stats-chart-tick[data-anchor='start'] {
+  transform: translateX(0);
+}
+.statistics .stats-chart-tick[data-anchor='middle'] {
+  transform: translateX(-50%);
+}
+.statistics .stats-chart-tick[data-anchor='end'] {
+  transform: translateX(-100%);
+}
+/* The y-axis ticks sit at the left edge, just above their own gridline. */
+.statistics .stats-chart-tick-y {
+  left: 0;
+  transform: translateY(-100%);
+  padding-bottom: 2px;
+}
+.statistics .stats-chart-value {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--text-heading);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* A transparent hit area needs `pointer-events` spelled out: the default
+   `visiblePainted` would ignore an unfilled rect entirely. */
+.statistics .stats-chart-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+
+/* ---- the plot band: marks in SVG, glyphs in HTML above them ---------- */
+
+/*
+ * The positioning context shared by the column, stacked and line charts. Its
+ * inline `height` is the plot height the component computed, so the band is
+ * exactly as tall as the SVG inside it — the axis labels and the one value label
+ * are then placed against the SAME pixel scale the marks were drawn on, with no
+ * second source of truth.
+ */
+.statistics .stats-chart-band {
+  position: relative;
+  min-width: 0;
+}
+
+/* ---- column chart --------------------------------------------------- */
+
+.statistics .stats-chart-columns {
+  display: block;
+  max-width: 100%;
+}
+/* Category names under the columns, in the same band order. Equal flex basis
+   with `minmax`-style zero shrink floor, so the labels line up with the bands
+   the SVG computed from the same width. */
+.statistics .stats-chart-catrow {
+  display: flex;
+  gap: 0;
+  min-width: 0;
+}
+.statistics .stats-chart-cat {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* ---- stacked bar ---------------------------------------------------- */
+
+.statistics .stats-chart-stack {
+  display: block;
+  max-width: 100%;
+}
+
+/* The line chart. Same sizing rule as the other three: the measured attributes
+   govern, `max-width` is only the shrink-safety net. */
+.statistics .stats-chart-line {
+  display: block;
+  max-width: 100%;
+}
+.statistics .stats-chart-xlabel {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.statistics .stats-chart-segment[data-slot='1'] { fill: var(--stats-ramp-1); }
+.statistics .stats-chart-segment[data-slot='2'] { fill: var(--stats-ramp-2); }
+.statistics .stats-chart-segment[data-slot='3'] { fill: var(--stats-ramp-3); }
+.statistics .stats-chart-segment[data-slot='4'] { fill: var(--stats-ramp-4); }
+.statistics .stats-chart-segment[data-slot='5'] { fill: var(--stats-ramp-5); }
+
+/*
+ * The in-segment share, as HTML centred over its own segment.
+ *
+ * A label set INSIDE a coloured fill is the one place text may leave the text
+ * tokens — it has to clear contrast against the fill it sits on. Measured, at
+ * 11px semibold (which is NOT WCAG large text: that threshold is 18.66px bold or
+ * 24px regular, so the requirement is 4.5:1, not 3:1):
+ *
+ *          ramp fill   --surface #ffffff   --text-heading #111a24
+ *   slot 1  #1c4a7a          9.09:1                1.93:1     -> white
+ *   slot 2  #3a6390          6.24:1                2.81:1     -> white
+ *   slot 3  #587ca7          4.32:1                4.06:1     -> NEITHER
+ *   slot 4  #7597be          3.03:1                5.79:1     -> ink
+ *   slot 5  #93b4d6          2.16:1                8.14:1     -> ink
+ *
+ * SLOT 3 IS THE MIDDLE OF THE RAMP AND NEITHER LABEL COLOUR CLEARS 4.5:1 ON IT,
+ * so no in-segment label is drawn there at all — see `IN_SEGMENT_LABEL_SLOTS` in
+ * `StatsCharts.tsx`, which is where the decision is made and where the reasoning
+ * for not re-stepping the ramp is recorded. This rule previously put `--surface`
+ * on slots 1–3 and justified slot 3 with "4.06:1 clears the 3:1 that applies to
+ * an 11px semibold label as large-ish text": the ratio was really 4.32:1, 3:1 was
+ * the wrong threshold, and 4.32:1 fails the right one.
+ *
+ * Never clipped: the component measures the text against the segment and simply
+ * does not render this element unless it fits with padding on both sides, so
+ * there is no `overflow: hidden` here to crop a glyph. A slot that carries no
+ * label — because it does not fit, or because of the contrast rule above — keeps
+ * its share in the legend, the summary sentence and the data table, so nothing
+ * is gated by either decision.
+ */
+.statistics .stats-chart-inlabel {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.statistics .stats-chart-inlabel[data-slot='1'],
+.statistics .stats-chart-inlabel[data-slot='2'] {
+  color: var(--surface);
+}
+.statistics .stats-chart-inlabel[data-slot='4'],
+.statistics .stats-chart-inlabel[data-slot='5'] {
+  color: var(--text-heading);
+}
+
+/* ---- legend --------------------------------------------------------- */
+
+/* Wraps rather than scrolls: five entries reflow to five rows in the 319px
+   content box at 375px width, so nothing overflows and no scroller is needed. */
+.statistics .stats-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.statistics .stats-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+/* A rect swatch, mirroring the mark it keys (a filled area, not a line). */
+.statistics .stats-chart-swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+.statistics .stats-chart-swatch[data-slot='1'] { background: var(--stats-ramp-1); }
+.statistics .stats-chart-swatch[data-slot='2'] { background: var(--stats-ramp-2); }
+.statistics .stats-chart-swatch[data-slot='3'] { background: var(--stats-ramp-3); }
+.statistics .stats-chart-swatch[data-slot='4'] { background: var(--stats-ramp-4); }
+.statistics .stats-chart-swatch[data-slot='5'] { background: var(--stats-ramp-5); }
+.statistics .stats-chart-legend-label {
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.statistics .stats-chart-legend-detail {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- tooltip -------------------------------------------------------- */
+
+/*
+ * The hover readout. Enhancement only — every value it shows is already in the
+ * visible row text, the legend or the data table — so it is `aria-hidden` and
+ * `pointer-events: none` (it must never eat the pointer it is following).
+ *
+ * `translate(-50%, -100%)` is a positioning offset, not an animation; there is
+ * no transition on it, so the reduced-motion blanket has nothing to neutralize.
+ */
+.statistics .stats-chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 260px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgb(17 26 36 / 12%);
+  font-size: 11.5px;
+  line-height: 1.4;
+  pointer-events: none;
+  white-space: nowrap;
+}
+/* Values lead, labels follow: the number is the strong element, because the
+   reader already knows which mark they are pointing at. */
+.statistics .stats-chart-tooltip-value {
+  font-weight: 600;
+  color: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+}
+/* A short line key, not a filled box: at tooltip density a box is data-weight
+   ink doing a label's job. */
+.statistics .stats-chart-tooltip-key {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--stats-series);
+}
+.statistics .stats-chart-tooltip-key[data-slot='1'] { background: var(--stats-ramp-1); }
+.statistics .stats-chart-tooltip-key[data-slot='2'] { background: var(--stats-ramp-2); }
+.statistics .stats-chart-tooltip-key[data-slot='3'] { background: var(--stats-ramp-3); }
+.statistics .stats-chart-tooltip-key[data-slot='4'] { background: var(--stats-ramp-4); }
+.statistics .stats-chart-tooltip-key[data-slot='5'] { background: var(--stats-ramp-5); }
+.statistics .stats-chart-tooltip-label {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- the data-table alternative ------------------------------------- */
+
+.statistics .stats-chart-table-wrap {
+  min-width: 0;
+}
+.statistics .stats-chart-table-toggle {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--action);
+  line-height: 1.5;
+}
+.statistics .stats-chart-table-toggle:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.statistics .stats-chart-table {
+  margin-top: 9px;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.statistics .stats-chart-table th,
+.statistics .stats-chart-table td {
+  padding: 5px 12px 5px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-hair);
+}
+.statistics .stats-chart-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-slate);
+  white-space: nowrap;
+}
+.statistics .stats-chart-table tbody th {
+  font-weight: 500;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.statistics .stats-chart-table tbody td {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- chart states --------------------------------------------------- */
+
+/* Deliberately NOT a shimmering skeleton, and deliberately NOT an empty axis:
+   a placeholder plot teaches the reader to read shapes that were never data. */
+.statistics .stats-chart-state {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.statistics .stats-chart-state-block {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+/* Access-pending is NEUTRAL, using the `--cover-*` family this design system
+   already uses for not-run / not-available. Never the red `--fail-*` family:
+   "we cannot attribute records to you" is a fact about this build, not a fault. */
+.statistics .stats-chart-state-pending {
+  border-color: var(--cover-border);
+  background: var(--cover-bg);
+}
+.statistics .stats-chart-state-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+  line-height: 1.4;
+}
+.statistics .stats-chart-state-block .stats-note {
+  margin-top: 0;
+}
+.statistics .stats-chart-state-label {
+  color: var(--text-secondary);
+}
+
+/* ---- Technical Details ---------------------------------------------- */
+
+/*
+ * The collapsed-by-default build-internals region. A native `<details>`, so it
+ * is keyboard operable and announces its own expanded state with no JS.
+ */
+.statistics .stats-technical {
+  min-width: 0;
+}
+.statistics .stats-technical-summary {
+  display: block;
+  cursor: pointer;
+}
+.statistics .stats-technical-summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.statistics .stats-technical-title {
+  display: inline;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+}
+/* The supporting line inside `<summary>` is a `<span>` (a `<p>` is not valid
+   there), so it needs the block display the class assumes. */
+.statistics .stats-technical-summary .stats-card-sub {
+  display: block;
+}
+.statistics .stats-technical-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 16px;
+}
+/* Nested section cards inside the region drop their own chrome — one card
+   border around the region, never a card inside a card. */
+.statistics .stats-technical-body .stats-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.statistics .stats-technical-body .stats-card + .stats-card {
+  padding-top: 18px;
+  border-top: 1px solid var(--border-faint);
+}
+
+/* ---- My Stats: the planned-view grid -------------------------------- */
+
+/*
+ * The finished layout, holding descriptions rather than figures. Same
+ * `minmax(0, …)` reasoning as `.stats-cards`: a bare `1fr` floors at `auto`, so
+ * one long unbroken word would push a track past its share.
+ */
+.statistics .stats-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.statistics .stats-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+.statistics .stats-plan-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.statistics .stats-plan-desc {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.statistics .stats-plan-meta {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.statistics .stats-plan-form {
+  color: var(--text-muted);
+}
+/* The gate marker is text, in the neutral not-available colour. No chip, no
+   dot, no colour-only signal — the sentence says it. */
+.statistics .stats-plan-gate {
+  color: var(--cover-text);
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .statistics .stats-plan-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

@@ -179,19 +179,54 @@ function figuresIn(region: string): Record<string, string> {
   return out;
 }
 
-/**
- * The [label, count] pairs of one bar figure, read from its VISIBLE spans (not
- * from the wrapper's `aria-label`), in DOM order — order is the assertion here.
- */
-function barRows(region: string, caption: string): [string, string][] {
+/** One chart `<figure>`, resolved by its own visible caption. */
+function chartFigure(region: string, caption: string): HTMLElement {
   const figure = within(regionOf(region))
     .getByText(caption, { selector: 'figcaption' })
     .closest('figure');
-  expect(figure, `no bar figure captioned "${caption}" in ${region}`).not.toBeNull();
-  return [...figure!.querySelectorAll('.stats-bar-row')].map((row) => [
-    row.querySelector('.stats-bar-label')?.textContent?.trim() ?? '',
-    row.querySelector('.stats-bar-count')?.textContent?.trim() ?? '',
+  expect(figure, `no chart figure captioned "${caption}" in ${region}`).not.toBeNull();
+  return figure as HTMLElement;
+}
+
+/**
+ * The [label, count] pairs of one ROW-BASED chart, read from its VISIBLE spans
+ * (never from an aria attribute), in DOM order — order is the assertion here.
+ *
+ * Covers `StatsBarChart` (`.stats-chart-row`) and `StatsComparisonRows`
+ * (`.stats-chart-comparerow`); both render the category name and the value as
+ * real HTML text beside the mark, which is what makes those charts readable with
+ * every fill removed.
+ */
+function chartRows(region: string, caption: string): [string, string][] {
+  const figure = chartFigure(region, caption);
+  return [...figure.querySelectorAll('.stats-chart-row, .stats-chart-comparerow')].map((row) => [
+    row.querySelector('.stats-chart-row-label')?.textContent?.trim() ?? '',
+    row.querySelector('.stats-chart-row-value')?.textContent?.trim() ?? '',
   ]);
+}
+
+/**
+ * The [row header, first data cell] pairs of a chart's DATA TABLE, in DOM order.
+ *
+ * The form-independent reader, and the only one that works for the column chart
+ * — whose category names sit under the marks and whose values are deliberately
+ * NOT all direct-labelled (only the sole maximum is). Using it is also a real
+ * assertion about the table alternative rather than an assertion about the
+ * picture, which is the point of the table existing.
+ */
+function chartTableRows(region: string, caption: string): [string, string][] {
+  const figure = chartFigure(region, caption);
+  const table = figure.querySelector('table.stats-chart-table');
+  expect(table, `no data table in the chart captioned "${caption}"`).not.toBeNull();
+  return [...table!.querySelectorAll('tbody tr')].map((row) => [
+    row.querySelector('th')?.textContent?.trim() ?? '',
+    row.querySelector('td')?.textContent?.trim() ?? '',
+  ]);
+}
+
+/** The screen-reader summary sentence a chart figure carries. */
+function chartSummaryText(region: string, caption: string): string {
+  return chartFigure(region, caption).querySelector('.sr-only')?.textContent?.trim() ?? '';
 }
 
 /** The chip + count pairs of a `MiniBreakdown`, in DOM order. */
@@ -525,9 +560,9 @@ describe('the record read follows the workspace scope', () => {
   });
 });
 
-// --- 1 · Workspace at a Glance -----------------------------------------------
+// --- Workspace at a Glance -----------------------------------------------
 
-describe('Section 1 — Workspace at a Glance', () => {
+describe('Workspace at a Glance', () => {
   it('the four record cards state the counts the fixture implies', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
@@ -546,6 +581,14 @@ describe('Section 1 — Workspace at a Glance', () => {
     expect(screen.queryByText(/This page received/)).toBeNull();
   });
 
+  /*
+   * THESE TWO CARDS MOVED, and the assertion moved with them rather than being
+   * dropped. They are facts about the BUILD, not about the workspace, and they
+   * sat in Workspace at a Glance only because they arrived in the same round of
+   * reads; they now live in the `Runtime` region inside Technical Details. What is
+   * pinned is unchanged: the value comes from `/api/about` and only its
+   * capitalisation changes.
+   */
   it('Runtime Mode and Persistence render from /api/about, in Title Case', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
@@ -553,8 +596,14 @@ describe('Section 1 — Workspace at a Glance', () => {
     // The API sends `synthetic-only` / `ephemeral`; only capitalisation changes.
     expect(aboutResponse.runtime_mode).toBe('synthetic-only');
     expect(aboutResponse.persistence).toBe('ephemeral');
-    expect(cardValue('Workspace at a Glance', 'Runtime Mode')).toBe('Synthetic-Only');
-    expect(cardValue('Workspace at a Glance', 'Persistence')).toBe('Ephemeral');
+    expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
+    expect(cardValue('Runtime', 'Persistence')).toBe('Ephemeral');
+
+    // …and they are NOT still in the glance row, so the move is real rather than
+    // a copy: the glance section reads exactly one endpoint now.
+    const glance = regionOf('Workspace at a Glance');
+    expect(within(glance).queryByText('Runtime Mode')).toBeNull();
+    expect(within(glance).queryByText('Persistence')).toBeNull();
   });
 
   /*
@@ -583,9 +632,10 @@ describe('Section 1 — Workspace at a Glance', () => {
       'Workspace at a Glance',
       'Workflow Distribution',
       'Evidence and Validation',
+      NO_ANALYTICS_HEADING,
+      'Runtime',
       'Project Memory',
       'API Surface',
-      NO_ANALYTICS_HEADING,
     ]) {
       expect(regionOf(region), `${region} must still render`).toBeInTheDocument();
     }
@@ -595,23 +645,23 @@ describe('Section 1 — Workspace at a Glance', () => {
 
     // Neither malformed fact is stated, and neither is replaced by a plausible
     // default — "Synthetic-Only" would be a guess, and this app must not guess.
-    expect(cardValue('Workspace at a Glance', 'Runtime Mode')).toBe(UNAVAILABLE);
-    expect(cardValue('Workspace at a Glance', 'Persistence')).toBe(UNAVAILABLE);
+    expect(cardValue('Runtime', 'Runtime Mode')).toBe(UNAVAILABLE);
+    expect(cardValue('Runtime', 'Persistence')).toBe(UNAVAILABLE);
     expect(pageText(container)).not.toMatch(/Synthetic-Only|Ephemeral/);
 
     // Absence, not failure: the neutral not-available tone, and no alarm.
-    const glance = regionOf('Workspace at a Glance');
+    const runtime = regionOf('Runtime');
     for (const label of ['Runtime Mode', 'Persistence']) {
-      const card = within(glance).getByText(label).closest('dl.stat-card');
+      const card = within(runtime).getByText(label).closest('dl.stat-card');
       expect(card?.getAttribute('data-tone')).toBe('quiet');
     }
-    expect(within(glance).queryByRole('alert')).toBeNull();
+    expect(within(runtime).queryByRole('alert')).toBeNull();
   });
 });
 
-// --- 2 · Workflow Distribution ------------------------------------------------
+// --- Workflow Distribution ------------------------------------------------
 
-describe('Section 2 — Workflow Distribution', () => {
+describe('Workflow Distribution', () => {
   it('renders every canonical bucket with its count as real text, zeros included, in canonical order', async () => {
     const { container } = renderStatistics(statisticsRoutes());
     await settled();
@@ -619,28 +669,41 @@ describe('Section 2 — Workflow Distribution', () => {
     // ONE ordered read of the visible spans. `Load Record` is at zero in this
     // fixture and must still draw its row: a distribution that silently omits
     // an empty bucket reshapes its own axis as records move.
-    expect(barRows('Workflow Distribution', `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
-      WORKFLOW_BARS,
-    );
+    const caption = `Records by current workflow step, out of ${RECORD_COUNT} counted`;
+    expect(chartRows('Workflow Distribution', caption)).toEqual(WORKFLOW_BARS);
 
-    // The counts are VISIBLE, not only spoken: strip every aria-label and the
-    // numbers are still on the page.
+    // The counts are VISIBLE, not only spoken: strip every aria-hidden subtree —
+    // which is the whole drawn SVG — and the labels and numbers are still there.
     const visible = pageTextWithout(container, '[aria-hidden="true"]');
     for (const [label, count] of WORKFLOW_BARS) {
       expect(visible).toContain(label);
       expect(new RegExp(`${label}\\s*${count}`).test(visible)).toBe(true);
     }
 
-    // The wrapper's single aria-label remains a SUMMARY of the same distribution.
-    const body = regionOf('Workflow Distribution').querySelector('.stats-bars-body');
-    expect(body).toHaveAttribute('role', 'img');
-    expect(body?.getAttribute('aria-label')).toContain(`Total ${RECORD_COUNT}.`);
+    /*
+     * TWO TEXT EQUIVALENTS, not one, and they are asserted separately because
+     * they do different jobs. The summary sentence is a real `<p>` present on
+     * every render — never an `aria-label`, and never inside the collapsed
+     * disclosure — so a screen reader gets the whole distribution without walking
+     * a grid. The data table then carries every figure for everyone.
+     */
+    const summary = chartSummaryText('Workflow Distribution', caption);
+    for (const [label, count] of WORKFLOW_BARS) {
+      expect(summary).toContain(`${label}: ${count}`);
+    }
+    expect(summary).toContain(`Total ${RECORD_COUNT} records.`);
+    expect(chartTableRows('Workflow Distribution', caption)).toEqual(WORKFLOW_BARS);
+
+    // The picture itself claims nothing: the SVG is hidden from assistive
+    // technology, so it cannot state a figure the text equivalents do not.
+    const svg = chartFigure('Workflow Distribution', caption).querySelector('svg');
+    expect(svg).toHaveAttribute('aria-hidden', 'true');
   });
 });
 
-// --- 3 · Evidence and Validation ---------------------------------------------
+// --- Evidence and Validation ---------------------------------------------
 
-describe('Section 3 — Evidence and Validation', () => {
+describe('Evidence and Validation', () => {
   it('renders the five evidence classes in severity precedence, NOT sorted by count', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
@@ -699,9 +762,9 @@ describe('Section 3 — Evidence and Validation', () => {
   });
 });
 
-// --- 4 · Project Memory -------------------------------------------------------
+// --- Project Memory (inside the collapsed Technical Details region) ----------
 
-describe('Section 4 — Project Memory', () => {
+describe('Project Memory', () => {
   it('renders the snapshot figures from /api/graph/status', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
@@ -905,9 +968,9 @@ describe('the served-file count is stated under ONE name on both screens', () =>
   });
 });
 
-// --- 5 · API Surface ----------------------------------------------------------
+// --- API Surface (inside the collapsed Technical Details region) -------------
 
-describe('Section 5 — API Surface', () => {
+describe('API Surface', () => {
   it('states the operation and group counts the served contract documents', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
@@ -916,11 +979,25 @@ describe('Section 5 — API Surface', () => {
     expect(figureValue('API Surface', 'Groups')).toBe(GROUP_COUNT);
   });
 
+  /*
+   * READ FROM THE DATA TABLE, deliberately. This breakdown is a COLUMN chart: its
+   * category names sit under the marks and only the sole maximum is direct-
+   * labelled, because a number on every mark goes unread. So the table is where
+   * every exact figure lives — and asserting it here is an assertion about the
+   * alternative every chart on this surface is required to carry.
+   */
   it('breaks the operations down by UPPERCASED HTTP method', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
-    expect(barRows('API Surface', 'Documented operations by HTTP method')).toEqual(METHOD_BARS);
+    const caption = 'Documented operations by HTTP method';
+    expect(chartTableRows('API Surface', caption)).toEqual(METHOD_BARS);
+    // The method names are also visible text under the columns, not SVG glyphs.
+    expect(
+      [...chartFigure('API Surface', caption).querySelectorAll('.stats-chart-cat')].map((c) =>
+        c.textContent?.trim(),
+      ),
+    ).toEqual(METHOD_BARS.map(([method]) => method));
   });
 
   it('groups the operations in the contract’s own tag order', async () => {
@@ -928,9 +1005,10 @@ describe('Section 5 — API Surface', () => {
     await settled();
 
     expect(
-      barRows('API Surface', "Documented operations by group, in the contract's own tag order").map(
-        ([group]) => group,
-      ),
+      chartRows(
+        'API Surface',
+        "Documented operations by group, in the contract's own tag order",
+      ).map(([group]) => group),
     ).toEqual([
       'Health & Meta',
       'Experiments',
@@ -953,9 +1031,9 @@ describe('Section 5 — API Surface', () => {
   });
 });
 
-// --- 6 · No analytics ---------------------------------------------------------
+// --- No analytics (kept in the MAIN flow, uncollapsed) ----------------------
 
-describe('Section 6 — analytics are not collected', () => {
+describe('analytics are not collected', () => {
   it('renders the no-telemetry disclosure as information, not as a failure', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
@@ -1097,7 +1175,8 @@ describe('loading', () => {
 
     const expected: [string, string][] = [
       ['Workspace at a Glance', 'Loading the workspace summary…'],
-      ['Workspace at a Glance', 'Loading the runtime mode and persistence…'],
+      // Inside Technical Details now — a different region, same labelled state.
+      ['Runtime', 'Loading the runtime mode and persistence…'],
       ['Workflow Distribution', 'Loading the workflow distribution…'],
       ['Evidence and Validation', 'Loading evidence and export-gate counts…'],
       ['Project Memory', 'Loading Project Memory provenance…'],
@@ -1129,7 +1208,7 @@ describe('partial failure — one dead source degrades only what reads it', () =
       within(regionOf(NO_ANALYTICS_HEADING)).getByText(/ships no analytics SDK/),
     ).toBeInTheDocument();
     // The two runtime cards read /api/about, which is still alive.
-    expect(cardValue('Workspace at a Glance', 'Runtime Mode')).toBe('Synthetic-Only');
+    expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
     // No record figure is substituted for the ones that were not received.
     expect(screen.queryByText('Total Records')).toBeNull();
 
@@ -1149,11 +1228,11 @@ describe('partial failure — one dead source degrades only what reads it', () =
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
     expect(cardValue('Workspace at a Glance', 'Need Attention')).toBe('2');
     // Neither runtime fact is stated, and neither is guessed.
-    const glance = regionOf('Workspace at a Glance');
-    expect(within(glance).queryByText('Runtime Mode')).toBeNull();
-    expect(within(glance).queryByText('Persistence')).toBeNull();
-    expect(within(glance).getByText(/runtime mode and persistence could not be read/)).toBeInTheDocument();
-    expect(within(glance).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    const runtime = regionOf('Runtime');
+    expect(within(runtime).queryByText('Runtime Mode')).toBeNull();
+    expect(within(runtime).queryByText('Persistence')).toBeNull();
+    expect(within(runtime).getByText(/runtime mode and persistence could not be read/)).toBeInTheDocument();
+    expect(within(runtime).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
   it('graph/status down — sections 1, 2, 3 and 5 still render', async () => {
@@ -1161,7 +1240,7 @@ describe('partial failure — one dead source degrades only what reads it', () =
     await settled();
 
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(barRows('Workflow Distribution', `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
+    expect(chartRows('Workflow Distribution', `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
       WORKFLOW_BARS,
     );
     expect(chipRows('Evidence and Validation')).toEqual(EVIDENCE_CHIPS);
@@ -1176,7 +1255,7 @@ describe('partial failure — one dead source degrades only what reads it', () =
     await settled();
 
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(barRows('Workflow Distribution', `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
+    expect(chartRows('Workflow Distribution', `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
       WORKFLOW_BARS,
     );
     expect(figureValue('Evidence and Validation', 'Total Fields Counted')).toBe('40');
@@ -1236,10 +1315,10 @@ describe('partial failure — one dead source degrades only what reads it', () =
 
     // The quiet exception: no alarm anywhere on the page for this source.
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
-    const glance = regionOf('Workspace at a Glance');
-    expect(glance.querySelector('.stats-unavailable')).not.toBeNull();
-    expect(within(glance).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-    // …and the four record cards it sits beside are unaffected.
+    const runtime = regionOf('Runtime');
+    expect(runtime.querySelector('.stats-unavailable')).not.toBeNull();
+    expect(within(runtime).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    // …and the record cards on the main flow are unaffected.
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
   });
 });
@@ -1280,9 +1359,19 @@ describe('empty workspace', () => {
       ROUTES.experiments,
     );
 
-    // No grid of zeros, no zero-height bars, no five-chip zero row.
-    expect(regionOf('Workspace at a Glance').querySelectorAll('dl.stat-card')).toHaveLength(2); // the two /api/about cards only
-    expect(regionOf('Workflow Distribution').querySelectorAll('.stats-bar-row')).toHaveLength(0);
+    // No grid of zeros, no zero-height bars, no five-chip zero row. The glance
+    // section now holds NO card at all in this state: the two /api/about cards it
+    // used to keep moved into the `Runtime` region, which still has them.
+    expect(regionOf('Workspace at a Glance').querySelectorAll('dl.stat-card')).toHaveLength(0);
+    expect(regionOf('Runtime').querySelectorAll('dl.stat-card')).toHaveLength(2);
+    // No chart is drawn, and no empty axis either — not one row, not one tick,
+    // not one table. Scoped to `.stats-chart` rather than to the region, because
+    // the section's own decorative heading glyph is an `<svg>` too and it is not
+    // a plot.
+    expect(regionOf('Workflow Distribution').querySelectorAll('.stats-chart-row')).toHaveLength(0);
+    expect(regionOf('Workflow Distribution').querySelectorAll('figure.stats-chart')).toHaveLength(0);
+    expect(regionOf('Workflow Distribution').querySelectorAll('.stats-chart svg')).toHaveLength(0);
+    expect(regionOf('Workflow Distribution').querySelectorAll('table')).toHaveLength(0);
     expect(chipRows('Evidence and Validation')).toEqual([]);
     expect(figuresIn('Evidence and Validation')).toEqual({});
     expect(within(regionOf('Workflow Distribution')).getByText(/No bar is drawn rather than a row of zeros/)).toBeInTheDocument();
@@ -1309,7 +1398,7 @@ describe('truncated body', () => {
     ).toBeInTheDocument();
     // The breakdowns keep counting what actually arrived — 5, not 9.
     expect(figureValue('Evidence and Validation', 'Records Counted')).toBe('5');
-    expect(barRows('Workflow Distribution', 'Records by current workflow step, out of 5 counted')).toEqual(
+    expect(chartRows('Workflow Distribution', 'Records by current workflow step, out of 5 counted')).toEqual(
       WORKFLOW_BARS,
     );
   });

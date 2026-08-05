@@ -29,6 +29,28 @@ export function isSettingsTab(value: string | null | undefined): value is Settin
   return SETTINGS_TAB_IDS.includes(value as SettingsTabId);
 }
 
+/**
+ * Statistics tabs, on the SAME `?tab=` mechanism as Settings and Governance —
+ * the third use of one convention, not a third convention.
+ *
+ * Deep-linkability is the point rather than a nicety: a tab held only in
+ * `useState` cannot be linked to, bookmarked, or reloaded back into, and that
+ * exact defect was already shipped once on Governance (the Validator tab was
+ * unreachable by link) and fixed there. Anything unrecognised falls back to
+ * `general` without throwing, so there is no dead route.
+ *
+ * `general` is the workspace-wide material; `mine` is the personal tab.
+ */
+export const STATISTICS_TAB_PARAM = 'tab';
+
+export const STATISTICS_TAB_IDS = ['general', 'mine'] as const;
+
+export type StatisticsTabId = (typeof STATISTICS_TAB_IDS)[number];
+
+export function isStatisticsTab(value: string | null | undefined): value is StatisticsTabId {
+  return STATISTICS_TAB_IDS.includes(value as StatisticsTabId);
+}
+
 export const ROUTES = {
   experiments: '/experiments',
   load: '/load',
@@ -54,6 +76,11 @@ export const ROUTES = {
    * app produces exactly the query string this helper builds for that tab.
    */
   settingsTab: (tab: SettingsTabId) => `/settings?${SETTINGS_TAB_PARAM}=${tab}`,
+  /** A deep link to one Statistics tab, e.g. `/statistics?tab=mine`. Same
+   *  division of labour as `settingsTab`: whole-URL links use this, while the
+   *  page itself switches tabs by copying its own `URLSearchParams` so any other
+   *  query parameter survives. */
+  statisticsTab: (tab: StatisticsTabId) => `/statistics?${STATISTICS_TAB_PARAM}=${tab}`,
   record: (id: string) => `/record/${id}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,

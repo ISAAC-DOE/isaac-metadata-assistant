@@ -40,9 +40,56 @@ import { auditScan, scan } from '../helpers/axe';
 import { expect, test } from '../fixtures';
 import { SURFACES } from '../surfaces';
 
+/**
+ * Open the one disclosure on a surface that NO `SURFACES` entry can reach, so
+ * its contents are scanned rather than silently exempt.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────────────
+ *
+ * A `<details>` has no URL state, so a surface's `path` cannot open one; and axe
+ * does not scan a closed disclosure. When the Statistics slice moved the two
+ * `/api/about` cards into a collapsed `Technical Details` region, their two
+ * `.stat-card-note` `color-contrast` failures stopped being counted — and the
+ * baseline recorded the drop as a coverage gap, with a note claiming the
+ * unmeasured instances were only those two and that "not one is a chart".
+ *
+ * Both halves of that claim were false. Measured by an independent reviewer and
+ * reproduced here, opening the region on `statistics-example` raised the failing
+ * node count from 9 to 12: the third node was a CHART AXIS TICK, at
+ * `--text-tertiary` #78838f / 10.5px — a new WCAG 1.4.3 failure shipping
+ * invisibly behind a note asserting it did not exist. (The token has since been
+ * darkened to `--text-muted`, which is why the tick no longer appears in the
+ * counts; the coverage this restores is what made it visible.)
+ *
+ * ── What it deliberately does NOT open ──────────────────────────────────────
+ *
+ * Each chart's own data-table `<details class="stats-chart-table-wrap">` stays
+ * closed. Those are a per-figure text equivalent whose default state is closed
+ * for every reader, and opening four tables at five viewports would move counts
+ * for a reason unrelated to this gap. They remain unscanned, which is a real and
+ * still-open limitation and is stated here rather than left to be discovered.
+ */
+async function openUnreachableDisclosures(page: import('@playwright/test').Page): Promise<void> {
+  const technical = page.locator('details.stats-technical');
+  const mounted = await technical.count();
+  if (mounted === 0) return;
+  /*
+   * ONE, ASSERTED. `technical.locator('> summary').click()` resolves through a
+   * strict-mode locator, so a second `details.stats-technical` on any surface
+   * would throw "resolved to 2 elements" from inside a helper whose job is
+   * coverage — an opaque failure in every a11y scan at every viewport, naming
+   * neither the surface nor the cause. Asserted here so the second mount names
+   * itself.
+   */
+  expect(mounted, 'a surface must mount exactly one details.stats-technical').toBe(1);
+  await technical.locator('> summary').click();
+  await expect(technical).toHaveAttribute('open', '');
+}
+
 for (const surface of SURFACES) {
   test(`@responsive a11y scan: ${surface.name}`, async ({ page, app }, testInfo) => {
     await app.open(surface);
+    await openUnreachableDisclosures(page);
 
     const project = testInfo.project.name;
     // If a sixth viewport project is ever added, its scans have no recorded
