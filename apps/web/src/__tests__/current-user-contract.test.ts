@@ -88,14 +88,45 @@ describe('the permanent disqualification (§6A.2)', () => {
      * this test green, silently re-permitting `'x-authentik-entitlements'` as a
      * `CurrentUserSubject.observedFrom` — which §6A.2 disqualifies permanently.
      *
-     * Annotated with the real type, a narrowing makes the second element
-     * unassignable (TS2322) and a widening breaks the set comparison below. The
-     * two halves of the guard now cover the two directions.
+     * WHAT EACH GUARD BELOW CATCHES, stated precisely because the version of this
+     * comment that shipped claimed "a widening breaks the set comparison below" and
+     * that is FALSE — measured: widening to `… | 'x-authentik-uid'` left `tsc -b`
+     * clean and all of this file green, because a two-element array is assignable
+     * to a three-member union and the runtime comparison never sees the type.
+     *
+     *   · NARROWING → the type-check fails at three sites: the annotation below
+     *     (TS2322), the exactness assertion below (TS2322), and the second
+     *     `@ts-expect-error` in the next test going unused (TS2578).
+     *   · ADDING OR REMOVING A DISQUALIFIED HEADER in `HEADER_OBSERVATION_6A` →
+     *     the SET comparison below fails, together with the derivation test above.
+     *     Measured both ways: `clientCanarySurvived: true` on `'x-authentik-uid'`,
+     *     and `false` on `'x-isaac-edge'`, each fail those same two tests. This is
+     *     the drift direction the set comparison really guards.
+     *   · WIDENING → the exactness assertion below, and nothing else. Widening is
+     *     the SAFE direction: `UsableIdentityClaimHeader` is an `Exclude`, so a
+     *     wider disqualification only removes names from it. What it would break is
+     *     this type's correspondence to §6A's table, which is worth pinning for its
+     *     own sake but is not a re-permitted header.
+     *
+     * ONE hand-written list feeds all three, so the guards cannot disagree with
+     * each other about which two headers §6A.2 named.
      */
-    const fromType: readonly DisqualifiedIdentityHeader[] = [
-      'x-authentik-entitlements',
-      'x-isaac-edge',
-    ];
+    const expected = ['x-authentik-entitlements', 'x-isaac-edge'] as const;
+
+    /* ASSIGNABILITY: a narrowed union makes this initializer unassignable. */
+    const fromType: readonly DisqualifiedIdentityHeader[] = expected;
+
+    /* EXACTNESS, in the type system: `true` only when each side extends the other,
+       so a wider union yields `false` and the assignment is a compile error. Both
+       sides are tupled to stop the union distributing over the conditional, which
+       would otherwise make a wider union appear to satisfy it member by member. */
+    type Exactly<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+    const unionIsExactlyExpected: Exactly<
+      DisqualifiedIdentityHeader,
+      (typeof expected)[number]
+    > = true;
+    expect(unionIsExactlyExpected, 'DisqualifiedIdentityHeader is exactly those two').toBe(true);
+
     expect([...fromType].sort()).toEqual([...DISQUALIFIED_IDENTITY_HEADERS].sort());
   });
 

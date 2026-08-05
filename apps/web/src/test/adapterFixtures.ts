@@ -192,8 +192,13 @@ export const fixtureLeakyFreshness: PortalMetricsFreshness = Object.freeze({
  * fragment, and this contract refuses rather than narrowing a detector.
  *
  * MEASURED, NOT ASSUMED: the ISO-8601 form of the same instant
- * (`2099-01-01T00:00:00Z`) does NOT trip, because `T` and `Z` are not hex-legal
- * and so destroy the word boundaries the pattern requires. See
+ * (`2099-01-01T00:00:00Z`) does NOT trip — but not for the reason first given
+ * here ("`T` and `Z` are not hex-legal"). `\b` is about WORD characters: `T` and
+ * `Z` are both word characters sitting against `00`, so neither boundary exists.
+ * Hex-legality is irrelevant on the leading side and works the OTHER way on the
+ * trailing side — a hex-legal trailing character would be absorbed into the
+ * closing group and the match would SUCCEED. The full measurement is in
+ * `IPV6_PATTERN`'s note in `lib/portalMetricsContract.ts`. See
  * `fixtureIsoInstantFreshness`.
  */
 export const fixtureSecondsPrecisionFreshness: PortalMetricsFreshness = Object.freeze({

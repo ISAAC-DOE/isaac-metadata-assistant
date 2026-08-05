@@ -167,13 +167,35 @@ export const DISQUALIFIED_IDENTITY_HEADERS: readonly IdentityCandidateHeader[] =
  *
  * Written out rather than derived, because `filter` is a runtime operation and
  * cannot narrow a type. `the disqualified type and the derived set name the same
- * two headers` in `current-user-contract.test.ts` ANNOTATES an array with this
- * type and compares it to {@link DISQUALIFIED_IDENTITY_HEADERS} as a SET, so both
- * directions fail: narrowing this union makes the array literal unassignable, and
- * widening it breaks the set comparison. It did not always: while the test held a
- * hand-written inline union instead, narrowing this type to `'x-isaac-edge'` alone
- * left the type-check clean and every test green, quietly re-permitting
- * `'x-authentik-entitlements'` as a {@link CurrentUserSubject.observedFrom}.
+ * two headers` in `current-user-contract.test.ts` pins it, and WHAT EACH HALF
+ * ACTUALLY CATCHES is spelled out here because the previous version of this
+ * comment got it wrong — it said "both directions fail: … widening it breaks the
+ * set comparison", and a measured widening to `… | 'x-authentik-uid'` left
+ * `tsc -b` clean and all 20 tests in that file green. A two-element array is
+ * assignable to a three-member union, and the runtime comparison never sees the
+ * type at all.
+ *
+ *   · NARROWING fails the type-check at three sites — the annotated array literal
+ *     (TS2322), the exactness assertion described below (TS2322), and the second
+ *     `@ts-expect-error` in the next test going unused (TS2578). This is the
+ *     direction that matters, and it is over-covered on purpose.
+ *     It was caught ZERO times while the test held a hand-written inline union
+ *     instead: narrowing this type to `'x-isaac-edge'` alone left the type-check
+ *     clean and every test green, quietly re-permitting
+ *     `'x-authentik-entitlements'` as a {@link CurrentUserSubject.observedFrom}.
+ *   · A CHANGE TO {@link HEADER_OBSERVATION_6A} that adds or removes a
+ *     disqualified header breaks the SET comparison. Measured both ways: setting
+ *     `clientCanarySurvived: true` on a third header, and `false` on one of these
+ *     two, each fail the same two named tests. The runtime set is what that
+ *     comparison guards — not this union's width.
+ *   · WIDENING this union is the SAFE direction, and is caught separately rather
+ *     than by the set comparison. {@link UsableIdentityClaimHeader} is an
+ *     `Exclude`, so a wider disqualification only REMOVES names from it; nothing
+ *     becomes trustable. What a widening would break is this type's
+ *     correspondence to §6A's table — it would stop being "the same two" and the
+ *     sentence above it would become false — so a type-level exactness assertion
+ *     in the same test pins it. That is a documentation-truth guard, not a
+ *     security guard, and the two are worth not confusing.
  */
 export type DisqualifiedIdentityHeader = 'x-authentik-entitlements' | 'x-isaac-edge';
 

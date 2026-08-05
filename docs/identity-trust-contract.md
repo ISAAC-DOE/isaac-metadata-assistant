@@ -127,14 +127,23 @@ the guard's own number. **Compare the file list, never a total.**
 this document either. It is a manual check, and saying so beats implying a tripwire that does not exist.
 Correction 4 is what a stale manual guard costs.
 
-**One narrower thing IS enforced, and the distinction matters.**
-`apps/web/src/__tests__/my-stats.test.tsx` (trap 6) and
-`apps/web/src/__tests__/current-user-contract.test.ts` read the source of
-`screens/statistics/MyStats.tsx`, `lib/myStatsContract.ts` and `lib/currentUserContract.ts` and fail on
-a header access, a `fetch`, an API-client call, another transport, a cookie or browser storage — so
-*consumption inside those three modules* is a tripwire. That covers the modules that name the headers
-today; it does not cover a fourth file appearing tomorrow, which is what the manual file-set check is
-for.
+**One narrower thing IS enforced, and the distinction matters — but the two guards cover DIFFERENT
+surfaces, and the first version of this paragraph read as though both scanned source text.** Corrected:
+
+- **The source scan lives solely in `apps/web/src/__tests__/my-stats.test.tsx`** (trap 6,
+  `:1029-1104`). It imports `screens/statistics/MyStats.tsx`, `lib/myStatsContract.ts` and
+  `lib/currentUserContract.ts` as `?raw`, strips comments first, and fails on a header access, a
+  `fetch`, an API-client call, another transport, a cookie or browser storage. So *consumption
+  inside those three modules* is a tripwire, whether or not the code ever runs.
+- **`apps/web/src/__tests__/current-user-contract.test.ts` reads no source at all.**
+  `grep -n "?raw" apps/web/src/__tests__/current-user-contract.test.ts` returns nothing. Its guard is
+  a RUNTIME one over `disabledCurrentUserSource.get()`: an own `document.cookie` accessor spy — itself
+  proved to fire, so "never read" means something — plus `localStorage`/`sessionStorage` `getItem`
+  spies and a stubbed `fetch`, all asserted not called. It catches a live read on the one code path
+  this build executes, and would not see a dead one the source scan catches.
+
+Both bite; neither substitutes for the other. And both cover only the modules that name the headers
+today — not a fourth file appearing tomorrow, which is what the manual file-set check is for.
 
 ### 1.2 Every request header the backend reads — four, none of them identity
 

@@ -271,11 +271,27 @@ const IPV4_PATTERN = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
  * reported as an `ip_address` and refuses the panel.
  *
  * The ISO-8601 form of the same instant — `2099-01-01T00:00:00Z` — does **not**
- * trip, because `T` and `Z` are not hex-legal and so destroy the `\b` boundaries
- * this pattern requires. (Written the other way round first, as though any
- * seconds-precision timestamp were refused; the ISO case was then measured and
- * came back clean. Recorded because a guard's blind spots are only useful at
- * their real width.)
+ * trip. THE MECHANISM STATED HERE WAS WRONG and is corrected rather than deleted:
+ * it said "because `T` and `Z` are not hex-legal and so destroy the `\b`
+ * boundaries". `\b` is a transition between a WORD character and a non-word one;
+ * hex-legality is a property of this pattern's character classes, which is a
+ * different thing — and on the trailing side the old sentence had the direction
+ * backwards. Measured, each boundary fails independently and either alone
+ * suffices:
+ *
+ *   · LEADING — `T` is a WORD character adjacent to `00`, so no `\b` exists
+ *     before the time. Hex-legality plays no part here: make the trailing side
+ *     clean and `2099-01-01T00:00:00 ` still matches nothing.
+ *   · TRAILING — `Z` is likewise a word character, so no `\b` exists after the
+ *     final `00`: make the leading side clean and `2099-01-01 00:00:00Z` also
+ *     matches nothing. Hex-legality DOES matter here, in the OPPOSITE direction
+ *     — a hex-legal trailing character is ABSORBED into the closing
+ *     `[0-9A-Fa-f]{1,4}` group and the match SUCCEEDS: ` 00:00:00A` matches
+ *     `00:00:00A`, while ` 00:00:00Z` matches nothing.
+ *
+ * (Written the other way round first, as though any seconds-precision timestamp
+ * were refused; the ISO case was then measured and came back clean. Recorded
+ * because a guard's blind spots are only useful at their real width.)
  *
  * So nothing is unstateable, and refusing is the documented trade of this whole
  * file — a false positive costs a refused panel, a false negative costs a
