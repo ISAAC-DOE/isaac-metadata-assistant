@@ -66,8 +66,15 @@ export function VerdictCard({ result, onRevalidate, onBackToComplete }: VerdictC
       {!pass && (
         <div className="card schema-errors">
           <h2>Schema Errors</h2>
-          {result.errors.map((err) => (
-            <div className="schema-error-row" key={err.path}>
+          {/* `err.path` is NOT unique — a record missing several required properties
+              produces one error per property, all reported at `$`. React keys must be
+              unique among siblings, so the index is part of the key. It is stable here
+              because this list is only ever replaced wholesale by a fresh validation
+              result, never reordered or spliced in place. Nothing renders wrong today;
+              a duplicate key is one refactor away from silently collapsing schema
+              errors on the surface that reports the export gate. */}
+          {result.errors.map((err, i) => (
+            <div className="schema-error-row" key={`${i}:${err.path}`}>
               <span className="schema-error-path mono">{err.path}</span> — {err.message}
             </div>
           ))}

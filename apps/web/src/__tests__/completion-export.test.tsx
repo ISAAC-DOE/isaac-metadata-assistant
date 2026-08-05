@@ -166,7 +166,25 @@ describe('S4 · Guided Completion (live)', () => {
       ...bundleRoutes('demo'),
       'GET /api/experiments/demo/pending': { body: seriesPending },
       'POST /api/experiments/demo/answers': {
-        body: { pending: [], status: 'ready_to_export' },
+        // `invalidation` is not decoration: the screen reads it (with the recomputed
+        // `pending`) to decide whether the server APPLIED the answer, because a 200
+        // alone does not say so. The real handler always sends it; this stub used to
+        // omit it and so modelled a response the backend never returns.
+        body: {
+          pending: [],
+          status: 'ready_to_export',
+          rev: 4,
+          updated_utc: '2099-04-02T09:16:00Z',
+          version: '1.1',
+          invalidation: {
+            changed: true,
+            rev: 4,
+            changed_fields: ['series'],
+            reopened_steps: [],
+            artifact: { state: 'none' as const, reason: null },
+            reason: 'Updated 1 field(s); no downstream steps reopened.',
+          },
+        },
       },
     });
     const { findByText, getByText } = renderAt('/record/demo/complete');
@@ -437,6 +455,16 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
                 rev: 5,
                 updated_utc: '2099-04-02T09:17:00Z',
                 version: '1.2',
+                // As above: the applied/not-applied signal the screen reads. The real
+                // handler always sends it.
+                invalidation: {
+                  changed: true,
+                  rev: 5,
+                  changed_fields: [pendingResponse.pending[1].id],
+                  reopened_steps: [],
+                  artifact: { state: 'none' as const, reason: null },
+                  reason: 'Updated 1 field(s); no downstream steps reopened.',
+                },
               };
         },
       },
