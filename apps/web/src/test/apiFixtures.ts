@@ -2307,32 +2307,40 @@ export const statisticsRecordsBody = {
 };
 
 /**
- * EXACTLY the four route keys the Statistics page requests, in the order the
+ * EXACTLY the five route keys the Statistics page requests, in the order the
  * page issues them. Exported so a test can assert the request set itself instead
- * of restating four literals it might mistype.
+ * of restating five literals it might mistype.
  */
 export const STATISTICS_ROUTE_KEYS = [
   'GET /api/runtime/records',
   'GET /api/graph/status',
   'GET /api/about',
   'GET /api/openapi',
+  'GET /api/schema',
 ] as const;
 
 /**
- * The Statistics page's four page-level reads, keyed exactly as `lib/api` builds
+ * The Statistics page's five page-level reads, keyed exactly as `lib/api` builds
  * them.
  *
  * Any source may be replaced with any `RouteEntry`, which is how a test fails ONE
- * of the four (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
- * swaps in a different graph body, without disturbing the other three.
+ * of the five (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
+ * swaps in a different graph body, without disturbing the other four.
+ *
+ * `schema` reuses `schemaBrowserFixture` — the same body the Schema Reference
+ * suite browses — so the two screens are asserted against ONE document and a
+ * count derived here can be checked against the fields that browser renders.
  */
 export function statisticsRoutes(
-  over: Partial<Record<'records' | 'graph' | 'about' | 'openapi', RouteEntry>> = {},
+  over: Partial<
+    Record<'records' | 'graph' | 'about' | 'openapi' | 'schema', RouteEntry>
+  > = {},
 ): Record<string, RouteEntry> {
   return {
     'GET /api/runtime/records': over.records ?? { body: statisticsRecordsBody },
     'GET /api/graph/status': over.graph ?? { body: graphStatusAvailable },
     'GET /api/about': over.about ?? { body: aboutResponse },
     'GET /api/openapi': over.openapi ?? { body: openApiFixture },
+    'GET /api/schema': over.schema ?? { body: schemaBrowserFixture },
   };
 }

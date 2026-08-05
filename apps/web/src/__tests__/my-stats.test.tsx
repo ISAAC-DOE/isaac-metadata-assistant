@@ -887,7 +887,7 @@ describe('My Stats invents no personal figure — the six traps', () => {
   it('2 — issues NO request, so no record in any scope can be shown as personal', async () => {
     const { calls } = await renderMineTab();
     /*
-     * The four General-tab reads still happen on mount (they are not tab-keyed),
+     * The five General-tab reads still happen on mount (they are not tab-keyed),
      * and NOTHING else does. `stubFetchRoutes` records each call as
      * `"<METHOD> <path>"`, so this asserts the method too — every request is a GET,
      * and this tab therefore cannot mutate anything either.
@@ -906,6 +906,7 @@ describe('My Stats invents no personal figure — the six traps', () => {
         'GET /api/graph/status',
         'GET /api/openapi',
         'GET /api/runtime/records',
+        'GET /api/schema',
       ].sort(),
     );
     expect(calls.filter((c) => c.includes('/api/experiments'))).toEqual([]);
@@ -1025,9 +1026,20 @@ describe('My Stats invents no personal figure — the six traps', () => {
 
     const source = String((await import('../screens/statistics/MyStats?raw')).default);
     const contract = String((await import('../lib/myStatsContract?raw')).default);
+    /*
+     * THE CURRENT-USER BOUNDARY IS SCANNED TOO, and it has to be: `MyStats.tsx`
+     * now imports it, so it is inside this tab's dependency chain. It is also the
+     * one module in the app that WRITES the seven header names down — as string
+     * literals in a frozen record of what §6A observed — which is exactly the
+     * module a reader would expect to find reading them. It does not: the scans
+     * below fail on any header access, any transport, and any use of this app's
+     * API client.
+     */
+    const identity = String((await import('../lib/currentUserContract?raw')).default);
     for (const [name, module] of [
       ['MyStats.tsx', source],
       ['myStatsContract.ts', contract],
+      ['currentUserContract.ts', identity],
     ] as const) {
       // No header read, and no fetch of any kind, in either module. `X-authentik`
       // appears only inside the prose that explains why it must not be used.
@@ -1055,13 +1067,28 @@ describe('My Stats invents no personal figure — the six traps', () => {
       // …and it cannot even IMPORT the client. Matched against the import
       // statements, per trap 1's reasoning: a whole-text scan would be satisfied
       // by deleting the explanation rather than the dependency.
-      // (`myStatsContract.ts` imports NOTHING at all, which is the strongest
-      // possible form of this and is asserted as such.)
       const imports = module.match(/^import[\s\S]*?from\s+'[^']+';$/gm) ?? [];
       for (const line of imports) {
         expect(line, `${name} must not import the API client`).not.toMatch(/lib\/api'|\/api'$/);
       }
-      if (name === 'myStatsContract.ts') expect(imports).toEqual([]);
+
+      /*
+       * THE EXACT DEPENDENCY SET OF EACH CONTRACT MODULE.
+       *
+       * This used to read `if (name === 'myStatsContract.ts') expect(imports)
+       * .toEqual([])` — "imports NOTHING at all, which is the strongest possible
+       * form of this". That claim STOPPED BEING TRUE when the contract began
+       * selecting a personal source from a current-user state, and the honest
+       * replacement is not a weaker scan but a narrower one: the exact set of
+       * specifiers each module may name. `./currentUserContract` is a type-and-
+       * union dependency on a module that itself imports nothing; anything else
+       * appearing here is a deliberate, reviewed change rather than a silent one.
+       */
+      const specifiers = imports
+        .map((line) => /from\s+'([^']+)';$/.exec(line)?.[1] ?? '')
+        .sort();
+      if (name === 'myStatsContract.ts') expect(specifiers).toEqual(['./currentUserContract']);
+      if (name === 'currentUserContract.ts') expect(specifiers).toEqual([]);
     }
   });
 });

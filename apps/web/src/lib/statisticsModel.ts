@@ -1,7 +1,7 @@
 /*
  * Statistics — the PURE derivation layer for the read-only Statistics dashboard.
  *
- * Every figure that screen states is computed HERE, from four read-only
+ * Every figure that screen states is computed HERE, from five read-only
  * responses the app ALREADY serves, so no number on the page can be authored by
  * hand and drift from the running app:
  *
@@ -12,6 +12,10 @@
  *     silently undercount. The page owns that call; this module never fetches.
  *   · `GET /api/graph/status`     (`api.getGraphStatus()`)
  *   · `GET /api/openapi`          (`api.getOpenApi()`)
+ *   · `GET /api/schema`           (`api.getSchema()`) — the vendored PUBLIC
+ *     official schema and the `vocabulary/*.json` files, the same body the
+ *     Schema Reference browser already renders field by field. Reduced here to
+ *     counts of the schema's own structure; no record is involved.
  *   · `GET /api/about`            (`api.getAbout()`) — consumed directly by the
  *     page's provenance rows; it needs no derivation and has none here.
  *
@@ -21,7 +25,9 @@
  *     title, an experiment or record id, a draft field value, a scientific
  *     value, an evidence body, a per-field classification, or a filesystem
  *     path. The input projection already withholds most of that; this layer
- *     reduces what remains to integers.
+ *     reduces what remains to integers. The one class of NAME any derivation
+ *     emits is a name the CONTRACT declares — an OpenAPI tag, a schema property,
+ *     a vocabulary file stem — never a name a record chose.
  *   · NOT telemetry. There is no request count, visit, session, user, IP,
  *     latency, uptime or database figure anywhere here, and no such signal
  *     exists to read.
@@ -37,9 +43,15 @@
  */
 
 import { METHOD_ORDER, flattenOpenApi } from './apiDocsModel';
+import {
+  buildSchemaFieldTree,
+  buildVocabularyFile,
+  extractRelationships,
+  flattenFieldTree,
+} from './schemaBrowser';
 import { CANONICAL_STEPS } from './workflowSteps';
 import type { RuntimeRecord } from './crossRecordTriage';
-import type { ApiGraphStatus, ApiOpenApiResponse, OpenApiMethod } from './types';
+import type { ApiGraphStatus, ApiOpenApiResponse, ApiSchemaResponse, OpenApiMethod } from './types';
 
 /* The four derived workspace statuses, mirroring the module-level constants at
    `apps/api/isaac_api/workspace.py:72-76`. They are MUTUALLY EXCLUSIVE and
@@ -357,6 +369,168 @@ export function deriveExportGate(records: readonly RuntimeRecord[]): ExportGate 
     if (record.artifact_state === 'stale') gate.staleArtifacts += 1;
   }
   return gate;
+}
+
+// --- open questions ----------------------------------------------------------
+
+export interface OpenQuestionTotals {
+  /** How many records this projection covered. */
+  recordsCounted: number;
+  /** Records whose `pending_count` was not a finite number. See below. */
+  recordsWithUnreadableCount: number;
+  /** The sum of `pending_count` over the records that carried a usable one. */
+  totalOpenQuestions: number;
+  /** How many of those records have at least one open question. */
+  recordsWithOpenQuestions: number;
+  /** The largest single record's open-question count. 0 when none has any. */
+  mostOnOneRecord: number;
+  /** Records whose workflow reports at least one BLOCKED step. */
+  recordsWithBlockedStep: number;
+  /** Records whose workflow reports at least one REOPENED step. */
+  recordsWithReopenedStep: number;
+}
+
+/**
+ * Open questions across the workspace, from the projection's `pending_count`.
+ *
+ * `pending_count` is `Experiment.pending_count()` as projected at
+ * `apps/api/isaac_api/runtime_records.py` (`_project_one`) — an integer per
+ * record, never a question's text. Nothing here reconstructs a question, a
+ * field name, or a value; the unit is QUESTIONS, and `recordsCounted` is carried
+ * beside the sum so a label cannot quietly read one as the other.
+ *
+ * A non-finite `pending_count` is COUNTED SEPARATELY rather than treated as
+ * zero. Treating it as zero would silently shrink a total that a reader would
+ * take as complete; `recordsWithUnreadableCount` makes the shortfall statable.
+ *
+ * `recordsWithBlockedStep` and `recordsWithReopenedStep` read the two booleans
+ * `deriveWorkflowStages` deliberately ignores, and the difference in USE is why
+ * that is not a contradiction. Those booleans are OR-reductions over all five
+ * steps (`runtime_records.py`, `_project_one`) and per-step `blocked`/`reopened`
+ * are not mutually exclusive (`apps/api/isaac_api/workflow.py`), so BUCKETING
+ * records by them would count one record twice. Counting how many RECORDS have
+ * at least one such step is a single tally per record, which is what an
+ * OR-reduction can honestly support — and the two counts are separate axes that
+ * overlap each other and the question count, never a partition.
+ */
+export function deriveOpenQuestions(records: readonly RuntimeRecord[]): OpenQuestionTotals {
+  const totals: OpenQuestionTotals = {
+    recordsCounted: records.length,
+    recordsWithUnreadableCount: 0,
+    totalOpenQuestions: 0,
+    recordsWithOpenQuestions: 0,
+    mostOnOneRecord: 0,
+    recordsWithBlockedStep: 0,
+    recordsWithReopenedStep: 0,
+  };
+  for (const record of records) {
+    const pending = numberOrNull(record.pending_count);
+    if (pending === null) {
+      totals.recordsWithUnreadableCount += 1;
+    } else {
+      totals.totalOpenQuestions += pending;
+      if (pending > 0) totals.recordsWithOpenQuestions += 1;
+      if (pending > totals.mostOnOneRecord) totals.mostOnOneRecord = pending;
+    }
+    if (record.workflow?.blocked === true) totals.recordsWithBlockedStep += 1;
+    if (record.workflow?.reopened === true) totals.recordsWithReopenedStep += 1;
+  }
+  return totals;
+}
+
+// --- the official schema's own shape ------------------------------------------
+
+export interface SchemaSectionCount {
+  /** A top-level property name, verbatim from the schema. */
+  section: string;
+  /** That property and every field nested under it. */
+  count: number;
+}
+
+export interface VocabularyCount {
+  /** The vocabulary file's stem, verbatim. */
+  name: string;
+  entryCount: number;
+}
+
+export interface SchemaFacts {
+  schemaTitle: string | null;
+  schemaVersion: string | null;
+  /** Properties the record root declares. */
+  topLevelFields: number;
+  /** Every field at every depth — the master list the Fields view browses. */
+  totalFields: number;
+  /** Top-level properties the root's own `required` array names. See below. */
+  requiredTopLevelFields: number;
+  /** Fields at any depth that declare an `enum`. */
+  fieldsWithEnumeratedValues: number;
+  /** `allOf` if/then rules declared anywhere in the document. */
+  conditionalRules: number;
+  /** Fields per top-level section, in the schema's own declaration order. */
+  bySection: SchemaSectionCount[];
+  vocabularyFiles: number;
+  /** Terms plus scalar entries across every vocabulary file. */
+  vocabularyTerms: number;
+  /** Per file, in the order the response listed them. */
+  byVocabulary: VocabularyCount[];
+}
+
+/**
+ * The shape of the official ISAAC record schema, from the app's own copy of it.
+ *
+ * Built on `lib/schemaBrowser.ts` — `buildSchemaFieldTree`, `flattenFieldTree`,
+ * `extractRelationships` and `buildVocabularyFile` — for the reason
+ * {@link deriveApiSurface} reuses `flattenOpenApi`: the Schema Reference browser
+ * already walks this document, and a second walker here would let the two
+ * screens disagree about what a field is. There is one traversal, in one place.
+ *
+ * WHAT IS AND IS NOT COUNTED AS REQUIRED. `requiredTopLevelFields` reads the
+ * ROOT's own `required` array only. Requiredness at depth is not summed, and
+ * that is a correctness decision rather than a shortcut: `SchemaFieldNode.required`
+ * is true iff the ENCLOSING object's `required` array names the field, so a
+ * required field inside an OPTIONAL object is not required of a record. A single
+ * "required fields" total across depths would state an obligation the schema
+ * does not impose.
+ *
+ * NO RECORD IS INVOLVED, which is what makes every figure here safe to state.
+ * The body is the vendored public schema (`schema/isaac_record_v1.json`, loaded
+ * server-side through `isaac_records.official.schema_path`) plus the committed
+ * `vocabulary/*.json` files. `vocabularyTerms` counts entries in THOSE FILES —
+ * it is not, and must not be read as, the cardinality of any database
+ * vocabulary table. That other number is a production-table figure this app
+ * deliberately does not serve (`CLAUDE.md` §15); the two share a word and
+ * nothing else.
+ */
+export function deriveSchemaFacts(body: ApiSchemaResponse): SchemaFacts {
+  const tree = buildSchemaFieldTree(body?.schema ?? {});
+  const flat = flattenFieldTree(tree);
+
+  const vocabularies = Object.entries(body?.vocabularies ?? {}).map(([name, data]) => {
+    const file = buildVocabularyFile(name, data);
+    return { name, entryCount: file.entryCount };
+  });
+
+  return {
+    schemaTitle: stringOrNull(body?.schema_title),
+    schemaVersion: stringOrNull(body?.schema_version),
+    topLevelFields: tree.length,
+    totalFields: flat.length,
+    requiredTopLevelFields: tree.filter((node) => node.required).length,
+    fieldsWithEnumeratedValues: flat.filter(
+      (node) => Array.isArray(node.enumValues) && node.enumValues.length > 0,
+    ).length,
+    conditionalRules: extractRelationships(body?.schema ?? {}).length,
+    /* `flattenFieldTree([node])` counts the section itself plus its descendants,
+       so the sections sum to `totalFields` by construction rather than by an
+       arithmetic that could drift. */
+    bySection: tree.map((node) => ({
+      section: node.name,
+      count: flattenFieldTree([node]).length,
+    })),
+    vocabularyFiles: vocabularies.length,
+    vocabularyTerms: vocabularies.reduce((sum, v) => sum + v.entryCount, 0),
+    byVocabulary: vocabularies,
+  };
 }
 
 // --- Project Memory facts ----------------------------------------------------
