@@ -262,7 +262,18 @@ const ORCID_PATTERN = /\b\d{4}-\d{4}-\d{4}-\d{3}[\dX]\b/;
 const IPV4_PATTERN = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
 
 /**
- * Two or more colon-separated hex groups: an IPv6 address or a fragment of one.
+ * Two or more colon-separated hex groups: a full (UNCOMPRESSED) IPv6 address or
+ * a fragment of one.
+ *
+ * THIS PATTERN CATCHES ONLY THE UNCOMPRESSED FORM, and saying the contract
+ * refused "IPv6 addresses" was a FALSE GUARANTEE until it was measured. The
+ * canonical COMPRESSED forms — `2001:db8::1`, `fe80::1`, `::1`, and the all-zero
+ * `::` — carry a `::` run whose empty group breaks the `(?:group:){2,}group`
+ * shape this pattern requires, so it matches NONE of them (measured false for all
+ * four). The module head and the "WHAT IT CANNOT SEE" list below both implied
+ * IPv6 was refused; they were half-right. {@link IPV6_COMPRESSED_PATTERN} closes
+ * the gap, and the two are OR'd together at the detection site so `ip_address`
+ * fires for either form.
  *
  * KNOWN FALSE POSITIVE, stated rather than narrowed, and stated at exactly the
  * width it was MEASURED at: a SPACE-DELIMITED wall-clock time is two
@@ -321,6 +332,28 @@ const IPV4_PATTERN = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
 const IPV6_PATTERN = /\b(?:[0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f]{1,4}\b/;
 
 /**
+ * The COMPRESSED (`::`) IPv6 form, which {@link IPV6_PATTERN} cannot see.
+ *
+ * A single `::` run stands in for one or more all-zero groups, so a compressed
+ * address may present as few as the two characters `::` — far short of the
+ * `(?:group:){2,}group` the uncompressed pattern needs. This matches an optional
+ * leading hex group, a literal `::`, and an optional trailing colon-separated
+ * run, which catches `2001:db8::1`, `fe80::1`, `::1` and the bare `::` itself
+ * (measured true for all four).
+ *
+ * NEW KNOWN FALSE POSITIVE, and the trade it makes in this file's own "refuse
+ * rather than narrow" direction. There is DELIBERATELY no `\b` anchor — a `::`
+ * embedded mid-string must still be caught — so ANY string containing `::`
+ * between word-ish labels trips it. A C++/Rust-style qualified name in a display
+ * label (`Foo::Bar`, `std::vector`, `Module::method`) is reported as an
+ * `ip_address` and REFUSES THE PANEL, exactly as the space-delimited clock time
+ * does for {@link IPV6_PATTERN}. That is the documented cost of a broad detector:
+ * a false positive costs a refused panel, a false negative costs a disclosure,
+ * and this file chooses the refusal every time.
+ */
+const IPV6_COMPRESSED_PATTERN = /(?:[0-9A-Fa-f]{1,4})?::(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4})*)?/;
+
+/**
  * A ULID — 26 characters of Crockford base32, which is the id shape this
  * project's official records carry (`records/<ULID>.json`).
  *
@@ -368,6 +401,14 @@ const COUNT_KEY_PATTERN = /^(count|records_affected)$/;
  *   · Cross-tabulation and differencing (§4.3 rules 2 and 3). A payload can be
  *     entirely clean by this function and still be reconstructible against a
  *     second one.
+ *
+ * An IPv6 address is NO LONGER a blind spot in either form: the uncompressed form
+ * ({@link IPV6_PATTERN}) and the compressed `::` form
+ * ({@link IPV6_COMPRESSED_PATTERN}) are both caught, and `ip_address` fires if
+ * EITHER matches. The residual cost is in the other direction — the compressed
+ * detector has no boundary anchor, so a non-address `::` label (`Foo::Bar`,
+ * `std::vector`) is a FALSE POSITIVE that refuses the panel rather than a miss
+ * that leaks, which is the trade this file makes everywhere.
  */
 export function screenPortalPayload(value: unknown): PortalForbiddenCategory[] {
   const found = new Set<PortalForbiddenCategory>();
@@ -393,7 +434,13 @@ function walkPortalPayload(
   if (typeof value === 'string') {
     if (EMAIL_PATTERN.test(value)) found.add('email_address');
     if (ORCID_PATTERN.test(value)) found.add('orcid_id');
-    if (IPV4_PATTERN.test(value) || IPV6_PATTERN.test(value)) found.add('ip_address');
+    if (
+      IPV4_PATTERN.test(value) ||
+      IPV6_PATTERN.test(value) ||
+      IPV6_COMPRESSED_PATTERN.test(value)
+    ) {
+      found.add('ip_address');
+    }
     if (ULID_PATTERN.test(value)) found.add('record_identifier');
     return;
   }

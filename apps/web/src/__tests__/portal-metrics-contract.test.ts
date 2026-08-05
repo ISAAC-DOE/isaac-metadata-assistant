@@ -21,6 +21,7 @@ import {
   failingPortalMetricsSource,
   fixtureDomainBreakdown,
   fixtureFreshness,
+  fixtureIpv6Freshness,
   fixtureIsoInstantFreshness,
   fixtureLeakyFreshness,
   fixturePlatformTotal,
@@ -258,6 +259,9 @@ const EXPECTED_BY_CASE: Record<LeakyCase, PortalForbiddenCategory[]> = {
   email_address: ['email_address'],
   orcid_id: ['orcid_id'],
   ip_address: ['ip_address'],
+  // A compressed `::` IPv6 in a metrics label — caught by IPV6_COMPRESSED_PATTERN,
+  // which the uncompressed IPV6_PATTERN cannot report.
+  ip_address_compressed_ipv6: ['ip_address'],
   user_identifier: ['user_identifier'],
   per_user_request_count: ['user_identifier', 'per_user_request_count'],
   record_identifier: ['record_identifier'],
@@ -317,6 +321,35 @@ describe('forbidden disclosures — each category is detected', () => {
     // 25 and 27 characters are not ULIDs, so the length is really being checked.
     expect(screenPortalPayload({ label: '01ARZ3NDEKTSV4RRFFQ69G5FA' })).toEqual([]);
     expect(screenPortalPayload({ label: '01ARZ3NDEKTSV4RRFFQ69G5FAVX' })).toEqual([]);
+  });
+
+  it('a compressed IPv6 address is detected — the uncompressed pattern alone missed it', () => {
+    /* THE NEGATIVE CONTROL FOR THIS ONE IS REVERTING to a single uncompressed
+       `IPV6_PATTERN`: the `::` forms below then match nothing and the panel is
+       served with the address intact. IPv6 detection was entirely untested before
+       this — only IPv4 (`192.0.2.7`) and a clock-time false positive existed. */
+    // The uncompressed form the original pattern was written for, still caught.
+    expect(screenPortalPayload({ label: 'Origin 2001:db8:0:0:0:0:0:1' })).toEqual(['ip_address']);
+    // The canonical COMPRESSED forms the original pattern silently missed.
+    expect(screenPortalPayload({ label: 'Origin 2001:db8::1' })).toEqual(['ip_address']);
+    expect(screenPortalPayload({ label: 'Host fe80::1' })).toEqual(['ip_address']);
+    expect(screenPortalPayload({ label: 'Loopback ::1' })).toEqual(['ip_address']);
+    // …and the DOCUMENTED false positive: a `::` qualified name refuses the panel
+    // rather than leaking — the trade this file makes on purpose.
+    expect(screenPortalPayload({ label: 'std::vector' })).toEqual(['ip_address']);
+    // …but a label with no `::` and no dotted quad is clean, so the compressed
+    // detector is not simply always positive.
+    expect(screenPortalPayload({ label: 'Characterization records' })).toEqual([]);
+  });
+
+  it('a compressed IPv6 in a freshness label refuses the panel even when the data is clean', () => {
+    // The screener sees it in the freshness pair on its own.
+    expect(screenPortalPayload(fixtureIpv6Freshness)).toEqual(['ip_address']);
+    // The data is clean, so the refusal can only come from the label.
+    expect(screenPortalPayload(fixturePlatformTotal)).toEqual([]);
+    const state = acceptPortalPayload(fixturePlatformTotal, fixtureIpv6Freshness);
+    expect(state).toEqual({ status: 'unavailable', reason: 'withheld' });
+    expect(JSON.stringify(state)).not.toContain('fe80::1');
   });
 
   it('finds a disclosure nested inside arrays and objects, not only at the top', () => {

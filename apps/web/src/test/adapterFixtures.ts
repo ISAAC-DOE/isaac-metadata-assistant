@@ -150,7 +150,9 @@ export function failingPortalMetricsSource(
  * (`records/<ULID>.json`) was exercised by nothing.
  *
  * The strings are structurally valid and semantically nonsense — an
- * `example.invalid` address, a documentation-range IP, an ORCID whose digits are
+ * `example.invalid` address, a documentation-range IPv4 and a documentation-range
+ * COMPRESSED IPv6 (`192.0.2.7` from RFC 5737, `2001:db8::1` from RFC 3849), an
+ * ORCID whose digits are
  * a counting pattern, and the ULID specification's own documentation example
  * (`01ARZ3NDEKTSV4RRFFQ69G5FAV`), chosen over a random-looking id because a
  * reader can recognise it as a published example rather than wonder whose record
@@ -161,6 +163,11 @@ export const LEAKY_PORTAL_PAYLOADS = Object.freeze({
   email_address: { label: 'Contact fixture-owner@example.invalid', count: 40 },
   orcid_id: { label: 'Author 0000-0001-2345-6789', count: 40 },
   ip_address: { label: 'Origin 192.0.2.7', count: 40 },
+  // A COMPRESSED IPv6 in a metrics category label. The uncompressed
+  // `IPV6_PATTERN` misses `::` forms entirely — this case bites only because
+  // `IPV6_COMPRESSED_PATTERN` was added; before it, IPv6 detection was untested
+  // and the compressed forms were a silent false-negative.
+  ip_address_compressed_ipv6: { label: 'Origin 2001:db8::1', count: 40 },
   user_identifier: { username: 'fixture-person', count: 40 },
   per_user_request_count: { requests_per_user: 12, count: 40 },
   record_identifier: { record_id: 'fixture', count: 40 },
@@ -181,6 +188,21 @@ export const LEAKY_PORTAL_PAYLOADS = Object.freeze({
 export const fixtureLeakyFreshness: PortalMetricsFreshness = Object.freeze({
   observedAtLabel: 'read by ops@internal.example.invalid',
   coverageLabel: 'host 192.0.2.9 / 0000-0001-2345-6789',
+});
+
+/**
+ * A freshness pair whose only defect is a COMPRESSED IPv6 address in a label.
+ *
+ * The second display channel again — freshness strings ride on every `ready`
+ * state and can leak what a figure can. This one specifically exercises
+ * `IPV6_COMPRESSED_PATTERN`: `fe80::1` is a link-local address the uncompressed
+ * `IPV6_PATTERN` cannot see, so before the compressed pattern was added this pair
+ * reached `ready` intact. `fe80::1` is a real, non-routable, non-identifying
+ * documentation-safe form.
+ */
+export const fixtureIpv6Freshness: PortalMetricsFreshness = Object.freeze({
+  observedAtLabel: 'observed from host fe80::1',
+  coverageLabel: 'all records in the fixture platform',
 });
 
 /**

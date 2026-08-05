@@ -58,8 +58,8 @@ import type { RuntimeRecord } from './crossRecordTriage';
 import type { ApiGraphStatus, ApiOpenApiResponse, ApiSchemaResponse, OpenApiMethod } from './types';
 
 /* The four derived workspace statuses, mirroring the module-level constants at
-   `apps/api/isaac_api/workspace.py:72-76`. They are MUTUALLY EXCLUSIVE and
-   exhaustive by construction: `Experiment.status()` (`workspace.py:400-417`)
+   `apps/api/isaac_api/workspace.py:99-102`. They are MUTUALLY EXCLUSIVE and
+   exhaustive by construction: `Experiment.status()` (`workspace.py:549-566`)
    returns exactly one of them per record, on read, from the current draft. */
 const NEEDS_ATTENTION = 'needs_attention';
 const IN_REVIEW = 'in_review';
@@ -93,11 +93,11 @@ export interface WorkspaceTotals {
 /**
  * The status distribution of the whole workspace.
  *
- * Mirrors `apps/api/isaac_api/workspace.py:400-417` (`Experiment.status()`) over
+ * Mirrors `apps/api/isaac_api/workspace.py:549-566` (`Experiment.status()`) over
  * the projection at `apps/api/isaac_api/runtime_records.py:96-99`.
  *
  * `total` is the server's `body.total` — the count AFTER filtering and BEFORE
- * pagination (`routes.py:2596-2610`) — and is kept distinct from
+ * pagination (`routes.py:3465-3473`) — and is kept distinct from
  * `records.length` so a truncated page could never be presented as the whole
  * workspace.
  *
@@ -105,7 +105,7 @@ export interface WorkspaceTotals {
  * so `needsAttention + inReview + readyToExport + exported + unknownStatus`
  * always equals `records.length`. The `exported` bucket counts `status === 'done'`
  * rather than the `exported` boolean: `status()` returns `DONE` if and only if
- * `Experiment.exported()` is true (`workspace.py:394-395, 411-412`), so the two
+ * `Experiment.exported()` is true (`workspace.py:543-544, 557-558`), so the two
  * are equivalent for any consistent body — and driving it from the exclusive
  * status is what makes the invariant structural instead of assumed. A record
  * carrying a future status the client does not know lands in `unknownStatus`,
@@ -308,14 +308,14 @@ export interface ExportGate {
 /**
  * The export gate, as the backend derives it.
  *
- * Mirrors `apps/api/isaac_api/workspace.py:400-417` (`Experiment.status()`) plus
+ * Mirrors `apps/api/isaac_api/workspace.py:549-566` (`Experiment.status()`) plus
  * `apps/api/isaac_api/dependencies.py` `artifact_state` as projected at
  * `apps/api/isaac_api/runtime_records.py:113-115`.
  *
  * There is deliberately no `passed` / `failed` / `not_run` field. No validation
  * verdict is stored anywhere: status is DERIVED on read from an in-memory
  * `export_draft` dry-run and nothing is persisted (`workspace.py:15-16`,
- * `workspace.py:410-417`). A "not run" count would therefore describe a state
+ * `workspace.py:549-566`). A "not run" count would therefore describe a state
  * the system does not have — it would be fabricated. What CAN be stated
  * honestly is where each record stands right now, which is what this returns.
  *
@@ -349,7 +349,7 @@ export interface ExportGate {
  * {@link deriveWorkspaceTotals} buckets on — and NOT the `exported` boolean it
  * previously read. The two are equivalent for every body the backend produces
  * (`status()` returns `DONE` iff `Experiment.exported()` is true,
- * `workspace.py:394-395, 411-412`), but they are not equivalent for an
+ * `workspace.py:543-544, 557-558`), but they are not equivalent for an
  * INCONSISTENT body: a row carrying `exported: true` under a status this client
  * cannot place used to be counted here and not there, so the page stated two
  * different numbers under the one word "Exported". Reading the exclusive status
@@ -568,16 +568,16 @@ const MIN_COMMIT_PREFIX = 7;
 /**
  * The Project Memory plane's own reported facts.
  *
- * Mirrors the body assembled at `apps/api/isaac_api/routes.py:1975-2005`
- * (`GET /api/graph/status`).
+ * Mirrors the body assembled at `apps/api/isaac_api/routes.py:2827-2853`
+ * (`GET /api/graph/status`, `def graph_status` at 2805).
  *
  * SCOPE, and the one trap in this endpoint: the response carries TWO different
  * file counts and they are deliberately different sets.
  *
- *   · `file_count` (`routes.py:2000`, from `overview["served_file_count"]`) is
+ *   · `file_count` (`routes.py:2850`, from `overview["served_file_count"]`) is
  *     the served PATH SET — every repo-relative path the memory plane may
  *     describe.
- *   · `served_file_count` (`routes.py:1984`, from `status()`) is the served
+ *   · `served_file_count` (`routes.py:2836`, from `status()`) is the served
  *     CONTENT MANIFEST — path + raw-bytes sha256, the drift-detection basis. It
  *     self-excludes the snapshot file it would otherwise hash, so it is smaller
  *     by one.
@@ -588,7 +588,7 @@ const MIN_COMMIT_PREFIX = 7;
  *
  * Every figure is whatever the live response returned, or `null`: the endpoint
  * itself sets the additive fields to `null` when no overview is available
- * (`routes.py:2002-2003`), and a null count is stated as unavailable rather
+ * (`routes.py:2854-2855`), and a null count is stated as unavailable rather
  * than rendered as zero.
  *
  * `freshness` compares the snapshot's `source_graph_commit` with the build's
@@ -598,7 +598,7 @@ const MIN_COMMIT_PREFIX = 7;
  * `undetermined`, which the UI must render as "cannot be determined in this
  * environment" and never as current. Note this is a VERSION comparison only:
  * the endpoint keeps `deployed_app_commit` out of its own `memory_policy` /
- * `indexed_sources` freshness (`routes.py:1955-1965`), and so does this — the
+ * `indexed_sources` freshness (`routes.py:2813-2815`, fields at 2832-2833), and so does this — the
  * value is not read as, or blended into, the snapshot's integrity signals.
  */
 export function deriveMemoryFacts(g: ApiGraphStatus): MemoryFacts {
