@@ -59,11 +59,18 @@ Files: `qa/validator-upload-package/` in the repo, or the ZIP.
 
 ```
 ZIP     qa/validator-upload-package/isaac-validator-qa-files.zip
-sha256  71c2303450487f0ae418e869844d336c2d7be53d01e87956901386f0292bc6f3
+sha256  8a2d4948825c56bbcd9f707d70133c3dd3ba39092b8b17474a0155e1b9bf7170
+bytes   66133
 ```
 
 > Verify the checksum before you trust the archive:
 > `shasum -a 256 qa/validator-upload-package/isaac-validator-qa-files.zip`
+> `wc -c qa/validator-upload-package/isaac-validator-qa-files.zip`
+>
+> Both numbers are pinned by `tests/test_validator_qa_package.py::test_the_committed_archive_matches_the_digest_and_size_the_operator_is_told_to_verify`,
+> which hashes the committed bytes and then asserts this document quotes the same
+> values — so a rebuilt archive cannot leave this page stale and hand you a
+> mismatch on a correct archive.
 
 Upload in manifest order. For each: click **Upload JSON File**, pick the file, click
 **Validate**, then check the verdict against `UPLOAD-GUIDE.md`.

@@ -43,15 +43,23 @@
  *      suites would mean a future change to `RecordValidator.tsx` has two
  *      unrelated places to look.
  *
- * ── The eighteen files are SYNTHETIC, and that is verified, not assumed ─────
+ * ── The eighteen files are not real data, and that is verified, not assumed ──
  *
- * Every record carries its own "Constructed by hand for validator exercise.
- * Values are illustrative and carry no measurement provenance." note; the
- * optional `attribution` block is absent from all eighteen (pinned by
- * `test_no_qa_record_carries_an_attribution_block`); and the only top-level
- * values shared with the public upstream example are the four schema-forced
- * enums plus `links: []`. Nothing here is production-derived and no database is
- * reachable from this suite.
+ * All eighteen — the seventeen records and the `.txt` — state in their own text
+ * that they were "Constructed by hand for validator exercise" and "carry no
+ * measurement provenance", pinned by
+ * `test_every_shipped_fixture_states_its_own_provenance_in_its_own_text`. The
+ * optional `attribution` block is absent from all eighteen, pinned by
+ * `test_no_qa_record_carries_an_attribution_block`. Both live in
+ * `tests/test_validator_qa_package.py`.
+ *
+ * Two things this does NOT claim. It was 17 of 18 until the `.txt` was rewritten:
+ * that file read as a genuine logbook transcription and carried no note at all,
+ * and nothing failed, because the note convention was unasserted until the test
+ * named above existed. And the values themselves are unverifiable by any test —
+ * "illustrative" is a statement the files make, not a property a machine can
+ * confirm. What IS mechanically true here: nothing in this suite reads a database,
+ * and MANIFEST.json records `production_derived_content: "none"`.
  *
  * ── The sweep is DATA-DRIVEN, so it is guarded against becoming vacuous ─────
  *
