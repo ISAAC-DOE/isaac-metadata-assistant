@@ -14,7 +14,7 @@
       "name": "Oxyde de cuivre(II) « CuO » — mélange de référence dilué",
       "formula": "CuO",
       "provenance": "commercial",
-      "notes": "Etiquette du flacon : « CuO, 99,9 % ».\nChinese label: 氧化铜（粉末）\nOperator remark: he said \"the edge looks clean\" 🧪\nPath recorded on the logbook page: C:\\\\beamline\\\\runs\\\\2026-03-04\\\\cu_k\nTab\tseparated\tcolumns; semicolons; ellipsis… 100 % ✓\nConstructed by hand for validator exercise. Values are illustrative and carry no measurement provenance."
+      "notes": "Etiquette du flacon : « CuO, 99,9 % ».\nChinese label: 氧化铜（粉末）\nOperator remark: he said \"the edge looks clean\" 🧪\nFolder written on the logbook page: notes\\\\runs\\\\2026-03-04\\\\cu_k\nTab\tseparated\tcolumns; semicolons; ellipsis… 100 % ✓\nConstructed by hand for validator exercise. Values are illustrative and carry no measurement provenance."
     },
     "sample_form": "pellet",
     "composition": {
@@ -173,7 +173,7 @@
             "source": "manual",
             "value": 8979.4,
             "unit": "eV",
-            "definition": "Maximum of dμ/dE (\"first derivative\"); window ± 5 eV; reported to 0,1 eV — see logbook C:\\\\logs\\\\2026\\\\03.md",
+            "definition": "Maximum of dμ/dE (\"first derivative\"); window ± 5 eV; reported to 0,1 eV — see logbook notes\\\\2026\\\\03.md",
             "uncertainty": {
               "sigma": 0.2,
               "unit": "eV",
