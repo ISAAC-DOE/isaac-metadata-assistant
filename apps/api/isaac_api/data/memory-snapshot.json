@@ -10340,7 +10340,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "1183c9dc3d2d01e6b5d9f0a3d47762056553efef43463e9eea530b0572bac8d0"
+        "sha256": "1759a43c7feff485bc90883bb2f5f5f26d406ea8712132618b17fdfeecb52c12"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10396,7 +10396,7 @@
       },
       {
         "path": "apps/web/src/__tests__/signals.test.tsx",
-        "sha256": "cb384e19176856f536d07d4dd5e639ec912578c03c96d2ec613f6835aa910e5c"
+        "sha256": "b99bf0ac367dadd9437467c48071d51502da5ce123dbbd9b04b2b4e5ad6667cd"
       },
       {
         "path": "apps/web/src/components/AdvisoryChip.tsx",
@@ -10416,7 +10416,7 @@
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
-        "sha256": "a3601ab727a0e93da0d4a114afcbce54f37b740108d8a4e7f505e0277fc66e00"
+        "sha256": "3eab5c9dd8f139cfe813989c51dd5df17f2c784d3e5b2af1e4f59ced5dc93771"
       },
       {
         "path": "apps/web/src/components/EvidenceRow.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "b3f401c07ad0bc41af0cda9a38ef0b53d69d7940ebd25930b4dec2a6ea3b16d5"
+        "sha256": "690341e7e705a558107b659f1b5a594be1502efcd7505dfa9dd56e2985e20c26"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "ef0926b65161a63a08c257430fa5aa197b55c02b8aa6ebea73fdc5213fa56c75"
+        "sha256": "0ae4e56fe30a1b52080b163c7c38fe3cc32a3200f87e3a7fb0407c3e33a8f249"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "191ba54ea36c0076a96a6b9069c7325b8172e38e6f1bf477d60e4b7587a662c5"
+    "served_manifest_fingerprint": "abb13c8b6e2627bf13429ca3582ec7cb2f5c965060a374e6a1ca89284835511c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
