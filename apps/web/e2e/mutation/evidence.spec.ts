@@ -207,8 +207,20 @@ test.describe('R4 · evidence', () => {
      * evidence are unchanged, and a reader who reloads sees the value that is
      * actually stored.
      *
-     * SEE THE REPORT for what the screen does BEFORE that reload, which is a separate
-     * finding and is deliberately not asserted here as though it were correct.
+     * THE WAYPOINT BELOW USED TO BE `expect(getByRole('button', {name: 'Edit Asset
+     * Hash'})).toBeVisible()`, with the comment "The editor closes, so the request
+     * completed". That was true of the behaviour at the time and was the WRONG thing to
+     * wait on: the editor closed because `saveEdit` treated the 200 as proof of a write
+     * — the same defect that then rewrote the row to the refused value under a
+     * "Confirmed by You" chip. The old note here ("what the screen does BEFORE that
+     * reload … is deliberately not asserted here as though it were correct") was
+     * pointing at exactly that.
+     *
+     * The editor now stays open on a refused correction, so the request's completion is
+     * waited on through the screen's own report of the outcome, and the pre-reload state
+     * is asserted rather than deferred. Strictly stronger: it pins that the request
+     * finished AND that nothing was claimed. `edit.spec.ts` owns the full behaviour of
+     * that state; this file keeps its focus on the evidence trail.
      */
     await openComplete(page, SEED.fresh);
     await confirmAssetHash(page, HASH_A);
@@ -220,8 +232,11 @@ test.describe('R4 · evidence', () => {
     await editor.getByLabel('Asset Hash').fill('not-a-valid-sha256');
     await editor.getByRole('button', { name: 'Save' }).click();
 
-    // The editor closes, so the request completed; the record did not move.
-    await expect(page.getByRole('button', { name: 'Edit Asset Hash' })).toBeVisible();
+    await expect(editor.locator('.completion-submit-error')).toContainText('Nothing was applied');
+    await expect(
+      page.locator('.answered-stored'),
+      'the refused value must never be shown as an answer'
+    ).toHaveCount(0);
     const after = await server.read(SEED.fresh);
     expect(after.rev, 'a refused correction must not count as a write').toBe(confirmed.rev);
     expect(after.pendingIds).toEqual(confirmed.pendingIds);

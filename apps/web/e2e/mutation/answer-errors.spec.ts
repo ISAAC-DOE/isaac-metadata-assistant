@@ -7,6 +7,8 @@
  * This file owns what happens when the answer is one the system must NOT take:
  *
  *   · blank            — the control is inert and nothing is sent;
+ *   · MALFORMED        — a value the truth core drops. 200, nothing written, and the
+ *                        screen must not claim it as confirmed;
  *   · WRONG-TYPED      — the historical 500, now guarded; must stay a safe status,
  *                        must write nothing, must leave the question open;
  *   · STALE            — the record moved under the form; the write is refused,
@@ -22,6 +24,17 @@ const HASH = 'a3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b123';
  *  `series` one. This is the exact confusion that produced the original 500. */
 const WRONG_TYPED_SERIES_VALUE =
   'd4c0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b999';
+/**
+ * NOT 64 lowercase hex characters, so `complete.py`'s `_SHA256_RE` rejects it and
+ * `apply_answers` puts the blocker straight back into `remaining_pending`. Nothing is
+ * tampered with to reach this: `GuidedPrompt` gates Confirm on `text.trim().length > 0`
+ * and nothing else, so a reader can type this and press Confirm.
+ *
+ * Short on purpose — `answerValuePreview` renders a string of 20 characters or fewer
+ * verbatim, so if the screen ever did claim it, the claim would be findable by its
+ * exact text rather than as a truncated prefix.
+ */
+const MALFORMED_HASH = 'not-a-valid-sha256';
 
 test.describe('R4 · answers that must be refused', () => {
   test('a blank answer cannot be confirmed and no request is sent', async ({
@@ -47,6 +60,87 @@ test.describe('R4 · answers that must be refused', () => {
     const after = await server.read(SEED.fresh);
     expect(after.rev).toBe(before.rev);
     expect(after.pendingIds).toEqual(before.pendingIds);
+  });
+
+  test('a malformed hash is dropped by the core, and the screen claims no confirmation, moves no counter, and keeps the question open', async ({
+    page,
+    server,
+  }) => {
+    /*
+     * THE DEFECT THIS GUARDS, and it needed no tampering to reach. `GuidedCompletion`
+     * used to push a field into its `answered` list on any RESOLVED promise — i.e. it
+     * read HTTP 200 as proof of a write. `apply_answers` refuses a malformed sha256 and
+     * re-adds the blocker, returning 200 with `rev` unmoved, so the row rendered
+     * "Asset Hash / you answered not-a-valid-sha256 / Confirmed by You" over a value the
+     * truth core had thrown away — a false claim of confirmed authority over a
+     * scientific value, which is the worst kind of defect this app can have.
+     *
+     * Everything below is the real UI against the real FastAPI process: no route
+     * interception, no rewritten body, no mocked response.
+     */
+    const before = await server.read(SEED.fresh);
+    await openComplete(page, SEED.fresh);
+
+    const statuses: number[] = [];
+    page.on('response', (res) => {
+      if (res.request().method() === 'POST' && res.url().includes('/answers')) {
+        statuses.push(res.status());
+      }
+    });
+
+    await page.getByLabel('Asset Hash').fill(MALFORMED_HASH);
+    await page.getByRole('button', { name: 'Confirm' }).click();
+
+    // The request really was accepted — this is a 200 the client had to interpret, not
+    // an error it could lean on.
+    await expect
+      .poll(() => statuses.length, { message: 'the answer never left the page' })
+      .toBe(1);
+    expect(statuses[0], 'the backend accepts and drops; it does not error').toBe(200);
+
+    // The screen says so, and says it without naming a cause the response does not
+    // carry.
+    const note = page.getByText(/That answer was not applied\./);
+    await expect(note).toBeVisible();
+    await expect(note).toContainText('nothing was invented in its place');
+    await expect(note).not.toContainText(/malformed|invalid|identical/i);
+
+    // NO CONFIRMATION IS CLAIMED, and the value is nowhere on the screen as an answer.
+    await expect(page.locator('.answered-row')).toHaveCount(0);
+    await expect(page.getByText('Confirmed by You')).toHaveCount(0);
+    await expect(page.locator('.answered-stored')).toHaveCount(0);
+
+    // The counter did not move and the question is still question 1 — a field may never
+    // be answered and open at the same time.
+    await expect(page.locator('.completion-counter')).toHaveText(
+      `0 / ${before.pendingIds.length}`
+    );
+    await expect(page.getByRole('heading', { name: /Answer \d+ Questions/ })).toBeVisible();
+    await expect(
+      page.locator('.guided-index'),
+      'the refused question must still be the open one'
+    ).toHaveText(`Question 1 of ${before.pendingIds.length}`);
+    // ...and what the reader typed is still there to correct.
+    await expect(page.getByLabel('Asset Hash')).toHaveValue(MALFORMED_HASH);
+
+    // INDEPENDENT server read: nothing was written and the question set is untouched.
+    const after = await server.read(SEED.fresh);
+    expect(after.rev, 'a dropped answer must not advance the revision').toBe(before.rev);
+    expect(after.pendingIds).toEqual(before.pendingIds);
+    expect(JSON.stringify(await server.evidence(SEED.fresh))).not.toContain(MALFORMED_HASH);
+
+    // AND THE RECOVERY WORKS: a well-formed value on the same visit lands normally, so
+    // the guard refuses the bad write without wedging the screen. 64 lowercase hex
+    // characters is all `_SHA256_RE` asks for.
+    await page.getByLabel('Asset Hash').fill('a1'.repeat(32));
+    await page.getByRole('button', { name: 'Confirm' }).click();
+    await expect(page.getByText('Confirmed by You')).toBeVisible();
+    await expect(page.getByText(/That answer was not applied\./)).toHaveCount(0);
+    await expect
+      .poll(async () => (await server.read(SEED.fresh)).rev, {
+        message: 'the retry after a dropped answer never landed',
+      })
+      .toBe(before.rev + 1);
   });
 
   test('a wrong-typed structured answer gets a safe status — never a 5xx — writes nothing, and leaves the question open', async ({
@@ -112,9 +206,29 @@ test.describe('R4 · answers that must be refused', () => {
       before.pendingIds
     );
 
-    // AND THE READER IS NOT LEFT WITH A FABRICATED ANSWER once the screen re-reads
-    // the server. (What the screen claims BEFORE that re-read is a separate finding,
-    // reported rather than asserted here — this test must not encode it as correct.)
+    // AND THE READER IS NOT LEFT WITH A FABRICATED ANSWER — not after the re-read, and
+    // not before it.
+    //
+    // This block used to say: "What the screen claims BEFORE that re-read is a separate
+    // finding, reported rather than asserted here — this test must not encode it as
+    // correct." It was right not to encode it, and the finding it deferred was the
+    // defect: the screen read the 200 as proof, rendered "Reduced Spectrum / you
+    // answered averaged_spectrum · 2 channels / Confirmed by You", advanced the counter
+    // to 1 / 3, and re-rendered the same `series` question as "Question 2 of 3". Now
+    // that the claim follows the server's report, the pre-reload state is assertable and
+    // is asserted here, which is where the regression would first show.
+    await expect(page.getByText(/That answer was not applied\./)).toBeVisible();
+    await expect(page.locator('.answered-row')).toHaveCount(0);
+    await expect(page.getByText('Confirmed by You')).toHaveCount(0);
+    await expect(
+      page.locator('.completion-counter'),
+      'a dropped answer must not inflate the counter'
+    ).toHaveText(`0 / ${before.pendingIds.length}`);
+    await expect(
+      page.locator('.guided-index'),
+      'the dropped question must still be the FIRST open one, not the second'
+    ).toHaveText(`Question 1 of ${before.pendingIds.length}`);
+
     await page.reload();
     await expect(page.getByRole('heading', { name: /Answer 2 Questions/ })).toBeVisible();
     await expect(page.locator('.answered-row')).toHaveCount(0);

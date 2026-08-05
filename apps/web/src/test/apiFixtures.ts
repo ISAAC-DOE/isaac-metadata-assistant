@@ -1175,13 +1175,69 @@ const SYNTH_SHA = 'c3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b
 
 /** POST /answers response after confirming the processing-notebook sha256. The
  *  version triplet advances (rev 3 → 4, new token) — the client adopts it as the
- *  If-Match token for the next submit. */
+ *  If-Match token for the next submit.
+ *
+ *  `invalidation` is part of the response the real handler ALWAYS sends
+ *  (`routes.py::post_answers` sets `result["invalidation"]` unconditionally, and
+ *  `ApiAnswersResponse.invalidation` is non-optional), and it is what tells a client
+ *  whether the answer was applied at all — a 200 does not, since
+ *  `_answers_to_apply_shape` drops what it cannot interpret. This fixture omitted it,
+ *  so it modelled an APPLIED answer with a response shape the server never sends. */
 export const answersAfterNotebook = {
   pending: pendingResponse.pending.slice(1),
   status: 'needs_attention',
   rev: 4,
   updated_utc: '2099-04-02T09:16:00Z',
   version: '1.1',
+  workflow: fixtureWorkflow({
+    pending_count: pendingResponse.pending.length - 1,
+    draft_ok: false,
+    ready: false,
+    exported: false,
+    rev: 4,
+  }),
+  invalidation: {
+    changed: true,
+    rev: 4,
+    changed_fields: [pendingResponse.pending[0].id],
+    reopened_steps: [],
+    artifact: { state: 'none' as const, reason: null },
+    reason: 'Updated 1 field(s); no downstream steps reopened.',
+  },
+};
+
+/** POST /answers response for an answer the backend DROPPED: 200, the blocker still
+ *  open in the recomputed list, `rev` unmoved and `changed:false`. This is what
+ *  `_answers_to_apply_shape` (unrecognised key) or `apply_answers` (malformed sha256,
+ *  wrong-typed structured value, off-enum qc) actually produces — `rev` equals the
+ *  loaded fixture's `rev 3`, and `pending` is returned intact.
+ *
+ *  NOTE the `reason`: the backend words its no-op reason as "the submitted value was
+ *  identical", which is NOT what happened here. It is shared with /edit and /export
+ *  and is pinned as known-wrong-but-unchanged by
+ *  `apps/api/tests/test_export_recovery.py:1361`, so it is reproduced verbatim — a
+ *  client must not render it. */
+export const answersDropped = {
+  pending: pendingResponse.pending,
+  status: 'needs_attention',
+  rev: 3,
+  updated_utc: '2099-04-02T09:16:00Z',
+  version: '1.0',
+  workflow: fixtureWorkflow({
+    pending_count: pendingResponse.pending.length,
+    draft_ok: false,
+    ready: false,
+    exported: false,
+    rev: 3,
+  }),
+  invalidation: {
+    changed: false,
+    rev: 3,
+    changed_fields: [],
+    reopened_steps: [],
+    artifact: { state: 'none' as const, reason: null },
+    reason: 'No change — the submitted value was identical; nothing was invalidated.',
+  },
 };
 
 /** POST /edit response after correcting the processing-notebook sha256 (P28.3).
@@ -1202,6 +1258,45 @@ export const editApplied = {
     reopened_steps: [],
     artifact: { state: 'none' as const, reason: null },
     reason: 'Updated 1 field(s); no downstream steps reopened.',
+  },
+};
+
+/** POST /edit response for a correction `apply_corrections` REFUSED — the shape a
+ *  malformed sha256 actually produces. The key was recognised (an unrecognised one is
+ *  a 422, not this), so the request reaches `apply_corrections`, which "never
+ *  overwrit[es] with a bad value": the draft does not move, `rev` stays put and
+ *  `changed` is false. `pending` is unchanged because `apply_corrections` never
+ *  touches it, which is exactly why it carries no signal on this path.
+ *
+ *  The same shape is what an IDENTICAL re-submit produces. The response cannot tell
+ *  the two apart, and its `reason` asserts the second for both — reproduced verbatim
+ *  so a test can prove the client never renders it. */
+export const editRefused = {
+  // `apply_corrections` never touches `pending`, so a refusal returns the SAME list the
+  // record already had. Paired with `answersAfterNotebook` (which resolves the first of
+  // the five blockers) that is the remaining four — not `[]`. The distinction is
+  // load-bearing: an empty list would put the screen into its all-resolved branch,
+  // which is a different render tree, and a correction that was refused must not move
+  // the record to "ready".
+  pending: pendingResponse.pending.slice(1),
+  status: 'needs_attention',
+  rev: 4,
+  updated_utc: '2099-04-02T09:18:00Z',
+  version: '1.1',
+  workflow: fixtureWorkflow({
+    pending_count: pendingResponse.pending.length - 1,
+    draft_ok: false,
+    ready: false,
+    exported: false,
+    rev: 4,
+  }),
+  invalidation: {
+    changed: false,
+    rev: 4,
+    changed_fields: [],
+    reopened_steps: [],
+    artifact: { state: 'none' as const, reason: null },
+    reason: 'No change — the submitted value was identical; nothing was invalidated.',
   },
 };
 
