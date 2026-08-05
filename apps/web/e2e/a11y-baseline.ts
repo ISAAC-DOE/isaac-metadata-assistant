@@ -319,7 +319,30 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // merges two text nodes that darwin keeps apart — the same mechanism the
       // notes below describe for other split pairs. Both numbers are measurements,
       // neither is derived.
-      'export-readiness-done@desktop-1280x800': { darwin: 13, linux: 12 },
+      //
+      // COVERAGE-DISCLOSURE SLICE: the pair COLLAPSES to a scalar 13, because linux
+      // rose 12 -> 13 (CI run 30984206413 on `e02ac14`) and darwin did not move.
+      // Both halves are measured, and the darwin half was measured SPECIFICALLY to
+      // answer whether this slice introduced a new low-contrast node — it did not.
+      // The full failing-node SET was dumped on darwin at this width on both
+      // `main` (61247ec) and this branch, and the two lists are IDENTICAL, in the
+      // same order: .record-file, kbd, .verdict-hint, .coverage-note, .coverage-cmd,
+      // .advisory-nongating, .ready-note, the two .artifact-sub, .artifact-pathcount,
+      // .artifact-hint, .assistant-note, .statusbar-right. NONE of the three
+      // elements this slice adds (.coverage-sub, .coverage-sub-scope,
+      // .statusbar-cover-scope) appears — consistent with their computed colours:
+      // --text-slate/--cover-text #5b6b7d on --cover-bg #eef2f6 is 4.85:1 and
+      // --text-secondary #46515f is above 8:1, both clearing AA at these sizes.
+      //
+      // So the +1 on linux is a PRE-EXISTING failing node being counted twice
+      // instead of once: CoverageBadge's denominator explanation went from one
+      // short line to two longer ones, the `.coverage` card grew, and on the wider
+      // linux face a text run that used to merge now splits. That is the same
+      // mechanism the paragraph above documents for this exact key — and the
+      // interesting part is that linux has now converged ON darwin's number, which
+      // is what you would expect if the merge that produced 12 stopped happening.
+      // Only the LINUX total moves; darwin's stays.
+      'export-readiness-done@desktop-1280x800': 13,
       'export-readiness-done@laptop-1024x768': 12,
       // The two pairs where LINUX HAS FEWER nodes: the wider face pushes two
       // fragments onto one line, so axe sees one text node instead of two.
@@ -881,8 +904,23 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // values for these ten keys remain darwin measurements written as scalars, as
   // they already were; if CI disagrees, transcribe ITS numbers and correct the
   // total — never loosen the assertion.
+  //
+  // ── COVERAGE-DISCLOSURE SLICE: linux 1703 -> 1704, darwin UNCHANGED ─────────
+  //
+  // One key moves, `export-readiness-done@desktop-1280x800`, and only on linux
+  // (12 -> 13, CI run 30984206413 on `e02ac14`). Darwin measured 13 there before
+  // and after this slice, so the pair collapses to the scalar 13 — see that key's
+  // note for the measured failing-node SET, which is identical on `main` and this
+  // branch and contains none of the three elements the slice adds.
+  //
+  // NEITHER number here is arithmetic. Both were computed by importing this module
+  // and summing `platformCount` over every entry: darwin 1703 (matches), linux 1704.
+  // That check is also what the suite itself performs per platform, so a stale
+  // constant fails in all five projects — which is exactly how the previous
+  // linux-column edit was caught, and why the entry and this constant are one
+  // atomic change. Darwin is NOT raised to match; nothing measured darwin at 14.
   darwin: 1703,
-  linux: 1703,
+  linux: 1704,
 };
 
 /**
