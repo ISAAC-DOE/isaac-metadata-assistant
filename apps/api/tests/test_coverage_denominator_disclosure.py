@@ -40,12 +40,33 @@ figure now states that its denominator is what the record contains, and — when
 advisory reports no measured series — that no series target is counted. The tests
 below pin both the measured facts and the non-gating properties, so a later slice
 cannot quietly promote the disclosure into a gate or drop it.
+
+THREE SURFACES SHOW THE FIGURE, not two. The first pass covered `CoverageBadge`
+and the Assistant's coverage answer and missed `components/StatusBar.tsx`, the
+persistent footer, which renders `evidence {resolved}/{total}` on BOTH
+`screens/ExportReadiness.tsx` and `screens/RecordWorkbench.tsx`. On Export
+Readiness the badge and the `AdvisoryChip` are on the same page; on the Review
+screen NEITHER renders, so post-export the footer read `evidence 32/32 Coverage ·
+2 advisory · non-gating` with the advisory messages nowhere on the screen. The
+footer now discloses too — see `_DISCLOSURE_CONSUMERS`, and read the note there
+about what a hand-written list of consumers can and cannot detect.
+
+STILL SILENT, and deliberately not fixed here: `isaac audit` (the CLI) prints
+`PASS … (0 schema errors, evidence 32/32)` for a record with no measured data.
+`test_the_audit_text_is_measured_both_ways_and_neither_way_fails` pins that as a
+measured fact. Fixing it is a truth-path change (`src/isaac_records/audit.py`,
+which must NOT import `portal_warnings` — a test enforces that) and is untestable
+from a worktree, because the editable install's `.pth` is an absolute path into
+the main tree. So the two planes still disagree on the surface CLAUDE.md §9 routes
+"which records are incomplete?" to; that is the recommended next slice, not an
+oversight in this one.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -307,12 +328,26 @@ def test_the_audit_text_is_measured_both_ways_and_neither_way_fails(tmp_path, mo
 
 # --- the disclosure is wired to the code the backend actually emits -----------
 
-#: The two frontend files that must key on the shared constant, not on their own
-#: copy of the literal. Named as a SET so adding a third surface that shows the
-#: coverage figure without the disclosure is a visible omission here.
-_DISCLOSURE_CONSUMERS = (
-    WEB_SRC / "components/CoverageBadge.tsx",
-    WEB_SRC / "lib/assistantComposer.ts",
+#: The frontend files NAMED here as keying on the shared constant rather than on
+#: their own copy of the literal.
+#:
+#: WHAT THIS SET IS AND IS NOT. It is a list of files a human has decided must
+#: disclose; it is NOT an enumeration of the surfaces that show a coverage figure,
+#: and it has no mechanism for noticing a new one. An earlier revision of this
+#: comment claimed the opposite — "adding a third surface … is a visible omission
+#: here" — while `components/StatusBar.tsx` was ALREADY the third surface, shipping
+#: `evidence {resolved}/{total}` on both Export Readiness and the Review screen
+#: with no disclosure at all. The claim was false when it was written, and a
+#: hard-coded list cannot make it true. Adding a fourth surface fails nothing here;
+#: a reviewer reading the rendering code remains the only detector.
+#:
+#: A frozenset, because the comment says set. (It was a tuple.)
+_DISCLOSURE_CONSUMERS = frozenset(
+    {
+        WEB_SRC / "components/CoverageBadge.tsx",
+        WEB_SRC / "components/StatusBar.tsx",
+        WEB_SRC / "lib/assistantComposer.ts",
+    }
 )
 _DISCLOSURE_SOURCE = WEB_SRC / "lib/adapt.ts"
 
@@ -329,12 +364,63 @@ def _emitted_code() -> str:
     return codes[0]
 
 
+def _disclosure_sentence() -> str:
+    """The sentence AS SHIPPED, read out of `adapt.ts` and lowercased."""
+    source = _DISCLOSURE_SOURCE.read_text(encoding="utf-8")
+    marker = "export const NO_SERIES_COVERAGE_NOTE ="
+    assert marker in source
+    # `NO_SERIES_COVERAGE_NOTE_SHORT` does not match this marker: the marker
+    # requires a space immediately after `NOTE`, and the short constant has `_`.
+    sentence = source.split(marker, 1)[1].split(";", 1)[0].strip().strip("'\"\n ")
+    assert sentence, "the disclosure sentence must not be empty"
+    return sentence.lower()
+
+
+def _forbidden_verdict_words() -> tuple[str, ...]:
+    """The ONE shared forbidden-word list, read out of `adapt.ts`.
+
+    It used to live in three hand-maintained copies — this file's nine words, plus
+    an eight-word copy in each of `signals.test.tsx` and `assistantComposer.test.ts`
+    — and had already drifted: `error` was here and in neither of those. That is the
+    same defect the shared sentence constant exists to prevent, one level up, so the
+    list is now shared the same way and the two vitest files import it directly.
+
+    Parsed rather than imported because the declaration is TypeScript. The parse is
+    proven non-vacuous by the membership assertion below, so a regex that stops
+    matching fails here instead of silently yielding an empty list that forbids
+    nothing.
+    """
+    source = _DISCLOSURE_SOURCE.read_text(encoding="utf-8")
+    marker = "export const VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE = ["
+    assert marker in source, f"{_DISCLOSURE_SOURCE.name} must declare the shared list"
+    block = source.split(marker, 1)[1].split("]", 1)[0]
+    words = tuple(re.findall(r"'([^']+)'", block))
+    # A SET membership check, not a count: a count would go stale every time a word
+    # is added, and the point is that these specific ones are present.
+    missing = {"invalid", "incomplete", "error", "missing", "needs"} - set(words)
+    assert not missing, (
+        f"the shared forbidden-word list lost {sorted(missing)} — or the parse above "
+        "stopped matching, which would silently forbid nothing"
+    )
+    return words
+
+
 def test_the_frontend_keys_on_the_code_python_actually_emits():
     """A cross-language guard, because the disclosure fails OPEN on a rename.
 
     If the Python code is renamed and the TypeScript literal is not, nothing throws
     — the badge simply stops disclosing, silently, and a record with no measured
     data goes back to reading as a full count. This test is what makes that loud.
+
+    WHAT THIS ASSERTION ALONE CANNOT DO, recorded because it is easy to overrate.
+    It is a substring search over the whole of `adapt.ts`, so a mention of the code
+    inside a COMMENT satisfies it while the real constant is stale — this test would
+    stay green through exactly the rename it exists to catch. What closes that is
+    the frontend side: `signals.test.tsx` and `coverage-figure-disclosure.test.tsx`
+    render with an advisory carrying the code from `NO_MEASUREMENT_SERIES_CODE` and
+    assert the disclosure appears, so a stale constant fails there (measured by
+    negative control: three failures). The COMBINED set holds; this test on its own
+    does not.
     """
     code = _emitted_code()
     source = _DISCLOSURE_SOURCE.read_text(encoding="utf-8")
@@ -345,14 +431,32 @@ def test_the_frontend_keys_on_the_code_python_actually_emits():
     )
 
 
-def test_every_coverage_surface_uses_the_shared_predicate_not_its_own_literal():
-    """Each consumer imports the predicate; none re-spells the code or the sentence.
+def test_named_disclosure_consumers_use_the_shared_predicate():
+    """Each NAMED file imports the predicate; none re-spells the code.
 
-    Asserted per FILE (a set of files, each checked), not as a count of matches:
-    "two files mention it" would pass if one of them mentioned it in a comment.
+    Named for the mechanism, deliberately. This was
+    `test_every_coverage_surface_uses_the_shared_predicate_not_its_own_literal`,
+    and it does not enumerate surfaces and cannot detect a new one — it iterates a
+    hand-written set (see `_DISCLOSURE_CONSUMERS`). When the old name was written
+    `components/StatusBar.tsx` was already a coverage surface and was already
+    absent from the set, which is precisely the omission the name promised to make
+    visible.
+
+    Asserted per FILE (each member checked), not as a count of matches.
+
+    WHAT IT CANNOT CATCH, and this was MEASURED rather than reasoned. It is a
+    substring search over the whole file, so "mentions the predicate" is not
+    "renders the disclosure". Negative control on `components/StatusBar.tsx`:
+    deleting the entire disclosure JSX left this file at 14 passed, and then
+    replacing the `import { NO_SERIES_COVERAGE_NOTE, ..., carriesNoMeasurementSeries
+    }` line with a bare COMMENT naming the same two identifiers ALSO left it at 14
+    passed. The frontend is what caught both — `coverage-figure-disclosure.test.tsx`
+    §1 failed 4 of its assertions on the first control. This guard pins the wiring
+    convention (import the shared names, never re-spell the code); the rendered
+    behaviour is pinned only on the frontend, and the combined set is what holds.
     """
     code = _emitted_code()
-    for path in _DISCLOSURE_CONSUMERS:
+    for path in sorted(_DISCLOSURE_CONSUMERS):
         source = path.read_text(encoding="utf-8")
         assert "carriesNoMeasurementSeries" in source, path.name
         assert "NO_SERIES_COVERAGE_NOTE" in source, path.name
@@ -362,32 +466,52 @@ def test_every_coverage_surface_uses_the_shared_predicate_not_its_own_literal():
         )
 
 
-def test_the_disclosure_sentence_classifies_nothing():
-    """The sentence shipped to a reader must state an observation only.
+def test_the_disclosure_sentence_names_no_verdict_word():
+    """The sentence shipped to a reader uses none of the shared forbidden words.
 
-    The four candidate meanings of an empty series (invalid / incomplete / not
-    applicable / deliberately empty) belong to a domain owner. Asserted as a SET of
-    forbidden verdict words over the sentence AS SHIPPED (read out of adapt.ts), so
-    it also fails if the sentence is edited in place to say more than it may.
+    NAMED FOR THE MECHANISM. This was `test_the_disclosure_sentence_classifies_
+    nothing`, which asserts a universal a blacklist cannot establish: a novel
+    classifying phrasing ("no usable spectrum was recorded", "this record has
+    nothing to evidence") passes every entry. What is actually checked is a
+    ratchet over a word list, over the sentence AS SHIPPED (read out of adapt.ts),
+    so it also fails if the sentence is edited in place to say more than it may.
+
+    The reason the ratchet exists: the four candidate meanings of an empty series
+    (invalid / incomplete / not applicable / deliberately empty) belong to a domain
+    owner. A human reviewer remains the backstop for a newly written sentence.
     """
-    source = _DISCLOSURE_SOURCE.read_text(encoding="utf-8")
-    marker = "export const NO_SERIES_COVERAGE_NOTE ="
-    assert marker in source
-    sentence = source.split(marker, 1)[1].split(";", 1)[0].strip().strip("'\"\n ").lower()
-    assert sentence, "the disclosure sentence must not be empty"
+    sentence = _disclosure_sentence()
     assert "no series target is counted" in sentence
-    for forbidden in (
-        "invalid",
-        "incomplete",
-        "not applicable",
-        "failed",
-        "compromised",
-        "suspicious",
-        "should",
-        "must",
-        "error",
-    ):
+    for forbidden in _forbidden_verdict_words():
         assert forbidden not in sentence, (
             f"the disclosure says {forbidden!r} — that classifies the empty series, "
             "which is a scientific decision this app does not make"
         )
+
+
+def test_the_footer_short_form_is_derived_and_keeps_both_halves():
+    """The StatusBar footer shows a SHORTENED disclosure, and it must stay derived.
+
+    `.statusbar` is a fixed 52px single-line flex row, so the full sentence squeezes
+    the two neighbouring segments; the footer shows the consequence clause and
+    carries the whole sentence in an `.sr-only` span plus a `title`. The clause is
+    computed in `adapt.ts` by splitting the sentence on its own `, so ` hinge, which
+    is only safe while the hinge exists — so this pins the hinge and pins that
+    neither half is empty. If the sentence is reworded without a hinge the
+    derivation falls back to the full sentence (long, still true), and this test
+    tells the next editor that the footer has silently gone back to long.
+
+    The rendered outcome is asserted on the frontend
+    (`coverage-figure-disclosure.test.tsx` §1/§3); this side only pins the string.
+    """
+    sentence = _disclosure_sentence()
+    hinge = ", so "
+    assert hinge in sentence, (
+        "the disclosure sentence lost its `, so ` hinge — NO_SERIES_COVERAGE_NOTE_"
+        "SHORT now falls back to the full sentence in a 52px single-line footer"
+    )
+    observation, consequence = sentence.split(hinge, 1)
+    assert observation.strip(), "the observation half must not be empty"
+    assert consequence.strip().rstrip("."), "the consequence half must not be empty"
+    # The short form must remain the half that qualifies the NUMBER it sits beside.
+    assert "no series target is counted" in consequence

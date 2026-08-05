@@ -6,6 +6,7 @@ import { AdvisoryChip } from '../components/AdvisoryChip';
 import {
   NO_MEASUREMENT_SERIES_CODE,
   NO_SERIES_COVERAGE_NOTE,
+  VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE,
 } from '../lib/adapt';
 import type { AdvisoryResult, AuditResult, ValidationResult } from '../lib/types';
 
@@ -148,27 +149,25 @@ describe('the three signals are separate components with distinct treatments', (
     expect(container.querySelector('.coverage-sub-scope')).toBeNull();
   });
 
-  it('the series disclosure states an observation and does not classify the science', () => {
+  it('the series disclosure names no verdict word from the shared forbidden list', () => {
     // The domain question — is an empty series invalid, incomplete, not
     // applicable, or deliberately empty? — belongs to a scientific owner. The
     // vendored schema sets no `minItems`, so `[]` validates with zero errors, and
-    // nothing on this surface may decide which of the four it is. Asserted as a
-    // SET of forbidden verdict words, so adding a new one to the sentence fails.
+    // nothing on this surface may decide which of the four it is.
+    //
+    // NAMED FOR THE MECHANISM, deliberately. This was titled "…states an
+    // observation and does not classify the science", which asserts a universal a
+    // blacklist cannot establish: a novel classifying phrasing ("no usable
+    // spectrum was recorded") passes every entry. What it checks is that the
+    // sentence uses none of these words — a ratchet, not a proof — and the list is
+    // IMPORTED, because the three hand-kept copies of it had already drifted
+    // (`error` was in the Python one only).
     const { container } = render(
       <CoverageBadge audit={AUDIT} advisory={ADVISORY_NO_SERIES} />,
     );
     const scope = container.querySelector('.coverage-sub-scope')?.textContent ?? '';
     expect(scope).not.toBe('');
-    for (const forbidden of [
-      'invalid',
-      'incomplete',
-      'not applicable',
-      'failed',
-      'compromised',
-      'suspicious',
-      'should',
-      'must',
-    ]) {
+    for (const forbidden of VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE) {
       expect(scope.toLowerCase()).not.toContain(forbidden);
     }
   });

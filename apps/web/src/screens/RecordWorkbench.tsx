@@ -30,7 +30,45 @@ import {
   toValidationResult,
 } from '../lib/adapt';
 import { compose } from '../lib/assistantComposer';
-import type { ApiEvidenceEntry, RecordBundle } from '../lib/types';
+import type { ApiEvidenceEntry, ApiWorkflow, RecordBundle } from '../lib/types';
+
+/**
+ * The draft-phase half of the status-bar readout, taken from the SERVER'S OWN
+ * workflow derivation instead of from `pending.length === 0`.
+ *
+ * I2 — WHAT WAS FALSE. This read `pending.length > 0 ? 'Draft assembled · N fields
+ * to confirm' : 'Draft complete · ready to export'`, and `pending == 0` does not
+ * imply export-ready. `apps/api/isaac_api/workspace.py::status` separates
+ * `ready_to_export` from `in_review` on exactly that residual — pending 0 with a
+ * FAILING official-schema dry-run is `in_review` — and `workflow.derive_workflow`
+ * agrees: measured, `derive_workflow(pending_count=0, draft_ok=True, ready=False,
+ * exported=False, rev=1)` returns `current_step == 'review_export_readiness'` with
+ * the `export` step `blocked`. So on such a record this footer claimed "ready to
+ * export" while `WorkflowProgressBanner` on the SAME screen, from the SAME
+ * `detail.workflow`, said "Not ready to export yet".
+ *
+ * Nothing is re-derived here and no cause is invented: the readiness claim is made
+ * only for the one step the server reports as `export`, and every other step maps
+ * to the action the banner already names ('Review Export Readiness' / 'Review
+ * Evidence'), so the two strings cannot contradict. An unrecognised or absent
+ * `current_step` makes NO readiness claim at all rather than guessing one.
+ *
+ * Deliberately not worded "not ready to export yet": that phrase contains "ready
+ * to export" as a substring, and a footer whose truthfulness is pinned by tests
+ * should not be one missed negation away from reading as its own opposite.
+ */
+export function draftPhaseFromWorkflow(workflow: ApiWorkflow | null): string {
+  switch (workflow?.current_step) {
+    case 'export':
+      return 'Draft complete · ready to export';
+    case 'review_export_readiness':
+      return 'Draft complete · review export readiness';
+    case 'review_evidence':
+      return 'Draft complete · review evidence';
+    default:
+      return 'Draft complete';
+  }
+}
 
 /**
  * S3 · Review Record — the core workbench, live from the record bundle
@@ -178,11 +216,13 @@ function LoadedWorkbench({
   const coverageNote = audit.records.length === 0 ? 'not exported yet' : undefined;
   const advisoryLive = toAdvisoryResult(warnings);
 
+  // The readiness claim comes from `detail.workflow`, never from the pending
+  // residual — see `draftPhaseFromWorkflow` above for the measurement.
   const phase = detail.exported
     ? `Exported · ${detail.record_id}`
     : pending.length > 0
       ? `Draft assembled · ${pending.length} fields to confirm`
-      : 'Draft complete · ready to export';
+      : draftPhaseFromWorkflow(detail.workflow);
 
   // D8 — the right rail is the assistant ONLY (advisory). Deterministic evidence
   // lives inline on every field row (truth, in the main column); the whole-record

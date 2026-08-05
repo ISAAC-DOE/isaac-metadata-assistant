@@ -227,11 +227,96 @@ export const NO_MEASUREMENT_SERIES_CODE = 'NO_MEASUREMENT_SERIES';
  * meanings an empty series has is a scientific decision for a domain owner. It is
  * not made here, and nothing here gates on it.
  *
- * Position-neutral on purpose: the badge renders it under the figure and the
- * Assistant appends it to a sentence, so it must not say "above".
+ * Position-neutral on purpose: the badge renders it under the figure, the
+ * StatusBar footer puts it beside the figure, and the Assistant appends it to a
+ * sentence — so it must not say "above".
+ *
+ * WHAT THE SENTENCE UNDERSTATES, measured, and why it is not broadened.
+ * `NO_MEASUREMENT_SERIES` fires on TWO record shapes, and the denominator loses a
+ * different amount in each. Measured on `qa/validator-upload-package/
+ * complete-valid-record.json` via `_scalar_targets` + `_block_targets`:
+ *
+ *     unmodified                    → 35 targets
+ *     `measurement.series` == []    → 34  (removed: series:merged_normalized_spectrum)
+ *     `measurement` deleted         → 31  (also removed: qc:status, and the two
+ *                                          scalars measurement.processing
+ *                                          .recipe_link.{rel,target})
+ *
+ * The advisory code is IDENTICAL for both shapes, so this module cannot tell them
+ * apart, and the sentence therefore names only the loss both shapes share — the
+ * series target. On the second shape it is true but incomplete. It is deliberately
+ * not broadened: asserting a dropped QC target would be FALSE on the far more
+ * common `series: []` shape, where `qc:status` is still counted. The general
+ * caveat that covers the remainder is the badge's second static line ("A full
+ * count means every target this record has is evidenced — not that any particular
+ * target exists"), which is unconditional and true of both. Closing the gap
+ * properly needs a shape-distinguishing signal the backend does not emit today.
  */
 export const NO_SERIES_COVERAGE_NOTE =
   'This record carries no measurement series, so no series target is counted.';
+
+/**
+ * The same disclosure, shortened for the StatusBar footer — DERIVED from the
+ * sentence above, never a second literal.
+ *
+ * `.statusbar` is a fixed 52px single-line flex row (`components/chrome.css`) with
+ * no wrap: three signal segments plus a right tail already fill it, and dropping a
+ * 74-character sentence in squeezes the other two segments rather than adding a
+ * line. So the footer shows the consequence clause — the half that qualifies the
+ * NUMBER standing next to it — and carries the whole sentence in an `.sr-only`
+ * span and a `title`, so nothing is only available to a hovering mouse.
+ *
+ * The split is on the sentence's own `, so ` hinge and FAILS SAFE: if a future
+ * edit removes that hinge, this falls back to the full sentence (visually long in
+ * the footer, still true) rather than to a truncated or empty string.
+ * `apps/api/tests/test_coverage_denominator_disclosure.py` pins that both halves
+ * of the sentence survive the derivation.
+ */
+export const NO_SERIES_COVERAGE_NOTE_SHORT = ((): string => {
+  const hinge = ', so ';
+  const i = NO_SERIES_COVERAGE_NOTE.indexOf(hinge);
+  if (i < 0) return NO_SERIES_COVERAGE_NOTE;
+  return NO_SERIES_COVERAGE_NOTE.slice(i + hinge.length).replace(/\.$/, '');
+})();
+
+/**
+ * The verdict words the coverage disclosure may not contain — ONE list, imported
+ * by every guard that checks the sentence.
+ *
+ * It existed in three hand-maintained copies (this repo's Python guard plus two
+ * vitest files) and had already drifted: `error` was in the Python list and in
+ * neither TypeScript one. That is the same defect the shared sentence constant
+ * exists to prevent, one level up, so the list is shared the same way. The Python
+ * guard reads this array out of this file rather than restating it; see
+ * `_forbidden_verdict_words` in
+ * `apps/api/tests/test_coverage_denominator_disclosure.py`.
+ *
+ * `missing` and `needs` are here because they were absent from all three copies
+ * while carrying a normative implication — "the measurement series is missing"
+ * passes a list built only of verdict nouns, and *missing* is one of the four
+ * candidate meanings (invalid / incomplete / not applicable / deliberately empty)
+ * that belong to a domain owner.
+ *
+ * WHAT THIS LIST CANNOT DO. It is a blacklist over one sentence, so it cannot
+ * establish that the sentence classifies nothing — only that it uses none of
+ * these words. A novel classifying phrasing ("no usable spectrum was recorded",
+ * "this record has nothing to evidence") passes every entry. A human reviewer
+ * remains the backstop; the tests that use it are named for the mechanism, not
+ * for the universal.
+ */
+export const VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE = [
+  'invalid',
+  'incomplete',
+  'not applicable',
+  'failed',
+  'compromised',
+  'suspicious',
+  'should',
+  'must',
+  'error',
+  'missing',
+  'needs',
+] as const;
 
 /** True when the advisory reports that this record carries no measured series. */
 export function carriesNoMeasurementSeries(advisory: AdvisoryResult): boolean {

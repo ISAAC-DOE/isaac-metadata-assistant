@@ -9,7 +9,11 @@ import {
   REVIEW_CATALOG,
 } from './assistantComposer';
 import { SOURCE_LABELS } from './assistant';
-import { NO_MEASUREMENT_SERIES_CODE, NO_SERIES_COVERAGE_NOTE } from './adapt';
+import {
+  NO_MEASUREMENT_SERIES_CODE,
+  NO_SERIES_COVERAGE_NOTE,
+  VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE,
+} from './adapt';
 import { VALIDATION_UNAVAILABLE_SUMMARY } from './assistantPaths';
 import {
   experimentDetail,
@@ -768,21 +772,19 @@ describe('compose export — coverage echo variants + pre-export fallback + disa
     );
   });
 
-  it('the appended disclosure states an observation and does not classify the science', () => {
+  it('the appended disclosure names no verdict word from the shared forbidden list', () => {
     // Whether an empty series is invalid, incomplete, not applicable or
     // deliberately empty is a domain owner's decision; the vendored schema sets no
     // `minItems`, so `[]` validates with zero errors. The Assistant must not pick
-    // one. Asserted as a SET of forbidden verdict words.
-    for (const forbidden of [
-      'invalid',
-      'incomplete',
-      'not applicable',
-      'failed',
-      'compromised',
-      'suspicious',
-      'should',
-      'must',
-    ]) {
+    // one.
+    //
+    // NAMED FOR THE MECHANISM. The old title ("states an observation and does not
+    // classify the science") claimed a universal a blacklist cannot establish. The
+    // list is imported rather than restated: this file and `signals.test.tsx` each
+    // carried their own 8-word copy against the Python guard's 9, so `error` was
+    // missing from both — the same defect the shared sentence constant exists to
+    // prevent, one level up.
+    for (const forbidden of VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE) {
       expect(NO_SERIES_COVERAGE_NOTE.toLowerCase()).not.toContain(forbidden);
     }
   });

@@ -1,6 +1,11 @@
 import './chrome.css';
 import type { ReactNode } from 'react';
 import { StatusChip } from './StatusChip';
+import {
+  NO_SERIES_COVERAGE_NOTE,
+  NO_SERIES_COVERAGE_NOTE_SHORT,
+  carriesNoMeasurementSeries,
+} from '../lib/adapt';
 import { LABELS } from '../lib/labels';
 import { RUNTIME_BADGE } from '../lib/runtimeContext';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
@@ -90,6 +95,34 @@ export function StatusBar({
               evidence {coverage.resolved}/{coverage.total}
             </span>
             {eyebrow(LABELS.signalCoverage)}
+            {/* THE THIRD COVERAGE SURFACE, and the one with nothing beside it.
+                `isaac_records.audit` builds the denominator FROM THE RECORD, so a
+                record whose `measurement.series` is `[]` contributes no series
+                target and the figure still reads full (measured on
+                `qa/validator-upload-package/complete-valid-record.json`: 35 targets
+                → 34; and on the canonical seed exported both ways, 33/33 → 32/32).
+                `CoverageBadge` and `AdvisoryChip` disclose that on Export
+                Readiness; this footer also mounts on the Review screen
+                (`RecordWorkbench`), where NEITHER of them renders — so post-export
+                it read `evidence 32/32 Coverage · 2 advisory · non-gating` with the
+                advisory MESSAGES nowhere on the screen. Nothing new is fetched:
+                `advisory` is already a required-shaped prop above and is already
+                read by the advisory segment below. */}
+            {advisoryResolved && carriesNoMeasurementSeries(advisory) && (
+              <span className="statusbar-cover-scope" title={NO_SERIES_COVERAGE_NOTE}>
+                {/* The visible half is the consequence clause, DERIVED from the one
+                    shared sentence (see `lib/adapt.ts`) — `.statusbar` is a fixed
+                    52px single-line row and the full sentence squeezes the other
+                    segments. The whole sentence is still in the DOM, unhidden from
+                    assistive tech, so it is not hover-only. `aria-hidden` on the
+                    short form keeps a screen reader from hearing the clause twice;
+                    if this segment's own `aria-label` wins instead (ARIA prohibits
+                    `aria-label` on a generic role, so browsers vary), the outcome is
+                    exactly what it is today — no regression either way. */}
+                <span aria-hidden="true">{NO_SERIES_COVERAGE_NOTE_SHORT}</span>
+                <span className="sr-only">{NO_SERIES_COVERAGE_NOTE}</span>
+              </span>
+            )}
           </>
         ) : (
           <>

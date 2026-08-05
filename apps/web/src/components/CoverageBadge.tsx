@@ -14,6 +14,23 @@ interface CoverageBadgeProps {
    * honestly without the one signal that says what the record does not contain.
    * An optional prop would let a future surface show `N / N` with the disclosure
    * silently absent, which is the exact failure this prop exists to close.
+   *
+   * "SAME RECORD" IS NOT ALWAYS "SAME DOCUMENT", and the exception is recorded
+   * rather than papered over. `routes.py::_warnings_payload` degrades to the
+   * in-memory export CANDIDATE when a record is marked exported but its artifact
+   * cannot be read, while `audit` counts the artifact on disk. In that state the
+   * advisory describes the draft and the count describes the artifact, which
+   * falsifies the sentence above — and `adapt.ts::toAdvisoryResult` drops the
+   * payload's `dry_run` flag, so this component could not tell even if it wanted
+   * to.
+   *
+   * It is UNREACHABLE today: on `ExportReadiness` the badge renders only behind
+   * `realValidation.verdict === 'pass'`, which requires a readable artifact. That
+   * is INCIDENTAL protection — a side effect of where the badge is mounted, not a
+   * decision anyone made here — so a new mount site, or a change to that
+   * condition, re-opens it. Closing it properly means carrying `dry_run` through
+   * `toAdvisoryResult` and refusing to disclose from a candidate while counting an
+   * artifact; that is a wire-shape change and is deliberately not in this slice.
    */
   advisory: AdvisoryResult;
 }

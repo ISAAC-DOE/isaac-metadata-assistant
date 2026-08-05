@@ -297,6 +297,20 @@ export const EXPORT_CATALOG: GroundedChip[] = [
       //    beside it — so it carries the same disclosure, from the same constant.
       //    `warnings` is already in this bundle (`getExportReadiness`); nothing new
       //    is fetched and nothing is re-derived from record content.
+      //
+      // ASYMMETRIC DEGRADATION, recorded rather than "fixed", because the fix is
+      // worse than the disclosure. `if (!audit) return null` above fails CLOSED —
+      // no payload, no answer. This `warnings &&` fails OPEN: an absent `warnings`
+      // emits the count with the disclosure silently gone, which is the exact
+      // failure mode this slice exists to close. It is UNREACHABLE today —
+      // `getExportReadiness` resolves `audit` and `warnings` in one `Promise.all`
+      // and `warnings` is a non-optional field of `ExportReadinessBundle`, so
+      // either both arrive or the whole bundle rejects; there is no partial state
+      // in which one is present and the other is not. Failing closed here instead
+      // (`if (!warnings) return null`) would disable a truthful coverage answer on
+      // a state that cannot occur, so the guard stays and the asymmetry is written
+      // down. If `warnings` ever becomes optional or independently fetched, this
+      // must become a closed guard in the same change.
       const scope = warnings && carriesNoMeasurementSeries(toAdvisoryResult(warnings))
         ? ` ${NO_SERIES_COVERAGE_NOTE}`
         : '';
