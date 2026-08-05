@@ -8,8 +8,12 @@
  *   · `GET /api/runtime/records`  (`api.getRuntimeRecords()`) — the SAFE
  *     cross-record projection (`apps/api/isaac_api/runtime_records.py`). Called
  *     with NO filters, because `limit` defaults to `None` server-side
- *     (`apps/api/isaac_api/routes.py:2584-2590`) and a partial page would
- *     silently undercount. The page owns that call; this module never fetches.
+ *     (`apps/api/isaac_api/routes.py:3445-3453` as of `f800dd8` — the citation read
+ *     `:2584-2590`, which was stale by roughly −860 lines and pointed into an
+ *     unrelated route; re-derive with
+ *     `rg -n 'Maximum rows to return after filtering' apps/api/isaac_api/routes.py`
+ *     rather than trusting the number) and a partial page would silently
+ *     undercount. The page owns that call; this module never fetches.
  *   · `GET /api/graph/status`     (`api.getGraphStatus()`)
  *   · `GET /api/openapi`          (`api.getOpenApi()`)
  *   · `GET /api/schema`           (`api.getSchema()`) — the vendored PUBLIC

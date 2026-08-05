@@ -103,7 +103,7 @@ import { MyStats } from './MyStats';
  * Nothing on this surface is telemetry: there is no request, visit, user, IP,
  * latency, uptime or database figure, because no such signal exists in this app
  * to read. Nothing here mutates, validates, exports, or gates anything —
- * `Refresh` issues exactly the same four GETs and nothing else.
+ * `Refresh` issues exactly the same five GETs and nothing else.
  *
  * The "last read" timestamp is captured HERE, on the settle of each read,
  * because the derivations are pure and hold no clock. It is labelled as when
@@ -293,9 +293,22 @@ function leadSentence(scope: string | null, tab: StatisticsTabId): string {
     );
   }
   const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
+  /*
+   * IT MUST NAME WHAT IS ACTUALLY BELOW IT. This enumerated four topics while the
+   * tab had grown seven sections: Open Questions, Record Schema and Platform
+   * Metrics were all absent, and a lead that lists some of the page reads as a
+   * complete list of it.
+   *
+   * Platform Metrics is named DIFFERENTLY from the rest, in its own clause, because
+   * it is the one section that states no figure — listing "platform metrics"
+   * alongside the others would promise a platform-wide number this build cannot
+   * produce, which is the same defect class as the workspace clause this function
+   * already branches on.
+   */
   return (
-    `A read-only view of ${workspace}, workflow readiness, evidence, Project ` +
-    'Memory, and the API surface.'
+    `A read-only view of ${workspace}, workflow readiness, open questions, ` +
+    'evidence, the official record schema, Project Memory, and the API surface — ' +
+    'and, for platform-wide figures, why none is stated.'
   );
 }
 
@@ -304,20 +317,29 @@ function leadSentence(scope: string | null, tab: StatisticsTabId): string {
  * the recourse (a real button, keyboard reachable) still offered.
  *
  * THE RULE THIS PAGE FOLLOWS IS ONE ALARM PER FAILED SOURCE, NOT ONE PER PAGE.
- * The four reads are independent, so each dead source states itself ONCE, as a
+ * The five reads are independent, so each dead source states itself ONCE, as a
  * full `BackendDown`, at the first section that reads it; every FURTHER section
  * reading that same source gets this compact note instead, because repeating the
  * identical alarm three times would be noise. Three simultaneously dead sources
  * therefore do produce three alarms — and that is the intent: they are three
  * different failures, and collapsing them into one panel would hide which
- * sources are actually down while the degraded banner above says "3 of 4 reads
- * failed". Only the ALL-FOUR-failed case collapses, into the single page-level
+ * sources are actually down while the degraded banner above says "3 of 5 reads
+ * failed". Only the ALL-FIVE-failed case collapses, into the single page-level
  * `BackendDown`, because there is then nothing left to localize.
  *
- * `/api/about` is the one deliberate exception, and it is quieter rather than
+ * `/api/about` is the ONE deliberate exception, and it is quieter rather than
  * louder: its failure costs two supporting cards in the collapsed Technical
  * Details region, so it states itself with this note at its only reader. An alarm
  * panel there would out-shout the figures beside it that were read successfully.
+ *
+ * `/api/schema` WAS A SECOND, UNDOCUMENTED EXCEPTION and is no longer one. It has
+ * a single reader, so this rule always prescribed a full `BackendDown` for it, and
+ * rendering this note instead meant a dead schema announced nothing at all: this
+ * component has no `role`, while `BackendDown` is `role="alert"`. It was not
+ * recorded as an exception because it was not a decision. `RecordSchemaFacts` now
+ * renders `BackendDown` like the other two sections in its region, and
+ * `a dead /api/schema alarms ONCE, like its two siblings in this region` pins the
+ * alarm count rather than only the message.
  *
  * (The earlier wording of this comment said the alarm is "stated once" full
  * stop, which read as a page-level promise the code never made — the code and
@@ -374,7 +396,7 @@ export function StatisticsPage() {
   }
 
   /*
-   * Round tracking. `useFetch` exposes no completion callback, so the four
+   * Round tracking. `useFetch` exposes no completion callback, so the five
    * fetchers are wrapped here: `track` is what `useFetch` actually calls, on the
    * initial load, on `reload()` and on `reloadSilent()` alike, which makes every
    * request's start and settle — and crucially whether it was FULFILLED or
@@ -393,7 +415,7 @@ export function StatisticsPage() {
 
   /*
    * The arithmetic lives in refs; the state only MIRRORS them for rendering. Two
-   * of the four reads can settle in the same tick, so a functional
+   * of the five reads can settle in the same tick, so a functional
    * `setState(n => n + 1)` chain would be correct while anything that had to
    * READ the resulting value in that same tick (which of the round's reads have
    * failed so far) would not.
@@ -1234,12 +1256,23 @@ function RecordSchemaFacts({ schema }: { schema: SchemaFetch }) {
       headingLevel={3}
     >
       {schema.status === 'loading' && <LoadingPanel label="Loading the official record schema…" />}
-      {schema.status === 'error' && (
-        <SectionUnavailable
-          message="The official record schema could not be read from the API, so none of its counts is stated here."
-          onRetry={schema.reload}
-        />
-      )}
+      {/*
+        `BackendDown`, MATCHING ITS TWO SIBLINGS IN THIS REGION, not the compact
+        note it used to render.
+
+        `/api/schema` has exactly ONE reader, so the rule stated on
+        `SectionUnavailable` — a full alarm at the first section that reads a dead
+        source, the compact note only at FURTHER readers — already prescribed this.
+        The compact note here was a violation of that rule rather than an exception
+        to it, and it had a consequence beyond tidiness: `SectionUnavailable` renders
+        no `role`, so a dead `/api/schema` announced nothing to a screen reader while
+        the banner above stated "1 of 5 reads failed". `/api/about`'s exception does
+        not transfer — its rationale is that its two cards sit BESIDE record cards
+        that were read successfully, whereas a dead schema empties this whole section
+        including its chart, exactly as a dead `/api/graph/status` empties Project
+        Memory and a dead `/api/openapi` empties API Surface.
+      */}
+      {schema.status === 'error' && <BackendDown error={schema.error} onRetry={schema.reload} />}
       {schema.status === 'data' && <SchemaBody body={schema.data} />}
     </StatsSection>
   );
@@ -1276,10 +1309,18 @@ function SchemaBody({ body }: { body: ApiSchemaResponse }) {
         rows={[
           { label: 'Schema Title', value: stringOrUnavailable(facts.schemaTitle) },
           { label: 'Schema Version', value: stringOrUnavailable(facts.schemaVersion), mono: true },
-          { label: 'Top-Level Sections', value: count(facts.topLevelFields), mono: true },
+          /* "FIELDS", NOT "SECTIONS". These two labelled the schema's top-level
+             properties as sections, and on the real document 5 of the 6 the root
+             requires are scalar strings — `isaac_record_version`, `record_id`,
+             `record_type` and so on — which are fields by any reading and are not
+             sections of anything. The model's own field names (`topLevelFields`,
+             `requiredTopLevelFields`) already said so. The chart below still says
+             "section", correctly: it groups each top-level field WITH ITS
+             DESCENDANTS, which is what makes a scalar field a one-field group. */
+          { label: 'Top-Level Fields', value: count(facts.topLevelFields), mono: true },
           { label: 'Fields at Every Depth', value: count(facts.totalFields), mono: true },
           {
-            label: 'Required Top-Level Sections',
+            label: 'Required Top-Level Fields',
             value: count(facts.requiredTopLevelFields),
             mono: true,
           },
@@ -1307,10 +1348,15 @@ function SchemaBody({ body }: { body: ApiSchemaResponse }) {
         />
       </div>
       <p className="stats-note">
-        Required Top-Level Sections counts what the schema&rsquo;s own root requires. Requiredness
+        Required Top-Level Fields counts what the schema&rsquo;s own root requires. Requiredness
         deeper in the document is not added to it: a field marked required inside an optional
         section is required only once that section is present, so a single total across depths would
-        state an obligation the schema does not impose.
+        state an obligation the schema does not impose. Fields at Every Depth is counted through the
+        schema&rsquo;s <span className="mono">properties</span> and array items; fields declared only
+        inside a <span className="mono">oneOf</span> alternative are not listed, so this is a count of
+        the fields this view can enumerate rather than of every field the document can express. The
+        Schema Reference browser walks the document the same way, so the two screens state the same
+        number.
       </p>
       <p className="stats-note">
         Vocabulary Terms counts the entries in the vocabulary files this build serves alongside the

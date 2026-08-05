@@ -8,6 +8,7 @@ import {
   canPersonalize,
   disabledCurrentUserSource,
   type CurrentUserSubject,
+  type DisqualifiedIdentityHeader,
 } from '../lib/currentUserContract';
 import { personalStatisticsSourceFor, unconfiguredMyStatsSource } from '../lib/myStatsContract';
 import {
@@ -79,16 +80,26 @@ describe('the permanent disqualification (§6A.2)', () => {
   });
 
   it('the disqualified TYPE and the derived set name the same two headers', () => {
-    /* The type is hand-written because `filter` cannot narrow one. This is the
-       assertion that keeps the two halves from drifting apart. */
-    const fromType: readonly ('x-authentik-entitlements' | 'x-isaac-edge')[] = [
+    /*
+     * THE ANNOTATION IS THE ASSERTION, and the previous version of this test did
+     * not have it. It declared a hand-written literal union inline and compared it
+     * to the runtime set, so it never mentioned `DisqualifiedIdentityHeader` at
+     * all: narrowing that type to `'x-isaac-edge'` alone left `tsc -b` clean and
+     * this test green, silently re-permitting `'x-authentik-entitlements'` as a
+     * `CurrentUserSubject.observedFrom` — which §6A.2 disqualifies permanently.
+     *
+     * Annotated with the real type, a narrowing makes the second element
+     * unassignable (TS2322) and a widening breaks the set comparison below. The
+     * two halves of the guard now cover the two directions.
+     */
+    const fromType: readonly DisqualifiedIdentityHeader[] = [
       'x-authentik-entitlements',
       'x-isaac-edge',
     ];
     expect([...fromType].sort()).toEqual([...DISQUALIFIED_IDENTITY_HEADERS].sort());
   });
 
-  it('a disqualified header is not assignable as a subject source', () => {
+  it('NEITHER disqualified header is assignable as a subject source', () => {
     const usable: CurrentUserSubject = {
       kind: 'authentik_username',
       value: 'x',
@@ -107,6 +118,20 @@ describe('the permanent disqualification (§6A.2)', () => {
     // that bites is `tsc`. Reading it here keeps the binding used and states
     // plainly which layer is doing the work.
     expect(rejected.observedFrom).toBe('x-isaac-edge');
+
+    /* BOTH, not one. Only `x-isaac-edge` was pinned here, so the entitlements
+       header — the other half of the same §6A.2 finding — could be re-permitted
+       without a single test or type error. `@ts-expect-error` bites in both
+       directions: if a narrowing ever makes this assignment legal, the unused
+       expectation is itself a compile error (TS2578). */
+    const alsoRejected: CurrentUserSubject = {
+      kind: 'authentik_username',
+      value: 'x',
+      // @ts-expect-error — §6A.2 disqualifies entitlements permanently too: the one
+      // value that arrived was the client's own, so it identifies nobody.
+      observedFrom: 'x-authentik-entitlements',
+    };
+    expect(alsoRejected.observedFrom).toBe('x-authentik-entitlements');
   });
 });
 
@@ -117,13 +142,45 @@ describe('the shipped source is inactive by construction', () => {
     expect(Object.isFrozen(disabledCurrentUserSource)).toBe(true);
   });
 
-  it('sends no request and reads no cookie when asked', () => {
+  /*
+   * THE TITLE USED TO CLAIM MORE THAN THE BODY ASSERTED. It said "reads no
+   * cookie" and spied only `fetch`, so adding `void document.cookie; void
+   * window.localStorage;` to `get()` left all of this file passing. A cookie is
+   * the most plausible route a future SPA slice takes from "no identity" to a
+   * username, so it is now instrumented rather than asserted in prose.
+   */
+  it('sends no request and reads no cookie or browser storage when asked', () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
+
+    /* An OWN accessor on `document`, shadowing the prototype's. Removing it again
+       restores jsdom's real behaviour, which assigning the descriptor back would
+       not (there was no own property to restore). */
+    const cookieGetter = vi.fn(() => '');
+    Object.defineProperty(document, 'cookie', {
+      configurable: true,
+      get: cookieGetter,
+      set: () => {},
+    });
+    const localGet = vi.spyOn(window.localStorage, 'getItem');
+    const sessionGet = vi.spyOn(window.sessionStorage, 'getItem');
+
     try {
       disabledCurrentUserSource.get();
-      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(fetchSpy, 'fetch').not.toHaveBeenCalled();
+      expect(cookieGetter, 'document.cookie').not.toHaveBeenCalled();
+      expect(localGet, 'localStorage.getItem').not.toHaveBeenCalled();
+      expect(sessionGet, 'sessionStorage.getItem').not.toHaveBeenCalled();
+
+      /* THE SPY IS PROVED TO WORK, so "not called" means something. Without this,
+         a getter that jsdom had made non-configurable — leaving the real accessor
+         in place — would report "never read" for every possible implementation. */
+      expect(document.cookie).toBe('');
+      expect(cookieGetter).toHaveBeenCalledTimes(1);
     } finally {
+      Reflect.deleteProperty(document, 'cookie');
+      localGet.mockRestore();
+      sessionGet.mockRestore();
       vi.unstubAllGlobals();
     }
   });

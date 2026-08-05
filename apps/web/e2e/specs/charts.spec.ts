@@ -690,7 +690,12 @@ test.describe('@responsive Statistics charts (worked example)', () => {
         "Documented operations by group, in the contract's own tag order",
       ].sort(),
     );
-    expect(count, 'every caption belongs to a figure').toBe(captions.length);
+    /* EVERY FIGURE HAS EXACTLY ONE CAPTION — which is the property this comparison
+       actually holds. "Every caption belongs to a figure" was trivially true given
+       the locator chain above: `figures.locator('figcaption')` can only ever return
+       captions that are already inside a `figure.stats-chart`. What the equality
+       rules out is a figure with none and a figure with two. */
+    expect(count, 'every figure must have exactly one caption').toBe(captions.length);
 
     for (let i = 0; i < count; i++) {
       const figure = figures.nth(i);

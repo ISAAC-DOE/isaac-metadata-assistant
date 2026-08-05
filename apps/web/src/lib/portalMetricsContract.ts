@@ -34,6 +34,15 @@
  * removes an email and serves the rest leaves the burden of completeness on the
  * redactor, while a refusal fails closed.
  *
+ * "THE PAYLOAD" MEANS THE FRESHNESS LABELS TOO. {@link PortalMetricsFreshness}
+ * carries two provider-supplied DISPLAY STRINGS on every `ready` state, so it is
+ * a disclosure channel of exactly the same kind as the figures beside it, and
+ * {@link acceptPortalPayload} screens the two together. It did not, until an
+ * independent review measured a freshness label carrying an address, an ORCID
+ * and an IP reaching `ready` intact while the same two strings handed to
+ * {@link screenPortalPayload} returned all three categories — the guard existed
+ * and one of the two display channels was simply never passed to it.
+ *
  * The subtle one is the eighth. A count of 1 in a category is a per-record fact
  * wearing aggregate clothing, and two coarse breakdowns can be intersected down
  * to an individual — the reasoning
@@ -137,6 +146,11 @@ export interface PortalMetricPayloads {
  * `coverageLabel` names the POPULATION ("all published records"), which a bare
  * timestamp does not. A total over a filtered subset presented as a platform
  * total is the other half of the same defect.
+ *
+ * BOTH ARE SCREENED, for the reason the module head gives: a display string a
+ * provider composes is exactly where "read by ops@internal.example.invalid"
+ * ends up. See {@link acceptPortalPayload}, and see {@link IPV6_PATTERN} for the
+ * one false positive that screening a human-written time label introduces.
  */
 export interface PortalMetricsFreshness {
   observedAtLabel: string | null;
@@ -247,12 +261,46 @@ const ORCID_PATTERN = /\b\d{4}-\d{4}-\d{4}-\d{3}[\dX]\b/;
 /** A dotted quad. Deliberately not range-checked — `999.1.1.1` is still refused. */
 const IPV4_PATTERN = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
 
-/** Two or more colon-separated hex groups: an IPv6 address or a fragment of one. */
+/**
+ * Two or more colon-separated hex groups: an IPv6 address or a fragment of one.
+ *
+ * KNOWN FALSE POSITIVE, stated rather than narrowed, and stated at exactly the
+ * width it was MEASURED at: a SPACE-DELIMITED wall-clock time is two
+ * colon-separated groups of hex-legal digits, so
+ * `1 January 2099, 00:00:00 UTC` in a {@link PortalMetricsFreshness} label is
+ * reported as an `ip_address` and refuses the panel.
+ *
+ * The ISO-8601 form of the same instant — `2099-01-01T00:00:00Z` — does **not**
+ * trip, because `T` and `Z` are not hex-legal and so destroy the `\b` boundaries
+ * this pattern requires. (Written the other way round first, as though any
+ * seconds-precision timestamp were refused; the ISO case was then measured and
+ * came back clean. Recorded because a guard's blind spots are only useful at
+ * their real width.)
+ *
+ * So nothing is unstateable, and refusing is the documented trade of this whole
+ * file — a false positive costs a refused panel, a false negative costs a
+ * disclosure. The alternative (exempting the freshness fields from one detector)
+ * is the redactor design {@link acceptPortalPayload} rejects. A provider that
+ * wants seconds precision writes an ISO instant; `fixtureFreshness` states a time
+ * without seconds and also passes. `a space-delimited clock time in a freshness
+ * label is refused as an address` pins both halves, so this is a decision on
+ * record rather than a surprise.
+ */
 const IPV6_PATTERN = /\b(?:[0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f]{1,4}\b/;
 
 /**
  * A ULID — 26 characters of Crockford base32, which is the id shape this
  * project's official records carry (`records/<ULID>.json`).
+ *
+ * THIS IS A VALUE-SHAPE DETECTOR AND IT IS THE ONLY ONE FOR AN ID, so it is the
+ * only thing that catches a record id under an innocuous key (`key`, `label`) —
+ * which {@link RECORD_ID_KEY_PATTERN} cannot see and which is the form the defect
+ * would really take. It went unexercised until an independent review deleted the
+ * line that uses it and measured the whole suite still passing: the one
+ * `record_identifier` fixture named the id in its KEY, so the key pattern caught
+ * it first and this pattern was covered by nothing. The
+ * `record_identifier_value` fixture in `test/adapterFixtures.ts` exists solely to
+ * bite here.
  */
 const ULID_PATTERN = /\b[0-9A-HJKMNP-TV-Z]{26}\b/;
 
@@ -352,12 +400,24 @@ function walkPortalPayload(
  * that removes an email and keeps the rest puts the burden of completeness on
  * the redactor, and this file has already listed four things its detectors
  * cannot see. A refused panel states that it was withheld and shows no figure.
+ *
+ * THE DATA AND THE FRESHNESS ARE SCREENED TOGETHER, in one pass over
+ * `{ data, freshness }`, because both are rendered and a guard applied to one of
+ * two display channels is not a guard. The wrapper's own two keys (`data`,
+ * `freshness`) trip no key pattern, so wrapping cannot itself cause a refusal.
+ *
+ * The refusal is still ALL OR NOTHING across the pair: a clean figure with a
+ * leaking freshness label is withheld whole rather than served without its
+ * observation time. That is deliberate — {@link PortalMetricsFreshness} is
+ * documented as required on `ready` precisely because an undated platform
+ * aggregate reads as "now", so serving the figure while dropping the label would
+ * trade a disclosure for a misdating.
  */
 export function acceptPortalPayload<T>(
   data: T,
   freshness: PortalMetricsFreshness,
 ): PortalMetricState<T> {
-  if (screenPortalPayload(data).length > 0) {
+  if (screenPortalPayload({ data, freshness }).length > 0) {
     return { status: 'unavailable', reason: 'withheld' };
   }
   return { status: 'ready', data, freshness };

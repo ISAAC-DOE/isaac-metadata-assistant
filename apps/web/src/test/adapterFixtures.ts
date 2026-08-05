@@ -133,18 +133,29 @@ export function failingPortalMetricsSource(
 /* ---- portal metrics: payloads that MUST be refused --------------------- */
 
 /**
- * One payload per forbidden disclosure category, so a test can assert the
- * screener reports the RIGHT category and not merely "something".
+ * One payload per screening CASE — keyed by case name, not by category, because
+ * one category has two detectors and each needs its own case.
  *
  * `per_user_request_count` is the one entry that deliberately trips TWO
  * categories: `requests_per_user` is both a per-person count and a
  * person-scoped key, and the screener reports both by design. The test asserts
  * exact sets, so that pair is stated rather than glossed.
  *
+ * `record_identifier` is covered TWICE, and the second case is the load-bearing
+ * one. `record_identifier` names the id in its KEY, which the key pattern
+ * catches; `record_identifier_value` hides a real ULID in a `label`, which only
+ * the value-shape detector can catch. Until the second case existed, deleting
+ * `ULID_PATTERN`'s line from `screenPortalPayload` left the entire suite green —
+ * the detector for the one id shape this project actually uses
+ * (`records/<ULID>.json`) was exercised by nothing.
+ *
  * The strings are structurally valid and semantically nonsense — an
  * `example.invalid` address, a documentation-range IP, an ORCID whose digits are
- * a counting pattern, a ULID of repeated characters. None of them belongs to
- * anybody.
+ * a counting pattern, and the ULID specification's own documentation example
+ * (`01ARZ3NDEKTSV4RRFFQ69G5FAV`), chosen over a random-looking id because a
+ * reader can recognise it as a published example rather than wonder whose record
+ * it is. None of them belongs to anybody, and no record in this repository
+ * carries that id.
  */
 export const LEAKY_PORTAL_PAYLOADS = Object.freeze({
   email_address: { label: 'Contact fixture-owner@example.invalid', count: 40 },
@@ -153,8 +164,53 @@ export const LEAKY_PORTAL_PAYLOADS = Object.freeze({
   user_identifier: { username: 'fixture-person', count: 40 },
   per_user_request_count: { requests_per_user: 12, count: 40 },
   record_identifier: { record_id: 'fixture', count: 40 },
+  record_identifier_value: { label: 'Record 01ARZ3NDEKTSV4RRFFQ69G5FAV', count: 40 },
   record_title: { title: 'A fixture record title', count: 40 },
   small_cohort: { label: 'A tiny category', count: 1 },
+});
+
+/**
+ * A freshness pair that must be REFUSED — the second display channel.
+ *
+ * `PortalMetricsFreshness` is two provider-composed display strings, so it can
+ * leak exactly what a figure can. `acceptPortalPayload` screened only the data
+ * until an independent review measured this object reaching `ready` intact.
+ * Typed as the real interface so it cannot drift from the shape the contract
+ * actually accepts.
+ */
+export const fixtureLeakyFreshness: PortalMetricsFreshness = Object.freeze({
+  observedAtLabel: 'read by ops@internal.example.invalid',
+  coverageLabel: 'host 192.0.2.9 / 0000-0001-2345-6789',
+});
+
+/**
+ * A freshness label whose only defect is a SPACE-DELIMITED `hh:mm:ss` clock time.
+ *
+ * Kept as a NAMED fixture because it is a known false positive rather than a
+ * leak — see `IPV6_PATTERN` in `lib/portalMetricsContract.ts`. Two
+ * colon-separated groups of hex-legal digits are indistinguishable from an IPv6
+ * fragment, and this contract refuses rather than narrowing a detector.
+ *
+ * MEASURED, NOT ASSUMED: the ISO-8601 form of the same instant
+ * (`2099-01-01T00:00:00Z`) does NOT trip, because `T` and `Z` are not hex-legal
+ * and so destroy the word boundaries the pattern requires. See
+ * `fixtureIsoInstantFreshness`.
+ */
+export const fixtureSecondsPrecisionFreshness: PortalMetricsFreshness = Object.freeze({
+  observedAtLabel: '1 January 2099, 00:00:00 UTC',
+  coverageLabel: 'all records in the fixture platform',
+});
+
+/**
+ * The SAME instant in ISO-8601, which passes screening.
+ *
+ * The counterpart to the fixture above, and the reason the false positive is worth
+ * documenting rather than fixing: a provider that wants seconds precision has a
+ * form that works, so nothing is actually unstateable.
+ */
+export const fixtureIsoInstantFreshness: PortalMetricsFreshness = Object.freeze({
+  observedAtLabel: '2099-01-01T00:00:00Z',
+  coverageLabel: 'all records in the fixture platform',
 });
 
 /** A breakdown with one category below the cohort floor, for suppression tests. */

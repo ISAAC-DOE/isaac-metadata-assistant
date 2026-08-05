@@ -26,6 +26,7 @@ import {
   memoryFilesAvailable,
   openApiFixture,
   resetDemoRoutes,
+  schemaBrowserFixture,
   statisticsRecordsBody,
   statisticsRoutes,
   statisticsRuntimeRecords,
@@ -379,7 +380,9 @@ describe('the lead sentence is truthful in each workspace scope', () => {
 
     expect(
       screen.getByText(
-        'A read-only view of this workspace, workflow readiness, evidence, Project Memory, and the API surface.',
+        'A read-only view of this workspace, workflow readiness, open questions, evidence, ' +
+          'the official record schema, Project Memory, and the API surface — and, for ' +
+          'platform-wide figures, why none is stated.',
       ),
     ).toBeInTheDocument();
     // The retired claim is gone from the PAGE, not relocated within it.
@@ -392,7 +395,9 @@ describe('the lead sentence is truthful in each workspace scope', () => {
 
     expect(
       screen.getByText(
-        'A read-only view of the open worked-example workspace, workflow readiness, evidence, Project Memory, and the API surface.',
+        'A read-only view of the open worked-example workspace, workflow readiness, open questions, ' +
+          'evidence, the official record schema, Project Memory, and the API surface — and, for ' +
+          'platform-wide figures, why none is stated.',
       ),
     ).toBeInTheDocument();
     // The neutral ordinary wording must not leak into the scope that has examples.
@@ -1564,6 +1569,13 @@ describe('Refresh', () => {
       'GET /api/graph/status': firstCallOnly(graphStatusAvailable),
       'GET /api/about': firstCallOnly(aboutResponse),
       'GET /api/openapi': firstCallOnly(openApiFixture),
+      /* ALL FIVE, which the title always claimed and the fixture did not supply:
+         `/api/schema` had no route here, so it failed on the INITIAL load too and
+         this was really "four succeeded then five failed". It passed the no-alarm
+         assertion below only because a dead `/api/schema` used to render a note
+         with no `role` — the very defect this slice fixed. With the fifth route
+         present, every section has data to keep and the round is genuinely 5→5. */
+      'GET /api/schema': firstCallOnly(schemaBrowserFixture),
     });
     await settled();
     const live = container.querySelector('p.sr-only[role="status"]');
@@ -1603,6 +1615,9 @@ describe('Refresh', () => {
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
     expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
+    // …the fifth read included, which is what makes the no-alarm assertion above
+    // mean "every section kept its data" rather than "one section never had any".
+    expect(figureValue('Record Schema', 'Top-Level Fields')).toBe('6');
 
     // Still the same live region, with the failure note mounted above it.
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
@@ -1743,9 +1758,11 @@ describe('Record Schema (inside Technical Details)', () => {
     expect(figuresIn('Record Schema')).toEqual({
       'Schema Title': 'ISAAC AI-Ready Scientific Record v1.05 (fixture)',
       'Schema Version': '1.05',
-      'Top-Level Sections': '6',
+      // "Fields", not "Sections": on the real schema 5 of the 6 the root requires
+      // are scalar strings, and the model's own field names say `topLevelFields`.
+      'Top-Level Fields': '6',
       'Fields at Every Depth': '12',
-      'Required Top-Level Sections': '3',
+      'Required Top-Level Fields': '3',
       'Fields With Enumerated Values': '1',
       'Conditional Rules': '2',
       'Vocabulary Files': '1',
@@ -1777,6 +1794,14 @@ describe('Record Schema (inside Technical Details)', () => {
     expect(text).toMatch(/counts what the schema’s own root requires/);
     expect(text).toMatch(/required only once that section is present/);
     expect(text).toMatch(/a property of those files, not a measurement of any stored data/);
+    /* …AND WHAT THE FIELD TOTAL DOES NOT REACH. `buildSchemaFieldTree` descends
+       `properties` and `items.properties` only, so on the real schema three fields
+       inside the `oneOf` at `descriptors.outputs[].descriptors[].relative_to` are
+       not listed and `Fields at Every Depth` is 271 rather than 274. The traversal
+       is shared with the Schema Reference browser and is deliberately unchanged —
+       the two screens agree — so the note is what makes the boundary honest. */
+    expect(text).toMatch(/fields declared only inside a\s+oneOf\s+alternative are not listed/);
+    expect(text).toMatch(/the fields this view can enumerate/);
   });
 
   it('links to the browser that renders the same document field by field', async () => {
@@ -1788,18 +1813,41 @@ describe('Record Schema (inside Technical Details)', () => {
     ).toHaveAttribute('href', '/governance?tab=schema');
   });
 
-  it('a dead /api/schema degrades only this section, and states nothing about the schema', async () => {
+  /*
+   * IT ALARMS, and until this slice it did not.
+   *
+   * `RecordSchemaFacts` rendered `SectionUnavailable` — the compact note the page
+   * reserves for a source whose alarm has ALREADY been stated at an earlier section.
+   * `/api/schema` has exactly one reader, so nothing had stated it: the note carries
+   * no `role`, so a dead schema announced nothing to a screen reader while the
+   * banner above said "1 of 5 reads failed". Its two siblings in the same collapsed
+   * region — Project Memory and API Surface — have always rendered `BackendDown`
+   * (`role="alert"`) for exactly the same situation.
+   *
+   * The ALARM COUNT is asserted, not just the message, because a message assertion
+   * is precisely what passed while the role was missing.
+   */
+  it('a dead /api/schema alarms ONCE, like its two siblings in this region', async () => {
     renderStatistics(statisticsRoutes({ schema: { status: 500, body: { detail: 'synthetic failure' } } }));
     await settled();
 
     const region = regionOf('Record Schema');
-    expect(
-      within(region).getByText(
-        'The official record schema could not be read from the API, so none of its counts is stated here.',
-      ),
-    ).toBeInTheDocument();
+    // One alarm here, and one on the whole page: this is the only reader.
+    expect(within(region).getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    // The recourse is still offered, exactly as the compact note offered it.
     expect(within(region).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-    expect(textOf(region)).not.toMatch(/\b\d+\b/);
+
+    /*
+     * AND STILL NOTHING ABOUT THE SCHEMA. Every figure slot is empty, and no number
+     * is stated outside the alarm panel. Measured outside it because `BackendDown`'s
+     * local-build copy carries the run command, which contains a host and a port —
+     * not a figure about the schema, and the same text its two siblings already show.
+     */
+    expect(figuresIn('Record Schema')).toEqual({});
+    const alarmText = textOf(within(region).getByRole('alert'));
+    expect(textOf(region).replace(alarmText, '')).not.toMatch(/\b\d+\b/);
+
     // Everything else still renders.
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
     expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);

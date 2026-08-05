@@ -167,18 +167,26 @@ export const DISQUALIFIED_IDENTITY_HEADERS: readonly IdentityCandidateHeader[] =
  *
  * Written out rather than derived, because `filter` is a runtime operation and
  * cannot narrow a type. `the disqualified type and the derived set name the same
- * two headers` in `current-user-contract.test.ts` compares the two as SETS, so a
- * future change to the observation table that is not mirrored here fails.
+ * two headers` in `current-user-contract.test.ts` ANNOTATES an array with this
+ * type and compares it to {@link DISQUALIFIED_IDENTITY_HEADERS} as a SET, so both
+ * directions fail: narrowing this union makes the array literal unassignable, and
+ * widening it breaks the set comparison. It did not always: while the test held a
+ * hand-written inline union instead, narrowing this type to `'x-isaac-edge'` alone
+ * left the type-check clean and every test green, quietly re-permitting
+ * `'x-authentik-entitlements'` as a {@link CurrentUserSubject.observedFrom}.
  */
 export type DisqualifiedIdentityHeader = 'x-authentik-entitlements' | 'x-isaac-edge';
 
 /**
  * The only header names a subject may ever claim to have come from.
  *
- * This is the compile-time half of §6A.2's disqualification: assigning
- * `'x-isaac-edge'` to a {@link CurrentUserSubject.observedFrom} is a type error,
- * so a future slice cannot reach for it casually. `a disqualified header is not
- * assignable as a subject source` pins that with `@ts-expect-error`.
+ * This is the compile-time half of §6A.2's disqualification: assigning EITHER
+ * `'x-isaac-edge'` OR `'x-authentik-entitlements'` to a
+ * {@link CurrentUserSubject.observedFrom} is a type error, so a future slice
+ * cannot reach for one casually. `NEITHER disqualified header is assignable as a
+ * subject source` pins BOTH with `@ts-expect-error` — it pinned only the first
+ * until an independent review narrowed {@link DisqualifiedIdentityHeader} and
+ * measured the whole suite and the type-check still passing.
  *
  * Being usable as a NAME here is not permission to trust the header's VALUE.
  * Q4 and Q6 are unanswered, and §6A proves nothing about authentication.

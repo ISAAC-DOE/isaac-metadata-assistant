@@ -21,7 +21,10 @@ import {
   failingPortalMetricsSource,
   fixtureDomainBreakdown,
   fixtureFreshness,
+  fixtureIsoInstantFreshness,
+  fixtureLeakyFreshness,
   fixturePlatformTotal,
+  fixtureSecondsPrecisionFreshness,
   fixtureSeries,
   fixtureSmallCohortBreakdown,
   leakyPortalMetricsSource,
@@ -84,11 +87,57 @@ describe('the shipped source is inactive by construction', () => {
   });
 
   it('carries no URL, host, token or credential in any form', () => {
+    /* WEAK ON ITS OWN, AND SAYING SO IS THE POINT: `JSON.stringify` drops
+       functions, so this walks `{ id, configured }` and a method body containing
+       `fetch('https://…')` would pass it untouched. It is kept because it pins the
+       DATA properties and the property NAMES; the claim that no method can reach a
+       network is carried by the fetch spy below, by `Object.isFrozen`, and above
+       all by the module source scan that follows. */
     const serialised = JSON.stringify(unconfiguredPortalMetricsSource);
     expect(serialised).not.toMatch(/https?:/i);
     expect(serialised).not.toMatch(/token|secret|bearer|api[_-]?key|password/i);
     for (const key of Object.keys(unconfiguredPortalMetricsSource)) {
       expect(key).not.toMatch(/url|endpoint|host|origin|base|token|key|secret/i);
+    }
+  });
+
+  it('the module SOURCE holds no URL, host, transport or API-client call', async () => {
+    /*
+     * THE SCAN THAT WOULD ACTUALLY BITE, and the one the serialisation test above
+     * cannot be: it reads the module's own text, so a URL inside a method body — the
+     * form the defect would really take — is visible to it.
+     *
+     * Comments are stripped first, because this module's head DISCUSSES `fetch`,
+     * URLs and hosts at length in order to explain why it holds none. A whole-text
+     * scan would be satisfied by deleting that explanation, which is the inversion
+     * `my-stats.test.tsx` trap 1 already names. Stripping is deliberately naive
+     * (block comments, then whole-line `//`); it is sound HERE because this file
+     * contains no `/*` inside a string or regular expression — checked.
+     */
+    const raw = String((await import('../lib/portalMetricsContract?raw')).default);
+    const code = raw.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+
+    // The stripper must have left the CODE behind, or every assertion below is
+    // vacuous. These are three things only the code can contain.
+    expect(code).toContain('unconfiguredPortalMetricsSource');
+    expect(code).toContain('PORTAL_MIN_COHORT_SIZE = 5');
+    // …and it must have removed the prose that would otherwise trip the scans.
+    expect(raw).toMatch(/\bfetch\b/);
+    expect(code).not.toMatch(/\bfetch\b/);
+
+    expect(code, 'no URL or protocol').not.toMatch(/https?:\/\//i);
+    expect(code, 'no transport of its own').not.toMatch(
+      /XMLHttpRequest|EventSource|sendBeacon|WebSocket|\bimport\s*\(/,
+    );
+    expect(code, "no call through this app's API client").not.toMatch(/\bapi\s*\.\s*[a-zA-Z]/);
+    expect(code, 'no header access').not.toMatch(/headers\s*[.[]/);
+    expect(code, 'no cookie or browser storage').not.toMatch(
+      /document\s*\.\s*cookie|localStorage|sessionStorage/,
+    );
+    // …and it cannot even IMPORT the API client. Matched on import statements, so
+    // deleting the explanation rather than the dependency cannot satisfy it.
+    for (const line of code.match(/^import[\s\S]*?from\s+'[^']+';$/gm) ?? []) {
+      expect(line, 'must not import the API client').not.toMatch(/lib\/api'|\/api'$/);
     }
   });
 
@@ -196,42 +245,78 @@ describe('the timeout is a combinator, not a client', () => {
   });
 });
 
+type LeakyCase = keyof typeof LEAKY_PORTAL_PAYLOADS;
+
+/**
+ * What each fixture CASE must be reported as — keyed by case name, because
+ * `record_identifier` has two detectors and therefore two cases.
+ *
+ * Sets, not counts. `requests_per_user` legitimately trips two categories and
+ * that pair is written out rather than glossed as "at least one".
+ */
+const EXPECTED_BY_CASE: Record<LeakyCase, PortalForbiddenCategory[]> = {
+  email_address: ['email_address'],
+  orcid_id: ['orcid_id'],
+  ip_address: ['ip_address'],
+  user_identifier: ['user_identifier'],
+  per_user_request_count: ['user_identifier', 'per_user_request_count'],
+  record_identifier: ['record_identifier'],
+  // A real ULID under `label` — no KEY pattern names `label`, so only the
+  // value-shape detector can report this one.
+  record_identifier_value: ['record_identifier'],
+  record_title: ['record_title'],
+  small_cohort: ['small_cohort'],
+};
+
 describe('forbidden disclosures — each category is detected', () => {
-  it('the fixture set names every category the contract declares', () => {
-    expect(Object.keys(LEAKY_PORTAL_PAYLOADS).sort()).toEqual([...PORTAL_FORBIDDEN_CATEGORIES].sort());
+  it('the fixture cases cover every category the contract declares, and each is expected', () => {
+    /* Coverage is asserted as a SET UNION over the cases rather than as
+       "one fixture per category": a category with two detectors needs two cases,
+       and keying the fixtures by category made that unrepresentable. Pinning the
+       expectation map's keys to the fixture's keys is what stops a new case being
+       added with no stated expectation. */
+    const covered = new Set(Object.values(EXPECTED_BY_CASE).flat());
+    expect([...covered].sort()).toEqual([...PORTAL_FORBIDDEN_CATEGORIES].sort());
+    expect(Object.keys(EXPECTED_BY_CASE).sort()).toEqual(Object.keys(LEAKY_PORTAL_PAYLOADS).sort());
   });
 
-  it.each(
-    (Object.keys(LEAKY_PORTAL_PAYLOADS) as PortalForbiddenCategory[]).map(
-      (category) => [category] as const,
-    ),
-  )('%s is reported', (category) => {
-    const found = screenPortalPayload(LEAKY_PORTAL_PAYLOADS[category]);
-    expect(found, `${category} must be among ${JSON.stringify(found)}`).toContain(category);
-  });
+  it.each((Object.keys(LEAKY_PORTAL_PAYLOADS) as LeakyCase[]).map((name) => [name] as const))(
+    '%s trips every category it is built to trip',
+    (name) => {
+      const found = screenPortalPayload(LEAKY_PORTAL_PAYLOADS[name]);
+      for (const category of EXPECTED_BY_CASE[name]) {
+        expect(found, `${name} must report ${category}, got ${JSON.stringify(found)}`).toContain(
+          category,
+        );
+      }
+    },
+  );
 
   it('reports the EXACT set for each payload, so a detector cannot over-report', () => {
-    /* Sets, not counts. `requests_per_user` legitimately trips two categories
-       and that pair is written out rather than glossed as "at least one". */
-    const expected: Record<PortalForbiddenCategory, PortalForbiddenCategory[]> = {
-      email_address: ['email_address'],
-      orcid_id: ['orcid_id'],
-      ip_address: ['ip_address'],
-      user_identifier: ['user_identifier'],
-      per_user_request_count: ['user_identifier', 'per_user_request_count'],
-      record_identifier: ['record_identifier'],
-      record_title: ['record_title'],
-      small_cohort: ['small_cohort'],
-    };
-    for (const [category, want] of Object.entries(expected) as [
-      PortalForbiddenCategory,
+    for (const [name, want] of Object.entries(EXPECTED_BY_CASE) as [
+      LeakyCase,
       PortalForbiddenCategory[],
     ][]) {
       expect(
-        screenPortalPayload(LEAKY_PORTAL_PAYLOADS[category]).sort(),
-        `payload "${category}"`,
+        screenPortalPayload(LEAKY_PORTAL_PAYLOADS[name]).sort(),
+        `payload "${name}"`,
       ).toEqual([...want].sort());
     }
+  });
+
+  it('a ULID under an innocuous key is reported — the value-shape detector, alone', () => {
+    /* THE NEGATIVE CONTROL FOR THIS ONE IS DELETING `ULID_PATTERN`'s line from
+       `screenPortalPayload`; before this case existed, that deletion left every
+       test in this file passing. `label` is matched by no key pattern, so nothing
+       but the value-shape detector can report it. */
+    expect(screenPortalPayload({ label: 'Record 01ARZ3NDEKTSV4RRFFQ69G5FAV' })).toEqual([
+      'record_identifier',
+    ]);
+    // …and the shape, not the word: the same sentence without the id is clean.
+    expect(screenPortalPayload({ label: 'Record' })).toEqual([]);
+    // 25 and 27 characters are not ULIDs, so the length is really being checked.
+    expect(screenPortalPayload({ label: '01ARZ3NDEKTSV4RRFFQ69G5FA' })).toEqual([]);
+    expect(screenPortalPayload({ label: '01ARZ3NDEKTSV4RRFFQ69G5FAVX' })).toEqual([]);
   });
 
   it('finds a disclosure nested inside arrays and objects, not only at the top', () => {
@@ -280,6 +365,75 @@ describe('a screened payload is refused WHOLE, not edited', () => {
       data: fixturePlatformTotal,
       freshness: fixtureFreshness,
     });
+  });
+
+  /*
+   * THE FRESHNESS IS THE SECOND DISPLAY CHANNEL, and it was unscreened.
+   *
+   * `PortalMetricsFreshness` is two provider-composed DISPLAY STRINGS that ride on
+   * every `ready` state, so it can carry exactly what a figure can. An independent
+   * review measured this pair reaching `ready` intact while the same two strings
+   * handed to `screenPortalPayload` returned all three categories — the guard
+   * existed and one of its two inputs was never passed to it.
+   */
+  it('refuses a leaking FRESHNESS label even when the data is clean', () => {
+    // First: the screener really does see all three, so the test below is about
+    // the wiring rather than about the detectors.
+    expect(screenPortalPayload(fixtureLeakyFreshness).sort()).toEqual(
+      ['email_address', 'ip_address', 'orcid_id'].sort(),
+    );
+
+    for (const [label, data] of [
+      ['total', fixturePlatformTotal],
+      ['categories', fixtureDomainBreakdown],
+      ['series', fixtureSeries],
+    ] as const) {
+      // The data is clean on its own — the refusal can only come from the label.
+      expect(screenPortalPayload(data), label).toEqual([]);
+      const state = acceptPortalPayload(data, fixtureLeakyFreshness);
+      expect(state, label).toEqual({ status: 'unavailable', reason: 'withheld' });
+      const serialised = JSON.stringify(state);
+      for (const needle of ['ops@internal.example.invalid', '192.0.2.9', '0000-0001-2345-6789']) {
+        expect(serialised, `${label} must not carry "${needle}"`).not.toContain(needle);
+      }
+    }
+  });
+
+  it('wrapping the pair cannot itself cause a refusal — the clean fixture still passes', () => {
+    /* `{ data, freshness }` introduces two new object keys into the walk. Neither
+       trips a key pattern, and this is the assertion that says so rather than
+       leaving it to inspection. */
+    expect(screenPortalPayload({ data: fixtureDomainBreakdown, freshness: fixtureFreshness })).toEqual(
+      [],
+    );
+    expect(acceptPortalPayload(fixtureDomainBreakdown, fixtureFreshness).status).toBe('ready');
+  });
+
+  it('a space-delimited clock time in a freshness label is refused as an address', () => {
+    /*
+     * NOT A LEAK, AND NOT A BUG — the documented trade on `IPV6_PATTERN`. Two
+     * colon-separated groups of hex-legal digits are an IPv6 fragment as far as a
+     * broad detector can tell, so ` 00:00:00 ` in a label refuses the panel.
+     *
+     * ITS WIDTH WAS MEASURED, and it is narrower than it first appeared: the ISO
+     * form of the same instant passes, because `T` and `Z` are not hex-legal and
+     * destroy the word boundaries the pattern needs. Both halves are asserted, so
+     * the blind spot is recorded at its real width rather than at a guessed one —
+     * and so a future change to the pattern that widens the refusal to ISO
+     * timestamps fails here.
+     */
+    expect(screenPortalPayload(fixtureSecondsPrecisionFreshness)).toEqual(['ip_address']);
+    expect(acceptPortalPayload(fixturePlatformTotal, fixtureSecondsPrecisionFreshness)).toEqual({
+      status: 'unavailable',
+      reason: 'withheld',
+    });
+
+    // The ISO-8601 instant is clean, so seconds precision IS stateable.
+    expect(screenPortalPayload(fixtureIsoInstantFreshness)).toEqual([]);
+    expect(acceptPortalPayload(fixturePlatformTotal, fixtureIsoInstantFreshness).status).toBe('ready');
+
+    // …and the shipped fixture label states a time WITHOUT seconds, and passes.
+    expect(screenPortalPayload(fixtureFreshness)).toEqual([]);
   });
 });
 

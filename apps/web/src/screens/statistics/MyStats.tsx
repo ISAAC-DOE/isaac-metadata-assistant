@@ -88,8 +88,17 @@ export function MyStats({ source, currentUser = disabledCurrentUserSource }: MyS
    * would not by itself make one dataset on this tab answerable — six of the
    * eight also need per-record attribution, which fails closed by design. Wiring
    * a real current-user source therefore changes nothing here, which is the
-   * intended and tested behaviour: `identity alone never selects a personal
-   * source` in `my-stats.test.tsx` asserts it for all five states.
+   * intended and tested behaviour, pinned at BOTH levels:
+   *
+   *   · `identity alone never selects a personal source` in
+   *     `current-user-contract.test.ts` sweeps the whole state union through the
+   *     PURE FUNCTION. (This comment used to cite `my-stats.test.tsx`, where that
+   *     test has never lived, and to imply the sweep covered the component. It
+   *     covers neither this file nor the `??` selection on the next line.)
+   *   · `a present current user changes nothing on this tab` in
+   *     `my-stats.test.tsx` renders THIS COMPONENT with a source reporting a
+   *     `present` user and asserts the same gate copy, so the wiring below is
+   *     covered where it is written rather than one layer down.
    *
    * `currentUser.get()` reads no header and issues no request — see
    * `lib/currentUserContract.ts`, which is a boundary, not an identity seam.
