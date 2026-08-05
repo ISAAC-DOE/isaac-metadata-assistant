@@ -1022,6 +1022,22 @@ describe('the chart palette declared on .statistics', () => {
    * keyframe step (`0% { … }`) becomes a rule with no chart class and is filtered
    * out, and a hoisted `@font-face` body carries no `{`, so `rulesOf` never sees
    * it as a rule at all.
+   *
+   * NATIVE CSS NESTING IS NOT HANDLED, and this is the one place a reader will be
+   * looking, so it is recorded here rather than left to be rediscovered. Flattening
+   * an at-rule wrapper is possible because the wrapper is recognisable by its `@`;
+   * a nested rule is not, and `rulesOf`'s `[^{}]+` selector pattern cannot express
+   * one. So `.statistics { & .stats-chart-bar { fill: #b0522c } }` yields
+   * `selector = ".statistics"`, the `.stats-chart-` filter discards it, and — worse
+   * than a miss — `scanned.length` stays put, so the count pin does not fire either.
+   * It fails SILENTLY, not closed.
+   *
+   * Left unhandled rather than solved because nesting has no precedent in this
+   * repo: every `&` in all 24 stylesheets under `apps/web/src` is inside a comment.
+   * Note the asymmetry that limits the damage — CONVERTING an existing rule to
+   * nesting IS caught, because `scanned` drops; only ADDING a nested rule is
+   * invisible. If nesting is ever adopted, reject it outright after flattening
+   * (`expect(css).not.toMatch(/\{[^{}]*\{/)`) rather than trying to parse it.
    */
   function withoutAtRuleWrappers(css: string): string {
     let out = '';
@@ -1076,7 +1092,7 @@ describe('the chart palette declared on .statistics', () => {
     ]);
   });
 
-  it('every chart colour declaration wears a token its OWN selector is allowed', async () => {
+  it('every chart colour declaration is literal-free, and every pure-colour one wears a token its OWN selector is allowed', async () => {
     const css = await statisticsCss();
 
     const seen: string[] = [];

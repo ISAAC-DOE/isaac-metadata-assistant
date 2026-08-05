@@ -626,6 +626,21 @@ const DENIAL_FRAME = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brat
  * alternatives, added in the same commit for this very sentence. The conclusion is
  * unaffected, since `triggers=false` settles it alone, but the figure is corrected
  * rather than repeated.
+ *
+ * WHAT THIS WIDENING DOES **NOT** CLOSE, said here because this is where a
+ * maintainer transcribing a sentence will be reading. The mirror is closed for a
+ * BARE COORDINATOR only. `REVIEWER_EVASIONS` below enumerates nine joiners that
+ * escaped when the denial came AFTER the claim; every one of them still escapes
+ * when the denial comes FIRST — measured unflagged: a colon, a parenthetical,
+ * `Because …`, `While/Although/Since/Whereas …`, no joiner at all, and
+ * `… therefore …`.
+ *
+ * That is tolerable for exactly one reason, and it is not this matcher's doing:
+ * LAYER 1 IS THE PERIMETER AND IT HOLDS. Any of those sentences rendered in the
+ * panel fails layer 1 immediately, because it is not in the allowlist. Reaching
+ * this matcher's holes requires transcribing the sentence into the allowlist in
+ * both copies — i.e. editing the test file, which is where a human reviewer reads
+ * the new claim. Do not read this note as a licence to trust the matcher alone.
  */
 function clausesOf(sentence: string): string[] {
   return sentence.split(/\s+(?:and|but|so|or|yet)\s+|,\s+|;\s+|\s*[—–]\s*/i);
