@@ -195,11 +195,16 @@ export const fixtureLeakyFreshness: PortalMetricsFreshness = Object.freeze({
  * (`2099-01-01T00:00:00Z`) does NOT trip — but not for the reason first given
  * here ("`T` and `Z` are not hex-legal"). `\b` is about WORD characters: `T` and
  * `Z` are both word characters sitting against `00`, so neither boundary exists.
- * Hex-legality is irrelevant on the leading side and works the OTHER way on the
- * trailing side — a hex-legal trailing character would be absorbed into the
- * closing group and the match would SUCCEED. The full measurement is in
- * `IPV6_PATTERN`'s note in `lib/portalMetricsContract.ts`. See
- * `fixtureIsoInstantFreshness`.
+ *
+ * The SECOND version of this note was also wrong, in the other direction: it said
+ * hex-legality "is irrelevant on the leading side and works the OTHER way on the
+ * trailing side". Absorption is symmetric — measured, `a00:00:00 ` matches while
+ * `x00:00:00 ` does not, so a hex-legal LEADING character is absorbed into the
+ * opening group exactly as a trailing one is absorbed into the closing group.
+ * What keeps the ISO form out on the leading side is the `{1,4}` length budget
+ * (`01T00` is five characters), not the side it is on. The full measurement,
+ * including the four-versus-five boundary cases, is in `IPV6_PATTERN`'s note in
+ * `lib/portalMetricsContract.ts`. See `fixtureIsoInstantFreshness`.
  */
 export const fixtureSecondsPrecisionFreshness: PortalMetricsFreshness = Object.freeze({
   observedAtLabel: '1 January 2099, 00:00:00 UTC',

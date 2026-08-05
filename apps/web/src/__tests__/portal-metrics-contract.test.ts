@@ -416,8 +416,16 @@ describe('a screened payload is refused WHOLE, not edited', () => {
      * broad detector can tell, so ` 00:00:00 ` in a label refuses the panel.
      *
      * ITS WIDTH WAS MEASURED, and it is narrower than it first appeared: the ISO
-     * form of the same instant passes, because `T` and `Z` are not hex-legal and
-     * destroy the word boundaries the pattern needs. Both halves are asserted, so
+     * form of the same instant passes. The MECHANISM stated here was wrong twice
+     * and is corrected at `IPV6_PATTERN` in `lib/portalMetricsContract.ts` — read
+     * that note, not this sentence, if you are changing the pattern. In brief:
+     * `T` and `Z` are WORD characters, so they destroy the `\b` boundaries the
+     * pattern needs (hex-legality is a different property, and absorption into
+     * the hex groups is symmetric on both sides); what keeps the ISO form out on
+     * the leading side is the `{1,4}` length budget, since `01T00` is five
+     * characters. This comment used to say `T` and `Z` "are not hex-legal and
+     * destroy the word boundaries", conflating the two — and it said so at the
+     * exact line the corrected note points readers to. Both halves are asserted, so
      * the blind spot is recorded at its real width rather than at a guessed one —
      * and so a future change to the pattern that widens the refusal to ISO
      * timestamps fails here.

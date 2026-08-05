@@ -17,7 +17,7 @@ observed runtime evidence; the vendored ISAAC v1.05 schema; tests.
 
 ## 1. What the application actually receives
 
-### 1.1 Identity headers in this repository: a permitted file set, now including four frontend files
+### 1.1 Identity headers in this repository: a permitted file set, now including five frontend files
 
 **The invariant is a PERMITTED SET, not zero.** This document names these headers, and so does
 `CLAUDE.md` §11 where it records the observation, so a tree-wide `0 matches` check would fire on the
@@ -49,7 +49,7 @@ apps/web/src/__tests__/current-user-contract.test.ts   # the guard over that tab
 apps/web/src/test/adapterFixtures.ts         # a test-only subject naming its origin header
 ```
 
-**Which of those were already there, and which this slice added.** Two of the four `apps/web/src`
+**Which of those were already there, and which this slice added.** Two of the five `apps/web/src`
 files predate the available-metrics/adapters slice: at `main` (`547276b`) the set was six files, and
 `apps/web/src/lib/myStatsContract.ts` and `apps/web/src/__tests__/my-stats.test.tsx` were already among
 them — pre-existing debt from the statistics-shell slice, and the invariant sentence was already false
@@ -57,7 +57,7 @@ when this slice began. The adapters slice added three: `lib/currentUserContract.
 `__tests__/current-user-contract.test.ts` and `test/adapterFixtures.ts`. The count is stated as a
 before/after file set rather than a total, for the reason recorded further down.
 
-**What those four frontend files do with the names — and it is the case this section exists to flag.**
+**What those five frontend files do with the names — and it is the case this section exists to flag.**
 `lib/currentUserContract.ts` is the first module in this repository whose *subject* is identity, which
 is exactly the shape §1.1 was written to catch, so it is stated explicitly rather than waved past:
 
@@ -73,8 +73,12 @@ is exactly the shape §1.1 was written to catch, so it is stated explicitly rath
   names untypeable as a subject source at compile time.
 - `test/adapterFixtures.ts` names `x-authentik-username` as one fixture subject's `observedFrom`. It is
   test-only, and `__tests__/adapter-fixture-isolation.test.ts` asserts no production module imports it.
-- The two `__tests__` files are the guards themselves: they scan those modules for a header read, a
-  transport, an API-client call, a cookie and browser storage, and they fail on any of them.
+- The two `__tests__` files are the guards themselves, but they guard DIFFERENT surfaces and only one
+  of them scans source. `my-stats.test.tsx` reads three modules as `?raw` and fails on a header read, a
+  transport, an API-client call, a cookie or browser storage. `current-user-contract.test.ts` reads no
+  source at all; its guard is a runtime one over `disabledCurrentUserSource.get()`. §1.4 states this
+  precisely — and an earlier revision of THIS bullet said both files scan, 54 lines above the
+  correction and first in reading order, which is the inversion §1.4's own wording exists to prevent.
 
 **So the invariant is now two claims, and only the second one is still absolute.** "Confined to
 documentation" is **spent** — it was false at `main` and this slice moved it further. "No application
@@ -131,10 +135,19 @@ Correction 4 is what a stale manual guard costs.
 surfaces, and the first version of this paragraph read as though both scanned source text.** Corrected:
 
 - **The source scan lives solely in `apps/web/src/__tests__/my-stats.test.tsx`** (trap 6,
-  `:1029-1104`). It imports `screens/statistics/MyStats.tsx`, `lib/myStatsContract.ts` and
-  `lib/currentUserContract.ts` as `?raw`, strips comments first, and fails on a header access, a
-  `fetch`, an API-client call, another transport, a cookie or browser storage. So *consumption
-  inside those three modules* is a tripwire, whether or not the code ever runs.
+  `:1024-1139`). It imports `screens/statistics/MyStats.tsx`, `lib/myStatsContract.ts` and
+  `lib/currentUserContract.ts` as `?raw` and fails on a header access, a `fetch`, an API-client call,
+  another transport, a cookie or browser storage. So *consumption inside those three modules* is a
+  tripwire, whether or not the code ever runs.
+
+  **Comment stripping applies to ONE of those scans, not all of them,** and an earlier revision of this
+  bullet said "strips comments first" as though it covered the list. Measured: the stripper is built at
+  `:1098` and only the cookie/browser-storage assertion (`:1109`) reads the stripped text; the header,
+  `fetch`, API-client and transport scans all run against the unstripped module, and the test says why
+  in line ("Neither module contains the substring `api.` in prose (checked), so this needs no comment
+  stripping"). The direction is conservative — an unstripped scan can only over-report — so this is a
+  description defect, not a hole. The stripper has its own two guards against returning `''` or
+  returning the text unchanged.
 - **`apps/web/src/__tests__/current-user-contract.test.ts` reads no source at all.**
   `grep -n "?raw" apps/web/src/__tests__/current-user-contract.test.ts` returns nothing. Its guard is
   a RUNTIME one over `disabledCurrentUserSource.get()`: an own `document.cookie` accessor spy — itself

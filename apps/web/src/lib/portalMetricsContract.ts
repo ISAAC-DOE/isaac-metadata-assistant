@@ -280,14 +280,30 @@ const IPV4_PATTERN = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
  * suffices:
  *
  *   · LEADING — `T` is a WORD character adjacent to `00`, so no `\b` exists
- *     before the time. Hex-legality plays no part here: make the trailing side
- *     clean and `2099-01-01T00:00:00 ` still matches nothing.
+ *     before the time: make the trailing side clean and `2099-01-01T00:00:00 `
+ *     still matches nothing.
  *   · TRAILING — `Z` is likewise a word character, so no `\b` exists after the
  *     final `00`: make the leading side clean and `2099-01-01 00:00:00Z` also
- *     matches nothing. Hex-legality DOES matter here, in the OPPOSITE direction
- *     — a hex-legal trailing character is ABSORBED into the closing
- *     `[0-9A-Fa-f]{1,4}` group and the match SUCCEEDS: ` 00:00:00A` matches
- *     `00:00:00A`, while ` 00:00:00Z` matches nothing.
+ *     matches nothing. A hex-legal trailing character is instead ABSORBED into
+ *     the closing `[0-9A-Fa-f]{1,4}` group and the match SUCCEEDS: ` 00:00:00A`
+ *     matches `00:00:00A`, while ` 00:00:00Z` matches nothing.
+ *
+ * THE ABSORPTION IS SYMMETRIC, and the second version of this comment claimed it
+ * was not — it said "hex-legality plays no part" on the leading side and worked
+ * "the OPPOSITE direction" only on the trailing one. Measured, both sides absorb:
+ * `a00:00:00 ` matches `a00:00:00`, and `x00:00:00 ` matches nothing. So the
+ * leading side has exactly the trailing side's behaviour, and the asserted
+ * asymmetry was not a property of the sides at all.
+ *
+ * What actually protects the ISO form on the leading side is the `{1,4}` LENGTH
+ * BUDGET, which no earlier version of this comment mentioned: `01T00` is five
+ * characters and cannot fit the opening group. Measured at the boundary —
+ * `2099-01-0a00:00:00 ` MATCHES (`0a00` fits in four), `2099-01-01a00:00:00 `
+ * does not (`01a00` does not), `f00:00:00 ` matches, `ffff0:00:00 ` does not.
+ * `T` being non-hex is a second, redundant reason for that one string; the
+ * budget is the reason that generalises. Widen the group and the leading side
+ * opens up — which is precisely what the earlier wording would have told a
+ * reviewer could not happen.
  *
  * (Written the other way round first, as though any seconds-precision timestamp
  * were refused; the ISO case was then measured and came back clean. Recorded

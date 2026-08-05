@@ -95,8 +95,11 @@ describe('the permanent disqualification (§6A.2)', () => {
      * to a three-member union and the runtime comparison never sees the type.
      *
      *   · NARROWING → the type-check fails at three sites: the annotation below
-     *     (TS2322), the exactness assertion below (TS2322), and the second
-     *     `@ts-expect-error` in the next test going unused (TS2578).
+     *     (TS2322), the exactness assertion below (TS2322), and whichever
+     *     `@ts-expect-error` in the next test covered the DROPPED header going
+     *     unused (TS2578) — the edge one at `:144` if you removed entitlements,
+     *     the entitlements one at `:161` if you removed edge. Three sites either
+     *     way; "the second" was the wrong way to name it.
      *   · ADDING OR REMOVING A DISQUALIFIED HEADER in `HEADER_OBSERVATION_6A` →
      *     the SET comparison below fails, together with the derivation test above.
      *     Measured both ways: `clientCanarySurvived: true` on `'x-authentik-uid'`,

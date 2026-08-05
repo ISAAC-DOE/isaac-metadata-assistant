@@ -176,8 +176,14 @@ export const DISQUALIFIED_IDENTITY_HEADERS: readonly IdentityCandidateHeader[] =
  * type at all.
  *
  *   · NARROWING fails the type-check at three sites — the annotated array literal
- *     (TS2322), the exactness assertion described below (TS2322), and the second
- *     `@ts-expect-error` in the next test going unused (TS2578). This is the
+ *     (TS2322), the exactness assertion described below (TS2322), and WHICHEVER
+ *     `@ts-expect-error` in the next test covers the header that was dropped,
+ *     going unused (TS2578). Three sites either way; which of the two directives
+ *     fires depends on which header you removed, and an earlier version of this
+ *     line said "the second" as though it were always that one. Measured:
+ *     narrowing to `'x-isaac-edge'` alone leaves the ENTITLEMENTS directive unused
+ *     (TS2578 at the second), and narrowing to `'x-authentik-entitlements'` alone
+ *     leaves the EDGE directive unused (TS2578 at the first). This is the
  *     direction that matters, and it is over-covered on purpose.
  *     It was caught ZERO times while the test held a hand-written inline union
  *     instead: narrowing this type to `'x-isaac-edge'` alone left the type-check
