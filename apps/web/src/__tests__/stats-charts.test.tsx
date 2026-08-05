@@ -517,6 +517,52 @@ function declaredHex(name: string, from: string): string {
   return found![1].toLowerCase();
 }
 
+/**
+ * The 148 CSS named colours. Listed because `border-color: red` is a likelier debug
+ * leftover than `border-color: #ff0000`, and a notation-only scan (`#hex` /
+ * `rgb()` / `hsl()`) reads a named colour as no colour at all.
+ *
+ * Word-boundary anchored below, so `red` does not match inside `darkred` — and
+ * `darkred` is on the list in its own right.
+ */
+const CSS_NAMED_COLOURS: readonly string[] =
+  ('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue ' +
+    'blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk ' +
+    'crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki ' +
+    'darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen ' +
+    'darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue ' +
+    'dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite ' +
+    'gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki ' +
+    'lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan ' +
+    'lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen ' +
+    'lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen ' +
+    'magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen ' +
+    'mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream ' +
+    'mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid ' +
+    'palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum ' +
+    'powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown ' +
+    'seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen ' +
+    'steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow ' +
+    'yellowgreen').split(' ');
+
+/**
+ * Any literal colour, in any notation, plus every CSS named colour.
+ *
+ * AT MODULE SCOPE because BOTH colour guards need it: the stylesheet scan below and
+ * the inline-style scan in `the components emit no inline colour`. Round 3 had two
+ * different colour patterns in this file — the stylesheet one listed properties by
+ * name, the inline one listed properties by name too, and each list was missing a
+ * different member. Sharing the VALUE pattern is what stops them diverging again.
+ *
+ * Applied to a VALUE, never to a whole declaration: `white-space: nowrap` contains
+ * `\bwhite\b` in its PROPERTY, and matching that would be a false positive.
+ */
+const LITERAL_COLOUR_ANYWHERE = new RegExp(
+  `#[0-9a-fA-F]{3,8}|\\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|device-cmyk)\\(` +
+    `|\\b(?:${CSS_NAMED_COLOURS.join('|')})\\b`,
+  'i',
+);
+
 describe('the chart palette declared on .statistics', () => {
   /**
    * The stylesheet with every `/* … *\/` comment removed.
@@ -730,12 +776,53 @@ describe('the chart palette declared on .statistics', () => {
    * categorical identity hue would be reintroduced. Negative control, measured at
    * 4b86f7e: three identity hues as literal hex on swatches 1–3 — 59 of 59 passed.
    *
-   * SO THE POLICY IS NOW PER SELECTOR. Every colour-bearing declaration under a
+   * ROUND 3 SCANNED TOO FEW PROPERTIES AGAIN — including the LONGHAND of the very
+   * property round 2 added. The pattern was
+   *
+   *     /(?:^|[;{\s])(fill|stroke|background|color)\s*:\s*([^;]+)/g
+   *
+   * `background` required a `:` immediately after it, and `color` required a
+   * `[;{\s]` immediately before it, so `background-color:` matched NEITHER
+   * alternative — and nor did `border-color`, `outline` or `box-shadow`. Negative
+   * control, measured at 134eac2 — four literal identity hues appended to
+   * `statistics.css`:
+   *
+   *     .stats-chart-swatch[data-slot='1'] { box-shadow: inset 0 0 0 99px #b0522c; }
+   *     .stats-chart-swatch[data-slot='2'] { background-color: #7a4fa3; }
+   *     .stats-chart-grid { border-color: #2f8f6b; outline: 1px solid #d94f4f; }
+   *
+   * 66 of 66 tests in this file passed, and 2774 of 2774 across the whole frontend
+   * suite. `box-shadow: inset 0 0 0 99px` repaints a legend swatch entirely, and
+   * `background-color` repaints swatch 2 outright.
+   *
+   * SO THE SCAN NOW FAILS CLOSED. It matches EVERY declaration and skips a closed
+   * list of properties known not to carry a colour ({@link NON_COLOUR_PROPERTIES}),
+   * rather than allow-listing the colour ones — because three rounds running, the
+   * hole was a property nobody had listed. Two tiers:
+   *
+   *   · {@link PURE_COLOUR_PROPERTIES} — the whole value is a colour, so the strict
+   *     rule applies: one plain `var()` or a listed keyword, and the selector's own
+   *     class must be allowed to wear that token.
+   *   · everything else that is scanned (today: `border`, `border-top`,
+   *     `border-bottom`, `outline`, `box-shadow` — shorthands whose value is mostly
+   *     geometry) — checked for a LITERAL colour only, since a token check would
+   *     have to parse a shorthand. The ramp-as-chrome direction is covered for
+   *     these by `a data-ink token is referenced ONLY by a class allowed to encode
+   *     a value` below, which reads every property.
+   *
+   * WHAT IS STILL NOT READ, stated rather than implied: the declarations of the 39
+   * properties listed in `NON_COLOUR_PROPERTIES`. That list is a documentation
+   * device more than a filter — MEASURED today, it withholds 160 declarations and
+   * NOT ONE of their values would trip the literal-colour scan, so deleting the
+   * list would change no result. It exists so that the claim "these cannot carry a
+   * colour" is written down and reviewable, and so that a genuine false positive
+   * (a `font-family` containing the word `tan`, say) has a named home instead of
+   * prompting somebody to narrow the scan again.
+   *
+   * SO THE POLICY IS PER SELECTOR. Every colour-bearing declaration under a
    * `.stats-chart-*` rule is looked up by its own class, and each class names the
    * exact value set it may carry. The table is closed: a class that declares a
    * colour and is not in it fails, so a new chart class cannot ship unclassified.
-   * `a data-ink token is referenced only by a mark class` below closes the other
-   * direction over EVERY property, including the ones this scan does not read.
    */
 
   /** Data ink: the only colours that may encode a value. */
@@ -752,6 +839,99 @@ describe('the chart palette declared on .statistics', () => {
   ];
   /** Non-colour keywords a declaration may legally carry. */
   const KEYWORDS: readonly string[] = ['transparent', 'none', 'currentColor'];
+
+  /**
+   * Properties whose ENTIRE value is a colour, so the strict rule can apply to it
+   * without parsing a shorthand. Longhands are spelled out: `background-color` is
+   * here because its absence is exactly what round 3 shipped.
+   */
+  const PURE_COLOUR_PROPERTIES: readonly string[] = [
+    'accent-color',
+    'background',
+    'background-color',
+    'border-bottom-color',
+    'border-color',
+    'border-left-color',
+    'border-right-color',
+    'border-top-color',
+    'caret-color',
+    'color',
+    'column-rule-color',
+    'fill',
+    'flood-color',
+    'lighting-color',
+    'outline-color',
+    'stop-color',
+    'stroke',
+    'text-decoration-color',
+  ];
+
+  /**
+   * Properties this surface declares that cannot carry a colour. CLOSED, and the
+   * direction is the point: a property in NEITHER this list nor
+   * `PURE_COLOUR_PROPERTIES` is still scanned for a literal colour, so the next
+   * property nobody thought of is covered by default rather than skipped.
+   *
+   * Every entry is a property `statistics.css` actually declares under a chart
+   * rule — measured, 39 of them — so the list documents a real decision instead of
+   * pre-authorising a guess.
+   */
+  const NON_COLOUR_PROPERTIES: readonly string[] = [
+    'align-items',
+    'border-collapse',
+    'border-radius',
+    'display',
+    'flex',
+    'flex-direction',
+    'flex-wrap',
+    'font-size',
+    'font-variant-numeric',
+    'font-weight',
+    'gap',
+    'grid-column',
+    'grid-template-columns',
+    'height',
+    'left',
+    'line-height',
+    'list-style',
+    'margin',
+    'margin-top',
+    'max-width',
+    'min-width',
+    'outline-offset',
+    'overflow',
+    'overflow-wrap',
+    'padding',
+    'padding-bottom',
+    'pointer-events',
+    'position',
+    'stroke-linecap',
+    'stroke-linejoin',
+    'stroke-width',
+    'text-align',
+    'text-overflow',
+    'top',
+    'transform',
+    'vertical-align',
+    'white-space',
+    'width',
+    'z-index',
+  ];
+
+  /** Any literal colour, in any notation, plus every CSS named colour. */
+  const LITERAL_COLOUR = LITERAL_COLOUR_ANYWHERE;
+
+  /**
+   * The ONE literal colour this surface declares, enumerated so it cannot widen.
+   *
+   * A neutral drop shadow on the tooltip — no design token exists for a shadow
+   * colour, and it encodes nothing. Keyed by normalised selector, property AND
+   * exact value, so changing the colour fails and adding a second entry lands in
+   * the diff next to whatever it excuses.
+   */
+  const LITERAL_COLOUR_EXCEPTIONS: readonly string[] = [
+    '.statistics .stats-chart-tooltip box-shadow 0 2px 8px rgb(17 26 36 / 12%)',
+  ];
 
   /**
    * What each `.stats-chart-*` class may paint with. Closed: an unlisted class that
@@ -780,7 +960,10 @@ describe('the chart palette declared on .statistics', () => {
     'stats-chart-hit': ['transparent'],
     'stats-chart-tooltip': ['--surface'],
     'stats-chart-state-block': ['--surface-subtle'],
-    'stats-chart-state-pending': ['--cover-bg'],
+    // `--cover-border` became visible only when the scan started reading
+    // `border-color`; it is the pending block's own hairline, declared beside the
+    // cover background it belongs to.
+    'stats-chart-state-pending': ['--cover-bg', '--cover-border'],
     // ── text · the contrast test above computes the RATIOS these have to clear;
     //    this only keeps them out of the data set and the data set out of them.
     'stats-chart-caption': TEXT_INK,
@@ -817,9 +1000,64 @@ describe('the chart palette declared on .statistics', () => {
     return classes.length === 0 ? null : classes[classes.length - 1];
   }
 
-  /** Every `selector { … }` rule of the comment-stripped stylesheet. */
+  /**
+   * The stylesheet with every at-rule WRAPPER removed and its body hoisted to the
+   * top level, recursively.
+   *
+   * ROUND 3 DEFECT, MEASURED. `rulesOf`'s `\{([^}]*)\}` cannot cross a `}`, so on
+   * `@media (…) { .stats-chart-x { … } }` the first match came back with
+   * `selector = "@media (…)"` and the nested rule sitting INSIDE `declarations` —
+   * and the `/\.stats-chart-/` selector filter then discarded the whole thing.
+   * Measured at 134eac2: a literal hue in the FIRST rule inside an `@media` block
+   * passed 66 of 66 tests in this file; the SAME rule placed SECOND was caught,
+   * because by then the scan had resynchronised on the inner braces.
+   * `statistics.css` has four `@media` blocks and none of them contains a chart
+   * rule, so the exposure was latent rather than live.
+   *
+   * Excluding `@` from the selector pattern does NOT fix it: the engine simply
+   * starts the match one character later and reports `selector = "media (…)"`,
+   * with the nested rule still buried in the declarations. The wrapper has to go.
+   *
+   * `@keyframes` and `@font-face` bodies are hoisted too. That is harmless: a
+   * keyframe step (`0% { … }`) becomes a rule with no chart class and is filtered
+   * out, and a hoisted `@font-face` body carries no `{`, so `rulesOf` never sees
+   * it as a rule at all.
+   */
+  function withoutAtRuleWrappers(css: string): string {
+    let out = '';
+    let index = 0;
+    while (index < css.length) {
+      const at = css.indexOf('@', index);
+      if (at === -1) {
+        out += css.slice(index);
+        break;
+      }
+      out += css.slice(index, at);
+      const brace = css.indexOf('{', at);
+      const semicolon = css.indexOf(';', at);
+      // A statement at-rule (`@import …;`, `@charset …;`) has no block to hoist.
+      if (brace === -1 || (semicolon !== -1 && semicolon < brace)) {
+        index = semicolon === -1 ? css.length : semicolon + 1;
+        continue;
+      }
+      let depth = 1;
+      let end = brace + 1;
+      while (end < css.length && depth > 0) {
+        if (css[end] === '{') depth += 1;
+        else if (css[end] === '}') depth -= 1;
+        end += 1;
+      }
+      // Separated by spaces so a hoisted body cannot weld onto its neighbour, and
+      // recursive so an at-rule nested inside an at-rule also goes.
+      out += ` ${withoutAtRuleWrappers(css.slice(brace + 1, end - 1))} `;
+      index = end;
+    }
+    return out;
+  }
+
+  /** Every `selector { … }` rule of the comment-stripped, at-rule-flattened sheet. */
   function rulesOf(css: string): { selector: string; declarations: string }[] {
-    return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({
+    return [...withoutAtRuleWrappers(css).matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({
       selector: m[1],
       declarations: m[2],
     }));
@@ -842,17 +1080,34 @@ describe('the chart palette declared on .statistics', () => {
     const css = await statisticsCss();
 
     const seen: string[] = [];
+    const scanned: string[] = [];
     for (const { selector, declarations } of rulesOf(css)) {
       if (!/\.stats-chart-/.test(selector)) continue;
+      const where = selector.replace(/\s+/g, ' ').trim();
+      // EVERY declaration, not a list of colour properties — see the round-3 note
+      // above. `[a-z-]+` also catches a custom property, which is correct: a
+      // `--ident: #b0522c` under a chart rule is the round-1 regression by hand.
       for (const [, property, rawValue] of declarations.matchAll(
-        /(?:^|[;{\s])(fill|stroke|background|color)\s*:\s*([^;]+)/g,
+        /(?:^|[;{\s])([a-z-]+)\s*:\s*([^;]+)/g,
       )) {
         const value = rawValue.trim();
+        if (NON_COLOUR_PROPERTIES.includes(property)) continue;
+        scanned.push(`${where} ${property} ${value}`);
 
-        // 1 · no literal colour of any notation, in any of the four properties.
-        expect(value, `${property} must not carry a literal colour: "${value}"`).not.toMatch(
-          /#[0-9a-fA-F]{3,8}|\brgba?\(|\bhsla?\(|\bcolor-mix\(|\boklch\(|\blab\(/,
-        );
+        // 1 · no literal colour, in ANY notation, in ANY scanned property —
+        //     including the shorthands (`border`, `outline`, `box-shadow`) the
+        //     strict tier below cannot parse. This is the tier that catches the
+        //     four hues round 3 shipped past.
+        if (!LITERAL_COLOUR_EXCEPTIONS.includes(`${where} ${property} ${value}`)) {
+          expect(
+            value,
+            `${where} { ${property}: ${value} } carries a literal colour. A colour this ` +
+              `stylesheet does not name as a token is a colour no policy governs — put it in a ` +
+              `token, or enumerate it in LITERAL_COLOUR_EXCEPTIONS with a reason.`,
+          ).not.toMatch(LITERAL_COLOUR);
+        }
+
+        if (!PURE_COLOUR_PROPERTIES.includes(property)) continue;
 
         // 2 · one plain `var()` or a listed keyword — no fallback colour hiding in
         //     a second argument, no space-separated list.
@@ -887,13 +1142,21 @@ describe('the chart palette declared on .statistics', () => {
     }
 
     /*
-     * Vacuity guard. MEASURED today: 50 checked (selector-part, property) pairs
-     * over 47 declarations. The three extra are the comma-grouped rules, each
-     * checked once per class in the group — `.stats-chart-bar`/`.stats-chart-marker`
-     * and the two `.stats-chart-inlabel` slot pairs. Round 2's `fill|stroke` scan
-     * saw 11 of those 47.
+     * Vacuity guards, both MEASURED today.
+     *
+     * · 51 checked (selector-part, property) pairs in the strict tier, over 48
+     *   pure-colour declarations. The three extra are the comma-grouped rules,
+     *   each checked once per class in the group —
+     *   `.stats-chart-bar`/`.stats-chart-marker` and the two
+     *   `.stats-chart-inlabel` slot pairs. Round 2's `fill|stroke` scan saw 11 of
+     *   those 48; round 3's `fill|stroke|background|color` saw 47.
+     * · 54 declarations reach the literal-colour tier — the 48 above plus the six
+     *   shorthands (`border` ×2, `border-top`, `border-bottom`, `outline`,
+     *   `box-shadow`), which round 3 read not at all.
      */
-    expect(seen.length, 'the colour scan found almost nothing — it is broken').toBe(50);
+    expect(seen.length, 'the colour scan found almost nothing — it is broken').toBe(51);
+    expect(scanned.length, 'the literal-colour tier read almost nothing — it is broken').toBe(54);
+    expect(LITERAL_COLOUR_EXCEPTIONS, 'the exception list has grown').toHaveLength(1);
     expect(seen, 'the ramp fills must be covered').toContain(
       'stats-chart-segment fill var(--stats-ramp-3)',
     );
@@ -901,13 +1164,65 @@ describe('the chart palette declared on .statistics', () => {
       'stats-chart-swatch background var(--stats-ramp-3)',
     );
     expect(seen, 'and chart text colour').toContain('stats-chart-tick color var(--text-muted)');
+    expect(
+      seen,
+      'and border-color, which round 3 matched as neither `background` nor `color`',
+    ).toContain('stats-chart-state-pending border-color var(--cover-border)');
+    expect(
+      scanned,
+      'and the shorthands the strict tier cannot parse must still be read for a literal',
+    ).toContain('.statistics .stats-chart-tooltip border 1px solid var(--border-strong)');
   });
 
   /*
-   * THE OTHER DIRECTION, over EVERY property rather than the four above. A data
-   * colour must appear only where a value is encoded — so `--stats-ramp-3` in a
-   * `border`, a `box-shadow`, an `outline` or a property nobody has thought of yet
-   * is caught here even though the scan above does not read those properties.
+   * THE SCAN'S OWN COVERAGE, PINNED. Round 3's hole was invisible because nothing
+   * asserted WHICH properties were read — the vacuity guard counted declarations,
+   * and a narrower pattern simply counted fewer of them and was re-pinned. So the
+   * property set is asserted directly, and the four names round 3 missed are named.
+   */
+  it('reads every colour-capable property this stylesheet declares', async () => {
+    const css = await statisticsCss();
+    const properties = new Set<string>();
+    for (const { selector, declarations } of rulesOf(css)) {
+      if (!/\.stats-chart-/.test(selector)) continue;
+      for (const [, property] of declarations.matchAll(/(?:^|[;{\s])([a-z-]+)\s*:\s*([^;]+)/g)) {
+        if (!NON_COLOUR_PROPERTIES.includes(property)) properties.add(property);
+      }
+    }
+    expect(
+      [...properties].sort(),
+      'the set of colour-capable properties under a chart rule changed. If a new one is ' +
+        'intended, add it here — and to PURE_COLOUR_PROPERTIES if its whole value is a colour — ' +
+        'in the same commit. If it cannot carry a colour, list it in NON_COLOUR_PROPERTIES.',
+    ).toEqual([
+      'background',
+      'border',
+      'border-bottom',
+      'border-color',
+      'border-top',
+      'box-shadow',
+      'color',
+      'fill',
+      'outline',
+      'stroke',
+    ]);
+    // The four round 3 could not see, called out by name so a future narrowing of
+    // the pattern fails here rather than silently lowering a count.
+    for (const property of ['background-color', 'border-color', 'outline', 'box-shadow']) {
+      expect(
+        NON_COLOUR_PROPERTIES,
+        `${property} must never be treated as unable to carry a colour`,
+      ).not.toContain(property);
+    }
+  });
+
+  /*
+   * THE OTHER DIRECTION, over EVERY property with no skip list at all — including
+   * the ones `NON_COLOUR_PROPERTIES` withholds from the scan above. A data colour
+   * must appear only where a value is encoded, so `--stats-ramp-3` in a `border`, a
+   * `box-shadow`, an `outline`, a `border-radius` or a property nobody has thought
+   * of yet is caught here. This is the tier that covers the token direction for the
+   * shorthands, which the strict tier above deliberately does not parse.
    */
   it('a data-ink token is referenced ONLY by a class allowed to encode a value', async () => {
     const css = await statisticsCss();
@@ -954,29 +1269,106 @@ describe('the chart palette declared on .statistics', () => {
  * So it is GUARDED rather than recorded as a residual. Every form is rendered and
  * the presentation attributes actually present are pinned: `fill="none"` on the
  * line chart's path (a geometry keyword, not a colour) and nothing else, plus no
- * inline `style` carrying a colour property. jsdom applies no stylesheet, which is
- * exactly right here — what is being checked is what the COMPONENT emits.
+ * inline `style` carrying a colour. jsdom applies no stylesheet, which is exactly
+ * right here — what is being checked is what the COMPONENT emits.
+ *
+ * ROUND 3'S INLINE GUARD MISSED BOTH IDIOMATIC REACT ROUTES, by making the same
+ * mistake as the stylesheet scan: it matched PROPERTY NAMES.
+ *
+ *     /(?:^|[;\s])(?:fill|stroke|background|color|border-color|box-shadow)\s*:/i
+ *
+ * It spelled out hyphenated `border-color` and not `background-color`, and it knew
+ * nothing about custom properties. Negative control, measured at 134eac2 — one line
+ * on `ChartLegend`'s swatch:
+ *
+ *     style={{ backgroundColor: '#b0522c', ['--stats-ramp-1' as never]: '#7a4fa3' }}
+ *
+ * which React serialises as `background-color: rgb(176, 82, 44); --stats-ramp-1:
+ * #7a4fa3;` — 67 of 67 tests in this file passed. Non-vacuous: `StatsStackedBar` is
+ * in `ALL_FORMS` and renders `ChartLegend`, so the guard did visit that element.
+ *
+ * The second half is the worse one. An inline custom property REDEFINES
+ * `--stats-ramp-1` for that subtree, so every mark reading slot 1 changes colour
+ * with no declaration any stylesheet scan can see.
+ *
+ * SO THE GUARD READS VALUES, NOT PROPERTY NAMES — the same `LITERAL_COLOUR_ANYWHERE`
+ * the stylesheet scan uses — and rejects an inline custom property outright. No
+ * component has a reason to set one: measured, the nine inline styles these forms
+ * emit are `left`, `top` and `height`, all geometry.
  */
 describe('the components emit no inline colour', () => {
-  const COLOUR_PROPERTIES = /(?:^|[;\s])(?:fill|stroke|background|color|border-color|box-shadow)\s*:/i;
+  /**
+   * Everything wrong with one element's inline style: a literal colour in a VALUE,
+   * a chart token named inline, or a custom property redefined for the subtree.
+   *
+   * Per DECLARATION, and the value is taken from after the first `:` — the whole
+   * attribute string cannot be matched against a colour pattern, because
+   * `white-space: nowrap` carries `\bwhite\b` in its property name.
+   */
+  function inlineStyleFaults(element: Element): string[] {
+    const style = element.getAttribute('style');
+    if (style === null) return [];
+    const faults: string[] = [];
+    for (const declaration of style.split(';')) {
+      const colon = declaration.indexOf(':');
+      if (colon === -1) continue;
+      const property = declaration.slice(0, colon).trim();
+      const value = declaration.slice(colon + 1).trim();
+      const where = `<${element.tagName.toLowerCase()}> style ${property}: ${value}`;
+      if (property.startsWith('--')) {
+        faults.push(`${where} — an inline custom property REDEFINES a token for this subtree`);
+      }
+      if (LITERAL_COLOUR_ANYWHERE.test(value)) {
+        faults.push(`${where} — a literal colour no stylesheet scan can govern`);
+      }
+      if (/var\(\s*--stats-/i.test(value)) {
+        faults.push(`${where} — a chart token applied inline, outside the per-selector policy`);
+      }
+    }
+    return faults;
+  }
+
+  /**
+   * How many elements of each form carry an inline `style`, MEASURED. The point of
+   * pinning it is that the scan below is only meaningful where it entered the
+   * branch, and one form never does — see the comment on the assertion.
+   */
+  const INLINE_STYLE_COUNTS: Readonly<Record<string, number>> = {
+    'Records by workflow step': 6,
+    'Operations by method': 8,
+    'Share of fields by class': 4,
+    'Exports per week': 7,
+    'Operations by group': 0,
+  };
 
   it.each(ALL_FORMS)('%s emits no colour attribute and no colour in style', (_name, caption, mount) => {
     mount();
     const fig = figure(caption);
 
     const attributes: string[] = [];
+    const faults: string[] = [];
+    let inlineStyles = 0;
     for (const element of [fig, ...fig.querySelectorAll('*')]) {
       for (const attribute of ['fill', 'stroke', 'color', 'stop-color', 'flood-color']) {
         const value = element.getAttribute(attribute);
         if (value !== null) attributes.push(`${attribute}="${value}"`);
       }
-      const style = element.getAttribute('style');
-      if (style !== null) {
-        expect(style, `${element.tagName.toLowerCase()} carries a colour in its inline style`).not.toMatch(
-          COLOUR_PROPERTIES,
-        );
-      }
+      if (element.getAttribute('style') !== null) inlineStyles += 1;
+      faults.push(...inlineStyleFaults(element));
     }
+    expect(faults).toEqual([]);
+    /*
+     * …and how many inline styles the branch actually saw, PINNED PER FORM rather
+     * than asserted to be non-zero — because measured, `StatsComparisonRows` emits
+     * NONE, so "every form emits at least one" would have been a false claim
+     * written to make a vacuity guard pass. The four charts that place marks by
+     * geometry emit `left` / `top` / `height`; the comparison rows are laid out
+     * entirely in CSS.
+     */
+    expect(inlineStyles, `${caption}: the inline-style count changed`).toBe(
+      INLINE_STYLE_COUNTS[caption],
+    );
+
     // `fill="none"` is a geometry keyword on the line chart's path — a stroked
     // polyline must not be filled — and is the ONLY presentation attribute any
     // form emits. Any other value is a colour the stylesheet cannot govern.
@@ -984,6 +1376,68 @@ describe('the components emit no inline colour', () => {
       caption === 'Exports per week' ? ['fill="none"'] : [],
     );
   });
+
+  /*
+   * THE GUARD BITES, on the reviewer's exact control. Round 3's version passed this
+   * line, so the line is kept as a fixture rather than described in a comment.
+   */
+  it('reports the reviewer control: an inline background-color AND a redefined ramp token', () => {
+    render(
+      <StatsStackedBar
+        caption="Share of fields by class"
+        rows={EVIDENCE}
+        total={40}
+        unit="fields"
+        categoryHeader="Class"
+      />,
+    );
+    const swatch = figure('Share of fields by class').querySelector(
+      '.stats-chart-swatch',
+    ) as HTMLElement;
+    expect(swatch, 'the legend swatch must exist for the control to be planted on').not.toBeNull();
+    swatch.setAttribute('style', 'background-color: rgb(176, 82, 44); --stats-ramp-1: #7a4fa3;');
+
+    expect(inlineStyleFaults(swatch)).toEqual([
+      '<span> style background-color: rgb(176, 82, 44) — a literal colour no stylesheet scan can govern',
+      '<span> style --stats-ramp-1: #7a4fa3 — an inline custom property REDEFINES a token for this subtree',
+      '<span> style --stats-ramp-1: #7a4fa3 — a literal colour no stylesheet scan can govern',
+    ]);
+  });
+
+  /* …and each of the three fault kinds on its own, so none of them is carried by
+   * the others in the combined control above. */
+  it.each([
+    ['a named colour, which a #hex-shaped scan misses', 'border-color: rebeccapurple'],
+    ['a chart token applied inline', 'fill: var(--stats-ramp-2)'],
+    ['a custom property with no colour in it at all', '--stats-series: var(--border)'],
+    ['a longhand round 3 could not see', 'background-color: #b0522c'],
+  ])('reports %s', (_why, declaration) => {
+    render(
+      <StatsStackedBar
+        caption="Share of fields by class"
+        rows={EVIDENCE}
+        total={40}
+        unit="fields"
+        categoryHeader="Class"
+      />,
+    );
+    const swatch = figure('Share of fields by class').querySelector(
+      '.stats-chart-swatch',
+    ) as HTMLElement;
+    swatch.setAttribute('style', declaration);
+    expect(inlineStyleFaults(swatch).length, declaration).toBeGreaterThan(0);
+  });
+
+  /* …and the geometry these forms really do emit is NOT reported, so the guard is
+   * not simply flagging every inline style. */
+  it.each(['left: 42px', 'top: 50%', 'height: 300px', 'white-space: nowrap'])(
+    'leaves the geometry alone: %s',
+    (declaration) => {
+      const span = document.createElement('span');
+      span.setAttribute('style', declaration);
+      expect(inlineStyleFaults(span)).toEqual([]);
+    },
+  );
 });
 
 describe('labels are selective, and never clipped', () => {

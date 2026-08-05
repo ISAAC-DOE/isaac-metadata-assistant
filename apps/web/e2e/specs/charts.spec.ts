@@ -41,13 +41,17 @@ const STATISTICS_MINE = SURFACES.find((s) => s.id === 'statistics-mine')!;
  * SENTENCES compared as an exact set, with the emptiness matcher demoted to a
  * second layer over that allowlist's own entries. The reasoning is inside the
  * block; the short version is that three generations of pattern-shaped guard were
- * each defeated by punctuation, the third by deleting one comma.
+ * each defeated by punctuation, the third by deleting one comma — and a FOURTH
+ * review then defeated the third's own clause splitter from the other side, by
+ * putting the denial FIRST and deleting the comma. The splitter is widened for that
+ * (see `clausesOf`), which is safe here and would not be safe in a perimeter: its
+ * whole input is 43 enumerated sentences.
  *
  * `src/__tests__/my-stats.test.tsx` is the AUTHORITY: it carries the
- * two-directional polarity table, the clause-scope and denial-position pairs, the
- * retired-literal parity assertion, the fourteen measured evasions, and the record
- * of all three generations. This is a byte-identical copy, and the lockstep is a
- * TEST there ("the two copies are byte-identical") rather than the
+ * two-directional polarity table, the clause-scope and denial-position pairs in
+ * both orders, the retired-literal parity assertion, the fourteen measured
+ * evasions, and the record of all four rounds. This is a byte-identical copy, and
+ * the lockstep is a TEST there ("the two copies are byte-identical") rather than the
  * request-in-a-comment it used to be — the older version of this block said "Keep
  * them in lockstep", and a comment cannot fail.
  *
@@ -97,8 +101,12 @@ const STATISTICS_MINE = SURFACES.find((s) => s.id === 'statistics-mine')!;
  * HOW A LEGITIMATE COPY CHANGE PROCEEDS. Edit the copy; the set test fails and
  * prints the difference; transcribe the new sentence into the list below IN THE
  * SAME COMMIT. That transcription is the moment honesty is judged — by layer 2,
- * which is applied to these entries, and by whoever reads the diff. There is no
- * way to change what this tab says without the new sentence appearing here.
+ * which is applied to these entries, and by whoever reads the diff.
+ *
+ * NO NEW SENTENCE can reach this tab without appearing here. That is the exact
+ * claim, and it is narrower than the one this comment used to make ("there is no
+ * way to change what this tab says without the new sentence appearing here"),
+ * which was FALSE — see limitation 2 below, measured.
  *
  * WHAT IS COMPARED. Every text NODE of the subtree, plus every accessible-name
  * attribute on it (see {@link ACCESSIBLE_NAME_ATTRS}) — an `aria-label` is copy a
@@ -106,24 +114,126 @@ const STATISTICS_MINE = SURFACES.find((s) => s.id === 'statistics-mine')!;
  * unit is whitespace-normalised and split into sentences, and the UNIQUE set is
  * compared, sorted, in full.
  *
- * UNIQUE, NOT A MULTISET, and that is a deliberate weakening of one edge: five
- * planned views share the gate label `Needs records linked to an account.`, and
- * three share `Will render as a line chart.`, so a multiset would pin how many
- * views happen to sit behind each precondition and would fail on a re-labelling
- * that says nothing new. Repeating a sentence that is already approved states no
- * new claim; saying anything else does, and that is what is caught.
+ * ══ WHAT LAYER 1 DOES NOT CATCH ═════════════════════════════════════════════
+ *
+ * These live HERE, next to the guard, and not only in a commit message — a
+ * limitation recorded where nobody reads it is a limitation nobody knows about.
+ * Each one is measured.
+ *
+ * 1 · SCOPE. `#statistics-tabpanel-mine` and the `.placeholder > p` page lead,
+ *     and nothing else. Copy elsewhere on the page is somebody else's guard.
+ *
+ * 2 · UNORDERED AND UNPAIRED. A SET is compared, so the guard is blind to which
+ *     title a description sits under and to where an approved sentence appears.
+ *     MEASURED: swapping the `description` strings of `readiness_trend` and
+ *     `exports_over_time` in `lib/myStatsContract.ts` passed the ENTIRE frontend
+ *     suite — 2799 of 2799 at the time of measurement, which was every test in the
+ *     repository except the pairing pin, since that pin did not exist yet — and the
+ *     tab then described each view as the other. Not a false personal zero, so not
+ *     the class this file exists to stop, but not nothing either, which is why
+ *     `MY_STATS_VIEWS` title→description pairing is pinned separately in
+ *     `the planned views` describe-block below.
+ *
+ * 3 · UNIQUE, NOT A MULTISET, and that one is deliberate: five planned views
+ *     share the gate label `Needs records linked to an account.`, and three share
+ *     `Will render as a line chart.`, so a multiset would pin how many views
+ *     happen to sit behind each precondition and would fail on a re-labelling
+ *     that says nothing new. Repeating a sentence that is already approved states
+ *     no new claim; saying anything else does, and that is what is caught.
+ *
+ * 4 · NAME INDIRECTION IS NOT FOLLOWED BY THE EXTRACTOR. `aria-labelledby` /
+ *     `aria-describedby` point at copy by ID, so the name a reader hears need not
+ *     be inside the subtree at all. MEASURED at 134eac2: a `<span id="evil">You
+ *     have no records.</span>` in `.placeholder` plus `aria-labelledby="evil"` on
+ *     the panel `<h2>` changed NEITHER set — a screen-reader user hears the false
+ *     claim where a sighted user reads "Personal Statistics".
+ *
+ *     It is now closed by a SEPARATE rule rather than by the extractor: every
+ *     IDREF on a panel descendant must resolve, and must resolve INSIDE the panel,
+ *     so the copy it names is already in the compared set — see `every name
+ *     reference inside the panel resolves inside the panel` below. Forbidding the
+ *     attributes outright would have been simpler and is not available: measured,
+ *     `StatsSection` renders `<section aria-labelledby={id}>` and the panel
+ *     contains two of them, each pointing at its own heading. The panel ROOT is
+ *     excluded by name — its `aria-labelledby` is the required tabpanel↔tab wiring
+ *     and points out of scope on purpose.
+ *
+ * 5 · LAYER 2's THIRD-PERSON SUBJECT LIST is itself a vocabulary allowlist of
+ *     exactly the kind that keeps losing — `whoever is signed in has no records`
+ *     passes it. Stated at {@link READER_IN_THIRD_PERSON}; acceptable only
+ *     because layer 1 rejects the sentence on the way in.
+ *
+ * The browser copy of the EXTRACTOR is no longer a re-implementation, and the
+ * reason previously given for that ("the production build must not import
+ * Playwright types") was not the obstacle: {@link copyUnitsFrom} takes
+ * `(root, attrs)`, closes over nothing, needs no Playwright type, and is passed
+ * BY VALUE to `locator.evaluate`. It now lives in this shared block, so the
+ * lockstep test covers it.
  */
 
-/** Attributes that put copy into the accessible name, and so into the claim set. */
+/**
+ * Attributes that put copy into the accessible name or description, and so into
+ * the claim set.
+ *
+ * `placeholder`, `label` and `abbr` are the NATIVE spellings beside their ARIA
+ * counterparts: round 3 listed `aria-placeholder` and not `placeholder`, which is
+ * the one an author actually writes. `label` covers `<option>` / `<optgroup>` and
+ * `abbr` covers `<th>`. None of them appears on this panel today — they are here
+ * because the cost of listing an attribute is nil and the cost of missing one is
+ * a claim read out to somebody.
+ *
+ * NOT here, and deliberately: `aria-labelledby` and `aria-describedby`. Those name
+ * copy BY REFERENCE, so adding them to this list would read an ID, not a sentence.
+ * They are forbidden on panel descendants instead — see limitation 4 above.
+ */
 const ACCESSIBLE_NAME_ATTRS: readonly string[] = [
   'aria-label',
   'aria-description',
   'aria-roledescription',
   'aria-valuetext',
   'aria-placeholder',
+  'placeholder',
   'title',
   'alt',
+  'label',
+  'abbr',
 ];
+
+/** Attributes that name copy BY REFERENCE, which no text scan can follow. */
+const NAME_INDIRECTION_ATTRS: readonly string[] = ['aria-labelledby', 'aria-describedby'];
+
+/**
+ * Every text node of `root` AND every accessible-name attribute on it, as a list of
+ * raw copy units — one entry per authored string, not one joined blob.
+ *
+ * Per UNIT, deliberately. Joining a subtree with spaces is right for a substring
+ * scan and wrong for a sentence set: it welds a heading with no full stop onto the
+ * paragraph after it ("Personal Statistics What this tab will show…") and invents a
+ * sentence nobody wrote. A text node is the smallest thing an author edits, so it
+ * is the unit.
+ *
+ * The attributes come last and are prefixed with nothing: an `aria-label` is copy,
+ * and it belongs in the same set as visible text. `aria-hidden` subtrees are NOT
+ * skipped — a decorative icon carries no text, and anything that does carry text is
+ * visible to somebody.
+ *
+ * SHARED BY BOTH SUITES, which is why it takes `attrs` as a parameter and closes
+ * over nothing at all: the browser copy hands it to `locator.evaluate`, which
+ * serialises the function and runs it in the page. It uses only DOM globals that
+ * exist in jsdom and in Chromium.
+ */
+function copyUnitsFrom(root: Element, attrs: readonly string[]): string[] {
+  const units: string[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) units.push(walker.currentNode.textContent ?? '');
+  for (const element of [root, ...Array.from(root.querySelectorAll('*'))]) {
+    for (const attribute of attrs) {
+      const value = element.getAttribute(attribute);
+      if (value !== null) units.push(value);
+    }
+  }
+  return units;
+}
 
 /**
  * EVERY SENTENCE THE MY STATS PANEL MAY RENDER. Nothing else may appear in
@@ -205,14 +315,25 @@ function sentenceSet(units: readonly string[]): string[] {
 
 /* ══ LAYER 2 · THE EMPTINESS MATCHER ════════════════════════════════════════
  *
- * ITS JOB IS SMALLER NOW, AND IT IS A JOB IT CAN DO. It no longer has to police
- * free prose written by anyone; it is applied to the entries of the two lists
- * above, so it has to catch a bad ADDITION — a false sentence somebody
- * transcribed into an allowlist while adding it to the panel. That is a review
- * aid with a review attached, not a perimeter.
+ * ITS JOB IS SMALLER NOW, AND IT STILL HAS HOLES — round 3 wrote "AND IT IS A JOB
+ * IT CAN DO" here and a fourth reviewer defeated it four ways in the same commit,
+ * so the claim is withdrawn rather than restated. What is true is narrower: it no
+ * longer has to police free prose written by anyone. It is applied to the 43
+ * enumerated entries of the two lists above, so it has to catch a bad ADDITION —
+ * a false sentence somebody transcribed into an allowlist while adding it to the
+ * panel. That is a review aid with a review attached, not a perimeter, and it
+ * should not be read as one.
  *
  * It is kept, rather than deleted, because the transcription step is exactly
  * where a false claim would arrive looking legitimate.
+ *
+ * ONE WIDENING IS NEVERTHELESS CORRECT HERE, and the reasoning matters because it
+ * looks like the reasoning round 3 rejected. Round 3 concluded "a guard shaped
+ * like an allowlist of joiners will keep losing" — a PERIMETER argument, and sound
+ * as one. It does not apply to a matcher whose entire input is 43 enumerated
+ * sentences: there a false positive is visible on the very next run and costs one
+ * line of triage, so the balance that makes widening a losing game outside is
+ * reversed inside. See {@link clausesOf}.
  */
 
 /** A quantity noun this tab could state a personal count of. */
@@ -351,9 +472,32 @@ const SUBJECTLESS_EMPTINESS: readonly RegExp[] = [
 const DENIAL_FRAME = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brather than\b|\b(?:is|are) absent\b/i;
 
 /**
- * A sentence's coordinate clauses, split on the coordinators that join two
- * independent claims — `, and`, `, so`, `, but`, `, or`, `, yet`, `; ` — AND ON
- * THE EM-DASH.
+ * A sentence's coordinate clauses, split on a bare coordinator (`and`, `but`, `so`,
+ * `or`, `yet`) with or WITHOUT a preceding comma, on any comma, on `; `, and on the
+ * em-dash.
+ *
+ * ROUND 3 SPLIT ON `,\s+(and|but|so|or|yet)`, `;\s+` and the em-dash — the comma
+ * being MANDATORY — and that is the MIRROR of the hole round 3 was fixing. Round 3
+ * lost to a denial moved AFTER the claim with the comma deleted; a fourth reviewer
+ * moved the denial BEFORE the claim and deleted the comma, which keeps the sentence
+ * in ONE clause, so the positional rule sees an escape opening before the trigger
+ * ends and excuses it. MEASURED at 134eac2, all four came back UNFLAGGED:
+ *
+ *     This preview cannot tell whose records these are and you have no records.
+ *     Unable to attribute anything, you have no records.
+ *     This build cannot say who you are but you have no records.
+ *     A count of zero would be wrong and you have no records.
+ *
+ * The first is in the tab's own voice, so this is the accidental-edit case as well
+ * as the adversarial one. The decisive control was the LEGITIMATE flow: sentence 1
+ * rendered in `MyStats.tsx` AND transcribed into both allowlists — 284 of 284 tests
+ * passed, layer 1 satisfied because it had been transcribed, layer 2 silent, and the
+ * tab stating a false personal zero.
+ *
+ * MEASURED COST OF THE WIDENING: zero. All four mirrors flagged, all 14
+ * `REVIEWER_EVASIONS` still flagged, and zero false positives across all 43
+ * approved entries — which is exactly what `no approved sentence asserts that the
+ * reader has nothing` asserts, on every run, rather than on trust.
  *
  * THE EM-DASH USED TO BE EXEMPT AND THE STATED REASON WAS FALSE. The exemption
  * was justified here by true copy it would flag: "none of the figures below are
@@ -372,7 +516,7 @@ const DENIAL_FRAME = /\bwould\b|\bcannot\b|\bcan't\b|\bunable\b|\bno way\b|\brat
  * rather than repeated.
  */
 function clausesOf(sentence: string): string[] {
-  return sentence.split(/,\s+(?:and|but|so|or|yet)\s+|;\s+|\s*[—–]\s*/i);
+  return sentence.split(/\s+(?:and|but|so|or|yet)\s+|,\s+|;\s+|\s*[—–]\s*/i);
 }
 
 /** Where a denial frame opens in `clause`, or `null` if none does. */
@@ -688,38 +832,60 @@ test.describe('@responsive Statistics charts (empty ordinary workspace)', () => 
 });
 
 /**
- * Every text node of a subtree AND every accessible-name attribute on it, read in
- * the page and returned as raw copy units.
+ * The copy units of the ONE element matching `selector`, read in the page.
  *
- * Per UNIT, matching `copyUnitsOf` in `src/__tests__/my-stats.test.tsx`, and NOT
- * `innerText`: `innerText` collapses the whole subtree into one string, so a
- * heading with no full stop is welded onto the paragraph after it and the split
- * invents a sentence nobody wrote. The extraction has to happen in the page
- * (there is no DOM here), so it is a `page.evaluate` — the ATTRIBUTE LIST is
- * passed in from the shared block rather than restated, so the two suites cannot
- * disagree about what counts as an accessible name.
+ * THE EXTRACTOR IS NO LONGER RE-IMPLEMENTED HERE. It used to be, and the reason
+ * given — "the production build must not import Playwright types" — was not the
+ * obstacle: {@link copyUnitsFrom} takes `(root, attrs)`, closes over nothing, and
+ * needs no Playwright type to exist. Playwright serialises it and runs it in the
+ * page, so the two suites now share one function and the lockstep test covers it.
+ * The two hand-written copies had already drifted in a way the lockstep could not
+ * see: this one failed closed on more than one match, the unit one silently took
+ * the first.
+ *
+ * `toHaveCount(1)` before `evaluate` keeps the fail-closed half: `locator.evaluate`
+ * on a multi-match locator would resolve to the first element.
  */
 async function copyUnitsIn(
   page: import('@playwright/test').Page,
   selector: string,
 ): Promise<string[]> {
+  const located = page.locator(selector);
+  await expect(located, `expected exactly one ${selector}`).toHaveCount(1);
+  return located.evaluate(copyUnitsFrom, [...ACCESSIBLE_NAME_ATTRS]);
+}
+
+/**
+ * Every `aria-labelledby` / `aria-describedby` IDREF on a descendant of `selector`
+ * that does NOT resolve inside it — the copy a screen reader reads out and the
+ * approved-sentence set cannot see. See the note on the unit test of the same name.
+ */
+async function unresolvedNameReferencesIn(
+  page: import('@playwright/test').Page,
+  selector: string,
+  attrs: readonly string[],
+): Promise<{ references: string[]; offenders: string[] }> {
   return page.evaluate(
-    ({ selector: sel, attrs }) => {
-      const roots = Array.from(document.querySelectorAll(sel));
-      if (roots.length !== 1) throw new Error(`expected exactly one ${sel}, found ${roots.length}`);
-      const root = roots[0];
-      const units: string[] = [];
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      while (walker.nextNode()) units.push(walker.currentNode.textContent ?? '');
-      for (const element of [root, ...Array.from(root.querySelectorAll('*'))]) {
-        for (const attribute of attrs) {
+    ({ selector: sel, attrs: names }) => {
+      const root = document.querySelector(sel);
+      if (root === null) throw new Error(`no ${sel}`);
+      const references: string[] = [];
+      const offenders: string[] = [];
+      for (const element of Array.from(root.querySelectorAll('*'))) {
+        for (const attribute of names) {
           const value = element.getAttribute(attribute);
-          if (value !== null) units.push(value);
+          if (value === null) continue;
+          for (const id of value.split(/\s+/).filter((token) => token !== '')) {
+            const where = `${element.tagName.toLowerCase()} ${attribute}="${id}"`;
+            references.push(where);
+            const target = document.getElementById(id);
+            if (target === null || !root.contains(target)) offenders.push(where);
+          }
         }
       }
-      return units;
+      return { references, offenders };
     },
-    { selector, attrs: [...ACCESSIBLE_NAME_ATTRS] },
+    { selector, attrs: [...attrs] },
   );
 }
 
@@ -767,6 +933,33 @@ test.describe('@responsive Statistics · My Stats', () => {
     expect(
       sentenceSet(rendered.filter((sentence) => !sentence.includes('A count of zero would say'))),
     ).not.toEqual([...APPROVED_PANEL_SENTENCES].sort());
+  });
+
+  /*
+   * LIMITATION 4, IN THE BROWSER — the scope where an accessible name is a real
+   * thing rather than an attribute string. Every `aria-labelledby` /
+   * `aria-describedby` on a panel descendant must resolve INSIDE the panel, or the
+   * copy a screen reader reads out is outside everything the sentence set compares.
+   * The unit test of the same name carries the measurement and the reasoning.
+   */
+  test('every name reference inside the panel resolves inside the panel', async ({ page, app }) => {
+    await app.open(STATISTICS_MINE);
+    await expect(page.getByRole('heading', { name: 'Personal Statistics' })).toBeVisible();
+
+    const { references, offenders } = await unresolvedNameReferencesIn(
+      page,
+      '#statistics-tabpanel-mine',
+      NAME_INDIRECTION_ATTRS,
+    );
+    expect(
+      offenders,
+      'a panel descendant names its accessible copy by an ID that is not inside the panel',
+    ).toEqual([]);
+    // Vacuity guard: the two `StatsSection` cards, each labelled by its own heading.
+    expect(references, 'no name reference was inspected — the scan is broken').toEqual([
+      'section aria-labelledby="stats-mine-gate"',
+      'section aria-labelledby="stats-mine-planned"',
+    ]);
   });
 
   test('renders the gate, and no chart, no skeleton and no zero', async ({ page, app }) => {
@@ -848,6 +1041,10 @@ test.describe('@responsive Statistics · My Stats', () => {
       'You have no records and this preview cannot tell you more than that.',
       'You have no records — this preview cannot tell you more than that.',
       'The signed-in user has no records.',
+      // …and the FOURTH reviewer's mirror: the denial moved BEFORE the claim with
+      // the comma deleted, which kept the whole sentence in one clause. Measured
+      // unflagged at 134eac2, in the tab's own voice.
+      'This preview cannot tell whose records these are and you have no records.',
     ]) {
       expect(assertsEmptiness(evasion), `must be FLAGGED: ${evasion}`).toBe(true);
       expect(emptinessClaims(`${text} ${evasion}`).length, evasion).toBeGreaterThan(0);
