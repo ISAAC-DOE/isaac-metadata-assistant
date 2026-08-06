@@ -1457,12 +1457,12 @@ describe('Refresh', () => {
     const { calls } = renderStatistics(statisticsRoutes());
     await settled();
 
-    // FIVE reads on mount: the four tracked ones plus Record Verification's.
+    // SIX reads on mount: the five tracked ones plus Record Verification's.
     expect([...calls].sort()).toEqual(
       [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY].sort(),
     );
     const afterLoad = calls.length;
-    expect(afterLoad).toBe(5);
+    expect(afterLoad).toBe(6);
 
     fireEvent.click(refreshButton());
     // FIVE, not six. This is the assertion that pins the design: the
@@ -1949,11 +1949,16 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
     ]);
   });
 
-  it('adds NO request to the page — the five reads are unchanged by its presence', async () => {
+  it('adds NO request to the page — the mount round is unchanged by its presence', async () => {
     const { calls } = renderStatistics(statisticsRoutes());
     await settled();
 
-    expect([...calls].sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
+    // The mount round is the five TRACKED reads plus Record Verification's
+    // untracked one. Both sections were added on separate branches; this
+    // assertion is what proves Platform Metrics contributed neither of them.
+    expect([...calls].sort()).toEqual(
+      [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY].sort(),
+    );
     expect(calls.filter((c) => /portal|metrics|platform/i.test(c))).toEqual([]);
   });
 
