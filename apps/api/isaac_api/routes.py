@@ -4509,9 +4509,22 @@ def _db_recon_scan(env: Mapping[str, str]) -> dict:
     # The serialisation lives INSIDE the guard with the projection it feeds: a
     # value the projection produced but `json.dumps` cannot encode would
     # otherwise escape as a bare 500 instead of this sanitized envelope.
+    #
+    # `string_leaves` IS COMPUTED HERE, INSIDE THE GUARD, FOR THAT SAME REASON —
+    # and it is a distinct risk rather than the same one twice. `json.dumps`
+    # encodes in C; `string_leaves` is a Python-level recursive walk, so it
+    # exhausts the interpreter's stack at a shallower depth than the encoder
+    # does. Measured: at depth 1500 `json.dumps` succeeds and `string_leaves`
+    # raises `RecursionError`. Left below the `try`, that band would escape as a
+    # bare 500 with a traceback — exactly what the paragraph above says this
+    # design exists to prevent, reintroduced by the line added to close a
+    # different hole. Not reachable through `_db_recon_project`, which projects
+    # onto frozen allowlists and yields a payload about three levels deep; this
+    # is defence in depth, and it costs one line.
     try:
         payload = _db_recon_project(report, authority, statements)
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+        leaves = db_recon.string_leaves(payload)
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:  # noqa: BLE001 - projection must never leak
@@ -4530,7 +4543,7 @@ def _db_recon_scan(env: Mapping[str, str]) -> dict:
         serialized,
         env=env,
         allow_raw_ids=False,
-        leaves=db_recon.string_leaves(payload),
+        leaves=leaves,
     )
     if issues:
         _log.info("db_recon outcome=refused gate=leak_scan codes=%s", ",".join(issues))

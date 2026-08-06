@@ -1095,8 +1095,17 @@ def scan_for_leaks(
 
     1. Values shorter than 4 characters are not compared, because they collide
        with legitimate counts and labels.
-    2. A value some transformation RESHAPED (truncated, case-folded, normalized)
-       is not caught by a substring scan.
+    2. A value some transformation RESHAPED (truncated, case-folded) is not
+       caught by a substring scan. UNICODE NORMAL FORM belongs here too, and the
+       word "reshaped" understated it: an NFC/NFD divergence needs NO
+       transformation by ISAAC at all — the environment variable can simply be
+       stored in one normal form while the value that reached the payload
+       carries the other, and the two are then different strings. Measured, in
+       both directions: env NFC + payload NFD and env NFD + payload NFC each
+       return ``[]``, while the same value in matching forms is detected. No
+       normalization is performed here, deliberately — normalizing before
+       comparison would be a second representation-guessing step of the kind
+       that produced this defect in the first place.
     3. Only string leaves and the serialized text are compared. A secret that
        reached the payload as a NUMBER would be caught only via ``text``.
     4. A value SPLIT across two adjacent leaves is not detected. Measured:
@@ -1106,6 +1115,19 @@ def scan_for_leaks(
        JSON separator (``", "``). This residual was omitted from the first
        version of this list, which is precisely how a known-limitations list
        becomes a false assurance.
+    5. ``_ULID_RE`` is ``\\b[0-9A-Z]{26}\\b``, so ``raw_ulid_present`` misses any
+       ULID ADJACENT TO A WORD CHARACTER — and ``_`` is a word character.
+       Measured: a bare ULID and ``rec-<ULID>`` are both detected;
+       ``id_<ULID>``, ``x<ULID>`` and ``<ULID>z`` are all MISSED. That is a
+       realistic shape, since a leaked id would plausibly arrive as a prefixed
+       key. This residual is PRE-EXISTING and untouched by this change — the
+       leaf scan neither widens nor narrows it — and it is recorded rather than
+       fixed on purpose: dropping the boundaries would match any 26-character
+       uppercase run inside a longer token, which is the shape of the digests
+       and fingerprints this report legitimately carries, so the fix trades a
+       miss for a false refusal and needs its own slice. Note the shared root
+       with the audit-tooling defect recorded elsewhere in this project: a
+       ``\\b``-anchored pattern returning zero is not evidence of absence.
     """
     issues: list[str] = []
     haystacks: tuple[str, ...] = (text, *leaves)

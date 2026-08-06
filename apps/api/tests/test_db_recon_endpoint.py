@@ -1997,6 +1997,43 @@ def test_a_leaked_value_arriving_as_a_mapping_KEY_is_caught():
     assert "env_value_present:PGPASSWORD" in issues
 
 
+def test_a_secret_SHAPE_whose_separator_json_escapes_is_caught_only_via_leaves():
+    """The fix widened `secret_shape` too, and nothing was holding that.
+
+    An independent review measured this gap in the test suite rather than in the
+    code: reinstating the defect (`haystacks = (text,)`) turned twelve tests red,
+    and every one of them was an `env_value_present` or endpoint case. Not one
+    `secret_shape` test moved — so a real improvement in detection was riding
+    along uncovered, and a future edit that kept env values working could have
+    dropped it in silence.
+
+    `_SECRET_SHAPES` matches the bearer token across `\\s`. In the serialized
+    text a newline is the TWO characters `\\` and `n`, which `\\s` does not
+    match, so this token is invisible there and visible only in the decoded
+    leaf. That makes it the exact canary for the widening.
+    """
+    token = "bearer\nabcdefgh12345678"
+    payload = {"some_field": token}
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    # Fixture validity: text alone really is blind to this one.
+    assert not [
+        code
+        for code in db_recon.scan_for_leaks(
+            serialized, env={}, allow_raw_ids=False, leaves=()
+        )
+        if code.startswith("secret_shape:")
+    ], "text alone already catches this token, so it is not a valid control"
+
+    issues = db_recon.scan_for_leaks(
+        serialized, env={}, allow_raw_ids=False, leaves=db_recon.string_leaves(payload)
+    )
+    assert "secret_shape:bearer_token" in issues, (
+        "a bearer token separated by a JSON-escaped newline was NOT detected; "
+        "the leaf scan is the only haystack that can see it"
+    )
+
+
 def test_leaves_is_required_so_a_caller_cannot_silently_restore_the_defect():
     """No default. A default of () would re-enable the bug by omission."""
     with pytest.raises(TypeError, match="leaves"):
