@@ -1367,3 +1367,187 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ======================================================================
+ * Record Verification — the corpus disclosure, the read controls, the
+ * grouped validator chart and the mutation accounting.
+ *
+ * NOTHING HERE ANIMATES. There is no transition, no transform and no
+ * keyframe below, so the global `prefers-reduced-motion` blanket in
+ * base.css needs no companion rule for this section — the reduced-motion
+ * rendering and the ordinary one are the same rendering.
+ *
+ * COLOUR IS NEVER THE ONLY ENCODING. The corpus block states its label,
+ * its wire token and its description as text; the grouped chart labels
+ * every bar with its series name and value as text; each accounting line
+ * prints the arithmetic in words and the backend's field names beside it.
+ * Remove every colour and every rule below and the section still says the
+ * same things.
+ * ====================================================================== */
+
+/* ---- which corpus ran -------------------------------------------------- */
+
+/*
+ * FIRST in the section and visually distinct, because it qualifies every
+ * figure under it. A result from the public examples displayed as if it came
+ * from the authorized sample is the one defect on this screen that nothing
+ * else would look wrong about.
+ */
+.statistics .stats-verify-corpus {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+/* A corpus this build has no label for is toned NEUTRALLY and never
+   affirmatively: an unrecognised token is a gap in what can be said, not a
+   fault, and not a reassurance either. */
+.statistics .stats-verify-corpus[data-known='false'] {
+  border-color: var(--cover-border);
+  border-left-color: var(--cover-border);
+  background: var(--cover-bg);
+}
+.statistics .stats-verify-corpus-label {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.statistics .stats-verify-corpus-mode {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.statistics .stats-verify-corpus-mode-label {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+/* ---- the read controls ------------------------------------------------- */
+
+.statistics .stats-verify-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.statistics .stats-verify-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.statistics .stats-verify-refreshing {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ---- the grouped validator chart --------------------------------------- */
+
+/*
+ * One group per validator, each with its own name, its own role sentence and
+ * its own record total — printed ON the group rather than in a shared header,
+ * because the two totals are different numbers and a single header would
+ * invite reading four bars as one partition.
+ */
+.statistics .stats-verify-chartgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin-bottom: 10px;
+}
+.statistics .stats-verify-chartgroup-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text-heading);
+}
+.statistics .stats-verify-chartgroup-total {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.statistics .stats-verify-chartgroup-role {
+  max-width: 68ch;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ---- the mutation accounting ------------------------------------------- */
+
+.statistics .stats-verify-identities {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.statistics .stats-verify-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+/* The arithmetic, in words. Wraps rather than scrolls: it is a sentence with
+   numbers in it, not a code block, and a horizontal scroller at 320px would
+   hide the right-hand side of an equation whose whole point is both sides. */
+.statistics .stats-verify-identity-statement {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+/* The backend's own field names for the same terms. Quieter than the words
+   above — it is the traceability route, not the reading. */
+.statistics .stats-verify-identity-keys {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.statistics .stats-verify-identity-mismatch {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--needsyou-text);
+  overflow-wrap: anywhere;
+}
+
+/* ---- a figure's wire field name, beside its plain-word label ------------- */
+
+/*
+ * Supplementary and quiet: the LABEL carries the meaning, this carries the
+ * traceability. Own line at every width rather than a wrapped tail, so a long
+ * field name never pushes the label into a second column.
+ */
+.statistics .stats-figure dt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.statistics .stats-figure-label {
+  overflow-wrap: anywhere;
+}
+.statistics .stats-figure-hint {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}

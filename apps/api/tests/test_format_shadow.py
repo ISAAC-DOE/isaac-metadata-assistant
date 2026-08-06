@@ -381,6 +381,81 @@ def test_declared_format_paths_is_deterministic_across_calls():
     assert fs.declared_format_paths(REPO_ROOT) == fs.declared_format_paths(REPO_ROOT)
 
 
+def test_every_format_the_schema_declares_is_actually_implemented_by_the_shadow():
+    """DRIFT GUARD. It is about the future, not about present coverage.
+
+    Measured today: the vendored schema declares exactly ONE format name,
+    ``date-time``, at six sites, and the shadow implements exactly that one. So
+    this passes trivially right now — which is the point. It is placed here to
+    fail LOUDLY the first time a schema refresh introduces a second format name.
+
+    Why the test above is not enough. ``test_every_declared_format_in_the_
+    vendored_schema_is_date_time`` pins the name, so it fires on any new format
+    whether or not the shadow handles it, and the obvious way to "fix" that
+    failure is to widen the expected set — which silences the alarm without
+    implementing anything. This one cannot be satisfied that way: it compares
+    what the SCHEMA declares against what the CHECKER registers and what the
+    CODE TABLE can name, so the only way to make it pass is to actually add the
+    checker and the code.
+
+    The silent failure it prevents, stated exactly: an unimplemented format is
+    not an error. ``jsonschema`` simply does not evaluate a format its checker
+    does not know, so the shadow would report NOTHING for those fields while
+    still presenting itself as the stricter validator. The
+    ``format_shadow.records_failing`` figure in the Record Verification report
+    would then be an undercount that looks like a clean result — in BOTH modes,
+    including the datastore mode where nobody can inspect the records to notice.
+    """
+    declared = {name for _, name in fs.declared_formats(REPO_ROOT)}
+    implemented = set(fs._SHADOW_FORMAT_CHECKER.checkers)
+    nameable = set(fs._FORMAT_CODES)
+
+    assert declared, "the schema declared no format at all; that is itself drift"
+
+    unchecked = sorted(declared - implemented)
+    assert not unchecked, (
+        "the vendored schema declares format(s) the shadow checker does not "
+        f"implement: {unchecked}. jsonschema silently SKIPS an unknown format, so "
+        "the shadow would report nothing for those fields while still claiming to "
+        "be the stricter validator. Register a checker on "
+        "`_SHADOW_FORMAT_CHECKER` (never `cls_checks`) before widening anything."
+    )
+
+    unnamed = sorted(declared - nameable)
+    assert not unnamed, (
+        f"the shadow can check {sorted(declared)} but has no stable error code "
+        f"for {unnamed}, so a finding would be published as the opaque `OTHER`. "
+        "Add an entry to `_FORMAT_CODES`; `SHADOW_ERROR_CODES` is derived from it."
+    )
+
+    # Every code the table can produce must be in the closed vocabulary the
+    # served report projects through, or a real finding would be dropped by the
+    # verification report's structural allowlist.
+    assert set(fs._FORMAT_CODES.values()) <= set(fs.SHADOW_ERROR_CODES)
+
+    # And the converse direction, so an implemented-but-undeclared checker is
+    # visible too: a checker for a format the schema never declares is dead
+    # code that will silently start firing after a schema refresh.
+    assert implemented <= declared, sorted(implemented - declared)
+
+
+def test_the_format_drift_guard_would_actually_fire(monkeypatch):
+    """NEGATIVE CONTROL for the guard above.
+
+    The guard passes today because nothing has drifted, and a guard that has
+    never been seen to fail is indistinguishable from one that cannot. Here a
+    schema revision declaring ``uri`` is simulated, and the guard's own
+    comparisons are asserted to produce a violation.
+    """
+    monkeypatch.setattr(
+        fs, "declared_formats", lambda root: (("/properties/pretend", "uri"),)
+    )
+    declared = {name for _, name in fs.declared_formats(REPO_ROOT)}
+
+    assert declared - set(fs._SHADOW_FORMAT_CHECKER.checkers) == {"uri"}
+    assert declared - set(fs._FORMAT_CODES) == {"uri"}
+
+
 # =============================================================================
 # PART D — shadow validation behaviour
 # =============================================================================

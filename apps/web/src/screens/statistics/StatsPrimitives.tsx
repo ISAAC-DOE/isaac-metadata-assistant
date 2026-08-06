@@ -132,6 +132,21 @@ export interface FigureRow {
   value: string;
   /** Render the value in the mono/tabular face (ids, hashes, counts). */
   mono?: boolean;
+  /**
+   * The wire field this figure came from, rendered quietly beside the label.
+   *
+   * OPT-IN, and it exists for one job: where a surface renames a backend field
+   * into plain words, the two descriptions of the same number should be
+   * checkable against each other. Record Verification prints these on its
+   * accounting identities already; without this the seven counts those
+   * identities are built from had no key beside them, so `operators_defined` —
+   * the one mutation count that appears in neither identity — was reachable on
+   * screen only as "Change Types Defined".
+   *
+   * Never a substitute for the label: it is supplementary, and a row with a hint
+   * and no label would be a bare wire name, which is what the renaming avoids.
+   */
+  hint?: string;
 }
 
 export interface FigureListProps {
@@ -150,7 +165,13 @@ export function FigureList({ rows }: FigureListProps) {
     <dl className="stats-figures">
       {rows.map((row) => (
         <div className="stats-figure" key={row.label}>
-          <dt>{row.label}</dt>
+          {/* The label is ALWAYS its own element, hint or not, so a query for
+              the label text matches the label rather than the label with a wire
+              name concatenated onto it. */}
+          <dt>
+            <span className="stats-figure-label">{row.label}</span>
+            {row.hint ? <span className="stats-figure-hint mono">{row.hint}</span> : null}
+          </dt>
           <dd className={row.mono ? 'mono' : undefined}>{row.value}</dd>
         </div>
       ))}

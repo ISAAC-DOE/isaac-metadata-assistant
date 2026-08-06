@@ -14,8 +14,9 @@ import pytest
 
 from isaac_api import corpus_mutation, verification
 from isaac_api.verification import (
+    AUTHORIZED_PRIVATE_SAMPLE,
     LIMITATIONS,
-    PUBLIC_UPSTREAM_CORPUS,
+    PUBLIC_REFERENCE,
     REPORT_FORMAT_VERSION,
     SAFEGUARD_STATES,
     VERIFICATION_MODES,
@@ -57,13 +58,20 @@ def test_the_corpus_is_the_public_upstream_example_set():
     assert all(isinstance(r, dict) for r in records)
 
 
-def test_there_is_exactly_one_verification_mode_and_it_is_not_a_database():
-    """Q19 is unanswered (`docs/dean-authorization-packet.md:3`, NOT SENT), so
-    no private-corpus mode may exist -- not even a disabled one. The
-    authorization audit is explicit that a disabled runner is a runner someone
-    enables."""
-    assert VERIFICATION_MODES == (PUBLIC_UPSTREAM_CORPUS,)
-    assert not any("private" in m or "database" in m for m in VERIFICATION_MODES)
+def test_the_mode_vocabulary_is_derived_from_the_authorization_record():
+    """The modes are COMPUTED, never declared here.
+
+    Q19 was answered on 2026-08-05 (relayed; see
+    `docs/evidence/2026-08-05-q19-q20-authorization.md`), so a datastore mode may
+    exist -- but only for as long as the flag in `authorization.py` says so. The
+    withdrawal path is absence, not a disabled switch: the authorization audit is
+    explicit that a disabled runner is a runner someone enables. The drift guard
+    itself lives in `test_authorization_state.py`.
+    """
+    from isaac_api import authorization
+
+    assert VERIFICATION_MODES == authorization.verification_modes()
+    assert VERIFICATION_MODES == (PUBLIC_REFERENCE, AUTHORIZED_PRIVATE_SAMPLE)
 
 
 def test_this_module_opens_no_database_and_imports_no_driver():
@@ -189,6 +197,58 @@ def test_authored_strings_do_not_swallow_a_real_record_value():
     assert records[0]["record_id"] in survivors
 
 
+def test_the_leak_scan_catches_a_NON_ASCII_record_value():
+    """C1 REGRESSION. The scan used to be blind to every non-ASCII value.
+
+    It compared each candidate against `json.dumps(payload, sort_keys=True)`,
+    and `json.dumps` defaults to `ensure_ascii=True` -- so a corpus value
+    containing an arrow appeared in that text as the seven characters
+    `\\u2192` while the candidate was still the raw one-character Python
+    string, and `value in serialized` was PERMANENTLY FALSE. The report went on
+    publishing `private_values_exposed: "verified"`.
+
+    Measured on the shipped ten-record public corpus: 3 of the 392 candidate
+    strings are already non-ASCII. Chemistry metadata makes this ordinary, not
+    exotic.
+
+    This test plants such a value into a served histogram cell and requires the
+    scan to fire. Before the fix it returned True.
+    """
+    records = load_public_corpus(ROOT)
+    _, declared = __import__(
+        "isaac_api.format_shadow", fromlist=["_introspect_root"]
+    )._introspect_root(ROOT)
+    candidates = verification._corpus_strings(records, declared) - _authored_strings()
+
+    non_ascii = sorted(v for v in candidates if any(ord(ch) > 127 for ch in v))
+    assert non_ascii, (
+        "the public corpus no longer contains a non-ASCII value; pick another "
+        "JSON-escaped character (a quote, a backslash, a newline) instead"
+    )
+
+    leaky = {
+        "limitations": [],
+        "format_shadow": {
+            "failures_by_schema_path": {"cells": [{"key": non_ascii[0], "count": 9}]}
+        },
+    }
+    assert not _leak_scan(leaky, records, ROOT), (
+        "a non-ASCII record value was not detected; the scan is comparing "
+        "against escaped JSON text again"
+    )
+
+
+@pytest.mark.parametrize("ch", ['"', "\\", "\n", "\t"])
+def test_the_leak_scan_catches_a_value_containing_a_json_escaped_character(ch):
+    """The same defect, in its other three forms. `ensure_ascii=False` alone
+    would have fixed the arrow and left these broken, which is why the fix walks
+    decoded string leaves instead of serializing at all."""
+    planted = f"SYNTHETIC{ch}RECORD{ch}VALUE{ch}ZZ9"
+    fake_records = [{"note": planted}]
+    leaky = {"limitations": [], "oops": planted}
+    assert not _leak_scan(leaky, fake_records, ROOT)
+
+
 def test_no_instance_path_histogram_is_served(report):
     """`by_instance_path` shipped in v0.0.32 and was withdrawn: over a small
     corpus an error count of 1 at an instance path is a single-record fact.
@@ -296,7 +356,7 @@ def test_the_mutation_sweep_found_no_unexpected_outcome(report):
 
 def test_metadata_is_honest_about_which_corpus_ran(report):
     meta = report["metadata"]
-    assert meta["verification_mode"] == PUBLIC_UPSTREAM_CORPUS
+    assert meta["verification_mode"] == PUBLIC_REFERENCE
     assert meta["corpus_size"] == 10
     assert meta["duration_ms"] > 0
     assert meta["generated_at"].endswith("Z")

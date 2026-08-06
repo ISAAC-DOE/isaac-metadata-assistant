@@ -58,12 +58,22 @@ export const VERIFICATION_STATUSES = Object.freeze([
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 
 /**
- * Every `verification_mode` this phase ships. A CLOSED enum on the wire, and
- * rendered VERBATIM by the UI as a disclosure of which corpus was evaluated —
- * so an unfamiliar value is displayed as it arrived rather than mapped onto a
- * friendly word this build cannot justify.
+ * Every `verification_mode` this phase ships. A CLOSED enum on the wire.
+ *
+ * Mirrors the backend's `authorization.verification_modes()`, which DERIVES the
+ * tuple from an approval flag rather than declaring it. `public_reference` is
+ * the public upstream example set and needs no authorization;
+ * `authorized_private_sample` is the application's own datastore, read-only and
+ * aggregate-only under the authorization recorded on 2026-08-05.
+ *
+ * THE WIRE TOKEN IS ALWAYS RENDERED, and a product label is rendered BESIDE it —
+ * never instead of it. See {@link corpusDisclosure} for why both, and for what
+ * happens to a member this build has no label for.
  */
-export const VERIFICATION_MODES = Object.freeze(['public_upstream_corpus'] as const);
+export const VERIFICATION_MODES = Object.freeze([
+  'public_reference',
+  'authorized_private_sample',
+] as const);
 export type VerificationMode = (typeof VERIFICATION_MODES)[number];
 
 export const VERIFICATION_ENVELOPE_KEYS = Object.freeze([
@@ -459,23 +469,21 @@ export interface VerificationChartRow {
   value: number;
 }
 
-/**
- * The two-segment composition of ONE validator's result over the records it
- * examined. Passing and failing are mutually exclusive and exhaustive there, so
- * they genuinely sum to a whole — which is what earns the stacked form.
+/*
+ * `validatorSplit`: REMOVED, and this note is why.
+ *
+ * It returned ONE validator's passing/failing split for a stacked bar, and the
+ * section drew two of them side by side. That form answers "what is this
+ * validator's result made of" twice and never answers "how do the two
+ * validators compare", which is the question a reader of this section actually
+ * has. {@link validatorComparison} supersedes it with a grouped form on one
+ * shared axis.
+ *
+ * DELETED rather than left unused, on the `StageBars` precedent in
+ * `screens/statistics/StatsPrimitives.tsx`: a helper shaped exactly like the
+ * superseded drawing, sitting in the module, is how the superseded drawing comes
+ * back.
  */
-export function validatorSplit(passing: number, failing: number): {
-  rows: VerificationChartRow[];
-  total: number;
-} {
-  return {
-    rows: [
-      { key: 'passing', label: 'Passing', value: passing },
-      { key: 'failing', label: 'Not Passing', value: failing },
-    ],
-    total: passing + failing,
-  };
-}
 
 /** Histogram cells as chart rows, in the order the backend sorted them. */
 export function histogramRows(histogram: VerificationHistogram): VerificationChartRow[] {
@@ -748,6 +756,375 @@ export function formatAgeSeconds(seconds: number): string {
   return `${Math.round(seconds / 3600)} hours`;
 }
 
+/* ---- which corpus ran -------------------------------------------------- */
+
+/**
+ * The product name for each mode, and the single highest-stakes string in this
+ * module.
+ *
+ * A public-corpus result presented as if it came from the authorized sample —
+ * or the reverse — is a false statement about WHICH RECORDS were evaluated, and
+ * every figure on the screen inherits it. The two labels therefore share no
+ * word: "preflight" against "reference sample", "Public" against "Authorized".
+ * `__tests__/record-verification.test.tsx` pins both strings and pins that
+ * neither appears while the other mode is being reported.
+ *
+ * ── ONE FIGURE IN A LABEL, AND IT IS NOT MEASURED ──────────────────────────
+ *
+ * "30-record" is authored copy, not a reading. The report's own measurement of
+ * how many records were evaluated is `metadata.corpus_size`, and the section
+ * renders that separately and adjacently, so the two can be COMPARED by a
+ * reader rather than reconciled by this file. {@link corpusSizeMismatch} states
+ * the disagreement out loud when they differ; nothing here quietly rewrites
+ * either number to agree with the other.
+ */
+export const VERIFICATION_MODE_LABELS: Readonly<Record<VerificationMode, string>> = Object.freeze({
+  public_reference: 'Public reference preflight',
+  authorized_private_sample: 'Authorized 30-record reference sample',
+});
+
+/**
+ * One sentence saying what each corpus IS.
+ *
+ * Both are scoped to the run. Neither claims anything about the deployment: the
+ * public-mode sentence says this run read the vendored public examples, not that
+ * no database exists anywhere — `CLAUDE.md` §15 requires that distinction, and
+ * `db-recon-truthfulness.test.tsx` sweeps this file's strings for it.
+ */
+export const VERIFICATION_MODE_DESCRIPTIONS: Readonly<Record<VerificationMode, string>> =
+  Object.freeze({
+    public_reference:
+      /*
+       * "this run did not open a database connection", NOT "no database
+       * connection was opened" and NOT "there is no database". The phrasing is
+       * the same one `safeguardDetail` uses below and for the same reason:
+       * `CLAUDE.md` §15 requires the run-scoped form, because `db_recon.py` DOES
+       * reach a datastore from the pod. `db-recon-truthfulness.test.tsx` sweeps
+       * this file's strings for the flat form and rejects it.
+       */
+      'The public upstream ISAAC example records vendored in this repository. They are already ' +
+      'published, so no approval is needed to read them, and this run did not open a database ' +
+      'connection to reach them.',
+    authorized_private_sample:
+      'A read-only, aggregate-only pass over the records this application holds in its own ' +
+      'datastore, under the approval recorded on 2026-08-05. Every figure below is a total ' +
+      'across the corpus: no record identifier, title, field value or per-record outcome is in ' +
+      'the report, so none can appear on this screen.',
+  });
+
+export function isVerificationMode(value: string): value is VerificationMode {
+  return (VERIFICATION_MODES as readonly string[]).includes(value);
+}
+
+/** What the section states about the corpus. The token is always carried. */
+export interface CorpusDisclosure {
+  /** The `verification_mode` exactly as it arrived. Rendered verbatim, always. */
+  mode: string;
+  /** The product name, or the raw token when this build has no label for it. */
+  label: string;
+  /** `false` when the wire carried a mode this build was not written against. */
+  known: boolean;
+  description: string;
+}
+
+/**
+ * The corpus disclosure for a mode.
+ *
+ * An UNRECOGNISED mode is not an error and is not guessed at: the token becomes
+ * its own label and the description says plainly that this build cannot name the
+ * corpus. Mapping an unknown member onto either shipped label is the one failure
+ * this function exists to make impossible — the wrong one of two labels is worse
+ * than no label, because it reads as a measurement of a corpus nobody read.
+ */
+export function corpusDisclosure(mode: string): CorpusDisclosure {
+  if (isVerificationMode(mode)) {
+    return {
+      mode,
+      label: VERIFICATION_MODE_LABELS[mode],
+      known: true,
+      description: VERIFICATION_MODE_DESCRIPTIONS[mode],
+    };
+  }
+  return {
+    mode,
+    label: mode,
+    known: false,
+    description:
+      'This build has no description for that corpus, so the value is shown exactly as it ' +
+      'arrived and nothing is claimed about which records were evaluated.',
+  };
+}
+
+/**
+ * The disagreement between an authored label and a measured count, or `null`.
+ *
+ * Only `authorized_private_sample` carries a figure in its name. If the report
+ * says it evaluated a different number, BOTH numbers are stated and the label is
+ * not silently rewritten — the mismatch is a fact about the run worth surfacing,
+ * and picking one number to display would hide it.
+ */
+export const AUTHORIZED_SAMPLE_LABELLED_SIZE = 30;
+
+export function corpusSizeMismatch(mode: string, corpusSize: number): string | null {
+  if (mode !== 'authorized_private_sample') return null;
+  if (corpusSize === AUTHORIZED_SAMPLE_LABELLED_SIZE) return null;
+  return (
+    `This corpus is named for ${AUTHORIZED_SAMPLE_LABELLED_SIZE} records, and the report states ` +
+    `that it evaluated ${corpusSize}. Both figures are shown as they stand; neither has been ` +
+    'adjusted to match the other.'
+  );
+}
+
+/* ---- freshness --------------------------------------------------------- */
+
+/**
+ * The backend's own cache lifetime for a report, in seconds
+ * (`verification.CACHE_TTL_SECONDS`). Past it the next request triggers a
+ * recomputation and is answered with the OLD result — deliberately, because a
+ * slightly old measurement beats a blank panel. This constant is what lets the
+ * UI say which of those two a reader is looking at.
+ */
+export const VERIFICATION_CACHE_TTL_SECONDS = 3600;
+
+export type ReportFreshness = 'fresh' | 'stale';
+
+export function reportFreshness(cacheAgeSeconds: number): ReportFreshness {
+  return cacheAgeSeconds >= VERIFICATION_CACHE_TTL_SECONDS ? 'stale' : 'fresh';
+}
+
+/* ---- the two validators, side by side ---------------------------------- */
+
+/** The two outcomes each validator reports, in the order they are drawn. */
+export const VALIDATOR_SERIES = Object.freeze([
+  { key: 'passing', label: 'Passing' },
+  { key: 'failing', label: 'Not Passing' },
+] as const);
+
+export interface ValidatorComparisonGroup {
+  key: 'official' | 'shadow';
+  label: string;
+  /** What this validator is, in one clause. Non-colour identity for the group. */
+  role: string;
+  passing: number;
+  failing: number;
+  /** THIS validator's own whole. The two groups' totals are not assumed equal. */
+  total: number;
+}
+
+/**
+ * The official validator and the format shadow as two comparable groups.
+ *
+ * GROUPED, not summed. Each group's passing and not-passing partition that
+ * validator's OWN total, and the two totals are separate numbers that this
+ * function never adds together — the shadow examines the same corpus but the
+ * report states its denominator independently, so a build that combined them
+ * would invent a whole nobody measured.
+ */
+export function validatorComparison(
+  official: VerificationOfficialValidation,
+  shadow: VerificationFormatShadow,
+): [ValidatorComparisonGroup, ValidatorComparisonGroup] {
+  return [
+    {
+      key: 'official',
+      label: 'Official Validation',
+      role: "ISAAC's own validator — the authority on whether a record is valid.",
+      passing: official.passing,
+      failing: official.failing,
+      total: official.passing + official.failing,
+    },
+    {
+      key: 'shadow',
+      label: 'Format Shadow',
+      role: 'A stricter second validator, run alongside. It decides nothing and gates nothing.',
+      passing: shadow.records_passing,
+      failing: shadow.records_failing,
+      total: shadow.records_passing + shadow.records_failing,
+    },
+  ];
+}
+
+/**
+ * The comparison as one sentence — the text equivalent of the grouped chart.
+ *
+ * States each group's own denominator explicitly, so the sentence cannot be read
+ * as two shares of one total.
+ */
+export function validatorComparisonSummary(groups: readonly ValidatorComparisonGroup[]): string {
+  const clauses = groups.map(
+    (group) =>
+      `${group.label}: ${group.passing} of ${group.total} records passing, ` +
+      `${group.failing} not passing`,
+  );
+  return `${clauses.join('; ')}. Each validator's figures are counted against its own total.`;
+}
+
+/* ---- mutation accounting, reconciled ----------------------------------- */
+
+/**
+ * Short plain-word names for the mutation counts, keyed by the BACKEND'S OWN
+ * key. Both are rendered: the words carry the meaning for a reader who has never
+ * seen the wire, the key is what makes a screen figure traceable to the field it
+ * came from, and keeping them in one table is what stops the two drifting apart.
+ */
+export const MUTATION_SHORT_LABELS: Readonly<Record<MutationKey, string>> = Object.freeze({
+  operators_defined: 'change types defined',
+  trials_attempted: 'trials attempted',
+  trials_applicable: 'trials that applied',
+  trials_skipped_not_applicable: 'trials skipped as not applicable',
+  expected_outcome_matches: 'trials that behaved as designed',
+  unexpected_outcomes: 'trials that behaved unexpectedly',
+  observation_only_trials: 'trials recorded without an expected outcome',
+});
+
+export interface MutationTerm {
+  key: MutationKey;
+  label: string;
+  value: number;
+}
+
+/**
+ * One accounting identity the harness's counts are expected to satisfy, with
+ * everything needed to show it ON SCREEN rather than assert it in a comment.
+ */
+export interface MutationIdentity {
+  key: 'attempted' | 'applicable';
+  total: MutationTerm;
+  parts: MutationTerm[];
+  /** The parts as they actually add up. MEASURED, never assumed to equal `total`. */
+  partsSum: number;
+  balances: boolean;
+  /** The arithmetic as a sentence, exactly as the counts stand. */
+  statement: string;
+}
+
+function term(mutations: VerificationMutations, key: MutationKey): MutationTerm {
+  return { key, label: MUTATION_SHORT_LABELS[key], value: mutations[key] };
+}
+
+/**
+ * The two identities the harness's seven counts are supposed to satisfy:
+ *
+ *   trials_attempted  = trials_applicable + trials_skipped_not_applicable
+ *   trials_applicable = expected_outcome_matches + unexpected_outcomes
+ *                     + observation_only_trials
+ *
+ * `balances` is COMPUTED from the values, not declared. A report whose counts do
+ * not add up is a real possibility and the section says so out loud rather than
+ * drawing a tidy total that hides it — which is the entire reason the sum is
+ * carried alongside the stated total instead of replacing it.
+ */
+export function mutationReconciliation(mutations: VerificationMutations): MutationIdentity[] {
+  const build = (
+    key: MutationIdentity['key'],
+    totalKey: MutationKey,
+    partKeys: readonly MutationKey[],
+  ): MutationIdentity => {
+    const total = term(mutations, totalKey);
+    const parts = partKeys.map((partKey) => term(mutations, partKey));
+    const partsSum = parts.reduce((sum, part) => sum + part.value, 0);
+    const rhs = parts.map((part) => `${part.value} ${part.label}`).join(' + ');
+    return {
+      key,
+      total,
+      parts,
+      partsSum,
+      balances: partsSum === total.value,
+      statement: `${total.value} ${total.label} = ${rhs}`,
+    };
+  };
+
+  return [
+    build('attempted', 'trials_attempted', [
+      'trials_applicable',
+      'trials_skipped_not_applicable',
+    ]),
+    build('applicable', 'trials_applicable', [
+      'expected_outcome_matches',
+      'unexpected_outcomes',
+      'observation_only_trials',
+    ]),
+  ];
+}
+
+export function mutationsReconcile(mutations: VerificationMutations): boolean {
+  return mutationReconciliation(mutations).every((identity) => identity.balances);
+}
+
+/** The sentence stated when an identity does not hold. Names both numbers. */
+export function reconciliationMismatch(identity: MutationIdentity): string {
+  return (
+    `These do not add up: the parts total ${identity.partsSum}, and the report states ` +
+    `${identity.total.value} ${identity.total.label}. Both figures are shown as they arrived.`
+  );
+}
+
+/* ---- the withheld bucket ----------------------------------------------- */
+
+/**
+ * Did this histogram withhold anything at all?
+ *
+ * ONE PREDICATE, USED BY BOTH SIDES, because they used to disagree. The chart's
+ * empty branch tested `suppressed_total === 0` while the row builder tested
+ * `suppressed_total <= 0 && suppressed_categories <= 0`, so a histogram with no
+ * cells, some withheld CATEGORIES and zero withheld OCCURRENCES took the empty
+ * branch in one place and produced a withheld bar in the other. That body is
+ * odd — categories withheld accounting for no occurrences — but it is a body the
+ * wire permits, and two code paths disagreeing about it is how one of them ends
+ * up drawing a bucket the other says does not exist.
+ *
+ * Either signal counts. Withholding is withholding, and the disclosure sentence
+ * beside it states the categories and the occurrences separately anyway.
+ */
+export function histogramWithheldAnything(histogram: VerificationHistogram): boolean {
+  return histogram.suppressed_categories > 0 || histogram.suppressed_total > 0;
+}
+
+/**
+ * Nothing to draw: no category survived the floor AND nothing was withheld.
+ *
+ * The distinction matters. "No occurrence was recorded" and "every category was
+ * too small to name" are different facts, and only the first justifies drawing
+ * nothing at all.
+ */
+export function histogramIsEmpty(histogram: VerificationHistogram): boolean {
+  return histogram.cells.length === 0 && !histogramWithheldAnything(histogram);
+}
+
+/**
+ * The row key for the withheld bucket. Deliberately not a category name: the
+ * withheld KEYS are not in the payload, so no code path here could render one
+ * even by mistake, and this key cannot collide with a real category because no
+ * schema path or error code has this shape.
+ */
+export const SUPPRESSED_ROW_KEY = '__withheld__';
+
+export const SUPPRESSED_ROW_LABEL = 'Withheld (categories below the disclosure floor)';
+
+/**
+ * Histogram cells as chart rows, with the withheld occurrences as their OWN
+ * final row when there are any.
+ *
+ * The bucket is drawn rather than only footnoted because the alternative reads
+ * as a complete distribution that happens to have a caveat under it. It is one
+ * aggregate row standing for however many categories were withheld — it names no
+ * category, and it cannot, because the payload does not carry their names.
+ */
+export function histogramRowsWithSuppressed(
+  histogram: VerificationHistogram,
+): VerificationChartRow[] {
+  const rows = histogramRows(histogram);
+  if (!histogramWithheldAnything(histogram)) return rows;
+  return [
+    ...rows,
+    {
+      key: SUPPRESSED_ROW_KEY,
+      label: SUPPRESSED_ROW_LABEL,
+      value: histogram.suppressed_total,
+    },
+  ];
+}
+
 /**
  * What the section says when the report is not a report.
  *
@@ -774,7 +1151,21 @@ export function notReadyMessage(status: Exclude<VerificationStatus, 'ok'>): {
   if (status === 'unavailable') {
     return {
       title: 'Verification Results Unavailable',
-      body: 'This build reports no verification results. Nothing is shown in their place, and no count is assumed to be zero.',
+      /*
+       * ONE WORD COVERS SEVERAL CAUSES, AND THE COPY SAYS SO.
+       *
+       * `verification._PROVIDER_STATUS` maps `not_run`, `unavailable` AND
+       * `timeout` onto this single status, and the envelope that carries it has
+       * no `metadata` block at all — so nothing on the wire tells this build
+       * which of them happened, or even which corpus was being read. Naming the
+       * possibilities without asserting one is the only honest reading; picking
+       * the most likely would be a guess about an event nobody observed.
+       */
+      body:
+        'This build reports no verification results. The report does not say which of several ' +
+        'causes applies: the program may not have run, a source it needed may not have ' +
+        'answered, or a read may have timed out — one status word covers all of them. Nothing ' +
+        'is shown in their place, and no count is assumed to be zero.',
     };
   }
   return {

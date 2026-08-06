@@ -2271,17 +2271,29 @@ export const openApiFixture = {
  * Explorer's `Full Description` disclosure never hides this API's own
  * boundary/honesty copy.
  *
- * Regenerated on 2026-07-31, re-measured 2026-08-04, with:
+ * Regenerated on 2026-07-31, re-measured 2026-08-06, with:
  *
  *   PYTHONPATH=apps/api .venv/bin/python -c \
  *     "from isaac_api.app import create_app; import json; \
  *      print(json.dumps(create_app().openapi()))"
  *
- * 38 operations · 23,948 description characters · 49 post-lead paragraphs · lead
- * paragraphs 78–660 characters · remainders 0–1,744. The two newest are the
- * worked-example session lifecycle (`POST /api/tutorial/sessions`,
- * `DELETE /api/tutorial/sessions/{session_id}`); before them the 36th was
+ * 39 operations · 54 post-lead paragraphs · lead paragraphs 78–548 characters ·
+ * remainders 0–1,740. The newest is `GET /api/runtime/verification`; before it
+ * came the worked-example session lifecycle (`POST /api/tutorial/sessions`,
+ * `DELETE /api/tutorial/sessions/{session_id}`), and before those the 36th was
  * `GET /api/runtime/database/recon`.
+ *
+ * TWO CHARACTER COUNTS, DIFFERING BY EXACTLY THE SEPARATORS, and this comment
+ * used to state one of them unlabelled — which is how it drifted 675 characters
+ * from the assertion it looks like it describes:
+ *
+ *   · 25,500 — `lead.length + rest.join('').length` after `splitPurpose` has
+ *     consumed the blank lines. THIS is what `settings-api.test.tsx` pins.
+ *   · 25,608 — the raw `description.length` sum, i.e. the same text plus 54
+ *     `\n\n` separators (54 x 2 = 108).
+ *
+ * Quote the metric with the number, or the next reader re-measures the other one
+ * and concludes the fixture is stale when it is not.
  *
  * THE "POINT-IN-TIME COPY" CAVEAT BELOW IS NOW WEAKER THAN IT READS, and that is
  * worth stating rather than leaving as a stale warning. Since

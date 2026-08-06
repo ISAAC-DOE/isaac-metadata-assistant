@@ -1,3 +1,23 @@
+> ## PARTIALLY OVERTAKEN — 2026-08-05, later the same day
+>
+> **Q19 was answered and approved** after this package was written (relayed by the project owner; no
+> direct agent-to-owner communication occurred). Record:
+> [`docs/evidence/2026-08-05-q19-q20-authorization.md`](../../evidence/2026-08-05-q19-q20-authorization.md).
+>
+> Three statements below are consequently no longer current:
+>
+> - *"The private 30-record runner … Not built, not disabled-built."* It is now built, as a second
+>   verification mode whose existence is **derived** from the approval flag in
+>   `apps/api/isaac_api/authorization.py`.
+> - *"`verificationFixtures.ts` uses `corpus_size: 30` with `verification_mode:
+>   'public_upstream_corpus'`."* That mode value has been **renamed to `public_reference`** and the
+>   fixture updated; the `corpus_size` inconsistency it flags is unrelated and still open.
+> - Any statement that `VERIFICATION_MODES` has exactly one member.
+>
+> **Unchanged and still current:** Q20 (`format` enforcement) is unanswered and the validator stays
+> format-blind; per-record display remains closed by default; CI remains billing-blocked, so nothing
+> from either slice has published an image or merged.
+
 # Record Verification + Statistics — closure and evidence package
 
 **Date:** 2026-08-05 · **Starting SHA:** `2fbecd4` · **Branches:** `feat/record-verification`

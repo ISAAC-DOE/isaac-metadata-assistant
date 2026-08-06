@@ -146,10 +146,12 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
     await view.findByText('Synthetic-Only');
 
     const found = levels(view.container);
-    // The four 3s in the middle are Record Verification's own sub-headings,
-    // under its h2: issue distribution, mutation verification, safeguards, and
-    // the run details.
-    expect(found).toEqual([1, 2, 2, 2, 3, 3, 2, 3, 3, 3, 3, 2, 2, 3, 3, 3]);
+    // The FIVE 3s in the middle are Record Verification's own sub-headings,
+    // under its h2: the official/shadow comparison, the issue distributions,
+    // mutation verification, safeguards, and the run details. (It was four
+    // before the comparison became a grouped chart with a heading of its own —
+    // the outline is unchanged in shape, one level deeper nowhere.)
+    expect(found).toEqual([1, 2, 2, 2, 3, 3, 2, 3, 3, 3, 3, 3, 2, 2, 3, 3, 3]);
     assertMonotonic(found, 'Statistics page · General ISAAC');
   });
 

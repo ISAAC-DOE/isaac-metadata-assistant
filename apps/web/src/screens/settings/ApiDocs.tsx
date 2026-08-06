@@ -537,6 +537,33 @@ export const BOUNDARY_CAVEAT_MARKERS: readonly string[] = [
   'synthetic-only',
   'immutable',
   'not enabled',
+  /*
+   * ── ADDED FOR `GET /api/runtime/verification`, AND THE MISS IS THE LESSON ──
+   *
+   * That operation shipped three post-lead paragraphs — 629 characters, over the
+   * threshold — carrying the aggregate-only guarantee ("No record id, title,
+   * field value, evidence entry or per-record outcome appears… withheld rather
+   * than named") and the corpus boundary ("this operation does not connect to
+   * any database"). It is boundary copy by any reading, and it contained NOT ONE
+   * token from the list above, so length alone collapsed all three behind the
+   * disclosure. Exactly the inversion this list exists to prevent, on the
+   * newest endpoint, caught by review rather than by CI.
+   *
+   * The general lesson is that this list is a RATCHET over vocabulary that has
+   * actually shipped, not a detector for the claim class — the same limit
+   * `db-recon-truthfulness.test.tsx` states about its own sweep. A boundary
+   * paragraph written in words nobody has used before will still slip through,
+   * and a human reviewing new contract copy remains the backstop.
+   *
+   * EACH OF THESE WAS MEASURED AGAINST THE REAL STRING, not eyeballed. A
+   * candidate that reads plausibly and never fires is worse than no marker at
+   * all, because it looks like coverage: `'not the production'` was proposed and
+   * REJECTED here, because the served description writes `It is **not** the
+   * production-derived corpus` and the markdown emphasis breaks the substring.
+   */
+  'aggregate only',
+  'withheld',
+  'does not connect',
 ];
 
 /** Does this paragraph carry a boundary/honesty claim that must stay visible? */
@@ -559,10 +586,17 @@ export function isBoundaryCaveat(paragraph: string): boolean {
  * A remainder is collapsed only when it is BOTH long enough to be a wall
  * ({@link PURPOSE_DISCLOSURE_MIN_CHARS}) AND free of boundary copy
  * ({@link BOUNDARY_CAVEAT_MARKERS}). Against the real contract that is currently
- * zero of 36 operations, which is the honest outcome: this API's descriptions are
+ * zero of 39 operations, which is the honest outcome: this API's descriptions are
  * short-to-medium and boundary-laden, so nothing about them needs hiding. The
  * disclosure remains for a future docstring that is genuinely long and carries no
  * caveat.
+ *
+ * "Currently zero" IS A MEASUREMENT THAT HAS ALREADY BEEN WRONG ONCE, so it is
+ * not a property of the rule. `GET /api/runtime/verification` arrived with a
+ * 629-character, three-paragraph, entirely boundary-bearing remainder that
+ * matched no marker, and it collapsed. The count is re-measured every run by
+ * `settings-api.test.tsx`; treat a change in it as a defect to investigate
+ * rather than a number to update.
  */
 export function splitPurpose(description?: string): {
   lead: string;
@@ -667,9 +701,18 @@ function ApiEndpointDetail({
             {/* Short and medium remainders — and ANY remainder carrying a
                 boundary caveat, at any length — render in full, right here. See
                 `splitPurpose`: the disclosure below is reserved for a genuinely
-                long, caveat-free docstring tail, which no operation in the
-                current contract has. Keyed by index, not by text: two identical
-                paragraphs in one description are legal and must not collide. */}
+                long, caveat-free docstring tail.
+
+                THIS COMMENT USED TO END "which no operation in the current
+                contract has", and that became false the moment
+                `GET /api/runtime/verification` was added: its three-paragraph
+                aggregate-only guarantee matched no marker and was collapsed.
+                A standing claim about the CONTENT of a contract this file does
+                not own goes stale silently, so the claim is gone; the measured
+                one lives in `settings-api.test.tsx`, which re-counts every run.
+
+                Keyed by index, not by text: two identical paragraphs in one
+                description are legal and must not collide. */}
             {purpose.inline.map((paragraph, i) => (
               <p className="api-docs-description" key={`purpose-inline-${i}`}>
                 {paragraph}
