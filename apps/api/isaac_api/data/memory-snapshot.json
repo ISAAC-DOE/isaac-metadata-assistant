@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "1cc7a0dd2e2903472b1d1dd03cd455eb32e3a610c2507f567ff1b61af6993e1c"
+        "sha256": "01901212549ee642cdf74adbd5372d25452ab9603712365f5eec43701c7ce15d"
       },
       {
         "path": "AGENTS.md",
@@ -10340,7 +10340,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "1183c9dc3d2d01e6b5d9f0a3d47762056553efef43463e9eea530b0572bac8d0"
+        "sha256": "5a7e5dc39797010a11a03bd4bad0ff5589284ed7cdd016d81dd92f3af1b15cba"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10396,7 +10396,7 @@
       },
       {
         "path": "apps/web/src/__tests__/signals.test.tsx",
-        "sha256": "cb384e19176856f536d07d4dd5e639ec912578c03c96d2ec613f6835aa910e5c"
+        "sha256": "e36d792d66bf7f2b3b356b9e29f8916d4f587bbcaa2ba199ca3f9aff345937cb"
       },
       {
         "path": "apps/web/src/components/AdvisoryChip.tsx",
@@ -10416,7 +10416,7 @@
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
-        "sha256": "a3601ab727a0e93da0d4a114afcbce54f37b740108d8a4e7f505e0277fc66e00"
+        "sha256": "d8635965451e98115b343004f9d4abb2ce5d8ecee54682c16015bf1b05914f11"
       },
       {
         "path": "apps/web/src/components/EvidenceRow.tsx",
@@ -10476,7 +10476,7 @@
       },
       {
         "path": "apps/web/src/components/StatusBar.tsx",
-        "sha256": "244749deb4544d63018fe97d45e17eb974a0195dd4f5f4c158b6efc85885c8d1"
+        "sha256": "4252540f149f2dba1a9c5dcea2af85a12e48f3cefd75fd330a45737bb621b5d0"
       },
       {
         "path": "apps/web/src/components/StatusChip.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "b3f401c07ad0bc41af0cda9a38ef0b53d69d7940ebd25930b4dec2a6ea3b16d5"
+        "sha256": "a39b209d3b718ab57b52e8489d68062fcb971002cc393316132faa7919e46586"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "ef0926b65161a63a08c257430fa5aa197b55c02b8aa6ebea73fdc5213fa56c75"
+        "sha256": "0ae4e56fe30a1b52080b163c7c38fe3cc32a3200f87e3a7fb0407c3e33a8f249"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "eb6414b3e1ef3d3e966e45a3fcce206b18869eff1dc6ac3b97485ddbdd413d38"
+        "sha256": "f169a20d01b458963933f65295482120a94afadb844a041e8a7e495f0fa5eeb6"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "e0423024e44208760c26d43061cf97c59240bf50ee71f710f4baa140bfdcd1c1"
+        "sha256": "be55b084060a00b7ee72fdebe530d59e3e1fff7bfd689c8cf7d65efa53a0ada5"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "588742609775866e629a4bc4608fcea9584aada079a2c83faa72e961caa49df9"
+    "served_manifest_fingerprint": "8e645980ab503d80033847d7f682157ed8a468c9682c0f55926719a6bd29a805"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

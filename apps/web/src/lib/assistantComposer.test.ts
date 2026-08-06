@@ -9,6 +9,11 @@ import {
   REVIEW_CATALOG,
 } from './assistantComposer';
 import { SOURCE_LABELS } from './assistant';
+import {
+  NO_MEASUREMENT_SERIES_CODE,
+  NO_SERIES_COVERAGE_NOTE,
+  VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE,
+} from './adapt';
 import { VALIDATION_UNAVAILABLE_SUMMARY } from './assistantPaths';
 import {
   experimentDetail,
@@ -671,12 +676,22 @@ describe('compose({context:"export"}) — post-export fixture bundle', () => {
   });
 
   it('coverage_vs_validity echoes evidence_present/evidence_expected live (33/33), never a verdict', () => {
+    // "targets", not "fields": `isaac_records.audit._block_targets` adds one target
+    // per series, asset, descriptor, link and contributor plus `qc:status`, so the
+    // denominator was never a field count. Same numbers, same source, same
+    // never-a-verdict property — only the noun is now the one the audit counts.
     expect(out.prompts[0].answer).toEqual({
       text:
-        'Coverage is 33/33 evidenced fields. It describes how many expected fields carry evidence; ' +
-        'the schema check is separate.',
+        'Coverage is 33/33 evidenced targets. It describes how many of the targets this record ' +
+        'contains carry evidence; the schema check is separate.',
       answeredFrom: 'audit',
     });
+  });
+
+  it('coverage_vs_validity does NOT append the series disclosure when the advisory omits it', () => {
+    // `warningsDryRun` carries NO_LINKS only. The disclosure is keyed on the
+    // backend advisory, never appended unconditionally.
+    expect(out.prompts[0].answer!.text).not.toContain(NO_SERIES_COVERAGE_NOTE);
   });
 
   it('blocking_paths (post-export, 0 errors) → no-blocking message, still offers Open Validator', () => {
@@ -721,9 +736,57 @@ describe('compose export — coverage echo variants + pre-export fallback + disa
       }),
     );
     expect(out.prompts[0].answer!.text).toBe(
-      'Coverage is 11/14 evidenced fields. It describes how many expected fields carry evidence; ' +
-        'the schema check is separate.',
+      'Coverage is 11/14 evidenced targets. It describes how many of the targets this record ' +
+        'contains carry evidence; the schema check is separate.',
     );
+  });
+
+  it('appends the series disclosure when the advisory reports no measured series', () => {
+    // A record whose `measurement.series` is `[]` contributes no series target, so
+    // the audit can report a FULL count over a record holding zero measured data
+    // (measured: 33/33 with a series, 32/32 with the series emptied). The Assistant
+    // asserts that count in a sentence with nothing beside it, so it carries the
+    // same disclosure the badge does — from the same constant, so the two cannot
+    // drift into two different claims about the same record.
+    const out = compose(
+      exportState({
+        warnings: {
+          advisory: true,
+          gating: false,
+          warnings: [
+            { code: 'NO_LINKS', where: 'record.links', message: 'no relationships declared' },
+            {
+              code: NO_MEASUREMENT_SERIES_CODE,
+              where: 'measurement.series',
+              message: '`measurement.series` is empty, so the record contains no measured data.',
+            },
+          ],
+          dry_run: false,
+        } as unknown as ExportReadinessBundle['warnings'],
+      }),
+    );
+    expect(out.prompts[0].answer!.text).toBe(
+      'Coverage is 33/33 evidenced targets. It describes how many of the targets this record ' +
+        'contains carry evidence; the schema check is separate. ' +
+        NO_SERIES_COVERAGE_NOTE,
+    );
+  });
+
+  it('the appended disclosure names no verdict word from the shared forbidden list', () => {
+    // Whether an empty series is invalid, incomplete, not applicable or
+    // deliberately empty is a domain owner's decision; the vendored schema sets no
+    // `minItems`, so `[]` validates with zero errors. The Assistant must not pick
+    // one.
+    //
+    // NAMED FOR THE MECHANISM. The old title ("states an observation and does not
+    // classify the science") claimed a universal a blacklist cannot establish. The
+    // list is imported rather than restated: this file and `signals.test.tsx` each
+    // carried their own 8-word copy against the Python guard's 9, so `error` was
+    // missing from both — the same defect the shared sentence constant exists to
+    // prevent, one level up.
+    for (const forbidden of VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE) {
+      expect(NO_SERIES_COVERAGE_NOTE.toLowerCase()).not.toContain(forbidden);
+    }
   });
 
   it('pre-export (records:[]) → honest empty-coverage fallback (chip still enabled)', () => {
