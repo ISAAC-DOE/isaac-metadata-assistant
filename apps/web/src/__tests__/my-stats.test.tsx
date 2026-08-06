@@ -887,7 +887,7 @@ describe('My Stats invents no personal figure — the six traps', () => {
   it('2 — issues NO request, so no record in any scope can be shown as personal', async () => {
     const { calls } = await renderMineTab();
     /*
-     * The four General-tab reads still happen on mount (they are not tab-keyed),
+     * The five General-tab reads still happen on mount (they are not tab-keyed),
      * and NOTHING else does. `stubFetchRoutes` records each call as
      * `"<METHOD> <path>"`, so this asserts the method too — every request is a GET,
      * and this tab therefore cannot mutate anything either.
@@ -906,6 +906,9 @@ describe('My Stats invents no personal figure — the six traps', () => {
         'GET /api/graph/status',
         'GET /api/openapi',
         'GET /api/runtime/records',
+        // Record Verification's read. A General-tab section, not tab-keyed, so
+        // it fires here too — and it is a GET, so this tab still cannot mutate.
+        'GET /api/runtime/verification',
       ].sort(),
     );
     expect(calls.filter((c) => c.includes('/api/experiments'))).toEqual([]);

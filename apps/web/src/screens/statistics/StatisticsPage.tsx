@@ -58,6 +58,7 @@ import {
   UnavailableNote,
 } from './StatsPrimitives';
 import { MyStats } from './MyStats';
+import { RecordVerification } from './RecordVerification';
 
 /**
  * Statistics — the read-only insights surface, in two tabs.
@@ -68,6 +69,16 @@ import { MyStats } from './MyStats';
  * this file fetches them, formats the strings the primitives display, and owns
  * the states. It computes no figure of its own. The My Stats tab reads NOTHING —
  * see `MyStats.tsx`.
+ *
+ * A FIFTH read, `/api/runtime/verification`, feeds Record Verification alone. Its
+ * figures are decoded and derived by `lib/verificationContract.ts` (a report is a
+ * wire document, not a projection of the workspace, so it fails closed on a body
+ * it cannot read rather than being modelled beside the record derivations). It is
+ * deliberately OUTSIDE the round tracker and the Refresh button below: the report
+ * is a cached artifact of a program run, not a live view of this workspace, and it
+ * discloses its own age. Re-reading it under a button that announces "N of 4 reads
+ * failed" would make that sentence describe a denominator it does not count. The
+ * section carries its own Retry.
  *
  * The four fetches are deliberately INDEPENDENT — that independence is the
  * partial-failure design. One dead endpoint degrades the sections that read it
@@ -439,6 +450,9 @@ export function StatisticsPage() {
   const graph = useFetch(() => track(api.getGraphStatus()), []);
   const about = useFetch(() => track(api.getAbout()), []);
   const openapi = useFetch(() => track(api.getOpenApi()), []);
+  // Untracked, by the reasoning in this file's header. A build artifact, not a
+  // workspace figure — so it is unkeyed on `scope` too.
+  const verification = useFetch(() => api.getVerification(), []);
 
   /*
    * ...AND the record read also listens for a workspace REBUILD, which the scope
@@ -614,6 +628,7 @@ export function StatisticsPage() {
               <WorkspaceGlance records={records} />
               <WorkflowDistribution records={records} />
               <EvidenceAndValidation records={records} />
+              <RecordVerification verification={verification} />
               <NoAnalytics />
               <TechnicalDetails
                 id="stats-technical"

@@ -1226,3 +1226,144 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ======================================================================
+ * RECORD VERIFICATION
+ * (appended only; nothing above is altered)
+ *
+ * Same two guarded constraints as the chart block above:
+ *  · NO `border-left` / `border-right` anywhere (`no-vertical-rail.test.ts`).
+ *  · NO `:hover` / `:active` / `:focus` rule with a hex literal or a
+ *    `--pass-*` / `--fail-*` token (`interaction-states.test.ts`). Nothing in
+ *    this block is interactive, so it declares no interaction state at all.
+ *
+ * COLOUR IS NEVER THE ONLY ENCODING HERE. Every tinted box carries a text
+ * label and a sentence saying what it counts, and every safeguard renders its
+ * state as a WORD ("Verified" / "Not applicable" / "Unverified") beside the
+ * label. Remove every colour below and the panel still says the same thing —
+ * which is the whole reason `not_applicable` can be given a neutral tint
+ * without that tint having to carry the distinction on its own.
+ * ====================================================================== */
+
+/* ---- a labelled, tinted group of counts ------------------------------- */
+
+.statistics .stats-verify-group {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+.statistics .stats-verify-group[data-tone='good'] {
+  border-color: var(--pass-border);
+  background: var(--pass-bg);
+}
+/* The cautionary tint is the AMBER family, not the red one. A non-zero count
+   here is something to look at, not a failure of the application, and dressing
+   it in `--fail-*` would overstate what the number means. */
+.statistics .stats-verify-group[data-tone='attention'] {
+  border-color: var(--needsyou-border);
+  background: var(--needsyou-bg);
+}
+.statistics .stats-verify-group .stats-figures {
+  margin-top: 0;
+}
+.statistics .stats-verify-group-note {
+  max-width: 68ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ---- the tri-state safeguard panel ------------------------------------ */
+
+/*
+ * A grid of `<dl>`-grouped rows, following the `StatCard` precedent: a `<dt>`
+ * label, a `<dd>` state word, a `<dd>` reason. Never bare divs of values.
+ */
+.statistics .stats-verify-safeguards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.statistics .stats-verify-safeguard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+.statistics .stats-verify-safeguard[data-tone='good'] {
+  border-color: var(--pass-border);
+  background: var(--pass-bg);
+}
+/* `not_applicable` — the NEUTRAL treatment, and the one rule in this file that
+   is load-bearing rather than cosmetic. It is not the affirmative tint. A
+   safeguard that did not apply is neither reassuring nor alarming, and giving
+   it the green box is exactly how "verified" gets read back into a state that
+   was carefully worded to avoid saying it. */
+.statistics .stats-verify-safeguard[data-tone='neutral'] {
+  border-color: var(--cover-border);
+  background: var(--cover-bg);
+}
+.statistics .stats-verify-safeguard[data-tone='attention'] {
+  border-color: var(--needsyou-border);
+  background: var(--needsyou-bg);
+}
+.statistics .stats-verify-safeguard-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+/* The state WORD. Weight and case do the emphasis; no glyph, and pointedly no
+   tick — a tick beside "Not applicable" would restate it as an affirmative. */
+.statistics .stats-verify-state {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  color: var(--text-strong);
+}
+.statistics .stats-verify-state[data-state='verified'] {
+  color: var(--pass-text);
+}
+.statistics .stats-verify-state[data-state='not_applicable'] {
+  color: var(--cover-text);
+}
+.statistics .stats-verify-state[data-state='unverified'] {
+  color: var(--needsyou-text);
+}
+.statistics .stats-verify-safeguard-detail {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ---- the report's own limitations -------------------------------------- */
+
+.statistics .stats-verify-limits {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-width: 68ch;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* Tablet and narrower: one column, matching `.stats-columns` / `.stats-cards`. */
+@media (max-width: 900px) {
+  .statistics .stats-verify-safeguards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

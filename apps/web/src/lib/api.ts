@@ -396,6 +396,16 @@ export const api = {
     return getJson<ApiOpenApiResponse>('/openapi');
   },
 
+  // Record Verification — the sanitized AGGREGATE report of the verification
+  // program (official validation, the format-aware shadow checks, the mutation
+  // harness). Read-only, and typed as `unknown` on purpose: the body is decoded
+  // by `lib/verificationContract.ts::readVerificationBody`, which fails closed
+  // on anything it does not fully understand. Asserting a wire type here would
+  // hand the caller a lie the compiler cannot check.
+  getVerification(): Promise<unknown> {
+    return getJson<unknown>('/runtime/verification');
+  },
+
   /**
    * Open an isolated worked-example session and return its id plus the record
    * ids actually materialised in it.

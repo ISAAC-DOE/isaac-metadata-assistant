@@ -8,6 +8,10 @@
 import { vi } from 'vitest';
 
 import type { ApiWorkflow } from '../lib/types';
+// The verification report bodies live in their own module, with the rest of the
+// Record Verification wire fixtures. Imported rather than duplicated so one
+// contract has one fixture.
+import { verificationReportOk } from './verificationFixtures';
 
 // --- backend-derived workflow (P28.1) -----------------------------------
 // Mirrors apps/api/isaac_api/workflow.py `derive_workflow` so detail fixtures
@@ -2304,6 +2308,7 @@ export const openApiFixture = {
  * protects a description added later.
  */
 export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: string }[] = [
+  { op: "GET /api/runtime/verification", description: "Aggregate results of three programs run over the ten public upstream ISAAC example records: official schema validation, a stricter format-aware shadow validation, and a deterministic mutation harness that deep-clones each record before mutating it.\n\nAggregate only. No record id, title, field value, evidence entry or per-record outcome appears, and every histogram is projected through a minimum-cell-size floor so a category with few occurrences is withheld rather than named.\n\nThe corpus is the public upstream example set vendored in this repository. It is **not** the production-derived corpus, and this operation does not connect to any database. That is a statement about this operation, not about the deployment: `GET /api/runtime/database/recon` does connect, from the pod.\n\nThe sweep runs off the request path. The first call returns `running`; poll until `status` is `ok`." },
   { op: "GET /api/health", description: "Liveness banner for platform and container probes: the service status, the runtime data mode, the name of the deterministic core package the app calls in process, the app version, and the build commit when the deployment supplies one (otherwise `null` — it is never guessed). This is the one operation that stays reachable without credentials when the deployment enables authentication. Read-only.\n\nIt also states whether this deployment has an application database configured, how that database is classified, whether hosted display of its per-record content is open, and the outcome of the most recent reconnaissance scan in this process. That block is derived from configuration alone: this operation never opens a database connection, issues a query, or waits on one, so a database problem can never change its result and can never fail a container probe." },
   // RE-TRANSCRIBED from `create_app().openapi()` after both descriptions were
   // corrected: the `X-Isaac-Tutorial-Session` REQUIREMENT was stated only in each
@@ -2414,20 +2419,34 @@ export const STATISTICS_ROUTE_KEYS = [
 ] as const;
 
 /**
- * The Statistics page's four page-level reads, keyed exactly as `lib/api` builds
+ * The FIFTH read, kept OUT of `STATISTICS_ROUTE_KEYS` on purpose.
+ *
+ * Record Verification reads this once on mount and refreshes it with its own
+ * Retry; the page's Refresh button deliberately does not re-issue it (see
+ * `StatisticsPage.tsx`'s header). So the mount round is these five and the
+ * Refresh round is the four above, and a single constant covering both would
+ * hide exactly that distinction.
+ */
+export const STATISTICS_VERIFICATION_ROUTE_KEY = 'GET /api/runtime/verification';
+
+/**
+ * The Statistics page's five page-level reads, keyed exactly as `lib/api` builds
  * them.
  *
  * Any source may be replaced with any `RouteEntry`, which is how a test fails ONE
- * of the four (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
- * swaps in a different graph body, without disturbing the other three.
+ * of them (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
+ * swaps in a different graph body, without disturbing the others.
  */
 export function statisticsRoutes(
-  over: Partial<Record<'records' | 'graph' | 'about' | 'openapi', RouteEntry>> = {},
+  over: Partial<
+    Record<'records' | 'graph' | 'about' | 'openapi' | 'verification', RouteEntry>
+  > = {},
 ): Record<string, RouteEntry> {
   return {
     'GET /api/runtime/records': over.records ?? { body: statisticsRecordsBody },
     'GET /api/graph/status': over.graph ?? { body: graphStatusAvailable },
     'GET /api/about': over.about ?? { body: aboutResponse },
     'GET /api/openapi': over.openapi ?? { body: openApiFixture },
+    [STATISTICS_VERIFICATION_ROUTE_KEY]: over.verification ?? { body: verificationReportOk },
   };
 }
