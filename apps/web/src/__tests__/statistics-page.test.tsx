@@ -1862,7 +1862,7 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
     const region = regionOf('Platform Metrics');
     expect(within(region).getByText('Not Connected')).toBeInTheDocument();
     expect(
-      within(region).getByText(/Platform usage metrics are not connected for this deployment/),
+      within(region).getByText(/Platform-wide record figures are not connected for this deployment/),
     ).toBeInTheDocument();
     // No digit anywhere in the section: not a total, not a zero, not a date.
     expect(textOf(region)).not.toMatch(/\d/);

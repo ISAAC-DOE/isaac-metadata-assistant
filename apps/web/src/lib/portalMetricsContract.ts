@@ -90,9 +90,22 @@ export interface PortalMetricCategoryCount {
  * A categorical breakdown.
  *
  * `withheldCategoryCount` is carried BESIDE the categories rather than folded
- * into an "Other" row, because an "Other" row with a count is itself a figure
- * and can be differenced against the total. A consumer states how many
- * categories were withheld and nothing about them.
+ * into an "Other" row, so a consumer states how many categories were withheld
+ * and nothing about them.
+ *
+ * WHAT THIS DOES NOT DO, corrected after review said the opposite. An earlier
+ * version of this comment claimed the design avoided differencing because "an
+ * 'Other' row with a count is itself a figure and can be differenced against
+ * the total". Omitting the row does not remove the total: `platform_record_total`
+ * is a declared dataset over the SAME population, so when exactly one category
+ * is withheld its count is recoverable as `total - sum(published)`. Measured:
+ * categories 900 / 95 / 1 against a total of 996 recovers the 1 exactly. And
+ * `withheldCategoryCount` itself tells an attacker how many unknowns to solve
+ * for.
+ *
+ * A floor is NOT safe against a co-published total over the same population.
+ * {@link suppressSmallCohorts} therefore does not stop at hiding one category —
+ * see the absorption rule there.
  */
 export interface PortalMetricCategories {
   categories: readonly PortalMetricCategoryCount[];
@@ -214,6 +227,28 @@ export type PortalMetricState<T> =
  * deliberately BROAD — a false positive costs a refused panel, a false negative
  * costs a disclosure — and each one's known blind spots are stated on it.
  */
+/**
+ * THE AUTHORIZATION GATE ON EVER CONNECTING THIS.
+ *
+ * Stated here because a seam with no gate on it is an invitation, and the
+ * sibling module `currentUserContract.ts` cites its own gate while this one —
+ * the module actually named after the portal — cited none.
+ *
+ * `docs/portal-identity-and-metrics-audit.md` §6 records that there is NO
+ * authorization to ingest portal metrics, and §7 that the metrics this
+ * application would want cannot be built honestly from what the portal exposes.
+ * Dean's direction is that portal usage metrics are not to be ported or reused:
+ * no request count, no username, no IP address, no personal portal activity.
+ * Nothing in this module may be wired to a portal endpoint on the strength of
+ * the types existing.
+ *
+ * `PORTAL_MIN_COHORT_SIZE = 5` DOES NOT DISCHARGE Q23. Q23 asks Dean which
+ * aggregates an ordinary signed-in user may see and what minimum aggregation
+ * threshold he wants enforced, and records that neither application has one
+ * today. Five is this module's defensive default so that the screening code has
+ * a number to test against — it is not an answer to a question only he can
+ * answer, and it must not be cited as one.
+ */
 export type PortalForbiddenCategory =
   | 'email_address'
   | 'orcid_id'
@@ -222,7 +257,11 @@ export type PortalForbiddenCategory =
   | 'per_user_request_count'
   | 'record_identifier'
   | 'record_title'
-  | 'small_cohort';
+  | 'small_cohort'
+  // A value under a count-shaped key that is not a number at all. Not a
+  // disclosure in itself — it is a shape this module does not understand, and
+  // an unparseable count must fail closed rather than pass through unscreened.
+  | 'malformed_count';
 
 export const PORTAL_FORBIDDEN_CATEGORIES: readonly PortalForbiddenCategory[] = Object.freeze([
   'email_address',
@@ -233,6 +272,7 @@ export const PORTAL_FORBIDDEN_CATEGORIES: readonly PortalForbiddenCategory[] = O
   'record_identifier',
   'record_title',
   'small_cohort',
+  'malformed_count',
 ] as const);
 
 /**
@@ -416,6 +456,58 @@ export function screenPortalPayload(value: unknown): PortalForbiddenCategory[] {
   return PORTAL_FORBIDDEN_CATEGORIES.filter((category) => found.has(category));
 }
 
+/**
+ * The five VALUE-SHAPE detectors, run over any string — whether it arrived as a
+ * value or as an object KEY.
+ *
+ * Keys were previously tested only against the four key-NAME patterns, so an
+ * identifier in key position slipped through entirely. Measured before the fix:
+ * `screenPortalPayload({'ops@example.invalid': 40})` returned `[]`. That is not
+ * an exotic shape — a breakdown keyed by an identifier is the natural JSON
+ * encoding of a categorical aggregate, which makes key position the LIKELIEST
+ * place for a leak rather than the least likely.
+ */
+function screenStringShape(text: string, found: Set<PortalForbiddenCategory>): void {
+  if (EMAIL_PATTERN.test(text)) found.add('email_address');
+  if (ORCID_PATTERN.test(text)) found.add('orcid_id');
+  if (
+    IPV4_PATTERN.test(text) ||
+    IPV6_PATTERN.test(text) ||
+    IPV6_COMPRESSED_PATTERN.test(text)
+  ) {
+    found.add('ip_address');
+  }
+  if (ULID_PATTERN.test(text)) found.add('record_identifier');
+}
+
+/**
+ * Screen a count that may not have arrived as a number.
+ *
+ * `count: number` is a compile-time annotation, not a runtime fact, and this
+ * module's whole premise is that the provider is untrusted. JSON APIs routinely
+ * stringify counts. Measured before the fix: `screenPortalPayload({count: '3'})`
+ * returned `[]` — a fail-OPEN path in the function whose contract is fail-closed.
+ * A non-numeric value under a count key is reported as `malformed` rather than
+ * ignored, because a count that is not a number is a shape this module does not
+ * understand and must not pass through.
+ */
+function screenCount(key: string, value: unknown, found: Set<PortalForbiddenCategory>): void {
+  if (!COUNT_KEY_PATTERN.test(key)) return;
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))
+        ? Number(value)
+        : null;
+  if (numeric === null) {
+    found.add('malformed_count');
+    return;
+  }
+  if (Number.isFinite(numeric) && numeric > 0 && numeric < PORTAL_MIN_COHORT_SIZE) {
+    found.add('small_cohort');
+  }
+}
+
 function walkPortalPayload(
   value: unknown,
   key: string | null,
@@ -429,32 +521,17 @@ function walkPortalPayload(
     if (USER_KEY_PATTERN.test(key)) found.add('user_identifier');
     if (RECORD_ID_KEY_PATTERN.test(key)) found.add('record_identifier');
     if (RECORD_TITLE_KEY_PATTERN.test(key)) found.add('record_title');
+    // The key is also a string, so it gets the value-shape detectors too.
+    screenStringShape(key, found);
+    if (typeof value !== 'object' || value === null) screenCount(key, value, found);
   }
 
   if (typeof value === 'string') {
-    if (EMAIL_PATTERN.test(value)) found.add('email_address');
-    if (ORCID_PATTERN.test(value)) found.add('orcid_id');
-    if (
-      IPV4_PATTERN.test(value) ||
-      IPV6_PATTERN.test(value) ||
-      IPV6_COMPRESSED_PATTERN.test(value)
-    ) {
-      found.add('ip_address');
-    }
-    if (ULID_PATTERN.test(value)) found.add('record_identifier');
+    screenStringShape(value, found);
     return;
   }
 
   if (typeof value === 'number') {
-    if (
-      key !== null &&
-      COUNT_KEY_PATTERN.test(key) &&
-      Number.isFinite(value) &&
-      value > 0 &&
-      value < PORTAL_MIN_COHORT_SIZE
-    ) {
-      found.add('small_cohort');
-    }
     return;
   }
 
@@ -514,14 +591,46 @@ export function suppressSmallCohorts(
   breakdown: PortalMetricCategories,
   minCount: number = PORTAL_MIN_COHORT_SIZE,
 ): PortalMetricCategories {
-  const kept = breakdown.categories.filter(
+  const kept = [...breakdown.categories].filter(
     (row) => row.count === 0 || row.count >= minCount,
   );
+  let withheldHere = breakdown.categories.length - kept.length;
+
+  // THE ABSORPTION RULE. One withheld category is recoverable: subtract the
+  // published categories from `platform_record_total` and the withheld count
+  // falls out, and the key universe is often enumerable so elimination names it
+  // too. While exactly one category would be withheld and a published one
+  // remains, absorb the smallest (ties broken by label, ascending, so the result
+  // does not depend on provider ordering) until at least two are withheld.
+  //
+  // A zero-count category is NOT a safe thing to absorb-around: it is kept above
+  // because it identifies nobody, but it also cannot mask anything, so it is
+  // excluded from the absorption candidates.
+  while (withheldHere === 1 && kept.some((row) => row.count > 0)) {
+    let victimIndex = -1;
+    for (let i = 0; i < kept.length; i += 1) {
+      if (kept[i].count === 0) continue;
+      if (victimIndex === -1) {
+        victimIndex = i;
+        continue;
+      }
+      const best = kept[victimIndex];
+      if (
+        kept[i].count < best.count ||
+        (kept[i].count === best.count && kept[i].label < best.label)
+      ) {
+        victimIndex = i;
+      }
+    }
+    if (victimIndex === -1) break;
+    kept.splice(victimIndex, 1);
+    withheldHere += 1;
+  }
+
   return {
     ...breakdown,
     categories: kept,
-    withheldCategoryCount:
-      breakdown.withheldCategoryCount + (breakdown.categories.length - kept.length),
+    withheldCategoryCount: breakdown.withheldCategoryCount + withheldHere,
   };
 }
 
@@ -721,7 +830,7 @@ export const PORTAL_METRICS_UNAVAILABLE_COPY: Readonly<
   Record<PortalMetricsUnavailableReason, string>
 > = Object.freeze({
   not_configured:
-    'Platform usage metrics are not connected for this deployment, so no platform-wide figure is stated here. Nothing is being hidden and no figure is zero — this application has no source to read one from.',
+    'Platform-wide record figures are not connected for this deployment, so no platform-wide figure is stated here. Nothing is being hidden and no figure is zero — this application has no source to read one from.',
   unreachable:
     'The platform metrics source could not be reached, so no platform-wide figure is stated here.',
   timed_out:

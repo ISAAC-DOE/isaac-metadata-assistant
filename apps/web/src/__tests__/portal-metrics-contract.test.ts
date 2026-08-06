@@ -4,6 +4,7 @@ import {
   PORTAL_FORBIDDEN_CATEGORIES,
   PORTAL_METRICS_TIMEOUT_MS,
   PORTAL_METRICS_UNAVAILABLE_COPY,
+  PORTAL_METRICS_UNAVAILABLE_TITLE,
   PORTAL_METRICS_UNAVAILABLE_REASONS,
   PORTAL_METRIC_VIEWS,
   PORTAL_MIN_COHORT_SIZE,
@@ -270,6 +271,12 @@ const EXPECTED_BY_CASE: Record<LeakyCase, PortalForbiddenCategory[]> = {
   record_identifier_value: ['record_identifier'],
   record_title: ['record_title'],
   small_cohort: ['small_cohort'],
+  email_address_in_key: ['email_address'],
+  record_identifier_in_key: ['record_identifier'],
+  ip_address_in_key: ['ip_address'],
+  email_address_in_nested_key: ['email_address'],
+  small_cohort_stringified: ['small_cohort'],
+  malformed_count: ['malformed_count'],
 };
 
 describe('forbidden disclosures — each category is detected', () => {
@@ -480,9 +487,15 @@ describe('a screened payload is refused WHOLE, not edited', () => {
 
 describe('small-cohort suppression', () => {
   it('drops categories below the floor, keeps zeros, and counts what it dropped', () => {
+    // UPDATED with the review fix. This fixture leaves exactly ONE category
+    // below the floor, which is the recoverable case: subtracting the published
+    // categories from the co-published total yields the withheld count exactly.
+    // `big` is therefore absorbed as well, so two categories are withheld.
+    // `none` (count 0) is kept — it identifies nobody — and is not an
+    // absorption candidate, since a zero cannot mask anything.
     const suppressed = suppressSmallCohorts(fixtureSmallCohortBreakdown);
-    expect(suppressed.categories.map((c) => c.key)).toEqual(['big', 'none']);
-    expect(suppressed.withheldCategoryCount).toBe(1);
+    expect(suppressed.categories.map((c) => c.key)).toEqual(['none']);
+    expect(suppressed.withheldCategoryCount).toBe(2);
   });
 
   it('a suppressed breakdown then passes screening — the two agree on the floor', () => {
@@ -494,7 +507,10 @@ describe('small-cohort suppression', () => {
     const twice = suppressSmallCohorts(
       suppressSmallCohorts({ ...fixtureSmallCohortBreakdown, withheldCategoryCount: 3 }),
     );
-    expect(twice.withheldCategoryCount).toBe(4);
+    // 3 pre-existing + 2 withheld here (one below the floor, plus the absorbed
+    // cell the review fix requires). Idempotent on the second pass: nothing is
+    // left below the floor, so no further absorption is triggered.
+    expect(twice.withheldCategoryCount).toBe(5);
   });
 });
 
@@ -537,5 +553,143 @@ describe('the planned views', () => {
       expect(view.description).not.toMatch(/\d/);
       expect(view.description).not.toMatch(/\buser|\bvisit|\brequest|\bsession|\bperson/i);
     }
+  });
+});
+
+/* =========================================================================
+ * REVIEW FIXES — five Important findings from the independent review.
+ * Each block below fails against the code as it stood before the fix.
+ * ========================================================================= */
+
+describe('review fix 1 — the unavailable copy names no metric category that does not exist', () => {
+  it('never calls these "usage", "traffic", "visit", "request" or "session" metrics', () => {
+    // None of the six datasets is a usage metric — this file says so itself:
+    // "None is a count over people, sessions, requests or visits". The copy
+    // previously read "Platform usage metrics are not connected", which told a
+    // reader that usage metrics exist and merely await connection, directly
+    // above a section stating no such figure exists in this application.
+    const strings = [
+      ...Object.values(PORTAL_METRICS_UNAVAILABLE_COPY),
+      PORTAL_METRICS_UNAVAILABLE_TITLE,
+    ];
+    for (const text of strings) {
+      expect(text).not.toMatch(/\b(usage|traffic|visits?|requests?|sessions?)\b/i);
+    }
+  });
+});
+
+describe('review fix 2 — value-shape detectors run over object KEYS', () => {
+  it('catches an identifier in key position', () => {
+    // A breakdown keyed by an identifier is the natural JSON encoding of a
+    // categorical aggregate, so key position is the LIKELIEST leak, not the
+    // least likely. All four of these returned [] before the fix.
+    expect(screenPortalPayload({ 'ops@example.invalid': 40 })).toContain('email_address');
+    expect(screenPortalPayload({ '01ARZ3NDEKTSV4RRFFQ69G5FAV': 40 })).toContain(
+      'record_identifier',
+    );
+    expect(screenPortalPayload({ '2001:db8::1': 40 })).toContain('ip_address');
+    expect(screenPortalPayload({ by_domain: { 'ops@example.invalid': 40 } })).toContain(
+      'email_address',
+    );
+  });
+
+  it('still catches the same shapes in value position', () => {
+    // The fix must not have moved the check rather than widening it.
+    expect(screenPortalPayload({ owner: 'ops@example.invalid' })).toContain('email_address');
+    expect(screenPortalPayload({ host: '2001:db8::1' })).toContain('ip_address');
+  });
+
+  it('does not fire on an ordinary category label', () => {
+    expect(screenPortalPayload({ characterization: 40, simulation: 12 })).toEqual([]);
+  });
+});
+
+describe('review fix 3 — a count that did not arrive as a number', () => {
+  it('screens a stringified count against the floor', () => {
+    // `count: number` is a compile-time cast, not a runtime fact, and this
+    // module's premise is an untrusted provider. Returned [] before the fix.
+    expect(screenPortalPayload({ count: '3' })).toContain('small_cohort');
+    expect(
+      screenPortalPayload({ categories: [{ key: 'a', label: 'A', count: '1' }] }),
+    ).toContain('small_cohort');
+  });
+
+  it('accepts a stringified count that clears the floor', () => {
+    expect(screenPortalPayload({ count: '40' })).toEqual([]);
+  });
+
+  it('reports a non-numeric count as malformed rather than ignoring it', () => {
+    expect(screenPortalPayload({ count: 'many' })).toContain('malformed_count');
+    expect(screenPortalPayload({ count: null })).toContain('malformed_count');
+  });
+});
+
+describe('review fix 4 — one withheld category is recoverable by differencing', () => {
+  const breakdown = (rows: readonly { label: string; count: number }[]) => ({
+    categories: rows.map((r) => ({ key: r.label.toLowerCase(), label: r.label, count: r.count })),
+    unitLabel: 'records',
+    withheldCategoryCount: 0,
+  });
+
+  it('absorbs the smallest published cell rather than withholding exactly one', () => {
+    // THE MEASURED CASE from the review: 900 / 95 / 1 against a declared total
+    // of 996 recovers the 1 exactly. After the fix, two categories are withheld
+    // so the subtraction yields 96 shared between two unknowns.
+    const out = suppressSmallCohorts(
+      breakdown([
+        { label: 'X', count: 900 },
+        { label: 'Y', count: 95 },
+        { label: 'Z', count: 1 },
+      ]),
+    );
+    expect(out.withheldCategoryCount).toBe(2);
+    expect(out.categories.map((c) => c.label)).toEqual(['X']);
+  });
+
+  it('never withholds exactly one category, over generated breakdowns', () => {
+    // The invariant, not just the one case.
+    let checked = 0;
+    for (let seed = 0; seed < 400; seed += 1) {
+      const size = (seed % 6) + 1;
+      const rows = Array.from({ length: size }, (_, i) => ({
+        label: `L${i}`,
+        count: (seed * 7 + i * 13) % 12,
+      }));
+      const out = suppressSmallCohorts(breakdown(rows));
+      expect(out.withheldCategoryCount).not.toBe(1);
+      checked += 1;
+    }
+    expect(checked).toBe(400);
+  });
+
+  it('withholds nothing when every category clears the floor', () => {
+    const out = suppressSmallCohorts(
+      breakdown([
+        { label: 'X', count: 900 },
+        { label: 'Y', count: 95 },
+      ]),
+    );
+    expect(out.withheldCategoryCount).toBe(0);
+    expect(out.categories).toHaveLength(2);
+  });
+
+  it('is deterministic when two absorption candidates tie', () => {
+    const rows = [
+      { label: 'B', count: 7 },
+      { label: 'A', count: 7 },
+      { label: 'Z', count: 2 },
+    ];
+    const first = suppressSmallCohorts(breakdown(rows));
+    const second = suppressSmallCohorts(breakdown([...rows].reverse()));
+    expect(first.categories.map((c) => c.label)).toEqual(second.categories.map((c) => c.label));
+  });
+});
+
+describe('review fix 5 — the module states its authorization gate', () => {
+  it('names Q23 and does not present the floor as answering it', () => {
+    // A seam with no gate on it is an invitation. The sibling identity module
+    // cites its gate; this one cited none while silently pre-answering Q23.
+    expect(PORTAL_MIN_COHORT_SIZE).toBe(5);
+    expect(PORTAL_METRICS_UNAVAILABLE_TITLE).toBe('Not Connected');
   });
 });

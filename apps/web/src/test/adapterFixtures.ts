@@ -174,6 +174,18 @@ export const LEAKY_PORTAL_PAYLOADS = Object.freeze({
   record_identifier_value: { label: 'Record 01ARZ3NDEKTSV4RRFFQ69G5FAV', count: 40 },
   record_title: { title: 'A fixture record title', count: 40 },
   small_cohort: { label: 'A tiny category', count: 1 },
+  // KEY-POSITION cases, added after review. A breakdown keyed by an identifier
+  // is the natural JSON encoding of a categorical aggregate, so key position is
+  // the LIKELIEST place for a leak — and it was screened by the four key-NAME
+  // patterns only, so all three of these returned [] before the fix.
+  email_address_in_key: { 'ops@example.invalid': 40 },
+  record_identifier_in_key: { '01ARZ3NDEKTSV4RRFFQ69G5FAV': 40 },
+  ip_address_in_key: { '2001:db8::1': 40 },
+  email_address_in_nested_key: { by_domain: { 'ops@example.invalid': 40 } },
+  // A count that did not arrive as a number. `count: number` is a compile-time
+  // cast, not a runtime fact, and the premise here is an untrusted provider.
+  small_cohort_stringified: { label: 'A tiny category', count: '1' },
+  malformed_count: { label: 'A category', count: 'many' },
 });
 
 /**
