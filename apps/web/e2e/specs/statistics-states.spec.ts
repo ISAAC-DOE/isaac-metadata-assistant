@@ -6,20 +6,29 @@
  *
  * ── What this file is for ───────────────────────────────────────────────────
  *
- * `src/screens/statistics/__tests__/*` drives these states in jsdom, where no
- * layout exists and nothing can be looked at. `specs/visual-sweep.spec.ts`
- * photographs the app's screens but reaches Record Verification only in its one
- * happy state. Nothing anywhere put the section's FAILURE, STALE, REFRESHING and
- * REFRESH-FAILED states in front of a real layout engine at 320px, which is
- * precisely where a panel of long JSON-pointer schema paths and a grouped bar
- * chart are most likely to come apart.
+ * `src/__tests__/record-verification.test.tsx` drives these states in jsdom,
+ * where no layout exists and nothing can be looked at. Nothing anywhere put the
+ * section's FAILURE, STALE, REFRESHING and REFRESH-FAILED states in front of a
+ * real layout engine at 320px, which is precisely where a panel of long
+ * JSON-pointer schema paths and a grouped bar chart are most likely to come
+ * apart.
+ *
+ * A NOTE ON THE CROSS-REFERENCES BELOW. This file was written on a local
+ * integration branch where five PRs were merged together, and its production
+ * home is PR #63, which owns `RecordVerification.tsx`. Two neighbours it cites —
+ * `specs/visual-sweep.spec.ts` and the 1440 entry in `specs/layout-widths.spec.ts`
+ * — belong to the visual-sweep work and are NOT on this branch. The citations are
+ * kept because they are accurate about where that reasoning is written down, and
+ * flagged here because a reference that resolves to nothing is worse than one
+ * that is explained. Nothing in this file DEPENDS on either: it never reads
+ * `layout-baseline.ts`, so sweeping 1440 needs no baseline entry from them.
  *
  * IT IS NOT A PIXEL BASELINE. `toHaveScreenshot` is not used and no PNG is
- * committed — same three reasons `visual-sweep.spec.ts` gives at length (no
- * webfont, so macOS and `ubuntu-latest` disagree permanently; CLAUDE.md §9
- * forbids committing derived artifacts; and a pixel diff answers "did anything
- * change?", which is not the question). The assertions answer what has an
- * objective answer; the images are for what does not.
+ * committed, for three reasons: there is no webfont, so macOS and
+ * `ubuntu-latest` disagree permanently; CLAUDE.md §9 forbids committing derived
+ * artifacts; and a pixel diff answers "did anything change?", which is not the
+ * question. The assertions answer what has an objective answer; the images are
+ * for what does not.
  *
  * ── THE HONESTY RULE, WHICH IS THE POINT OF THIS FILE ───────────────────────
  *
@@ -88,13 +97,24 @@
  * nothing here reads, writes or touches the shared session the other projects
  * are measuring.
  *
- * ── Read-only, and nothing is polled ───────────────────────────────────────
+ * ── Read-only, and nothing is polled — WHAT IS AND IS NOT ENFORCED ─────────
  *
  * `GET /api/runtime/verification` is the only backend call this file causes on
- * purpose, it is a read, and the section itself never polls (one read on mount,
- * one more per press — `RecordVerification.tsx`'s header). Every mutation of
- * behaviour here is a `page.route` inside the browser: the intercepted requests
- * never leave the page.
+ * purpose, and it is a read. Every mutation of behaviour here is a `page.route`
+ * inside the browser: the intercepted requests never leave the page.
+ *
+ * The section itself does not poll — one read on mount, one more per press
+ * (`RecordVerification.tsx`'s `useVerificationReport`, which holds a single
+ * effect per `attempt` with an `alive` flag and a cleanup). But read that as a
+ * statement about the product TODAY, not as something this file holds in place.
+ * An independent review added a real uncleaned `setInterval` re-reading the
+ * endpoint every 700ms and ALL ELEVEN TESTS STILL PASSED; the whole-test request
+ * total moved from 1939 to 1965 and nothing looked at it. The network guard
+ * below allowlists ORIGINS, so any number of same-origin API calls is permitted.
+ *
+ * An earlier version of this paragraph asserted the no-polling property flatly,
+ * which read as a guarantee this suite provides. It does not, and the honest
+ * form is that the guard would not notice.
  */
 
 import { API_BASE, BASE_URL } from '../env';
@@ -216,6 +236,50 @@ const PRIVATE_SAMPLE_SHAPE = {
     records_failing: 9,
     failures_by_schema_path: LONG_PATH_HISTOGRAM,
   },
+  /**
+   * THE TWO DATABASE SAFEGUARDS ARE OVERRIDDEN TO `not_applicable`, AND THIS IS
+   * THE MOST IMPORTANT LINE IN THE FILE.
+   *
+   * `verificationReportPrivateSample` sets both to `'verified'` — reasonably,
+   * for a unit test that needs to prove the affirmative rendering exists. But
+   * this spec does something a unit test does not: it PHOTOGRAPHS the result and
+   * attaches the image as evidence. An independent review caught what that
+   * combination produced. The captured element read:
+   *
+   *     Records Evaluated  30
+   *     Read-Only Database Access       Verified
+   *     Parameterized Database Queries  Verified
+   *
+   * in the affirmative tone — a green picture of a completed read-only pass over
+   * 30 private production records. **No private record has ever been evaluated
+   * and no database connection has ever been opened.** The only disclaimer was
+   * the Playwright attachment NAME, and the attachment name does not travel with
+   * the file: on disk it is `playwright-report/data/<sha1>.png`, which CI
+   * uploads as an artifact. The caption stays in the report; the image walks
+   * away on its own.
+   *
+   * That is a false record of a measurement — the exact defect class this file's
+   * own header is written to prevent, produced by the file itself.
+   *
+   * `not_applicable` is not a weaker claim than `verified`; it is the TRUE one.
+   * `verificationContract.ts:182-196` calls keeping these three states distinct
+   * "the single most consequential rule in this module", and renders a distinct
+   * reason for `not_applicable`: this run opened no connection, so there was no
+   * transaction to keep read-only and no query to parameterize. That sentence is
+   * exactly right about the authorized-but-unexecuted private mode, so the fix
+   * makes the capture MORE faithful to the product, not less.
+   *
+   * The record counts are deliberately left alone. They are what makes the
+   * disclosure render at all, the state exists to prove the section names this
+   * corpus without borrowing the public one's label, and the burnt-in provenance
+   * stamp (see `stampProvenance`) now says on the image itself that every figure
+   * in it was fabricated.
+   */
+  safeguards: {
+    ...verificationReportPrivateSample.safeguards,
+    transaction_read_only: 'not_applicable',
+    parameterized_queries_only: 'not_applicable',
+  },
 };
 
 /** A synthetic PUBLIC-mode report aged past the backend's 3600s cache lifetime. */
@@ -238,6 +302,87 @@ const PRIVATE_LABEL = VERIFICATION_MODE_LABELS.authorized_private_sample;
 /** The section `StatsSection` renders for Record Verification. */
 const section = (page: Page): Locator =>
   page.locator('section[aria-labelledby="stats-verification"]');
+
+/**
+ * What each classifier says, in words, when it is burnt into the image.
+ *
+ * Short enough to survive 320px, and phrased so the reader needs no key: the
+ * word "FABRICATED" does not require knowing what `synthetic-fixture` means.
+ */
+const STAMP_TEXT: Record<(typeof PROVENANCE_CLASSIFIERS)[number], string> = {
+  'real-public-reference': '',
+  'synthetic-fixture': 'SYNTHETIC — every figure below is FABRICATED. No run produced it.',
+  'intercepted-error': 'SYNTHETIC — failure injected by the test. No real failure occurred.',
+  'unavailable-state': 'TEST CAPTURE — nothing is claimed here; the product has nothing to state yet.',
+};
+
+/**
+ * Burn the provenance into the captured pixels, and return a handle that removes it.
+ *
+ * WHY THIS EXISTS, since a reviewer will otherwise reasonably ask why the test
+ * injects DOM into the product it is measuring. Every assertion in this file has
+ * already run by the time this is called, so the stamp cannot influence a single
+ * one — and it is removed immediately after `screenshot()`, before the next state.
+ *
+ * The file previously carried its provenance ONLY in the `testInfo.attach` name.
+ * That is a real disclosure inside the HTML report, and it is worth nothing once
+ * the image leaves it: Playwright writes attachments to
+ * `playwright-report/data/<sha1>.png`, whose filename contains neither the state
+ * id nor the classifier, and CI uploads that whole directory as an artifact. An
+ * independent review found the consequence — a green, affirmative capture of a
+ * completed private database run over 30 production records, with the read-only
+ * transaction check reading "Verified", when no private record has ever been
+ * evaluated and no database connection has ever been opened. A screenshot pasted
+ * into a slide deck or a mentor e-mail carries its pixels and nothing else.
+ *
+ * `real-public-reference` is stamped with NOTHING, on purpose. Those figures were
+ * produced by the real backend's real run over the ten public upstream records,
+ * so a "synthetic" banner would be its own false statement — and stamping every
+ * image identically would make the stamp meaningless, which is how a disclaimer
+ * becomes decoration.
+ */
+async function stampProvenance(target: Locator, stateId: string): Promise<() => Promise<void>> {
+  const classifier = PROVENANCE_CLASSIFIERS.find((c) => stateId.endsWith(c));
+  const text = classifier ? STAMP_TEXT[classifier] : '';
+  // An UNCLASSIFIED id is stamped as unattributable rather than left bare: the
+  // partition test would fail for it anyway, but it runs in a SEPARATE test, so
+  // without this the width sweep would still have attached a clean-looking image
+  // first. Never leave the strongest-looking artifact as the unlabelled one.
+  const banner = text || (classifier ? '' : 'UNATTRIBUTED CAPTURE — provenance unknown.');
+  if (!banner) return async () => undefined;
+
+  await target.evaluate((el, msg) => {
+    const node = el.ownerDocument.createElement('div');
+    node.setAttribute('data-e2e-provenance-stamp', '');
+    node.textContent = msg;
+    node.style.cssText = [
+      'background:#7f1d1d',
+      'color:#fff',
+      'font:700 12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace',
+      'padding:6px 8px',
+      'margin:0 0 8px',
+      'border-radius:4px',
+      'text-align:left',
+      'letter-spacing:.02em',
+      // The stamp must never be the thing that is clipped away.
+      'position:relative',
+      'z-index:2147483647',
+      'white-space:normal',
+      'overflow-wrap:anywhere',
+    ].join(';');
+    el.prepend(node);
+  }, banner);
+
+  // Removed through the same element handle, so a state whose route teardown has
+  // already run cannot leave the stamp behind for the next capture.
+  return async () => {
+    await target
+      .evaluate((el) => {
+        el.querySelectorAll('[data-e2e-provenance-stamp]').forEach((n) => n.remove());
+      })
+      .catch(() => undefined);
+  };
+}
 
 /** A bare navigation — no injected stylesheet. See the header. */
 async function open(page: Page, path: string): Promise<void> {
@@ -785,10 +930,23 @@ const STATES: readonly VerificationState[] = [
       await expect(panel.locator('figure.stats-chart')).toHaveCount(0);
       await expect(panel.locator('.stats-cards')).toHaveCount(0);
       /*
-       * `MyStats` issues NO request at all — asserted in `MyStats.tsx`'s own
-       * header as rule 2. The whole-test request log below is what proves it,
-       * and it is proved here rather than trusted because a relabelled workspace
-       * count is the cheapest possible false personal claim.
+       * `MyStats` issues no request at all — stated in `MyStats.tsx`'s own
+       * header as rule 2, and TRUSTED HERE RATHER THAN PROVED.
+       *
+       * The previous sentence claimed "the whole-test request log below is what
+       * proves it". It does not, and an independent review demonstrated the gap
+       * by making `MyStats` fetch `/api/runtime/records` on mount: all eleven
+       * tests still passed. The log allowlists ORIGINS (Vite and the API), so a
+       * same-origin request is invisible to it — including, as the review also
+       * showed, a hypothetical `127.0.0.1/api/portal/metrics`, which the
+       * portal-telemetry check cannot see either because that check matches
+       * HOSTNAMES.
+       *
+       * What IS enforced here is structural: `.stats-cards` and
+       * `figure.stats-chart` must not appear inside the personal panel, which
+       * catches corpus figures arriving in the shapes they are actually drawn
+       * in. A relabelled workspace count in a bare paragraph would still pass —
+       * so this is a real guard with a known edge, not a proof.
        */
       return panel;
     },
@@ -974,6 +1132,24 @@ async function reportAssertions(
   const s = section(page);
 
   // ── the corpus labels are never interchangeable ───────────────────────────
+  // THE LABEL CHECK AND THE TOKEN CHECK ARE NOT EQUALLY STRONG, and reading
+  // them as one guard overstates this file.
+  //
+  // `PUBLIC_LABEL`/`PRIVATE_LABEL` are imported from `verificationContract` —
+  // the module under test. Comparing the DOM against them proves the two labels
+  // are DIFFERENT FROM EACH OTHER and that the right one of the pair is on
+  // screen. It cannot prove either is TRUE. An independent review rewrote the
+  // private label to "Completed live run over the 30 private production
+  // records" and all eleven tests here passed. (Vitest
+  // `src/__tests__/record-verification.test.tsx` does catch that — 4 failures —
+  // so the property is covered; it is just not covered HERE, and this file used
+  // to imply otherwise.)
+  //
+  // The WIRE TOKENS below are a different matter: 'authorized_private_sample'
+  // and 'public_reference' are hardcoded literals in this file, owned by nobody
+  // else, so that comparison is genuinely independent of the module it tests. It
+  // is the stronger of the two, which is why the token is asserted verbatim
+  // beside the label rather than instead of it.
   const sectionText = await s.innerText();
   const wantLabel = state.corpus === 'private' ? PRIVATE_LABEL : PUBLIC_LABEL;
   const otherLabel = state.corpus === 'private' ? PUBLIC_LABEL : PRIVATE_LABEL;
@@ -984,6 +1160,36 @@ async function reportAssertions(
     push(`the OTHER corpus's label "${otherLabel}" appears while reporting the ${state.corpus} corpus`);
   }
   if (!sectionText.includes(wantToken)) push(`the wire token "${wantToken}" is not rendered verbatim`);
+
+  // ── no private capture may show a DATABASE safeguard as "Verified" ────────
+  //
+  // The one assertion in this file that is about the world rather than about
+  // the DOM. No private record has ever been evaluated and no database
+  // connection has ever been opened, so a capture of the private corpus stating
+  // that a read-only transaction or a parameterized query was VERIFIED is a
+  // false record of a measurement — the defect an independent review found here,
+  // where the fixture said `verified` and the sweep photographed it.
+  //
+  // It reads the RENDERED WORDS, not the fixture: a body that reintroduces
+  // `'verified'`, or a product change that folded `not_applicable` into it (the
+  // collapse `verificationContract.ts:182-196` exists to prevent), both fail.
+  // Deliberately NOT symmetrical — the public corpus really does run, and this
+  // says nothing about it.
+  if (state.corpus === 'private') {
+    for (const label of ['Read-Only Database Access', 'Parameterized Database Queries']) {
+      const row = s.locator('.stats-verify-safeguard', { hasText: label });
+      if ((await row.count()) === 0) continue;
+      const rowText = await row.first().innerText();
+      if (/\bVerified\b/.test(rowText)) {
+        push(
+          `the private-corpus capture states "${label}" as Verified. No private run has ` +
+            `occurred and no database connection has ever been opened, so this image would ` +
+            `be a false record of a measurement`
+        );
+      }
+    }
+  }
+
   if (sectionText.includes(otherToken)) {
     push(`the OTHER corpus's wire token "${otherToken}" appears while reporting the ${state.corpus} corpus`);
   }
@@ -1273,7 +1479,12 @@ test.describe('statistics · record verification runtime states', () => {
 
           // ── the artifact ──────────────────────────────────────────────────
           await target.scrollIntoViewIfNeeded().catch(() => undefined);
+          // The provenance goes into the PIXELS, not just the attachment name.
+          // See `stampProvenance`: the name stays behind in the HTML report and
+          // the image does not.
+          const unstamp = await stampProvenance(target, state.id);
           const shot = await target.screenshot({ animations: 'disabled' });
+          await unstamp();
           const suffix = notes.length ? ` [${notes.join('; ')}]` : '';
           await testInfo.attach(`${width}px · ${state.id} — ${state.what}${suffix}`, {
             body: shot,
