@@ -1058,9 +1058,11 @@ def scan_for_leaks(
     IT MATCHES AGAINST DECODED LEAVES AS WELL AS THE SERIALIZED TEXT
     ===============================================================
     This is a correction of a real defect, recorded rather than silently
-    replaced, and it is the SAME defect that
-    :func:`verification._private_values_unexposed` documents — fixed there, and
-    for a while still live here.
+    replaced, and it is the SAME defect that ``verification._leak_scan``
+    documents (with ``verification._string_leaves`` as its decoded-leaf walker)
+    — fixed there, and for a while still live here. That module is NOT on
+    ``main``: it arrives with ``feat/record-verification`` (PR #63), so until
+    that merges the citation resolves only on that branch.
 
     Both call sites in ``routes.py`` pass ``json.dumps(payload,
     ensure_ascii=True)``. That escapes any non-ASCII character to ``\\uXXXX``,
@@ -1078,9 +1080,10 @@ def scan_for_leaks(
 
     Scanning the decoded leaves removes the encoding step, so there is no
     representation for an escape to hide in. The serialized ``text`` is still
-    scanned as well — it is the only form in which a value SPLIT across
-    structure would appear contiguously — so this strictly widens detection and
-    can never narrow it.
+    scanned as well, so this strictly widens detection and can never narrow it.
+    ``text`` is NOT, however, general coverage for a value split across
+    structure: it catches such a value only when the value itself happens to
+    span the JSON separator. See residual 4.
 
     ``leaves`` IS REQUIRED, WITH NO DEFAULT, ON PURPOSE. A default of ``()``
     would keep every existing call compiling while silently restoring exactly
@@ -1096,6 +1099,13 @@ def scan_for_leaks(
        is not caught by a substring scan.
     3. Only string leaves and the serialized text are compared. A secret that
        reached the payload as a NUMBER would be caught only via ``text``.
+    4. A value SPLIT across two adjacent leaves is not detected. Measured:
+       ``PGPASSWORD="supersecretpassword"`` against
+       ``{"a": ["supersecret", "password"]}`` is MISSED by both haystacks —
+       ``text`` catches a split value only when the value itself spans the
+       JSON separator (``", "``). This residual was omitted from the first
+       version of this list, which is precisely how a known-limitations list
+       becomes a false assurance.
     """
     issues: list[str] = []
     haystacks: tuple[str, ...] = (text, *leaves)
