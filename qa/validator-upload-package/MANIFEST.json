@@ -19,7 +19,7 @@
   },
   "validator_invocation": {
     "command": ".venv/bin/python -c \"import json,sys; from pathlib import Path; from isaac_records.official import validate_official; rec=json.loads(Path(sys.argv[1]).read_text()); r=validate_official(rec, Path('.')); print('OK' if r.ok else 'FAIL'); print(r.render())\" <file>",
-    "note": "validate_official(record: dict, root: Path) -> OfficialReport, called with root = the repository root, exactly as the API route calls it. Run from /Users/krishverma/Documents/ISAAC. This is the same function POST /api/validate/record invokes, so the verdicts agree by construction."
+    "note": "validate_official(record: dict, root: Path) -> OfficialReport, called with root = the repository root, exactly as the API route calls it. Run it from the root of a checkout of this repository, i.e. the directory that contains schema/isaac_record_v1.json. This is the same function POST /api/validate/record invokes, so the verdicts agree by construction."
   },
   "http_contract": {
     "200": "The body parsed as a JSON object. The response carries ok true or false plus the {path, message} error list. An invalid record is a 200 with ok false, NOT an error status.",
@@ -350,7 +350,7 @@
     {
       "id": 13,
       "filename": "unicode-and-escaping.json",
-      "bytes": 5822,
+      "bytes": 5809,
       "purpose": "VALID record carrying accented Latin, CJK, an emoji, embedded double quotes, backslashes, escaped newlines and tabs, guillemets, en/em dashes, a numero sign and a check mark, across free-text fields (material name and notes, series notes, QC evidence, descriptor definition, a configuration string, and tags).",
       "schema_paths_exercised": [
         "/properties/sample/properties/material/properties/notes",
@@ -423,8 +423,8 @@
     {
       "id": 16,
       "filename": "unsupported-file.txt",
-      "bytes": 304,
-      "purpose": "Not JSON at all: a plain-text page of run notes.",
+      "bytes": 507,
+      "purpose": "Not JSON at all: a plain-text page of illustrative run notes, which like every other file here states in its own text that it is constructed by hand and carries no measurement provenance.",
       "schema_paths_exercised": [],
       "intended_outcome": "not-parseable",
       "measured_validator_result": {
