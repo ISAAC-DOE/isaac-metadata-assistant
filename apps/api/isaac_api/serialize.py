@@ -20,6 +20,8 @@ from isaac_records.export import ExportResult, get_path
 from isaac_records.official import OfficialReport
 from isaac_records.portal_warnings import PortalWarningReport
 
+from . import inferability
+
 # --- report serializers -------------------------------------------------------
 
 
@@ -164,9 +166,39 @@ def draft_to_groups(draft: dict) -> dict:
 
 _DEMO_LABEL = "Example answer"
 
+#: Provenance carried BY the example answer itself, so a reader (and a test) can
+#: check what it is without inferring it from a label. Every claim here is
+#: machine-checkable and every one of them is a limitation.
+EXAMPLE_ANSWER_PROVENANCE: dict = {
+    "source": "tutorial_example_fixture",
+    "is_evidence_for_this_record": False,
+    "auto_applied": False,
+    "requires_user_confirmation": True,
+}
 
-def _demo_answer_for(entry: dict, demo_answers: dict):
-    """Return the labeled demo suggestion for a blocker, or None. Never auto-applied."""
+
+def _demo_answer_for(entry: dict, demo_answers: dict, *, example_scope: bool):
+    """The labeled example answer for a blocker, or None. Never auto-applied.
+
+    SCOPE IS ENFORCED HERE, and it did not used to be. The endpoint documentation
+    has always promised this value "for the built-in examples only", but only the
+    ``asset`` branch was incidentally scoped (it keys on the blocker's own URI
+    against the fixture's URI map, so a foreign URI missed). The ``series`` and
+    ``descriptor`` branches read the fixture unconditionally and returned it for
+    ANY record — a fabricated 7-point spectrum and a fabricated descriptor value
+    with an uncertainty, offered as the answer to a scientific question about a
+    record they have nothing to do with. That is precisely what CLAUDE.md §5
+    forbids ("Never invent or guess: scientific values, units, ... descriptor
+    values, uncertainty values"), and the promise in the docstring made it worse
+    by asserting a boundary the code did not have.
+
+    ``example_scope`` is now required and defaults, at every caller, to False —
+    fail-closed, so a caller that forgets it withholds the example rather than
+    leaking it. The example content remains available on the five canonical
+    walkthrough records, which is what it was authored for.
+    """
+    if not example_scope:
+        return None
     kind = entry.get("kind")
     if kind == "asset":
         value = (demo_answers.get("asset_sha256") or {}).get(entry.get("uri"))
@@ -178,7 +210,7 @@ def _demo_answer_for(entry: dict, demo_answers: dict):
         value = None
     if value is None:
         return None
-    return {"value": value, "label": _DEMO_LABEL}
+    return {"value": value, "label": _DEMO_LABEL, "provenance": dict(EXAMPLE_ANSWER_PROVENANCE)}
 
 
 def blocker_id(entry: dict) -> str:
@@ -193,16 +225,48 @@ def _blocker_about(entry: dict):
     return entry.get("uri") or entry.get("blocker")
 
 
-def pending_to_list(draft: dict, demo_answers: dict) -> dict:
+def pending_to_list(draft: dict, demo_answers: dict, *, example_scope: bool = False) -> dict:
+    """The open blocking questions, each with its explicit inferability decision.
+
+    ``example_scope`` gates the walkthrough example answer (see
+    :func:`_demo_answer_for`) and DEFAULTS TO FALSE so the leak-safe behaviour is
+    the one you get by forgetting.
+
+    Two channels, deliberately kept apart:
+
+    * ``inferability`` — can ISAAC determine this value from the record's own
+      evidence? For every blocker kind the honest answer is no, and the state says
+      which flavour of no. It carries no value: ``Inferability.__post_init__``
+      refuses one for any state but ``supported_suggestion``, and
+      ``blocker_inferability`` cannot return that state at all.
+    * ``demo_answer`` — is there illustrative walkthrough content the user may
+      click? Example-scope only, provenance-carrying, never auto-applied.
+
+    They cannot contradict each other because the second one's existence is fed
+    INTO the first (``example_available``), so the refusal is written knowing the
+    example is on screen and says so in the same sentence.
+
+    NOT served here: the rule set's per-field decisions (``inferability.infer_all``).
+    An earlier revision added them as an ``inferences`` block on this response, and
+    they reached three endpoints with no consumer anywhere in the client — an
+    unread payload that shipped concrete values and bypassed the client's own
+    re-check, which only ever ran over ``item.inferability``. ``infer_all``
+    remains available to a caller that has a use for it; serving it by default was
+    speculative surface, so it is gone rather than guarded.
+    """
     pending = []
     for entry in draft.get("pending") or []:
+        demo = _demo_answer_for(entry, demo_answers, example_scope=example_scope)
         pending.append(
             {
                 "id": blocker_id(entry),
                 "kind": entry.get("kind"),
                 "question": entry.get("question"),
                 "about": _blocker_about(entry),
-                "demo_answer": _demo_answer_for(entry, demo_answers),
+                "demo_answer": demo,
+                "inferability": inferability.blocker_inferability(
+                    entry, example_available=demo is not None
+                ).to_dict(),
             }
         )
     return {"pending": pending}

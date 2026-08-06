@@ -26,6 +26,7 @@ import type {
   ExperimentTrailing,
   FieldEvidence,
   FieldGroupData,
+  Inferability,
   PendingBlocker,
   QueueGroup,
   QueueGroupKey,
@@ -34,9 +35,16 @@ import type {
   ValidationResult,
 } from './types';
 
-// The MVP is a single characterization path; the row tag is a display label, not
-// a server field. (The list endpoint carries no technique — it is Cu K-edge XANES.)
-const TECHNIQUE = 'Cu K-edge XANES';
+// REMOVED: `const TECHNIQUE = 'Cu K-edge XANES'`, which every adapted row carried
+// as `technique`. It was a scientific value invented in the client — the list
+// endpoint carries no technique field, so nothing in any response supported it —
+// and its own comment said so ("a display label, not a server field") as though
+// that made it safe. It did not: `technique` is a real, schema-governed scientific
+// property (`system.technique`, an enum), and a hard-coded one would have been
+// wrong for any record that was not Cu K-edge XANES with no signal that it was
+// fabricated. It was never rendered, which is luck, not design — it sat one JSX
+// line away from the queue row. `technique` is now optional and simply absent:
+// the honest representation of a value the server does not send.
 
 const STATUS_TO_GROUP: Record<ApiExperimentStatus, QueueGroupKey> = {
   needs_attention: 'needsAttention',
@@ -95,7 +103,6 @@ export function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary 
     // same seed spec that builds the title. Nothing here parses a title to recover
     // it, and a missing/null value stays undefined so the row renders nothing.
     scenario: s.scenario ?? undefined,
-    technique: TECHNIQUE,
     idOrDraft: s.exported && s.record_id ? s.record_id : 'draft',
     meta: s.created_utc ? `created ${s.created_utc.slice(0, 10)}` : undefined,
     lifecycle: s.exported ? 'exported' : 'draft',
@@ -214,9 +221,22 @@ const KIND_LABEL: Record<string, string> = {
 
 // Sentence-case helper copy (never a scientific value) explaining each blocker
 // and reinforcing the no-guessing contract.
+// TWO variants per structured kind, because the example answer is no longer
+// present on every record. Scoping it to the built-in walkthrough records made
+// the old single sentence FALSE wherever it was withheld: "Confirm the example
+// value, or leave it honestly missing" told the reader to confirm something not
+// on screen. A `managed_legacy` record (workspace.py) is a real, reachable case.
+// The `withExample` copy is used only when a `demo_answer` actually arrived.
 const KIND_CONTEXT: Record<string, string> = {
   asset:
     'An asset can only be cited once it carries a hash. Paste the sha256 — the system will never generate this value for you.',
+  series:
+    'A structured reduced-spectrum value the system will never generate for you. Leave it honestly missing unless you can supply it.',
+  descriptor:
+    'A structured scientific descriptor the system will never generate for you. Leave it honestly missing unless you can supply it.',
+};
+
+const KIND_CONTEXT_WITH_EXAMPLE: Record<string, string> = {
   series:
     'A structured reduced-spectrum value the system will never generate for you. Confirm the example value, or leave it honestly missing.',
   descriptor:
@@ -236,8 +256,63 @@ function pathTokenFor(item: ApiPendingItem): string {
   return item.about || item.id;
 }
 
+/**
+ * Re-check the one invariant the whole suggestion contract rests on: a concrete
+ * value may accompany `supported_suggestion` and no other state.
+ *
+ * The backend enforces this structurally (`Inferability.__post_init__` raises), so
+ * this is a SECOND check on the same rule, deliberately. The failure this guards
+ * against is not a backend bug we know about — it is a future response shape that
+ * quietly grows a value where the client does not expect one. Fail closed by
+ * dropping the value: a suggestion that arrives without the justification the
+ * state promises is not shown at all.
+ */
+/**
+ * Source types that are NOT record-specific evidence. Mirrors
+ * `inferability.NON_EVIDENCE_SOURCE_TYPES`. It is a mirror and the duplication is
+ * deliberate: the point of this guard is to hold even when the server's copy does
+ * not, so deriving it from the server would defeat it.
+ */
+const NON_EVIDENCE_SOURCE_TYPES = new Set([
+  'model_confidence',
+  'heuristic_confidence',
+  'statistical_prior',
+  'commonly_used',
+  'population_default',
+  'other_record',
+  'tutorial_example',
+  'schema_default',
+  'schema_enum',
+  'schema_example',
+]);
+
+export function sanitizeInferability(inf: Inferability | undefined): Inferability | undefined {
+  if (!inf) return undefined;
+  const p = inf.provenance;
+  // Every clause the backend's own invariant checks, re-checked. The first
+  // version stopped at `unique` and `rule`, which left a `supported_suggestion`
+  // "justified" by `{source_type: 'other_record'}` — a value copied from a
+  // different record — passing through the client untouched.
+  const justified =
+    inf.state === 'supported_suggestion' &&
+    !!p &&
+    p.unique === true &&
+    !!p.rule &&
+    Array.isArray(p.supporting_fields) &&
+    p.supporting_fields.length > 0 &&
+    Array.isArray(p.supporting_evidence) &&
+    p.supporting_evidence.length > 0 &&
+    p.supporting_evidence.every(
+      (e) => typeof e?.source_type === 'string' && !NON_EVIDENCE_SOURCE_TYPES.has(e.source_type),
+    );
+  if (justified) return inf;
+  if (inf.value === null || inf.value === undefined) return inf;
+  return { ...inf, value: null, provenance: null };
+}
+
 /** Map one live /pending item onto the render blocker the GuidedPrompt consumes. */
 export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
+  const hasExample = !!item.demo_answer;
   return {
     id: item.id,
     kind: item.kind,
@@ -245,11 +320,21 @@ export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
     label: KIND_LABEL[item.kind] ?? titleCase(String(item.kind)),
     path: pathTokenFor(item),
     about: item.about ?? undefined,
-    context: KIND_CONTEXT[item.kind],
+    // The "confirm the example value" wording is used ONLY when an example value
+    // actually arrived — see the note on KIND_CONTEXT_WITH_EXAMPLE.
+    context:
+      (hasExample ? KIND_CONTEXT_WITH_EXAMPLE[item.kind] : undefined) ?? KIND_CONTEXT[item.kind],
     inputType: inputTypeForKind(item.kind),
     demo_answer: item.demo_answer
-      ? { value: item.demo_answer.value, label: item.demo_answer.label }
+      ? {
+          value: item.demo_answer.value,
+          label: item.demo_answer.label,
+          // Carried through, not re-derived. The client must never be the thing
+          // that decides an example answer counts as evidence.
+          provenance: item.demo_answer.provenance,
+        }
       : undefined,
+    inferability: sanitizeInferability(item.inferability),
   };
 }
 
