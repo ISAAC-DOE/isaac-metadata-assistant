@@ -1,0 +1,74 @@
+{
+  "corpus": {
+    "records_failing_baseline": 0,
+    "records_passing_baseline": 10,
+    "records_scanned": 10
+  },
+  "format_shadow": {
+    "failures_by_error_code": {
+      "cells": [],
+      "floor": 5,
+      "suppressed_categories": 0,
+      "suppressed_total": 0
+    },
+    "failures_by_schema_path": {
+      "cells": [],
+      "floor": 5,
+      "suppressed_categories": 0,
+      "suppressed_total": 0
+    },
+    "records_failing": 0,
+    "records_passing": 10
+  },
+  "limitations": [
+    "The corpus is the public upstream ISAAC example records vendored at tests/fixtures/official/. It is not the production-derived corpus, and no figure here describes production data.",
+    "The format shadow is advisory. It does not decide validity, does not gate export, and does not change what the official validator accepts.",
+    "Histogram cells below the floor are withheld, and the number of withheld categories is never exactly one while any cell is published \u2014 one withheld key against an enumerable universe is identified by elimination.",
+    "Failure paths are SCHEMA paths. The per-record instance-path breakdown is computed internally and deliberately not served: over a small corpus a count of one at an instance path is a single-record fact.",
+    "Mutation counts are global scalars. Per-operator and per-category breakdowns are absent because mutation applicability is a fact about a record's structure, so a breakdown is a field-presence map.",
+    "This module opens no connection and imports no driver. Where records are not read from this repository, they arrive from an injected read-only provider, which is the component that reaches any external source."
+  ],
+  "metadata": {
+    "cache_age_seconds": 0,
+    "corpus_size": 10,
+    "duration_ms": 18910,
+    "generated_at": "2026-08-06T15:33:25Z",
+    "verification_mode": "public_reference"
+  },
+  "mutations": {
+    "expected_outcome_matches": 2361,
+    "observation_only_trials": 750,
+    "operators_defined": 755,
+    "trials_applicable": 3111,
+    "trials_attempted": 7550,
+    "trials_skipped_not_applicable": 4439,
+    "unexpected_outcomes": 0
+  },
+  "official_validation": {
+    "failing": 0,
+    "passing": 10
+  },
+  "oracles": {
+    "engine_disagreements": 0,
+    "no_guessing_failures": 0,
+    "ordering_instability_failures": 0,
+    "repeatability_failures": 0,
+    "restoration_failures": 0,
+    "source_mutation_failures": 0,
+    "workflow_consistency_failures": 0
+  },
+  "report_format_version": 2,
+  "safeguards": {
+    "ddl_statements": 0,
+    "dml_statements": 0,
+    "export_gating_unchanged": "verified",
+    "official_validator_unchanged": "verified",
+    "parameterized_queries_only": "not_applicable",
+    "private_values_exposed": "verified",
+    "source_records_modified": "verified",
+    "transaction_read_only": "not_applicable"
+  },
+  "schema_fingerprint": "e80bb7a7d18f3fadc581601447d1b6a72e859e428a46871b27eb04ceb3e5e9a3",
+  "schema_version": "1.05",
+  "status": "ok"
+}
