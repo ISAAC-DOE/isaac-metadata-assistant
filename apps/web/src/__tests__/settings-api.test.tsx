@@ -1058,8 +1058,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 38 operations, 51 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(38);
+  it('describes the contract it claims to: 39 operations, 54 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(39);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1138,8 +1138,30 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // operation count unchanged at 38. The paragraph count moves by exactly 2 because a
     // new FIRST paragraph makes the requirement the lead and pushes each old lead into
     // `rest` — it is one added `\n\n` per operation, not a reflow.
-    expect(total).toBe(24623);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(51);
+    // 24,623 -> 25,500 and 38 -> 39 operations, 51 -> 54 paragraphs: the record
+    // verification slice added `GET /api/runtime/verification`, whose description
+    // is a lead plus three paragraphs (+877 characters in ONE new operation; no
+    // existing description changed, which the parity test named above proves
+    // rather than leaving asserted here).
+    //
+    // NOTE WHICH LENGTH THIS IS, because two plausible ones differ by exactly 108
+    // here and picking the wrong one wastes a debugging cycle: `total` above sums
+    // `lead.length + rest.join('').length`, i.e. the text AFTER `splitPurpose`
+    // has consumed the blank-line separators. Summing `d.description.length`
+    // instead gives 25,608 — the same text plus the 54 `\n\n` separators (54 x 2).
+    //
+    // THESE THREE NUMBERS WENT STALE IN THE COMMIT THAT ADDED THAT OPERATION, and
+    // the failure was misattributed before it was fixed — read as a concurrent
+    // backend worker's, because the surrounding comments discuss `apps/api`
+    // docstrings. They do not: this test reads a STATIC COMMITTED ARRAY in
+    // `test/apiFixtures.ts` plus `splitPurpose` from `ApiDocs.tsx`, and touches no
+    // `apps/api` file at runtime, so no backend change can move it. (The test that
+    // does react to `apps/api` is `apps/api/tests/test_contract_description_parity.py`,
+    // which compares that array against the served document — a different test, in
+    // a different suite.) `git log -- src/test/apiFixtures.ts` settles the question
+    // in one command and should be the first thing run when this fails.
+    expect(total).toBe(25500);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(54);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

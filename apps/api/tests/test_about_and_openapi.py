@@ -309,7 +309,7 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
             f"{auto!r} (from `{function_name}`)"
         )
         checked += 1
-    assert checked == 38, f"expected 38 documented operations, found {checked}"
+    assert checked == 39, f"expected 39 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -517,6 +517,7 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/runtime/database/recon", "get"): ["200", "401", "409"],
     ("/api/schema", "get"): ["200", "401"],
     ("/api/runtime/records", "get"): ["200", "401", "404", "422"],
+    ("/api/runtime/verification", "get"): ["200", "401"],
     ("/api/search", "get"): ["200", "401", "404", "422"],
     ("/api/tutorial/sessions", "post"): ["201", "401"],
     ("/api/tutorial/sessions/{session_id}", "delete"): ["204", "401", "422"],

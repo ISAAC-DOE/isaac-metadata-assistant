@@ -76,6 +76,7 @@ import {
   UnavailableNote,
 } from './StatsPrimitives';
 import { MyStats } from './MyStats';
+import { RecordVerification, useVerificationReport } from './RecordVerification';
 
 /**
  * Statistics — the read-only insights surface, in two tabs.
@@ -86,6 +87,33 @@ import { MyStats } from './MyStats';
  * `/api/schema`); this file fetches them, formats the strings the primitives
  * display, and owns the states. It computes no figure of its own. The My Stats
  * tab reads NOTHING — see `MyStats.tsx`.
+ *
+ * A SIXTH read, `/api/runtime/verification`, feeds Record Verification alone. It
+ * is issued from HERE — by `useVerificationReport`, not by `useFetch` — and its
+ * state is handed to the section, which renders it and owns nothing else.
+ *
+ * TWO reasons for that split, and both are load-bearing. The section is mounted
+ * inside the General tab panel, which UNMOUNTS on a switch to My Stats, so state
+ * held there would re-read on every return to the tab — for a ~19-second program
+ * run that in one of its modes opens a database connection. And the section needs
+ * runtime states the shared 3-state hook cannot express: a run still in progress,
+ * a result past the backend's own cache lifetime, a re-read in flight, and a
+ * re-read that FAILED while a good earlier result is still on screen. Its figures
+ * are decoded and derived by `lib/verificationContract.ts` (a report is a wire
+ * document, not a projection of the workspace, so it fails closed on a body it
+ * cannot read rather than being modelled beside the record derivations).
+ *
+ * It stays deliberately OUTSIDE the round tracker and the Refresh button below:
+ * the report is a cached artifact of a program run, not a live view of this
+ * workspace, and it discloses its own age. Re-reading it under a button that
+ * announces "N of 5 reads failed" would make that sentence describe a denominator
+ * it does not count. The section carries its own controls, whose accessible names
+ * are its own so neither collides with this page's Refresh.
+ *
+ * (That denominator was FOUR when this section was written on its own branch and
+ * is FIVE here: `/api/schema` became a tracked read on the adapters branch. The
+ * rendered string reads `round.attempted`, which is measured, so it was never
+ * wrong — but this comment was, until the two branches were integrated.)
  *
  * The five fetches are deliberately INDEPENDENT — that independence is the
  * partial-failure design. One dead endpoint degrades the sections that read it
@@ -490,6 +518,16 @@ export function StatisticsPage() {
   const about = useFetch(() => track(api.getAbout()), []);
   const openapi = useFetch(() => track(api.getOpenApi()), []);
   const schema = useFetch(() => track(api.getSchema()), []);
+  /*
+   * The SIXTH read, and it is deliberately NOT a `useFetch` and NOT tracked.
+   *
+   * It lives HERE rather than inside `RecordVerification` because the section is
+   * mounted inside the General tab panel, which unmounts when the reader opens
+   * My Stats — state held in the section would re-read on every return, and
+   * "switching tabs is free" is a rule this page is tested against. This
+   * component outlives both panels.
+   */
+  const verification = useVerificationReport();
 
   /*
    * ...AND the record read also listens for a workspace REBUILD, which the scope
@@ -669,6 +707,7 @@ export function StatisticsPage() {
               <WorkflowDistribution records={records} />
               <OpenQuestions records={records} />
               <EvidenceAndValidation records={records} />
+              <RecordVerification verification={verification} />
               <PlatformMetrics />
               <NoAnalytics />
               <TechnicalDetails

@@ -153,12 +153,24 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
     await view.findByText('Synthetic-Only');
 
     const found = levels(view.container);
+    // INTEGRATED OUTLINE. Two branches each added an h2 section to this panel:
+    // Record Verification (with FIVE h3s of its own — the official/shadow
+    // comparison, the issue distributions, mutation verification, safeguards,
+    // and the run details) and Platform Metrics. Neither branch could assert
+    // the other's headings, so this array is the first statement of the
+    // combined outline and was MEASURED from the rendered result, not derived.
     expect(found).toEqual([
       1,
       2 /* Workspace at a Glance */,
       2 /* Workflow Distribution */,
       2 /* Open Questions */,
       2 /* Evidence and Validation */,
+      3,
+      3,
+      2 /* Record Verification */,
+      3,
+      3,
+      3,
       3,
       3,
       2 /* Platform Metrics */,

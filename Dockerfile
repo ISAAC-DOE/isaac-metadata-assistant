@@ -34,6 +34,11 @@ COPY src/ src/
 COPY apps/api/ apps/api/
 COPY schema/ schema/
 COPY tests/fixtures/synthetic/ tests/fixtures/synthetic/
+# The Record Verification corpus. These ten records are copied verbatim from the
+# PUBLIC upstream ISAAC `examples/` directory (`schema/PROVENANCE.md`) and are
+# already published on GitHub, so shipping them in the image discloses nothing.
+# Without this line the deployed pod finds no corpus and reports `unavailable`.
+COPY tests/fixtures/official/ tests/fixtures/official/
 COPY scripts/check_graphify_freshness.py scripts/check_graphify_freshness.py
 
 RUN pip install --no-cache-dir ".[api]"

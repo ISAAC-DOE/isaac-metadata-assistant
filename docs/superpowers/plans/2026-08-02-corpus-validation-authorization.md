@@ -1,3 +1,28 @@
+> ## VERDICT SUPERSEDED — 2026-08-05
+>
+> This audit's verdict was **`Ambiguous — Dean Confirmation Required`**. That confirmation has since
+> arrived: **Q19 is APPROVED**, relayed by the project owner; no direct agent-to-owner communication
+> occurred. The record is
+> [`docs/evidence/2026-08-05-q19-q20-authorization.md`](../../evidence/2026-08-05-q19-q20-authorization.md);
+> the machine-readable form is
+> [`apps/api/isaac_api/authorization.py`](../../../apps/api/isaac_api/authorization.py).
+>
+> **The audit's analysis is NOT superseded — only its verdict is.** Three findings from it are now
+> load-bearing in shipped code and must not be treated as historical:
+>
+> - **§3's finding that there was no minimum-cell-size suppression anywhere in the aggregation
+>   path.** That gap is closed by `apps/api/isaac_api/disclosure.py`, and floor suppression now runs
+>   on both distributions in **both** verification modes, unconditionally.
+> - **The applicability-disclosure argument** (a per-operator breakdown is a field-presence map over
+>   the corpus). It still holds. Mutation counts remain global scalars; no per-operator,
+>   per-category or per-record breakdown is served in either mode.
+> - **`:221-223` — "a disabled runner is a runner someone enables."** This is why withdrawal of the
+>   approval is implemented as *absence*: `verification.VERIFICATION_MODES` is derived from the
+>   approval flag, so clearing the flag deletes the mode rather than disabling it.
+>
+> **Q20 (`format` enforcement) remains unanswered**, and per-record display remains closed by
+> default. Nothing in this note widens either.
+
 # Corpus-Validation Authorization Audit — 30 Production-Derived Records
 
 **Date:** 2026-08-02 · **HEAD at audit:** `d521dd7` · **Method:** static reading of Dean's committed

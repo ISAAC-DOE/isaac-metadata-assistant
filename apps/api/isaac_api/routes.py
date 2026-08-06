@@ -45,6 +45,7 @@ from . import runtime_records
 from . import search
 from . import serialize
 from . import sources
+from . import verification
 from . import version_contract as vc
 from . import workspace as ws
 from .workflow import derive_workflow
@@ -4642,3 +4643,53 @@ def get_database_recon(response: Response) -> dict:
 
     _db_recon_cache_put(payload)
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Record Verification
+# ---------------------------------------------------------------------------
+# Serves the sanitized aggregate report described in `verification.py`. Read
+# only: no write, no lock on the workspace, no truth-path call beyond the
+# validator's own read.
+#
+# The sweep costs ~19s over ten records, so it NEVER runs inside a request.
+# `VerificationState` starts it on a background thread and answers `running`
+# until a result exists. A request that blocked for 19s would time out behind
+# the ingress and look like an outage.
+
+_VERIFICATION_STATE = verification.VerificationState(REPO_ROOT)
+
+
+@router.get(
+    "/runtime/verification",
+    tags=[TAG_VALIDATION],
+    summary="Read the Record Verification Aggregate Report",
+    description=(
+        "Aggregate results of three programs run over the ten public upstream "
+        "ISAAC example records: official schema validation, a stricter "
+        "format-aware shadow validation, and a deterministic mutation harness "
+        "that deep-clones each record before mutating it.\n\n"
+        "Aggregate only. No record id, title, field value, evidence entry or "
+        "per-record outcome appears, and every histogram is projected through a "
+        "minimum-cell-size floor so a category with few occurrences is withheld "
+        "rather than named.\n\n"
+        "The corpus is the public upstream example set vendored in this "
+        "repository. It is **not** the production-derived corpus, and this "
+        "operation does not connect to any database. That is a statement about "
+        "this operation, not about the deployment: `GET "
+        "/api/runtime/database/recon` does connect, from the pod.\n\n"
+        "The sweep runs off the request path. The first call returns `running`; "
+        "poll until `status` is `ok`."
+    ),
+    response_description="The sanitized aggregate report, or a status envelope.",
+    responses={**_R_UNAUTHORIZED},
+)
+def get_runtime_verification() -> dict:
+    try:
+        return _VERIFICATION_STATE.get()
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException:  # noqa: BLE001 - must never leak, must never 500
+        # The exception text is not captured: it could carry a filesystem path
+        # or a record value. `error` is all a caller may safely learn.
+        return verification.build_pending_report("error")

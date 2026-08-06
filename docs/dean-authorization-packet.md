@@ -1,7 +1,30 @@
+> ## SUPERSEDED IN PART — 2026-08-05
+>
+> **Q19 has been ANSWERED and APPROVED.** The approval was **relayed by the project owner; no direct
+> agent-to-owner communication occurred.** The durable record is
+> [`docs/evidence/2026-08-05-q19-q20-authorization.md`](evidence/2026-08-05-q19-q20-authorization.md),
+> and its machine-readable form — including the twelve constraints attached to the approval — is
+> [`apps/api/isaac_api/authorization.py`](../apps/api/isaac_api/authorization.py).
+>
+> **Q20 is still unanswered.** The two were deliberately not bundled (see the line below), so Q19's
+> approval says nothing about arming `format` enforcement.
+> `authorization.Q20_FORMAT_ENFORCEMENT_APPROVED` is `False` and the validator stays format-blind.
+>
+> **What this means for the text below.** The "Consequence while unanswered" bullet for Q19, and the
+> "Ambiguous / no answer → runner stays unbuilt" row in the outcome table, are **no longer the
+> current state**: the datastore-backed verification mode is built, and
+> `verification.VERIFICATION_MODES` now derives from the approval flag. Everything else here —
+> the wording of the question, the reasoning behind it, and the whole of Q20 — stands unchanged and
+> is deliberately **not deleted**: the question as put is what was approved, so it remains the
+> authoritative statement of scope.
+>
+> Nothing here reopens per-record display, which remains closed by default.
+
 # Authorization packet for Dean — Q19 and Q20
 
 **Status: NOT SENT.** No approved workflow permits agent-to-Dean communication. This file exists so
-Krish can send it; nothing in it has been transmitted.
+Krish can send it; nothing in it has been transmitted. *(Superseded in part — see the 2026-08-05
+note above: Q19 was subsequently answered and the answer relayed.)*
 
 **Both questions are independent decisions and should not be bundled into one answer.**
 

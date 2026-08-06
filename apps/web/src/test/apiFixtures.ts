@@ -8,6 +8,10 @@
 import { vi } from 'vitest';
 
 import type { ApiWorkflow } from '../lib/types';
+// The verification report bodies live in their own module, with the rest of the
+// Record Verification wire fixtures. Imported rather than duplicated so one
+// contract has one fixture.
+import { verificationReportOk } from './verificationFixtures';
 
 // --- backend-derived workflow (P28.1) -----------------------------------
 // Mirrors apps/api/isaac_api/workflow.py `derive_workflow` so detail fixtures
@@ -2267,17 +2271,29 @@ export const openApiFixture = {
  * Explorer's `Full Description` disclosure never hides this API's own
  * boundary/honesty copy.
  *
- * Regenerated on 2026-07-31, re-measured 2026-08-04, with:
+ * Regenerated on 2026-07-31, re-measured 2026-08-06, with:
  *
  *   PYTHONPATH=apps/api .venv/bin/python -c \
  *     "from isaac_api.app import create_app; import json; \
  *      print(json.dumps(create_app().openapi()))"
  *
- * 38 operations · 23,948 description characters · 49 post-lead paragraphs · lead
- * paragraphs 78–660 characters · remainders 0–1,744. The two newest are the
- * worked-example session lifecycle (`POST /api/tutorial/sessions`,
- * `DELETE /api/tutorial/sessions/{session_id}`); before them the 36th was
+ * 39 operations · 54 post-lead paragraphs · lead paragraphs 78–548 characters ·
+ * remainders 0–1,740. The newest is `GET /api/runtime/verification`; before it
+ * came the worked-example session lifecycle (`POST /api/tutorial/sessions`,
+ * `DELETE /api/tutorial/sessions/{session_id}`), and before those the 36th was
  * `GET /api/runtime/database/recon`.
+ *
+ * TWO CHARACTER COUNTS, DIFFERING BY EXACTLY THE SEPARATORS, and this comment
+ * used to state one of them unlabelled — which is how it drifted 675 characters
+ * from the assertion it looks like it describes:
+ *
+ *   · 25,500 — `lead.length + rest.join('').length` after `splitPurpose` has
+ *     consumed the blank lines. THIS is what `settings-api.test.tsx` pins.
+ *   · 25,608 — the raw `description.length` sum, i.e. the same text plus 54
+ *     `\n\n` separators (54 x 2 = 108).
+ *
+ * Quote the metric with the number, or the next reader re-measures the other one
+ * and concludes the fixture is stale when it is not.
  *
  * THE "POINT-IN-TIME COPY" CAVEAT BELOW IS NOW WEAKER THAN IT READS, and that is
  * worth stating rather than leaving as a stale warning. Since
@@ -2304,6 +2320,7 @@ export const openApiFixture = {
  * protects a description added later.
  */
 export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: string }[] = [
+  { op: "GET /api/runtime/verification", description: "Aggregate results of three programs run over the ten public upstream ISAAC example records: official schema validation, a stricter format-aware shadow validation, and a deterministic mutation harness that deep-clones each record before mutating it.\n\nAggregate only. No record id, title, field value, evidence entry or per-record outcome appears, and every histogram is projected through a minimum-cell-size floor so a category with few occurrences is withheld rather than named.\n\nThe corpus is the public upstream example set vendored in this repository. It is **not** the production-derived corpus, and this operation does not connect to any database. That is a statement about this operation, not about the deployment: `GET /api/runtime/database/recon` does connect, from the pod.\n\nThe sweep runs off the request path. The first call returns `running`; poll until `status` is `ok`." },
   { op: "GET /api/health", description: "Liveness banner for platform and container probes: the service status, the runtime data mode, the name of the deterministic core package the app calls in process, the app version, and the build commit when the deployment supplies one (otherwise `null` — it is never guessed). This is the one operation that stays reachable without credentials when the deployment enables authentication. Read-only.\n\nIt also states whether this deployment has an application database configured, how that database is classified, whether hosted display of its per-record content is open, and the outcome of the most recent reconnaissance scan in this process. That block is derived from configuration alone: this operation never opens a database connection, issues a query, or waits on one, so a database problem can never change its result and can never fail a container probe." },
   // RE-TRANSCRIBED from `create_app().openapi()` after both descriptions were
   // corrected: the `X-Isaac-Tutorial-Session` REQUIREMENT was stated only in each
@@ -2415,12 +2432,27 @@ export const STATISTICS_ROUTE_KEYS = [
 ] as const;
 
 /**
+ * The SIXTH read, kept OUT of `STATISTICS_ROUTE_KEYS` on purpose.
+ *
+ * Record Verification reads this once on mount and refreshes it with its own
+ * Retry; the page's Refresh button deliberately does not re-issue it (see
+ * `StatisticsPage.tsx`'s header). So the mount round is these six and the
+ * Refresh round is the five above, and a single constant covering both would
+ * hide exactly that distinction.
+ *
+ * (FIFTH and four-above on the verification branch alone; the adapters branch
+ * added `/api/schema` to the tracked set, and integrating the two moved both
+ * numbers by one. The distinction this constant exists to preserve is unchanged.)
+ */
+export const STATISTICS_VERIFICATION_ROUTE_KEY = 'GET /api/runtime/verification';
+
+/**
  * The Statistics page's five page-level reads, keyed exactly as `lib/api` builds
- * them.
+ * them, plus the verification read the page issues but does not track.
  *
  * Any source may be replaced with any `RouteEntry`, which is how a test fails ONE
- * of the five (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
- * swaps in a different graph body, without disturbing the other four.
+ * of them (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
+ * swaps in a different graph body, without disturbing the others.
  *
  * `schema` reuses `schemaBrowserFixture` — the same body the Schema Reference
  * suite browses — so the two screens are asserted against ONE document and a
@@ -2428,7 +2460,7 @@ export const STATISTICS_ROUTE_KEYS = [
  */
 export function statisticsRoutes(
   over: Partial<
-    Record<'records' | 'graph' | 'about' | 'openapi' | 'schema', RouteEntry>
+    Record<'records' | 'graph' | 'about' | 'openapi' | 'schema' | 'verification', RouteEntry>
   > = {},
 ): Record<string, RouteEntry> {
   return {
@@ -2437,5 +2469,6 @@ export function statisticsRoutes(
     'GET /api/about': over.about ?? { body: aboutResponse },
     'GET /api/openapi': over.openapi ?? { body: openApiFixture },
     'GET /api/schema': over.schema ?? { body: schemaBrowserFixture },
+    [STATISTICS_VERIFICATION_ROUTE_KEY]: over.verification ?? { body: verificationReportOk },
   };
 }

@@ -909,6 +909,9 @@ describe('My Stats invents no personal figure — the six traps', () => {
         'GET /api/openapi',
         'GET /api/runtime/records',
         'GET /api/schema',
+        // Record Verification's read. A General-tab section, not tab-keyed, so
+        // it fires here too — and it is a GET, so this tab still cannot mutate.
+        'GET /api/runtime/verification',
       ].sort(),
     );
     expect(calls.filter((c) => c.includes('/api/experiments'))).toEqual([]);
