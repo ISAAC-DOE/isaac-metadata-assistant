@@ -1121,13 +1121,34 @@ def scan_for_leaks(
        ``id_<ULID>``, ``x<ULID>`` and ``<ULID>z`` are all MISSED. That is a
        realistic shape, since a leaked id would plausibly arrive as a prefixed
        key. This residual is PRE-EXISTING and untouched by this change — the
-       leaf scan neither widens nor narrows it — and it is recorded rather than
-       fixed on purpose: dropping the boundaries would match any 26-character
-       uppercase run inside a longer token, which is the shape of the digests
-       and fingerprints this report legitimately carries, so the fix trades a
-       miss for a false refusal and needs its own slice. Note the shared root
-       with the audit-tooling defect recorded elsewhere in this project: a
-       ``\\b``-anchored pattern returning zero is not evidence of absence.
+       leaf scan neither widens nor narrows it.
+
+       WHY IT IS DEFERRED, STATED CORRECTLY THE SECOND TIME. The first version
+       of this entry justified deferring the fix by asserting that dropping the
+       boundaries "would match any 26-character uppercase run inside a longer
+       token, which is the shape of the digests and fingerprints this report
+       legitimately carries". **That was false of this report, and a false
+       sentence in a limitations list is the exact failure residual 4 above
+       exists to warn about — committed here one paragraph later.** Measured
+       against a realistic projected response: the only digest served is
+       ``schema_fingerprint``, a **lowercase** sha256 hex that ``[0-9A-Z]{26}``
+       cannot match; ``record_id`` digests are truncated, lowercase, and not
+       projected at all; a loose ``[0-9A-Z]{26}`` matches **nothing** in the
+       response, whose longest uppercase run is 11 characters
+       (``CONCURRENCY``); and removing both ``\\b`` breaks **no** test.
+
+       So the honest reason is PROSPECTIVE, not present: the boundaries are not
+       protecting against a collision that exists today, and widening them
+       would cost nothing today. It stays out of this PR because this PR is
+       about the escaping defect, because ``allow_raw_ids=False`` sits behind a
+       projection that already excludes record ids (so it is a backstop, not the
+       boundary), and because a future report that legitimately carries an
+       uppercase token would silently start refusing. It is a small, separable
+       slice — not a trade-off that has already been made.
+
+       Note the shared root with the audit-tooling defect recorded elsewhere in
+       this project: a ``\\b``-anchored pattern returning zero is not evidence
+       of absence.
     """
     issues: list[str] = []
     haystacks: tuple[str, ...] = (text, *leaves)

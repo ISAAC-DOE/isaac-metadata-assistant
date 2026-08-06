@@ -4550,11 +4550,19 @@ def _db_recon_scan(env: Mapping[str, str]) -> dict:
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:  # noqa: BLE001 - projection must never leak
-        _log.info("db_recon outcome=error type=%s", type(exc).__name__)
+        # `gate` names the STAGE, and three stages now live in this block. A
+        # `RecursionError` from the leaf walk was previously attributed to
+        # "projection", which is a safe response carrying a wrong label — and a
+        # wrong label on a refusal is what a later reader debugs against.
+        # Narrowed by exception type rather than by splitting the try, because
+        # splitting it is what put the leaf walk outside a guard in the first
+        # place.
+        gate = "leaf_walk" if isinstance(exc, RecursionError) else "projection"
+        _log.info("db_recon outcome=error gate=%s type=%s", gate, type(exc).__name__)
         return _db_recon_failure(
             env=env,
             status="error",
-            gate="projection",
+            gate=gate,
             exception_class=type(exc).__name__,
         )
 

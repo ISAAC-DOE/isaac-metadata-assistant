@@ -2034,6 +2034,66 @@ def test_a_secret_SHAPE_whose_separator_json_escapes_is_caught_only_via_leaves()
     )
 
 
+def test_a_leaf_walk_failure_is_sanitized_AND_named_as_its_own_gate(client, monkeypatch):
+    """The leaf walk is inside the guard, and does not borrow projection's name.
+
+    Two properties, and the second exists because the first was fixed carelessly.
+
+    `string_leaves` is a Python-level recursive walk while `json.dumps` encodes in
+    C, so it exhausts the stack at a shallower depth: measured, at depth 1200 the
+    encoder succeeds and the walk raises. Computed as a bare argument to
+    `scan_for_leaks` — outside the `try` that the surrounding comment says exists
+    to stop exactly this — that band escaped as a 500 with a traceback. It is now
+    inside the guard, so it collapses into the sanitized envelope.
+
+    But the envelope's `refusal_gate` names the STAGE, and folding a third stage
+    into a block labelled `projection` produces a safe response carrying a wrong
+    label — and the label is what a later reader debugs against. `RecursionError`
+    from this block can only be the walk: `json.dumps` raises `ValueError` on
+    deep nesting, not `RecursionError`, and `_db_recon_project` is a flat
+    allowlist projection. So the type is a sound discriminator, and narrowing by
+    it beats splitting the `try` — splitting is what put the walk outside a guard
+    to begin with.
+
+    No traceback, no payload, no exception message: a gate name and a class name.
+
+    THE FAKE RAISES ONCE, AND THAT IS THE REALISTIC SHAPE, not a convenience.
+    An unconditional raiser also breaks the walk over the FAILURE envelope —
+    `_db_recon_failure` runs `_db_recon_leak_guard` over its own small dict — and
+    the response then comes back under `leak_scan` instead. That degradation is
+    correct behaviour and worth knowing about (the envelope fails closed rather
+    than escaping), but it is not what a stack overflow does in production: the
+    overflow is a function of DEPTH, the deep object is the report, and the
+    envelope is three levels deep. So the fake reproduces the real condition —
+    the walk fails on the report and succeeds on the envelope — instead of a
+    condition that cannot occur.
+    """
+    configure_db(monkeypatch)
+    ok_scan(monkeypatch)
+
+    real_string_leaves = db_recon.string_leaves
+    calls = {"n": 0}
+
+    def _blow_the_stack_on_the_report(node):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RecursionError("maximum recursion depth exceeded")
+        return real_string_leaves(node)
+
+    monkeypatch.setattr(db_recon, "string_leaves", _blow_the_stack_on_the_report)
+
+    response = client.get(RECON_PATH)
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["database"]["refusal_gate"] == "leaf_walk", (
+        "a leaf-walk failure must not be reported under the projection gate"
+    )
+    assert body["dataset"] is None
+    # The envelope carries the class name and nothing else from the exception.
+    assert "maximum recursion depth" not in response.text
+    assert "Traceback" not in response.text
+
+
 def test_leaves_is_required_so_a_caller_cannot_silently_restore_the_defect():
     """No default. A default of () would re-enable the bug by omission."""
     with pytest.raises(TypeError, match="leaves"):
