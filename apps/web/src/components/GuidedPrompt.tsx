@@ -90,6 +90,21 @@ export function GuidedPrompt({
       <h2 className="guided-question">{blocker.question}</h2>
       {blocker.context && <p className="guided-context">{blocker.context}</p>}
 
+      {/* WHY the app is asking instead of answering. Rendered verbatim from the
+          server's inferability decision — never re-worded here, so the reason a
+          user reads is the reason the backend actually applied. The state is
+          exposed as a data attribute so a test can assert the pairing of state
+          and copy; a `supported_suggestion` would carry a value, and no blocker
+          state ever does (see `inferability.blocker_inferability`). */}
+      {blocker.inferability && (
+        <p
+          className="guided-inferability"
+          data-inferability-state={blocker.inferability.state}
+        >
+          {blocker.inferability.explanation}
+        </p>
+      )}
+
       {demo && (
         <div className="guided-suggestion" aria-label="Example answer suggestion">
           <div className="guided-suggestion-head">

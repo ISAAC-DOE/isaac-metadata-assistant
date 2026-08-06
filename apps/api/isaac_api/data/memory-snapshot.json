@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "c259cca2bc973dd6ae1cc436161a2b8167709f6397bf1318e0704f64928236a9"
+        "sha256": "0e6ab7f43fd11f55e3470db06ab39f1ceee3faf1236f8aee002ff6ab679eca2d"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "48f4adcafb2c3e4dd9e32d989f1b6271ce33c5bf280c2f6e1cdea93bc0df4588"
+        "sha256": "db3c236e7ed22fef12189ede82b7d805210c1c227ee3f581b0c40b4b8c5413f9"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "666ac12c7fe3d0e98579d8bb5f9a188f24d8183ec1f0d32a32df4c8fcd1bca63"
+        "sha256": "ada2146d7fb501346269cb9373c06371fbd4455ca042802746f0bb3c94f96793"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10500,11 +10500,11 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "b3f401c07ad0bc41af0cda9a38ef0b53d69d7940ebd25930b4dec2a6ea3b16d5"
+        "sha256": "a3a017e610dd1207120f64222a2177710f5b671a52b96ea779681b708283cf5b"
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "0596849be802a28429c6a5c6af75bcfb97ae07d0237211a2441cd60616e50ed3"
+        "sha256": "3f262cac9631a24e5f4671a9bd44c16c88bb77012353587dbf08944d1f321d08"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "5f46900fc50984c96e683e24310203cfadc44b5588e787593ff931564dd30a2f"
+        "sha256": "282969f65dfc467214a586fcfa28fe17d9d0ebbc8a4e08812d4e431029b84d1a"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "6a43480eb790cb823fa07bad9c97374a314e9a81b71a4485dadfc41f58c47618"
+        "sha256": "c81aec83b6fc21dbcca04bbf9ff5825950d61b91640bfdc933f79633de1a0e9c"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10776,7 +10776,7 @@
       },
       {
         "path": "pyproject.toml",
-        "sha256": "354b90b91309043bc3b713e0e914065abe7e077d84294391a2fba7a8972c07b5"
+        "sha256": "45fa6c9d1a178be61064169c30c1b557fcd31bf48cf33359d92274a275798c01"
       },
       {
         "path": "schema/PROVENANCE.md",
@@ -10836,7 +10836,7 @@
       },
       {
         "path": "src/isaac_records/extract/draft_builder.py",
-        "sha256": "266cff4a6c2769637fba36b9dd9afaea2fb1bc70a4f87b6d1cc5b941ba8b44f8"
+        "sha256": "7f53b477e8939cf8856d419ba43c7c6a82253d397fb77a0c3f0952e8743d60e1"
       },
       {
         "path": "src/isaac_records/extract/file_listing.py",
@@ -10960,7 +10960,7 @@
       },
       {
         "path": "tests/test_draft_builder.py",
-        "sha256": "a7f072fecb0d91b919181e119cae52a50cba805623c596ce64092f86858adacd"
+        "sha256": "e2834a72a0aac2801336722ade976f22b053ba965b2fb2d8245b6a1498b4d410"
       },
       {
         "path": "tests/test_e2e.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "d661653a8b550eb97901b64663f9422802ad0746bb0040d7bebd3f4f5414984e"
+    "served_manifest_fingerprint": "23c8f1d9b33a2767fc731f52d0fe4aee0515dc5ed342838261a7ffcac441b915"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

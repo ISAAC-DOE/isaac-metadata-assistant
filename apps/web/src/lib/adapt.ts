@@ -26,6 +26,7 @@ import type {
   ExperimentTrailing,
   FieldEvidence,
   FieldGroupData,
+  Inferability,
   PendingBlocker,
   QueueGroup,
   QueueGroupKey,
@@ -34,9 +35,16 @@ import type {
   ValidationResult,
 } from './types';
 
-// The MVP is a single characterization path; the row tag is a display label, not
-// a server field. (The list endpoint carries no technique — it is Cu K-edge XANES.)
-const TECHNIQUE = 'Cu K-edge XANES';
+// REMOVED: `const TECHNIQUE = 'Cu K-edge XANES'`, which every adapted row carried
+// as `technique`. It was a scientific value invented in the client — the list
+// endpoint carries no technique field, so nothing in any response supported it —
+// and its own comment said so ("a display label, not a server field") as though
+// that made it safe. It did not: `technique` is a real, schema-governed scientific
+// property (`system.technique`, an enum), and a hard-coded one would have been
+// wrong for any record that was not Cu K-edge XANES with no signal that it was
+// fabricated. It was never rendered, which is luck, not design — it sat one JSX
+// line away from the queue row. `technique` is now optional and simply absent:
+// the honest representation of a value the server does not send.
 
 const STATUS_TO_GROUP: Record<ApiExperimentStatus, QueueGroupKey> = {
   needs_attention: 'needsAttention',
@@ -95,7 +103,6 @@ export function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary 
     // same seed spec that builds the title. Nothing here parses a title to recover
     // it, and a missing/null value stays undefined so the row renders nothing.
     scenario: s.scenario ?? undefined,
-    technique: TECHNIQUE,
     idOrDraft: s.exported && s.record_id ? s.record_id : 'draft',
     meta: s.created_utc ? `created ${s.created_utc.slice(0, 10)}` : undefined,
     lifecycle: s.exported ? 'exported' : 'draft',
@@ -353,9 +360,22 @@ const KIND_LABEL: Record<string, string> = {
 
 // Sentence-case helper copy (never a scientific value) explaining each blocker
 // and reinforcing the no-guessing contract.
+// TWO variants per structured kind, because the example answer is no longer
+// present on every record. Scoping it to the built-in walkthrough records made
+// the old single sentence FALSE wherever it was withheld: "Confirm the example
+// value, or leave it honestly missing" told the reader to confirm something not
+// on screen. A `managed_legacy` record (workspace.py) is a real, reachable case.
+// The `withExample` copy is used only when a `demo_answer` actually arrived.
 const KIND_CONTEXT: Record<string, string> = {
   asset:
     'An asset can only be cited once it carries a hash. Paste the sha256 — the system will never generate this value for you.',
+  series:
+    'A structured reduced-spectrum value the system will never generate for you. Leave it honestly missing unless you can supply it.',
+  descriptor:
+    'A structured scientific descriptor the system will never generate for you. Leave it honestly missing unless you can supply it.',
+};
+
+const KIND_CONTEXT_WITH_EXAMPLE: Record<string, string> = {
   series:
     'A structured reduced-spectrum value the system will never generate for you. Confirm the example value, or leave it honestly missing.',
   descriptor:
@@ -375,8 +395,104 @@ function pathTokenFor(item: ApiPendingItem): string {
   return item.about || item.id;
 }
 
+/**
+ * Evidence source types that DO speak about the record in hand — a POSITIVE
+ * allowlist mirroring `inferability.RECORD_EVIDENCE_SOURCE_TYPES`
+ * (`draft_validator.OBSERVED_SOURCE_TYPES` plus `derivation`).
+ *
+ * It replaces a denylist of the ten known non-evidence types, and the difference
+ * is not cosmetic: a denylist passes everything it has not heard of, so
+ * `source_type: 'literature'` — a value this repo's own fixtures use — and an
+ * outright invented `'vibes'` both sailed through while the backend's positive
+ * allowlist refused them. An unrecognised source type is now refused here too.
+ *
+ * The duplication of the server's list is deliberate. This guard exists to hold
+ * when the server's copy does not, so deriving it from the response would defeat
+ * the point. `suggestion-provenance.test.tsx` pins the two in step.
+ */
+const RECORD_EVIDENCE_SOURCE_TYPES = new Set([
+  'document',
+  'spreadsheet',
+  'screenshot',
+  'web_form',
+  'file_listing',
+  'user_confirmation',
+  'derivation',
+]);
+
+/** Confidence-like keys, mirroring `inferability._CONFIDENCE_KEYS`. */
+const CONFIDENCE_KEYS = new Set(['confidence', 'probability', 'score']);
+
+/**
+ * True if any confidence-like key appears anywhere in `node`'s tree.
+ *
+ * Recursive for the same reason the server's scan is: this repo's corpus nests
+ * the key one level down (`"uncertainty": {"confidence": 0.86}`), so a top-level
+ * check misses the shape it was written for. Depth-bounded — evidence entries are
+ * small, hand-authored objects.
+ */
+function hasConfidenceKey(node: unknown, depth = 0): boolean {
+  if (depth > 12 || node === null || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some((v) => hasConfidenceKey(v, depth + 1));
+  return Object.entries(node as Record<string, unknown>).some(
+    ([k, v]) => CONFIDENCE_KEYS.has(k) || hasConfidenceKey(v, depth + 1),
+  );
+}
+
+/**
+ * Re-check, on arrival, the clauses that let an `Inferability` carry a concrete
+ * value. A value may accompany `supported_suggestion` and no other state, and only
+ * with a provenance that survives every check below.
+ *
+ * The backend enforces this in `Inferability.__post_init__` and `_check_evidence`;
+ * this is a deliberate SECOND check on the same rules. What it guards against is
+ * not a backend bug we know of — it is a future response shape that quietly grows
+ * a value where the client does not expect one. It fails closed by nulling the
+ * value AND detaching the provenance that failed to justify it.
+ *
+ * Scope, stated precisely because an earlier version of this comment claimed
+ * "every clause the backend checks" and did not deliver it: this mirrors the
+ * server's state/value pairing, provenance completeness, `unique`, `rule`, the
+ * evidence source-type allowlist, the nested confidence scan, the
+ * derivation-needs-a-rule rule, and the non-empty `explanation`. It does NOT
+ * re-check `detail` against the server's per-state key allowlist (`_DETAIL_SCHEMA`)
+ * — `detail` cannot carry a value past the server's own type checks, and
+ * duplicating a five-state key map here would be a third copy to keep in step.
+ */
+export function sanitizeInferability(inf: Inferability | undefined): Inferability | undefined {
+  if (!inf) return undefined;
+  const p = inf.provenance;
+  const evidenceSpeaksAboutThisRecord = (e: { source_type?: string }) =>
+    typeof e?.source_type === 'string' &&
+    RECORD_EVIDENCE_SOURCE_TYPES.has(e.source_type) &&
+    // A derivation must state the rule it applied; an unstated one is a bare assertion.
+    (e.source_type !== 'derivation' || !!(e as { rule?: string }).rule) &&
+    !hasConfidenceKey(e);
+
+  const justified =
+    inf.state === 'supported_suggestion' &&
+    typeof inf.explanation === 'string' &&
+    inf.explanation.length > 0 &&
+    !!p &&
+    p.unique === true &&
+    !!p.rule &&
+    Array.isArray(p.supporting_fields) &&
+    p.supporting_fields.length > 0 &&
+    Array.isArray(p.supporting_evidence) &&
+    p.supporting_evidence.length > 0 &&
+    p.supporting_evidence.every(evidenceSpeaksAboutThisRecord);
+
+  if (justified) return inf;
+  // Nothing to strip only when there is neither a value nor an unjustified
+  // provenance. Leaving provenance attached to a non-supported state was itself a
+  // hole: it presents a justification for a value the state says does not exist.
+  if ((inf.value === null || inf.value === undefined) && !p) return inf;
+  return { ...inf, value: null, provenance: null };
+}
+
 /** Map one live /pending item onto the render blocker the GuidedPrompt consumes. */
 export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
+  const hasExample = !!item.demo_answer;
   return {
     id: item.id,
     kind: item.kind,
@@ -384,11 +500,21 @@ export function pendingItemToBlocker(item: ApiPendingItem): PendingBlocker {
     label: KIND_LABEL[item.kind] ?? titleCase(String(item.kind)),
     path: pathTokenFor(item),
     about: item.about ?? undefined,
-    context: KIND_CONTEXT[item.kind],
+    // The "confirm the example value" wording is used ONLY when an example value
+    // actually arrived — see the note on KIND_CONTEXT_WITH_EXAMPLE.
+    context:
+      (hasExample ? KIND_CONTEXT_WITH_EXAMPLE[item.kind] : undefined) ?? KIND_CONTEXT[item.kind],
     inputType: inputTypeForKind(item.kind),
     demo_answer: item.demo_answer
-      ? { value: item.demo_answer.value, label: item.demo_answer.label }
+      ? {
+          value: item.demo_answer.value,
+          label: item.demo_answer.label,
+          // Carried through, not re-derived. The client must never be the thing
+          // that decides an example answer counts as evidence.
+          provenance: item.demo_answer.provenance,
+        }
       : undefined,
+    inferability: sanitizeInferability(item.inferability),
   };
 }
 
