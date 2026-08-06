@@ -67,8 +67,24 @@ import { SURFACES } from '../surfaces';
  */
 const HOST_PROJECT = 'desktop-1280x800';
 
-/** Breakpoint and content-pressure widths. 320 is required; see the header. */
-const WIDTHS = [1280, 1024, 768, 640, 390, 375, 320] as const;
+/**
+ * Breakpoint and content-pressure widths. 320 is required; see the header.
+ *
+ * 1440 WAS ADDED 2026-08-05, and it closed a gap rather than adding depth: no
+ * sweep in this suite went above 1280, so the widest layout an ordinary modern
+ * laptop renders — the one where a `max-width`-constrained content column has
+ * the most room to sit wrongly in — was measured by nothing at all. The five
+ * Playwright projects top out at 1280 too.
+ *
+ * ITS BASELINE COLUMN IS DARWIN-ONLY. Every `@width-1440` entry added to
+ * `layout-baseline.ts` for this width was measured on macOS in this environment;
+ * the Linux face is NOT measurable here and no Linux number has been invented
+ * for it. **CI (Linux) is the authority** and may report further instances at
+ * 1440 — when it does, add them exactly as the failure names them rather than
+ * widening the match. `linux: []` is never written for a pair this environment
+ * could not measure.
+ */
+const WIDTHS = [1440, 1280, 1024, 768, 640, 390, 375, 320] as const;
 
 /**
  * The "project" component of a `layout-baseline.ts` key for this file.
@@ -180,7 +196,14 @@ test.describe('layout width sweep', () => {
          * `findObscuredControls`'s own contract says callers should. Measured
          * across all 7 sweep widths x 18 surfaces: 1 finding at the top offset,
          * 18 at the bottom — so **17 genuine occlusion instances are invisible
-         * to this sweep**. Every one of them is the LAYOUT-03 class already
+         * to this sweep**. (Those two figures are a MEASUREMENT taken when this
+         * sweep ran 7 widths over 18 surfaces. It now runs 8 over 21, so the
+         * counts are certainly larger; they have deliberately NOT been guessed
+         * upward, because a re-measured number is the only honest replacement
+         * and this environment cannot supply the Linux half of one. The
+         * CONCLUSION — that the bottom offset holds strictly more of the same
+         * LAYOUT-03 class and this sweep sees none of it — is unaffected.)
+         * Every one of them is the LAYOUT-03 class already
          * recorded in `layout-baseline.ts` (the floating Assistant trigger over
          * `span.statusbar-right` / `span.statusbar-eyebrow`) at 1024/768/640/
          * 390/375. Nothing NEW is being hidden.
