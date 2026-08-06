@@ -989,11 +989,13 @@ def test_the_leak_scan_runs_over_every_response_shape(client, monkeypatch, shape
     "last line of defence" that is conditional on the outcome is not one.
     """
     scanned: list[str] = []
+    leaf_sets: list[tuple[str, ...]] = []
     original = db_recon.scan_for_leaks
 
-    def recording(text, *, env, allow_raw_ids):
+    def recording(text, *, env, allow_raw_ids, leaves):
         scanned.append(text)
-        return original(text, env=env, allow_raw_ids=allow_raw_ids)
+        leaf_sets.append(tuple(leaves))
+        return original(text, env=env, allow_raw_ids=allow_raw_ids, leaves=leaves)
 
     monkeypatch.setattr(db_recon, "scan_for_leaks", recording)
     r = _response_for_shape(client, monkeypatch, shape)
@@ -1002,6 +1004,23 @@ def test_the_leak_scan_runs_over_every_response_shape(client, monkeypatch, shape
         json.dumps(json.loads(t), sort_keys=True) for t in scanned
     ], shape
 
+    # AND the leaves actually passed are the payload's, not an empty tuple.
+    #
+    # Requiring `leaves` stops a caller OMITTING it. It does not stop a caller
+    # passing `()`, which is legal, silently reinstates the escaping defect in
+    # the endpoint, and — before this assertion existed — left the whole suite
+    # green: the only thing that went red was a content-hash drift test, which
+    # CLAUDE.md §17 tells the author to regenerate. So the production wiring was
+    # protected by a file digest rather than by a behavioural test.
+    for text, leaves in zip(scanned, leaf_sets):
+        expected = db_recon.string_leaves(json.loads(text))
+        assert set(leaves) == set(expected), (
+            f"{shape}: scan_for_leaks was called with leaves={leaves!r}, which is "
+            f"not the scanned payload's string leaves — a value containing a "
+            f"JSON-escaped character would be invisible to this scan"
+        )
+        assert leaves, f"{shape}: leaves was empty; the decoded-leaf scan is a no-op"
+
 
 def test_a_tripped_scan_on_a_failure_envelope_still_returns_the_frozen_shape(
     client, monkeypatch
@@ -1009,7 +1028,9 @@ def test_a_tripped_scan_on_a_failure_envelope_still_returns_the_frozen_shape(
     """The guard's own fallback must not recurse and must stay in-shape."""
     configure_db(monkeypatch)
     monkeypatch.setattr(
-        db_recon, "scan_for_leaks", lambda text, *, env, allow_raw_ids: ["synthetic"]
+        db_recon,
+        "scan_for_leaks",
+        lambda text, *, env, allow_raw_ids, leaves: ["synthetic"],
     )
     install_connection(monkeypatch, FakeConnection({}))
     r = client.get(RECON_PATH)
@@ -1881,3 +1902,220 @@ def test_health_carries_no_secret_or_connection_detail(client, monkeypatch):
     text = client.get("/api/health").text.lower()
     for needle in (FAKE_HOST, FAKE_PASSWORD, "pghost", "pgpassword", "postgres://"):
         assert needle.lower() not in text, needle
+
+
+# --- the JSON-escaping blind spot -------------------------------------------
+#
+# `scan_for_leaks` was called ONLY with `json.dumps(payload, ensure_ascii=True)`.
+# JSON escapes every non-ASCII character to `\uXXXX`, and always escapes `"`,
+# `\`, newline and tab. The forbidden env value was compared as a raw Python
+# string, so for any such value `value in text` was PERMANENTLY FALSE and the
+# `env_value_present` check could not fire at all.
+#
+# The same defect class is documented in `verification._leak_scan` (with
+# `verification._string_leaves` as its decoded-leaf walker), where it was fixed;
+# it stayed live here. That module lands with feat/record-verification (PR #63)
+# and is not on main yet. These tests are the negative controls
+# that were missing: parametrised over exactly the characters JSON escapes, each
+# one FAILS if the leaves argument stops being consulted.
+
+_ESCAPING_PASSWORDS = (
+    pytest.param("motdepassé-secret-value", id="non-ascii-latin"),
+    pytest.param("σερνετ-value", id="non-ascii-greek"),
+    pytest.param("secret→value", id="non-ascii-arrow"),
+    pytest.param("secretÅngstrom-value", id="non-ascii-angstrom"),
+    pytest.param('sec"ret-value', id="double-quote"),
+    pytest.param("sec\\ret-value", id="backslash"),
+    pytest.param("sec\nret-value", id="newline"),
+    pytest.param("sec\tret-value", id="tab"),
+)
+
+
+@pytest.mark.parametrize("password", _ESCAPING_PASSWORDS)
+def test_the_leak_scan_catches_an_env_value_that_json_escapes(password):
+    """A leaked credential must be caught whatever characters it contains."""
+    payload = {"some_field": password}
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    issues = db_recon.scan_for_leaks(
+        serialized,
+        env={"PGPASSWORD": password},
+        allow_raw_ids=False,
+        leaves=db_recon.string_leaves(payload),
+    )
+    assert "env_value_present:PGPASSWORD" in issues, (
+        f"a leaked password containing {password!r} was NOT detected; "
+        "the scan is blind to the representation JSON gave it"
+    )
+
+
+@pytest.mark.parametrize("password", _ESCAPING_PASSWORDS)
+def test_the_serialized_text_ALONE_would_miss_it(password):
+    """Fixture validity: every canary above really IS re-represented by JSON.
+
+    This is what makes the parametrised cases valid negative controls. It does
+    NOT protect the fix — removing the fix turns nine other tests red and leaves
+    this one green, because it never calls `scan_for_leaks`. An earlier version
+    of this docstring claimed it was the test holding the fix in place, which
+    overstated its role.
+    """
+    payload = {"some_field": password}
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    assert password not in serialized, (
+        f"{password!r} survives JSON encoding unchanged, so it is not a valid "
+        "negative control for the escaping defect"
+    )
+
+
+def test_an_ascii_env_value_is_still_caught_guard_against_over_correction():
+    """The control that proves the parametrised cases above are about ESCAPING."""
+    password = "hunter2supersecretvalue"
+    payload = {"some_field": password}
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+    assert password in serialized
+
+    issues = db_recon.scan_for_leaks(
+        serialized,
+        env={"PGPASSWORD": password},
+        allow_raw_ids=False,
+        leaves=db_recon.string_leaves(payload),
+    )
+    assert "env_value_present:PGPASSWORD" in issues
+
+
+def test_a_leaked_value_arriving_as_a_mapping_KEY_is_caught():
+    """Histogram cells are keyed by strings, so a key is a real leak surface."""
+    password = "kéy-shaped-secret-value"
+    payload = {"cells": {password: 3}}
+    issues = db_recon.scan_for_leaks(
+        json.dumps(payload, sort_keys=True, ensure_ascii=True),
+        env={"PGPASSWORD": password},
+        allow_raw_ids=False,
+        leaves=db_recon.string_leaves(payload),
+    )
+    assert "env_value_present:PGPASSWORD" in issues
+
+
+def test_a_secret_SHAPE_whose_separator_json_escapes_is_caught_only_via_leaves():
+    """The fix widened `secret_shape` too, and nothing was holding that.
+
+    An independent review measured this gap in the test suite rather than in the
+    code: reinstating the defect (`haystacks = (text,)`) turned twelve tests red,
+    and every one of them was an `env_value_present` or endpoint case. Not one
+    `secret_shape` test moved — so a real improvement in detection was riding
+    along uncovered, and a future edit that kept env values working could have
+    dropped it in silence.
+
+    `_SECRET_SHAPES` matches the bearer token across `\\s`. In the serialized
+    text a newline is the TWO characters `\\` and `n`, which `\\s` does not
+    match, so this token is invisible there and visible only in the decoded
+    leaf. That makes it the exact canary for the widening.
+    """
+    token = "bearer\nabcdefgh12345678"
+    payload = {"some_field": token}
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    # Fixture validity: text alone really is blind to this one.
+    assert not [
+        code
+        for code in db_recon.scan_for_leaks(
+            serialized, env={}, allow_raw_ids=False, leaves=()
+        )
+        if code.startswith("secret_shape:")
+    ], "text alone already catches this token, so it is not a valid control"
+
+    issues = db_recon.scan_for_leaks(
+        serialized, env={}, allow_raw_ids=False, leaves=db_recon.string_leaves(payload)
+    )
+    assert "secret_shape:bearer_token" in issues, (
+        "a bearer token separated by a JSON-escaped newline was NOT detected; "
+        "the leaf scan is the only haystack that can see it"
+    )
+
+
+def test_leaves_is_required_so_a_caller_cannot_silently_restore_the_defect():
+    """No default. A default of () would re-enable the bug by omission."""
+    with pytest.raises(TypeError, match="leaves"):
+        db_recon.scan_for_leaks(  # type: ignore[call-arg]
+            "{}", env={}, allow_raw_ids=False
+        )
+
+
+def test_string_leaves_walks_keys_values_and_nesting():
+    payload = {"a": "one", "b": {"nested-key": ["two", {"c": "three"}]}, "d": 4}
+    assert set(db_recon.string_leaves(payload)) == {
+        "a", "one", "b", "nested-key", "two", "c", "three", "d",
+    }
+
+
+# --- the ENDPOINT, not just the function ------------------------------------
+#
+# Everything above tests `scan_for_leaks` directly. That left the production
+# wiring — the two `routes.py` call sites — covered by nothing behavioural: an
+# independent review reinstated the defect verbatim by passing `leaves=()` at
+# both sites and the entire suite stayed green apart from a content-hash drift
+# test, which CLAUDE.md §17 instructs the author to regenerate. These two tests
+# close that: they drive the real endpoint and assert the real refusal.
+
+@pytest.mark.parametrize(
+    "password",
+    [
+        pytest.param("leaked-pässword-value", id="non-ascii"),
+        pytest.param('leaked"password-value', id="double-quote"),
+        pytest.param("leaked\\password-value", id="backslash"),
+    ],
+)
+def test_the_ENDPOINT_refuses_when_an_escaping_credential_reaches_the_payload(
+    client, monkeypatch, password
+):
+    """A credential JSON would escape must still trip the endpoint's own gate."""
+    configure_db(monkeypatch, PGPASSWORD=password)
+
+    real_project = routes._db_recon_project
+
+    def leaking_project(report, authority, statements):
+        payload = real_project(report, authority, statements)
+        # Simulate the failure this gate exists for: a projection that lets a
+        # credential through. It must be REFUSED, not returned.
+        payload["schema_fingerprint"] = password
+        return payload
+
+    monkeypatch.setattr(routes, "_db_recon_project", leaking_project)
+    # `base_rows()` is the fixture that passes every EARLIER gate — an empty
+    # FakeConnection refuses at `transaction_read_only` and never reaches the
+    # projection, so the leak scan would not be exercised at all.
+    install_connection(monkeypatch, FakeConnection(base_rows()))
+
+    r = client.get(RECON_PATH)
+    body = r.json()
+
+    assert set(body) == EXPECTED_TOP_LEVEL_KEYS
+    # `error`, with `refusal_gate: leak_scan`. Note the asymmetry: the LOG line
+    # reads `outcome=refused gate=leak_scan` but the SERVED status is `error`
+    # (routes.py `_db_recon_failure(status="error", gate="leak_scan")`). Do not
+    # take the log wording as the contract — a first draft of this test asserted
+    # `refused` and passed for the wrong reason, against a connection that was
+    # actually being turned away at the `transaction_read_only` gate long before
+    # the leak scan ran.
+    assert body["status"] == "error", (
+        f"the endpoint RETURNED a payload containing {password!r}; the leak scan "
+        "did not fire, because the raw value and its JSON representation differ"
+    )
+    assert body["database"]["refusal_gate"] == "leak_scan"
+    # And the credential itself is nowhere in what was actually served.
+    assert password not in r.text
+    assert password not in json.dumps(body, ensure_ascii=False)
+
+
+def test_the_ENDPOINT_still_serves_a_clean_report_ascii_control(client, monkeypatch):
+    """Guard against over-correction: an unleaked report is still returned."""
+    configure_db(monkeypatch)
+    install_connection(monkeypatch, FakeConnection(base_rows()))
+
+    r = client.get(RECON_PATH)
+    body = r.json()
+
+    assert set(body) == EXPECTED_TOP_LEVEL_KEYS
+    assert body["status"] == "ok"
+    assert body["database"].get("refusal_gate") != "leak_scan"
