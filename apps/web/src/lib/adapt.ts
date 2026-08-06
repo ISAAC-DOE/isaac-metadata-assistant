@@ -257,44 +257,83 @@ function pathTokenFor(item: ApiPendingItem): string {
 }
 
 /**
- * Re-check the one invariant the whole suggestion contract rests on: a concrete
- * value may accompany `supported_suggestion` and no other state.
+ * Evidence source types that DO speak about the record in hand — a POSITIVE
+ * allowlist mirroring `inferability.RECORD_EVIDENCE_SOURCE_TYPES`
+ * (`draft_validator.OBSERVED_SOURCE_TYPES` plus `derivation`).
  *
- * The backend enforces this structurally (`Inferability.__post_init__` raises), so
- * this is a SECOND check on the same rule, deliberately. The failure this guards
- * against is not a backend bug we know about — it is a future response shape that
- * quietly grows a value where the client does not expect one. Fail closed by
- * dropping the value: a suggestion that arrives without the justification the
- * state promises is not shown at all.
+ * It replaces a denylist of the ten known non-evidence types, and the difference
+ * is not cosmetic: a denylist passes everything it has not heard of, so
+ * `source_type: 'literature'` — a value this repo's own fixtures use — and an
+ * outright invented `'vibes'` both sailed through while the backend's positive
+ * allowlist refused them. An unrecognised source type is now refused here too.
+ *
+ * The duplication of the server's list is deliberate. This guard exists to hold
+ * when the server's copy does not, so deriving it from the response would defeat
+ * the point. `suggestion-provenance.test.tsx` pins the two in step.
  */
-/**
- * Source types that are NOT record-specific evidence. Mirrors
- * `inferability.NON_EVIDENCE_SOURCE_TYPES`. It is a mirror and the duplication is
- * deliberate: the point of this guard is to hold even when the server's copy does
- * not, so deriving it from the server would defeat it.
- */
-const NON_EVIDENCE_SOURCE_TYPES = new Set([
-  'model_confidence',
-  'heuristic_confidence',
-  'statistical_prior',
-  'commonly_used',
-  'population_default',
-  'other_record',
-  'tutorial_example',
-  'schema_default',
-  'schema_enum',
-  'schema_example',
+const RECORD_EVIDENCE_SOURCE_TYPES = new Set([
+  'document',
+  'spreadsheet',
+  'screenshot',
+  'web_form',
+  'file_listing',
+  'user_confirmation',
+  'derivation',
 ]);
 
+/** Confidence-like keys, mirroring `inferability._CONFIDENCE_KEYS`. */
+const CONFIDENCE_KEYS = new Set(['confidence', 'probability', 'score']);
+
+/**
+ * True if any confidence-like key appears anywhere in `node`'s tree.
+ *
+ * Recursive for the same reason the server's scan is: this repo's corpus nests
+ * the key one level down (`"uncertainty": {"confidence": 0.86}`), so a top-level
+ * check misses the shape it was written for. Depth-bounded — evidence entries are
+ * small, hand-authored objects.
+ */
+function hasConfidenceKey(node: unknown, depth = 0): boolean {
+  if (depth > 12 || node === null || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some((v) => hasConfidenceKey(v, depth + 1));
+  return Object.entries(node as Record<string, unknown>).some(
+    ([k, v]) => CONFIDENCE_KEYS.has(k) || hasConfidenceKey(v, depth + 1),
+  );
+}
+
+/**
+ * Re-check, on arrival, the clauses that let an `Inferability` carry a concrete
+ * value. A value may accompany `supported_suggestion` and no other state, and only
+ * with a provenance that survives every check below.
+ *
+ * The backend enforces this in `Inferability.__post_init__` and `_check_evidence`;
+ * this is a deliberate SECOND check on the same rules. What it guards against is
+ * not a backend bug we know of — it is a future response shape that quietly grows
+ * a value where the client does not expect one. It fails closed by nulling the
+ * value AND detaching the provenance that failed to justify it.
+ *
+ * Scope, stated precisely because an earlier version of this comment claimed
+ * "every clause the backend checks" and did not deliver it: this mirrors the
+ * server's state/value pairing, provenance completeness, `unique`, `rule`, the
+ * evidence source-type allowlist, the nested confidence scan, the
+ * derivation-needs-a-rule rule, and the non-empty `explanation`. It does NOT
+ * re-check `detail` against the server's per-state key allowlist (`_DETAIL_SCHEMA`)
+ * — `detail` cannot carry a value past the server's own type checks, and
+ * duplicating a five-state key map here would be a third copy to keep in step.
+ */
 export function sanitizeInferability(inf: Inferability | undefined): Inferability | undefined {
   if (!inf) return undefined;
   const p = inf.provenance;
-  // Every clause the backend's own invariant checks, re-checked. The first
-  // version stopped at `unique` and `rule`, which left a `supported_suggestion`
-  // "justified" by `{source_type: 'other_record'}` — a value copied from a
-  // different record — passing through the client untouched.
+  const evidenceSpeaksAboutThisRecord = (e: { source_type?: string }) =>
+    typeof e?.source_type === 'string' &&
+    RECORD_EVIDENCE_SOURCE_TYPES.has(e.source_type) &&
+    // A derivation must state the rule it applied; an unstated one is a bare assertion.
+    (e.source_type !== 'derivation' || !!(e as { rule?: string }).rule) &&
+    !hasConfidenceKey(e);
+
   const justified =
     inf.state === 'supported_suggestion' &&
+    typeof inf.explanation === 'string' &&
+    inf.explanation.length > 0 &&
     !!p &&
     p.unique === true &&
     !!p.rule &&
@@ -302,11 +341,13 @@ export function sanitizeInferability(inf: Inferability | undefined): Inferabilit
     p.supporting_fields.length > 0 &&
     Array.isArray(p.supporting_evidence) &&
     p.supporting_evidence.length > 0 &&
-    p.supporting_evidence.every(
-      (e) => typeof e?.source_type === 'string' && !NON_EVIDENCE_SOURCE_TYPES.has(e.source_type),
-    );
+    p.supporting_evidence.every(evidenceSpeaksAboutThisRecord);
+
   if (justified) return inf;
-  if (inf.value === null || inf.value === undefined) return inf;
+  // Nothing to strip only when there is neither a value nor an unjustified
+  // provenance. Leaving provenance attached to a non-supported state was itself a
+  // hole: it presents a justification for a value the state says does not exist.
+  if ((inf.value === null || inf.value === undefined) && !p) return inf;
   return { ...inf, value: null, provenance: null };
 }
 

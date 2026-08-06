@@ -28,6 +28,21 @@ const REFUSAL: Inferability = {
   detail: {},
 };
 
+/** A provenance that passes every check, so a test can vary exactly one clause. */
+function prov(
+  patch: Partial<NonNullable<Inferability['provenance']>>,
+): NonNullable<Inferability['provenance']> {
+  return {
+    supporting_fields: ['sample.material.formula'],
+    supporting_evidence: [{ source_type: 'spreadsheet' }],
+    rule: 'absorbing element = the sole non-oxygen element (CuO2 -> Cu)',
+    unique: true,
+    alternatives_excluded: ['oxygen is excluded by the rule'],
+    requires_user_confirmation: true,
+    ...patch,
+  };
+}
+
 function blocker(overrides: Partial<PendingBlocker> = {}): PendingBlocker {
   return {
     id: 'series',
@@ -147,6 +162,86 @@ describe('a concrete value may accompany supported_suggestion and nothing else',
       },
     };
     expect(sanitizeInferability(rogue)!.value).toBeNull();
+  });
+
+  // The five shapes an independent review proved the DENYLIST version let through.
+  // Each is a `supported_suggestion` carrying a value; each must now be stripped.
+  const counterExamples: [string, Partial<Inferability>][] = [
+    [
+      "an unrecognised source type ('literature' — used by this repo's own fixtures)",
+      { provenance: prov({ supporting_evidence: [{ source_type: 'literature' }] }) },
+    ],
+    [
+      "an invented source type ('vibes')",
+      { provenance: prov({ supporting_evidence: [{ source_type: 'vibes' }] }) },
+    ],
+    [
+      'a NESTED confidence number (the corpus shape: uncertainty.confidence)',
+      {
+        provenance: prov({
+          supporting_evidence: [
+            { source_type: 'spreadsheet', uncertainty: { confidence: 0.86 } },
+          ],
+        }),
+      },
+    ],
+    [
+      'derivation evidence that states no rule',
+      { provenance: prov({ supporting_evidence: [{ source_type: 'derivation' }] }) },
+    ],
+    ['an empty explanation', { explanation: '' }],
+  ];
+
+  it.each(counterExamples)('strips a supported_suggestion with %s', (_label, patch) => {
+    const rogue: Inferability = {
+      ...REFUSAL,
+      state: 'supported_suggestion',
+      explanation: 'Uniquely determined by a documented rule.',
+      value: 'Cu',
+      provenance: prov({}),
+      ...patch,
+    } as Inferability;
+    const cleaned = sanitizeInferability(rogue)!;
+    expect(cleaned.value).toBeNull();
+    expect(cleaned.provenance).toBeNull();
+  });
+
+  it('detaches a provenance left attached to a non-supported state', () => {
+    // A justification for a value the state says does not exist.
+    const rogue: Inferability = { ...REFUSAL, provenance: prov({}) };
+    expect(sanitizeInferability(rogue)!.provenance).toBeNull();
+  });
+
+  it('accepts every source type the truth plane treats as record evidence', () => {
+    // The positive allowlist must mirror `RECORD_EVIDENCE_SOURCE_TYPES`
+    // (`OBSERVED_SOURCE_TYPES` + `derivation`) — not be narrower by accident.
+    for (const sourceType of [
+      'document',
+      'spreadsheet',
+      'screenshot',
+      'web_form',
+      'file_listing',
+      'user_confirmation',
+    ]) {
+      const good: Inferability = {
+        ...REFUSAL,
+        state: 'supported_suggestion',
+        explanation: 'Uniquely determined by a documented rule.',
+        value: 'Cu',
+        provenance: prov({ supporting_evidence: [{ source_type: sourceType }] }),
+      };
+      expect(sanitizeInferability(good)!.value).toBe('Cu');
+    }
+    const derivation: Inferability = {
+      ...REFUSAL,
+      state: 'supported_suggestion',
+      explanation: 'Uniquely determined by a documented rule.',
+      value: 'experimental',
+      provenance: prov({
+        supporting_evidence: [{ source_type: 'derivation', rule: 'facility => experimental' }],
+      }),
+    };
+    expect(sanitizeInferability(derivation)!.value).toBe('experimental');
   });
 
   it('keeps a fully justified supported_suggestion intact', () => {

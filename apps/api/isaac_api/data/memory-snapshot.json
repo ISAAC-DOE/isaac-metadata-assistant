@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "aed85314bf1e63b1a3ee26afec7cf9c9679b69f444f881cf4438db28a16ecde8"
+        "sha256": "a3a017e610dd1207120f64222a2177710f5b671a52b96ea779681b708283cf5b"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "635320dfd6cf803936d294f58e43884374d25e01527d34688d0c7e1aa1089f67"
+    "served_manifest_fingerprint": "23c8f1d9b33a2767fc731f52d0fe4aee0515dc5ed342838261a7ffcac441b915"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

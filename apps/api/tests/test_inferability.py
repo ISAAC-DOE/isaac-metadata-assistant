@@ -688,19 +688,61 @@ def test_infer_all_degrades_instead_of_raising_on_unknown_evidence():
     ]
 
 
-def test_the_pending_endpoint_survives_unknown_evidence(client, raw_seed_id):
-    """The same defect, exercised over HTTP against a real record."""
+def test_infer_all_degrades_on_a_REAL_seed_draft_not_just_a_stub(client, raw_seed_id):
+    """The same defect, driven through a real canonical seed draft.
+
+    REPLACES a test that asserted `GET /pending` returned 200 after planting
+    unknown evidence. That test was VACUOUS: `pending_to_list` no longer calls
+    `infer_all` at all, so the endpoint could not have been affected — an
+    independent reviewer replaced `infer_all`'s whole body with an unconditional
+    `raise` and it still passed. A test whose passing means nothing is worse than
+    no test, so this one calls `infer_all` directly, on the real seed draft the
+    app ships, and would fail if the function raised.
+    """
     from isaac_api import workspace
 
     exp = workspace.load_experiment(raw_seed_id, session_id=client.tutorial_session_id)
-    formula = (exp.draft.get("fields") or {}).get("sample.material.formula")
-    if formula is not None:
-        formula["evidence"] = [{"source_type": "literature"}]
-        exp.save_versioned()
+    draft = copy.deepcopy(exp.draft)
+    formula = (draft.get("fields") or {}).get("sample.material.formula")
+    assert formula is not None, "the canonical seed must carry a formula to plant on"
+    formula["evidence"] = [{"source_type": "literature"}]
 
-    response = client.get(f"/api/experiments/{raw_seed_id}/pending")
-    assert response.status_code == 200
-    assert response.json()["pending"]
+    results = inf.infer_all(draft)
+    by_field = {r.field: r for r in results}
+    absorber = by_field["implicit:absorbing_element"]
+    assert absorber.state == inf.NOT_INFERABLE
+    assert absorber.detail["reason"] == "rule_refused"
+    assert "literature" not in absorber.explanation
+
+
+def test_the_canonical_seed_still_yields_a_supported_suggestion(client, raw_seed_id):
+    """The degrade must not be able to hide a genuinely broken rule.
+
+    `infer_all` swallows `UnsupportedSuggestion` per rule, which is right for
+    availability but means a future edit that (say) emptied `supporting_fields`
+    would turn every suggestion into a permanent `not_inferable` with every other
+    test still green — they assert refusals, and a refusal is what a broken rule
+    produces. This asserts the POSITIVE direction end-to-end on the real shipped
+    seed: the rule fires, uniquely, WITH provenance, THROUGH `infer_all`.
+    """
+    from isaac_api import workspace
+
+    exp = workspace.load_experiment(raw_seed_id, session_id=client.tutorial_session_id)
+    by_field = {r.field: r for r in inf.infer_all(exp.draft)}
+
+    absorber = by_field["implicit:absorbing_element"]
+    assert absorber.state == inf.SUPPORTED_SUGGESTION, (
+        "the shipped seed carries a single-absorber formula; a refusal here means "
+        "the rule broke and infer_all's degrade swallowed the reason"
+    )
+    assert absorber.value is not None
+    assert absorber.provenance is not None
+    assert absorber.provenance.supporting_fields == ("sample.material.formula",)
+    assert absorber.provenance.unique is True
+
+    domain = by_field["system.domain"]
+    assert domain.state == inf.SUPPORTED_SUGGESTION
+    assert domain.value == "experimental"
 
 
 def test_a_nested_confidence_number_is_refused():

@@ -1,11 +1,52 @@
 """Explicit inferability states + machine-checkable provenance for SUGGESTIONS.
 
-This module is the single place that decides whether the app may put a CONCRETE
-value in front of a user that the user did not supply. It is pure, deterministic,
-stdlib-only apart from two read-only project reads, and Graphify-free. It decides
-nothing about validity or exportability — that stays with ``draft_validator`` /
-``official`` / ``export`` (the truth plane), which this module never imports for
-any purpose other than the two deterministic derivation rules it wraps.
+READ THIS FIRST: what is live, and what is not
+----------------------------------------------
+An earlier version of this docstring opened by calling this module "the single
+place that decides whether the app may put a CONCRETE value in front of a user".
+That was wrong, and wrong in the direction that matters on a no-guessing slice —
+it pointed a reader at the wrong file. The correction is stated up front rather
+than buried, because the sentence it replaces is the first thing anyone reads.
+
+**The app's only concrete value that the user did not supply is ``demo_answer``,
+and it is decided in ``serialize.py``, not here.** That is the committed
+walkthrough example content, and what actually keeps it honest in the running app
+is ``serialize._demo_answer_for``'s ``example_scope`` gate: it is withheld from
+every record outside the five canonical seeds, defaults to withheld, and carries
+provenance saying it is not evidence. If you are auditing what stops this app from
+guessing, that gate — plus the truth plane (``draft_validator``, ``official``,
+``export``) and the ``If-Match`` + ``confirmed_by_user`` acceptance contract — is
+where to look.
+
+From THIS module, exactly ONE function has a production caller:
+:func:`blocker_inferability`, called at ``serialize.py`` for each open blocker and
+rendered by ``GuidedPrompt.tsx`` as the sentence explaining why the app is asking
+rather than answering. It can only ever return :data:`NEEDS_USER_INPUT` or
+:data:`NOT_INFERABLE` — it raises on anything else — so **no production code path
+in this module can emit a concrete value at all.**
+
+Everything else is a tested library with no caller: the rule engine
+(:func:`infer_all`, :func:`absorbing_element`, :func:`system_domain`,
+:func:`absorption_edge`), the value-bearing constructor :func:`supported` and its
+guards (:func:`_check_evidence`, :func:`_confidence_keys_in`),
+:class:`SuggestionProvenance`, :func:`constraint_only`, and the
+:data:`AMBIGUOUS` / :data:`CONTRADICTORY_EVIDENCE` states. Measured: 344 of this
+file's 815 lines are definitions with no production caller. They exist because the
+slice specified the vocabulary and its guards, and they are exercised only by
+``apps/api/tests/test_inferability.py``. Treat them as a contract waiting for a
+consumer, not as something running today.
+
+A previous revision DID serve the rule engine's output as an ``inferences`` block
+on the pending response. It was removed: nothing consumed it, it shipped concrete
+values, and it bypassed the client's own re-check. Do not re-add it to manufacture
+a caller.
+
+Other properties: pure, deterministic, Graphify-free, and stdlib-only apart from
+two read-only imports from the truth plane — ``draft_builder.non_oxygen_elements``
+(the derivation rule wrapped by :func:`absorbing_element`) and
+``draft_validator.OBSERVED_SOURCE_TYPES`` (the constant
+:data:`RECORD_EVIDENCE_SOURCE_TYPES` is derived from). It decides nothing about
+validity or exportability.
 
 The contract, in one sentence
 ----------------------------
@@ -132,9 +173,11 @@ _CONFIDENCE_KEYS: frozenset[str] = frozenset({"confidence", "probability", "scor
 #: as literals, which made this a mirror with nothing holding it up: widening
 #: ``OBSERVED_SOURCE_TYPES`` in the truth plane would silently leave this set
 #: behind, and every draft using the new type would start raising here — on a
-#: READ path. Deriving it means the two can only drift if someone edits this line,
-#: and ``test_record_evidence_source_types_is_derived_from_the_truth_plane`` pins
-#: the relationship rather than the contents.
+#: READ path. Deriving it means the two can only drift if someone edits this line.
+#: ``test_record_evidence_source_types_is_derived_from_the_truth_plane`` asserts
+#: the resulting CONTENTS against the same derived expression — it does not detect
+#: this line being replaced by an equivalent literal, and does not claim to; what
+#: it catches is the truth plane widening while this set stays put.
 RECORD_EVIDENCE_SOURCE_TYPES: frozenset[str] = frozenset(OBSERVED_SOURCE_TYPES) | {
     # A documented rule applied to THIS record's own fields. Deliberately added
     # here and NOT to the truth plane's tuple: `draft_validator` distinguishes
@@ -682,7 +725,9 @@ _RULES: tuple[tuple[Any, str], ...] = (
 
 #: What a caller is told when a rule refuses to run at all. Deliberately fixed and
 #: content-free: the exception message can quote an evidence source type or a
-#: field value, and this string is rendered to a user.
+#: field value, so it must not be passed through. Nothing renders this string
+#: today — ``infer_all`` has no production caller — but it is written to be safe
+#: for a surface, because that is the only reason a caller would want it.
 _RULE_REFUSED = (
     "This field's derivation rule could not be applied to the evidence this "
     "record carries, so nothing is proposed. The value must come from you."
@@ -692,18 +737,24 @@ _RULE_REFUSED = (
 def infer_all(draft: dict) -> list[Inferability]:
     """Every rule's decision for one draft, in a fixed order. Pure; no I/O.
 
-    A rule that raises :class:`UnsupportedSuggestion` DEGRADES to
-    ``not_inferable`` rather than propagating. This is not defensive padding — it
-    closes a real availability hole. ``_check_evidence`` raises on any evidence
-    ``source_type`` outside :data:`RECORD_EVIDENCE_SOURCE_TYPES`, and this
-    function is reached from ``GET /pending``, ``POST /answers`` and
-    ``POST /edit``. A draft whose formula evidence carried an unlisted type would
-    have turned a READ into a 500 — and the refusal is not even a caller error:
-    the honest answer to "can you infer this?" for evidence the rule set does not
-    understand is *no*, which is a state this vocabulary already has.
+    **This function currently has NO production caller** (see the module
+    docstring). It was reached from ``GET /pending``, ``POST /answers`` and
+    ``POST /edit`` when the pending response carried an ``inferences`` block; that
+    block was removed as unconsumed surface, and the last call went with it.
+
+    The per-rule degrade below therefore protects a path nothing walks today. It
+    is kept, rather than reverted with the caller, because it is the correct
+    behaviour for the next caller: ``_check_evidence`` raises on any evidence
+    ``source_type`` outside :data:`RECORD_EVIDENCE_SOURCE_TYPES`, so a draft
+    carrying an unlisted type would turn a READ into a 500 — and the refusal is
+    not even a caller error. The honest answer to "can you infer this?" for
+    evidence the rule set does not understand is *no*, which is a state this
+    vocabulary already has.
 
     Degrading is safe precisely because the fallback is the most conservative
-    state. It can only ever remove a suggestion, never manufacture one.
+    state. It can only ever remove a suggestion, never manufacture one — and
+    ``test_the_canonical_seed_still_yields_a_supported_suggestion`` exists so the
+    degrade cannot quietly swallow a rule that has genuinely broken.
     """
     out: list[Inferability] = []
     for rule, field_name in _RULES:
