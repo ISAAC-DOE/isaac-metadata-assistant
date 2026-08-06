@@ -41,6 +41,8 @@
  *   · No header-derived identity of any kind, not even as a display name.
  */
 
+import type { CurrentUserState } from './currentUserContract';
+
 /* ---- dataset identity -------------------------------------------------- */
 
 /**
@@ -287,6 +289,33 @@ export const unconfiguredMyStatsSource: MyStatsSource = Object.freeze({
  */
 function pending<T>(id: MyStatsDatasetId): MyStatsState<T> {
   return { status: 'access_pending', reason: MY_STATS_PENDING_REASON[id] };
+}
+
+/**
+ * Which personal-statistics source answers for a given reader.
+ *
+ * IT RETURNS THE SAME SOURCE FOR EVERY STATE, INCLUDING `present`, AND THAT IS
+ * THE ASSERTION. Knowing who the reader is would not, by itself, make a single
+ * dataset above answerable: six of the eight additionally need per-record
+ * attribution, and `attribution.uploaded_by` fails closed by design (commit
+ * `bdff8f5`). So identity does not unlock personal data here, and this function
+ * is where that is written down — a future slice that wires a real current-user
+ * source has to change THIS line to start showing anything, rather than getting
+ * personal figures as a side effect of signing somebody in.
+ *
+ * Written as an exhaustive switch rather than `return unconfiguredMyStatsSource`
+ * so that adding a state to {@link CurrentUserState} is a compile error here
+ * instead of silently inheriting the constant.
+ */
+export function personalStatisticsSourceFor(state: CurrentUserState): MyStatsSource {
+  switch (state.status) {
+    case 'disabled':
+    case 'absent':
+    case 'unavailable':
+    case 'untrusted':
+    case 'present':
+      return unconfiguredMyStatsSource;
+  }
 }
 
 /* ---- what the UI says about each dataset ----------------------------- */

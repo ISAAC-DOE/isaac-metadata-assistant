@@ -8,14 +8,17 @@ import {
   deriveEvidenceTotals,
   deriveExportGate,
   deriveMemoryFacts,
+  deriveOpenQuestions,
+  deriveSchemaFacts,
   deriveWorkflowStages,
   deriveWorkspaceTotals,
 } from '../lib/statisticsModel';
 import { CANONICAL_STEPS } from '../lib/workflowSteps';
 import { flattenOpenApi } from '../lib/apiDocsModel';
+import { buildSchemaFieldTree, flattenFieldTree } from '../lib/schemaBrowser';
 import type { RuntimeRecord } from '../lib/crossRecordTriage';
-import type { ApiGraphStatus, ApiOpenApiResponse } from '../lib/types';
-import { openApiFixture } from '../test/apiFixtures';
+import type { ApiGraphStatus, ApiOpenApiResponse, ApiSchemaResponse } from '../lib/types';
+import { openApiFixture, schemaBrowserFixture } from '../test/apiFixtures';
 
 /**
  * The Statistics dashboard's derivation layer, tested WITHOUT React.
@@ -590,6 +593,7 @@ describe('privacy — derivations emit counts and provenance strings only', () =
     deriveWorkflowStages(ADVERSARIAL),
     deriveEvidenceTotals(ADVERSARIAL),
     deriveExportGate(ADVERSARIAL),
+    deriveOpenQuestions(ADVERSARIAL),
     deriveMemoryFacts(
       graphStatus({
         note: 'ops@example.com Bearer secret cookie authorization /Users/someone 10.0.0.5',
@@ -644,5 +648,160 @@ describe('privacy — derivations emit counts and provenance strings only', () =
         /request|visit|session|user|latency|uptime|database|hostname|origin/i,
       );
     }
+  });
+});
+
+// --- open questions -----------------------------------------------------------
+
+describe('deriveOpenQuestions', () => {
+  it('sums the seed set\'s question counts and reports the three record tallies', () => {
+    /* SEEDS carry pending_count 5, 2, 0, 0, 0 and workflow flags blocked on the
+       first two, reopened on the fourth. Transcribed by hand from the fixture
+       above, not recomputed, so a change to either would have to be noticed. */
+    expect(deriveOpenQuestions(SEEDS)).toEqual({
+      recordsCounted: 5,
+      recordsWithUnreadableCount: 0,
+      totalOpenQuestions: 7,
+      recordsWithOpenQuestions: 2,
+      mostOnOneRecord: 5,
+      recordsWithBlockedStep: 2,
+      recordsWithReopenedStep: 1,
+    });
+  });
+
+  it('an empty set yields zeros without inventing a maximum', () => {
+    expect(deriveOpenQuestions([])).toEqual({
+      recordsCounted: 0,
+      recordsWithUnreadableCount: 0,
+      totalOpenQuestions: 0,
+      recordsWithOpenQuestions: 0,
+      mostOnOneRecord: 0,
+      recordsWithBlockedStep: 0,
+      recordsWithReopenedStep: 0,
+    });
+  });
+
+  it('a non-numeric pending_count is counted as UNREADABLE, never as zero', () => {
+    /* The distinction that matters: treating it as zero shrinks a total a reader
+       would take as complete. `recordsWithUnreadableCount` makes the shortfall
+       statable, and the record still contributes its workflow flags. */
+    const broken = [
+      rec({ experiment_id: 'X', pending_count: undefined as unknown as number }),
+      rec({ experiment_id: 'Y', pending_count: 4, workflow: { current_step: null, blocked: true, reopened: true } }),
+    ];
+    const questions = deriveOpenQuestions(broken);
+    expect(questions.recordsWithUnreadableCount).toBe(1);
+    expect(questions.totalOpenQuestions).toBe(4);
+    expect(questions.recordsWithOpenQuestions).toBe(1);
+    expect(questions.recordsCounted).toBe(2);
+    expect(questions.recordsWithBlockedStep).toBe(1);
+    expect(questions.recordsWithReopenedStep).toBe(1);
+  });
+
+  it('blocked and reopened are SEPARATE axes, and one record may be in both', () => {
+    const both = [
+      rec({
+        experiment_id: 'BOTH',
+        pending_count: 1,
+        workflow: { current_step: 'export', blocked: true, reopened: true },
+      }),
+    ];
+    const questions = deriveOpenQuestions(both);
+    expect(questions.recordsWithBlockedStep).toBe(1);
+    expect(questions.recordsWithReopenedStep).toBe(1);
+    // …so the two must never be added: their sum exceeds the record count.
+    expect(
+      questions.recordsWithBlockedStep + questions.recordsWithReopenedStep,
+    ).toBeGreaterThan(questions.recordsCounted);
+  });
+});
+
+// --- the official schema's own shape -----------------------------------------
+
+/*
+ * NOT swept by the record-privacy block above, and deliberately so: this
+ * derivation never sees a record. Its input is the vendored PUBLIC schema and
+ * the committed vocabulary files, so there is no title, id or scientific value
+ * in scope for it to leak. What it CAN get wrong is a count, which is what these
+ * assert.
+ */
+describe('deriveSchemaFacts', () => {
+  const SCHEMA = schemaBrowserFixture as unknown as ApiSchemaResponse;
+
+  /*
+   * Every literal below is derived BY HAND from `schemaBrowserFixture`:
+   *
+   *   top-level: isaac_record_version · record_id · record_type · descriptors ·
+   *              sample · tags                                              = 6
+   *   required (root): isaac_record_version, record_id, record_type         = 3
+   *   all depths: the three scalars (3) + descriptors > outputs > descriptors
+   *               > name (4) + sample > {sample_form, material > formula} (4)
+   *               + tags (1)                                                = 12
+   *   enums: record_type only                                               = 1
+   *   allOf rules: one at the root, one under `sample`                      = 2
+   *   vocabularies: descriptor_class, whose entries are
+   *                 classes.spectroscopy (2) + products (2)                 = 4
+   */
+  it('counts the fixture schema the way the Schema Reference browser walks it', () => {
+    expect(deriveSchemaFacts(SCHEMA)).toEqual({
+      schemaTitle: 'ISAAC AI-Ready Scientific Record v1.05 (fixture)',
+      schemaVersion: '1.05',
+      topLevelFields: 6,
+      totalFields: 12,
+      requiredTopLevelFields: 3,
+      fieldsWithEnumeratedValues: 1,
+      conditionalRules: 2,
+      bySection: [
+        { section: 'isaac_record_version', count: 1 },
+        { section: 'record_id', count: 1 },
+        { section: 'record_type', count: 1 },
+        { section: 'descriptors', count: 4 },
+        { section: 'sample', count: 4 },
+        { section: 'tags', count: 1 },
+      ],
+      vocabularyFiles: 1,
+      vocabularyTerms: 4,
+      byVocabulary: [{ name: 'descriptor_class', entryCount: 4 }],
+    });
+  });
+
+  it('the section counts partition the field total, by construction', () => {
+    const facts = deriveSchemaFacts(SCHEMA);
+    expect(facts.bySection.reduce((n, s) => n + s.count, 0)).toBe(facts.totalFields);
+  });
+
+  it('the field total agrees with the browser\'s own traversal, not with a second walker', () => {
+    /* The point of reusing `buildSchemaFieldTree`/`flattenFieldTree`: this
+       assertion could only fail if Statistics grew a walker of its own. */
+    const facts = deriveSchemaFacts(SCHEMA);
+    expect(facts.totalFields).toBe(flattenFieldTree(buildSchemaFieldTree(SCHEMA.schema)).length);
+  });
+
+  it('an empty document yields zeros and a null title, and does not throw', () => {
+    expect(
+      deriveSchemaFacts({ schema_title: null, schema_version: '', schema: {}, vocabularies: {} }),
+    ).toEqual({
+      schemaTitle: null,
+      schemaVersion: null,
+      topLevelFields: 0,
+      totalFields: 0,
+      requiredTopLevelFields: 0,
+      fieldsWithEnumeratedValues: 0,
+      conditionalRules: 0,
+      bySection: [],
+      vocabularyFiles: 0,
+      vocabularyTerms: 0,
+      byVocabulary: [],
+    });
+  });
+
+  it('a malformed body degrades to zeros rather than throwing during render', () => {
+    /* There is no ErrorBoundary in this app, so a throw here would blank the
+       whole SPA rather than one section. The types say these fields exist; the
+       wire does not. */
+    const facts = deriveSchemaFacts({} as unknown as ApiSchemaResponse);
+    expect(facts.totalFields).toBe(0);
+    expect(facts.schemaVersion).toBeNull();
+    expect(facts.byVocabulary).toEqual([]);
   });
 });
