@@ -1175,10 +1175,26 @@ async function reportAssertions(
   // collapse `verificationContract.ts:182-196` exists to prevent), both fail.
   // Deliberately NOT symmetrical — the public corpus really does run, and this
   // says nothing about it.
+  // IT FAILS CLOSED. An earlier version did `if (count === 0) continue`, which
+  // turned "I could not find the row" into a PASS — so an ordinary product copy
+  // change ("Read-Only Database Access" -> "Read-Only DB Access") or a CSS class
+  // rename silently disarmed the guard that exists to stop the Critical coming
+  // back. A reviewer proved both: with `verified` reinstated AND either drift
+  // applied, all eleven tests passed. A guard whose own selector is part of its
+  // trust boundary must report when the boundary moves.
   if (state.corpus === 'private') {
     for (const label of ['Read-Only Database Access', 'Parameterized Database Queries']) {
       const row = s.locator('.stats-verify-safeguard', { hasText: label });
-      if ((await row.count()) === 0) continue;
+      const count = await row.count();
+      if (count === 0) {
+        push(
+          `the private-corpus safeguard row "${label}" was not found (selector ` +
+            `.stats-verify-safeguard). The guard that stops this capture claiming a ` +
+            `database check was Verified cannot run, so this is a FAILURE, not a pass — ` +
+            `if the label or the class was renamed, update this guard with it`
+        );
+        continue;
+      }
       const rowText = await row.first().innerText();
       if (/\bVerified\b/.test(rowText)) {
         push(
@@ -1404,6 +1420,73 @@ test.describe('statistics · record verification runtime states', () => {
       ).toHaveLength(1);
     }
 
+    // THE CLASSIFIER IS TIED TO WHAT THE STATE ACTUALLY DOES, not to its name.
+    //
+    // The partition check above only proves each id ends in ONE classifier — it
+    // cannot tell whether that classifier is TRUE. A reviewer renamed
+    // `stale-report-synthetic-fixture` to `...-real-public-reference` and all
+    // eleven tests passed: the state still served a fabricated body, but the
+    // attachment was now named "real" and, because `real-public-reference` maps
+    // to no stamp, the image lost its banner too. Only the private state was
+    // protected, by the hard-coded check below; the other two synthetic states,
+    // three intercepted-error states and three unavailable states were not.
+    //
+    // So the label is checked against the state's own `reach` SOURCE. A state
+    // that fabricates or intercepts calls `serve(`, `servePhased(` or `route.`;
+    // a state claiming real figures must await the real backend through
+    // `waitForRealReport`. Reading the source is unusual, and it is chosen
+    // deliberately over a hand-written `intercepts: true` flag — a flag is one
+    // more thing to label wrongly, and this file's whole problem is labels that
+    // drift from behaviour. It cannot be satisfied by editing a string.
+    // The rule is PER CLASSIFIER, because the four are not one axis. A first
+    // version asserted "not real => must fabricate" and correctly failed on
+    // `my-stats-no-attribution-unavailable-state`, which reaches the REAL page
+    // with no interception at all — the PRODUCT has nothing to state, which is
+    // exactly what `unavailable-state` means. That is a true classifier on an
+    // un-faked state, so the crude rule was wrong, not the state.
+    for (const state of STATES) {
+      const src = state.reach.toString();
+      const fabricates = /\bserve\(|\bservePhased\(/.test(src);
+      const intercepts = /\broute\./.test(src);
+      const awaitsReal = /waitForRealReport\(/.test(src);
+
+      if (state.id.endsWith('real-public-reference')) {
+        // Figures on screen are asserted to be the real backend's. This is the
+        // only classifier captured WITHOUT a provenance stamp, so it is the one
+        // that must be hardest to claim.
+        expect(
+          awaitsReal,
+          `"${state.id}" claims real-public-reference but never awaits the real backend ` +
+            '(waitForRealReport). It is captured with NO provenance stamp, so a false claim ' +
+            'here produces exactly the unmarked, authoritative-looking artifact this file ' +
+            'exists to prevent.'
+        ).toBe(true);
+      } else if (state.id.endsWith('synthetic-fixture')) {
+        expect(
+          fabricates,
+          `"${state.id}" claims synthetic-fixture but serves no fabricated body ` +
+            '(serve/servePhased). Either it is really reading the backend — in which case ' +
+            'the classifier is wrong — or the state no longer does what its name says.'
+        ).toBe(true);
+      } else if (state.id.endsWith('intercepted-error')) {
+        expect(
+          intercepts || fabricates,
+          `"${state.id}" claims intercepted-error but intercepts nothing (route.*). A real ` +
+            'failure and an injected one must never be captured under the same word.'
+        ).toBe(true);
+      } else {
+        // `unavailable-state` deliberately constrains nothing about HOW it is
+        // reached — a read genuinely in flight, a run genuinely in progress and
+        // an unattributable personal panel are all legitimate, faked or not.
+        // What it must not do is put figures on screen: nothing is claimed.
+        expect(
+          state.rendersReport === true,
+          `"${state.id}" claims unavailable-state — nothing claimed, nothing failed — but ` +
+            'it renders a report. A capture showing figures cannot carry that classifier.'
+        ).toBe(false);
+      }
+    }
+
     // And the one state whose caption is load-bearing carries its words.
     const privateState = STATES.find((s) => s.corpus === 'private');
     expect(privateState, 'the private-corpus state must exist').toBeTruthy();
@@ -1483,13 +1566,42 @@ test.describe('statistics · record verification runtime states', () => {
           // See `stampProvenance`: the name stays behind in the HTML report and
           // the image does not.
           const unstamp = await stampProvenance(target, state.id);
-          const shot = await target.screenshot({ animations: 'disabled' });
-          await unstamp();
-          const suffix = notes.length ? ` [${notes.join('; ')}]` : '';
-          await testInfo.attach(`${width}px · ${state.id} — ${state.what}${suffix}`, {
-            body: shot,
-            contentType: 'image/png',
-          });
+          try {
+            // THE STAMP IS ASSERTED, NOT ASSUMED. A reviewer emptied every
+            // synthetic `STAMP_TEXT` entry and all eleven tests still passed —
+            // the mechanism introduced to stop this file producing a lying
+            // artifact could itself be deleted in silence, which is the same
+            // untested-widening defect the sibling PR was fixing at the time.
+            // Asserted HERE, immediately before the pixels are taken, because
+            // that is the only moment at which "the banner is in the image" is
+            // a true statement about the image.
+            const wantsStamp = !state.id.endsWith('real-public-reference');
+            const stampCount = await target.locator('[data-e2e-provenance-stamp]').count();
+            if (wantsStamp && stampCount !== 1) {
+              push(
+                `the provenance stamp is missing from a non-real capture (found ` +
+                  `${stampCount}); the attached image would carry no indication that its ` +
+                  `figures were not produced by a real run`
+              );
+            }
+            if (!wantsStamp && stampCount !== 0) {
+              push(
+                `a real-public-reference capture carries a synthetic provenance stamp ` +
+                  `(found ${stampCount}); that would be its own false statement`
+              );
+            }
+            const shot = await target.screenshot({ animations: 'disabled' });
+            await testInfo.attach(
+              `${width}px · ${state.id} — ${state.what}${notes.length ? ` [${notes.join('; ')}]` : ''}`,
+              { body: shot, contentType: 'image/png' }
+            );
+          } finally {
+            // In a `finally` so a throwing screenshot cannot leave the stamp on
+            // the page. Every state re-navigates, so today nothing could carry
+            // it into the next capture — but that is an unwritten convention,
+            // and one line is cheaper than depending on it.
+            await unstamp();
+          }
           attachments += 1;
           captured.push(state.id);
         } catch (err) {
