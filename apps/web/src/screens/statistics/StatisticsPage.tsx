@@ -294,10 +294,13 @@ function leadSentence(scope: string | null, tab: StatisticsTabId): string {
   }
   const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
   /*
-   * IT MUST NAME WHAT IS ACTUALLY BELOW IT. This enumerated four topics while the
-   * tab had grown seven sections: Open Questions, Record Schema and Platform
-   * Metrics were all absent, and a lead that lists some of the page reads as a
-   * complete list of it.
+   * IT NAMES THE TOPICS THAT STATE FIGURES — NOT EVERY HEADING BELOW IT, and the
+   * narrower claim is the true one. Open Questions, Record Schema and Platform
+   * Metrics are added by this same change, so the previous four-topic sentence was
+   * not stale: it was complete for the page it described, and it is adding a
+   * section that makes a lead go wrong. Two headings stay unnamed on purpose — the
+   * runtime facts inside Technical Details, and the no-analytics disclosure, which
+   * is an absence rather than a topic — so this is not a table of contents.
    *
    * Platform Metrics is named DIFFERENTLY from the rest, in its own clause, because
    * it is the one section that states no figure — listing "platform metrics"

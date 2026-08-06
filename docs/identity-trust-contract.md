@@ -144,8 +144,8 @@ surfaces, and the first version of this paragraph read as though both scanned so
   bullet said "strips comments first" as though it covered the list. Measured: the stripper is built at
   `:1098` and only the cookie/browser-storage assertion (`:1109`) reads the stripped text; the header,
   `fetch`, API-client and transport scans all run against the unstripped module, and the test says why
-  in line ("Neither module contains the substring `api.` in prose (checked), so this needs no comment
-  stripping"). The direction is conservative — an unstripped scan can only over-report — so this is a
+  in line ("None of the THREE modules contains the substring `api.` in prose (checked …), so this
+  needs no stripping"). The direction is conservative — an unstripped scan can only over-report — so this is a
   description defect, not a hole. The stripper has its own two guards against returning `''` or
   returning the text unchanged.
 - **`apps/web/src/__tests__/current-user-contract.test.ts` reads no source at all.**

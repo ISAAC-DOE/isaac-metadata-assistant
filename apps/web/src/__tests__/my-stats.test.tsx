@@ -1068,8 +1068,8 @@ describe('My Stats invents no personal figure — the six traps', () => {
        * de-duplicated its call list. Both holes are closed; this is the one that
        * closes it at the source rather than at the call log.
        *
-       * Neither module contains the substring `api.` in prose (checked), so this
-       * needs no comment stripping.
+       * None of the THREE modules contains the substring `api.` in prose (checked
+       * — "neither" was written when the loop had two), so this needs no stripping.
        */
       expect(module, `${name} must not call this app's API client`).not.toMatch(/\bapi\s*\.\s*[a-zA-Z]/);
       expect(module, `${name} must not open a transport of its own`).not.toMatch(

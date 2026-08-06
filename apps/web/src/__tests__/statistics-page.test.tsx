@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
+import { cleanup, render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
+import { SchemaBrowser } from '../components/SchemaBrowser';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import { StatisticsPage } from '../screens/statistics/StatisticsPage';
 import { LABELS } from '../lib/labels';
@@ -1811,6 +1812,46 @@ describe('Record Schema (inside Technical Details)', () => {
     expect(
       within(regionOf('Record Schema')).getByRole('link', { name: 'Open Schema Reference' }),
     ).toHaveAttribute('href', '/governance?tab=schema');
+  });
+
+  /*
+   * THE CROSS-SCREEN CLAIM, RENDERED ON BOTH SCREENS.
+   *
+   * `SchemaBody`'s note tells the reader, in product copy, "The Schema Reference
+   * browser walks the document the same way, so the two screens state the same
+   * number." That was a claim about ANOTHER SCREEN backed by nothing that rendered
+   * it: `statistics-model.test.ts` compares this module's total against a direct
+   * call of the shared traversal, which proves there is ONE walker — not that the
+   * browser puts that walker's result on screen, nor that it puts it where a
+   * reader would compare it. Both screens are rendered here, from the one fixture,
+   * and the two DISPLAYED strings are compared.
+   *
+   * Sequential rather than side by side: `screen` is document-wide, and both
+   * surfaces render a `Fields`-labelled count, so mounting them together would
+   * make each lookup ambiguous.
+   */
+  it('states the same field total the Schema Reference browser displays', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    const onStatistics = figureValue('Record Schema', 'Fields at Every Depth');
+    // …and it really did read a number, or the comparison below could pass on ''.
+    expect(onStatistics).toMatch(/^\d+$/);
+
+    cleanup();
+    stubFetchRoutes({ 'GET /api/schema': { body: schemaBrowserFixture as never } });
+    const browser = render(<SchemaBrowser />);
+    const paneCount = async () => {
+      const el = await waitFor(() => {
+        const found = browser.container.querySelector('#schema-fields-list-heading .schema-pane-count');
+        expect(found, 'the Fields pane must state a count').not.toBeNull();
+        return found as HTMLElement;
+      });
+      return el.textContent?.trim() ?? '';
+    };
+
+    // Unfiltered, the pane states the bare total — the same quantity Statistics
+    // labels `Fields at Every Depth`.
+    expect(await paneCount()).toBe(onStatistics);
   });
 
   /*

@@ -46,8 +46,20 @@ function locateSrcDir(): string {
 
 const SRC_DIR = locateSrcDir();
 
-/** Directories that are test scaffolding rather than shipped product code. */
+/**
+ * The TOP-LEVEL directories that are test scaffolding rather than shipped product
+ * code: `src/test` and `src/__tests__`, and only those two.
+ *
+ * Matched by POSITION as well as by name. Excluding every directory called `test`
+ * or `__tests__` at any depth would silently drop a future `screens/test/` or
+ * `components/__tests__/` out of the scan — and a production file missing from
+ * this scan is precisely the file that could import a fixture without this guard
+ * noticing. The exclusions asserted below are already stated in top-level terms
+ * (`startsWith('test/')`, `startsWith('__tests__/')`).
+ */
 const TEST_DIRS = new Set(['__tests__', 'test']);
+const isTestScaffoldingDir = (dir: string, name: string): boolean =>
+  dir === SRC_DIR && TEST_DIRS.has(name);
 const isColocatedTest = (name: string): boolean => /\.test\.tsx?$/.test(name);
 
 /** Every `.ts`/`.tsx` file that is part of the shipped app. */
@@ -56,7 +68,7 @@ function productionSourceFiles(dir: string = SRC_DIR): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (!TEST_DIRS.has(entry.name)) found.push(...productionSourceFiles(full));
+      if (!isTestScaffoldingDir(dir, entry.name)) found.push(...productionSourceFiles(full));
     } else if (/\.tsx?$/.test(entry.name) && !isColocatedTest(entry.name)) {
       found.push(relative(SRC_DIR, full).split(sep).join('/'));
     }

@@ -438,6 +438,12 @@ const COUNT_KEY_PATTERN = /^(count|records_affected)$/;
  *     a DOI. Only the ULID shape is recognised.
  *   · A record title carried under a key this list does not name (`label`,
  *     `description`), because those keys legitimately carry category names.
+ *   · AN ADDRESS NOT WRITTEN AS AN ADDRESS. {@link IPV4_PATTERN} is a dotted
+ *     quad, so `192.0.2.7` in its integer or hex form (`3221225991`,
+ *     `0xC0000207`) matches nothing here — and a NUMBER never reaches these
+ *     detectors at all, because {@link walkPortalPayload} returns on
+ *     `typeof value === 'number'`. Under a count-shaped key such a value is still
+ *     screened as a COUNT; nothing screens it as an address.
  *   · Cross-tabulation and differencing (§4.3 rules 2 and 3). A payload can be
  *     entirely clean by this function and still be reconstructible against a
  *     second one.
