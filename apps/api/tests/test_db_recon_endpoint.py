@@ -991,9 +991,9 @@ def test_the_leak_scan_runs_over_every_response_shape(client, monkeypatch, shape
     scanned: list[str] = []
     original = db_recon.scan_for_leaks
 
-    def recording(text, *, env, allow_raw_ids):
+    def recording(text, *, env, allow_raw_ids, leaves):
         scanned.append(text)
-        return original(text, env=env, allow_raw_ids=allow_raw_ids)
+        return original(text, env=env, allow_raw_ids=allow_raw_ids, leaves=leaves)
 
     monkeypatch.setattr(db_recon, "scan_for_leaks", recording)
     r = _response_for_shape(client, monkeypatch, shape)
@@ -1009,7 +1009,9 @@ def test_a_tripped_scan_on_a_failure_envelope_still_returns_the_frozen_shape(
     """The guard's own fallback must not recurse and must stay in-shape."""
     configure_db(monkeypatch)
     monkeypatch.setattr(
-        db_recon, "scan_for_leaks", lambda text, *, env, allow_raw_ids: ["synthetic"]
+        db_recon,
+        "scan_for_leaks",
+        lambda text, *, env, allow_raw_ids, leaves: ["synthetic"],
     )
     install_connection(monkeypatch, FakeConnection({}))
     r = client.get(RECON_PATH)
@@ -1881,3 +1883,107 @@ def test_health_carries_no_secret_or_connection_detail(client, monkeypatch):
     text = client.get("/api/health").text.lower()
     for needle in (FAKE_HOST, FAKE_PASSWORD, "pghost", "pgpassword", "postgres://"):
         assert needle.lower() not in text, needle
+
+
+# --- the JSON-escaping blind spot -------------------------------------------
+#
+# `scan_for_leaks` was called ONLY with `json.dumps(payload, ensure_ascii=True)`.
+# JSON escapes every non-ASCII character to `\uXXXX`, and always escapes `"`,
+# `\`, newline and tab. The forbidden env value was compared as a raw Python
+# string, so for any such value `value in text` was PERMANENTLY FALSE and the
+# `env_value_present` check could not fire at all.
+#
+# The same defect class is documented in `verification._private_values_unexposed`,
+# where it was fixed; it stayed live here. These tests are the negative controls
+# that were missing: parametrised over exactly the characters JSON escapes, each
+# one FAILS if the leaves argument stops being consulted.
+
+_ESCAPING_PASSWORDS = (
+    pytest.param("motdepassé-secret-value", id="non-ascii-latin"),
+    pytest.param("σερνετ-value", id="non-ascii-greek"),
+    pytest.param("secret→value", id="non-ascii-arrow"),
+    pytest.param("secretÅngstrom-value", id="non-ascii-angstrom"),
+    pytest.param('sec"ret-value', id="double-quote"),
+    pytest.param("sec\\ret-value", id="backslash"),
+    pytest.param("sec\nret-value", id="newline"),
+    pytest.param("sec\tret-value", id="tab"),
+)
+
+
+@pytest.mark.parametrize("password", _ESCAPING_PASSWORDS)
+def test_the_leak_scan_catches_an_env_value_that_json_escapes(password):
+    """A leaked credential must be caught whatever characters it contains."""
+    payload = {"some_field": password}
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    issues = db_recon.scan_for_leaks(
+        serialized,
+        env={"PGPASSWORD": password},
+        allow_raw_ids=False,
+        leaves=db_recon.string_leaves(payload),
+    )
+    assert "env_value_present:PGPASSWORD" in issues, (
+        f"a leaked password containing {password!r} was NOT detected; "
+        "the scan is blind to the representation JSON gave it"
+    )
+
+
+@pytest.mark.parametrize("password", _ESCAPING_PASSWORDS)
+def test_the_serialized_text_ALONE_would_miss_it(password):
+    """The negative control: this is the behaviour that shipped, and it fails.
+
+    Without this test the fix above could be deleted and the suite would stay
+    green — the assertion that matters is not "the scan works" but "the scan
+    would NOT work the old way".
+    """
+    payload = {"some_field": password}
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    assert password not in serialized, (
+        f"{password!r} survives JSON encoding unchanged, so it is not a valid "
+        "negative control for the escaping defect"
+    )
+
+
+def test_an_ascii_env_value_is_still_caught_guard_against_over_correction():
+    """The control that proves the parametrised cases above are about ESCAPING."""
+    password = "hunter2supersecretvalue"
+    payload = {"some_field": password}
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+    assert password in serialized
+
+    issues = db_recon.scan_for_leaks(
+        serialized,
+        env={"PGPASSWORD": password},
+        allow_raw_ids=False,
+        leaves=db_recon.string_leaves(payload),
+    )
+    assert "env_value_present:PGPASSWORD" in issues
+
+
+def test_a_leaked_value_arriving_as_a_mapping_KEY_is_caught():
+    """Histogram cells are keyed by strings, so a key is a real leak surface."""
+    password = "kéy-shaped-secret-value"
+    payload = {"cells": {password: 3}}
+    issues = db_recon.scan_for_leaks(
+        json.dumps(payload, sort_keys=True, ensure_ascii=True),
+        env={"PGPASSWORD": password},
+        allow_raw_ids=False,
+        leaves=db_recon.string_leaves(payload),
+    )
+    assert "env_value_present:PGPASSWORD" in issues
+
+
+def test_leaves_is_required_so_a_caller_cannot_silently_restore_the_defect():
+    """No default. A default of () would re-enable the bug by omission."""
+    with pytest.raises(TypeError):
+        db_recon.scan_for_leaks(  # type: ignore[call-arg]
+            "{}", env={}, allow_raw_ids=False
+        )
+
+
+def test_string_leaves_walks_keys_values_and_nesting():
+    payload = {"a": "one", "b": {"nested-key": ["two", {"c": "three"}]}, "d": 4}
+    assert set(db_recon.string_leaves(payload)) == {
+        "a", "one", "b", "nested-key", "two", "c", "three", "d",
+    }

@@ -4196,7 +4196,12 @@ def _db_recon_leak_guard(payload: dict, env: Mapping[str, str]) -> dict:
     """
     try:
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
-        issues = db_recon.scan_for_leaks(serialized, env=env, allow_raw_ids=False)
+        issues = db_recon.scan_for_leaks(
+            serialized,
+            env=env,
+            allow_raw_ids=False,
+            leaves=db_recon.string_leaves(payload),
+        )
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:  # noqa: BLE001 - the guard must never leak
@@ -4518,8 +4523,15 @@ def _db_recon_scan(env: Mapping[str, str]) -> dict:
             exception_class=type(exc).__name__,
         )
 
-    # Final backstop over the SERIALISED response, before it is returned.
-    issues = db_recon.scan_for_leaks(serialized, env=env, allow_raw_ids=False)
+    # Final backstop over the response, before it is returned. Both the
+    # serialised text AND the payload's decoded string leaves — a value
+    # containing a JSON-escaped character is invisible in the former.
+    issues = db_recon.scan_for_leaks(
+        serialized,
+        env=env,
+        allow_raw_ids=False,
+        leaves=db_recon.string_leaves(payload),
+    )
     if issues:
         _log.info("db_recon outcome=refused gate=leak_scan codes=%s", ",".join(issues))
         return _db_recon_failure(

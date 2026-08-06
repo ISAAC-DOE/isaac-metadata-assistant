@@ -1021,22 +1021,93 @@ _SECRET_SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = (
 _FORBIDDEN_ENV_VALUES = ("PGPASSWORD", "PGHOST", "PGPASSFILE", "PGSSLKEY", "PGSSLCERT")
 
 
-def scan_for_leaks(text: str, *, env: Mapping[str, str], allow_raw_ids: bool) -> list[str]:
-    """Return issue CODES for forbidden content in the serialised report.
+def string_leaves(node: Any) -> tuple[str, ...]:
+    """Every string in ``node``, keys included, decoded and unescaped.
+
+    The same unit :func:`verification._string_leaves` compares against, and for
+    the same reason (see :func:`scan_for_leaks`). Keys are collected as well as
+    values because a leaked value can arrive as a mapping KEY — which is exactly
+    the shape the recon report's histogram cells have.
+    """
+    found: list[str] = []
+
+    def walk(inner: Any) -> None:
+        if isinstance(inner, str):
+            found.append(inner)
+        elif isinstance(inner, Mapping):
+            for key, value in inner.items():
+                if isinstance(key, str):
+                    found.append(key)
+                walk(value)
+        elif isinstance(inner, (list, tuple)):
+            for item in inner:
+                walk(item)
+
+    walk(node)
+    return tuple(found)
+
+
+def scan_for_leaks(
+    text: str, *, env: Mapping[str, str], allow_raw_ids: bool, leaves: Sequence[str]
+) -> list[str]:
+    """Return issue CODES for forbidden content in the report.
 
     Codes only — never the matched text, or the scanner would itself become the
     leak. An empty list means the report is clear.
+
+    IT MATCHES AGAINST DECODED LEAVES AS WELL AS THE SERIALIZED TEXT
+    ===============================================================
+    This is a correction of a real defect, recorded rather than silently
+    replaced, and it is the SAME defect that
+    :func:`verification._private_values_unexposed` documents — fixed there, and
+    for a while still live here.
+
+    Both call sites in ``routes.py`` pass ``json.dumps(payload,
+    ensure_ascii=True)``. That escapes any non-ASCII character to ``\\uXXXX``,
+    and JSON *always* escapes ``"``, ``\\``, newline and tab. So a forbidden env
+    value containing any of those appeared in ``text`` in a different
+    representation than the raw Python string it was compared against, and
+    ``value in text`` was **permanently false** — the ``env_value_present``
+    check could not fire at all. Measured before the fix: an ASCII password was
+    detected; the same password containing ``é``, ``"``, ``\\``, a newline, or
+    ``→`` was missed in every case.
+
+    A PostgreSQL password containing a quote, a backslash or a non-ASCII
+    character is ordinary, not exotic, so this was the realistic case rather
+    than a corner one.
+
+    Scanning the decoded leaves removes the encoding step, so there is no
+    representation for an escape to hide in. The serialized ``text`` is still
+    scanned as well — it is the only form in which a value SPLIT across
+    structure would appear contiguously — so this strictly widens detection and
+    can never narrow it.
+
+    ``leaves`` IS REQUIRED, WITH NO DEFAULT, ON PURPOSE. A default of ``()``
+    would keep every existing call compiling while silently restoring exactly
+    the behaviour above, and a last line of defence that a caller can disable by
+    omission is not one. Callers pass :func:`string_leaves` of the payload they
+    are about to serialize.
+
+    RESIDUALS, stated so the claim is not read as stronger than it is:
+
+    1. Values shorter than 4 characters are not compared, because they collide
+       with legitimate counts and labels.
+    2. A value some transformation RESHAPED (truncated, case-folded, normalized)
+       is not caught by a substring scan.
+    3. Only string leaves and the serialized text are compared. A secret that
+       reached the payload as a NUMBER would be caught only via ``text``.
     """
     issues: list[str] = []
-    if not allow_raw_ids and _ULID_RE.search(text):
+    haystacks: tuple[str, ...] = (text, *leaves)
+    if not allow_raw_ids and any(_ULID_RE.search(hay) for hay in haystacks):
         issues.append("raw_ulid_present")
     for name in _FORBIDDEN_ENV_VALUES:
         value = (env.get(name) or "").strip()
         # Very short values would false-positive against counts and labels.
-        if len(value) >= 4 and value in text:
+        if len(value) >= 4 and any(value in hay for hay in haystacks):
             issues.append(f"env_value_present:{name}")
     for code, pattern in _SECRET_SHAPES:
-        if pattern.search(text):
+        if any(pattern.search(hay) for hay in haystacks):
             issues.append(f"secret_shape:{code}")
     return sorted(set(issues))
 
