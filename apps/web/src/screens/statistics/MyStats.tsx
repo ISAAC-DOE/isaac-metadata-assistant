@@ -8,13 +8,17 @@ import { Link } from 'react-router-dom';
 import { CircleDashed } from '../../components/icons';
 import { ROUTES } from '../../lib/routes';
 import {
+  type CurrentUserSource,
+  disabledCurrentUserSource,
+} from '../../lib/currentUserContract';
+import {
   MY_STATS_PENDING_COPY,
   MY_STATS_PENDING_LABEL,
   MY_STATS_PENDING_REASON,
   MY_STATS_VIEWS,
+  personalStatisticsSourceFor,
   type MyStatsPendingReason,
   type MyStatsSource,
-  unconfiguredMyStatsSource,
 } from '../../lib/myStatsContract';
 import { ChartAccessPending } from './StatsCharts';
 import { StatsSection } from './StatsPrimitives';
@@ -51,6 +55,11 @@ import { StatsSection } from './StatsPrimitives';
  *   6. NO HEADER-DERIVED IDENTITY. No name, no email, no uid, no group, no
  *      "signed in as". Not even as a greeting — §6A shows two of the seven
  *      candidate headers arrive carrying whatever a CLIENT chose to send.
+ *      The tab does consume a current-user BOUNDARY
+ *      (`lib/currentUserContract.ts`), and that boundary reads no header,
+ *      issues no request, and has one implementation that answers `disabled`.
+ *      It selects which personal source answers; it never supplies a value that
+ *      is rendered.
  *
  * ── Why the layout is finished anyway ───────────────────────────────────────
  *
@@ -61,13 +70,41 @@ import { StatsSection } from './StatsPrimitives';
  * precondition it is waiting on.
  */
 
-/** The adapter this build wires. Injectable so a test can prove the tab renders
- *  the state a source reports rather than a hard-coded message. */
+/** The two adapters this build wires. Both injectable so a test can prove the
+ *  tab renders the state a source reports rather than a hard-coded message. */
 export interface MyStatsProps {
+  /** An explicit personal-statistics source. When absent, one is SELECTED from
+   *  the current-user state — see the note in the component body. */
   source?: MyStatsSource;
+  currentUser?: CurrentUserSource;
 }
 
-export function MyStats({ source = unconfiguredMyStatsSource }: MyStatsProps) {
+export function MyStats({ source, currentUser = disabledCurrentUserSource }: MyStatsProps) {
+  /*
+   * IDENTITY IS READ FIRST, AND IT SELECTS A SOURCE RATHER THAN UNLOCKING DATA.
+   *
+   * `personalStatisticsSourceFor` returns the unconfigured source for EVERY
+   * current-user state, including `present`, because knowing who the reader is
+   * would not by itself make one dataset on this tab answerable — six of the
+   * eight also need per-record attribution, which fails closed by design. Wiring
+   * a real current-user source therefore changes nothing here, which is the
+   * intended and tested behaviour, pinned at BOTH levels:
+   *
+   *   · `identity alone never selects a personal source` in
+   *     `current-user-contract.test.ts` sweeps the whole state union through the
+   *     PURE FUNCTION. (This comment used to cite `my-stats.test.tsx`, where that
+   *     test has never lived, and to imply the sweep covered the component. It
+   *     covers neither this file nor the `??` selection on the next line.)
+   *   · `a present current user changes nothing on this tab` in
+   *     `my-stats.test.tsx` renders THIS COMPONENT with a source reporting a
+   *     `present` user and asserts the same gate copy, so the wiring below is
+   *     covered where it is written rather than one layer down.
+   *
+   * `currentUser.get()` reads no header and issues no request — see
+   * `lib/currentUserContract.ts`, which is a boundary, not an identity seam.
+   */
+  const resolved = source ?? personalStatisticsSourceFor(currentUser.get());
+
   /*
    * ONE probe, through the real adapter boundary, rather than a hard-coded
    * sentence. `workflowCounts()` is the first dataset a personal dashboard would
@@ -81,7 +118,7 @@ export function MyStats({ source = unconfiguredMyStatsSource }: MyStatsProps) {
    * produces is how a placeholder chart gets shipped. The exhaustive fallback
    * below states the state's own name rather than inventing a picture for it.
    */
-  const headline = source.workflowCounts();
+  const headline = resolved.workflowCounts();
 
   return (
     <>

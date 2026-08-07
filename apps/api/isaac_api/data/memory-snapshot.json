@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "01901212549ee642cdf74adbd5372d25452ab9603712365f5eec43701c7ce15d"
+        "sha256": "1cc7a0dd2e2903472b1d1dd03cd455eb32e3a610c2507f567ff1b61af6993e1c"
       },
       {
         "path": "AGENTS.md",
@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "396e1f618e94ffec6cfaba7d8987ba9202e612af946d27c7361b8e6cb9b8780a"
+        "sha256": "8547225733dc5655b3b4716a4b2acf15888ab49a9a41a380ef7c01136e9fbfcc"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "c81aec83b6fc21dbcca04bbf9ff5825950d61b91640bfdc933f79633de1a0e9c"
+        "sha256": "d6950eac56a1bddeea1433397c202ec6044bd88a4d8afff0eeb56796b82da517"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "5dfa5b7ca9c382ff8730fb01dd4eca2d9e695de1f8373dd48a246900a6a56aba"
+    "served_manifest_fingerprint": "0fb35fe59e3f45eef95cf8a6b3033739d26e3f936794a1349b5db3de6f7622aa"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

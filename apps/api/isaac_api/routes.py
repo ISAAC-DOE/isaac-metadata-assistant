@@ -4196,7 +4196,12 @@ def _db_recon_leak_guard(payload: dict, env: Mapping[str, str]) -> dict:
     """
     try:
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
-        issues = db_recon.scan_for_leaks(serialized, env=env, allow_raw_ids=False)
+        issues = db_recon.scan_for_leaks(
+            serialized,
+            env=env,
+            allow_raw_ids=False,
+            leaves=db_recon.string_leaves(payload),
+        )
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:  # noqa: BLE001 - the guard must never leak
@@ -4504,22 +4509,50 @@ def _db_recon_scan(env: Mapping[str, str]) -> dict:
     # The serialisation lives INSIDE the guard with the projection it feeds: a
     # value the projection produced but `json.dumps` cannot encode would
     # otherwise escape as a bare 500 instead of this sanitized envelope.
+    #
+    # `string_leaves` IS COMPUTED HERE, INSIDE THE GUARD, FOR THAT SAME REASON —
+    # and it is a distinct risk rather than the same one twice. `json.dumps`
+    # encodes in C; `string_leaves` is a Python-level recursive walk, so it
+    # exhausts the interpreter's stack at a shallower depth than the encoder
+    # does. Measured: at depth 1500 `json.dumps` succeeds and `string_leaves`
+    # raises `RecursionError`. Left below the `try`, that band would escape as a
+    # bare 500 with a traceback — exactly what the paragraph above says this
+    # design exists to prevent, reintroduced by the line added to close a
+    # different hole. Not reachable through `_db_recon_project`, which projects
+    # onto frozen allowlists and yields a payload about three levels deep; this
+    # is defence in depth, and it costs one line.
     try:
         payload = _db_recon_project(report, authority, statements)
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+        leaves = db_recon.string_leaves(payload)
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:  # noqa: BLE001 - projection must never leak
-        _log.info("db_recon outcome=error type=%s", type(exc).__name__)
+        # `gate` names the STAGE, and three stages now live in this block. A
+        # `RecursionError` from the leaf walk was previously attributed to
+        # "projection", which is a safe response carrying a wrong label — and a
+        # wrong label on a refusal is what a later reader debugs against.
+        # Narrowed by exception type rather than by splitting the try, because
+        # splitting it is what put the leaf walk outside a guard in the first
+        # place.
+        gate = "leaf_walk" if isinstance(exc, RecursionError) else "projection"
+        _log.info("db_recon outcome=error gate=%s type=%s", gate, type(exc).__name__)
         return _db_recon_failure(
             env=env,
             status="error",
-            gate="projection",
+            gate=gate,
             exception_class=type(exc).__name__,
         )
 
-    # Final backstop over the SERIALISED response, before it is returned.
-    issues = db_recon.scan_for_leaks(serialized, env=env, allow_raw_ids=False)
+    # Final backstop over the response, before it is returned. Both the
+    # serialised text AND the payload's decoded string leaves — a value
+    # containing a JSON-escaped character is invisible in the former.
+    issues = db_recon.scan_for_leaks(
+        serialized,
+        env=env,
+        allow_raw_ids=False,
+        leaves=leaves,
+    )
     if issues:
         _log.info("db_recon outcome=refused gate=leak_scan codes=%s", ",".join(issues))
         return _db_recon_failure(

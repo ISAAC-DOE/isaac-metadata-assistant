@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
+import { cleanup, render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
+import { SchemaBrowser } from '../components/SchemaBrowser';
 import { ProjectMemory } from '../screens/ProjectMemory';
 import { StatisticsPage } from '../screens/statistics/StatisticsPage';
 import { LABELS } from '../lib/labels';
@@ -26,6 +27,7 @@ import {
   memoryFilesAvailable,
   openApiFixture,
   resetDemoRoutes,
+  schemaBrowserFixture,
   statisticsRecordsBody,
   statisticsRoutes,
   statisticsRuntimeRecords,
@@ -42,7 +44,7 @@ import {
  * does not re-test those pure functions. What it pins is everything that lives
  * between them and the reader: which number reaches which labelled slot, what
  * the page says when a figure is absent, what it must never say at all, the six
- * independent fetch states, and the fact that Refresh is four GETs and nothing
+ * independent fetch states, and the fact that Refresh is five GETs and nothing
  * more.
  *
  * Three deliberate choices about HOW this file asserts:
@@ -144,7 +146,7 @@ function renderStatistics(routes: Record<string, RouteEntry>) {
  * Wait until no section is loading any more. Works for success AND failure
  * rounds, because `LoadingPanel` is the only `role="status"` fetch state
  * (`BackendDown` is `role="alert"`), so this settles a round without the caller
- * having to know which of the four sources answered.
+ * having to know which of the five sources answered.
  */
 async function settled(): Promise<void> {
   await waitFor(() =>
@@ -379,7 +381,9 @@ describe('the lead sentence is truthful in each workspace scope', () => {
 
     expect(
       screen.getByText(
-        'A read-only view of this workspace, workflow readiness, evidence, Project Memory, and the API surface.',
+        'A read-only view of this workspace, workflow readiness, open questions, evidence, ' +
+          'the official record schema, Project Memory, and the API surface — and, for ' +
+          'platform-wide figures, why none is stated.',
       ),
     ).toBeInTheDocument();
     // The retired claim is gone from the PAGE, not relocated within it.
@@ -392,7 +396,9 @@ describe('the lead sentence is truthful in each workspace scope', () => {
 
     expect(
       screen.getByText(
-        'A read-only view of the open worked-example workspace, workflow readiness, evidence, Project Memory, and the API surface.',
+        'A read-only view of the open worked-example workspace, workflow readiness, open questions, ' +
+          'evidence, the official record schema, Project Memory, and the API surface — and, for ' +
+          'platform-wide figures, why none is stated.',
       ),
     ).toBeInTheDocument();
     // The neutral ordinary wording must not leak into the scope that has examples.
@@ -459,7 +465,7 @@ describe('the record read follows the workspace scope', () => {
   async function renderSurface(routes: Record<string, RouteEntry>) {
     const calls = stubFetchRoutes(routes);
     let view!: ReturnType<typeof render>;
-    // Wrapped because the four reads resolve during mount: without it React warns
+    // Wrapped because the five reads resolve during mount: without it React warns
     // about the settle-time `setState` in the page's own round tracker.
     await act(async () => {
       view = render(
@@ -1178,6 +1184,8 @@ describe('loading', () => {
       // Inside Technical Details now — a different region, same labelled state.
       ['Runtime', 'Loading the runtime mode and persistence…'],
       ['Workflow Distribution', 'Loading the workflow distribution…'],
+      ['Open Questions', 'Loading the open-question counts…'],
+      ['Record Schema', 'Loading the official record schema…'],
       ['Evidence and Validation', 'Loading evidence and export-gate counts…'],
       ['Project Memory', 'Loading Project Memory provenance…'],
       ['API Surface', 'Loading the API contract…'],
@@ -1273,21 +1281,21 @@ describe('partial failure — one dead source degrades only what reads it', () =
    * three independent sources failed, and one panel could not say which. What the
    * rule forbids is repeating the SAME source's alarm at every section that reads
    * it — records is read by three sections and must alarm at the first only. And
-   * `/api/about` is the deliberate quiet exception: its two cards sit beside four
+   * `/api/about` is the deliberate quiet exception: its two cards sit beside the
    * record cards, so it never renders a full alarm panel at all.
    */
   it('alarms ONCE PER DEAD SOURCE — not once per section, and not once per page', async () => {
     renderStatistics(statisticsRoutes({ records: dead, graph: dead, openapi: dead }));
     await settled();
 
-    // Three dead sources, three alarms — not five (one per reading section) and
-    // not one (which would hide which sources are down).
+    // Three dead sources, three alarms — not one per reading section (records
+    // alone is read by four), and not one (which would hide which are down).
     expect(screen.getAllByRole('alert')).toHaveLength(3);
 
     // The records alarm is at the FIRST section that reads records; the other two
     // sections reading it get the compact, neutral note instead.
     expect(within(regionOf('Workspace at a Glance')).getByRole('alert')).toBeInTheDocument();
-    for (const region of ['Workflow Distribution', 'Evidence and Validation']) {
+    for (const region of ['Workflow Distribution', 'Open Questions', 'Evidence and Validation']) {
       expect(within(regionOf(region)).queryByRole('alert'), `${region} must not re-alarm`).toBeNull();
       expect(regionOf(region).querySelector('.stats-unavailable')).not.toBeNull();
     }
@@ -1299,6 +1307,7 @@ describe('partial failure — one dead source degrades only what reads it', () =
     for (const region of [
       'Workspace at a Glance',
       'Workflow Distribution',
+      'Open Questions',
       'Evidence and Validation',
       'Project Memory',
       'API Surface',
@@ -1324,7 +1333,7 @@ describe('partial failure — one dead source degrades only what reads it', () =
 });
 
 describe('total failure', () => {
-  it('renders ONE page-level error rather than four stacked copies, and keeps the h1', async () => {
+  it('renders ONE page-level error rather than five stacked copies, and keeps the h1', async () => {
     stubFetchDown();
     const { container } = render(
       <MemoryRouter
@@ -1340,7 +1349,7 @@ describe('total failure', () => {
 
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     expect(container.querySelectorAll('.fetch-state.error')).toHaveLength(1);
-    // The six sections are replaced by the one failure, not decorated with it.
+    // Every section is replaced by the one failure, not decorated with it.
     expect(screen.queryByRole('region', { name: 'Workspace at a Glance' })).toBeNull();
     expect(screen.queryByRole('region', { name: 'API Surface' })).toBeNull();
     // The recourse is still offered once.
@@ -1443,19 +1452,19 @@ describe('truncated body', () => {
 describe('Refresh', () => {
   const refreshButton = () => screen.getByRole('button', { name: 'Refresh' });
 
-  it('re-issues EXACTLY the four GETs and no other request', async () => {
+  it('re-issues EXACTLY the five GETs and no other request', async () => {
     const { calls } = renderStatistics(statisticsRoutes());
     await settled();
 
     expect([...calls].sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
     const afterLoad = calls.length;
-    expect(afterLoad).toBe(4);
+    expect(afterLoad).toBe(5);
 
     fireEvent.click(refreshButton());
-    await waitFor(() => expect(calls.length).toBe(afterLoad + 4));
+    await waitFor(() => expect(calls.length).toBe(afterLoad + 5));
 
     expect(calls.slice(afterLoad).sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
-    // Nothing outside the four, in either round.
+    // Nothing outside the five, in either round.
     for (const key of calls) expect(STATISTICS_ROUTE_KEYS).toContain(key);
   });
 
@@ -1464,7 +1473,7 @@ describe('Refresh', () => {
     await settled();
 
     fireEvent.click(refreshButton());
-    await waitFor(() => expect(calls.length).toBe(8));
+    await waitFor(() => expect(calls.length).toBe(10));
 
     for (const key of calls) expect(key.startsWith('GET ')).toBe(true);
     expect(calls.some((key) => /^(POST|PUT|PATCH|DELETE) /.test(key))).toBe(false);
@@ -1508,11 +1517,11 @@ describe('Refresh', () => {
    * announce a reading that did not occur.
    *
    * The two rounds below are the two shapes of that failure: a partial round,
-   * where the disclosure is the only signal available (three reads DID succeed,
+   * where the disclosure is the only signal available (four reads DID succeed,
    * so the clock legitimately advances and no timestamp comparison can
    * discriminate), and a total round, where the clock must visibly not move.
    */
-  it('a Refresh where ONE of the four reads fails says so, and never reads as a clean success', async () => {
+  it('a Refresh where ONE of the five reads fails says so, and never reads as a clean success', async () => {
     const { container } = renderStatistics(
       statisticsRoutes({ records: firstCallOnly(statisticsRecordsBody) }),
     );
@@ -1529,12 +1538,12 @@ describe('Refresh', () => {
        discriminator: the pre-fix page announced exactly this clean sentence with
        the CURRENT time, for a round in which a read had failed. */
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 1 of 4 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 1 of 5 reads failed — the figures shown were last read at /,
     );
     expect(live?.textContent).not.toMatch(/^Refresh finished\. The page last read the API at/);
 
     // Stated on SCREEN as well, not only to a screen reader.
-    expect(screen.getByText(/1 of 4 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 5 reads failed on the most recent attempt/)).toBeInTheDocument();
     expect(
       screen.getByText(/either absent or older than the last-read time above/),
     ).toBeInTheDocument();
@@ -1555,12 +1564,19 @@ describe('Refresh', () => {
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
   });
 
-  it('a Refresh where ALL FOUR reads fail leaves the timestamp at the last successful read', async () => {
+  it('a Refresh where ALL FIVE reads fail leaves the timestamp at the last successful read', async () => {
     const { container } = renderStatistics({
       'GET /api/runtime/records': firstCallOnly(statisticsRecordsBody),
       'GET /api/graph/status': firstCallOnly(graphStatusAvailable),
       'GET /api/about': firstCallOnly(aboutResponse),
       'GET /api/openapi': firstCallOnly(openApiFixture),
+      /* ALL FIVE, which the title always claimed and the fixture did not supply:
+         `/api/schema` had no route here, so it failed on the INITIAL load too and
+         this was really "four succeeded then five failed". It passed the no-alarm
+         assertion below only because a dead `/api/schema` used to render a note
+         with no `role` — the very defect this slice fixed. With the fifth route
+         present, every section has data to keep and the round is genuinely 5→5. */
+      'GET /api/schema': firstCallOnly(schemaBrowserFixture),
     });
     await settled();
     const live = container.querySelector('p.sr-only[role="status"]');
@@ -1581,7 +1597,7 @@ describe('Refresh', () => {
     await waitFor(() => expect(live?.textContent).toMatch(/^Refresh finished/));
 
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 4 of 4 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 5 of 5 reads failed — the figures shown were last read at /,
     );
     expect(live?.textContent).not.toContain('The page last read the API at');
 
@@ -1592,7 +1608,7 @@ describe('Refresh', () => {
     expect(metaLabel(container)).toBe('Last Read From the API');
 
     // Stated on screen, once, as information rather than as an alert.
-    expect(screen.getByText(/4 of 4 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/5 of 5 reads failed on the most recent attempt/)).toBeInTheDocument();
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
 
     // Every figure is still the one that was actually read, unchanged and
@@ -1600,6 +1616,9 @@ describe('Refresh', () => {
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
     expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
+    // …the fifth read included, which is what makes the no-alarm assertion above
+    // mean "every section kept its data" rather than "one section never had any".
+    expect(figureValue('Record Schema', 'Top-Level Fields')).toBe('6');
 
     // Still the same live region, with the failure note mounted above it.
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
@@ -1647,5 +1666,292 @@ describe('privacy — nothing identifying reaches the DOM', () => {
       expect(text).not.toContain(record.navigate_to);
     }
     expect(text).not.toMatch(/XANES|CuO|K-edge|\.xdi/);
+  });
+});
+
+// --- the metrics wired from already-available reads ---------------------------
+
+/*
+ * `statisticsRuntimeRecords` carries pending_count 5 · 0 · 0 · 0 · 2 and
+ * workflow flags blocked on the first row, reopened on the third. Transcribed
+ * by hand from the fixture, per choice 2 at the head of this file.
+ */
+describe('Open Questions', () => {
+  it('states the question total, the record tallies, and the maximum', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    expect(figuresIn('Open Questions')).toEqual({
+      'Total Open Questions': '7',
+      'Records With Open Questions': '2',
+      'Most on One Record': '5',
+      'Records With a Blocked Step': '1',
+      'Records With a Reopened Step': '1',
+    });
+  });
+
+  it('names the unit of every figure, and forbids adding the five together', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    const text = textOf(regionOf('Open Questions'));
+    expect(text).toMatch(/counts QUESTIONS across the 5 records received/);
+    /* The three record-counting rows are NAMED rather than referred to by
+       position: "the three beneath it" was true and unreadable, because a
+       maximum sits among them. */
+    expect(text).toMatch(
+      /Records With Open Questions, Records With a Blocked Step and Records With a Reopened Step count RECORDS/,
+    );
+    expect(text).toMatch(/Most on One Record is the largest single record’s question count/);
+    expect(text).toMatch(/none of these five may be added together/);
+  });
+
+  it('reads no question text, field name or answer — no record string reaches the page', async () => {
+    const { container } = renderStatistics(statisticsRoutes());
+    await settled();
+
+    const text = textOf(regionOf('Open Questions'));
+    for (const record of statisticsRuntimeRecords) {
+      expect(text).not.toContain(record.title);
+      expect(text).not.toContain(record.experiment_id);
+    }
+    // …and the section adds no link into a record from a question count.
+    expect(regionOf('Open Questions').querySelectorAll('a')).toHaveLength(0);
+    expect(pageText(container)).toContain('Total Open Questions');
+  });
+
+  it('an empty workspace states that there is nothing to count, and no zero', async () => {
+    renderStatistics(statisticsRoutes({ records: { body: { records: [], total: 0 } } }));
+    await settled();
+
+    const text = textOf(regionOf('Open Questions'));
+    expect(text).toContain('No records were returned, so there is no open-question count to state.');
+    expect(text).not.toMatch(/\b\d+\b/);
+  });
+
+  it('discloses records whose question count could not be read, rather than zeroing them', async () => {
+    const broken = statisticsRuntimeRecords.map((r, i) =>
+      i === 0 ? { ...r, pending_count: null as unknown as number } : r,
+    );
+    renderStatistics(statisticsRoutes({ records: { body: { records: broken, total: broken.length } } }));
+    await settled();
+
+    // The 5 that row carried is gone from the total, and the shortfall is stated.
+    expect(figureValue('Open Questions', 'Total Open Questions')).toBe('2');
+    expect(
+      within(regionOf('Open Questions')).getByText(
+        /1 of the 5 records received carried no usable question count/,
+      ),
+    ).toBeInTheDocument();
+  });
+});
+
+/*
+ * `schemaBrowserFixture` — the SAME document the Schema Reference suite browses.
+ * Its counts are derived by hand in `statistics-model.test.ts`, which states the
+ * derivation; the literals here are what must reach the labelled slots.
+ */
+describe('Record Schema (inside Technical Details)', () => {
+  it('states the schema counts in their labelled slots', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    expect(figuresIn('Record Schema')).toEqual({
+      'Schema Title': 'ISAAC AI-Ready Scientific Record v1.05 (fixture)',
+      'Schema Version': '1.05',
+      // "Fields", not "Sections": on the real schema 5 of the 6 the root requires
+      // are scalar strings, and the model's own field names say `topLevelFields`.
+      'Top-Level Fields': '6',
+      'Fields at Every Depth': '12',
+      'Required Top-Level Fields': '3',
+      'Fields With Enumerated Values': '1',
+      'Conditional Rules': '2',
+      'Vocabulary Files': '1',
+      'Vocabulary Terms': '4',
+    });
+  });
+
+  it('breaks the fields down by section, in the document\'s own order', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    expect(
+      chartRows('Record Schema', "Fields by top-level section, in the schema's own declaration order"),
+    ).toEqual([
+      ['isaac_record_version', '1'],
+      ['record_id', '1'],
+      ['record_type', '1'],
+      ['descriptors', '4'],
+      ['sample', '4'],
+      ['tags', '1'],
+    ]);
+  });
+
+  it('qualifies what "required" means and what the term count is a property of', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    const text = textOf(regionOf('Record Schema'));
+    expect(text).toMatch(/counts what the schema’s own root requires/);
+    expect(text).toMatch(/required only once that section is present/);
+    expect(text).toMatch(/a property of those files, not a measurement of any stored data/);
+    /* …AND WHAT THE FIELD TOTAL DOES NOT REACH. `buildSchemaFieldTree` descends
+       `properties` and `items.properties` only, so on the real schema three fields
+       inside the `oneOf` at `descriptors.outputs[].descriptors[].relative_to` are
+       not listed and `Fields at Every Depth` is 271 rather than 274. The traversal
+       is shared with the Schema Reference browser and is deliberately unchanged —
+       the two screens agree — so the note is what makes the boundary honest. */
+    expect(text).toMatch(/fields declared only inside a\s+oneOf\s+alternative are not listed/);
+    expect(text).toMatch(/the fields this view can enumerate/);
+  });
+
+  it('links to the browser that renders the same document field by field', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    expect(
+      within(regionOf('Record Schema')).getByRole('link', { name: 'Open Schema Reference' }),
+    ).toHaveAttribute('href', '/governance?tab=schema');
+  });
+
+  /*
+   * THE CROSS-SCREEN CLAIM, RENDERED ON BOTH SCREENS.
+   *
+   * `SchemaBody`'s note tells the reader, in product copy, "The Schema Reference
+   * browser walks the document the same way, so the two screens state the same
+   * number." That was a claim about ANOTHER SCREEN backed by nothing that rendered
+   * it: `statistics-model.test.ts` compares this module's total against a direct
+   * call of the shared traversal, which proves there is ONE walker — not that the
+   * browser puts that walker's result on screen, nor that it puts it where a
+   * reader would compare it. Both screens are rendered here, from the one fixture,
+   * and the two DISPLAYED strings are compared.
+   *
+   * Sequential rather than side by side: `screen` is document-wide, and both
+   * surfaces render a `Fields`-labelled count, so mounting them together would
+   * make each lookup ambiguous.
+   */
+  it('states the same field total the Schema Reference browser displays', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    const onStatistics = figureValue('Record Schema', 'Fields at Every Depth');
+    // …and it really did read a number, or the comparison below could pass on ''.
+    expect(onStatistics).toMatch(/^\d+$/);
+
+    cleanup();
+    stubFetchRoutes({ 'GET /api/schema': { body: schemaBrowserFixture as never } });
+    const browser = render(<SchemaBrowser />);
+    const paneCount = async () => {
+      const el = await waitFor(() => {
+        const found = browser.container.querySelector('#schema-fields-list-heading .schema-pane-count');
+        expect(found, 'the Fields pane must state a count').not.toBeNull();
+        return found as HTMLElement;
+      });
+      return el.textContent?.trim() ?? '';
+    };
+
+    // Unfiltered, the pane states the bare total — the same quantity Statistics
+    // labels `Fields at Every Depth`.
+    expect(await paneCount()).toBe(onStatistics);
+  });
+
+  /*
+   * IT ALARMS, and until this slice it did not.
+   *
+   * `RecordSchemaFacts` rendered `SectionUnavailable` — the compact note the page
+   * reserves for a source whose alarm has ALREADY been stated at an earlier section.
+   * `/api/schema` has exactly one reader, so nothing had stated it: the note carries
+   * no `role`, so a dead schema announced nothing to a screen reader while the
+   * banner above said "1 of 5 reads failed". Its two siblings in the same collapsed
+   * region — Project Memory and API Surface — have always rendered `BackendDown`
+   * (`role="alert"`) for exactly the same situation.
+   *
+   * The ALARM COUNT is asserted, not just the message, because a message assertion
+   * is precisely what passed while the role was missing.
+   */
+  it('a dead /api/schema alarms ONCE, like its two siblings in this region', async () => {
+    renderStatistics(statisticsRoutes({ schema: { status: 500, body: { detail: 'synthetic failure' } } }));
+    await settled();
+
+    const region = regionOf('Record Schema');
+    // One alarm here, and one on the whole page: this is the only reader.
+    expect(within(region).getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    // The recourse is still offered, exactly as the compact note offered it.
+    expect(within(region).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+    /*
+     * AND STILL NOTHING ABOUT THE SCHEMA. Every figure slot is empty, and no number
+     * is stated outside the alarm panel. Measured outside it because `BackendDown`'s
+     * local-build copy carries the run command, which contains a host and a port —
+     * not a figure about the schema, and the same text its two siblings already show.
+     */
+    expect(figuresIn('Record Schema')).toEqual({});
+    const alarmText = textOf(within(region).getByRole('alert'));
+    expect(textOf(region).replace(alarmText, '')).not.toMatch(/\b\d+\b/);
+
+    // Everything else still renders.
+    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+  });
+});
+
+describe('Platform Metrics — the inactive adapter boundary', () => {
+  it('states that it is not connected, and states no figure at all', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    const region = regionOf('Platform Metrics');
+    expect(within(region).getByText('Not Connected')).toBeInTheDocument();
+    expect(
+      within(region).getByText(/Platform-wide record figures are not connected for this deployment/),
+    ).toBeInTheDocument();
+    // No digit anywhere in the section: not a total, not a zero, not a date.
+    expect(textOf(region)).not.toMatch(/\d/);
+  });
+
+  it('says the absence is an absence, not a withholding and not a zero', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    const text = textOf(regionOf('Platform Metrics'));
+    expect(text).toMatch(/Nothing is being hidden and no figure is zero/);
+    expect(text).toMatch(/this application has no source to read one from/);
+    // It must not blame a decision, a permission, or a person.
+    expect(text).not.toMatch(/permission|denied|governance|approval|administrator|Dean/i);
+  });
+
+  it('lists the six planned views, each naming what it would count', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    const titles = [...regionOf('Platform Metrics').querySelectorAll('.stats-plan-title')].map(
+      (n) => n.textContent?.trim() ?? '',
+    );
+    expect(titles).toEqual([
+      'Records Across the Platform',
+      'Records by Scientific Domain',
+      'Records by Experiment Type',
+      'Records by Schema Version',
+      'Schema Validation Outcomes',
+      'Records Added Over Time',
+    ]);
+  });
+
+  it('adds NO request to the page — the five reads are unchanged by its presence', async () => {
+    const { calls } = renderStatistics(statisticsRoutes());
+    await settled();
+
+    expect([...calls].sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
+    expect(calls.filter((c) => /portal|metrics|platform/i.test(c))).toEqual([]);
+  });
+
+  it('draws no chart, no axis and no empty plot', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+
+    const panel = regionOf('Platform Metrics');
+    expect(panel.querySelector('figure.stats-chart')).toBeNull();
+    expect(panel.querySelector('.stats-chart-track')).toBeNull();
+    expect(panel.querySelector('.stats-chart-grid')).toBeNull();
   });
 });
