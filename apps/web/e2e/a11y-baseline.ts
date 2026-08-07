@@ -1029,7 +1029,6 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // they already were; if CI disagrees, transcribe ITS numbers and correct the
   // total — never loosen the assertion.
   //
-<<<<<<< HEAD
   // ── RECORD VERIFICATION, 2026-08-06: 1703 -> 1745 on both columns ──────────
   //
   // The arithmetic, so a reviewer can check it without a run:
@@ -1064,9 +1063,7 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // not a measurement. CI is the authority; if it disagrees, transcribe ITS
   // numbers into those two keys and correct this total, and never loosen the
   // assertion. Both sums are CHECKED by the suite itself, per platform.
-  darwin: 1745,
-  linux: 1745,
-=======
+  //
   // ── COVERAGE-DISCLOSURE SLICE: linux 1703 -> 1704, darwin UNCHANGED ─────────
   //
   // One key moves, `export-readiness-done@desktop-1280x800`, and only on linux
@@ -1081,9 +1078,29 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // constant fails in all five projects — which is exactly how the previous
   // linux-column edit was caught, and why the entry and this constant are one
   // atomic change. Darwin is NOT raised to match; nothing measured darwin at 14.
-  darwin: 1703,
-  linux: 1704,
->>>>>>> origin/main
+  //
+  // ── MERGE OF THE TWO SLICES ABOVE: darwin 1745, linux 1746 ─────────────────
+  //
+  // The two notes above were written independently, each against a tree whose
+  // starting point was 1703/1703, and each is still correct about its OWN keys.
+  // They touch DISJOINT keys and therefore COMPOSE rather than conflict:
+  //
+  //   Record Verification    both columns +42 (statistics, statistics-example,
+  //                          settings-explorer)
+  //   coverage-disclosure    linux only  +1  (export-readiness-done@desktop-1280x800)
+  //                                          darwin 1703 + 42      = 1745
+  //                                          linux  1703 + 42 + 1  = 1746
+  //
+  // So the columns no longer agree, and that asymmetry is inherited from the
+  // coverage-disclosure slice, not introduced here. NEITHER number is my
+  // arithmetic: both were recomputed on the merged tree by importing this module
+  // and summing `platformCount` over every entry — darwin 1745, linux 1746. No
+  // per-key value was changed to reach them; only this total moved. The two
+  // inferred keys the Record Verification note names above are still inferred;
+  // CI remains the authority, and if it disagrees, transcribe ITS numbers and
+  // correct the total rather than loosening the assertion.
+  darwin: 1745,
+  linux: 1746,
 };
 
 /**

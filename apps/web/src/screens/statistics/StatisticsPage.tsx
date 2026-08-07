@@ -88,8 +88,7 @@ import { RecordVerification, useVerificationReport } from './RecordVerification'
  * display, and owns the states. It computes no figure of its own. The My Stats
  * tab reads NOTHING — see `MyStats.tsx`.
  *
-<<<<<<< HEAD
- * A FIFTH read, `/api/runtime/verification`, feeds Record Verification alone. It
+ * A SIXTH read, `/api/runtime/verification`, feeds Record Verification alone. It
  * is issued from HERE — by `useVerificationReport`, not by `useFetch` — and its
  * state is handed to the section, which renders it and owns nothing else.
  *
@@ -107,14 +106,11 @@ import { RecordVerification, useVerificationReport } from './RecordVerification'
  * It stays deliberately OUTSIDE the round tracker and the Refresh button below:
  * the report is a cached artifact of a program run, not a live view of this
  * workspace, and it discloses its own age. Re-reading it under a button that
- * announces "N of 4 reads failed" would make that sentence describe a denominator
+ * announces "N of 5 reads failed" would make that sentence describe a denominator
  * it does not count. The section carries its own controls, whose accessible names
  * are its own so neither collides with this page's Refresh.
  *
- * The four fetches are deliberately INDEPENDENT — that independence is the
-=======
  * The five fetches are deliberately INDEPENDENT — that independence is the
->>>>>>> origin/main
  * partial-failure design. One dead endpoint degrades the sections that read it
  * and nothing else; the page never blanks and never substitutes a plausible
  * value for one it did not receive. When (and only when) all five have failed,
@@ -516,9 +512,9 @@ export function StatisticsPage() {
   const graph = useFetch(() => track(api.getGraphStatus()), []);
   const about = useFetch(() => track(api.getAbout()), []);
   const openapi = useFetch(() => track(api.getOpenApi()), []);
-<<<<<<< HEAD
+  const schema = useFetch(() => track(api.getSchema()), []);
   /*
-   * The FIFTH read, and it is deliberately NOT a `useFetch` and NOT tracked.
+   * The SIXTH read, and it is deliberately NOT a `useFetch` and NOT tracked.
    *
    * It lives HERE rather than inside `RecordVerification` because the section is
    * mounted inside the General tab panel, which unmounts when the reader opens
@@ -527,9 +523,6 @@ export function StatisticsPage() {
    * component outlives both panels.
    */
   const verification = useVerificationReport();
-=======
-  const schema = useFetch(() => track(api.getSchema()), []);
->>>>>>> origin/main
 
   /*
    * ...AND the record read also listens for a workspace REBUILD, which the scope
@@ -709,11 +702,8 @@ export function StatisticsPage() {
               <WorkflowDistribution records={records} />
               <OpenQuestions records={records} />
               <EvidenceAndValidation records={records} />
-<<<<<<< HEAD
               <RecordVerification verification={verification} />
-=======
               <PlatformMetrics />
->>>>>>> origin/main
               <NoAnalytics />
               <TechnicalDetails
                 id="stats-technical"

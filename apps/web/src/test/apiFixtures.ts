@@ -2432,34 +2432,23 @@ export const STATISTICS_ROUTE_KEYS = [
 ] as const;
 
 /**
-<<<<<<< HEAD
- * The FIFTH read, kept OUT of `STATISTICS_ROUTE_KEYS` on purpose.
+ * The SIXTH read, kept OUT of `STATISTICS_ROUTE_KEYS` on purpose.
  *
  * Record Verification reads this once on mount and refreshes it with its own
  * Retry; the page's Refresh button deliberately does not re-issue it (see
- * `StatisticsPage.tsx`'s header). So the mount round is these five and the
- * Refresh round is the four above, and a single constant covering both would
+ * `StatisticsPage.tsx`'s header). So the mount round is these six and the
+ * Refresh round is the five above, and a single constant covering both would
  * hide exactly that distinction.
  */
 export const STATISTICS_VERIFICATION_ROUTE_KEY = 'GET /api/runtime/verification';
 
 /**
-=======
->>>>>>> origin/main
- * The Statistics page's five page-level reads, keyed exactly as `lib/api` builds
- * them.
+ * The Statistics page's five page-level reads plus the verification read, keyed
+ * exactly as `lib/api` builds them.
  *
  * Any source may be replaced with any `RouteEntry`, which is how a test fails ONE
-<<<<<<< HEAD
  * of them (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
  * swaps in a different graph body, without disturbing the others.
- */
-export function statisticsRoutes(
-  over: Partial<
-    Record<'records' | 'graph' | 'about' | 'openapi' | 'verification', RouteEntry>
-=======
- * of the five (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
- * swaps in a different graph body, without disturbing the other four.
  *
  * `schema` reuses `schemaBrowserFixture` — the same body the Schema Reference
  * suite browses — so the two screens are asserted against ONE document and a
@@ -2467,8 +2456,10 @@ export function statisticsRoutes(
  */
 export function statisticsRoutes(
   over: Partial<
-    Record<'records' | 'graph' | 'about' | 'openapi' | 'schema', RouteEntry>
->>>>>>> origin/main
+    Record<
+      'records' | 'graph' | 'about' | 'openapi' | 'schema' | 'verification',
+      RouteEntry
+    >
   > = {},
 ): Record<string, RouteEntry> {
   return {
@@ -2476,10 +2467,7 @@ export function statisticsRoutes(
     'GET /api/graph/status': over.graph ?? { body: graphStatusAvailable },
     'GET /api/about': over.about ?? { body: aboutResponse },
     'GET /api/openapi': over.openapi ?? { body: openApiFixture },
-<<<<<<< HEAD
-    [STATISTICS_VERIFICATION_ROUTE_KEY]: over.verification ?? { body: verificationReportOk },
-=======
     'GET /api/schema': over.schema ?? { body: schemaBrowserFixture },
->>>>>>> origin/main
+    [STATISTICS_VERIFICATION_ROUTE_KEY]: over.verification ?? { body: verificationReportOk },
   };
 }

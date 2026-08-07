@@ -699,13 +699,6 @@ test.describe('@responsive Statistics charts (worked example)', () => {
 
     const figures = page.locator('figure.stats-chart');
     const count = await figures.count();
-<<<<<<< HEAD
-    // Workflow bars · the evidence stack · operations by method · operations by
-    // group · the two validators side by side. A count is asserted so a chart
-    // silently disappearing reads as a failure rather than as a vacuous pass
-    // over zero figures.
-    expect(count, 'the populated page draws five charts').toBe(5);
-=======
 
     /*
      * THE SET OF CHARTS, NOT THE NUMBER OF THEM.
@@ -719,6 +712,16 @@ test.describe('@responsive Statistics charts (worked example)', () => {
      * The workflow caption carries the record count, so digits are masked: this
      * spec is about which charts exist, and the figures themselves are pinned by
      * `statistics-page.test.tsx` against a fixture it states by hand.
+     *
+     * SIX captions, not five. Two slices each added one figure to a four-figure
+     * page and each therefore measured five: the schema breakdown inside
+     * Technical Details, and Record Verification's side-by-side validators
+     * (whose precondition `settledVerificationSection` asserts above). They sit
+     * in different sections and compose, so the merged page draws six. Record
+     * Verification's two `IssueDistribution` charts are deliberately NOT here:
+     * on a report with no format issues they render `ChartEmpty`, which is not a
+     * `figure.stats-chart` — which is why the verification slice counted one new
+     * figure and not three.
      */
     const captions = await figures.locator('figcaption').allInnerTexts();
     expect(captions.map((c) => c.trim().replace(/\d+/g, '<n>')).sort()).toEqual(
@@ -728,6 +731,7 @@ test.describe('@responsive Statistics charts (worked example)', () => {
         "Fields by top-level section, in the schema's own declaration order",
         'Documented operations by HTTP method',
         "Documented operations by group, in the contract's own tag order",
+        'Records passing and not passing, by validator',
       ].sort(),
     );
     /* EVERY FIGURE HAS EXACTLY ONE CAPTION — which is the property this comparison
@@ -736,7 +740,6 @@ test.describe('@responsive Statistics charts (worked example)', () => {
        captions that are already inside a `figure.stats-chart`. What the equality
        rules out is a figure with none and a figure with two. */
     expect(count, 'every figure must have exactly one caption').toBe(captions.length);
->>>>>>> origin/main
 
     for (let i = 0; i < count; i++) {
       const figure = figures.nth(i);

@@ -1453,42 +1453,30 @@ describe('truncated body', () => {
 describe('Refresh', () => {
   const refreshButton = () => screen.getByRole('button', { name: 'Refresh' });
 
-<<<<<<< HEAD
-  it('re-issues EXACTLY the four tracked GETs, and does NOT re-read verification', async () => {
-=======
-  it('re-issues EXACTLY the five GETs and no other request', async () => {
->>>>>>> origin/main
+  it('re-issues EXACTLY the five tracked GETs, and does NOT re-read verification', async () => {
     const { calls } = renderStatistics(statisticsRoutes());
     await settled();
 
-    // FIVE reads on mount: the four tracked ones plus Record Verification's.
+    // SIX reads on mount: the five tracked ones plus Record Verification's.
     expect([...calls].sort()).toEqual(
       [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY].sort(),
     );
     const afterLoad = calls.length;
-    expect(afterLoad).toBe(5);
+    expect(afterLoad).toBe(6);
 
     fireEvent.click(refreshButton());
-<<<<<<< HEAD
-    // FOUR, not five. This is the assertion that pins the design: the
+    // FIVE, not six. This is the assertion that pins the design: the
     // verification report is a cached artifact of a program run that states its
     // own age, not a live view of this workspace, so Refresh leaves it alone.
-    // Re-reading it here would also make the "N of 4 reads failed" notice
+    // Re-reading it here would also make the "N of 5 reads failed" notice
     // describe a denominator it does not count.
-    await waitFor(() => expect(calls.length).toBe(afterLoad + 4));
-
-    expect(calls.slice(afterLoad).sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
-    expect(calls.slice(afterLoad)).not.toContain(STATISTICS_VERIFICATION_ROUTE_KEY);
-    // Nothing outside the five, in either round.
-    const allowed = [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY];
-    for (const key of calls) expect(allowed).toContain(key);
-=======
     await waitFor(() => expect(calls.length).toBe(afterLoad + 5));
 
     expect(calls.slice(afterLoad).sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
-    // Nothing outside the five, in either round.
-    for (const key of calls) expect(STATISTICS_ROUTE_KEYS).toContain(key);
->>>>>>> origin/main
+    expect(calls.slice(afterLoad)).not.toContain(STATISTICS_VERIFICATION_ROUTE_KEY);
+    // Nothing outside the six, in either round.
+    const allowed = [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY];
+    for (const key of calls) expect(allowed).toContain(key);
   });
 
   it('issues no POST, PUT, PATCH or DELETE — the page mutates nothing', async () => {
@@ -1496,12 +1484,8 @@ describe('Refresh', () => {
     await settled();
 
     fireEvent.click(refreshButton());
-<<<<<<< HEAD
-    // 5 on mount + 4 on Refresh. See the test above for why Refresh is 4.
-    await waitFor(() => expect(calls.length).toBe(9));
-=======
-    await waitFor(() => expect(calls.length).toBe(10));
->>>>>>> origin/main
+    // 6 on mount + 5 on Refresh. See the test above for why Refresh is 5.
+    await waitFor(() => expect(calls.length).toBe(11));
 
     for (const key of calls) expect(key.startsWith('GET ')).toBe(true);
     expect(calls.some((key) => /^(POST|PUT|PATCH|DELETE) /.test(key))).toBe(false);
