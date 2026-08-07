@@ -21,6 +21,13 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel a superseded smoke run when the PR branch gets a new commit. This job
+# only ever runs on pull_request, so cancelling in-progress is always safe: it
+# builds and smoke-tests a throwaway local image and publishes nothing.
+concurrency:
+  group: pr-docker-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 # Read-only. Nothing here can push a package, request an OIDC token, write repo
 # contents, or create a tag/release.
 permissions:
