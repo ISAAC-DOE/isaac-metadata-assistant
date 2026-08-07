@@ -358,19 +358,20 @@ review (2026-06-30)**"*. The rules:
 - **Client-supplied `contributors[]` and ORCID confer no rights**, with a named regression test
   `test_orcid_in_body_confers_no_rights` (`tests/test_record_authz.py`).
 
-**Two upstream gaps to inherit deliberately or not at all**, stated because adopting the pattern
-without them would be adopting a weaker system than it looks:
+**Two limits on adopting this pattern**, stated because adopting it wholesale would be adopting a
+weaker system than it looks:
 
 1. **ACL grantees are never verified to exist in Authentik.** A grant is a string write. A typo, a
    departed user, or a username that was never real all persist silently as a grant row.
-2. **The upstream header-trust boundary is unproven, and ISAAC must not inherit it.** The specific
-   degradation condition and the setting that governs it are **withheld from this public document**
-   — that boundary belongs to another team's live system and the weakness is not ours to fix (same
-   rationale as `portal-identity-and-metrics-audit.md` §1 and §4). What matters here is the shape:
-   the upstream trust layer is not verified by tests, and it is the same boundary §2 of this
-   document identifies as the hard part. A locked, adversarially-reviewed *decision layer* sitting
-   on an unproven *trust layer* is exactly what §2 warns about — so ISAAC adopts the decision
-   pattern and **does not** adopt the trust mechanism.
+2. **The decision layer is separable from the trust layer, and only the decision layer may be
+   adopted.** An authorization rule set answers *"given a caller, what may they do"*; it says
+   nothing about *"is this really the caller"*. That second question is the boundary §2 of this
+   document identifies as the hard part, and it is the one ISAAC must answer on its **own**
+   evidence — never by importing a mechanism from another team's system, whose operating conditions
+   this project cannot observe, test, or fix. Mechanism-level material about that system is not
+   recorded in this repository (see
+   [`portal-identity-and-metrics-audit.md`](portal-identity-and-metrics-audit.md) §0). So: adopt
+   the decision pattern, and **do not** adopt any foreign trust mechanism.
 
 ### 5.3 Authentik's groups are coarse deployment-access groups, not collaboration groups
 
