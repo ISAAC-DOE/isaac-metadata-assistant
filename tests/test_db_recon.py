@@ -1122,19 +1122,28 @@ def test_changing_vocabulary_count_mid_run_is_detected(recon):
 
 
 def test_leak_scan_passes_a_clean_report(recon):
-    payload = json.dumps(run_ok(recon), sort_keys=True)
-    assert recon.scan_for_leaks(payload, env=GOOD_ENV, allow_raw_ids=False) == []
+    report = run_ok(recon)
+    payload = json.dumps(report, sort_keys=True)
+    assert (
+        recon.scan_for_leaks(
+            payload,
+            env=GOOD_ENV,
+            allow_raw_ids=False,
+            leaves=recon.string_leaves(report),
+        )
+        == []
+    )
 
 
 def test_leak_scan_catches_raw_ulid(recon):
     issues = recon.scan_for_leaks(
-        '{"x": "%s"}' % FAKE_ULID_A, env=GOOD_ENV, allow_raw_ids=False
+        '{"x": "%s"}' % FAKE_ULID_A, env=GOOD_ENV, allow_raw_ids=False, leaves=()
     )
     assert "raw_ulid_present" in issues
 
 
 def test_leak_scan_allows_ulid_when_explicitly_authorised(recon):
-    issues = recon.scan_for_leaks('{"x": "%s"}' % FAKE_ULID_A, env=GOOD_ENV, allow_raw_ids=True)
+    issues = recon.scan_for_leaks('{"x": "%s"}' % FAKE_ULID_A, env=GOOD_ENV, allow_raw_ids=True, leaves=())
     assert "raw_ulid_present" not in issues
 
 
@@ -1149,22 +1158,22 @@ def test_leak_scan_allows_ulid_when_explicitly_authorised(recon):
     ],
 )
 def test_leak_scan_catches_secret_shapes(recon, text, code):
-    assert code in recon.scan_for_leaks(text, env={}, allow_raw_ids=True)
+    assert code in recon.scan_for_leaks(text, env={}, allow_raw_ids=True, leaves=())
 
 
 def test_leak_scan_catches_env_values(recon):
     issues = recon.scan_for_leaks(
-        '{"k": "%s"}' % FAKE_PASSWORD, env=GOOD_ENV, allow_raw_ids=True
+        '{"k": "%s"}' % FAKE_PASSWORD, env=GOOD_ENV, allow_raw_ids=True, leaves=()
     )
     assert "env_value_present:PGPASSWORD" in issues
-    issues = recon.scan_for_leaks('{"k": "%s"}' % FAKE_HOST, env=GOOD_ENV, allow_raw_ids=True)
+    issues = recon.scan_for_leaks('{"k": "%s"}' % FAKE_HOST, env=GOOD_ENV, allow_raw_ids=True, leaves=())
     assert "env_value_present:PGHOST" in issues
 
 
 def test_leak_scan_does_not_flag_the_role_name(recon):
     """PGUSER's value is emitted on purpose as gate-3 evidence."""
     assert recon.scan_for_leaks(
-        '{"current_user": "metadata_assistant"}', env=GOOD_ENV, allow_raw_ids=False
+        '{"current_user": "metadata_assistant"}', env=GOOD_ENV, allow_raw_ids=False, leaves=()
     ) == []
 
 
@@ -1173,6 +1182,7 @@ def test_leak_scan_issue_codes_never_contain_the_matched_text(recon):
         '{"k": "%s", "j": "%s"}' % (FAKE_PASSWORD, FAKE_ULID_A),
         env=GOOD_ENV,
         allow_raw_ids=False,
+        leaves=(),
     )
     joined = " ".join(issues)
     assert FAKE_PASSWORD not in joined

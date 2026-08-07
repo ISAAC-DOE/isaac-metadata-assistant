@@ -113,6 +113,7 @@ from isaac_api.db_recon import (  # noqa: E402  (after sys.path wiring)
     connect_psycopg2,
     run_recon,
     scan_for_leaks,
+    string_leaves,
 )
 
 __all__ = [
@@ -286,7 +287,10 @@ def main(
         payload = json.dumps(report, indent=args.indent, sort_keys=True, ensure_ascii=True)
 
         issues = scan_for_leaks(
-            payload, env=environ, allow_raw_ids=bool(args.emit_raw_record_ids)
+            payload,
+            env=environ,
+            allow_raw_ids=bool(args.emit_raw_record_ids),
+            leaves=string_leaves(report),
         )
         if issues:
             raise LeakDetected(issues)
