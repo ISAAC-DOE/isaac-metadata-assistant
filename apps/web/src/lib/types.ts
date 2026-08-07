@@ -74,11 +74,58 @@ export type BlockerKind = 'asset' | 'series' | 'descriptor' | 'edge' | string;
 // user can't type (series/descriptor objects). text → a short free-text value.
 export type CompletionInputType = 'hash' | 'text' | 'structured';
 
+/**
+ * The five explicit inferability states, mirroring
+ * `apps/api/isaac_api/inferability.py`. A CONCRETE value may accompany
+ * `supported_suggestion` and nothing else — the backend enforces that in
+ * `Inferability.__post_init__`, and `sanitizeInferability` (lib/adapt.ts)
+ * re-checks it on arrival, because a client that trusts the shape it was promised
+ * has no way to notice when the promise breaks.
+ */
+export type InferabilityState =
+  | 'supported_suggestion'
+  | 'needs_user_input'
+  | 'ambiguous'
+  | 'contradictory_evidence'
+  | 'not_inferable';
+
+/** Machine-checkable justification for a supported suggestion. */
+export interface SuggestionProvenance {
+  supporting_fields: string[];
+  supporting_evidence: { source_type?: string; [k: string]: unknown }[];
+  rule: string;
+  unique: boolean;
+  alternatives_excluded: string[];
+  requires_user_confirmation: boolean;
+}
+
+export interface Inferability {
+  field: string;
+  state: InferabilityState;
+  explanation: string;
+  /** Non-null ONLY for `supported_suggestion`. */
+  value: unknown;
+  provenance: SuggestionProvenance | null;
+  /** Counts, constraint text, conflicting source names — never a candidate value. */
+  detail: Record<string, unknown>;
+}
+
+/** What an example answer IS, carried with it so no reader has to infer it. */
+export interface ExampleAnswerProvenance {
+  source: string;
+  is_evidence_for_this_record: boolean;
+  auto_applied: boolean;
+  requires_user_confirmation: boolean;
+}
+
 export interface DemoAnswer {
   // A sha256 string for assets; a structured object (series list / descriptor
   // dict) for series/descriptor blockers — sent back verbatim on confirm.
   value: unknown;
-  label: string; // "Demo answer (synthetic)"
+  label: string; // "Example answer"
+  // Present on every server-sent example answer. Optional in the type only so
+  // older recorded fixtures keep compiling.
+  provenance?: ExampleAnswerProvenance;
 }
 
 export interface PendingBlocker {
@@ -91,6 +138,9 @@ export interface PendingBlocker {
   context?: string; // sentence-case context for the question card
   inputType: CompletionInputType;
   demo_answer?: DemoAnswer;
+  // Why the app cannot determine this value itself. Always present from a
+  // current backend; optional so pre-existing fixtures still typecheck.
+  inferability?: Inferability;
 }
 
 // --- the three signals (never merged) ---------------------------------
@@ -362,7 +412,11 @@ export interface ExperimentSummary {
   // Server-supplied scenario label for a canonical synthetic seed; undefined for
   // every other record, in which case the row renders nothing for it.
   scenario?: string;
-  technique: string; // Cu K-edge XANES
+  // OPTIONAL, and normally absent. No list endpoint sends a technique, so the
+  // adapter no longer invents one (see the note in `adapt.ts`). Kept in the type
+  // because it is a legitimate field for a server that one day does send it —
+  // when a value is present it must have come from a response, never a constant.
+  technique?: string;
   idOrDraft: string; // mono ULID or "draft · name"
   meta?: string; // "updated 2099-04-02" | "with G. Hopper"
   // P33 S1 — the dashboard card's ONE lifecycle badge (Draft/Exported), distinct
@@ -406,7 +460,8 @@ export interface RunnerStage {
 export interface ExperimentDetail {
   id: string;
   title: string;
-  technique: string;
+  // Optional for the same reason as on `ExperimentSummary`: never fabricated.
+  technique?: string;
   draftName: string; // mono draft filename or record filename
   mode: Mode;
   groups: FieldGroupData[];
@@ -533,7 +588,8 @@ export interface ApiDraftResponse {
 export interface ApiDemoAnswer {
   // string sha256 for assets; structured object for series/descriptor blockers.
   value: unknown;
-  label: string; // "Demo answer (synthetic)"
+  label: string; // "Example answer"
+  provenance?: ExampleAnswerProvenance;
 }
 
 export interface ApiPendingItem {
@@ -541,7 +597,9 @@ export interface ApiPendingItem {
   kind: BlockerKind;
   question: string;
   about?: string | null;
+  // Example-scope records ONLY. `null`/absent on every ordinary record.
   demo_answer?: ApiDemoAnswer | null;
+  inferability?: Inferability;
 }
 
 export interface ApiPendingResponse {

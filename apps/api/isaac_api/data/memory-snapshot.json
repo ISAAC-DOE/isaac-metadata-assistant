@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "8547225733dc5655b3b4716a4b2acf15888ab49a9a41a380ef7c01136e9fbfcc"
+        "sha256": "c045e81fd3d6154ff6be96237b5e63814fcc51e6b4bba0929220d7a2951a0250"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "48f4adcafb2c3e4dd9e32d989f1b6271ce33c5bf280c2f6e1cdea93bc0df4588"
+        "sha256": "db3c236e7ed22fef12189ede82b7d805210c1c227ee3f581b0c40b4b8c5413f9"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "666ac12c7fe3d0e98579d8bb5f9a188f24d8183ec1f0d32a32df4c8fcd1bca63"
+        "sha256": "5c95024070bf688aa5af3326647123498bc6530362481f1236a4c6e3faa3703b"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "a39b209d3b718ab57b52e8489d68062fcb971002cc393316132faa7919e46586"
+        "sha256": "15e8a32faae3112df37acf0dea4bcaaa6960ac9ab082accc90b2e0b9b537bae5"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "5f46900fc50984c96e683e24310203cfadc44b5588e787593ff931564dd30a2f"
+        "sha256": "282969f65dfc467214a586fcfa28fe17d9d0ebbc8a4e08812d4e431029b84d1a"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10776,7 +10776,7 @@
       },
       {
         "path": "pyproject.toml",
-        "sha256": "354b90b91309043bc3b713e0e914065abe7e077d84294391a2fba7a8972c07b5"
+        "sha256": "45fa6c9d1a178be61064169c30c1b557fcd31bf48cf33359d92274a275798c01"
       },
       {
         "path": "schema/PROVENANCE.md",
@@ -10836,7 +10836,7 @@
       },
       {
         "path": "src/isaac_records/extract/draft_builder.py",
-        "sha256": "266cff4a6c2769637fba36b9dd9afaea2fb1bc70a4f87b6d1cc5b941ba8b44f8"
+        "sha256": "7f53b477e8939cf8856d419ba43c7c6a82253d397fb77a0c3f0952e8743d60e1"
       },
       {
         "path": "src/isaac_records/extract/file_listing.py",
@@ -10960,7 +10960,7 @@
       },
       {
         "path": "tests/test_draft_builder.py",
-        "sha256": "a7f072fecb0d91b919181e119cae52a50cba805623c596ce64092f86858adacd"
+        "sha256": "e2834a72a0aac2801336722ade976f22b053ba965b2fb2d8245b6a1498b4d410"
       },
       {
         "path": "tests/test_e2e.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "a24539a62edbb280d9fa8c335378cd38a36dd1069b6fd4e64a96e0ee75f58b5b"
+    "served_manifest_fingerprint": "39d09c2fe0c4cba23787f23bfd77f874836de9de72a3b08f3ac5e30f162181db"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

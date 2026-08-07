@@ -24,5 +24,12 @@ isaac = "isaac_records.cli:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["apps/api"]
+# `src` is listed FIRST so a test run always exercises the checkout it was
+# launched from. The venv's editable install pins `isaac_records` to one absolute
+# path (`<main checkout>/src`), so without this line a run started inside a git
+# WORKTREE silently tested that other checkout's truth core against this one's
+# `apps/` — two different trees, reported as one result. On the main checkout the
+# two paths are the same directory, so this changes nothing there; it only stops
+# the resolution from depending on which checkout happens to be installed.
+pythonpath = ["src", "apps/api"]
 testpaths = ["tests", "apps/api/tests"]

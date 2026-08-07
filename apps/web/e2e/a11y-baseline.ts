@@ -384,7 +384,36 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // Linux 11 -> 10, MEASURED by CI run 30691557697 on `7e9a387`: a genuine
       // IMPROVEMENT on Linux only, lowered rather than left stale. darwin stays
       // 11 (measured locally, unchanged), so the entry splits.
-      'guided-completion@tablet-768x1024': { darwin: 11, linux: 10 },
+      //
+      // Linux 10 -> 11, MEASURED by CI on this branch's `4f845ea`. This is a
+      // GROWTH and is recorded as one rather than dressed up: this slice adds
+      // `.guided-inferability`, the paragraph that states WHY the app is asking
+      // instead of answering, and it fails `color-contrast` on Linux.
+      //
+      // Why it is ratcheted and not fixed here. The new paragraph is styled to
+      // match `.guided-context`, the explanatory paragraph it renders directly
+      // beneath — same `--text-secondary` token, same 12.5px, same line-height —
+      // and `.guided-context` ALREADY fails the same rule in this same count.
+      // So the deficit is in the token against this surface, not in this slice's
+      // markup: giving only the new paragraph a stronger colour would leave two
+      // adjacent explanatory paragraphs deliberately mismatched and would not
+      // remove a single pre-existing violation. Repairing `--text-secondary` on
+      // this surface is a design-system change that moves counts on many screens
+      // and belongs to its own slice, not to a no-guessing slice.
+      //
+      // The entry COLLAPSES back to a bare number, and the number for darwin is
+      // MEASURED, not assumed. A first attempt wrote `{ darwin: 11, linux: 11 }`
+      // and the well-formedness guard rejected it correctly: a per-platform pair
+      // must mark a real measured difference, and equal halves are not one.
+      //
+      // darwin re-measured locally on this branch --
+      //   npx playwright test e2e/specs/a11y-axe.spec.ts \
+      //     --project=tablet-768x1024 -g "Guided Completion"
+      // -- passes against 11, so darwin did NOT gain a node from
+      // `.guided-inferability` while Linux did. The two platforms have therefore
+      // CONVERGED at 11, which is why the split that existed for the 11/10
+      // difference is no longer carrying any information and is removed.
+      'guided-completion@tablet-768x1024': 11,
       // Was `{ darwin: 7, linux: 8 }`; darwin caught up to Linux on 2026-08-01
       // and the split is no longer needed. `.guided-suggestion-not` moved from
       // axe's `incomplete` bucket into `violations` after the C1/I4 fix removed
@@ -924,6 +953,17 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // they already were; if CI disagrees, transcribe ITS numbers and correct the
   // total — never loosen the assertion.
   //
+  // no-guessing slice: LINUX ONLY rises by 1, 1703 -> 1704. This slice adds
+  // `.guided-inferability` (the paragraph stating why the app is asking rather
+  // than answering), which fails `color-contrast` on Linux but NOT on darwin --
+  // `guided-completion@tablet-768x1024` was `{ darwin: 11, linux: 10 }` and is
+  // now the scalar `11`, so the darwin half is unchanged and only the Linux half
+  // moves. darwin therefore stays 1703; it was re-measured locally on this branch
+  // (`playwright test e2e/specs/a11y-axe.spec.ts --project=tablet-768x1024
+  // -g "Guided Completion"` passes against 11) rather than assumed, because the
+  // note above records that assuming a DOM change affects both platforms equally
+  // has already been wrong once here.
+  //
   // ── COVERAGE-DISCLOSURE SLICE: linux 1703 -> 1704, darwin UNCHANGED ─────────
   //
   // One key moves, `export-readiness-done@desktop-1280x800`, and only on linux
@@ -938,8 +978,29 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // constant fails in all five projects — which is exactly how the previous
   // linux-column edit was caught, and why the entry and this constant are one
   // atomic change. Darwin is NOT raised to match; nothing measured darwin at 14.
+  //
+  // ── MERGE OF THE TWO SLICES ABOVE: linux 1704 -> 1705, darwin UNCHANGED ─────
+  //
+  // The two notes immediately above were written independently, each against a
+  // tree where 1703/1703 was the starting point, and each correctly concluded
+  // "linux 1703 -> 1704". They move DIFFERENT keys — the no-guessing slice moves
+  // `guided-completion@tablet-768x1024` (linux 10 -> 11) and the coverage-
+  // disclosure slice moves `export-readiness-done@desktop-1280x800` (linux
+  // 12 -> 13) — so on a tree containing BOTH they COMPOSE rather than coincide:
+  // linux 1703 + 1 + 1 = 1705. Darwin is untouched by either (both keys already
+  // measured 11 and 13 on darwin, which is why both collapsed to scalars), so it
+  // stays 1703.
+  //
+  // A three-way merge cannot see this. Both sides wrote the identical text
+  // `linux: 1704`, so git took it without a conflict while silently combining two
+  // entry changes that each justified only one of that number's two increments.
+  // The resulting 1704 was arithmetically wrong for the merged entry set and the
+  // per-platform self-check would have caught it. NEITHER number below is my
+  // arithmetic: both were recomputed by importing this module and summing
+  // `platformCount` over every entry on the merged tree — darwin 1703, linux 1705.
+  // No per-key value was changed to reach them; only this total moved.
   darwin: 1703,
-  linux: 1704,
+  linux: 1705,
 };
 
 /**

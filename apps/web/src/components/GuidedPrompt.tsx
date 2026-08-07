@@ -34,8 +34,10 @@ interface GuidedPromptProps {
  * The one-question-at-a-time completion card — the single place AI touches a
  * value, made a two-step human-owned gate. The assistant never prefills a
  * scientific value: an asset hash is pasted by the user; a structured
- * series/descriptor value can only be *confirmed* from the labeled synthetic
- * demo answer ("Demo answer (synthetic) — not a value until you confirm"),
+ * series/descriptor value can only be *confirmed* from the labeled example
+ * answer ("Example answer — not a value until you confirm" — the label is the
+ * server's `serialize._DEMO_LABEL`, rendered verbatim; this docstring quoted the
+ * retired "Demo answer (synthetic)" long after the string changed),
  * never auto-filled and never auto-submitted. "I don't know" is calm and
  * legitimate — it writes nothing and leaves the field honestly missing.
  *
@@ -89,6 +91,21 @@ export function GuidedPrompt({
 
       <h2 className="guided-question">{blocker.question}</h2>
       {blocker.context && <p className="guided-context">{blocker.context}</p>}
+
+      {/* WHY the app is asking instead of answering. Rendered verbatim from the
+          server's inferability decision — never re-worded here, so the reason a
+          user reads is the reason the backend actually applied. The state is
+          exposed as a data attribute so a test can assert the pairing of state
+          and copy; a `supported_suggestion` would carry a value, and no blocker
+          state ever does (see `inferability.blocker_inferability`). */}
+      {blocker.inferability && (
+        <p
+          className="guided-inferability"
+          data-inferability-state={blocker.inferability.state}
+        >
+          {blocker.inferability.explanation}
+        </p>
+      )}
 
       {demo && (
         <div className="guided-suggestion" aria-label="Example answer suggestion">
