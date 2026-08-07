@@ -30,11 +30,16 @@ Everything else is a tested library with no caller: the rule engine
 :func:`absorption_edge`), the value-bearing constructor :func:`supported` and its
 guards (:func:`_check_evidence`, :func:`_confidence_keys_in`),
 :class:`SuggestionProvenance`, :func:`constraint_only`, and the
-:data:`AMBIGUOUS` / :data:`CONTRADICTORY_EVIDENCE` states. Measured: 344 of this
-file's 815 lines are definitions with no production caller. They exist because the
+:data:`AMBIGUOUS` / :data:`CONTRADICTORY_EVIDENCE` states. They exist because the
 slice specified the vocabulary and its guards, and they are exercised only by
 ``apps/api/tests/test_inferability.py``. Treat them as a contract waiting for a
 consumer, not as something running today.
+
+No line figure is quoted here any more, on purpose. This paragraph used to read
+"344 of this file's 815 lines"; the file had grown to 866 and nothing recomputed
+the 344 either, so a stale number sat behind the word "Measured". A count that
+no longer measures anything is worse than no count — the names listed above are
+the claim, and they are checkable by reading them.
 
 A previous revision DID serve the rule engine's output as an ``inferences`` block
 on the pending response. It was removed: nothing consumed it, it shipped concrete
@@ -770,11 +775,17 @@ def infer_all(draft: dict) -> list[Inferability]:
 #: Why each open blocker kind cannot be answered by the app. These are refusals,
 #: and each names the specific reason rather than a generic "unknown".
 _BLOCKER_REFUSALS: dict[str, tuple[str, str]] = {
+    # RESCOPED. This used to say the digest is "of file bytes this app never
+    # reads", which is false on the absolute reading: the Validator screen and the
+    # CSV reconcile panel both read a file the user chooses. What the app never
+    # reads is THIS record's raw data — the record names the artifact and stores no
+    # bytes of it. The claim now says only that, because the unscoped form of this
+    # exact claim has already shipped falsely in this repo more than once.
     "asset": (
         NOT_INFERABLE,
-        "A sha256 is a digest of file bytes this app never reads. No amount of "
-        "metadata determines it, so none is proposed — paste the digest you "
-        "computed.",
+        "A sha256 is a digest of the raw data file this record only names — its "
+        "bytes are not part of the record. No amount of metadata determines the "
+        "digest, so none is proposed — paste the one you computed.",
     ),
     "series": (
         NEEDS_USER_INPUT,

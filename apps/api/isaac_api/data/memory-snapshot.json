@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "ada2146d7fb501346269cb9373c06371fbd4455ca042802746f0bb3c94f96793"
+        "sha256": "5c95024070bf688aa5af3326647123498bc6530362481f1236a4c6e3faa3703b"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "a3a017e610dd1207120f64222a2177710f5b671a52b96ea779681b708283cf5b"
+        "sha256": "50ca3a18073f4bbee8ceaa791ec32dae6135a01c102736edd1b20e28df533a6a"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "1bdc3926796eae214501580eb6a309626e0ce07af7066822f8589a6dae2b6cda"
+    "served_manifest_fingerprint": "bea402761e188aaee205fb4c12ea628aea37ac56f93afd624a7ab760cae2701e"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

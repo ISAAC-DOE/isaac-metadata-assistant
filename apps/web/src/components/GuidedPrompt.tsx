@@ -34,8 +34,10 @@ interface GuidedPromptProps {
  * The one-question-at-a-time completion card — the single place AI touches a
  * value, made a two-step human-owned gate. The assistant never prefills a
  * scientific value: an asset hash is pasted by the user; a structured
- * series/descriptor value can only be *confirmed* from the labeled synthetic
- * demo answer ("Demo answer (synthetic) — not a value until you confirm"),
+ * series/descriptor value can only be *confirmed* from the labeled example
+ * answer ("Example answer — not a value until you confirm" — the label is the
+ * server's `serialize._DEMO_LABEL`, rendered verbatim; this docstring quoted the
+ * retired "Demo answer (synthetic)" long after the string changed),
  * never auto-filled and never auto-submitted. "I don't know" is calm and
  * legitimate — it writes nothing and leaves the field honestly missing.
  *

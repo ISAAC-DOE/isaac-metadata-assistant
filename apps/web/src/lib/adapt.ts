@@ -227,13 +227,26 @@ const KIND_LABEL: Record<string, string> = {
 // value, or leave it honestly missing" told the reader to confirm something not
 // on screen. A `managed_legacy` record (workspace.py) is a real, reachable case.
 // The `withExample` copy is used only when a `demo_answer` actually arrived.
+//
+// A SECOND review then caught the replacement over-claiming in the other
+// direction. It said "Leave it honestly missing UNLESS YOU CAN SUPPLY IT", which
+// invites the reader to supply a value the screen gives them no way to supply:
+// for a structured blocker with no example, `GuidedPrompt` renders a hint and
+// nothing else — the input row, and the Confirm button inside it, are behind
+// `{demo && (…)}` (`GuidedPrompt.tsx`), and the edit path is gated the same way
+// (`GuidedCompletion.tsx` passes `initialStaged` but the Save control lives in
+// that same `demo` branch). So the copy now states the dead end plainly instead
+// of pointing at a control that is not rendered. It deliberately does NOT name a
+// screen where the value CAN be entered: no such path was verified, and naming an
+// unverified one would repeat the defect at one remove. Building a structured
+// input is a feature, and out of scope for this slice.
 const KIND_CONTEXT: Record<string, string> = {
   asset:
     'An asset can only be cited once it carries a hash. Paste the sha256 — the system will never generate this value for you.',
   series:
-    'A structured reduced-spectrum value the system will never generate for you. Leave it honestly missing unless you can supply it.',
+    'A structured reduced-spectrum value the system will never generate for you. No example is available for this record, and this screen has no way to enter one, so the field stays honestly missing here.',
   descriptor:
-    'A structured scientific descriptor the system will never generate for you. Leave it honestly missing unless you can supply it.',
+    'A structured scientific descriptor the system will never generate for you. No example is available for this record, and this screen has no way to enter one, so the field stays honestly missing here.',
 };
 
 const KIND_CONTEXT_WITH_EXAMPLE: Record<string, string> = {

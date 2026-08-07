@@ -418,6 +418,92 @@ def test_15b_the_default_scope_is_closed():
     assert out["pending"][0]["demo_answer"] is None
 
 
+#: Strings that exist ONLY inside the committed walkthrough answers
+#: (``tests/fixtures/.../demo_answers.json``). None of them is derivable from an
+#: ordinary record, so any one of them appearing in an ordinary record's response
+#: body IS the leak — whatever route or argument let it through.
+_WALKTHROUGH_MARKERS = (
+    "9001.2",  # the fabricated descriptor value, with its fabricated uncertainty
+    "xanes_inflection_point_energy",  # the fabricated descriptor name
+    "averaged_spectrum",  # the fabricated 7-point reduced spectrum
+    "Example answer",  # serialize._DEMO_LABEL — the wrapper, not just its content
+)
+
+
+def _assert_no_walkthrough_content(response, where: str) -> dict:
+    """Every blocker refuses an example, and no fixture string rode along."""
+    assert response.status_code == 200, f"{where}: {response.text}"
+    body = response.json()
+    assert body["pending"], f"{where}: expected open blockers to assert about"
+    for item in body["pending"]:
+        assert item["demo_answer"] is None, f"{where}: {item['id']} carried an example"
+    for marker in _WALKTHROUGH_MARKERS:
+        assert marker not in response.text, f"{where}: leaked {marker!r}"
+    return body
+
+
+def test_15e_an_ordinary_record_is_offered_no_example_by_any_mutating_route(client):
+    """END-TO-END. The withholding holds on the ROUTES, not only at the seam.
+
+    ``test_15``/``test_15b`` pin ``serialize.pending_to_list`` and ``test_15c``
+    pins the ``_example_scope`` predicate, but both are the pieces in isolation.
+    An independent review showed the wiring between them was unpinned: replacing
+    ``example_scope=_example_scope(experiment_id)`` with ``example_scope=True`` at
+    all three call sites in ``routes.py`` — restoring the exact defect this slice
+    fixed, a fabricated ``9001.2 eV`` descriptor and a fabricated 7-point spectrum
+    offered as the answer to an unrelated record's scientific question — produced
+    ZERO behavioural failures. This test is that missing behavioural pin, and it
+    covers ALL THREE call sites: ``GET /pending``, ``POST /answers`` and
+    ``POST /edit`` each rebuild the list and each must withhold.
+
+    The record is deliberately NOT canonical (random id, so outside
+    ``ws.CANONICAL_IDS``) while carrying the SAME draft — and therefore the same
+    asset URIs — as the walkthrough seed. That matters: the asset branch of
+    ``_demo_answer_for`` keys on the URI, so a record with foreign URIs would miss
+    the fixture by accident and prove nothing about scope. Here the fixture WOULD
+    match; only scope withholds it.
+    """
+    from conftest import client_ws
+
+    store = client_ws(client)
+    ordinary = store.create_experiment(
+        title="Synthetic record outside the walkthrough (Xx placeholder campaign)",
+        source={"description": "hand-authored / unknown provenance", "files": []},
+        draft=ws.build_draft(ws.CSV_PATH, ws.LISTING_PATH),
+    )
+    assert ordinary.id not in ws.CANONICAL_IDS
+
+    # 1. GET /pending
+    body = _assert_no_walkthrough_content(
+        client.get(f"/api/experiments/{ordinary.id}/pending"), "GET /pending"
+    )
+    asset_ids = [item["id"] for item in body["pending"] if item["kind"] == "asset"]
+    assert asset_ids  # the answer/edit legs below need one
+
+    # 2. POST /answers — a sha the USER supplies, never one the app produced.
+    pasted = "d" * 64
+    etag = client.get(f"/api/experiments/{ordinary.id}").headers["ETag"]
+    _assert_no_walkthrough_content(
+        client.post(
+            f"/api/experiments/{ordinary.id}/answers",
+            json={"confirmed_by_user": True, "answers": {asset_ids[0]: pasted}},
+            headers={"If-Match": etag},
+        ),
+        "POST /answers",
+    )
+
+    # 3. POST /edit — correct the field just answered; same rebuilt list.
+    etag = client.get(f"/api/experiments/{ordinary.id}").headers["ETag"]
+    _assert_no_walkthrough_content(
+        client.post(
+            f"/api/experiments/{ordinary.id}/edit",
+            json={"confirmed_by_user": True, "answers": {asset_ids[0]: "e" * 64}},
+            headers={"If-Match": etag},
+        ),
+        "POST /edit",
+    )
+
+
 # =============================================================================
 # 16-17. confidence is not evidence, in either direction
 # =============================================================================

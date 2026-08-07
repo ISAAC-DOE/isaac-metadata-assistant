@@ -190,6 +190,29 @@ describe('a concrete value may accompany supported_suggestion and nothing else',
       { provenance: prov({ supporting_evidence: [{ source_type: 'derivation' }] }) },
     ],
     ['an empty explanation', { explanation: '' }],
+    // A second review found the TOP-LEVEL confidence key unpinned on this side:
+    // every existing case nested it (`uncertainty.confidence`) or relied on the
+    // source type alone, so a `confidence >= 0.9` bypass of BOTH the allowlist and
+    // the confidence scan cost 0 frontend failures. These two are the pair that
+    // kills it — the first keeps the source type legitimate so only the confidence
+    // clause can refuse, the second keeps the confidence high so only the
+    // allowlist can. A bypass that reads either clause alone still fails one.
+    [
+      'a TOP-LEVEL confidence number on otherwise legitimate evidence',
+      {
+        provenance: prov({
+          supporting_evidence: [{ source_type: 'spreadsheet', confidence: 0.99 }],
+        }),
+      },
+    ],
+    [
+      'a high confidence carried by a predictor source type',
+      {
+        provenance: prov({
+          supporting_evidence: [{ source_type: 'model_confidence', confidence: 0.99 }],
+        }),
+      },
+    ],
   ];
 
   it.each(counterExamples)('strips a supported_suggestion with %s', (_label, patch) => {
@@ -316,6 +339,37 @@ describe('the adapter does not manufacture values', () => {
         demo_answer: { value: [{ series_id: 's' }], label: 'Example answer' },
       });
       expect(withExample.context).toMatch(/Confirm the example value/);
+    }
+  });
+
+  it('does not invite the user to supply a value this screen cannot take', () => {
+    // REVIEW FINDING (second pass) on the fix for FINDING 2 above. The
+    // replacement copy over-claimed in the OTHER direction: "Leave it honestly
+    // missing unless you can supply it" tells the reader to supply something the
+    // screen offers no control for. For a structured blocker with NO example,
+    // `GuidedPrompt` renders the hint and stops — the input row and the Confirm
+    // button live inside `{demo && (…)}`.
+    //
+    // This asserts the copy AND the rendered UI together, in one test, on
+    // purpose: a claim pinned apart from the screen it describes is exactly how
+    // the two drifted. If a future slice builds the structured input, this test
+    // fails and the copy must be revisited in the same change.
+    for (const kind of ['series', 'descriptor'] as const) {
+      const b = pendingItemToBlocker({ id: kind, kind, question: 'q', demo_answer: null });
+
+      expect(b.context).not.toMatch(/unless you can supply it/i);
+      expect(b.context).toMatch(/no way to enter one/i);
+      expect(b.context).toMatch(/never generate/);
+
+      const { view } = renderPrompt(b);
+      // The claim is on screen …
+      expect(view.getByText(b.context!)).toBeInTheDocument();
+      // … and so is the dead end it describes: no field, no confirm/use control.
+      expect(view.queryByRole('textbox')).toBeNull();
+      expect(view.queryByRole('button', { name: /confirm|use this/i })).toBeNull();
+      // The only action left is the honest one.
+      expect(view.getByRole('button', { name: /don.t know/i })).toBeInTheDocument();
+      view.unmount();
     }
   });
 
