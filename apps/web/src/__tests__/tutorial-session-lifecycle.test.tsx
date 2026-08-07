@@ -94,6 +94,21 @@ function sentRequests(): { key: string; scope: string | undefined }[] {
   }));
 }
 
+/**
+ * How many controls on this screen offer to START the walkthrough, by either name.
+ *
+ * Counted by NAME across the whole tree rather than per-component, because the defect
+ * being guarded against is two components each behaving correctly on its own. The
+ * running overlay's own controls are excluded by construction — neither is called
+ * `Start Tutorial` nor `Launch Guided Demo`.
+ */
+function ctaCount(container: HTMLElement): number {
+  const names = new Set<string>([LABELS.actionStartTutorial, LABELS.actionLaunchGuidedDemo]);
+  return [...container.querySelectorAll('button')].filter((b) =>
+    names.has((b.textContent ?? '').trim()),
+  ).length;
+}
+
 const SESSION_CREATE = 'POST /api/tutorial/sessions';
 const sessionDiscard = (id = TUTORIAL_SESSION_ID) => `DELETE /api/tutorial/sessions/${id}`;
 
@@ -474,7 +489,9 @@ describe('worked-example session — cleanup failure', () => {
     } as never);
     const view = renderAt();
 
-    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
+    // The empty state's primary, not the offer card's: the list above answers `[]`
+    // outside a session, so this screen is the empty state and it owns the CTA.
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo }));
     await waitFor(() => expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID));
     await waitFor(() => expect(scopedListReads).toBeGreaterThan(0));
 
@@ -607,33 +624,143 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     // What it MAY point at.
     expect(view.getByRole('button', { name: 'Open Validator' })).toBeInTheDocument();
     /*
-     * RE-POINTED, AND THE DESTINATION IS NOW PINNED TOO.
+     * THE CONTROL SET, AND ITS TWO FORBIDDEN NAMES.
      *
-     * This used to require `actionReplayTutorial` ("Replay Tutorial") here, which is
-     * the exact label of the button in Settings that actually starts the walkthrough —
-     * while this one merely navigated, and navigated to `ROUTES.settings` with no
-     * `?tab=`. `SettingsPage` resolves an absent tab to `overview`, which carries no
-     * tutorial control, so the reader arrived at a screen holding nothing that matched
-     * the button they pressed. A label-only assertion could not see that, which is why
-     * the click and its landing are asserted below rather than the name alone.
+     * History, kept because both halves were real defects. It first required
+     * `actionReplayTutorial` ("Replay Tutorial") here — the exact label of the button
+     * in Settings that actually starts the walkthrough — on a control that merely
+     * navigated, and navigated to `ROUTES.settings` with no `?tab=`, so the reader
+     * landed on `overview`, which carries no tutorial control at all. That was replaced
+     * by `actionGoToHelpAndTutorial`, an honest pair: a name about navigation on a
+     * button that navigated, pointing at the tab that owns replay.
+     *
+     * IT IS GONE NOW, and the reason is not that it was dishonest — it was that it was
+     * the LAST tutorial affordance on this screen. The first-run offer retires
+     * permanently on completion (`shouldOfferTutorial`), so a returning reader was left
+     * with a quiet secondary that took them elsewhere to press a different button. The
+     * empty state now holds a primary that starts a session itself; the navigate-only
+     * control was redundant once it did, and its old hint described what the new button
+     * does. Replay is untouched and still lives in Settings → Help & Tutorial.
+     *
+     * Both old names must stay absent, for the same reason each time: one label must
+     * address exactly one control in the app.
      */
     expect(view.queryByRole('button', { name: LABELS.actionReplayTutorial })).toBeNull();
-    const go = view.getByRole('button', { name: LABELS.actionGoToHelpAndTutorial });
-    expect(go).toBeInTheDocument();
+    expect(view.queryByRole('button', { name: LABELS.actionGoToHelpAndTutorial })).toBeNull();
+    expect(view.queryByRole('button', { name: LABELS.actionStartTutorial })).toBeNull();
+    expect(
+      view.getByRole('button', { name: LABELS.actionLaunchGuidedDemo }),
+    ).toBeInTheDocument();
     // And no unscoped request was made to an example-workspace endpoint.
     const keys = sentRequests().map((r) => r.key);
     expect(keys.filter((k) => k.includes('/demo/'))).toEqual([]);
-
-    // The destination really holds the replay control the hint sends the reader to.
-    fireEvent.click(go);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: LABELS.actionReplayTutorial })).toBeInTheDocument(),
-    );
-    // ...and it is the Help & Tutorial tab that is selected, not `overview`.
-    expect(
-      screen.getByRole('tab', { name: LABELS.settingsTabHelp }).getAttribute('aria-selected'),
-    ).toBe('true');
+    // Nor has anything been created merely by rendering: the primary is an offer to
+    // start, not a start.
+    expect(keys).not.toContain(SESSION_CREATE);
   });
+
+  /*
+   * THE CONTROL DOES THE THING, ASSERTED ON THE WIRE.
+   *
+   * The button it replaces was a `navigate` — indistinguishable, to any query by role
+   * and name, from one that starts a session. That is exactly the defect this slice
+   * closes, so the test for it may not be a label check either: what is asserted is the
+   * request the app SENT, in the same idiom the rest of this file uses.
+   *
+   * "Exactly one" is load-bearing in both directions. `startTutorial` discards any
+   * prior session before opening a new one, so a control wired to fire twice — or a
+   * double-mount — would show up here as two creates and two workspaces, one of which
+   * the reader cannot see or reach.
+   */
+  it('T7c · the empty-state primary STARTS a session — one create, no navigation', async () => {
+    /*
+     * The list is answered the way the real backend answers it — empty without a
+     * session header, the five examples with one — because the property under test is
+     * a TRANSITION between those two answers. A flat `[]` would have proved the create
+     * went out while leaving the walkthrough pointing at a queue that never arrived.
+     */
+    stubFetchRoutes({
+      ...tutorialSessionRoutes(),
+      ...readOnlyRoutes([]),
+      'GET /api/experiments': (init?: RequestInit) => ({
+        status: 200,
+        body: {
+          experiments: (init?.headers as Record<string, string> | undefined)?.[
+            TUTORIAL_SESSION_HEADER
+          ]
+            ? canonicalFiveSummaries
+            : [],
+        },
+      }),
+    } as never);
+    const view = renderAt();
+
+    const launch = await view.findByRole('button', {
+      name: LABELS.actionLaunchGuidedDemo,
+    });
+    expect(sentRequests().map((r) => r.key)).not.toContain(SESSION_CREATE);
+
+    fireEvent.click(launch);
+    await waitFor(() => expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID));
+
+    const creates = sentRequests().filter((r) => r.key === SESSION_CREATE);
+    expect(creates).toHaveLength(1);
+    expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID);
+    expect(readTutorialSession()?.sessionId).toBe(TUTORIAL_SESSION_ID);
+
+    // It did NOT navigate to Settings on the way — the walkthrough runs over the
+    // screen the reader is on. (Settings' own replay control is the tell: if this had
+    // routed there, it would be in the document.)
+    expect(
+      screen.queryByRole('button', { name: LABELS.actionReplayTutorial }),
+    ).toBeNull();
+    // ...and the overlay the session is for is actually up.
+    await waitFor(() => expect(document.querySelector('.tutorial-mark')).not.toBeNull());
+  }, 30000);
+
+  /*
+   * THE DOUBLE-CTA GUARD.
+   *
+   * The empty state's primary and the first-run offer's `Start Tutorial` call the same
+   * function. On a first visit — not completed, not dismissed, phase `idle` — both
+   * conditions are satisfied at once, and without the queue gate in `ExperimentsHome`
+   * the reader gets two primaries, ten pixels apart, doing the identical thing under
+   * two names.
+   *
+   * Asserted as an EXCLUSION over both list states rather than as "the card is absent",
+   * so it keeps its meaning if the arrangement is ever inverted: whichever surface owns
+   * the CTA, there must never be two.
+   */
+  it('T7d · exactly one tutorial CTA is on screen, never both', async () => {
+    stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes([]) } as never);
+    const empty = renderAt();
+    await screen.findByRole('heading', { name: 'No experiments yet' });
+    // The precondition that makes this a real test: the offer's own condition is TRUE
+    // here (nothing completed, nothing dismissed, phase idle), so the card is being
+    // suppressed by the queue gate rather than by having nothing to offer.
+    const { shouldOfferTutorial } = await import('../lib/tutorialController');
+    expect(shouldOfferTutorial(getTutorialState())).toBe(true);
+
+    expect(document.querySelectorAll('.tutorial-offer')).toHaveLength(0);
+    expect(ctaCount(empty.container)).toBe(1);
+    expect(
+      empty.getByRole('button', { name: LABELS.actionLaunchGuidedDemo }),
+    ).toBeInTheDocument();
+    empty.unmount();
+
+    // The other list state: rows present, so the queue — not the empty state — is on
+    // screen, and the offer card is the one CTA.
+    stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes() } as never);
+    const filled = renderAt();
+    await waitFor(() =>
+      expect(document.querySelector('.tutorial-offer')).not.toBeNull(),
+    );
+    expect(filled.container.querySelector('.queue-empty-state')).toBeNull();
+    expect(ctaCount(filled.container)).toBe(1);
+    expect(
+      filled.queryByRole('button', { name: LABELS.actionLaunchGuidedDemo }),
+    ).toBeNull();
+  }, 30000);
 
   it('T7b · no ordinary request carries a tutorial scope', async () => {
     stubFetchRoutes({ ...readOnlyRoutes([]) } as never);

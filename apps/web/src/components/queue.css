@@ -202,28 +202,69 @@
 /*
  * The PERMANENT ordinary empty state (no record can be created or imported in
  * this build), so it is given real structure rather than the one-line
- * `.queue-empty` treatment. Restrained on purpose: this is the resting state of
- * the primary screen, not a promotion, so it must not out-shout the queue it
- * replaces. Constrained to a readable measure and left-aligned to match the rest
- * of the screen rather than floating centred.
+ * `.queue-empty` treatment. Left-aligned to match the rest of the screen rather
+ * than floating centred, and held to a readable measure.
+ *
+ * IT USED TO BE DELIBERATELY RESTRAINED, and the reason is kept here rather than
+ * deleted because it was a good reason and it may become good again. It read:
+ * "this is the resting state of the primary screen, not a promotion, so it must
+ * not out-shout the queue it replaces" — written when the empty list was a
+ * TRANSIENT state that a filling queue would replace, and quiet was right for
+ * something a reader passes through.
+ *
+ * WHAT CHANGED IS THE FACT UNDERNEATH IT, not the taste. There is no
+ * `POST /api/experiments`, `create_experiment` has no production caller, and
+ * `POST /api/uploads` refuses by design, so in the ordinary workspace there is no
+ * queue for this to out-shout — this IS the screen, permanently, and it now owns
+ * the screen's only real action (`Launch Guided Demo`). A resting state that is
+ * also the only state has to carry a hierarchy.
+ *
+ * The lift is measured, not loud: a wider measure, more room above, a heading that
+ * reads as the screen's own rather than as a caption, and ONE emphasised control.
+ * Nothing here gets a card, a fill, or a border — the restraint the old comment
+ * asked for is spent on the container, and the emphasis is spent on the action.
+ * If a create/import path ever lands, revisit this: the premise above is what
+ * justifies it, and it expires with that premise.
  */
 .queue-empty-state {
-  max-width: 52ch;
-  padding: 26px 4px 8px;
+  max-width: 60ch;
+  padding: 38px 4px 12px;
 }
 
 .queue-empty-title {
-  margin: 0 0 8px;
-  font-size: 15px;
+  margin: 0 0 10px;
+  font-size: 19px;
   font-weight: 600;
-  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
 }
 
 .queue-empty-body {
   margin: 0 0 10px;
   font-size: 13.5px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--text-secondary);
+}
+
+/*
+ * The one emphasised action, given its own band so the hierarchy is spatial as
+ * well as tonal — the reader's eye should land on the button before it reads the
+ * alternatives below it. Generous vertical rhythm, no box: this is a step in the
+ * page flow, not a card competing with the screen it sits on.
+ */
+.queue-empty-primary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 22px 0 30px;
+}
+
+/* Slightly larger than a row-level `.btn`, because it is the only primary on the
+   screen and the default control size is tuned for dense toolbars. */
+.queue-empty-cta {
+  font-size: 13.5px;
+  padding: 11px 20px;
 }
 
 .queue-empty-list {

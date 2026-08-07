@@ -165,9 +165,20 @@ function bar(): HTMLElement | null {
   return document.querySelector('.tutorial-session-bar');
 }
 
-/** Start the walkthrough from its real first-run offer, and wait for the session. */
+/**
+ * Start the walkthrough the way a reader does from the ordinary workspace, and wait
+ * for the session.
+ *
+ * IT IS THE EMPTY STATE'S PRIMARY, NOT THE OFFER CARD. `scopedRoutes` answers
+ * `GET /api/experiments` with `[]` when the request carries no session header — which
+ * is the whole point of this file — so My Experiments renders its empty state here,
+ * and `ExperimentsHome` suppresses the first-run offer whenever the queue is empty so
+ * that one action is never offered by two primaries at once. `Start Tutorial` is
+ * therefore not on this screen to click; `Launch Guided Demo` is, and it calls the same
+ * `startTutorial`.
+ */
 async function startFromOffer(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
+  fireEvent.click(await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo }));
   await waitFor(() => expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID));
 }
 
