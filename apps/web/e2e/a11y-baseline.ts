@@ -953,7 +953,6 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // they already were; if CI disagrees, transcribe ITS numbers and correct the
   // total — never loosen the assertion.
   //
-<<<<<<< HEAD
   // no-guessing slice: LINUX ONLY rises by 1, 1703 -> 1704. This slice adds
   // `.guided-inferability` (the paragraph stating why the app is asking rather
   // than answering), which fails `color-contrast` on Linux but NOT on darwin --
@@ -964,7 +963,7 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // -g "Guided Completion"` passes against 11) rather than assumed, because the
   // note above records that assuming a DOM change affects both platforms equally
   // has already been wrong once here.
-=======
+  //
   // ── COVERAGE-DISCLOSURE SLICE: linux 1703 -> 1704, darwin UNCHANGED ─────────
   //
   // One key moves, `export-readiness-done@desktop-1280x800`, and only on linux
@@ -979,9 +978,29 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // constant fails in all five projects — which is exactly how the previous
   // linux-column edit was caught, and why the entry and this constant are one
   // atomic change. Darwin is NOT raised to match; nothing measured darwin at 14.
->>>>>>> origin/main
+  //
+  // ── MERGE OF THE TWO SLICES ABOVE: linux 1704 -> 1705, darwin UNCHANGED ─────
+  //
+  // The two notes immediately above were written independently, each against a
+  // tree where 1703/1703 was the starting point, and each correctly concluded
+  // "linux 1703 -> 1704". They move DIFFERENT keys — the no-guessing slice moves
+  // `guided-completion@tablet-768x1024` (linux 10 -> 11) and the coverage-
+  // disclosure slice moves `export-readiness-done@desktop-1280x800` (linux
+  // 12 -> 13) — so on a tree containing BOTH they COMPOSE rather than coincide:
+  // linux 1703 + 1 + 1 = 1705. Darwin is untouched by either (both keys already
+  // measured 11 and 13 on darwin, which is why both collapsed to scalars), so it
+  // stays 1703.
+  //
+  // A three-way merge cannot see this. Both sides wrote the identical text
+  // `linux: 1704`, so git took it without a conflict while silently combining two
+  // entry changes that each justified only one of that number's two increments.
+  // The resulting 1704 was arithmetically wrong for the merged entry set and the
+  // per-platform self-check would have caught it. NEITHER number below is my
+  // arithmetic: both were recomputed by importing this module and summing
+  // `platformCount` over every entry on the merged tree — darwin 1703, linux 1705.
+  // No per-key value was changed to reach them; only this total moved.
   darwin: 1703,
-  linux: 1704,
+  linux: 1705,
 };
 
 /**
