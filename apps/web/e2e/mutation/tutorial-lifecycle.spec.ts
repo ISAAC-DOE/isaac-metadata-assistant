@@ -30,9 +30,19 @@ const mark = (page: import('@playwright/test').Page) => page.locator('.tutorial-
  *  elements and a bare role query is ambiguous. */
 const MODAL = '[role="dialog"][aria-modal="true"]';
 
-async function startFromOffer(page: import('@playwright/test').Page) {
+/**
+ * Start the walkthrough from My Experiments.
+ *
+ * IT IS THE EMPTY STATE'S PRIMARY, NOT THE FIRST-RUN OFFER CARD. This suite's
+ * ordinary workspace is empty by construction (`globalSetup` asserts it), and
+ * `ExperimentsHome` suppresses the offer card whenever the queue has no rows — so that
+ * one action is never offered by two primaries at once. `Launch Guided Demo` is the
+ * control that is on this screen, and it calls the same `startTutorial`, so every
+ * session below is opened by the same code path it always was.
+ */
+async function startFromEmptyState(page: import('@playwright/test').Page) {
   await page.goto('/experiments', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'Start Tutorial' }).click();
+  await page.getByRole('button', { name: 'Launch Guided Demo' }).click();
   await expect(bar(page)).toBeVisible({ timeout: 20_000 });
   await expect(mark(page)).toBeVisible({ timeout: 20_000 });
 }
@@ -58,7 +68,7 @@ test.describe('worked-example session lifecycle', () => {
     const otherBefore = await lifecycle.readInSession(other, SEED.fresh);
     expect(otherBefore.rev, 'the control session must carry progress worth protecting').toBeGreaterThan(0);
 
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const mine = lifecycle.sessionsCreated()[0];
     expect(mine, 'starting the walkthrough must open a session').toBeTruthy();
 
@@ -131,7 +141,7 @@ test.describe('worked-example session lifecycle', () => {
     // fetch, so the default 60s is not enough for a full walk.
     test.setTimeout(180_000);
 
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const session = lifecycle.sessionsCreated()[0];
     await expect(page.locator('.exp-row')).toHaveCount(5);
 
@@ -197,7 +207,7 @@ test.describe('worked-example session lifecycle', () => {
      * of sessions minted, and the count of rows rendered — because either one alone
      * would pass a build that got the other wrong.
      */
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const first = lifecycle.sessionsCreated()[0];
     await expect(page.locator('.exp-row')).toHaveCount(5);
 
@@ -256,7 +266,7 @@ test.describe('worked-example session lifecycle', () => {
      */
     test.setTimeout(180_000);
 
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const first = lifecycle.sessionsCreated()[0];
 
     const next = page.getByRole('button', { name: 'Next', exact: true });
