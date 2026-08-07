@@ -186,6 +186,251 @@ def test_the_archive_contains_every_fixture_and_the_user_facing_documents():
     )
 
 
+def test_the_archive_contains_NOTHING_BEYOND_what_a_human_needs():
+    """No extra entry, named or unnamed.
+
+    The test above is a SUBSET check (`required <= names`) plus two named
+    exclusions, so it passes with an arbitrary extra file in the archive as long
+    as that file is neither the archive itself nor `ENGINEERING-NOTES.md`. This
+    one pins the SET, which is the property that actually matters: the archive is
+    the only thing a human downloads, so anything inside it is something they
+    were handed — and nothing else in the repository re-measures a file that got
+    in by accident.
+    """
+    with zipfile.ZipFile(ARCHIVE) as zf:
+        names = set(zf.namelist())
+    expected = {e["filename"] for e in ENTRIES} | {"UPLOAD-GUIDE.md", "MANIFEST.json"}
+    assert names == expected, (
+        "the archive's contents are not exactly the eighteen files plus the two "
+        f"user-facing documents.\n  unexpected: {sorted(names - expected)}\n"
+        f"  missing:    {sorted(expected - names)}"
+    )
+    assert not any("/" in n for n in names), (
+        f"the archive contains a directory entry or nested path: "
+        f"{sorted(n for n in names if '/' in n)}. It is built flat so that a human "
+        "who unzips it gets the files themselves, not a folder to dig through."
+    )
+
+
+#: Absolute paths that only exist on one particular machine.
+#:
+#: WHY THIS IS A DEFECT EVEN THOUGH THIS REPOSITORY IS PRIVATE. It is not a secret
+#: leak and must not be described as one — the harm is plainer than that. Everything
+#: inside the archive is handed to an operator, and `MANIFEST.json`'s
+#: `validator_invocation` block is a REPRODUCTION INSTRUCTION: it tells the reader
+#: how to re-derive the verdicts the manifest states. `Run from
+#: /Users/<somebody>/Documents/ISAAC` is an instruction nobody but that one person
+#: can follow, on that one machine, and it silently stops being followable for its
+#: own author the moment the checkout moves. A repo-relative instruction
+#: ("the directory containing schema/isaac_record_v1.json") works for every reader,
+#: including the author later. The same argument covers a `/home/...` path from a
+#: Linux checkout and a `C:\...` path from a Windows one.
+#:
+#: SCOPE: this guards the ARCHIVE's members, because those are what leaves the
+#: repository. `ENGINEERING-NOTES.md` is deliberately not covered — it is pinned OUT
+#: of the archive by `test_the_archive_contains_every_fixture_and_the_user_facing_documents`
+#: and so is never distributed. (Its own two occurrences were cleaned at the same
+#: time as this guard was added; that is hygiene, not a requirement this test makes.)
+_MACHINE_SPECIFIC_PATH_MARKERS = (
+    "/Users/",
+    "/home/",
+    "C:\\",
+    "/private/tmp/",
+    "/var/folders/",
+)
+
+
+def test_no_archive_member_carries_a_machine_specific_path():
+    """Scans the BYTES of everything in the download, not just the documents.
+
+    Pinning the member SET (above) says nothing about member CONTENT, and the
+    per-file measurement tests read the loose files for verdicts rather than for
+    paths — so an absolute path could sit in the shipped `MANIFEST.json` with every
+    test in this module green. It did: `validator_invocation.note` carried
+    `Run from /Users/…/Documents/ISAAC` until this assertion was written.
+
+    Whole-file substring scan on purpose. A defect like this arrives inside prose
+    that no structured assertion is looking at, so there is nothing narrower to
+    check.
+    """
+    with zipfile.ZipFile(ARCHIVE) as zf:
+        offenders: list[str] = []
+        for name in sorted(zf.namelist()):
+            text = zf.read(name).decode("utf-8", errors="replace")
+            offenders += [
+                f"{name}: {marker!r}"
+                for marker in _MACHINE_SPECIFIC_PATH_MARKERS
+                if marker in text
+            ]
+    assert not offenders, (
+        "machine-specific absolute paths are inside the archive an operator "
+        f"downloads: {offenders}.\n"
+        "This is not a secret leak — it is a reproduction instruction that only "
+        "works on one machine, in a document handed to somebody else. Rewrite it "
+        "relative to the repository root (e.g. 'the directory containing "
+        "schema/isaac_record_v1.json'), then rebuild the archive and re-measure its "
+        "digest in docs/krish-manual-verification-checklist.md."
+    )
+
+
+#: The committed archive, measured. Regenerate BOTH numbers together with the
+#: archive; never copy one across from a previous build.
+#:
+#:   shasum -a 256 qa/validator-upload-package/isaac-validator-qa-files.zip
+#:   wc -c          qa/validator-upload-package/isaac-validator-qa-files.zip
+_ARCHIVE_SHA256 = "8a2d4948825c56bbcd9f707d70133c3dd3ba39092b8b17474a0155e1b9bf7170"
+_ARCHIVE_BYTES = 66133
+
+#: Documents that quote the digest to a human. Both are asserted to be FOUND, so
+#: renaming one cannot make the cross-check vacuous.
+_DIGEST_QUOTING_DOCS = (
+    Path("docs/krish-manual-verification-checklist.md"),
+    Path("docs/superpowers/plans/2026-08-03-product-hardening-closure.md"),
+)
+
+#: Any 64-hex token, i.e. anything shaped like a sha256.
+_SHA256_TOKEN = re.compile(r"\b[0-9a-f]{64}\b")
+
+
+def test_the_committed_archive_matches_the_digest_and_size_the_operator_is_told_to_verify():
+    """Pins the archive's own bytes, and the number quoted to the operator.
+
+    `docs/krish-manual-verification-checklist.md` tells a human to run `shasum -a
+    256` and — by its own wording — to distrust the archive on a mismatch. Nothing
+    asserted that digest, so any edit inside the package that got the archive
+    correctly rebuilt would leave the document quoting the PREVIOUS build: every
+    test green, and the operator instructed to refuse a correct archive. That is the
+    failure mode this test exists for, and it is worse than a stale document,
+    because the person it misleads has been told to trust it.
+
+    THE DIGEST IS OF THE COMMITTED BYTES, NOT OF A REBUILD. A rebuild-and-compare
+    would be the tempting form and it is unusable here: a ZIP's bytes include
+    DEFLATE output, which is a property of the linked zlib rather than of the ZIP
+    format, so a rebuild pin fails on a machine where nothing is wrong.
+    `test_the_archive_metadata_is_normalised_so_the_build_is_reproducible` is what
+    covers reproducibility; this one covers "the document and the file agree".
+    """
+    data = ARCHIVE.read_bytes()
+    assert len(data) == _ARCHIVE_BYTES, (
+        f"the archive is {len(data)} bytes, this test pins {_ARCHIVE_BYTES}. "
+        "Re-measure with `wc -c` and update _ARCHIVE_BYTES, _ARCHIVE_SHA256 and "
+        "every document listed in _DIGEST_QUOTING_DOCS together."
+    )
+    assert (measured := _sha256(data)) == _ARCHIVE_SHA256, (
+        f"the archive's sha256 is {measured}, this test pins {_ARCHIVE_SHA256}.\n"
+        "If you changed the package on purpose, rebuild the archive and then update "
+        "_ARCHIVE_SHA256, _ARCHIVE_BYTES and every document in "
+        "_DIGEST_QUOTING_DOCS in the SAME commit — the operator is told to refuse "
+        "an archive whose digest does not match the document."
+    )
+
+    for relative in _DIGEST_QUOTING_DOCS:
+        doc = ROOT / relative
+        assert doc.is_file(), (
+            f"{relative} is missing, so this test's cross-check is vacuous. If the "
+            "document moved, update _DIGEST_QUOTING_DOCS."
+        )
+        text = doc.read_text()
+        assert "isaac-validator-qa-files" in text, (
+            f"{relative} no longer mentions the archive; revisit whether it still "
+            "belongs in _DIGEST_QUOTING_DOCS."
+        )
+        assert _ARCHIVE_SHA256 in text, (
+            f"{relative} does not quote the archive's current sha256 "
+            f"{_ARCHIVE_SHA256}. It instructs a human to verify the checksum and to "
+            "distrust a mismatch, so a stale digest there makes a CORRECT archive "
+            "look tampered with."
+        )
+
+    # A THIRD document could start quoting a digest later and go stale unnoticed, so
+    # every sha256-shaped token in any Markdown that mentions the archive must be
+    # this digest. Scoped to files that mention the archive, so unrelated hashes
+    # elsewhere in the docs are not this test's business.
+    candidates = [*ROOT.glob("docs/**/*.md"), *PACKAGE.glob("*.md"), ROOT / "README.md"]
+    stale: list[str] = []
+    for doc in sorted(set(candidates)):
+        if not doc.is_file():
+            continue
+        text = doc.read_text()
+        if "isaac-validator-qa-files" not in text:
+            continue
+        stale += [
+            f"{doc.relative_to(ROOT)}: {token}"
+            for token in set(_SHA256_TOKEN.findall(text))
+            if token != _ARCHIVE_SHA256
+        ]
+    assert not stale, (
+        "these documents mention the QA archive and quote a sha256 that is not its "
+        f"current digest {_ARCHIVE_SHA256}:\n  " + "\n  ".join(sorted(stale))
+    )
+
+
+def test_the_archive_metadata_is_normalised_so_the_build_is_reproducible():
+    """The archive rebuilds to identical bytes — enforced via its metadata.
+
+    WHY THIS IS NOT A sha256 PIN. A pinned archive digest would be the most
+    direct assertion and it would be the wrong one: a ZIP's bytes include DEFLATE
+    output, and DEFLATE is a property of the linked zlib rather than of the ZIP
+    format. The same content at the same nominal level can compress to a
+    different (perfectly valid) byte stream under a different zlib, so a digest
+    pin would fail on a machine where nothing was wrong. Verified locally: the
+    committed archive reproduces bit-for-bit at zlib's DEFAULT level and differs
+    at levels 1 and 9.
+
+    What IS portable is the metadata normalisation that makes the build
+    reproducible in the first place, and it is the part a careless rebuild
+    destroys. `zip -r` from a shell, or `zipfile` without an explicit `ZipInfo`,
+    stamps every entry with the current wall-clock time and the umask of whoever
+    ran it — so the archive's bytes change on every rebuild while its contents do
+    not, and the checksum quoted to an operator in
+    `docs/krish-manual-verification-checklist.md` becomes noise.
+
+    The recipe these assertions describe: entries sorted by name; each
+    `ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))` with
+    `external_attr = 0o644 << 16`, `create_system = 3` and `ZIP_DEFLATED` at
+    zlib's default level; no extra fields, no comments, no directory entries.
+    """
+    with zipfile.ZipFile(ARCHIVE) as zf:
+        infos = zf.infolist()
+        assert zf.comment == b"", "the archive carries a comment, which a rebuild would not"
+
+    assert [i.filename for i in infos] == sorted(i.filename for i in infos), (
+        "the archive's entries are not in sorted order, so two rebuilds from the "
+        "same directory can disagree — directory iteration order is not stable "
+        "across filesystems"
+    )
+
+    epoch = (1980, 1, 1, 0, 0, 0)
+    stamped = {i.filename: i.date_time for i in infos if i.date_time != epoch}
+    assert not stamped, (
+        "these entries do not carry the fixed ZIP epoch, so the archive was built "
+        f"with wall-clock timestamps and cannot rebuild to the same bytes: {stamped}"
+    )
+
+    modes = {i.external_attr >> 16 for i in infos}
+    assert modes == {0o644}, (
+        f"entry permission bits are not uniformly 0644: {[oct(m) for m in sorted(modes)]}. "
+        "A umask-dependent mode makes the archive's bytes depend on who built it."
+    )
+
+    assert {i.compress_type for i in infos} == {zipfile.ZIP_DEFLATED}, (
+        "entries are not uniformly DEFLATE-compressed; a mixed archive is a sign "
+        "of a hand-edited or appended-to file rather than a clean rebuild"
+    )
+    assert {i.create_system for i in infos} == {3}, (
+        "entries do not uniformly declare create_system 3 (Unix), so the archive "
+        "would rebuild differently on a different platform"
+    )
+
+    decorated = {
+        i.filename: (len(i.extra), i.comment) for i in infos if i.extra or i.comment
+    }
+    assert not decorated, (
+        "these entries carry extra fields or per-entry comments, which macOS "
+        f"archive tools add and which are not reproducible: {decorated}"
+    )
+
+
 # --- the measurement ----------------------------------------------------------
 
 
@@ -401,6 +646,51 @@ def test_no_qa_record_carries_an_attribution_block():
         f"these QA records contain an `attribution` block: {offenders}. The block "
         "is optional in the schema and is omitted on purpose so that no person or "
         "account is named in a committed fixture."
+    )
+
+
+#: The two sentences every shipped file states about itself. Product language, so
+#: they survive `_DEV_VOCABULARY`; unambiguous, so a reader cannot mistake the file
+#: for a transcription of a real measurement.
+_PROVENANCE_SENTENCES = (
+    "Constructed by hand for validator exercise",
+    "no measurement provenance",
+)
+
+
+def test_every_shipped_fixture_states_its_own_provenance_in_its_own_text():
+    """CLAUDE.md §6: a committed fixture must be unmistakably not real data.
+
+    The seventeen JSON records have always carried these sentences by convention —
+    but a convention is not a check, and `unsupported-file.txt` was the one file
+    that carried NEITHER. It read as a genuine logbook transcription (a real-looking
+    beamline designation and the textbook Cu K-edge energy presented as a measured
+    value), which is exactly the shape §6 forbids, and no assertion noticed.
+
+    `_DEV_VOCABULARY` below constrains the fix and is the reason this is subtle: the
+    package's fixtures are operator-facing product content, so "synthetic" and
+    "test data" are BANNED here. The disclosure therefore has to be product
+    language that is still unambiguous, which is what these two sentences are.
+    Scans every non-document file, so a future `.txt` or `.csv` cannot slip in
+    silently either.
+    """
+    missing: list[str] = []
+    for path in sorted(PACKAGE.iterdir()):
+        if path.name in _NOT_FIXTURES:
+            continue
+        text = path.read_text()
+        missing += [
+            f"{path.name}: {sentence!r}"
+            for sentence in _PROVENANCE_SENTENCES
+            if sentence not in text
+        ]
+    assert not missing, (
+        "these shipped files do not state their own provenance in their own text: "
+        f"{missing}. Every file in this package must say, in language an operator "
+        "reads, that it was constructed by hand and carries no measurement "
+        "provenance — otherwise it can be mistaken for a record of a real "
+        "measurement. Note that `_DEV_VOCABULARY` forbids the obvious words, so the "
+        "disclosure must be product language."
     )
 
 
