@@ -1058,7 +1058,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 39 operations, 54 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 39 operations, 56 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(39);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1160,8 +1160,26 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // which compares that array against the served document — a different test, in
     // a different suite.) `git log -- src/test/apiFixtures.ts` settles the question
     // in one command and should be the first thing run when this fails.
-    expect(total).toBe(25500);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(54);
+    // 25,500 -> 26,223 (+723): `GET /api/runtime/verification` gained the `mode`
+    // disclosure. That route now serves TWO corpora rather than one, and its
+    // description had to say so -- it previously read "over the ten public
+    // upstream ISAAC example records" and "this operation does not connect to any
+    // database", both of which became false the moment the authorized private
+    // mode was made reachable. The re-transcription is mechanical: it was copied
+    // from `create_app().openapi()`, not written by hand, and
+    // `apps/api/tests/test_contract_description_parity.py` is what proves the
+    // copy still matches the server.
+    //
+    // A note for whoever re-transcribes next: dump the string with
+    // `ensure_ascii=False`. The parser in that parity test unescapes `\n`, `\"`,
+    // `\'` and `\\` and NOT `\uXXXX`, so an ASCII-escaped em dash reads as six
+    // literal characters and the two sides differ in a way the diff renders
+    // identically. That cost a debugging round here.
+    expect(total).toBe(26223);
+    // 54 -> 56: the `mode` disclosure on GET /api/runtime/verification is two
+    // new paragraphs -- the two-corpus list, and the sentence saying an unknown
+    // mode is refused rather than silently served the other corpus.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(56);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

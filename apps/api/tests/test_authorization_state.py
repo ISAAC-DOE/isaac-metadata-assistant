@@ -253,34 +253,71 @@ def test_the_parity_check_would_notice_a_withdrawal(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_the_verification_route_accepts_no_parameters():
-    """`GET /api/runtime/verification` documents itself as running over "the ten
-    public upstream ISAAC example records" and as not connecting to any database.
+def test_the_verification_route_takes_a_mode_AND_its_description_says_so():
+    """The same guard as before, pointed at the state that is now true.
 
-    Both are true only because the operation takes no parameter, while
-    `VerificationState.get()` accepts a mode. A future `?mode=` query parameter
-    would silently falsify the published description without touching it. This
-    test is that guard: adding a parameter fails here, next to the reason.
+    THIS TEST USED TO ASSERT THE OPPOSITE, and the change is deliberate rather
+    than a capitulation. Its previous form read:
 
-    The description itself is deliberately NOT edited to say so --
-    `apps/api/isaac_api/routes.py` is in the committed served-content manifest,
-    so editing it drifts `memory-snapshot.json`, and regenerating that is out of
-    scope for this slice.
+        assert list(inspect.signature(get_runtime_verification).parameters) == []
+
+    and its docstring explained why: the published description claimed the
+    operation ran over "the ten public upstream ISAAC example records" and
+    connected to no database, and *both claims were true only because the route
+    took no parameter*. A `?mode=` added on its own would have silently
+    falsified a description nobody edited. The guard existed to couple the two,
+    and it was never a prohibition on wiring -- it even named the reason the
+    description was left alone (regenerating the snapshot was out of that
+    slice's scope).
+
+    Q19 authorized the datastore mode on 2026-08-05, the wire now exists, and
+    the description WAS edited in the same commit. So the coupling is preserved
+    by inverting the assertion: the route must take the mode parameter, and the
+    description must disclose both corpora. Deleting the test would have removed
+    the coupling; that is the one thing that must not happen.
     """
     import inspect
 
     from isaac_api import routes
 
-    assert list(inspect.signature(routes.get_runtime_verification).parameters) == []
+    params = list(inspect.signature(routes.get_runtime_verification).parameters)
+    assert params == ["mode"], (
+        "the route must expose exactly the mode parameter -- an extra one is a "
+        "caller-influenced value on a path that reaches a datastore"
+    )
+
+    # The other half: the description must not still describe a single public
+    # corpus, and must not make a bare no-database claim about the deployment.
+    description = _verification_route_description(routes)
+    assert "`mode`" in description
+    assert verification.AUTHORIZED_PRIVATE_SAMPLE in description
+    assert "ten public upstream ISAAC example records: official schema" not in description, (
+        "the lead sentence still describes only the public corpus"
+    )
 
 
-def test_the_deployed_state_object_has_no_provider_factory():
-    """The other half of the same claim. The route cannot reach a datastore
-    because the process-wide `VerificationState` was constructed without a
-    provider factory, so the datastore mode has nothing to open."""
+def _verification_route_description(routes_module) -> str:
+    """The description FastAPI will actually publish for the route."""
+    for route in routes_module.router.routes:
+        if getattr(route, "path", None) == "/api/runtime/verification":
+            return route.description or ""
+    raise AssertionError("the verification route is not registered")
+
+
+def test_the_deployed_state_object_HAS_a_provider_factory_and_still_defaults_to_public():
+    """The other half of the same claim, likewise inverted deliberately.
+
+    Previously: `_provider_factory is None`, because the route could not reach a
+    datastore at all. Q19 authorized it, so the factory is supplied.
+
+    What must NOT change, and is asserted here rather than assumed: the DEFAULT
+    is still the public corpus. A caller who names no mode must never be handed
+    the datastore one. That is the part of the old guarantee that survives
+    verbatim, and it is the part a careless refactor would take.
+    """
     from isaac_api import routes
 
-    assert routes._VERIFICATION_STATE._provider_factory is None
+    assert routes._VERIFICATION_STATE._provider_factory is not None
     assert routes._VERIFICATION_STATE.default_mode == verification.PUBLIC_REFERENCE
 
 
