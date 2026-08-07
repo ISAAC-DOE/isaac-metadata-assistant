@@ -4729,12 +4729,20 @@ def _verification_provider_factory() -> db_provider.DatastoreRecordProvider:
     specified rather than the absence of a wire.
 
     Nothing here relaxes a gate. Every constraint still lives in the provider:
-    `db_recon.check_env_gates` pins `PGDATABASE`; a missing `PGHOST`/`PGUSER`/
-    `PGPASSWORD` refuses; the driver is imported lazily so an image without it
-    reports `unavailable` instead of raising; the transaction declares read-only
-    twice and verifies it server-side; and the report is aggregate-only. This
-    function adds no argument a caller can influence -- it reads `os.environ` and
-    nothing else, so there is no request-derived value anywhere on this path.
+    `db_recon.check_env_gates` pins `PGDATABASE`, and a wrong or absent value
+    **refuses** before anything is opened; a missing `PGHOST`/`PGUSER`/
+    `PGPASSWORD` is a different failure and produces **`unavailable`** from the
+    connect gate, as does an image whose driver will not import (it is imported
+    lazily, so it reports rather than raising); the transaction declares
+    read-only twice and verifies it server-side; and the report is
+    aggregate-only. This function adds no argument a caller can influence -- it
+    reads `os.environ` and nothing else, so there is no request-derived value
+    anywhere on this path.
+
+    THE TWO FAILURE WORDS ARE NOT INTERCHANGEABLE, and an earlier version of
+    this docstring said a missing `PGHOST` "refuses", which is false: only the
+    `PGDATABASE` pin yields `refused`. Both are measured, per environment, in
+    `apps/api/tests/test_verification_route_wiring.py`.
 
     Constructing the provider is itself side-effect free: with an empty
     environment it returns an object in state `not_run` rather than raising, and
@@ -4757,27 +4765,48 @@ _VERIFICATION_STATE = verification.VerificationState(
         "ISAAC records: official schema validation, a stricter format-aware "
         "shadow validation, and a deterministic mutation harness that "
         "deep-clones each record before mutating it. **Which** corpus is "
-        "selected by `mode` and is always named in the report itself.\n\n"
+        "selected by `mode`, and a completed report names it in "
+        "`metadata.verification_mode`.\n\n"
         "Aggregate only. No record id, title, field value, evidence entry or "
         "per-record outcome appears, and every histogram is projected through a "
         "minimum-cell-size floor so a category with few occurrences is withheld "
         "rather than named.\n\n"
-        "**Two corpora, selected by `mode`, and the report always names which "
-        "one it read.**\n\n"
+        "**Two corpora, selected by `mode`. A completed report names the one it "
+        "read; a status envelope (`running`, `refused`, `unavailable`, `error`) "
+        "carries no `metadata` at all, so it names no corpus and reports no "
+        "figures.**\n\n"
         "* `public_reference` (default) — the ten public upstream ISAAC example "
         "records vendored in this repository. Already published, so reading them "
-        "needs no approval, and a run in this mode does not open a database "
-        "connection to reach them.\n"
+        "needs no approval, and a run in `public_reference` mode does not open a "
+        "database connection to reach them.\n"
         "* `authorized_private_sample` — a bounded, read-only, aggregate-only "
         "pass over the records this application holds in its own datastore, "
         "under the approval recorded on 2026-08-05. This mode **does** open one "
-        "short-lived read-only connection from the pod. Each record is deep-"
-        "copied in memory, mutated only as a copy, and discarded; no identifier, "
-        "title, field value, evidence entry or per-record outcome is retained or "
-        "returned.\n\n"
+        "short-lived read-only connection — to whatever host the process's own "
+        "libpq environment names, which in the deployed configuration is the "
+        "in-cluster database reached from the pod. Nothing on this path checks "
+        "where the process is running; that it runs in the pod is how the "
+        "deployment is configured, not something this operation enforces. Each "
+        "record is deep-copied in memory, mutated only as a copy, and discarded; "
+        "no identifier, title, field value, evidence entry or per-record outcome "
+        "is retained or returned.\n\n"
+        # The credential variable is described rather than named: `PGPASSWORD`
+        # contains "password", and `test_about_and_openapi.py` scans the whole
+        # generated document for that substring with no exception list. Spelling
+        # it out fails that scan -- MEASURED, it did. The variable's real name is
+        # in `_verification_provider_factory`'s docstring and in `db_provider`,
+        # neither of which is published.
         "An unknown mode is **refused**, never silently served the other one. "
-        "The private mode is refused rather than attempted when its environment "
-        "gates are unmet, and reports `unavailable` when the driver is absent.\n\n"
+        "For the private mode the two failure words are not interchangeable, and "
+        "each has its own cause. `refused` means an environment gate rejected "
+        "the run before anything was opened — in practice that `PGDATABASE` is "
+        "not exactly the expected database name, and absent counts as not "
+        "exactly. `unavailable` means that gate passed but no connection was "
+        "obtained: the driver would not import, or one of the remaining libpq "
+        "connection variables (`PGHOST`, `PGUSER`, or the credential variable "
+        "beside them) is missing or empty, or the attempt itself failed. So a "
+        "deployment with `PGDATABASE` set and `PGHOST` unset reports "
+        "`unavailable`, not `refused`.\n\n"
         "The sweep runs off the request path. The first call returns `running`; "
         "poll until `status` is `ok`."
     ),

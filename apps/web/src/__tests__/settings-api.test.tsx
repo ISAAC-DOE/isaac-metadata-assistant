@@ -1175,7 +1175,30 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `\'` and `\\` and NOT `\uXXXX`, so an ASCII-escaped em dash reads as six
     // literal characters and the two sides differ in a way the diff renders
     // identically. That cost a debugging round here.
-    expect(total).toBe(26223);
+    // 26,223 -> 27,188 (+965): the review follow-up on the same operation. The
+    // `mode` disclosure had shipped with two statements that measurement
+    // contradicts, and correcting prose is longer than asserting it. (1) It said
+    // the private mode "is refused rather than attempted when its environment
+    // gates are unmet, and reports `unavailable` when the driver is absent" --
+    // but only the `PGDATABASE` pin refuses; a missing `PGHOST`/`PGUSER`/
+    // `PGPASSWORD` reports `unavailable`, as does an unimportable driver. An
+    // operator reading the old text of a pod saying `unavailable` would hunt for
+    // a missing driver instead of an unset host. Each word is now paired with
+    // its own cause, and `apps/api/tests/test_verification_route_wiring.py`
+    // measures both under real environments. (2) It said the connection is
+    // opened "from the pod", which is where the deployment puts the process, not
+    // anything this code checks -- now stated as configuration rather than
+    // enforcement. Two smaller edits: "always named in the report itself" became
+    // false for pending envelopes (they carry no `metadata`), and the public
+    // bullet now names `public_reference` inside the sentence that makes the
+    // no-database claim, so the claim is scoped where it is read. NO paragraph
+    // was added or removed -- the count below stays 56, and that is asserted
+    // rather than assumed. One wording constraint is worth knowing before
+    // editing that description again: the credential libpq variable is
+    // DESCRIBED, not named, because `apps/api/tests/test_about_and_openapi.py`
+    // scans the whole generated document for the substring "password" with no
+    // exception list, and spelling the variable out fails it.
+    expect(total).toBe(27188);
     // 54 -> 56: the `mode` disclosure on GET /api/runtime/verification is two
     // new paragraphs -- the two-corpus list, and the sentence saying an unknown
     // mode is refused rather than silently served the other corpus.

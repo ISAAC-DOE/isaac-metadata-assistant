@@ -11,19 +11,40 @@ it on 2026-08-05, so the wire now exists, and this file is the guard on the wire
 itself. Every test here fails if the factory is removed, if the route stops
 accepting a mode, or if an unknown mode is quietly served the public corpus.
 
-WHAT THIS FILE DELIBERATELY DOES NOT DO: open a database connection. No test here
-sets `PGHOST`, and none may. The private mode is exercised in its refusing state,
-which is what an environment without the libpq variables must produce.
+WHAT THIS FILE DELIBERATELY DOES NOT DO: open a database connection. The private
+mode is exercised only in states that fail before a socket exists, and the tests
+that drive it MEASURE `connections_opened == 0` on the provider the real factory
+built rather than asserting it in prose.
+
+That is stated this way because the earlier wording -- "no test here sets
+`PGHOST`, and none may" -- was already untrue of the leak test below, which sets
+a sentinel `PGHOST`. It is safe, but for a reason the old sentence did not give:
+`PGDATABASE` is checked first and refuses, so `_drain` returns before `_connect`
+is ever called. The invariant that matters is "no connection is opened", and it
+is now checked instead of promised.
+
+A SECOND CORRECTION IS BAKED INTO THIS FILE'S SHAPE. Every test that depends on
+an environment builds its OWN `VerificationState`. Driving the process-wide
+`routes._VERIFICATION_STATE` does not work: it rate-limits a restart to
+`MIN_REFRESH_INTERVAL_SECONDS` (60) per mode, so once an earlier test has touched
+the private mode, a later test's `monkeypatch.setenv` never reaches a provider and
+the test observes a CACHED status word produced under the ambient environment. Two
+tests here were vacuous exactly that way -- the anti-leak sentinels were never
+seen by any provider. The local state still uses the REAL
+`routes._verification_provider_factory`, because the wiring under test is the
+application's, not a stub's.
 """
 
 from __future__ import annotations
 
+import inspect
 import time
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from isaac_api import db_provider, routes, verification
+from isaac_api import db_provider, db_recon, routes, verification
 from isaac_api.app import app
 
 ROUTE = "/api/runtime/verification"
@@ -56,6 +77,53 @@ def _settle(client: TestClient, query: str = "", limit: int = 240) -> dict:
     pytest.fail(f"{ROUTE}{query} never left 'running'")
 
 
+def _local_state() -> tuple[verification.VerificationState, list[Any]]:
+    """A private `VerificationState` wired to the REAL provider factory.
+
+    Returns the state and the list of providers the factory produced, so a test
+    can assert on what the application's own wiring actually built -- above all
+    `connections_opened`, which is the only direct evidence that no socket was
+    opened.
+
+    The capture wrapper calls `routes._verification_provider_factory()` and
+    returns its product unchanged; it is not a stub, and replacing the factory
+    with one would defeat the purpose of the file.
+
+    NOT given `min_refresh_interval_seconds=0`: with a zero interval and a
+    non-`ok` outcome (which is every case here, since nothing may connect) each
+    `get` starts a fresh sweep and the state answers `running` forever. MEASURED
+    -- a first draft of this helper did exactly that and hung the poll loop. The
+    default 60s is what lets a settled failure be observed at all.
+    """
+    built: list[Any] = []
+
+    def _capturing_factory() -> Any:
+        provider = routes._verification_provider_factory()
+        built.append(provider)
+        return provider
+
+    state = verification.VerificationState(
+        routes.REPO_ROOT, provider_factory=_capturing_factory
+    )
+    return state, built
+
+
+def _settle_state(
+    state: verification.VerificationState, mode: str, limit: int = 240
+) -> dict:
+    for _ in range(limit):
+        body = state.get(mode)
+        if body.get("status") != "running":
+            return body
+        time.sleep(0.5)
+    pytest.fail(f"the {mode} sweep never left 'running'")
+
+
+def _clear_libpq(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ("PGHOST", "PGUSER", "PGPASSWORD", "PGDATABASE", "PGPORT"):
+        monkeypatch.delenv(var, raising=False)
+
+
 # ---------------------------------------------------------------------------
 # The wire itself
 # ---------------------------------------------------------------------------
@@ -75,7 +143,18 @@ def test_the_application_supplies_a_provider_factory() -> None:
 
 
 def test_the_factory_builds_the_datastore_provider_and_reads_only_the_environment() -> None:
-    """It takes no argument, so no request-derived value can reach the provider."""
+    """It takes no argument, so no request-derived value can reach the provider.
+
+    The arity is asserted on the SIGNATURE, not by calling it with no arguments.
+    Calling it successfully proves only that every parameter has a default -- a
+    factory that gained `def _f(mode: str = "public")` and used `mode` would keep
+    a call-based check green while a request-derived value reached the provider.
+    """
+    assert inspect.signature(routes._verification_provider_factory).parameters == {}, (
+        "the factory must take no parameter at all: a defaulted one is still a "
+        "channel a caller-influenced value could travel down"
+    )
+
     provider = routes._verification_provider_factory()
     assert isinstance(provider, db_provider.DatastoreRecordProvider)
     # Constructing it must not connect. A provider that has not run yet reports
@@ -127,31 +206,40 @@ def test_omitting_the_mode_reads_the_public_corpus(client: TestClient) -> None:
 
 
 def test_the_private_mode_fails_closed_when_the_environment_has_no_database(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No libpq variables -> a status word, not a traceback and not a hang.
+    """No libpq variables at all -> `refused`, and MEASURED to be that word.
 
     This is the state every CI run and every developer machine is in, and it is
     also the state a pod is in if the database is not configured. It must be a
-    calm refusal.
+    calm status word, not a traceback and not a hang.
+
+    WHICH GATE FIRES HERE, because the word depends on it and the two words are
+    not interchangeable: with `PGDATABASE` unset, `db_recon.check_env_gates`
+    rejects it (`"" != "metadata_assistant"`) before anything is opened, which is
+    `refused`. It is NOT refused because the host is unknown -- that condition
+    produces `unavailable`, and the companion test below pins it. An earlier
+    version of this test asserted `refused` for an environment it never actually
+    installed, so the distinction was unmeasured.
+
+    `refused` also proves the application CONSTRUCTED a provider and let it run
+    its own gates: with no factory at all the mode settles to `unavailable`
+    instead, so accepting either word would let the whole wire be deleted while
+    this test stayed green.
     """
-    for var in ("PGHOST", "PGUSER", "PGPASSWORD", "PGDATABASE", "PGPORT"):
-        monkeypatch.delenv(var, raising=False)
+    _clear_libpq(monkeypatch)
 
-    body = _settle(client, f"?mode={PRIVATE}")
+    state, built = _local_state()
+    body = _settle_state(state, PRIVATE)
 
-    # `refused` SPECIFICALLY, and the precision is the second guard on the wire.
-    # The two failure words are not interchangeable here, and MEASURED to differ:
-    #   * provider built, gates unmet          -> `refused`
-    #   * no provider_factory at all           -> `unavailable`
-    # So asserting `refused` proves the application actually CONSTRUCTED a
-    # provider and let it run its own gates, rather than merely holding a
-    # non-None attribute. Accepting `unavailable` here would let the whole wire
-    # be deleted while this test stayed green.
     assert body.get("status") == "refused", (
-        f"expected 'refused' (provider built, environment gates unmet), got "
-        f"{body.get('status')!r} -- 'unavailable' means no provider was built at all"
+        f"expected 'refused' (the PGDATABASE pin rejects an unset value before "
+        f"anything opens), got {body.get('status')!r}"
     )
+    assert len(built) == 1, "the wire must build exactly one provider for one sweep"
+    assert built[0].refusal_gate == "pgdatabase_env"
+    assert built[0].connections_opened == 0, "a refusal must open no connection"
+
     # Whatever the word, it must never carry a corpus it did not read. A pending
     # report nulls these blocks rather than zeroing them, and the distinction is
     # the point: `None` says "not measured", `0` would say "measured, none found".
@@ -160,16 +248,83 @@ def test_the_private_mode_fails_closed_when_the_environment_has_no_database(
     assert (body.get("metadata") or {}).get("corpus_size") in (None, 0)
 
 
-def test_a_refused_private_report_leaks_no_environment_detail(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_a_pinned_database_with_no_host_is_UNAVAILABLE_not_refused(
+    monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A refusal names a gate, never a host, a user, a password or a path."""
+    """The other half of the distinction, and the one the contract got wrong.
+
+    `PGDATABASE` is set to exactly the expected name, so the pin PASSES; the
+    connection then cannot be made because the host, user and password are
+    absent. MEASURED: that is `unavailable`, never `refused`.
+
+    Why it is worth a test of its own: the published description used to say the
+    private mode "is refused rather than attempted when its environment gates are
+    unmet", which reads as though a missing `PGHOST` refuses. It does not, and an
+    operator reading that of a pod reporting `unavailable` would conclude the
+    DRIVER is missing from the image rather than that the HOST is unset -- a
+    wrong diagnosis of a one-variable misconfiguration.
+
+    A NOTE ON WHICH GATE FIRES, so this test is not read as proving more than it
+    does. `connect_psycopg2` imports the driver before it inspects the variables,
+    so on a checkout WITHOUT `psycopg2` the gate is `driver` and on the deployed
+    image (which installs the `api` extra) it is `connect`. Both are
+    `unavailable`, which is exactly why the assertion is on the served word and
+    not on the gate name: the word is the contract, and it is the same either
+    way. Neither path opens a socket, which is asserted rather than assumed.
+
+    THIS TEST DOES NOT SET `PGHOST`. It is the absence of a host that is under
+    test, so no connection can be attempted even with a driver present.
+    """
+    _clear_libpq(monkeypatch)
+    monkeypatch.setenv("PGDATABASE", db_recon.EXPECTED_DATABASE)
+
+    state, built = _local_state()
+    body = _settle_state(state, PRIVATE)
+
+    assert body.get("status") == "unavailable", (
+        f"expected 'unavailable' (the PGDATABASE pin passed; no connection could "
+        f"be obtained), got {body.get('status')!r} -- 'refused' would mean an "
+        f"environment gate rejected the run, and none did"
+    )
+    assert len(built) == 1
+    assert built[0].refusal_gate in {"driver", "connect"}, (
+        f"unexpected gate {built[0].refusal_gate!r}: this environment must fail "
+        f"at the driver import or at the missing libpq variables, nowhere else"
+    )
+    assert built[0].connections_opened == 0, "no host was configured; nothing may open"
+    assert (body.get("metadata") or {}).get("corpus_size") in (None, 0)
+
+
+def test_a_refused_private_report_leaks_no_environment_detail(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal names a gate, never a host, a user, a password or a path.
+
+    The sentinels are only meaningful if a provider actually READS them, which
+    is why this test drives its own state: on the process-wide one the private
+    mode's 60s refresh floor meant the sweep it observed had been started under
+    the ambient environment and no provider ever saw a sentinel. It asserted
+    nothing at all.
+
+    Setting a sentinel `PGHOST` is safe here for a checked reason rather than a
+    hoped-for one: `PGDATABASE` is a sentinel too, so the pin refuses first and
+    `_drain` returns before `_connect` -- and `connections_opened == 0` below is
+    the measurement of that, not a restatement of it.
+    """
     monkeypatch.setenv("PGHOST", "sentinel-host-must-never-be-served.invalid")
     monkeypatch.setenv("PGUSER", "sentinel-user-must-never-be-served")
     monkeypatch.setenv("PGPASSWORD", "sentinel-password-must-never-be-served")
     monkeypatch.setenv("PGDATABASE", "sentinel-database-must-never-be-served")
 
-    body = _settle(client, f"?mode={PRIVATE}")
+    state, built = _local_state()
+    body = _settle_state(state, PRIVATE)
+
+    assert body.get("status") == "refused"
+    assert len(built) == 1, "no provider was built, so no sentinel was ever read"
+    assert built[0].connections_opened == 0, (
+        "a sentinel host must never be dialled: the PGDATABASE pin refuses first"
+    )
+
     blob = repr(body)
     for sentinel in (
         "sentinel-host-must-never-be-served",

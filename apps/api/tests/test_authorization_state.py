@@ -304,6 +304,97 @@ def _verification_route_description(routes_module) -> str:
     raise AssertionError("the verification route is not registered")
 
 
+def _sentences(text: str) -> list[str]:
+    """Sentence-ish units, so a claim is judged with its own qualification.
+
+    A whole-description substring search cannot tell "does not connect to any
+    database" (false of the operation now) from "a run in `public_reference`
+    mode does not connect to any database" (true). Splitting on terminal
+    punctuation is crude and deliberately so: the units it produces are the ones
+    a reader reads.
+    """
+    import re
+
+    flat = " ".join(text.split())
+    return [s for s in re.split(r"(?<=[.!?])\s+", flat) if s]
+
+
+def test_the_verification_description_makes_no_UNQUALIFIED_no_database_claim():
+    """The sentence this slice deleted must not be able to come back unscoped.
+
+    The inverted guard above asserts the old LEAD sentence is gone. It never
+    asserted anything about the other false sentence -- "this operation does not
+    connect to any database" -- and `test_backend_copy_truthfulness.py`'s
+    `\\bno\\s+database\\b` pattern does not match that phrasing either, so
+    re-adding it would have passed both guards. This closes that hole.
+
+    What is banned is the UNQUALIFIED form. A mode-scoped statement stays legal,
+    because it is still true: `public_reference` reads vendored files and opens
+    nothing. So a sentence may make the claim only if it names that mode in the
+    same sentence.
+    """
+    from isaac_api import routes
+
+    description = _verification_route_description(routes)
+    for sentence in _sentences(description):
+        lowered = sentence.lower()
+        if "connect to any database" not in lowered and (
+            "does not open a database connection" not in lowered
+        ):
+            continue
+        assert verification.PUBLIC_REFERENCE in sentence, (
+            "a no-database claim must be scoped to the public mode in its own "
+            f"sentence; this one is unqualified and now false: {sentence!r}"
+        )
+
+
+def test_the_verification_description_pairs_each_failure_word_with_its_own_cause():
+    """`refused` and `unavailable` have different causes, MEASURED to differ.
+
+    Measured in `apps/api/tests/test_verification_route_wiring.py`, which drives
+    the real provider factory under two environments:
+
+    * `PGDATABASE` absent or wrong -> the pin rejects it -> `refused`
+    * `PGDATABASE` pinned, no host/user/password (or no driver) -> `unavailable`
+
+    The published description used to say the private mode "is refused rather
+    than attempted when its environment gates are unmet, and reports
+    `unavailable` when the driver is absent". Read against the measurement that
+    is wrong twice: a missing `PGHOST` is an unmet gate that does NOT refuse, and
+    the driver is not the only cause of `unavailable`. An operator debugging a
+    pod that reported `unavailable` would look for a missing driver in the image
+    rather than for an unset host.
+
+    So the contract must NAME which condition produces which word, and must not
+    re-generalize refusal back over the whole environment.
+    """
+    from isaac_api import routes
+
+    description = _verification_route_description(routes)
+    sentences = _sentences(description)
+
+    assert any("refused" in s and "PGDATABASE" in s for s in sentences), (
+        "the description must name the PGDATABASE pin as the cause of `refused`"
+    )
+    assert any("unavailable" in s and "PGHOST" in s for s in sentences), (
+        "the description must name a missing host as a cause of `unavailable`"
+    )
+
+    for sentence in sentences:
+        lowered = sentence.lower()
+        if "refus" not in lowered:
+            continue
+        assert "gates are unmet" not in lowered and "gate is unmet" not in lowered, (
+            "refusal is re-generalized over the whole environment, which is "
+            f"false: only the PGDATABASE pin refuses. {sentence!r}"
+        )
+        if any(var in sentence for var in ("PGHOST", "PGUSER", "PGPASSWORD")):
+            assert "unavailable" in lowered, (
+                "a sentence associating a missing host, user or password with "
+                f"refusal must say the word those conditions produce: {sentence!r}"
+            )
+
+
 def test_the_deployed_state_object_HAS_a_provider_factory_and_still_defaults_to_public():
     """The other half of the same claim, likewise inverted deliberately.
 
