@@ -12,7 +12,9 @@ import {
   unconfiguredMyStatsSource,
   type MyStatsSource,
 } from '../lib/myStatsContract';
+import { type CurrentUserSource } from '../lib/currentUserContract';
 import { MyStats } from '../screens/statistics/MyStats';
+import { currentUserSourceReporting, fixtureCurrentUser } from '../test/adapterFixtures';
 import { statisticsRecordsBody, statisticsRoutes, stubFetchRoutes } from '../test/apiFixtures';
 
 /**
@@ -906,9 +908,13 @@ describe('My Stats invents no personal figure — the six traps', () => {
         'GET /api/graph/status',
         'GET /api/openapi',
         'GET /api/runtime/records',
+<<<<<<< HEAD
         // Record Verification's read. A General-tab section, not tab-keyed, so
         // it fires here too — and it is a GET, so this tab still cannot mutate.
         'GET /api/runtime/verification',
+=======
+        'GET /api/schema',
+>>>>>>> origin/main
       ].sort(),
     );
     expect(calls.filter((c) => c.includes('/api/experiments'))).toEqual([]);
@@ -1028,12 +1034,33 @@ describe('My Stats invents no personal figure — the six traps', () => {
 
     const source = String((await import('../screens/statistics/MyStats?raw')).default);
     const contract = String((await import('../lib/myStatsContract?raw')).default);
+    /*
+     * THE CURRENT-USER BOUNDARY IS SCANNED TOO, and it has to be: `MyStats.tsx`
+     * now imports it, so it is inside this tab's dependency chain. It is also the
+     * one module in the app that WRITES the seven header names down — as string
+     * literals in a frozen record of what §6A observed — which is exactly the
+     * module a reader would expect to find reading them. It does not: the scans
+     * below fail on any header access, any transport, and any use of this app's
+     * API client.
+     */
+    const identity = String((await import('../lib/currentUserContract?raw')).default);
     for (const [name, module] of [
       ['MyStats.tsx', source],
       ['myStatsContract.ts', contract],
+      ['currentUserContract.ts', identity],
     ] as const) {
-      // No header read, and no fetch of any kind, in either module. `X-authentik`
-      // appears only inside the prose that explains why it must not be used.
+      /*
+       * No header read, and no fetch of any kind, in any of the three modules.
+       *
+       * WHERE THE HEADER NAMES DO APPEAR, stated precisely because the previous
+       * version of this comment got it wrong: it said "`X-authentik` appears only
+       * inside the prose that explains why it must not be used", which had stopped
+       * being true of the module this same hunk added. In `currentUserContract.ts`
+       * the seven names are `const` STRING LITERALS in `IDENTITY_CANDIDATE_HEADERS`
+       * and in the frozen `HEADER_OBSERVATION_6A` table — real code, not prose. The
+       * claim that holds is the narrower one the comment eight lines above already
+       * makes: nothing reads a header BY them. That is what the scans assert.
+       */
       expect(module, name).not.toMatch(/headers\s*[.[]/);
       expect(module, name).not.toMatch(/\bfetch\s*\(/);
       expect(module, name).not.toMatch(/getHeader|request\.headers/);
@@ -1047,24 +1074,73 @@ describe('My Stats invents no personal figure — the six traps', () => {
        * de-duplicated its call list. Both holes are closed; this is the one that
        * closes it at the source rather than at the call log.
        *
-       * Neither module contains the substring `api.` in prose (checked), so this
-       * needs no comment stripping.
+       * None of the THREE modules contains the substring `api.` in prose (checked
+       * — "neither" was written when the loop had two), so this needs no stripping.
        */
       expect(module, `${name} must not call this app's API client`).not.toMatch(/\bapi\s*\.\s*[a-zA-Z]/);
       expect(module, `${name} must not open a transport of its own`).not.toMatch(
         /XMLHttpRequest|EventSource|sendBeacon|WebSocket|\bimport\s*\(/,
       );
 
+      /*
+       * …AND NO COOKIE, AND NO BROWSER STORAGE. The list above had no entry for
+       * either, so `void document.cookie; void window.localStorage;` inside
+       * `disabledCurrentUserSource.get()` was invisible to every guard in this repo
+       * — while `currentUserContract.ts`'s own module head offered "no
+       * `document.cookie`" as evidence that it is not an identity seam. A cookie is
+       * the shortest path a future SPA slice has from "no identity" to a username,
+       * and it needs no transport and no header at all.
+       *
+       * COMMENTS ARE STRIPPED FIRST, and they have to be: that module head names
+       * `document.cookie` in order to disclaim it, so a whole-text scan would be
+       * satisfied by deleting the disclaimer instead of the dependency — trap 1's
+       * reasoning, applied here. The stripper is deliberately naive (block
+       * comments, then whole-line `//`), which is sound for these three files
+       * because none of them contains `/*` inside a string or a regular expression
+       * — checked. The two assertions below prove the stripper both kept the code
+       * and removed the prose, so a stripper that returned `''` could not make this
+       * pass vacuously.
+       */
+      const code = module.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+      expect(code, `${name}: the comment stripper must leave code behind`).toMatch(/\bexport\b/);
+      if (name === 'currentUserContract.ts') {
+        /* …and it really did remove prose that names the thing being scanned for:
+           this module's head disclaims `document.cookie` in words. A stripper that
+           returned the text unchanged would fail the scan below on that sentence,
+           and one that returned `''` would fail the `export` check above. */
+        expect(module, 'the module head names document.cookie in prose').toMatch(
+          /document\s*\.\s*cookie/,
+        );
+      }
+      expect(code, `${name} must not read a cookie or browser storage`).not.toMatch(
+        /document\s*\.\s*cookie|localStorage|sessionStorage/,
+      );
+
       // …and it cannot even IMPORT the client. Matched against the import
       // statements, per trap 1's reasoning: a whole-text scan would be satisfied
       // by deleting the explanation rather than the dependency.
-      // (`myStatsContract.ts` imports NOTHING at all, which is the strongest
-      // possible form of this and is asserted as such.)
       const imports = module.match(/^import[\s\S]*?from\s+'[^']+';$/gm) ?? [];
       for (const line of imports) {
         expect(line, `${name} must not import the API client`).not.toMatch(/lib\/api'|\/api'$/);
       }
-      if (name === 'myStatsContract.ts') expect(imports).toEqual([]);
+
+      /*
+       * THE EXACT DEPENDENCY SET OF EACH CONTRACT MODULE.
+       *
+       * This used to read `if (name === 'myStatsContract.ts') expect(imports)
+       * .toEqual([])` — "imports NOTHING at all, which is the strongest possible
+       * form of this". That claim STOPPED BEING TRUE when the contract began
+       * selecting a personal source from a current-user state, and the honest
+       * replacement is not a weaker scan but a narrower one: the exact set of
+       * specifiers each module may name. `./currentUserContract` is a type-and-
+       * union dependency on a module that itself imports nothing; anything else
+       * appearing here is a deliberate, reviewed change rather than a silent one.
+       */
+      const specifiers = imports
+        .map((line) => /from\s+'([^']+)';$/.exec(line)?.[1] ?? '')
+        .sort();
+      if (name === 'myStatsContract.ts') expect(specifiers).toEqual(['./currentUserContract']);
+      if (name === 'currentUserContract.ts') expect(specifiers).toEqual([]);
     }
   });
 });
@@ -1638,6 +1714,64 @@ describe('the gated state', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText('The personal source failed.')).toBeInTheDocument();
+  });
+
+  /*
+   * WIRING AN IDENTITY CHANGES NOTHING — ASSERTED AT THE COMPONENT, not one layer
+   * down.
+   *
+   * `MyStats.tsx` claims both adapters are "injectable so a test can prove the tab
+   * renders the state a source reports", and no test passed `currentUser` at all:
+   * the `source ?? personalStatisticsSourceFor(currentUser.get())` selection was
+   * covered by nothing, and the file's own comment cited a test in the wrong file
+   * for it. `current-user-contract.test.ts` sweeps the PURE FUNCTION over the whole
+   * state union; this renders the component with the one state that could plausibly
+   * unlock something.
+   *
+   * §8-relevant, and the reason it is worth a render rather than a unit call: the
+   * fixture user carries a subject value AND a display name, so if the selection
+   * ever grew a greeting or a scoped read, the assertions below would catch the
+   * value on screen as well as the changed gate.
+   */
+  it('a present current user changes nothing on this tab', () => {
+    const reporting = currentUserSourceReporting({
+      status: 'present',
+      user: fixtureCurrentUser,
+    });
+    /* Wrapped in a spy so "the component consulted it" is measured rather than
+       assumed — a component that ignored the prop entirely would satisfy every
+       assertion below. */
+    const get = vi.fn(reporting.get);
+    const currentUser: CurrentUserSource = { id: reporting.id, get };
+    const { container } = render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <MyStats currentUser={currentUser} />
+      </MemoryRouter>,
+    );
+
+    // The SAME gate sentence the disabled default produces — `no_record_ownership`,
+    // not `no_signed_in_account`: knowing who the reader is does not make one
+    // dataset here answerable, because no record carries an author.
+    expect(screen.getByText(MY_STATS_PENDING_COPY.no_record_ownership)).toBeInTheDocument();
+    expect(screen.queryByText(MY_STATS_PENDING_COPY.no_signed_in_account)).toBeNull();
+
+    // Nothing about the person reaches the DOM: not the subject key, not the
+    // display name, not a greeting, not an origin header name.
+    const text = textOf(container);
+    const { displayName } = fixtureCurrentUser;
+    // …and the fixture really does carry one, or that assertion means nothing.
+    expect(displayName, 'the fixture must name somebody').not.toBeNull();
+    expect(text).not.toContain(fixtureCurrentUser.subject.value);
+    expect(text).not.toContain(String(displayName));
+    expect(text).not.toContain(fixtureCurrentUser.subject.observedFrom);
+    expect(text).not.toMatch(/signed in as|Signed in|Hello|Welcome back/i);
+    // …and no figure appeared, personal or otherwise.
+    expect(container.querySelector('figure.stats-chart')).toBeNull();
+    expect(text).not.toMatch(/\b\d+\b/);
+
+    // THE SOURCE WAS ACTUALLY CONSULTED — once, on this render.
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get).toHaveReturnedWith({ status: 'present', user: fixtureCurrentUser });
   });
 
   /*

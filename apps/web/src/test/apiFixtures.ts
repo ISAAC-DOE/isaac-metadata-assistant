@@ -2369,7 +2369,7 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/runtime/database/recon", description: "A sanitized, aggregate-only reconnaissance report over this deployment's own application database. It answers one question — do the stored records validate against the vendored official ISAAC schema — and reports the answer as counts.\n\nThe scan is strictly read-only, and no write is possible: the transaction is set AND verified read-only server-side, every statement is checked against a SELECT-only allowlist before it is issued, and values are always bound as parameters. The row count is also compared before and after, but that is a concurrency check rather than a mutation proof — a row-count equality cannot detect an update and cannot distinguish this scan's writes from a concurrent writer's, so it is the verified read-only transaction and the allowlist that carry the guarantee. The statement counters report every statement this service issues through a cursor; they are not a wire-level record, because the driver's own transaction framing never passes through one.\n\nThe response carries aggregates only: record totals, counts by type and domain, validation totals by rule family and by schema path, and the gate results. It never carries a record id, a title, a scientific value, a stored document, a connection detail, or a credential; per-record content stays closed. A serialized-output scan runs over every response shape before it is returned and replaces it with a sanitized failure if it trips. Every shape also carries a fixed `limitations` list saying what the gates cannot establish — in particular that the production-isolation gate is a tripwire rather than proof, and that the confirmed transport encryption does not verify the server certificate.\n\nWhen the deployment has no database configured, the operation reports that and connects to nothing. Repeat calls inside a short window are served from memory, and a scan already in progress is reported as a conflict rather than opening a second connection. The operation takes no parameters and no body." },
 ];
 
-// --- Statistics dashboard fixtures (the four page-level reads) ---------------
+// --- Statistics dashboard fixtures (the five page-level reads) --------------
 //
 // The Statistics page reads `GET /api/runtime/records` with NO filters, so its
 // route key is the BARE path. `runtimeRecordsRoutes()` above serves only the four
@@ -2419,18 +2419,20 @@ export const statisticsRecordsBody = {
 };
 
 /**
- * EXACTLY the four route keys the Statistics page requests, in the order the
+ * EXACTLY the five route keys the Statistics page requests, in the order the
  * page issues them. Exported so a test can assert the request set itself instead
- * of restating four literals it might mistype.
+ * of restating five literals it might mistype.
  */
 export const STATISTICS_ROUTE_KEYS = [
   'GET /api/runtime/records',
   'GET /api/graph/status',
   'GET /api/about',
   'GET /api/openapi',
+  'GET /api/schema',
 ] as const;
 
 /**
+<<<<<<< HEAD
  * The FIFTH read, kept OUT of `STATISTICS_ROUTE_KEYS` on purpose.
  *
  * Record Verification reads this once on mount and refreshes it with its own
@@ -2442,16 +2444,31 @@ export const STATISTICS_ROUTE_KEYS = [
 export const STATISTICS_VERIFICATION_ROUTE_KEY = 'GET /api/runtime/verification';
 
 /**
+=======
+>>>>>>> origin/main
  * The Statistics page's five page-level reads, keyed exactly as `lib/api` builds
  * them.
  *
  * Any source may be replaced with any `RouteEntry`, which is how a test fails ONE
+<<<<<<< HEAD
  * of them (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
  * swaps in a different graph body, without disturbing the others.
  */
 export function statisticsRoutes(
   over: Partial<
     Record<'records' | 'graph' | 'about' | 'openapi' | 'verification', RouteEntry>
+=======
+ * of the five (`statisticsRoutes({ records: { status: 500, body: {} } })`) or
+ * swaps in a different graph body, without disturbing the other four.
+ *
+ * `schema` reuses `schemaBrowserFixture` — the same body the Schema Reference
+ * suite browses — so the two screens are asserted against ONE document and a
+ * count derived here can be checked against the fields that browser renders.
+ */
+export function statisticsRoutes(
+  over: Partial<
+    Record<'records' | 'graph' | 'about' | 'openapi' | 'schema', RouteEntry>
+>>>>>>> origin/main
   > = {},
 ): Record<string, RouteEntry> {
   return {
@@ -2459,6 +2476,10 @@ export function statisticsRoutes(
     'GET /api/graph/status': over.graph ?? { body: graphStatusAvailable },
     'GET /api/about': over.about ?? { body: aboutResponse },
     'GET /api/openapi': over.openapi ?? { body: openApiFixture },
+<<<<<<< HEAD
     [STATISTICS_VERIFICATION_ROUTE_KEY]: over.verification ?? { body: verificationReportOk },
+=======
+    'GET /api/schema': over.schema ?? { body: schemaBrowserFixture },
+>>>>>>> origin/main
   };
 }

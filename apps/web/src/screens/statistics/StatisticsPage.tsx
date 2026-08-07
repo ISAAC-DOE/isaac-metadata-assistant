@@ -10,19 +10,34 @@ import { BackendDown, LoadingPanel } from '../../components/FetchStates';
 import { StatusChip } from '../../components/StatusChip';
 import {
   BarChart3,
+  CircleDashed,
+  CircleHelp,
   FileJson,
   LayoutList,
   Network,
   Settings,
   Shield,
   ShieldCheck,
+  Table2,
 } from '../../components/icons';
 import { api } from '../../lib/api';
 import { useFetch, type FetchState } from '../../lib/useFetch';
 import { useWorkspaceScope } from '../../lib/workspaceScope';
 import { subscribeWorkspaceRebuilt } from '../../lib/workspaceInvalidation';
 import type { RuntimeRecord } from '../../lib/crossRecordTriage';
-import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../../lib/types';
+import type {
+  ApiAboutResponse,
+  ApiGraphStatus,
+  ApiOpenApiResponse,
+  ApiSchemaResponse,
+} from '../../lib/types';
+import {
+  PORTAL_METRICS_UNAVAILABLE_COPY,
+  PORTAL_METRICS_UNAVAILABLE_TITLE,
+  PORTAL_METRIC_VIEWS,
+  type PortalMetricsSource,
+  unconfiguredPortalMetricsSource,
+} from '../../lib/portalMetricsContract';
 import {
   ROUTES,
   STATISTICS_TAB_PARAM,
@@ -36,6 +51,8 @@ import {
   deriveEvidenceTotals,
   deriveExportGate,
   deriveMemoryFacts,
+  deriveOpenQuestions,
+  deriveSchemaFacts,
   deriveWorkflowStages,
   deriveWorkspaceTotals,
 } from '../../lib/statisticsModel';
@@ -44,6 +61,7 @@ import {
   ChartEmpty,
   ChartError,
   ChartLoading,
+  ChartSourceUnavailable,
   StatsBarChart,
   StatsColumnChart,
   StatsComparisonRows,
@@ -64,12 +82,13 @@ import { RecordVerification, useVerificationReport } from './RecordVerification'
  * Statistics — the read-only insights surface, in two tabs.
  *
  * COMPOSITION ONLY. Every number on the General ISAAC tab is produced by
- * `lib/statisticsModel.ts` from one of four read-only GETs
- * (`/api/runtime/records`, `/api/graph/status`, `/api/about`, `/api/openapi`);
- * this file fetches them, formats the strings the primitives display, and owns
- * the states. It computes no figure of its own. The My Stats tab reads NOTHING —
- * see `MyStats.tsx`.
+ * `lib/statisticsModel.ts` from one of five read-only GETs
+ * (`/api/runtime/records`, `/api/graph/status`, `/api/about`, `/api/openapi`,
+ * `/api/schema`); this file fetches them, formats the strings the primitives
+ * display, and owns the states. It computes no figure of its own. The My Stats
+ * tab reads NOTHING — see `MyStats.tsx`.
  *
+<<<<<<< HEAD
  * A FIFTH read, `/api/runtime/verification`, feeds Record Verification alone. It
  * is issued from HERE — by `useVerificationReport`, not by `useFetch` — and its
  * state is handed to the section, which renders it and owns nothing else.
@@ -93,16 +112,25 @@ import { RecordVerification, useVerificationReport } from './RecordVerification'
  * are its own so neither collides with this page's Refresh.
  *
  * The four fetches are deliberately INDEPENDENT — that independence is the
+=======
+ * The five fetches are deliberately INDEPENDENT — that independence is the
+>>>>>>> origin/main
  * partial-failure design. One dead endpoint degrades the sections that read it
  * and nothing else; the page never blanks and never substitutes a plausible
- * value for one it did not receive. When (and only when) all four have failed,
- * one page-level failure state replaces the body rather than four identical
+ * value for one it did not receive. When (and only when) all five have failed,
+ * one page-level failure state replaces the body rather than five identical
  * stacked copies of the same message.
+ *
+ * ONE SECTION READS NO ENDPOINT AT ALL. `Platform Metrics` renders the state of
+ * an adapter boundary that is not connected in this build — see
+ * `lib/portalMetricsContract.ts`. It issues no request, so it neither joins a
+ * round nor can fail one, and it is present so a reader who wonders why there is
+ * no platform-wide figure is told rather than left to infer.
  *
  * Nothing on this surface is telemetry: there is no request, visit, user, IP,
  * latency, uptime or database figure, because no such signal exists in this app
  * to read. Nothing here mutates, validates, exports, or gates anything —
- * `Refresh` issues exactly the same four GETs and nothing else.
+ * `Refresh` issues exactly the same five GETs and nothing else.
  *
  * The "last read" timestamp is captured HERE, on the settle of each read,
  * because the derivations are pure and hold no clock. It is labelled as when
@@ -193,9 +221,9 @@ function formatInstant(when: Date): string {
 
 /**
  * One round of reads: how many were STARTED while the page was busy, and how
- * many of those rejected. A page-level Refresh is a round of four; a single
+ * many of those rejected. A page-level Refresh is a round of five; a single
  * section's Retry is a round of one — which is why the denominator is counted
- * rather than hard-coded to four.
+ * rather than hard-coded.
  */
 interface Round {
   attempted: number;
@@ -292,9 +320,25 @@ function leadSentence(scope: string | null, tab: StatisticsTabId): string {
     );
   }
   const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
+  /*
+   * IT NAMES THE TOPICS THAT STATE FIGURES — NOT EVERY HEADING BELOW IT, and the
+   * narrower claim is the true one. Open Questions, Record Schema and Platform
+   * Metrics are added by this same change, so the previous four-topic sentence was
+   * not stale: it was complete for the page it described, and it is adding a
+   * section that makes a lead go wrong. Two headings stay unnamed on purpose — the
+   * runtime facts inside Technical Details, and the no-analytics disclosure, which
+   * is an absence rather than a topic — so this is not a table of contents.
+   *
+   * Platform Metrics is named DIFFERENTLY from the rest, in its own clause, because
+   * it is the one section that states no figure — listing "platform metrics"
+   * alongside the others would promise a platform-wide number this build cannot
+   * produce, which is the same defect class as the workspace clause this function
+   * already branches on.
+   */
   return (
-    `A read-only view of ${workspace}, workflow readiness, evidence, Project ` +
-    'Memory, and the API surface.'
+    `A read-only view of ${workspace}, workflow readiness, open questions, ` +
+    'evidence, the official record schema, Project Memory, and the API surface — ' +
+    'and, for platform-wide figures, why none is stated.'
   );
 }
 
@@ -303,20 +347,29 @@ function leadSentence(scope: string | null, tab: StatisticsTabId): string {
  * the recourse (a real button, keyboard reachable) still offered.
  *
  * THE RULE THIS PAGE FOLLOWS IS ONE ALARM PER FAILED SOURCE, NOT ONE PER PAGE.
- * The four reads are independent, so each dead source states itself ONCE, as a
+ * The five reads are independent, so each dead source states itself ONCE, as a
  * full `BackendDown`, at the first section that reads it; every FURTHER section
  * reading that same source gets this compact note instead, because repeating the
  * identical alarm three times would be noise. Three simultaneously dead sources
  * therefore do produce three alarms — and that is the intent: they are three
  * different failures, and collapsing them into one panel would hide which
- * sources are actually down while the degraded banner above says "3 of 4 reads
- * failed". Only the ALL-FOUR-failed case collapses, into the single page-level
+ * sources are actually down while the degraded banner above says "3 of 5 reads
+ * failed". Only the ALL-FIVE-failed case collapses, into the single page-level
  * `BackendDown`, because there is then nothing left to localize.
  *
- * `/api/about` is the one deliberate exception, and it is quieter rather than
+ * `/api/about` is the ONE deliberate exception, and it is quieter rather than
  * louder: its failure costs two supporting cards in the collapsed Technical
  * Details region, so it states itself with this note at its only reader. An alarm
  * panel there would out-shout the figures beside it that were read successfully.
+ *
+ * `/api/schema` WAS A SECOND, UNDOCUMENTED EXCEPTION and is no longer one. It has
+ * a single reader, so this rule always prescribed a full `BackendDown` for it, and
+ * rendering this note instead meant a dead schema announced nothing at all: this
+ * component has no `role`, while `BackendDown` is `role="alert"`. It was not
+ * recorded as an exception because it was not a decision. `RecordSchemaFacts` now
+ * renders `BackendDown` like the other two sections in its region, and
+ * `a dead /api/schema alarms ONCE, like its two siblings in this region` pins the
+ * alarm count rather than only the message.
  *
  * (The earlier wording of this comment said the alarm is "stated once" full
  * stop, which read as a page-level promise the code never made — the code and
@@ -373,7 +426,7 @@ export function StatisticsPage() {
   }
 
   /*
-   * Round tracking. `useFetch` exposes no completion callback, so the four
+   * Round tracking. `useFetch` exposes no completion callback, so the five
    * fetchers are wrapped here: `track` is what `useFetch` actually calls, on the
    * initial load, on `reload()` and on `reloadSilent()` alike, which makes every
    * request's start and settle — and crucially whether it was FULFILLED or
@@ -392,7 +445,7 @@ export function StatisticsPage() {
 
   /*
    * The arithmetic lives in refs; the state only MIRRORS them for rendering. Two
-   * of the four reads can settle in the same tick, so a functional
+   * of the five reads can settle in the same tick, so a functional
    * `setState(n => n + 1)` chain would be correct while anything that had to
    * READ the resulting value in that same tick (which of the round's reads have
    * failed so far) would not.
@@ -449,8 +502,9 @@ export function StatisticsPage() {
    * so the right answer is to re-read (unlike the record surfaces, which leave —
    * see `lib/workspaceScope.ts`).
    *
-   * The graph status, the About payload and the OpenAPI schema are properties of
-   * the build rather than of a workspace, so they are deliberately left unkeyed.
+   * The graph status, the About payload, the OpenAPI document and the official
+   * record schema are properties of the build rather than of a workspace, so
+   * they are deliberately left unkeyed.
    *
    * THE READS ARE NOT KEYED ON THE TAB, and that is deliberate rather than an
    * oversight: they are issued on mount regardless of which tab is showing, so
@@ -462,6 +516,7 @@ export function StatisticsPage() {
   const graph = useFetch(() => track(api.getGraphStatus()), []);
   const about = useFetch(() => track(api.getAbout()), []);
   const openapi = useFetch(() => track(api.getOpenApi()), []);
+<<<<<<< HEAD
   /*
    * The FIFTH read, and it is deliberately NOT a `useFetch` and NOT tracked.
    *
@@ -472,6 +527,9 @@ export function StatisticsPage() {
    * component outlives both panels.
    */
   const verification = useVerificationReport();
+=======
+  const schema = useFetch(() => track(api.getSchema()), []);
+>>>>>>> origin/main
 
   /*
    * ...AND the record read also listens for a workspace REBUILD, which the scope
@@ -489,8 +547,8 @@ export function StatisticsPage() {
    * SILENT on purpose, exactly as the queue's is: the figures stay on screen while
    * the fresh ones arrive, so the page does not blank and the reader does not lose
    * their scroll position. Only the RECORD read is re-issued — the graph status, the
-   * About payload and the OpenAPI schema are properties of the build and a reset
-   * cannot change them.
+   * About payload, the OpenAPI document and the official record schema are
+   * properties of the build and a reset cannot change them.
    */
   const { reloadSilent: reloadRecordsSilent } = records;
   useEffect(() => subscribeWorkspaceRebuilt(reloadRecordsSilent), [reloadRecordsSilent]);
@@ -513,11 +571,12 @@ export function StatisticsPage() {
   function refreshAll() {
     if (refreshing) return;
     // Silent reloads: current data stays on screen, so the page does not blank
-    // and scroll position is kept. Four GETs, no write, no third endpoint.
+    // and scroll position is kept. Five GETs, no write, nothing else.
     records.reloadSilent();
     graph.reloadSilent();
     about.reloadSilent();
     openapi.reloadSilent();
+    schema.reloadSilent();
     setRefreshing(true);
     setRefreshMessage('Refreshing — re-reading the API.');
   }
@@ -526,13 +585,15 @@ export function StatisticsPage() {
     records.status === 'error' &&
     graph.status === 'error' &&
     about.status === 'error' &&
-    openapi.status === 'error';
+    openapi.status === 'error' &&
+    schema.status === 'error';
 
   function retryAll() {
     records.reload();
     graph.reload();
     about.reload();
     openapi.reload();
+    schema.reload();
   }
 
   return (
@@ -646,15 +707,21 @@ export function StatisticsPage() {
             <>
               <WorkspaceGlance records={records} />
               <WorkflowDistribution records={records} />
+              <OpenQuestions records={records} />
               <EvidenceAndValidation records={records} />
+<<<<<<< HEAD
               <RecordVerification verification={verification} />
+=======
+              <PlatformMetrics />
+>>>>>>> origin/main
               <NoAnalytics />
               <TechnicalDetails
                 id="stats-technical"
                 title="Technical Details"
-                sub="What this build reports about itself: the runtime mode, the served memory snapshot, and the shape of the API. Properties of the deployment, not of your records."
+                sub="What this build reports about itself: the runtime mode, the served memory snapshot, the official record schema, and the shape of the API. Properties of the deployment, not of your records."
               >
                 <RuntimeFacts about={about} />
+                <RecordSchemaFacts schema={schema} />
                 <ProjectMemoryFacts graph={graph} />
                 <ApiSurface openapi={openapi} />
               </TechnicalDetails>
@@ -688,6 +755,7 @@ type RecordsFetch = Fetched<RecordsBody>;
 type AboutFetch = Fetched<ApiAboutResponse>;
 type GraphFetch = Fetched<ApiGraphStatus>;
 type OpenApiFetch = Fetched<ApiOpenApiResponse>;
+type SchemaFetch = Fetched<ApiSchemaResponse>;
 
 /**
  * The at-a-glance row — the KPI form, deliberately not a chart.
@@ -925,7 +993,113 @@ function WorkflowBars({ records }: { records: RuntimeRecord[] }) {
   );
 }
 
-/* ---- 3 · Evidence and Validation -------------------------------------- */
+/* ---- 3 · Open Questions ------------------------------------------------ */
+
+/**
+ * The one figure the safe record projection carries that this page used to
+ * discard: `pending_count`.
+ *
+ * It is the quantity that DRIVES the status distribution above — `needs_attention`
+ * is exactly "open questions remain" — so the page stated the consequence four
+ * times and never the cause. Nothing new is fetched for it.
+ */
+function OpenQuestions({ records }: { records: RecordsFetch }) {
+  return (
+    <StatsSection
+      id="stats-questions"
+      title="Open Questions"
+      sub="How many answers the records are still waiting for, counted in questions rather than in records."
+      icon={<CircleHelp size={18} strokeWidth={2} aria-hidden="true" />}
+    >
+      {records.status === 'loading' && <LoadingPanel label="Loading the open-question counts…" />}
+      {records.status === 'error' && (
+        <SectionUnavailable
+          message="The workspace records could not be read, so no open-question count is stated."
+          onRetry={records.reload}
+        />
+      )}
+      {records.status === 'data' && <OpenQuestionFigures records={records.data.records} />}
+    </StatsSection>
+  );
+}
+
+/**
+ * FORM CHOICE — a figure list, for the same reason the export gate is one.
+ *
+ * These five numbers sit on THREE different axes. `Total Open Questions` counts
+ * questions; the next three count records; `Most on One Record` is a maximum,
+ * not a tally of anything. Putting them on one shared scale would invite adding
+ * a question total to a record count, and a stacked bar would assert a
+ * partition that does not exist — a record with a blocked step may also have
+ * open questions, and usually does.
+ */
+function OpenQuestionFigures({ records }: { records: RuntimeRecord[] }) {
+  const questions = deriveOpenQuestions(records);
+
+  if (questions.recordsCounted === 0) {
+    return (
+      <p className="stats-note">
+        No records were returned, so there is no open-question count to state.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <FigureList
+        rows={[
+          {
+            label: 'Total Open Questions',
+            value: count(questions.totalOpenQuestions),
+            mono: true,
+          },
+          {
+            label: 'Records With Open Questions',
+            value: count(questions.recordsWithOpenQuestions),
+            mono: true,
+          },
+          { label: 'Most on One Record', value: count(questions.mostOnOneRecord), mono: true },
+          {
+            label: 'Records With a Blocked Step',
+            value: count(questions.recordsWithBlockedStep),
+            mono: true,
+          },
+          {
+            label: 'Records With a Reopened Step',
+            value: count(questions.recordsWithReopenedStep),
+            mono: true,
+          },
+        ]}
+      />
+      {questions.recordsWithUnreadableCount > 0 && (
+        <div className="stats-block">
+          <UnavailableNote>
+            <p>
+              {count(questions.recordsWithUnreadableCount)} of the{' '}
+              {count(questions.recordsCounted)} records received carried no usable question count,
+              so they contribute nothing to the total above. Nothing was assumed for them, and they
+              were not counted as zero.
+            </p>
+          </UnavailableNote>
+        </div>
+      )}
+      <p className="stats-note">
+        Total Open Questions counts QUESTIONS across the {count(questions.recordsCounted)} records
+        received. Records With Open Questions, Records With a Blocked Step and Records With a
+        Reopened Step count RECORDS. Most on One Record is the largest single record&rsquo;s
+        question count, and is neither a total nor a share of one.
+      </p>
+      <p className="stats-note">
+        A blocked step and a reopened step are separate axes and overlap each other and the question
+        counts, so none of these five may be added together. Each reports only whether a record has
+        at least one such step — the workspace projection reduces all five steps to one flag apiece,
+        so it does not name the step. No question text, field name or answer is read here.
+      </p>
+    </>
+  );
+}
+
+/* ---- 4 · Evidence and Validation -------------------------------------- */
 
 function EvidenceAndValidation({ records }: { records: RecordsFetch }) {
   return (
@@ -1106,6 +1280,139 @@ function ExportGateGroup({ records }: { records: RuntimeRecord[] }) {
         </>
       )}
     </div>
+  );
+}
+
+/* ---- Technical Details · Record Schema --------------------------------- */
+
+/**
+ * The shape of the official ISAAC record schema this build validates against.
+ *
+ * A BUILD PROPERTY, not a workspace one, which is why it sits inside Technical
+ * Details beside the runtime facts and the API surface: the numbers do not
+ * change when a record does. Every figure is a count of the schema's own
+ * structure — no record is read to produce any of them.
+ */
+function RecordSchemaFacts({ schema }: { schema: SchemaFetch }) {
+  return (
+    <StatsSection
+      id="stats-schema"
+      title="Record Schema"
+      sub="The shape of the official record schema this build validates against, and the controlled vocabularies served beside it."
+      icon={<Table2 size={18} strokeWidth={2} aria-hidden="true" />}
+      headingLevel={3}
+    >
+      {schema.status === 'loading' && <LoadingPanel label="Loading the official record schema…" />}
+      {/*
+        `BackendDown`, MATCHING ITS TWO SIBLINGS IN THIS REGION, not the compact
+        note it used to render.
+
+        `/api/schema` has exactly ONE reader, so the rule stated on
+        `SectionUnavailable` — a full alarm at the first section that reads a dead
+        source, the compact note only at FURTHER readers — already prescribed this.
+        The compact note here was a violation of that rule rather than an exception
+        to it, and it had a consequence beyond tidiness: `SectionUnavailable` renders
+        no `role`, so a dead `/api/schema` announced nothing to a screen reader while
+        the banner above stated "1 of 5 reads failed". `/api/about`'s exception does
+        not transfer — its rationale is that its two cards sit BESIDE record cards
+        that were read successfully, whereas a dead schema empties this whole section
+        including its chart, exactly as a dead `/api/graph/status` empties Project
+        Memory and a dead `/api/openapi` empties API Surface.
+      */}
+      {schema.status === 'error' && <BackendDown error={schema.error} onRetry={schema.reload} />}
+      {schema.status === 'data' && <SchemaBody body={schema.data} />}
+    </StatsSection>
+  );
+}
+
+/**
+ * FORM CHOICE — figures for the totals, comparison rows for the sections.
+ *
+ * The totals sit on different axes (sections, fields, rules, files, terms) and
+ * are a labelled list for the same reason the export gate is. The section
+ * breakdown IS one whole divided into named parts whose labels come from the
+ * document and can be any length, which is the compact comparison row's case —
+ * the same form the API surface uses for its groups, and for the same reason.
+ */
+function SchemaBody({ body }: { body: ApiSchemaResponse }) {
+  const facts = deriveSchemaFacts(body);
+
+  if (facts.totalFields === 0) {
+    return (
+      <>
+        <p className="stats-note">
+          The schema this build served declares no fields, so there is no breakdown to show.
+        </p>
+        <p className="stats-actions">
+          <Link to={`${ROUTES.governance}?tab=schema`}>Open Schema Reference</Link>
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <FigureList
+        rows={[
+          { label: 'Schema Title', value: stringOrUnavailable(facts.schemaTitle) },
+          { label: 'Schema Version', value: stringOrUnavailable(facts.schemaVersion), mono: true },
+          /* "FIELDS", NOT "SECTIONS". These two labelled the schema's top-level
+             properties as sections, and on the real document 5 of the 6 the root
+             requires are scalar strings — `isaac_record_version`, `record_id`,
+             `record_type` and so on — which are fields by any reading and are not
+             sections of anything. The model's own field names (`topLevelFields`,
+             `requiredTopLevelFields`) already said so. The chart below still says
+             "section", correctly: it groups each top-level field WITH ITS
+             DESCENDANTS, which is what makes a scalar field a one-field group. */
+          { label: 'Top-Level Fields', value: count(facts.topLevelFields), mono: true },
+          { label: 'Fields at Every Depth', value: count(facts.totalFields), mono: true },
+          {
+            label: 'Required Top-Level Fields',
+            value: count(facts.requiredTopLevelFields),
+            mono: true,
+          },
+          {
+            label: 'Fields With Enumerated Values',
+            value: count(facts.fieldsWithEnumeratedValues),
+            mono: true,
+          },
+          { label: 'Conditional Rules', value: count(facts.conditionalRules), mono: true },
+          { label: 'Vocabulary Files', value: count(facts.vocabularyFiles), mono: true },
+          { label: 'Vocabulary Terms', value: count(facts.vocabularyTerms), mono: true },
+        ]}
+      />
+      <div className="stats-block">
+        <StatsComparisonRows
+          caption="Fields by top-level section, in the schema's own declaration order"
+          rows={facts.bySection.map((row) => ({
+            key: row.section,
+            label: row.section,
+            value: row.count,
+          }))}
+          unit="fields"
+          total={facts.totalFields}
+          categoryHeader="Section"
+        />
+      </div>
+      <p className="stats-note">
+        Required Top-Level Fields counts what the schema&rsquo;s own root requires. Requiredness
+        deeper in the document is not added to it: a field marked required inside an optional
+        section is required only once that section is present, so a single total across depths would
+        state an obligation the schema does not impose. Fields at Every Depth is counted through the
+        schema&rsquo;s <span className="mono">properties</span> and array items; fields declared only
+        inside a <span className="mono">oneOf</span> alternative are not listed, so this is a count of
+        the fields this view can enumerate rather than of every field the document can express. The
+        Schema Reference browser walks the document the same way, so the two screens state the same
+        number.
+      </p>
+      <p className="stats-note">
+        Vocabulary Terms counts the entries in the vocabulary files this build serves alongside the
+        schema. It is a property of those files, not a measurement of any stored data.
+      </p>
+      <p className="stats-actions">
+        <Link to={`${ROUTES.governance}?tab=schema`}>Open Schema Reference</Link>
+      </p>
+    </>
   );
 }
 
@@ -1313,6 +1620,66 @@ function ApiSurfaceBody({ doc }: { doc: Parameters<typeof deriveApiSurface>[0] }
         <Link to={ROUTES.settingsTab('explorer')}>Open Endpoint Explorer</Link>
       </p>
     </>
+  );
+}
+
+/* ---- 5 · Platform Metrics (an inactive adapter boundary) --------------- */
+
+/**
+ * The wider-platform figures this deployment has no source for.
+ *
+ * THE SECTION EXISTS BECAUSE THE ABSENCE NEEDS STATING. Every figure above is
+ * scoped to this workspace or this build, and a reader who wants to know how
+ * ISAAC is doing across the platform would otherwise conclude either that the
+ * question is unasked or that the answer is on some other screen. It is neither.
+ *
+ * NOTHING HERE ISSUES A REQUEST. The state is read from
+ * `lib/portalMetricsContract.ts`, whose only implementation holds no URL, no
+ * host and no token, and this component does not join the page's fetch rounds —
+ * so it can neither slow a Refresh nor be counted among reads that failed.
+ *
+ * The state is PROBED THROUGH THE REAL BOUNDARY (`platformRecordTotal()`) rather
+ * than hard-coded, so wiring a source later changes this section's behaviour
+ * instead of requiring it to be rewritten. Only `unavailable` has a rendering:
+ * this build's source cannot return `ready` or `loading`, and writing branches
+ * for payloads no adapter produces is how a placeholder chart gets shipped.
+ */
+function PlatformMetrics({
+  source = unconfiguredPortalMetricsSource,
+}: {
+  source?: PortalMetricsSource;
+}) {
+  const probe = source.platformRecordTotal();
+
+  return (
+    <StatsSection
+      id="stats-platform"
+      title="Platform Metrics"
+      sub="Figures about the wider ISAAC platform, as distinct from this workspace and this build."
+      icon={<CircleDashed size={18} strokeWidth={2} aria-hidden="true" />}
+    >
+      <ChartSourceUnavailable title={PORTAL_METRICS_UNAVAILABLE_TITLE}>
+        {probe.status === 'unavailable'
+          ? PORTAL_METRICS_UNAVAILABLE_COPY[probe.reason]
+          : /* Reachable only if a source is wired that this build does not ship.
+               It states the state it received and draws nothing, which is the
+               only honest thing to do with a payload no view here can read. */
+            `The platform metrics source reported "${probe.status}", and this page has no view built for it, so nothing is shown.`}
+      </ChartSourceUnavailable>
+      <ul className="stats-plan-grid">
+        {PORTAL_METRIC_VIEWS.map((view) => (
+          <li className="stats-plan-card" key={view.id}>
+            <h3 className="stats-plan-title">{view.title}</h3>
+            <p className="stats-plan-desc">{view.description}</p>
+          </li>
+        ))}
+      </ul>
+      <p className="stats-note">
+        Each description names the unit it would count. None of these figures is being withheld from
+        you and none of them is zero — this application has no source to read one from, so it states
+        that instead of a number.
+      </p>
+    </StatsSection>
   );
 }
 

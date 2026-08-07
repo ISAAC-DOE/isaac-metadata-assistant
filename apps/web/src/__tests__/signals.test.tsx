@@ -3,6 +3,11 @@ import { render } from '@testing-library/react';
 import { VerdictCard } from '../components/VerdictCard';
 import { CoverageBadge } from '../components/CoverageBadge';
 import { AdvisoryChip } from '../components/AdvisoryChip';
+import {
+  NO_MEASUREMENT_SERIES_CODE,
+  NO_SERIES_COVERAGE_NOTE,
+  VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE,
+} from '../lib/adapt';
 import type { AdvisoryResult, AuditResult, ValidationResult } from '../lib/types';
 
 const PASS: ValidationResult = {
@@ -17,6 +22,19 @@ const ADVISORY: AdvisoryResult = {
   gating: false,
   warnings: [{ code: 'NO_LINKS', where: 'record.links', message: 'no relationships declared' }],
 };
+/** An advisory reporting that the record carries NO measured series. */
+const ADVISORY_NO_SERIES: AdvisoryResult = {
+  advisory: true,
+  gating: false,
+  warnings: [
+    { code: 'NO_LINKS', where: 'record.links', message: 'no relationships declared' },
+    {
+      code: NO_MEASUREMENT_SERIES_CODE,
+      where: 'measurement.series',
+      message: '`measurement.series` is empty, so the record contains no measured data.',
+    },
+  ],
+};
 
 describe('the three signals are separate components with distinct treatments', () => {
   it('VerdictCard renders the reserved PASS verdict with its own class', () => {
@@ -29,7 +47,7 @@ describe('the three signals are separate components with distinct treatments', (
   });
 
   it('CoverageBadge is neutral slate N/N — labeled "not a verdict", never a PASS', () => {
-    const { container, getByText } = render(<CoverageBadge audit={AUDIT} />);
+    const { container, getByText } = render(<CoverageBadge audit={AUDIT} advisory={ADVISORY} />);
     expect(container.querySelector('.coverage')).not.toBeNull();
     expect(getByText('33 / 33')).toBeInTheDocument();
     expect(getByText(/coverage · not a verdict/)).toBeInTheDocument();
@@ -50,7 +68,7 @@ describe('the three signals are separate components with distinct treatments', (
 
   it('the three components use three distinct root classes', () => {
     const v = render(<VerdictCard result={PASS} />).container.querySelector('.verdict');
-    const c = render(<CoverageBadge audit={AUDIT} />).container.querySelector('.coverage');
+    const c = render(<CoverageBadge audit={AUDIT} advisory={ADVISORY} />).container.querySelector('.coverage');
     const a = render(<AdvisoryChip advisory={ADVISORY} />).container.querySelector('.advisory');
     const classes = [v?.className, c?.className, a?.className];
     expect(new Set(classes).size).toBe(3);
@@ -63,7 +81,7 @@ describe('the three signals are separate components with distinct treatments', (
       uncovered: ['qc.completeness_score', 'links'],
       dangling: ['assets:legacy_notebook'],
     };
-    const { getByText, container } = render(<CoverageBadge audit={partial} />);
+    const { getByText, container } = render(<CoverageBadge audit={partial} advisory={ADVISORY} />);
     expect(getByText('30 / 33')).toBeInTheDocument();
     // every uncovered target renders
     expect(getByText('qc.completeness_score')).toBeInTheDocument();
@@ -75,7 +93,7 @@ describe('the three signals are separate components with distinct treatments', (
   });
 
   it('CoverageBadge at full coverage renders no uncovered/dangling section', () => {
-    const { container, getByText } = render(<CoverageBadge audit={AUDIT} />);
+    const { container, getByText } = render(<CoverageBadge audit={AUDIT} advisory={ADVISORY} />);
     expect(getByText('33 / 33')).toBeInTheDocument();
     expect(container.querySelectorAll('.coverage-dangling')).toHaveLength(0);
   });
@@ -85,11 +103,72 @@ describe('the three signals are separate components with distinct treatments', (
     // "N / N" must not have to guess what is counted (P21E copy requirement)
     const partial: AuditResult = { resolved: 30, total: 33, uncovered: ['links'], dangling: [] };
     for (const audit of [AUDIT, partial]) {
-      const { getByText, unmount } = render(<CoverageBadge audit={audit} />);
+      const { getByText, unmount } = render(<CoverageBadge audit={audit} advisory={ADVISORY} />);
       expect(
-        getByText('Includes fields, assets, descriptors, series, QC, links, and attribution.'),
+        getByText(
+          'Counted from what this record contains: fields, assets, descriptors, series, QC, links, and attribution.',
+        ),
       ).toBeInTheDocument();
       unmount();
+    }
+  });
+
+  it('CoverageBadge states the denominator as SCOPE, never as a claim that any target exists', () => {
+    // The line this replaces read "Includes fields, assets, descriptors, series,
+    // QC, links, and attribution." — a description of the enumeration RULE that a
+    // reader takes as a description of THIS record. It matters because the
+    // denominator is built from record content (`isaac_records.audit`), so a
+    // record with fewer targets has a smaller denominator and still reads as a
+    // full count: measured 33 / 33 with a series, 32 / 32 with the series emptied.
+    const { container, getByText } = render(<CoverageBadge audit={AUDIT} advisory={ADVISORY} />);
+    expect(
+      getByText(
+        'A full count means every target this record has is evidenced — not that any particular target exists.',
+      ),
+    ).toBeInTheDocument();
+    // The old wording must not come back alongside the new one.
+    expect(container.textContent).not.toContain('Includes fields, assets, descriptors');
+  });
+
+  it('CoverageBadge discloses a missing measurement series when the advisory reports one', () => {
+    // The record-specific half of the same defect. A record whose
+    // `measurement.series` is `[]` contributes no series target, so `N / N` is
+    // reachable with zero measured data — and this is the surface that shows N / N.
+    const { getByText } = render(
+      <CoverageBadge audit={AUDIT} advisory={ADVISORY_NO_SERIES} />,
+    );
+    expect(getByText(NO_SERIES_COVERAGE_NOTE)).toBeInTheDocument();
+  });
+
+  it('CoverageBadge does NOT disclose a missing series when the advisory does not report one', () => {
+    // The negative half: the disclosure is keyed on the backend advisory, never
+    // shown unconditionally. An always-on note would be a claim about records that
+    // do carry measured data.
+    const { container } = render(<CoverageBadge audit={AUDIT} advisory={ADVISORY} />);
+    expect(container.textContent).not.toContain(NO_SERIES_COVERAGE_NOTE);
+    expect(container.querySelector('.coverage-sub-scope')).toBeNull();
+  });
+
+  it('the series disclosure names no verdict word from the shared forbidden list', () => {
+    // The domain question — is an empty series invalid, incomplete, not
+    // applicable, or deliberately empty? — belongs to a scientific owner. The
+    // vendored schema sets no `minItems`, so `[]` validates with zero errors, and
+    // nothing on this surface may decide which of the four it is.
+    //
+    // NAMED FOR THE MECHANISM, deliberately. This was titled "…states an
+    // observation and does not classify the science", which asserts a universal a
+    // blacklist cannot establish: a novel classifying phrasing ("no usable
+    // spectrum was recorded") passes every entry. What it checks is that the
+    // sentence uses none of these words — a ratchet, not a proof — and the list is
+    // IMPORTED, because the three hand-kept copies of it had already drifted
+    // (`error` was in the Python one only).
+    const { container } = render(
+      <CoverageBadge audit={AUDIT} advisory={ADVISORY_NO_SERIES} />,
+    );
+    const scope = container.querySelector('.coverage-sub-scope')?.textContent ?? '';
+    expect(scope).not.toBe('');
+    for (const forbidden of VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE) {
+      expect(scope.toLowerCase()).not.toContain(forbidden);
     }
   });
 });
