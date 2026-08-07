@@ -73,7 +73,12 @@ const created = {
  * a known state. `undefined` omits the block entirely, which is what a build
  * predating it, and a health body that never arrived, both look like.
  */
-function emptyRoutes(storage?: { configured: boolean; backend: string; durable: boolean }) {
+function emptyRoutes(storage?: {
+  configured: boolean;
+  backend: string;
+  durable: boolean;
+  state?: string;
+}) {
   return {
     'GET /api/health': {
       body: { ...healthSynthetic, ...(storage ? { experiment_storage: storage } : {}) },
@@ -85,10 +90,47 @@ function emptyRoutes(storage?: { configured: boolean; backend: string; durable: 
   };
 }
 
-const DURABLE = { configured: true, backend: 'postgres', durable: true };
-const EPHEMERAL = { configured: false, backend: 'filesystem', durable: false };
-/** A database IS configured, but not the one the write path requires. */
-const DEGRADED = { configured: true, backend: 'filesystem', durable: false };
+const DURABLE = { configured: true, backend: 'postgres', durable: true, state: 'durable' };
+const EPHEMERAL = {
+  configured: false,
+  backend: 'filesystem',
+  durable: false,
+  state: 'ephemeral',
+};
+/**
+ * A database IS configured, but not the one the write path requires — WITHOUT the
+ * `state` field, i.e. the shape the FIRST version of this block served. Kept
+ * deliberately: a deployment running an older image still sends exactly this, and
+ * the boolean fallback has to keep reading it correctly.
+ */
+const DEGRADED_LEGACY = { configured: true, backend: 'filesystem', durable: false };
+/** The same misconfiguration as served TODAY, with the state named. */
+const DEGRADED = {
+  configured: true,
+  backend: 'filesystem',
+  durable: false,
+  state: 'unavailable',
+};
+/**
+ * THE STATE THAT BROUGHT THE HOSTED APP DOWN. `PGHOST` and `PGDATABASE` are set on
+ * the deployed pod, so the durable backend selects itself; the migration is applied
+ * by an operator, so there is a window in which the table does not exist. `backend`
+ * stays `postgres` — the app has NOT fallen back, it keeps trying — and `durable` is
+ * false because it is not working.
+ */
+const UNAVAILABLE = {
+  configured: true,
+  backend: 'postgres',
+  durable: false,
+  state: 'unavailable',
+};
+/** A `state` value this build has never heard of. Must produce silence, not a guess. */
+const FUTURE_STATE = {
+  configured: true,
+  backend: 'postgres',
+  durable: false,
+  state: 'something_invented_later',
+};
 
 function renderAt(path = '/experiments') {
   return render(
@@ -107,7 +149,17 @@ function panel(): HTMLElement {
   return found!;
 }
 
-async function openEmptyState(storage?: typeof DURABLE) {
+/**
+ * `state` is OPTIONAL in this signature on purpose: `DEGRADED_LEGACY` deliberately
+ * omits it, because that is the shape a deployment predating the field still
+ * serves and the boolean fallback has to keep reading it.
+ */
+async function openEmptyState(storage?: {
+  configured: boolean;
+  backend: string;
+  durable: boolean;
+  state?: string;
+}) {
   stubFetchRoutes(emptyRoutes(storage) as never);
   const view = renderAt();
   await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
@@ -236,17 +288,70 @@ describe('My Experiments · where a new experiment is stored', () => {
     expect(line!.textContent).not.toMatch(/cleared|until the server restarts/i);
   });
 
-  it('a configured-but-misconfigured database claims NO durability', async () => {
+  it('a configured-but-misconfigured database claims NO durability (legacy shape)', async () => {
     /*
-     * The state that makes the two booleans worth keeping apart. A database is
-     * wired up, but the write path refused its name, so the app degraded to the
-     * workspace directory. Reporting `configured` as durability would promise
-     * exactly the thing that just failed.
+     * The state that makes the two booleans worth keeping apart, as served by a
+     * deployment predating the `state` field. A database is wired up, but the write
+     * path refused its name, so the app degraded to the workspace directory.
+     * Reporting `configured` as durability would promise exactly the thing that just
+     * failed.
+     *
+     * `ephemeral` is the RIGHT reading for this shape and only for this shape: with
+     * no `state`, `configured && !durable` could only be the PGDATABASE mismatch,
+     * after which the app really does fall back to the workspace directory.
      */
-    await openEmptyState(DEGRADED);
+    await openEmptyState(DEGRADED_LEGACY);
     const line = panel().querySelector<HTMLElement>('.queue-empty-storage');
     expect(line!.dataset.durability).toBe('ephemeral');
     expect(line!.textContent).not.toMatch(/database/i);
+  });
+
+  it('a configured database that is NOT ANSWERING says so, and promises nothing', async () => {
+    /*
+     * THE REGRESSION THIS SECTION EXISTS FOR. Before the backend named this state,
+     * it reported `durable: true` while every read and write against the database
+     * failed — so this line promised durability on the exact deployment where
+     * creating an experiment could not work at all.
+     */
+    await openEmptyState(UNAVAILABLE);
+    const line = panel().querySelector<HTMLElement>('.queue-empty-storage');
+    expect(line).not.toBeNull();
+    expect(line!.dataset.durability).toBe('unavailable');
+    expect(line!.textContent).toBe(LABELS.storageUnavailable);
+    /*
+     * PINNED ON THE RENDERED TEXT, not on the label constant, for the reason the
+     * ephemeral case states: a matcher reading the constant passes whatever the
+     * constant says. Both directions are asserted — what it must say, and the two
+     * false promises it must not make.
+     */
+    expect(line!.textContent).toMatch(/not answering/i);
+    expect(line!.textContent).not.toMatch(/stay here across restarts|saved in this/i);
+    expect(line!.textContent).not.toMatch(/cleared when the server restarts/i);
+  });
+
+  it('reads the NAMED state even when it disagrees with the boolean fallback', async () => {
+    /*
+     * `DEGRADED` and `DEGRADED_LEGACY` carry identical booleans and differ only in
+     * `state`. If `state` were ignored, these two tests would be the same test and
+     * one of them would be silently wrong.
+     */
+    await openEmptyState(DEGRADED);
+    const line = panel().querySelector<HTMLElement>('.queue-empty-storage');
+    expect(line!.dataset.durability).toBe('unavailable');
+    expect(line!.textContent).toBe(LABELS.storageUnavailable);
+  });
+
+  it('says NOTHING for a state value this build does not recognise', async () => {
+    /*
+     * A future backend value must produce silence, not the nearest-looking
+     * sentence. Falling back to the boolean here would read `durable: false` as
+     * "ephemeral" and tell the reader their work is cleared on restart — a
+     * confident claim derived from a word we could not read.
+     */
+    await openEmptyState(FUTURE_STATE);
+    const section = panel();
+    expect(section.querySelector('.queue-empty-storage')).toBeNull();
+    expect(section.textContent).not.toMatch(/database|restart/i);
   });
 
   it('says NOTHING when durability has not been established', async () => {

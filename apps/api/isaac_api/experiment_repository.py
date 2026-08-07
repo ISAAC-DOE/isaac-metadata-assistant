@@ -60,6 +60,50 @@ not be enough:
 
 Guard 3 is also what keeps a claim three product surfaces make true — see
 ``test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package``.
+
+WHAT HAPPENS WHEN THE DATABASE IS CONFIGURED AND DOES NOT ANSWER
+================================================================
+This is the state the deployed pod is in RIGHT NOW, and it is why this section
+exists rather than being left to "it will be fine". ``PGHOST`` and ``PGDATABASE``
+are already set in the pod, so the durable backend selects itself on the next
+image roll — and the migration is deliberately NOT applied at boot, so
+``isaac_experiments`` does not exist. Every statement against it raises.
+
+Before this was handled, that turned three previously database-free operations
+into unhandled 500s: ``GET /api/experiments`` (My Experiments rendered "Backend
+Not Running"), ``GET /api/experiments/<id>`` (a clean 404 became a 500) and
+``POST /api/experiments``. The same three 500s would have come back on any
+transient outage, permanently — a read path that had never touched a database
+had acquired a hard dependency on one.
+
+THE RULE THAT REPLACES IT, and the two halves are deliberately different:
+
+* **READS DEGRADE.** Hydration is an optimisation — it restores directories a
+  restart threw away. A failed hydration therefore falls back to the filesystem
+  view and the read continues, so a list stays a list and a miss stays a 404.
+* **WRITES DO NOT.** A failed durable write raises :class:`StorageUnavailable`,
+  which ``isaac_api.app`` renders as a typed ``503``. Degrading a write to the
+  filesystem would be worse than failing it: the reader has been TOLD their work
+  is durable, and a silent ephemeral write takes that promise away without
+  telling them. Failing loudly is the only honest option.
+
+**AND IT IS DISCLOSED.** Any failure is recorded in this process
+(:func:`storage_failure`) and :func:`storage_status` then reports
+``durable: false`` with ``state: "unavailable"``, which is what stops the UI
+promising durability. A later success clears it, so a transient outage heals
+instead of marking the deployment broken for the life of the pod.
+
+TWO LIMITS OF THAT DISCLOSURE, STATED RATHER THAN GLOSSED:
+
+1. **It is PROCESS-LOCAL.** Each replica observes its own failures. With more
+   than one replica, a health read answered by a healthy process cannot know
+   about a sibling's outage.
+2. **The FIRST health read after a process start says ``durable: true``**, because
+   nothing has been attempted yet and ``/api/health`` is the readiness probe and
+   must never open a connection. On a persistently broken deployment the first
+   experiment read trips the flag, so every subsequent health read is correct;
+   the optimistic answer is confined to the window before anything has been
+   tried.
 """
 
 from __future__ import annotations
@@ -75,20 +119,44 @@ __all__ = [
     "BACKEND_FILESYSTEM",
     "BACKEND_POSTGRES",
     "NEW_EXPERIMENT_SOURCE_DESCRIPTION",
+    "STORAGE_STATE_DURABLE",
+    "STORAGE_STATE_EPHEMERAL",
+    "STORAGE_STATE_UNAVAILABLE",
     "ExperimentRepository",
     "FilesystemExperimentRepository",
     "NotPersistable",
     "PostgresExperimentRepository",
     "PostgresOrdinaryStore",
+    "StorageUnavailable",
     "blank_draft",
+    "forget_storage_failure",
     "ordinary_store",
     "repository",
+    "storage_failure",
     "storage_status",
 ]
 
 
 BACKEND_FILESYSTEM = "filesystem"
 BACKEND_POSTGRES = "postgres"
+
+#: The three answers ``storage_status`` can give to "where does a new experiment
+#: go, and is it going there". They are NAMED rather than left to be re-derived
+#: from the two booleans, because the UI has to branch on them and a truth table
+#: reconstructed at each call site is a truth table that eventually disagrees
+#: with itself.
+#:
+#: ``ephemeral``   — no database is configured. The workspace directory is all
+#:                   there is, and on the pod that directory is an ``emptyDir``.
+#: ``durable``     — a database is configured, correctly named, and nothing has
+#:                   failed against it in this process.
+#: ``unavailable`` — a database is configured and this application is NOT storing
+#:                   experiments in it: either the ``PGDATABASE`` gate refused it,
+#:                   or a durable operation has failed in this process. The reader
+#:                   must not be told their work is durable in this state.
+STORAGE_STATE_EPHEMERAL = "ephemeral"
+STORAGE_STATE_DURABLE = "durable"
+STORAGE_STATE_UNAVAILABLE = "unavailable"
 
 
 class NotPersistable(RuntimeError):
@@ -99,6 +167,86 @@ class NotPersistable(RuntimeError):
     tutorial-isolation invariant into something a test could only observe by its
     absence.
     """
+
+
+class StorageUnavailable(RuntimeError):
+    """A durable write was attempted, and the configured database did not take it.
+
+    DISTINCT FROM :class:`NotPersistable`, and the distinction is the whole point.
+    ``NotPersistable`` is a REFUSAL — the record must never be stored, the app is
+    working exactly as designed, and no amount of waiting changes it.
+    ``StorageUnavailable`` is an OUTAGE — the record should have been stored, and
+    was not, for a reason outside this application: the table has not been created
+    yet, the server is unreachable, the credentials changed. One is a permanent
+    property of the record; the other is a temporary property of the deployment.
+    Rendering them as the same HTTP status would tell an operator to fix the wrong
+    thing.
+
+    ``isaac_api.app`` registers a handler that turns this into a typed ``503``.
+    It carries a FIXED, path-free, credential-free message for exactly the reason
+    :class:`~isaac_api.db_write.WriteRefused` does: it reaches a response body, and
+    driver messages echo the host, the user and the connection string. The
+    underlying exception is chained (``raise ... from exc``) so a server log still
+    has the cause; only the CLASS NAME is ever kept in process state.
+    """
+
+
+# --- the degradation this process has actually observed -----------------------
+#
+# ONE MODULE GLOBAL, and it holds an exception CLASS NAME — never a message, a
+# host, a path or a credential. It exists so `/api/health` can report a database
+# problem WITHOUT opening a connection: the health handler is the container
+# readiness probe, so it must never dial anything, but it must also not keep
+# promising durability after a durable write has demonstrably failed.
+#
+# It is deliberately not a counter, a timestamp or a history. The only question
+# any caller asks is "has a durable operation failed since the last one
+# succeeded", which is one bit plus a label for the report.
+
+_storage_failure: str | None = None
+
+
+def _note_storage_failure(exc: BaseException) -> None:
+    """Record that a durable operation failed. Keeps the exception CLASS NAME only."""
+    global _storage_failure
+    _storage_failure = type(exc).__name__
+
+
+def _note_storage_success() -> None:
+    """Record that a durable operation succeeded, clearing any earlier failure.
+
+    CLEARING MATTERS AS MUCH AS SETTING. Without it a single transient blip would
+    mark the deployment as unavailable for the life of the process, so the UI
+    would go on telling a reader their work is not durable long after it was — a
+    false claim in the other direction, and one nothing would ever correct.
+    """
+    global _storage_failure
+    _storage_failure = None
+
+
+def storage_failure() -> str | None:
+    """The class name of the last durable-storage failure in this process, or ``None``."""
+    return _storage_failure
+
+
+def forget_storage_failure() -> None:
+    """Test seam: drop the observation so cases cannot leak into one another.
+
+    Named for what it does rather than ``reset_...``: this application uses
+    "reset" for the guarded destructive workspace operation, and reusing the word
+    for a one-variable test helper invites exactly the misreading that word has
+    caused here before.
+    """
+    _note_storage_success()
+
+
+def _unavailable(exc: BaseException) -> StorageUnavailable:
+    """Record ``exc`` and build the fixed, path-free error the caller should raise."""
+    _note_storage_failure(exc)
+    return StorageUnavailable(
+        "This deployment stores experiments in its own database, and that "
+        "database did not accept the write. Nothing was saved."
+    )
 
 
 # --- what a brand-new experiment contains -------------------------------------
@@ -269,11 +417,30 @@ class PostgresOrdinaryStore:
     # -- write-through ---------------------------------------------------------
 
     def persist(self, exp: "ws.Experiment") -> None:
-        """Upsert one ordinary-scope experiment's authoritative state."""
+        """Upsert one ordinary-scope experiment's authoritative state.
+
+        RAISES :class:`StorageUnavailable` if the database does not take the write,
+        and deliberately does NOT fall back to the filesystem. The caller
+        (``workspace.Experiment.save``) has already been told, through
+        ``storage_status``, that this deployment stores experiments durably; a
+        quiet ephemeral write would withdraw that promise without saying so, and
+        the reader would only discover it at the next pod restart. Failing here
+        means the workspace file is not rewritten either, so the record is not left
+        looking saved.
+
+        The isolation refusal is raised OUTSIDE the try, and that ordering is
+        load-bearing: :class:`NotPersistable` is a permanent property of the
+        record, not an outage, and must never be reported as one or recorded as a
+        storage failure.
+        """
         self.refuse_if_not_persistable(exp)
         payload = json.dumps(exp.to_state(), sort_keys=True)
-        with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
-            cursor.execute(policy.check(Q_UPSERT_EXPERIMENT), (exp.id, payload))
+        try:
+            with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
+                cursor.execute(policy.check(Q_UPSERT_EXPERIMENT), (exp.id, payload))
+        except Exception as exc:  # noqa: BLE001 - any driver/server failure, uniformly
+            raise _unavailable(exc) from exc
+        _note_storage_success()
 
     # -- restore ---------------------------------------------------------------
 
@@ -289,12 +456,23 @@ class PostgresOrdinaryStore:
         well-formed record id, or is a canonical example id, is skipped rather
         than written — the same fail-closed reading the rest of the workspace
         layer applies to anything it did not just create itself.
+
+        RAISES :class:`StorageUnavailable` if the read fails, and the CALLER
+        (``workspace._hydrate_ordinary_scope``) is what degrades. The split is
+        deliberate: this method's job is to say truthfully whether it restored
+        anything, and swallowing the error here would make "restored 0" mean both
+        "there was nothing to restore" and "I could not look", which is exactly
+        the ambiguity that let a failed read reach a request handler as a 500.
         """
         root = ws.workspace_root()
         restored = 0
-        with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
-            cursor.execute(policy.check(Q_ALL_EXPERIMENTS))
-            rows = cursor.fetchall() or []
+        try:
+            with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
+                cursor.execute(policy.check(Q_ALL_EXPERIMENTS))
+                rows = cursor.fetchall() or []
+        except Exception as exc:  # noqa: BLE001 - any driver/server failure, uniformly
+            raise _unavailable(exc) from exc
+        _note_storage_success()
         for row in rows:
             rid = str(row[0] or "").strip()
             if not ws.is_record_id(rid) or rid in ws.CANONICAL_IDS:
@@ -436,20 +614,51 @@ def repository(env: Mapping[str, str] | None = None) -> ExperimentRepository:
 def storage_status(env: Mapping[str, str] | None = None) -> dict:
     """The ``experiment_storage`` block on ``GET /api/health``.
 
-    DERIVED FROM CONFIGURATION ALONE. Nothing here opens a connection, issues a
-    query or waits on one — the same discipline the adjacent ``database`` block
-    keeps, and for the same reason: ``/health`` is the container readiness probe
-    and a database problem must not be able to fail it.
+    IT OPENS NOTHING. No connection, no query, no wait — the same discipline the
+    adjacent ``database`` block keeps, and for the same reason: ``/health`` is the
+    container readiness probe and a database problem must not be able to fail it.
 
-    So ``durable: true`` means "this deployment is configured to store
-    experiments in its own database", never "a database is currently reachable".
-    The honest failure mode if it is configured but unreachable is a failed
-    create with an error, not a silent ephemeral write.
+    IT IS NO LONGER DERIVED FROM CONFIGURATION ALONE, AND THAT IS THE CORRECTION.
+    It used to be, and the result was a pod reporting ``durable: true`` while every
+    write against it failed, because "configured" and "working" are not the same
+    claim and only one of them is what a reader hears. So this now also reads
+    :func:`storage_failure` — a value RECORDED BY OTHER CODE PATHS that already
+    tried, never a probe issued from here. Configuration says where experiments
+    are meant to go; the observation says whether they are getting there.
+
+    The three ``state`` values are documented at :data:`STORAGE_STATE_DURABLE` and
+    friends. ``durable`` stays as the boolean it always was and stays consistent
+    with ``state``, so an older client reading only the boolean is told the truth
+    rather than being left on the optimistic branch.
+
+    Both limits of the observation — it is process-local, and the first read after
+    a process start is optimistic because nothing has been attempted — are stated
+    in this module's docstring. Neither is hidden behind a reassuring value here.
     """
     env = os.environ if env is None else env
-    durable = _postgres_available(env)
+    configured = database_configured(env)
+    selected = _postgres_available(env)
+    failure = storage_failure()
+    durable = selected and failure is None
+    if durable:
+        state = STORAGE_STATE_DURABLE
+    elif configured:
+        # A database IS wired up and experiments are not going into it — because
+        # the PGDATABASE gate refused it, or because it stopped answering. Both
+        # are "configured but not storing", which is one state to a reader even
+        # though it is two causes to an operator.
+        state = STORAGE_STATE_UNAVAILABLE
+    else:
+        state = STORAGE_STATE_EPHEMERAL
     return {
-        "configured": database_configured(env),
-        "backend": BACKEND_POSTGRES if durable else BACKEND_FILESYSTEM,
+        # `backend` REPORTS WHAT IS SELECTED, NOT WHETHER IT IS WORKING, and those
+        # came apart the moment a failure could be observed. A pod whose database
+        # has stopped answering still HAS the Postgres repository selected — it
+        # keeps trying, which is what lets it recover — so reporting
+        # `backend: "filesystem"` there would describe a fallback the app is not
+        # performing. `durable` and `state` are where "is it working" is answered.
+        "configured": configured,
+        "backend": BACKEND_POSTGRES if selected else BACKEND_FILESYSTEM,
         "durable": durable,
+        "state": state,
     }

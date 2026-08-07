@@ -989,9 +989,35 @@ def _hydrate_ordinary_scope() -> int:
     hydration would leave that replica permanently blind to everything created
     before it started. Hydrating on read is one bounded ``SELECT`` on a table this
     application owns, and it writes only what is genuinely absent.
+
+    A FAILED HYDRATION DEGRADES TO THE FILESYSTEM VIEW AND RETURNS 0. It does not
+    raise, and this is the single most consequential line in the durable-storage
+    work. ``PGHOST`` and ``PGDATABASE`` are already set in the deployed pod and the
+    migration is deliberately not applied at boot, so on the next image roll this
+    ``SELECT`` hits a table that does not exist. With the exception propagating,
+    ``GET /api/experiments`` returned 500 and My Experiments — the product's
+    primary screen — rendered "Backend Not Running"; ``GET /api/experiments/<id>``
+    turned a clean 404 into a 500. Both are READS that had no database dependency
+    at all before this feature, and an optimisation must not be able to take a read
+    path down.
+
+    Degrading is not silent. ``PostgresOrdinaryStore.hydrate`` records the failure
+    before raising, so ``/api/health`` reports ``experiment_storage.state:
+    "unavailable"`` and the UI stops claiming durability. WRITES still fail loudly
+    (``Experiment.save`` re-raises ``StorageUnavailable``, rendered as a typed
+    503) — a read that shows less than everything is a degraded read, while a write
+    that quietly lands somewhere temporary is a broken promise.
+
+    ``Exception`` and not ``BaseException``: a cancellation or a ``KeyboardInterrupt``
+    is not a storage outage and must not be swallowed as one.
     """
     store = _ordinary_store(None)
-    return 0 if store is None else store.hydrate()
+    if store is None:
+        return 0
+    try:
+        return store.hydrate()
+    except Exception:  # noqa: BLE001 - see the docstring; reads must never 500 on this
+        return 0
 
 
 def list_experiments(session_id: str | None = None) -> list[Experiment]:
@@ -1030,6 +1056,13 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
         # directory, so a deep link to it would otherwise 404 until something else
         # happened to list. Hydration cannot invent a record: it writes back only
         # rows this application stored, and never a canonical example id.
+        #
+        # AND A MISS STAYS A 404 WHEN THE DATABASE IS DOWN. `_hydrate_ordinary_scope`
+        # returns 0 rather than raising on a failed read, so this returns `None` and
+        # the route answers "not found" — which is what it answered before durable
+        # storage existed. It must not become a 500: "we could not check" and "it is
+        # not here" look identical to a client holding a stale link, and only one of
+        # them is a server error.
         if session_id is not None or _hydrate_ordinary_scope() == 0:
             return None
         if not state_path.exists():

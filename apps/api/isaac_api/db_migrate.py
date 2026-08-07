@@ -41,6 +41,7 @@ without applying anything, so the operator can see the plan first.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -71,6 +72,12 @@ STATEMENT_SEPARATOR = "--;"
 #: A rollback file is committed beside its migration for review, and is never
 #: loaded by this runner.
 _ROLLBACK_SUFFIX = ".rollback.sql"
+
+#: A PostgreSQL dollar-quoted string — ``$$ … $$`` or ``$tag$ … $tag$``. Matching
+#: the OPENING delimiter is enough: :func:`split_statements` refuses the file
+#: outright rather than trying to find the matching close, which would be the
+#: first step down the road of writing a SQL parser here.
+_DOLLAR_QUOTE_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 
 Q_ENSURE_BOOKKEEPING = (
     "CREATE TABLE IF NOT EXISTS isaac_schema_migrations ("
@@ -110,7 +117,30 @@ def split_statements(sql: str) -> list[str]:
 
     Comment-only and blank chunks are dropped: a file that is entirely commentary
     yields no statements, rather than one statement that is a comment.
+
+    A DOLLAR-QUOTED BODY IS REFUSED, NOT PARSED, and the refusal is the feature.
+    This splitter is line-based and comment-blind: it drops every line beginning
+    ``--`` and cuts on a line that is exactly ``--;``. Inside ``$$ … $$`` — a
+    ``DO`` block, a function body — both rules are wrong, because such a line is
+    body text rather than syntax. It would be SILENTLY MANGLED: a line of the
+    body starting ``--`` would vanish, and a body line reading ``--;`` would split
+    the block in two, producing two statements that are each invalid SQL and
+    neither of which is what the author wrote. No committed migration uses one
+    today, so the honest options were "refuse" or "write a SQL parser". Refusing
+    fails loudly at load time, before a connection is opened, and can be revisited
+    the day a migration genuinely needs a function body.
+
+    :class:`~isaac_api.db_write.WriteRefused` rather than a new exception type: the
+    caller already handles it, and the meaning is the same one it always carries —
+    this SQL will not be executed.
     """
+    if _DOLLAR_QUOTE_RE.search(sql):
+        raise WriteRefused(
+            "this migration contains a dollar-quoted body ($$ ... $$), which the "
+            "line-based statement splitter cannot read without silently mangling "
+            "it. Rewrite the statement without one, or teach the splitter to "
+            "understand dollar quoting before using it."
+        )
     out: list[str] = []
     chunk: list[str] = []
 

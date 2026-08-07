@@ -26,11 +26,11 @@ import { queueSubcount, summariesToQueueGroups } from '../lib/adapt';
 
 /**
  * Where a newly created experiment is stored, as far as this client has
- * ESTABLISHED it. Three states, and `'unknown'` is a real one rather than a
+ * ESTABLISHED it. Four states, and `'unknown'` is a real one rather than a
  * placeholder: `/api/health` may not have answered yet, and a deployment older
  * than the `experiment_storage` block carries none.
  */
-type Durability = 'durable' | 'ephemeral' | 'unknown';
+type Durability = 'durable' | 'ephemeral' | 'unavailable' | 'unknown';
 
 /**
  * THE DURABILITY CLAIM IS DERIVED, NEVER ASSUMED — and `unknown` claims nothing.
@@ -42,26 +42,56 @@ type Durability = 'durable' | 'ephemeral' | 'unknown';
  * A hard-coded sentence would therefore be false on one of them, whichever one we
  * picked.
  *
- * `configured && !durable` is deliberately read as EPHEMERAL rather than as an
- * error: it is the state of a deployment whose database is wired up but whose
- * `PGDATABASE` does not match what the write path requires, so the app degrades
- * to the workspace directory. The reader's data really is ephemeral then, and
- * telling them so is the whole point of not collapsing the two booleans.
+ * `'unavailable'` IS NEW, AND IT IS THE ONE THAT WAS MISSING. This function used
+ * to read `configured && !durable` as EPHEMERAL, on the reasoning that the only
+ * way to reach it was a `PGDATABASE` mismatch, after which the app really does
+ * fall back to the workspace directory. That reasoning no longer covers the state
+ * space: a deployment whose database is configured and NOT ANSWERING also reports
+ * `durable: false`, and there the reader's work is not ephemeral — creating fails
+ * outright with a 503. Telling them "cleared when the server restarts" would be a
+ * different false promise, not a safer one, so the backend now names the state
+ * and this reads the name.
+ *
+ * THE BOOLEAN IS STILL THE FALLBACK, for a deployment serving the first version
+ * of this block (`state` absent). There, `configured && !durable` can only be the
+ * `PGDATABASE` mismatch, so the old reading is still the correct one — it is kept
+ * for exactly the case it was correct for.
+ *
+ * AN UNRECOGNISED `state` IS `'unknown'`, not a guess. A future backend value this
+ * build has never heard of must produce silence rather than the nearest-looking
+ * sentence.
  */
 function durabilityOf(
-  storage: { configured: boolean; durable: boolean } | undefined,
+  storage: { configured: boolean; durable: boolean; state?: string } | undefined,
 ): Durability {
   if (storage === undefined) return 'unknown';
-  return storage.durable ? 'durable' : 'ephemeral';
+  switch (storage.state) {
+    case 'durable':
+      return 'durable';
+    case 'ephemeral':
+      return 'ephemeral';
+    case 'unavailable':
+      return 'unavailable';
+    case undefined:
+      return storage.durable ? 'durable' : 'ephemeral';
+    default:
+      return 'unknown';
+  }
 }
 
 /** The one short line about where a new experiment goes, or nothing at all. */
 function storageSentence(durability: Durability): string | null {
   if (durability === 'durable') return LABELS.storageDurable;
   if (durability === 'ephemeral') return LABELS.storageEphemeral;
+  // NOT SILENCE. `unavailable` is the one bad state, and the reader is about to
+  // press a button that will fail — saying so before they press it is the whole
+  // value of the line. It is deliberately not softened into "storage is being
+  // set up": that would be an invented cause.
+  if (durability === 'unavailable') return LABELS.storageUnavailable;
   // UNKNOWN SAYS NOTHING. Not "checking…", not a hedge — the only honest thing to
   // say about durability that has not been established is nothing, and a hedge
   // reads as a claim about the reader's data rather than about our own state.
+  // This is different from `unavailable`, where something HAS been established.
   return null;
 }
 

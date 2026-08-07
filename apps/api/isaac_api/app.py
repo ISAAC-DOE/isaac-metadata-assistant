@@ -23,10 +23,12 @@ from . import __version__
 from . import runtime_mode
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
+from .experiment_repository import StorageUnavailable
 from .routes import (
     OPENAPI_TAGS,
     TutorialScopeError,
     router,
+    storage_unavailable_handler,
     tutorial_scope_error_handler,
 )
 from .spa import mount_spa
@@ -154,6 +156,16 @@ def create_app() -> FastAPI:
     # are raised from a dependency, which cannot return a response. This renders them
     # with the same typed `{"error": ...}` body shape every other refusal uses.
     app.add_exception_handler(TutorialScopeError, tutorial_scope_error_handler)
+    # A durable-storage outage — the deployment is configured to store experiments
+    # in its own database and that database did not take the write. Registered on
+    # the APP rather than handled per route because `Experiment.save()` is called
+    # from a dozen operations (answers, corrections, edits, export) and every one
+    # of them would otherwise surface a driver failure as an unhandled 500. One
+    # handler is also what keeps the body identical wherever it is raised.
+    #
+    # It renders 503, never 500, and never a silent fall back to the filesystem —
+    # see the handler's own docstring for why each of those is deliberate.
+    app.add_exception_handler(StorageUnavailable, storage_unavailable_handler)
     # ISAAC_BASE_PATH prefixes every route (the router keeps its own /api
     # prefix, so routes land at {base}/api/*). Unset, prefix="" is byte-identical
     # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR

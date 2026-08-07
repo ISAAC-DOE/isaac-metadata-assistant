@@ -95,6 +95,11 @@ def test_health(client, monkeypatch):
             "configured": False,
             "backend": "filesystem",
             "durable": False,
+            # `state` is the explicit three-way answer the UI branches on, so it does
+            # not have to reconstruct a truth table from two booleans at each call
+            # site. `ephemeral` is "no database configured", which is distinct from
+            # `unavailable` ("configured, and experiments are not going into it").
+            "state": "ephemeral",
         },
     }
     assert body["version"]

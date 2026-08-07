@@ -296,6 +296,7 @@ def test_no_pghost_selects_the_filesystem_repository():
         "configured": False,
         "backend": "filesystem",
         "durable": False,
+        "state": repo.STORAGE_STATE_EPHEMERAL,
     }
 
 
@@ -309,6 +310,7 @@ def test_pghost_with_the_expected_database_selects_postgres():
         "configured": True,
         "backend": "postgres",
         "durable": True,
+        "state": repo.STORAGE_STATE_DURABLE,
     }
 
 
@@ -328,6 +330,12 @@ def test_a_wrong_pgdatabase_degrades_to_the_filesystem_AND_SAYS_SO():
         "configured": True,
         "backend": "filesystem",
         "durable": False,
+        # A database is configured and experiments are not going into it. That is
+        # the same THING to a reader as a database that stopped answering, even
+        # though it is a different CAUSE to an operator, so it carries the same
+        # state word — and `backend: "filesystem"` is what distinguishes it, because
+        # here the app really has fallen back rather than kept trying.
+        "state": repo.STORAGE_STATE_UNAVAILABLE,
     }
 
 
@@ -344,6 +352,7 @@ def test_health_reports_the_storage_block_without_opening_a_connection(app, monk
         "configured": True,
         "backend": "postgres",
         "durable": True,
+        "state": repo.STORAGE_STATE_DURABLE,
     }
     assert body["status"] == "ok"
 
@@ -744,18 +753,32 @@ def test_a_durable_create_writes_to_the_database_before_the_filesystem(
 
 
 def test_a_failed_durable_write_does_not_leave_a_file_behind(app, tmp_path, monkeypatch):
+    """The write is NOT degraded to the filesystem, and the failure is typed.
+
+    It used to be an unhandled exception, which the route surfaced as a 500. The
+    property this test was written for — nothing on disk — is unchanged and still
+    asserted; what is added is that the caller now gets a 503 with a typed body
+    instead of a stack trace, and that the body names no host, path or credential.
+    """
     monkeypatch.setenv("PGHOST", "db.invalid")
     monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
     conn = FakeConnection(raise_on={repo.Q_UPSERT_EXPERIMENT: RuntimeError("no")})
     monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
 
-    with pytest.raises(RuntimeError):
-        TestClient(app, raise_server_exceptions=True).post(
-            "/api/experiments", json={"title": "Doomed"}
-        )
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/api/experiments", json={"title": "Doomed"}
+    )
+    assert response.status_code == 503, response.text
+    body = response.json()
+    assert body["error"] == "experiment_storage_unavailable"
+    assert "db.invalid" not in response.text and "PGHOST" not in response.text
+
     on_disk = [p.name for p in (tmp_path / "ws").iterdir()] if (tmp_path / "ws").exists() else []
     assert on_disk == [], "a record whose durable write failed was written to disk anyway"
     assert conn.rollbacks == 1
+    # ...and the outage is now ON RECORD, which is what `/api/health` reads.
+    assert repo.storage_failure() == "RuntimeError"
+    assert repo.storage_status(_env())["state"] == repo.STORAGE_STATE_UNAVAILABLE
 
 
 # =============================================================================
@@ -839,3 +862,300 @@ def test_the_statement_separator_survives_a_semicolon_inside_a_literal():
     statements = dbm.split_statements(sql)
     assert len(statements) == 2
     assert "'a;b'" in statements[0]
+
+
+def test_a_dollar_quoted_body_is_REFUSED_rather_than_silently_mangled():
+    """The other half of "why ``--;``": a shape the splitter must not guess at.
+
+    ``split_statements`` drops every line beginning ``--`` and cuts on a line that
+    is exactly ``--;``. Inside a ``$$ … $$`` body both rules are wrong — such a
+    line is body text, not syntax — so the block would be cut in two, yielding two
+    fragments that are each invalid SQL and neither of which is what was written.
+    Silently. No committed migration uses one, so the file is refused at load time
+    rather than parsed by a splitter that cannot read it.
+    """
+    body = (
+        "DO $$\n"
+        "BEGIN\n"
+        "  -- a comment inside the body\n"
+        "  --;\n"
+        "  RAISE NOTICE 'hello';\n"
+        "END $$"
+    )
+    with pytest.raises(dbw.WriteRefused) as excinfo:
+        dbm.split_statements(body)
+    assert "dollar-quoted" in str(excinfo.value)
+    # A tagged dollar quote is the same construct and is refused identically.
+    with pytest.raises(dbw.WriteRefused):
+        dbm.split_statements("DO $tag$ SELECT 1 $tag$")
+
+
+def test_the_committed_migrations_regex_literal_is_not_read_as_a_dollar_quote():
+    """The guard above must not refuse the migration this repository actually ships.
+
+    ``CHECK (experiment_id ~ '^[0-9A-Z]{26}$')`` contains a ``$``. A guard matching
+    a single ``$`` would refuse the one migration in the repository — an
+    over-broad refusal that would have been discovered at deploy time rather than
+    here. Dollar QUOTING needs a pair.
+    """
+    migrations = dbm.load_migrations()
+    assert [m.version for m in migrations] == ["0001_experiments"]
+    assert len(migrations[0].statements) == 3
+
+
+# =============================================================================
+# 9. privilege and identity statements — refused, and the docstring says so
+# =============================================================================
+#
+# THIS SECTION EXISTS BECAUSE THE DOCSTRING WAS WRONG. `db_write`'s module
+# docstring claimed `CREATE ROLE` / `USER` / `DATABASE` / `EXTENSION` were refused
+# "anywhere at all"; measured against the policy, all four were ACCEPTED, as was
+# `SET ROLE postgres`. In a module whose entire job is refusing statements, a
+# docstring is read as a specification. These pin the specification, so the two
+# cannot come apart again silently.
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE ROLE evil LOGIN SUPERUSER",
+        "CREATE USER evil PASSWORD 'x'",
+        "CREATE DATABASE elsewhere",
+        "CREATE EXTENSION dblink",
+        "CREATE EXTENSION IF NOT EXISTS postgres_fdw",
+        # SET ROLE is included deliberately: it changes the identity subsequent
+        # statements execute as, which is the one move that could make every other
+        # guard in this module irrelevant.
+        "SET ROLE postgres",
+        "RESET ROLE",
+        "SET SESSION AUTHORIZATION postgres",
+        "ALTER ROLE metadata_assistant SUPERUSER",
+        "DROP OWNED BY someone",
+    ],
+)
+def test_privilege_and_identity_statements_are_refused_anywhere_at_all(sql):
+    policy = dbw.WriteStatementPolicy()
+    with pytest.raises(dbw.WriteRefused):
+        policy.check(sql)
+    assert policy.seen == [], "a refused statement was recorded as having passed"
+
+
+def test_the_new_privilege_verbs_are_actually_on_the_list():
+    """Pinned by name, so a future edit cannot drop one and leave the tests green.
+
+    The parametrized cases above could each still fail for a different reason (an
+    unowned table name, say), which would let a removed keyword pass unnoticed.
+    """
+    for verb in ("role", "user", "database", "extension", "authorization"):
+        assert verb in dbw._FORBIDDEN_KEYWORDS, verb
+
+
+def test_the_near_misses_that_make_this_a_token_match_and_not_a_substring_one():
+    """`current_database` and `isaac_schema_migrations` must still pass.
+
+    A substring check for "database" would refuse the write path's own
+    `SELECT current_database()` — the server-side gate that catches a redirected
+    connection. The refusal filter matches identifier TOKENS, and each of these is
+    one token.
+    """
+    assert dbw.WriteStatementPolicy().check(dbw.Q_CURRENT_DATABASE)
+    assert dbw.WriteStatementPolicy().check(dbm.Q_ENSURE_BOOKKEEPING)
+
+
+def test_the_obfuscated_do_block_residual_is_documented_where_it_lives():
+    """A KNOWN, ACCEPTED LIMIT, asserted so it stays documented rather than lurking.
+
+    The policy is a tokenizer, not a SQL parser, so a forbidden verb assembled at
+    run time inside a `DO $$ … $$` body is not seen. It is not reachable in this
+    application — the only SQL reaching the policy is a module-level constant or a
+    committed migration file, both human-reviewed, and `split_statements` refuses
+    a dollar-quoted migration outright. This test asserts the limit is WRITTEN
+    DOWN, because an undocumented limit is what a later reader mistakes for a
+    guarantee. It deliberately does NOT assert the statement is refused: that
+    would be asserting behaviour the module does not have.
+    """
+    doc = dbw.__doc__ or ""
+    assert "KNOWN, ACCEPTED LIMITS" in doc
+    assert "TOKENIZER, not a SQL parser" in doc
+    assert "DO $$" in doc
+
+
+# =============================================================================
+# 10. THE DEPLOYED-POD FAILURE MODE: configured, and the table is not there
+# =============================================================================
+#
+# This is the state the hosted pod is in on the next image roll. `PGHOST` and
+# `PGDATABASE` are already set there (`docs/postgres-test-db-guide.md`), so the
+# durable backend selects itself, and the migration is deliberately not applied at
+# boot — so `isaac_experiments` does not exist and every statement against it
+# raises.
+#
+# Before this was handled, that made THREE previously database-free operations
+# return 500: the list (My Experiments rendered "Backend Not Running"), a detail
+# read (a clean 404 became a 500), and the create. The same 500s would have
+# returned on any transient outage.
+
+
+class UndefinedTable(Exception):
+    """Stands in for ``psycopg2.errors.UndefinedTable``.
+
+    A real driver class is not used, and not because psycopg2 is awkward to import:
+    the fix must catch ANY failure from the driver or the server, not a curated
+    list of exception types. Using an exception class the application has never
+    heard of is what proves that.
+    """
+
+
+def _table_missing_connection():
+    """A ``FakeConnection`` on which every statement naming the app's own table raises."""
+    return FakeConnection(
+        raise_on={
+            repo.Q_ALL_EXPERIMENTS: UndefinedTable("relation does not exist"),
+            repo.Q_UPSERT_EXPERIMENT: UndefinedTable("relation does not exist"),
+        }
+    )
+
+
+@pytest.fixture()
+def pod_without_migration(app, monkeypatch):
+    """The deployed pod's environment, with the migration not yet applied."""
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    conn = _table_missing_connection()
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
+    return TestClient(app, raise_server_exceptions=False), conn
+
+
+def test_the_list_degrades_to_the_filesystem_view_instead_of_500ing(
+    pod_without_migration, tmp_path, monkeypatch
+):
+    """`GET /api/experiments` must stay 200. It is a READ, and it had no database
+    dependency at all before durable storage existed."""
+    client, _conn = pod_without_migration
+    # A record already on disk, written by an earlier pod that had no database.
+    monkeypatch.delenv("PGHOST")
+    existing = ws.create_experiment(
+        title="Written before the roll", source=repo.new_experiment_source(), draft={}
+    )
+    monkeypatch.setenv("PGHOST", "db.invalid")
+
+    response = client.get("/api/experiments")
+    assert response.status_code == 200, response.text
+    assert [row["id"] for row in response.json()["experiments"]] == [existing.id]
+
+
+def test_an_unknown_id_is_still_a_404_and_not_a_500(pod_without_migration):
+    """A miss stays a miss. "We could not check" and "it is not here" look the same
+    to a client holding a stale link, and only one of them is a server error."""
+    client, _conn = pod_without_migration
+    response = client.get("/api/experiments/01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "experiment_not_found"
+
+
+def test_a_known_id_still_loads_from_the_filesystem(pod_without_migration, monkeypatch):
+    client, _conn = pod_without_migration
+    monkeypatch.delenv("PGHOST")
+    existing = ws.create_experiment(
+        title="Still readable", source=repo.new_experiment_source(), draft={}
+    )
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    assert client.get(f"/api/experiments/{existing.id}").status_code == 200
+
+
+def test_create_fails_with_a_typed_503_and_writes_nothing(pod_without_migration, tmp_path):
+    """The WRITE does not degrade, and that asymmetry is the design.
+
+    A read that shows less than everything is a degraded read. A write that
+    quietly lands somewhere temporary is a broken promise — the reader was told on
+    the screen they created this from that their work is kept.
+    """
+    client, _conn = pod_without_migration
+    response = client.post("/api/experiments", json={"title": "Doomed"})
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "experiment_storage_unavailable"
+    workspace = tmp_path / "ws"
+    on_disk = [p.name for p in workspace.iterdir()] if workspace.exists() else []
+    assert on_disk == [], "a create that failed durably still wrote a directory"
+
+
+def test_health_stops_claiming_durability_once_a_read_has_failed(pod_without_migration):
+    """THE DISCLOSURE, and the ordering is asserted because it is the honest limit.
+
+    The FIRST health read says `durable: true`: nothing has been attempted, and
+    `/api/health` is the readiness probe so it may not open a connection to find
+    out. Once a real read has failed, every subsequent health read reports
+    `unavailable` — which is what stops the UI promising durability.
+    """
+    client, _conn = pod_without_migration
+    before = client.get("/api/health").json()["experiment_storage"]
+    assert before["durable"] is True and before["state"] == repo.STORAGE_STATE_DURABLE
+
+    assert client.get("/api/experiments").status_code == 200
+
+    after = client.get("/api/health").json()["experiment_storage"]
+    assert after["durable"] is False
+    assert after["state"] == repo.STORAGE_STATE_UNAVAILABLE
+    # The backend is still `postgres`: the app has NOT fallen back, it keeps
+    # trying, which is what lets it recover. `durable`/`state` carry "is it
+    # working"; `backend` carries "what is selected".
+    assert after["backend"] == "postgres"
+    assert after["configured"] is True
+
+
+def test_a_transient_outage_heals_instead_of_marking_the_pod_broken_forever(
+    app, tmp_path, monkeypatch
+):
+    """Clearing the observation matters as much as setting it.
+
+    Without it, one blip would make `/api/health` report `unavailable` for the life
+    of the process — a false claim in the other direction, and one nothing would
+    ever correct.
+    """
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    broken = _table_missing_connection()
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(broken))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    assert client.get("/api/experiments").status_code == 200
+    assert client.get("/api/health").json()["experiment_storage"]["durable"] is False
+
+    healthy = FakeConnection()
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(healthy))
+    assert client.post("/api/experiments", json={"title": "After recovery"}).status_code == 201
+    storage = client.get("/api/health").json()["experiment_storage"]
+    assert storage["durable"] is True
+    assert storage["state"] == repo.STORAGE_STATE_DURABLE
+
+
+def test_a_refusal_is_never_recorded_as_an_outage():
+    """`NotPersistable` is a permanent property of the RECORD, not of the deployment.
+
+    Recording it as a storage failure would make `/api/health` report the database
+    as unavailable because a tutorial record was correctly refused — sending an
+    operator to look at a database that is working perfectly.
+    """
+    session_record = ws.Experiment(
+        id="01SYNTHTESTEXP000000000000",
+        title="t",
+        created_utc="2026-01-01T00:00:00Z",
+        source={},
+        draft={},
+        generation="g",
+        session_id="a" * 22,
+    )
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(FakeConnection()))
+    with pytest.raises(repo.NotPersistable):
+        store.persist(session_record)
+    assert repo.storage_failure() is None
+    assert repo.storage_status(_env())["state"] == repo.STORAGE_STATE_DURABLE
+
+
+def test_the_storage_error_body_names_no_host_path_user_or_driver_message(
+    pod_without_migration,
+):
+    client, _conn = pod_without_migration
+    text = client.post("/api/experiments", json={"title": "Doomed"}).text
+    for leak in ("db.invalid", "PGHOST", "PGUSER", "PGPASSWORD", "relation does not exist"):
+        assert leak not in text, leak

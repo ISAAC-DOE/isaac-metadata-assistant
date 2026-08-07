@@ -164,6 +164,7 @@ def test_health_commit_null_when_neither_env_set(tmp_path, monkeypatch):
             "configured": False,
             "backend": "filesystem",
             "durable": False,
+            "state": "ephemeral",
         },
     }
 

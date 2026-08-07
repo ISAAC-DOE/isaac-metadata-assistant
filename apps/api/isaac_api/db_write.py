@@ -24,12 +24,49 @@ statement issued through :func:`write_transaction` is checked against
 
 * any statement naming a table that is not in :data:`OWNED_TABLES` — most
   importantly ``records``, which holds the production-derived sample;
-* ``DROP``, ``TRUNCATE``, ``ALTER``, ``GRANT``, ``REVOKE``, ``COPY``,
-  ``CREATE ROLE``/``USER``/``DATABASE``/``EXTENSION`` anywhere at all.
+* ``DROP``, ``TRUNCATE``, ``ALTER``, ``GRANT``, ``REVOKE``, ``COPY``, ``VACUUM``,
+  ``REINDEX``, ``CLUSTER``, and any statement naming ``ROLE``, ``USER``,
+  ``DATABASE``, ``EXTENSION`` or ``AUTHORIZATION`` as a bare token — so
+  ``CREATE ROLE``, ``CREATE USER``, ``CREATE DATABASE``, ``CREATE EXTENSION``,
+  ``SET ROLE``, ``SET SESSION AUTHORIZATION`` and ``DROP OWNED BY`` are all
+  refused, anywhere they appear.
+
+**THIS LIST WAS WRONG UNTIL IT WAS MEASURED, AND THAT IS THE POINT OF THE
+PARAGRAPH BELOW.** It named ``CREATE ROLE``/``USER``/``DATABASE``/``EXTENSION``
+as refused "anywhere at all" while :data:`_FORBIDDEN_KEYWORDS` contained none of
+those four words, so all four were ACCEPTED, as was ``SET ROLE postgres``. A
+docstring in a *safety* module is read as a specification and was reviewed as one;
+it was made true by extending the list rather than by softening the sentence. The
+verbs are enumerated here now instead of summarised, because a summary is what
+drifted.
 
 That is a defence-in-depth guard, not the primary one. The primary one is that
 every statement this module's callers issue is a module-level constant with
 ``%s`` placeholders — no caller-supplied SQL exists anywhere in the write path.
+
+KNOWN, ACCEPTED LIMITS OF THE STATEMENT POLICY
+==============================================
+Recorded rather than fixed, because each fix would cost more than it buys and
+because an undocumented limit is what a future reader mistakes for a guarantee.
+
+* **It is a TOKENIZER, not a SQL parser.** It lowercases, extracts
+  identifier-shaped tokens, and reasons about which token follows which. It does
+  not know about string literals, dollar-quoted bodies or nesting.
+* **Concretely: a forbidden verb assembled at run time inside a ``DO`` block is
+  not seen.** ``DO $$ BEGIN EXECUTE 'TRUNC' || 'ATE rec' || 'ords'; END $$`` is
+  ACCEPTED — no token in it is ``truncate`` or ``records``. This is NOT a
+  reachable attack on this application: the only SQL that ever reaches this policy
+  is a module-level constant or a committed migration file, both of which a human
+  reviews before merge, and neither the route layer nor any request body can
+  contribute a character of it. Contorting the tokenizer to catch a shape that
+  can only arrive through deliberately obfuscated *committed* SQL would trade real
+  clarity for imaginary protection.
+* **What actually stops that class of statement is upstream**: no caller-supplied
+  SQL exists, and :data:`_FORBIDDEN_TABLES` refuses ``records`` by identifier in
+  any position and any syntax, so the plain forms need no grammar to be right.
+* ``db_migrate.split_statements`` REFUSES a migration file containing a
+  dollar-quote outright, which removes the one committed-file route by which such
+  a body could reach here at all.
 
 WHY THE DATABASE NAME IS PINNED FROM A CONSTANT
 ===============================================
@@ -128,6 +165,40 @@ class WriteRefused(RuntimeError):
 #: ``INSERT ... ON CONFLICT ... DO UPDATE``, which is how an experiment's state is
 #: upserted. ``DO $$ ... $$`` anonymous blocks are refused by the fact that this
 #: application never writes one, not by this list.
+#:
+#: ``role``, ``user``, ``database`` AND ``extension`` WERE MISSING, AND THE MODULE
+#: DOCSTRING SAID THEY WERE NOT. It claimed ``CREATE ROLE`` / ``USER`` /
+#: ``DATABASE`` / ``EXTENSION`` were refused "anywhere at all"; measured against the
+#: policy as it stood, all four were ACCEPTED, as was ``SET ROLE postgres``. The
+#: list is what the docstring described, so the list is what was corrected — the
+#: alternative, weakening the docstring to match, would have documented a gap
+#: instead of closing one, and closing it costs four strings.
+#:
+#: ``SET ROLE`` IS INCLUDED DELIBERATELY, on the same reasoning as the others
+#: rather than as an afterthought. It changes the identity a statement executes
+#: as, which is the one thing that could make every other guard in this module
+#: irrelevant — a session that becomes a superuser mid-transaction is no longer
+#: constrained by which tables this application owns. Nothing this application
+#: issues names a role, so the cost of refusing it is zero. ``RESET ROLE`` is
+#: covered by the same ``role`` token.
+#:
+#: ``authorization`` IS ITS OWN ENTRY, and it is here because a test caught the
+#: claim that it was not needed. ``SET SESSION AUTHORIZATION postgres`` tokenizes
+#: to ``set session authorization postgres`` — it contains neither ``role`` nor
+#: ``user``, so an earlier draft of this comment asserting it was "covered by the
+#: same token" was simply wrong. It is the same privilege-switch shape as
+#: ``SET ROLE`` and is refused by name rather than by hope.
+#:
+#: VERIFIED AGAINST WHAT THE APPLICATION ACTUALLY ISSUES, not assumed: all eight
+#: module-level statements and all three committed migration statements still
+#: pass, pinned by
+#: ``test_every_statement_this_application_actually_issues_passes_the_policy``.
+#: The near-misses are worth naming, because they are why this is a token match
+#: and not a substring one: ``current_database`` (in ``Q_CURRENT_DATABASE``) and
+#: ``isaac_schema_migrations`` are each a SINGLE identifier token, so neither
+#: contains ``database`` or ``user`` as far as this filter is concerned. A
+#: substring check would have refused the write path's own database-verification
+#: query.
 _FORBIDDEN_KEYWORDS = (
     "drop",
     "truncate",
@@ -138,6 +209,11 @@ _FORBIDDEN_KEYWORDS = (
     "vacuum",
     "reindex",
     "cluster",
+    "role",
+    "user",
+    "database",
+    "extension",
+    "authorization",
 )
 
 #: Identifier-ish tokens. Used to find table names; deliberately crude, because

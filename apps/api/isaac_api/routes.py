@@ -375,6 +375,39 @@ async def tutorial_scope_error_handler(request, exc: TutorialScopeError) -> JSON
     return JSONResponse(status_code=exc.status_code, content=exc.payload)
 
 
+#: The typed body every durable-storage outage produces, whichever operation hit
+#: it. One shape, one place, because the outage is a property of the deployment
+#: rather than of the operation that happened to notice it.
+STORAGE_UNAVAILABLE_ERROR = "experiment_storage_unavailable"
+
+
+async def storage_unavailable_handler(request, exc) -> JSONResponse:
+    """Render a durable-storage outage as a typed ``503``, never a bare 500.
+
+    WHY 503 AND NOT 500. The request was well formed and the application is
+    working; a dependency this deployment is configured to use did not answer.
+    ``503`` says "try again", which is true — the write path opens a fresh
+    connection every time and recovers by itself — where a 500 says "this is
+    broken", which sends an operator looking in the wrong place.
+
+    WHY NOT DEGRADE TO THE FILESYSTEM INSTEAD. Because the reader has been told,
+    on the screen they created this from, that their work is stored durably. A
+    quiet ephemeral write withdraws that promise without telling them and they
+    find out at the next restart. Failing the write is the honest outcome, and
+    ``GET /api/health`` stops claiming durability from the same moment.
+
+    THE BODY NAMES NO HOST, PATH, USER OR DRIVER MESSAGE — the exception carries
+    a fixed string for that reason (``experiment_repository.StorageUnavailable``).
+    """
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": STORAGE_UNAVAILABLE_ERROR,
+            "message": str(exc),
+        },
+    )
+
+
 def tutorial_scope(
     x_isaac_tutorial_session: Annotated[
         str | None,
@@ -705,10 +738,20 @@ def _build_commit() -> str | None:
         "configuration alone: this operation never opens a database connection, "
         "issues a query, or waits on one, so a database problem can never change "
         "its result and can never fail a container probe.\n\n"
+        # THIS PARAGRAPH USED TO END "That is derived from configuration alone as
+        # well, so it says how this deployment is set up, never that a database is
+        # reachable right now." It was true of the code as first written and it was
+        # the sentence that made the defect invisible: a pod whose experiments
+        # table did not exist reported `durable: true` while every read and write
+        # against it failed. `experiment_storage` now also reports an observation,
+        # so the disclaimer is corrected rather than kept as a comforting one.
         "It states, in `experiment_storage`, whether an experiment created here is "
-        "stored durably or only for as long as this server runs. That is derived "
-        "from configuration alone as well, so it says how this deployment is set "
-        "up, never that a database is reachable right now."
+        "stored durably, stored only for as long as this server runs, or not being "
+        "stored at all because a database this deployment is configured to use is "
+        "not answering. The first two are read from configuration. The third is an "
+        "observation, recorded when a real read or write against that database "
+        "failed — so this operation still opens no connection of its own, and it "
+        "reports what has already happened rather than testing anything now."
     ),
     response_description="The liveness banner.",
 )
@@ -1537,7 +1580,12 @@ class CreateExperimentRequest(BaseModel):
         "either.\n\n"
         "Whether the new experiment is stored durably depends on this deployment. "
         "`GET /api/health` reports which, in `experiment_storage`, and the reader "
-        "is told the same thing before they create anything."
+        "is told the same thing before they create anything.\n\n"
+        "Where this deployment stores experiments in a database and that database "
+        "does not accept the write, the request fails with `503` and nothing is "
+        "created. It is never quietly written somewhere temporary instead: you "
+        "have been told your work is kept, and a create that could not keep it "
+        "says so rather than looking like it succeeded."
     ),
     response_description="The created experiment's detail bundle, with its `ETag`.",
     responses={
@@ -1548,6 +1596,14 @@ class CreateExperimentRequest(BaseModel):
                 "The request carried a worked-example session header. This "
                 "operation acts only on the ordinary workspace. Nothing was "
                 "created."
+            )
+        },
+        503: {
+            "description": (
+                "This deployment stores experiments in its own database, and that "
+                "database did not accept the write. Nothing was created, and "
+                "nothing was written to the server's workspace directory either. "
+                "The response names no host, path or credential."
             )
         },
     },

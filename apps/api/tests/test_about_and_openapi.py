@@ -480,7 +480,13 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # of `/api/demo/run`'s `tutorial_scope_required`: this operation refuses when a
     # worked-example session header IS present, because a session is discarded on a
     # timer and a record a person created must not inherit that.
-    ("/api/experiments", "post"): ["201", "401", "404", "409", "422"],
+    # `503` is the durable-storage outage: this deployment stores experiments in
+    # its own database and that database did not take the write. It is documented
+    # rather than left as an undeclared failure because it is REACHABLE on the
+    # deployed pod — `PGHOST` is set there and the migration is applied by an
+    # operator, so there is a window in which the table does not exist yet. The
+    # create fails; it is never quietly degraded to an ephemeral write.
+    ("/api/experiments", "post"): ["201", "401", "404", "409", "422", "503"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422"],
     ("/api/experiments/{experiment_id}/answers", "post"): [
         "200", "400", "401", "404", "412", "422", "428",

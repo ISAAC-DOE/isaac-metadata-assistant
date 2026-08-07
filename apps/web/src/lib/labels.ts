@@ -525,6 +525,28 @@ export const LABELS = {
   storageEphemeral:
     'Experiments you create live in this server’s workspace and are cleared when the server ' +
     'restarts.',
+  /*
+   * THE THIRD SENTENCE, AND IT IS NOT A REASSURING ONE ON PURPOSE.
+   *
+   * `unavailable` means a database IS configured for this deployment and
+   * experiments are not going into it. The temptation is to soften that into
+   * "storage is being set up" or to drop it and render nothing. Both would be
+   * worse than saying it: the reader is about to press a button that will fail,
+   * and the honest thing is to tell them before they press it rather than after.
+   *
+   * IT DESCRIBES THE CONSEQUENCE ACCURATELY, which took some care. Creating does
+   * not silently produce a temporary record — `POST /api/experiments` returns 503
+   * and writes nothing at all — so "may be lost" would be wrong in the direction
+   * that matters. "Will not work until it does" is what actually happens.
+   *
+   * The two sentences above deliberately never mention this state, and the note
+   * on `unknown` above still holds for `unknown` — that one renders nothing,
+   * because there the app has established NOTHING. Here it has established
+   * something bad, which is a different thing from knowing nothing.
+   */
+  storageUnavailable:
+    'This deployment saves experiments in its own database, and that database is not ' +
+    'answering. Creating an experiment will not work until it does.',
 
   actionLaunchGuidedDemo: 'Launch Guided Demo',
   launchGuidedDemoBody:

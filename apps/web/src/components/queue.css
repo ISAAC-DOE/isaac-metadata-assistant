@@ -400,10 +400,22 @@
   min-height: 44px;
 }
 
+/*
+ * `--text-secondary`, NOT `--text-tertiary` — the SAME fix `.queue-empty-storage`
+ * carries one rule above, reintroduced here and then caught in review.
+ * `--text-tertiary` (#78838f) on `--surface` is 3.86:1, below the 4.5:1 WCAG AA
+ * threshold for text this size.
+ *
+ * WHY axe DID NOT CATCH IT, which is the part worth remembering: the create form
+ * is collapsed by default, so this element is not in the DOM when the accessibility
+ * scan runs. An automated scan can only see rendered nodes, so "axe is green" says
+ * nothing about a surface behind a disclosure. The rule to carry forward is that
+ * the token choice is decided at authoring time, not delegated to the scan.
+ */
 .create-experiment-hint {
   font-size: 12px;
   line-height: 1.5;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 /* The failure token on text and border only, never a solid fill: the same

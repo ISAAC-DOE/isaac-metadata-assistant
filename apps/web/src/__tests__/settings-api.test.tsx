@@ -1058,8 +1058,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 42 operations, 67 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(42);
+  it('describes the contract it claims to: 40 operations, 61 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(40);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1198,23 +1198,69 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // DESCRIBED, not named, because `apps/api/tests/test_about_and_openapi.py`
     // scans the whole generated document for the substring "password" with no
     // exception list, and spelling the variable out fails it.
-    expect(total).toBe(32174);
-    // 54 -> 56: the `mode` disclosure on GET /api/runtime/verification is two
-    // new paragraphs -- the two-corpus list, and the sentence saying an unknown
-    // mode is refused rather than silently served the other corpus.
-    // MERGE OF THE CREATE-EXPERIMENT BRANCH WITH THE PRIVATE-MODE WIRING.
-    // Neither side's numbers were correct for the merged file and neither was
-    // copied: this branch had 40 ops / 26,797 / 58, `origin/main` had 39 /
-    // 27,188 / 56, and the merged contract measures 42 / 32,174 / 67. All three
-    // were COMPUTED by running this assertion and transcribing what it reported,
-    // after every entry was re-transcribed from `create_app().openapi()`.
-    // Two independently-correct numbers combining into a wrong one is the exact
-    // failure this file's history keeps recording.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(67);
+    //
+    // 27,188 -> "32,174" -> 29,052, and 39 -> "42" -> 40 operations. READ THE
+    // MIDDLE NUMBER AS A DEFECT, NOT AS A STEP. It is the only entry in this log
+    // that records a measurement of something that was never true.
+    //
+    // WHAT HAPPENED. `origin/main` and the create-experiment branch each added
+    // operations to `REAL_CONTRACT_DESCRIPTIONS`. The merge was resolved by
+    // KEEPING BOTH SIDES, which left `GET /api/runtime/verification` and
+    // `GET /api/health` in the array TWICE each — 42 entries describing 40
+    // operations. The three numbers here were then RAISED TO MATCH the broken
+    // array: 42 / 32,174 / 67 were each produced by running this assertion and
+    // transcribing what it reported, which is the correct procedure applied to an
+    // input nobody had checked. The comment that shipped alongside them claimed
+    // every entry had been re-transcribed from `create_app().openapi()`. It had
+    // not. Two whole descriptions were counted twice.
+    //
+    // WHY NOTHING CAUGHT IT, which is the part worth carrying forward. Both
+    // directions of `apps/api/tests/test_contract_description_parity.py` are blind
+    // to a duplicate: one iterates the entries and looks each up in the spec (a
+    // duplicate matches, twice, happily), the other compares SETS. And "I measured
+    // it" felt like verification while it was only transcription — measuring a
+    // corrupt input reproduces the corruption with a fresh-looking number beside
+    // it. The `contains each operation exactly once` test below is the missing
+    // control, and it is one line.
+    //
+    // 29,052 / 61 is the corrected measurement, after deleting the two duplicate
+    // rows and re-transcribing all 40 entries from `create_app().openapi()` with
+    // `json.dumps(..., ensure_ascii=False)`. It was cross-checked independently in
+    // Python (sum of `len(description)` = 29,174 raw, minus 2 per `\n\n`
+    // separator = 29,052) rather than only by re-running the assertion that had
+    // just been wrong.
+    //
+    // It also includes two deliberate contract edits made in the same pass:
+    // `GET /api/health`'s third paragraph was CORRECTED (it claimed
+    // `experiment_storage` was "derived from configuration alone", which is what
+    // let a pod report `durable: true` while every write against it failed), and
+    // `POST /api/experiments` gained a paragraph documenting its `503`.
+    expect(total).toBe(29052);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(61);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);
     }
+  });
+
+  /*
+   * THE ASSERTION THAT WOULD HAVE STOPPED ALL OF THE ABOVE, and it is one line.
+   *
+   * Neither parity direction in `test_contract_description_parity.py` can see a
+   * duplicate: one iterates the entries and looks each up in the spec (a duplicate
+   * matches happily, twice), and the other compares SETS. So a duplicated row is
+   * invisible to every existing guard, is counted twice by the totals above, and
+   * makes those totals look freshly measured while describing a contract that does
+   * not exist.
+   */
+  it('contains each operation exactly once', () => {
+    const seen = new Map<string, number>();
+    for (const d of REAL_CONTRACT_DESCRIPTIONS) {
+      seen.set(d.op, (seen.get(d.op) ?? 0) + 1);
+    }
+    const duplicated = [...seen].filter(([, n]) => n > 1).map(([op, n]) => `${op} x${n}`);
+    expect(duplicated, 'REAL_CONTRACT_DESCRIPTIONS has duplicate entries').toEqual([]);
+    expect(seen.size).toBe(REAL_CONTRACT_DESCRIPTIONS.length);
   });
 
   /** All paragraphs after the lead, whether they render inline or collapsed. */

@@ -66,6 +66,7 @@ import functools
 import pytest
 from fastapi.testclient import TestClient
 
+from isaac_api import experiment_repository as _repo
 from isaac_api import memory
 from isaac_api import workspace as _ws
 from isaac_api.routes import TUTORIAL_SESSION_HEADER
@@ -77,6 +78,25 @@ def _neutralize_packaged_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(memory, "_default_reader", None)
     monkeypatch.setattr(memory, "_default_choice", None)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _clear_storage_observation():
+    """No test may inherit another's durable-storage outage.
+
+    ``experiment_repository`` records the last durable-storage failure in a MODULE
+    GLOBAL, deliberately — it is how ``/api/health`` reports a database problem
+    without opening a connection. A module global is also process state that
+    survives a test, so a case that simulates an outage would otherwise leave
+    ``storage_status`` reporting ``durable: false`` for every case that ran after
+    it, and the resulting failure would name an innocent test.
+
+    Cleared BEFORE and AFTER: before, so a test's starting state is stated rather
+    than inherited; after, so a failing test cannot poison the rest of the run.
+    """
+    _repo.forget_storage_failure()
+    yield
+    _repo.forget_storage_failure()
 
 
 def tutorial_client(app, **kwargs) -> TestClient:

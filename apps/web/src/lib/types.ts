@@ -1188,25 +1188,47 @@ export interface ApiHealthDatabase {
  * them in a workspace directory, and on the pod that directory is an `emptyDir`
  * that a restart empties.
  *
- * DERIVED FROM CONFIGURATION ALONE, exactly like the sibling `database` block:
- * the handler opens no connection. So `durable: true` means "this deployment is
- * set up to store experiments durably", NEVER "the database answered just now".
+ * THE HANDLER OPENS NO CONNECTION — same discipline as the sibling `database`
+ * block, because `/api/health` is the container readiness probe and a database
+ * problem must never be able to fail it.
  *
- * `configured` and `durable` are separate on purpose. `configured: true,
- * durable: false` is a real and reachable state — a database is wired up but its
- * name does not match what the write path requires, so the app degrades to the
- * workspace directory. Reporting that as one boolean would hide a
- * misconfiguration behind a sentence promising durability.
+ * IT IS NOT "DERIVED FROM CONFIGURATION ALONE", AND THIS COMMENT USED TO SAY IT
+ * WAS. That was true of the first implementation and it is exactly what made the
+ * defect invisible: the deployed pod has `PGHOST` and `PGDATABASE` set, so the
+ * durable backend selected itself, while the migration had not been applied — the
+ * table did not exist, every read and write against it failed, and this block
+ * went on reporting `durable: true`. The block now also carries an OBSERVATION
+ * recorded when a real read or write failed. It still probes nothing; it reports
+ * what has already happened.
+ *
+ * `state` is the field to branch on. `durable` is kept, and kept consistent with
+ * it, so a client reading only the boolean is never left on the optimistic
+ * branch — but three states cannot be reconstructed from two booleans without a
+ * truth table at every call site, and truth tables reconstructed at call sites
+ * eventually disagree.
  *
  * Optional here because a build predating this block, and a health body the
  * client failed to fetch, simply have none. Absent is read as "unknown", and the
  * UI then claims NEITHER durability nor ephemerality — see `ExperimentsHome`.
+ * `state` is separately optional from the block, because a deployment running the
+ * first version of this block has `configured`/`durable` and no `state`.
  */
 export interface ApiHealthExperimentStorage {
   configured: boolean;
-  /** "postgres" | "filesystem" — an implementation name, never rendered verbatim. */
+  /** "postgres" | "filesystem" — an implementation name, never rendered verbatim.
+   *  It reports what is SELECTED, not whether it is working: a pod whose database
+   *  has stopped answering still has the postgres backend selected, because it
+   *  keeps trying, which is what lets it recover. */
   backend: string;
   durable: boolean;
+  /**
+   * "ephemeral" (no database configured) | "durable" | "unavailable" (a database
+   * IS configured and experiments are not going into it — the name was refused,
+   * or it stopped answering). Widened to `string` so an unrecognised future value
+   * is a type-level possibility rather than a surprise; `ExperimentsHome` treats
+   * anything it does not recognise as unknown and says nothing.
+   */
+  state?: string;
 }
 
 export interface ApiHealth {

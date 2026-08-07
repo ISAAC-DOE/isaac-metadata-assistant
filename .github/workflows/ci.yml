@@ -69,7 +69,10 @@ jobs:
           assert selected.backend == repo.BACKEND_FILESYSTEM, selected.backend
           assert selected.durable is False
           assert repo.storage_status() == {
-              "configured": False, "backend": "filesystem", "durable": False
+              "configured": False,
+              "backend": "filesystem",
+              "durable": False,
+              "state": repo.STORAGE_STATE_EPHEMERAL,
           }, repo.storage_status()
           print("no database configured: filesystem repository selected, durability NOT claimed")
           PY
@@ -203,6 +206,120 @@ jobs:
           echo "records digest before: $(cat /tmp/records-before.txt)"
           cat /tmp/tables-before.txt
 
+      # ==================================================================
+      # THE STATE THE DEPLOYED POD IS ACTUALLY IN, and the one this whole job
+      # previously skipped over: a database is CONFIGURED and the migration is
+      # NOT YET APPLIED.
+      #
+      # It is not a hypothetical. `docs/postgres-test-db-guide.md` states that
+      # `PGHOST` is already set in the deployed pod, and `PGDATABASE` there is
+      # exactly `db_write.EXPECTED_DATABASE` — so the durable backend selects
+      # itself on the next image roll, while the migration is deliberately applied
+      # by an operator and not at boot. Every statement against `isaac_experiments`
+      # therefore raises.
+      #
+      # WHAT THAT USED TO DO, measured before the fix: `GET /api/experiments` → 500
+      # (My Experiments, the product's primary screen, rendered "Backend Not
+      # Running"), `GET /api/experiments/<id>` → 500 where it had returned a clean
+      # 404, and `POST /api/experiments` → 500 — while `/api/health` went on
+      # reporting `durable: true` and the UI went on promising durability. The same
+      # three 500s would have returned on any transient outage, permanently, on a
+      # read path that had no database dependency at all before this feature.
+      #
+      # THIS STEP RUNS FIRST, DELIBERATELY. Every step below it applies the
+      # migration, so this is the only point in the job at which the un-migrated
+      # state exists. Putting it here is what makes the omission impossible to
+      # repeat: the job cannot reach "apply" without having proven the state before
+      # it degrades rather than crashes.
+      - name: Prove the app DEGRADES when the migration has not been applied yet
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-unmigrated
+        run: |
+          set -euo pipefail
+          # The table must genuinely not exist, or this step proves nothing.
+          count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_experiments'")
+          [ "$count" = "0" ] || { echo "::error::isaac_experiments already exists; this step must run BEFORE the migration"; exit 1; }
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "apps/api")
+          from fastapi.testclient import TestClient
+          import isaac_api.experiment_repository as repo
+          import isaac_api.workspace as ws
+          from isaac_api.app import create_app
+
+          client = TestClient(create_app(), raise_server_exceptions=False)
+
+          # The durable backend really is selected — otherwise this step would be
+          # asserting the filesystem fallback all over again and would pass for the
+          # wrong reason.
+          assert repo.repository().backend == repo.BACKEND_POSTGRES, repo.repository().backend
+
+          # A record an earlier pod (which had no database) left on disk. The list
+          # must still show it: "degraded" means the filesystem VIEW, not an empty
+          # one, and an empty list would pass a weaker version of this assertion for
+          # entirely the wrong reason.
+          #
+          # The state file is placed DIRECTLY rather than through
+          # `ws.create_experiment`, because that helper writes through the durable
+          # store — which is the very thing that fails here.
+          import json, pathlib
+          rid = "01CIUNMIGRATEDFIXTURE00000"
+          state = {
+              "id": rid,
+              "title": "Written before the roll",
+              "created_utc": "2026-01-01T00:00:00Z",
+              "source": repo.new_experiment_source(),
+              "draft": {},
+              "generation": "ci",
+          }
+          d = pathlib.Path(ws.workspace_root()) / rid
+          d.mkdir(parents=True, exist_ok=True)
+          (d / "experiment.json").write_text(json.dumps(state, indent=2) + "\n")
+
+          # 1. THE LIST DEGRADES. 200, with the filesystem view — never 500.
+          listed = client.get("/api/experiments")
+          assert listed.status_code == 200, (listed.status_code, listed.text[:400])
+          ids = [row["id"] for row in listed.json()["experiments"]]
+          assert ids == [rid], ids
+
+          # 2. A MISS STAYS A 404. It was a clean 404 before durable storage existed
+          #    and it must not have become a server error.
+          missing = client.get("/api/experiments/01ARZ3NDEKTSV4RRFFQ69G5FAV")
+          assert missing.status_code == 404, (missing.status_code, missing.text[:400])
+
+          # 3. A KNOWN ID STILL LOADS, from the filesystem.
+          assert client.get(f"/api/experiments/{rid}").status_code == 200
+
+          # 4. THE WRITE FAILS LOUDLY AND TYPED — 503, not 500, and not a silent
+          #    ephemeral write. The reader was told their work is durable; a create
+          #    that could not keep it must say so rather than look like it worked.
+          created = client.post("/api/experiments", json={"title": "CI unmigrated"})
+          assert created.status_code == 503, (created.status_code, created.text[:400])
+          assert created.json()["error"] == "experiment_storage_unavailable", created.text
+          for leak in ("127.0.0.1", "PGHOST", "PGPASSWORD", "throwaway-ci-password"):
+              assert leak not in created.text, leak
+
+          # 5. THE DURABILITY CLAIM IS GONE. This is what stops the UI promising
+          #    durability on a deployment where creating cannot work.
+          storage = client.get("/api/health").json()["experiment_storage"]
+          assert storage["durable"] is False, storage
+          assert storage["state"] == repo.STORAGE_STATE_UNAVAILABLE, storage
+          assert storage["configured"] is True, storage
+          # `backend` still reports what is SELECTED. The app has not fallen back;
+          # it keeps trying, which is what lets it recover once the operator applies
+          # the migration.
+          assert storage["backend"] == repo.BACKEND_POSTGRES, storage
+
+          # 6. AND NOTHING WAS WRITTEN. The failed create left no directory behind.
+          assert sorted(p.name for p in pathlib.Path(ws.workspace_root()).iterdir()) == [rid]
+          print("un-migrated database: reads degrade, the write fails typed, durability is NOT claimed")
+          PY
+
+      # The un-migrated fixture workspace is thrown away so no later step can read
+      # a record that only existed to prove the degraded path.
+      - name: Discard the un-migrated fixture workspace
+        run: rm -rf /tmp/isaac-pg-unmigrated
+
       - name: Plan the migration without applying it
         run: |
           set -euo pipefail
@@ -282,7 +399,12 @@ jobs:
           client = TestClient(app)
 
           status = client.get("/api/health").json()["experiment_storage"]
-          assert status == {"configured": True, "backend": "postgres", "durable": True}, status
+          assert status == {
+              "configured": True,
+              "backend": "postgres",
+              "durable": True,
+              "state": repo.STORAGE_STATE_DURABLE,
+          }, status
 
           created = client.post("/api/experiments", json={"title": "CI durable"})
           assert created.status_code == 201, created.text
