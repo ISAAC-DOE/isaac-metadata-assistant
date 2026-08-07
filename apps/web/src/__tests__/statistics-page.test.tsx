@@ -1949,11 +1949,16 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
     ]);
   });
 
-  it('adds NO request to the page — the five reads are unchanged by its presence', async () => {
+  it('adds NO request to the page — the mount reads are unchanged by its presence', async () => {
     const { calls } = renderStatistics(statisticsRoutes());
     await settled();
 
-    expect([...calls].sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
+    // The five tracked reads plus Record Verification's, and nothing else. The
+    // verification read belongs to a different section; it is listed here so the
+    // set stays EXACT rather than being relaxed to a subset check.
+    expect([...calls].sort()).toEqual(
+      [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY].sort(),
+    );
     expect(calls.filter((c) => /portal|metrics|platform/i.test(c))).toEqual([]);
   });
 
