@@ -242,6 +242,15 @@ a:hover {
   flex: none;
 }
 .dot-ready { background: var(--pass-solid); }
+/* WORKFLOW PROGRESS, never a verdict. `--pass-solid` (#2f8557) is declared under
+ * "signal 1 — validation verdict (RESERVED, hard gate)" in styles/tokens.css, and
+ * `.dot-ready` above paints it — so a workflow dot that used `.dot-ready` claimed a
+ * PASS. This variant borrows neither reserved verdict token; it uses the same calm
+ * action blue as `.wf-progress-banner--ready` and `.nav-item.active`, which is the
+ * treatment WorkflowProgressBanner already documents for "this step is the next
+ * one" (see components/workflow-progress-banner.css). The StatusBar phase dot is
+ * typed so that it CANNOT be `ready` (components/StatusBar.tsx). */
+.dot-progress { background: var(--action); }
 .dot-attention { background: var(--advisory-solid); }
 .dot-blocked { background: var(--fail-solid); }
 .dot-processing { background: var(--processing); animation: dot-pulse 1.6s ease-in-out infinite; }

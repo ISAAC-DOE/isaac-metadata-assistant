@@ -199,6 +199,145 @@ export function toAdvisoryResult(w: ApiWarningsResponse): AdvisoryResult {
   return { advisory: true, gating: false, warnings: w.warnings };
 }
 
+/**
+ * The advisory code the backend emits when a record carries no measured series —
+ * `src/isaac_records/portal_warnings.py::_no_measurement_series`. Declared ONCE
+ * here because two surfaces that show the coverage figure key on it, and a second
+ * copy of the literal is a second thing to forget when the code is renamed.
+ * `apps/api/tests/test_coverage_denominator_disclosure.py` pins this file against
+ * the code the Python check actually emits, so a rename on either side fails.
+ */
+export const NO_MEASUREMENT_SERIES_CODE = 'NO_MEASUREMENT_SERIES';
+
+/**
+ * WHY THE COVERAGE FIGURE NEEDS THIS, stated where the predicate lives.
+ *
+ * `isaac_records.audit` enumerates the coverage DENOMINATOR from the record's own
+ * content — one block target per series present, so a record whose
+ * `measurement.series` is `[]` contributes NO series target at all. Measured on the
+ * canonical worked example: 33 / 33 expected targets with its series, 32 / 32 with
+ * the series emptied. Both read as full coverage. So the number alone cannot
+ * distinguish "everything is evidenced" from "there is less to evidence", and a
+ * record holding no measured data can reach a reader as 100 % complete.
+ *
+ * The sentence states only what is observable from the record and from the
+ * enumeration rule. It deliberately does NOT say the record is invalid,
+ * incomplete, or not applicable: `measurement.series` has no `minItems` in the
+ * vendored schema, so `[]` validates with zero errors, and which of those four
+ * meanings an empty series has is a scientific decision for a domain owner. It is
+ * not made here, and nothing here gates on it.
+ *
+ * Position-neutral on purpose: the badge renders it under the figure, the
+ * StatusBar footer puts it beside the figure, and the Assistant appends it to a
+ * sentence — so it must not say "above".
+ *
+ * WHAT THE SENTENCE UNDERSTATES, measured, and why it is not broadened.
+ * `NO_MEASUREMENT_SERIES` fires on TWO record shapes, and the denominator loses a
+ * different amount in each. Measured on `qa/validator-upload-package/
+ * complete-valid-record.json` via `_scalar_targets` + `_block_targets`:
+ *
+ *     unmodified                    → 35 targets
+ *     `measurement.series` == []    → 34  (removed: series:merged_normalized_spectrum)
+ *     `measurement` deleted         → 31  (also removed: qc:status, and the two
+ *                                          scalars measurement.processing
+ *                                          .recipe_link.{rel,target})
+ *
+ * The advisory code is IDENTICAL for both shapes, so this module cannot tell them
+ * apart, and the sentence therefore names only the loss both shapes share — the
+ * series target. On the second shape it is true but incomplete. It is deliberately
+ * not broadened: asserting a dropped QC target would be FALSE on the far more
+ * common `series: []` shape, where `qc:status` is still counted. The general
+ * caveat that covers the remainder is the badge's second static line ("A full
+ * count means every target this record has is evidenced — not that any particular
+ * target exists"), which is unconditional and true of both. Closing the gap
+ * properly needs a shape-distinguishing signal the backend does not emit today.
+ */
+export const NO_SERIES_COVERAGE_NOTE =
+  'This record carries no measurement series, so no series target is counted.';
+
+/**
+ * The same disclosure, shortened for the StatusBar footer — DERIVED from the
+ * sentence above, never a second literal.
+ *
+ * `.statusbar` is a fixed 52px single-line flex row (`components/chrome.css`) with
+ * no wrap: three signal segments plus a right tail already fill it, and dropping a
+ * 74-character sentence in squeezes the other two segments rather than adding a
+ * line. So the footer shows ONE clause and carries the whole sentence in an
+ * `.sr-only` span and a `title`, so nothing is only available to a hovering mouse.
+ *
+ * WHICH CLAUSE, AND WHY IT CHANGED (F6). This was the CONSEQUENCE clause, "no
+ * series target is counted", on the reasoning that it is the half that qualifies
+ * the number. Read alone — which is exactly how it renders, immediately after
+ * `evidence 32/32 · Coverage` — it has no antecedent, so it reads as "the coverage
+ * metric does not count series": a claim about the METRIC, and the opposite of
+ * `CoverageBadge`'s "Counted from what this record contains: … series …". Both
+ * strings render simultaneously on Export Readiness, so an ambiguity that inverts
+ * one of them is not survivable. The footer therefore shows the OBSERVATION clause,
+ * which carries its own subject and cannot be read as a statement about the metric.
+ * It is 41 characters against the consequence's 27 and the full sentence's 74 — the
+ * reason for shortening at all is the fixed row, and this is still 33 characters
+ * shorter than the sentence. That trade-off is a visual judgement, and no test in
+ * this repo measures it: the seeded records all carry a series, so no e2e surface
+ * renders this segment at any viewport.
+ *
+ * The split is on the sentence's own `, so ` hinge and FAILS SAFE: if a future
+ * edit removes that hinge, this falls back to the full sentence (visually long in
+ * the footer, still true) rather than to a truncated or empty string.
+ * `apps/api/tests/test_coverage_denominator_disclosure.py` pins that both halves
+ * of the sentence survive the derivation, and that the half shown here keeps a
+ * subject.
+ */
+export const NO_SERIES_COVERAGE_NOTE_SHORT = ((): string => {
+  const hinge = ', so ';
+  const i = NO_SERIES_COVERAGE_NOTE.indexOf(hinge);
+  if (i < 0) return NO_SERIES_COVERAGE_NOTE;
+  return NO_SERIES_COVERAGE_NOTE.slice(0, i);
+})();
+
+/**
+ * The verdict words the coverage disclosure may not contain — ONE list, imported
+ * by every guard that checks the sentence.
+ *
+ * It existed in three hand-maintained copies (this repo's Python guard plus two
+ * vitest files) and had already drifted: `error` was in the Python list and in
+ * neither TypeScript one. That is the same defect the shared sentence constant
+ * exists to prevent, one level up, so the list is shared the same way. The Python
+ * guard reads this array out of this file rather than restating it; see
+ * `_forbidden_verdict_words` in
+ * `apps/api/tests/test_coverage_denominator_disclosure.py`.
+ *
+ * `missing` and `needs` are here because they were absent from all three copies
+ * while carrying a normative implication — "the measurement series is missing"
+ * passes a list built only of verdict nouns, and *missing* is one of the four
+ * candidate meanings (invalid / incomplete / not applicable / deliberately empty)
+ * that belong to a domain owner.
+ *
+ * WHAT THIS LIST CANNOT DO. It is a blacklist over one sentence, so it cannot
+ * establish that the sentence classifies nothing — only that it uses none of
+ * these words. A novel classifying phrasing ("no usable spectrum was recorded",
+ * "this record has nothing to evidence") passes every entry. A human reviewer
+ * remains the backstop; the tests that use it are named for the mechanism, not
+ * for the universal.
+ */
+export const VERDICT_WORDS_FORBIDDEN_IN_DISCLOSURE = [
+  'invalid',
+  'incomplete',
+  'not applicable',
+  'failed',
+  'compromised',
+  'suspicious',
+  'should',
+  'must',
+  'error',
+  'missing',
+  'needs',
+] as const;
+
+/** True when the advisory reports that this record carries no measured series. */
+export function carriesNoMeasurementSeries(advisory: AdvisoryResult): boolean {
+  return advisory.warnings.some((w) => w.code === NO_MEASUREMENT_SERIES_CODE);
+}
+
 // --- S4 completion blockers ---------------------------------------------
 // The /pending items (id / kind / question / about / demo_answer) become the
 // render blockers. Asset blockers take a pasted sha256; series/descriptor carry
