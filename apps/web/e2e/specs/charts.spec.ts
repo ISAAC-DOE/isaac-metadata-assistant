@@ -666,10 +666,36 @@ test.describe('@responsive Statistics charts (worked example)', () => {
 
     const figures = page.locator('figure.stats-chart');
     const count = await figures.count();
-    // Workflow bars · the evidence stack · operations by method · operations by
-    // group. A count is asserted so a chart silently disappearing reads as a
-    // failure rather than as a vacuous pass over zero figures.
-    expect(count, 'the populated page draws four charts').toBe(4);
+
+    /*
+     * THE SET OF CHARTS, NOT THE NUMBER OF THEM.
+     *
+     * This used to assert `count === 4`. A count cannot tell "one chart was
+     * removed and another added" from "nothing changed", and it says nothing
+     * about WHICH figures the loop below then walks — so a renamed or replaced
+     * chart would keep passing. The captions are compared as a sorted set
+     * instead, which pins identity and cardinality at once.
+     *
+     * The workflow caption carries the record count, so digits are masked: this
+     * spec is about which charts exist, and the figures themselves are pinned by
+     * `statistics-page.test.tsx` against a fixture it states by hand.
+     */
+    const captions = await figures.locator('figcaption').allInnerTexts();
+    expect(captions.map((c) => c.trim().replace(/\d+/g, '<n>')).sort()).toEqual(
+      [
+        'Records by current workflow step, out of <n> counted',
+        'Share of classified fields by evidence-support class',
+        "Fields by top-level section, in the schema's own declaration order",
+        'Documented operations by HTTP method',
+        "Documented operations by group, in the contract's own tag order",
+      ].sort(),
+    );
+    /* EVERY FIGURE HAS EXACTLY ONE CAPTION — which is the property this comparison
+       actually holds. "Every caption belongs to a figure" was trivially true given
+       the locator chain above: `figures.locator('figcaption')` can only ever return
+       captions that are already inside a `figure.stats-chart`. What the equality
+       rules out is a figure with none and a figure with two. */
+    expect(count, 'every figure must have exactly one caption').toBe(captions.length);
 
     for (let i = 0; i < count; i++) {
       const figure = figures.nth(i);

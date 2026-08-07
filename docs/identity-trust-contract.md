@@ -17,40 +17,89 @@ observed runtime evidence; the vendored ISAAC v1.05 schema; tests.
 
 ## 1. What the application actually receives
 
-### 1.1 Identity headers in this repository: confined to two documentation files
+### 1.1 Identity headers in this repository: a permitted file set, now including five frontend files
 
 **The invariant is a PERMITTED SET, not zero.** This document names these headers, and so does
 `CLAUDE.md` §11 where it records the observation, so a tree-wide `0 matches` check would fire on the
 very documents written to reason about the boundary.
 
-> **Identity-forwarding header names appear in exactly two files, both documentation, and no
-> application code path consumes any of them.** `X-Forwarded-For` and `X-Forwarded-Proto` are absent
-> from code, config, tests and fixtures — the only occurrences tree-wide are the two in this sentence.
+> **Identity-forwarding header names appear only in files this section lists, and no application code
+> path consumes any of them.** `X-Forwarded-For` and `X-Forwarded-Proto` are absent from code, config,
+> tests and fixtures — the only occurrences tree-wide are the two in this sentence.
 > *(It previously claimed "zero matches … in code, config, **docs**, tests or fixtures", which its own
 > text falsified. Left visible: it is the trap this section names forty lines below — a document
 > discussing the guard is itself a match.)*
+
+**The heading and the invariant sentence used to say "exactly two files, both documentation". That was
+false, and correction 4 below records when it stopped being true — it is not being silently
+replaced.** Measured now:
 
 ```
 $ rg --hidden -g '!.git' -g '!node_modules' -g '!.venv' -g '!.claude/worktrees' \
     -i "x-forwarded|x-auth-request|remote-user|remote-groups|x-real-ip|x-authentik|x-isaac-edge" \
     --files-with-matches
-CLAUDE.md                                # §11, which records the observation
-docs/identity-trust-contract.md          # this file, which discusses the names
+CLAUDE.md                                    # §11, which records the observation
+docs/identity-trust-contract.md              # this file, which discusses the names
+docs/dean-slack-draft-2026-08-03.md          # a question to Dean about the observation
+docs/portal-identity-and-metrics-audit.md    # the audit that reasons about the boundary
+apps/web/src/lib/myStatsContract.ts          # prose only: why no personal figure exists
+apps/web/src/lib/currentUserContract.ts      # a FROZEN OBSERVATION TABLE — see below
+apps/web/src/__tests__/my-stats.test.tsx     # the guard that scans the two modules above
+apps/web/src/__tests__/current-user-contract.test.ts   # the guard over that table
+apps/web/src/test/adapterFixtures.ts         # a test-only subject naming its origin header
 ```
 
-**What the signal is.** A **third** file, and above all a match inside `apps/api/isaac_api/` or
-`apps/web/src/`, means someone has started *consuming* a claim — which §8 forbids until Q4 and Q6 are
-answered, and which §6A.2 forbids permanently for two of the seven regardless of how Q4 and Q6 come
-out. Note that neither permitted file is code: `routes.py` contains no identity header name at all, and
-did not even while the probe existed, because the candidate tuple lived in the probe module.
+**Which of those were already there, and which this slice added.** Two of the five `apps/web/src`
+files predate the available-metrics/adapters slice: at `main` (`547276b`) the set was six files, and
+`apps/web/src/lib/myStatsContract.ts` and `apps/web/src/__tests__/my-stats.test.tsx` were already among
+them — pre-existing debt from the statistics-shell slice, and the invariant sentence was already false
+when this slice began. The adapters slice added three: `lib/currentUserContract.ts`,
+`__tests__/current-user-contract.test.ts` and `test/adapterFixtures.ts`. The count is stated as a
+before/after file set rather than a total, for the reason recorded further down.
+
+**What those five frontend files do with the names — and it is the case this section exists to flag.**
+`lib/currentUserContract.ts` is the first module in this repository whose *subject* is identity, which
+is exactly the shape §1.1 was written to catch, so it is stated explicitly rather than waved past:
+
+- The seven names appear as `const` **string literals** in `IDENTITY_CANDIDATE_HEADERS` and in the
+  frozen `HEADER_OBSERVATION_6A` record. That is code, not prose — a fair reading of the original
+  invariant, which said "both documentation", is that this violates it.
+- **Nothing reads a header by them.** There is no request object, no `Headers`, no `document.cookie`,
+  no `fetch`, and no function in the module takes a header collection as an argument. The tuple is a
+  transcription of §6A's table, kept beside the type it constrains so the disqualified pair can be
+  *derived* from the observation rather than hand-listed twice.
+- The tuple is **not an allowlist**, and the module says so at its declaration. Being nameable there is
+  not permission to read the header, and `UsableIdentityClaimHeader` makes the two §6A.2-disqualified
+  names untypeable as a subject source at compile time.
+- `test/adapterFixtures.ts` names `x-authentik-username` as one fixture subject's `observedFrom`. It is
+  test-only, and `__tests__/adapter-fixture-isolation.test.ts` asserts no production module imports it.
+- The two `__tests__` files are the guards themselves, but they guard DIFFERENT surfaces and only one
+  of them scans source. `my-stats.test.tsx` reads three modules as `?raw` and fails on a header read, a
+  transport, an API-client call, a cookie or browser storage. `current-user-contract.test.ts` reads no
+  source at all; its guard is a runtime one over `disabledCurrentUserSource.get()`. §1.4 states this
+  precisely — and an earlier revision of THIS bullet said both files scan, 54 lines above the
+  correction and first in reading order, which is the inversion §1.4's own wording exists to prevent.
+
+**So the invariant is now two claims, and only the second one is still absolute.** "Confined to
+documentation" is **spent** — it was false at `main` and this slice moved it further. "No application
+code path consumes any of them" holds, is the claim that actually matters, and is the one now backed by
+automated scans in the two test files above (§1.1's guard as a whole remains manual — see below).
+
+**What the signal is.** A file *outside the list above*, and above all a match inside
+`apps/api/isaac_api/`, means someone has started *consuming* a claim — which §8 forbids until Q4 and Q6
+are answered, and which §6A.2 forbids permanently for two of the seven regardless of how Q4 and Q6 come
+out. `apps/api/isaac_api/` is still at **zero**: `routes.py` contains no identity header name at all,
+and did not even while the probe existed, because the candidate tuple lived in the probe module.
 
 This is a **stronger** guard than the original `0 matches`, not a weaker one. `0 matches` could only
-say "nobody mentions these"; the permitted set says "only the documents that reason about them mention
-them, and nothing consumes them".
+say "nobody mentions these"; the permitted set says "only the files that reason about them mention
+them, and nothing consumes them". What it has lost since it was written is the ability to say "and none
+of those files is code".
 
-**Three corrections are recorded here rather than silently applied**, because this section's whole job
-is accuracy and it has now failed at it repeatedly — twice on the invariant itself (corrections 1 and
-2; correction 3 is a gap in the pattern rather than a false statement), and three times on the count:
+**Four corrections are recorded here rather than silently applied**, because this section's whole job
+is accuracy and it has now failed at it repeatedly — three times on the invariant itself (corrections
+1, 2 and 4; correction 3 is a gap in the pattern rather than a false statement), and three times on the
+count:
 
 1. **The original sentence** — *"No identity-forwarding header name appears anywhere — not in code,
    config, docs, tests, or fixtures"* — became false when the probe landed and was left standing three
@@ -62,14 +111,52 @@ is accuracy and it has now failed at it repeatedly — twice on the invariant it
    §6A.2 establishes that `X-Isaac-Edge` is the header **any client can set freely**, which makes
    "read `X-Isaac-Edge` to check the request came through the edge" the single most tempting misuse in
    the set — and exactly the one the guard could not see.
+4. **The two-file form** (`CLAUDE.md` and this file, "both documentation") was **already false at
+   `main` (`547276b`)**, where the set was six files and two of them — `apps/web/src/lib/myStatsContract.ts`
+   and `apps/web/src/__tests__/my-stats.test.tsx` — sat inside `apps/web/src/`, the directory this
+   section names as the strongest signal. It went unnoticed through the statistics-shell slice that
+   introduced them, and this section was left unamended by the available-metrics/adapters slice that
+   added three more, including the first module whose subject is identity. **The guard is manual by
+   design, which means this document IS the guard**; leaving it stale did not merely mis-describe the
+   tree, it disabled the check. Two lessons, both recorded rather than assumed learned: a slice that
+   adds a header name must amend this section in the same commit, and "the header names are only in
+   documentation" is no longer a claim this repository can make.
 
 **The match COUNT is deliberately not recorded, and that is a fix rather than an omission.** It was
 stated three times in two days — 61, then 24, then 33 — and was wrong within hours each time, because
 *this document discussing the guard is itself a match*, so every edit explaining the guard invalidates
 the guard's own number. **Compare the file list, never a total.**
 
-**Nothing enforces any of this automatically** — no test, no CI job, and none for the dead-link risk in
+**Nothing enforces the FILE SET automatically** — no test, no CI job, and none for the dead-link risk in
 this document either. It is a manual check, and saying so beats implying a tripwire that does not exist.
+Correction 4 is what a stale manual guard costs.
+
+**One narrower thing IS enforced, and the distinction matters — but the two guards cover DIFFERENT
+surfaces, and the first version of this paragraph read as though both scanned source text.** Corrected:
+
+- **The source scan lives solely in `apps/web/src/__tests__/my-stats.test.tsx`** (trap 6,
+  `:1024-1139`). It imports `screens/statistics/MyStats.tsx`, `lib/myStatsContract.ts` and
+  `lib/currentUserContract.ts` as `?raw` and fails on a header access, a `fetch`, an API-client call,
+  another transport, a cookie or browser storage. So *consumption inside those three modules* is a
+  tripwire, whether or not the code ever runs.
+
+  **Comment stripping applies to ONE of those scans, not all of them,** and an earlier revision of this
+  bullet said "strips comments first" as though it covered the list. Measured: the stripper is built at
+  `:1098` and only the cookie/browser-storage assertion (`:1109`) reads the stripped text; the header,
+  `fetch`, API-client and transport scans all run against the unstripped module, and the test says why
+  in line ("None of the THREE modules contains the substring `api.` in prose (checked …), so this
+  needs no stripping"). The direction is conservative — an unstripped scan can only over-report — so this is a
+  description defect, not a hole. The stripper has its own two guards against returning `''` or
+  returning the text unchanged.
+- **`apps/web/src/__tests__/current-user-contract.test.ts` reads no source at all.**
+  `grep -n "?raw" apps/web/src/__tests__/current-user-contract.test.ts` returns nothing. Its guard is
+  a RUNTIME one over `disabledCurrentUserSource.get()`: an own `document.cookie` accessor spy — itself
+  proved to fire, so "never read" means something — plus `localStorage`/`sessionStorage` `getItem`
+  spies and a stubbed `fetch`, all asserted not called. It catches a live read on the one code path
+  this build executes, and would not see a dead one the source scan catches.
+
+Both bite; neither substitutes for the other. And both cover only the modules that name the headers
+today — not a fourth file appearing tomorrow, which is what the manual file-set check is for.
 
 ### 1.2 Every request header the backend reads — four, none of them identity
 
@@ -358,17 +445,24 @@ review (2026-06-30)**"*. The rules:
 - **Client-supplied `contributors[]` and ORCID confer no rights**, with a named regression test
   `test_orcid_in_body_confers_no_rights` (`tests/test_record_authz.py`).
 
-**Two upstream gaps to inherit deliberately or not at all**, stated because adopting the pattern
-without them would be adopting a weaker system than it looks:
+**Two requirements ISAAC must satisfy if it adopts this pattern.** Both are stated as obligations on
+ISAAC, deliberately and not as a stylistic preference: this repository is public, and a requirement
+on ourselves carries the whole engineering lesson without describing what any other team's live
+system does or does not do.
 
-1. **ACL grantees are never verified to exist in Authentik.** A grant is a string write. A typo, a
-   departed user, or a username that was never real all persist silently as a grant row.
-2. **The header-trust boundary fails open and is untested.** `portal/ontology.py`'s `trusted_identity`
-   *"fail[s]-open with a warning"* when `EDGE_AUTH_SECRET` is unset — its own comment says the gate is
-   *"INACTIVE (EDGE_AUTH_SECRET unset, fail-open)"* — and it carries **zero tests**. This is the same
-   boundary §2 of this document identifies as the hard part, and upstream has not closed it either.
-   A locked, adversarially-reviewed *decision layer* sitting on an unproven *trust layer* is exactly
-   the shape §2 warns about.
+1. **ISAAC must verify that a grantee exists in the identity provider before writing a grant row,
+   and must never treat the existence of a grant row as evidence that its grantee exists.** A grant
+   is otherwise just a string write: a typo, a departed user, or a name that was never real would
+   all persist indefinitely and read exactly like a valid grant. Whatever ISAAC keys grants on, that
+   value must be resolved against the identity provider at write time, and the failure to resolve
+   must refuse the write rather than record it hopefully.
+2. **The decision layer is separable from the trust layer, and only the decision layer may be
+   adopted.** An authorization rule set answers *"given a caller, what may they do"*; it says
+   nothing about *"is this really the caller"*. That second question is the boundary §2 of this
+   document identifies as the hard part, and it is the one ISAAC must answer on its **own**
+   evidence — never by importing a trust mechanism from another team's system, whose operating
+   conditions this project cannot observe, test, or fix. So: adopt the decision pattern, and **do
+   not** adopt any foreign trust mechanism.
 
 ### 5.3 Authentik's groups are coarse deployment-access groups, not collaboration groups
 

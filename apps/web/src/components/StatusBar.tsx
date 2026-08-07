@@ -1,6 +1,11 @@
 import './chrome.css';
 import type { ReactNode } from 'react';
 import { StatusChip } from './StatusChip';
+import {
+  NO_SERIES_COVERAGE_NOTE,
+  NO_SERIES_COVERAGE_NOTE_SHORT,
+  carriesNoMeasurementSeries,
+} from '../lib/adapt';
 import { LABELS } from '../lib/labels';
 import { RUNTIME_BADGE } from '../lib/runtimeContext';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
@@ -8,7 +13,18 @@ import type { AdvisoryResult, AuditResult, ValidationResult } from '../lib/types
 
 interface StatusBarProps {
   phase?: string; // left dot + note, e.g. "Draft assembled · 5 fields to confirm"
-  phaseDot?: 'attention' | 'ready' | 'idle';
+  /**
+   * The tone of the phase disc. `'ready'` IS ABSENT ON PURPOSE and this is the
+   * whole point of the union: `.dot-ready` is painted `var(--pass-solid)`
+   * (`styles/base.css`), a token declared under "signal 1 — validation verdict
+   * (RESERVED, hard gate)" in `styles/tokens.css`. The phase describes WORKFLOW
+   * PROGRESS, which is not a verdict, so it must not be able to reach that hue —
+   * `RecordWorkbench` rendered `phaseDot="ready"` beside "review export readiness"
+   * on a record whose official dry-run was failing (F2). `'progress'` is the calm
+   * action-blue equivalent; the reserved pass/fail discs are still available to the
+   * VERDICT segments, which get them from `StatusChip`, not from here.
+   */
+  phaseDot?: 'attention' | 'progress' | 'idle';
   // The three signals, each pending or resolved — shown distinct, never merged.
   validation?: ValidationResult | 'pending';
   coverage?: AuditResult | 'pending';
@@ -90,6 +106,75 @@ export function StatusBar({
               evidence {coverage.resolved}/{coverage.total}
             </span>
             {eyebrow(LABELS.signalCoverage)}
+            {/* THE THIRD COVERAGE SURFACE, and the one with nothing beside it.
+                `isaac_records.audit` builds the denominator FROM THE RECORD, so a
+                record whose `measurement.series` is `[]` contributes no series
+                target and the figure still reads full (measured on
+                `qa/validator-upload-package/complete-valid-record.json`: 35 targets
+                → 34; and on the canonical seed exported both ways, 33/33 → 32/32).
+                `CoverageBadge` and `AdvisoryChip` disclose that on Export
+                Readiness; this footer also mounts on the Review screen
+                (`RecordWorkbench`), where NEITHER of them renders — so post-export
+                it read `evidence 32/32 Coverage · 2 advisory · non-gating` with the
+                advisory MESSAGES nowhere on the screen. Nothing new is fetched:
+                `advisory` is already a required-shaped prop above and is already
+                read by the advisory segment below.
+
+                WHAT THIS FOOTER DISCLOSES IS ONLY THE SERIES CASE — the
+                RECORD-SPECIFIC half of `CoverageBadge`'s disclosure — and it is
+                missing the badge's UNCONDITIONAL half (F9). The badge carries two
+                always-on lines: "Counted from what this record contains: fields,
+                assets, descriptors, series, QC, links, and attribution." and "A
+                full count means every target this record has is evidenced — not
+                that any particular target exists." `portal_warnings` emits only
+                NO_LINKS, QC_NONVALID_WITHOUT_EVIDENCE and NO_MEASUREMENT_SERIES,
+                (measured: those are the only three `code=` literals in
+                `src/isaac_records/portal_warnings.py`), so a record with zero assets
+                and zero descriptors still reads `evidence N/N · Coverage` HERE with
+                nothing beside it — the same defect shape, for the target kinds no
+                advisory covers. Not fixed
+                here rather than fixed quietly: `.statusbar` is a fixed 52px
+                single-line row (`chrome.css`) holding three signal segments plus a
+                right tail, and an unconditional scope line would have to render on
+                every record surface at every viewport, including the 320px and
+                200%-zoom layout baselines. Closing it means a disclosure the
+                FOOTER's geometry can carry (an accessible affordance on the figure
+                itself, not more inline prose) and re-measuring those baselines; it
+                is deliberately outside this slice. Until then this segment is a
+                disclosure of ONE case, not of the denominator in general.
+
+                "SAME RECORD" IS NOT ALWAYS "SAME DOCUMENT", AND HERE THAT IS
+                REACHABLE (F7). `CoverageBadge` records the same hazard and calls it
+                unreachable at the badge, because the badge renders only behind
+                `realValidation.verdict === 'pass'` (`ExportReadiness.tsx`), which
+                needs a readable artifact. This footer has NO such gate on either of
+                its mounts. `routes.py::_warnings_payload` degrades to the in-memory
+                export CANDIDATE when a record is marked exported but its artifact
+                cannot be read, while `audit` counts the artifact on disk — and
+                `audit_records` returns `(0, 0, [], [])` for an artifact whose JSON
+                does not parse (`src/isaac_records/audit.py`). So an exported record
+                with a corrupt artifact prints `evidence 0/0` from the artifact
+                beside a disclosure derived from the draft candidate: two documents,
+                one line. `adapt.ts::toAdvisoryResult` drops the payload's `dry_run`
+                flag, so this component cannot detect it — the fix is to carry
+                `dry_run` through and refuse to disclose from a candidate while
+                counting an artifact, which is a wire-shape change and is not in
+                this slice. Recorded as reachable, not as unreachable. */}
+            {advisoryResolved && carriesNoMeasurementSeries(advisory) && (
+              <span className="statusbar-cover-scope" title={NO_SERIES_COVERAGE_NOTE}>
+                {/* The visible half is the observation clause (F6), DERIVED from the
+                    one shared sentence (see `lib/adapt.ts`) — `.statusbar` is a fixed
+                    52px single-line row and the full sentence squeezes the other
+                    segments. The whole sentence is still in the DOM, unhidden from
+                    assistive tech, so it is not hover-only. `aria-hidden` on the
+                    short form keeps a screen reader from hearing the clause twice;
+                    if this segment's own `aria-label` wins instead (ARIA prohibits
+                    `aria-label` on a generic role, so browsers vary), the outcome is
+                    exactly what it is today — no regression either way. */}
+                <span aria-hidden="true">{NO_SERIES_COVERAGE_NOTE_SHORT}</span>
+                <span className="sr-only">{NO_SERIES_COVERAGE_NOTE}</span>
+              </span>
+            )}
           </>
         ) : (
           <>

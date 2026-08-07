@@ -201,8 +201,19 @@ describe('S4 · Guided Completion (live)', () => {
     expect(answerPosts()).toHaveLength(0); // staged, still not submitted
 
     fireEvent.click(confirm);
-    // 0 remaining -> the finished state routes forward to S6
-    expect(await findByText('This record is ready to export.')).toBeInTheDocument();
+    // 0 remaining -> the finished state routes forward to S6.
+    //
+    // F4: this used to pin 'This record is ready to export.', which was FALSE from
+    // this basis — `POST /export` returns `ok: false` and writes nothing when the
+    // official report fails, whatever the pending count is. The assertion now pins
+    // the claim the empty pending list actually supports, and the negative below
+    // pins that the panel makes no readiness claim at all. The forward BUTTON keeps
+    // "Ready to Export" because that is the destination screen's name, not a claim
+    // about this record — which is why the negative is scoped to the panel.
+    expect(await findByText('Nothing is left for you to confirm.')).toBeInTheDocument();
+    const donePanel = document.querySelector('.completion-done') as HTMLElement;
+    expect(donePanel).not.toBeNull();
+    expect(donePanel.textContent).not.toMatch(/is ready to export/i);
     expect(getByText('Go to Ready to Export →')).toBeInTheDocument();
     // non-zero total (1 question, now answered): the real counter still renders
     expect(getByText('1 / 1')).toBeInTheDocument();
@@ -221,7 +232,10 @@ describe('S4 · Guided Completion (live)', () => {
     expect(await findByText('All Fields Resolved')).toBeInTheDocument();
     expect(getByText('No open questions.')).toBeInTheDocument();
     expect(queryByText('0 / 0')).toBeNull();
-    expect(getByText('This record is ready to export.')).toBeInTheDocument();
+    // F4 — see the sibling assertion above: the panel states what pending == 0
+    // establishes, and claims no export readiness.
+    expect(getByText('Nothing is left for you to confirm.')).toBeInTheDocument();
+    expect(queryByText('This record is ready to export.')).toBeNull();
     // the sidebar spine's "Complete" step must not repeat the same dishonest
     // zero-count in its meta line either
     expect(queryByText('0 of 0 answered')).toBeNull();
@@ -710,9 +724,12 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // verdict (the on-mount auto-reply was removed).
     fireEvent.click(panel.getByText('Is coverage the same as valid?').closest('button')!);
     expect(
+      // "targets", not "fields": the audit denominator counts one target per
+      // series / asset / descriptor / link / contributor plus `qc:status`, so it was
+      // never a field count. Same live numbers, same never-a-verdict property.
       await panel.findByText(
-        'Coverage is 33/33 evidenced fields. It describes how many expected fields carry ' +
-          'evidence; the schema check is separate.',
+        'Coverage is 33/33 evidenced targets. It describes how many of the targets this ' +
+          'record contains carry evidence; the schema check is separate.',
       ),
     ).toBeInTheDocument();
     expect(panel.getByText('Source: Evidence Audit')).toBeInTheDocument();

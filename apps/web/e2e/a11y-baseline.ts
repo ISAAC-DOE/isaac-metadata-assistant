@@ -319,7 +319,49 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // merges two text nodes that darwin keeps apart — the same mechanism the
       // notes below describe for other split pairs. Both numbers are measurements,
       // neither is derived.
-      'export-readiness-done@desktop-1280x800': { darwin: 13, linux: 12 },
+      //
+      // COVERAGE-DISCLOSURE SLICE: the pair COLLAPSES to a scalar 13, because linux
+      // rose 12 -> 13 (CI run 30984206413 on `e02ac14`) and darwin did not move.
+      // Both halves are measured, and the darwin half was measured SPECIFICALLY to
+      // answer whether this slice introduced a new low-contrast node — it did not.
+      // The full failing-node SET was dumped on darwin at this width on both
+      // `main` (61247ec) and this branch, and the two lists are IDENTICAL, in the
+      // same order: .record-file, kbd, .verdict-hint, .coverage-note, .coverage-cmd,
+      // .advisory-nongating, .ready-note, the two .artifact-sub, .artifact-pathcount,
+      // .artifact-hint, .assistant-note, .statusbar-right. NONE of the three
+      // elements this slice adds (.coverage-sub, .coverage-sub-scope,
+      // .statusbar-cover-scope) appears — consistent with their computed colours,
+      // RE-MEASURED per (foreground, background) pair rather than per token, because
+      // the earlier version of this note said --text-secondary #46515f is "above 8:1"
+      // full stop, and 8.07:1 is its ratio on PURE WHITE (--surface) only. It is not
+      // the background either of these elements has:
+      //   #46515f on --surface-subtle #fbfcfd = 7.86:1  <- .statusbar-cover-scope
+      //     (chrome.css: .statusbar { background: var(--surface-subtle) })
+      //   #46515f on --cover-bg      #eef2f6 = 7.17:1
+      //   #46515f on --surface       #ffffff = 8.07:1   <- not used by either
+      //   #5b6b7d on --cover-bg      #eef2f6 = 4.86:1  <- .coverage-sub /
+      //     .coverage-sub-scope, both inside .coverage (signals.css: background
+      //     var(--cover-bg)); --text-slate and --cover-text are both #5b6b7d
+      // Computed with the WCAG 2.x formulae directly — per-channel sRGB linearisation
+      // (c/12.92 below 0.03928, else ((c+0.055)/1.055)^2.4), luminance
+      // 0.2126R+0.7152G+0.0722B, ratio (L_light+0.05)/(L_dark+0.05) — not read off a
+      // tool and not copied from another comment. Unrounded: 7.8553, 7.1724, 8.0687,
+      // 4.8561. All four clear the 4.5:1 AA requirement at these sizes, which is what
+      // this note is for; the smallest margin is the coverage card's 4.86:1, so a
+      // darker --cover-bg or a lighter --cover-text would move that pair first.
+      // (styles/statistics.css records "#46515f (8.07:1 / 7.86:1)" — the same two
+      // numbers, for the same two backgrounds; 4.85:1 elsewhere in the repo is 4.8561
+      // truncated rather than rounded.)
+      //
+      // So the +1 on linux is a PRE-EXISTING failing node being counted twice
+      // instead of once: CoverageBadge's denominator explanation went from one
+      // short line to two longer ones, the `.coverage` card grew, and on the wider
+      // linux face a text run that used to merge now splits. That is the same
+      // mechanism the paragraph above documents for this exact key — and the
+      // interesting part is that linux has now converged ON darwin's number, which
+      // is what you would expect if the merge that produced 12 stopped happening.
+      // Only the LINUX total moves; darwin's stays.
+      'export-readiness-done@desktop-1280x800': 13,
       'export-readiness-done@laptop-1024x768': 12,
       // The two pairs where LINUX HAS FEWER nodes: the wider face pushes two
       // fragments onto one line, so axe sees one text node instead of two.
@@ -911,6 +953,7 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // they already were; if CI disagrees, transcribe ITS numbers and correct the
   // total — never loosen the assertion.
   //
+<<<<<<< HEAD
   // no-guessing slice: LINUX ONLY rises by 1, 1703 -> 1704. This slice adds
   // `.guided-inferability` (the paragraph stating why the app is asking rather
   // than answering), which fails `color-contrast` on Linux but NOT on darwin --
@@ -921,6 +964,22 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // -g "Guided Completion"` passes against 11) rather than assumed, because the
   // note above records that assuming a DOM change affects both platforms equally
   // has already been wrong once here.
+=======
+  // ── COVERAGE-DISCLOSURE SLICE: linux 1703 -> 1704, darwin UNCHANGED ─────────
+  //
+  // One key moves, `export-readiness-done@desktop-1280x800`, and only on linux
+  // (12 -> 13, CI run 30984206413 on `e02ac14`). Darwin measured 13 there before
+  // and after this slice, so the pair collapses to the scalar 13 — see that key's
+  // note for the measured failing-node SET, which is identical on `main` and this
+  // branch and contains none of the three elements the slice adds.
+  //
+  // NEITHER number here is arithmetic. Both were computed by importing this module
+  // and summing `platformCount` over every entry: darwin 1703 (matches), linux 1704.
+  // That check is also what the suite itself performs per platform, so a stale
+  // constant fails in all five projects — which is exactly how the previous
+  // linux-column edit was caught, and why the entry and this constant are one
+  // atomic change. Darwin is NOT raised to match; nothing measured darwin at 14.
+>>>>>>> origin/main
   darwin: 1703,
   linux: 1704,
 };

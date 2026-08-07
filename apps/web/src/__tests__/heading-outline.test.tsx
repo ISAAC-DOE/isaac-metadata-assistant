@@ -125,14 +125,21 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
    * only screen whose outline goes THREE levels deep, which is precisely the shape
    * a skip or a backwards step hides in.
    *
-   * THE EXPECTED OUTLINE CHANGED WITH THE TAB RESTRUCTURE, and the reason is
-   * worth writing down because it is the interesting part. Its General ISAAC tab
-   * is now h1 → four h2 sections (Workspace at a Glance · Workflow Distribution ·
-   * Evidence and Validation, which nests `Evidence Support` and `Export Gate` as
-   * h3 · This Application Collects No Analytics) → a fifth h2 `Technical Details`
-   * which nests THREE h3 sections (Runtime · Project Memory · API Surface).
+   * THE EXPECTED OUTLINE CHANGED WITH THE TAB RESTRUCTURE, and again when the
+   * available-metrics slice added three sections. The reason is worth writing
+   * down because it is the interesting part. Its General ISAAC tab is now
+   * h1 → six h2 sections:
    *
-   * The three trailing h3s are inside a `<details>` that is CLOSED by default, and
+   *   Workspace at a Glance · Workflow Distribution · Open Questions ·
+   *   Evidence and Validation (nesting `Evidence Support` and `Export Gate` as
+   *   h3) · Platform Metrics (nesting one h3 per planned view — SIX of them,
+   *   the same plan-card shape My Stats uses) · This Application Collects No
+   *   Analytics
+   *
+   * …followed by a seventh h2 `Technical Details`, which nests FOUR h3 sections
+   * (Runtime · Record Schema · Project Memory · API Surface).
+   *
+   * The four trailing h3s are inside a `<details>` that is CLOSED by default, and
    * they are counted here on purpose: `querySelectorAll` sees the whole DOM, so
    * this asserts the outline is well-formed in BOTH states of the disclosure.
    * (`e2e/specs/structure.spec.ts` filters by computed style and therefore checks
@@ -142,11 +149,32 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
   it('Statistics · General ISAAC (every section loaded, Technical Details closed)', async () => {
     stubFetchRoutes(statisticsRoutes());
     const view = renderAt('/statistics');
-    // Settles /api/about, which is the last of the four reads to paint.
+    // Settles /api/about, which is the last of the five reads to paint.
     await view.findByText('Synthetic-Only');
 
     const found = levels(view.container);
-    expect(found).toEqual([1, 2, 2, 2, 3, 3, 2, 2, 3, 3, 3]);
+    expect(found).toEqual([
+      1,
+      2 /* Workspace at a Glance */,
+      2 /* Workflow Distribution */,
+      2 /* Open Questions */,
+      2 /* Evidence and Validation */,
+      3,
+      3,
+      2 /* Platform Metrics */,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      2 /* This Application Collects No Analytics */,
+      2 /* Technical Details */,
+      3,
+      3,
+      3,
+      3,
+    ]);
     assertMonotonic(found, 'Statistics page · General ISAAC');
   });
 
