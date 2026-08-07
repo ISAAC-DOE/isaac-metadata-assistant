@@ -13,13 +13,24 @@ read-only reading of published source. No authenticated request was made against
 cookie or credential was handled, and no identity value, record content, or network address appears
 here.
 
-**Operational detail about that third-party system is not recorded in this repository** — how it is
-built, configured, or guarded; which components, settings, guards, data stores, endpoints or metric
-breakdowns it has; which request headers it consumes; and which source was read. That application is
-operated by another team; it is not ours to deploy, change, or fix, and this repository is public.
-**Where an observation concerns a system this project does not own, it is raised with that system's
-owners directly and is not written down here** — not in this file, not in another file, and not in a
-PR title, issue, or commit message.
+**The audit's findings about weaknesses in that third-party system are not recorded here.** That
+application is operated by another team; it is not ours to deploy, change, or fix, and this
+repository is public — so where an observation would describe a missing, absent, or degradable
+control in a system this project does not own, it is raised with that system's owners directly
+rather than written down.
+
+**Read that as the narrow claim it is, because a broader one would be false.** This file is not a
+repository-wide guarantee. Other documents in this repository — `identity-trust-contract.md` §5 and
+the planning documents under `docs/superpowers/plans/` among them — do describe that system's
+*design*: tables it has, routes it exposes, rules it enforces, defaults it applies. Those are
+**positive** properties, several of them published by their own owners in this repository, and
+describing a control that exists is not the same act as publishing one that is missing. The line
+drawn here is between the two, not between "mentioned" and "unmentioned".
+
+An earlier revision of this section claimed the broader form — that no operational detail about that
+system appears *anywhere in this repository*. That was false when written, and it is recorded rather
+than quietly narrowed, because a withholding notice a reader can falsify is worse than none: it
+tells a future session there is nothing to look for.
 
 What this file does keep is the set of conclusions that bind **ISAAC's own** engineering: the rules
 a future session must not silently reverse, and the open questions ISAAC still needs answered.

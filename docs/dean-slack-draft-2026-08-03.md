@@ -4,11 +4,16 @@
 Krish to send, edit, or discard. The ISAAC-binding conclusions behind these questions:
 [`portal-identity-and-metrics-audit.md`](portal-identity-and-metrics-audit.md).
 
-**One further item is tracked privately and is not recorded in this repository.** Krish holds it and
-raises it with Dean directly; it is deliberately absent from this file, and must not be added to it,
-to another file, or to a PR title, issue, or commit message. That describes this file as it now
-stands — see [`portal-identity-and-metrics-audit.md`](portal-identity-and-metrics-audit.md) §5 on why
-a later commit cannot unpublish an earlier one.
+**One further item is tracked privately.** Krish holds it and raises it with Dean directly. It is
+absent from this file and from the rest of the current working tree, and must not be added back —
+not here, not in another file, and not in a PR title, issue, or commit message.
+
+**That is a claim about the current tree, and deliberately not about the repository's history.** An
+earlier commit on the branch that removed this item describes in its message what was removed, and
+commit messages are part of this repository. So the honest statement is that the item is gone from
+what the tree now says, not that it was never here — see
+[`portal-identity-and-metrics-audit.md`](portal-identity-and-metrics-audit.md) §5 on why a later
+commit cannot unpublish an earlier one.
 
 ---
 
