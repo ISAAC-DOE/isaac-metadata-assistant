@@ -1494,6 +1494,18 @@ def get_draft(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Re
 # --- 6. pending ---------------------------------------------------------------
 
 
+def _example_scope(experiment_id: str) -> bool:
+    """Whether this record may be shown the committed walkthrough example answers.
+
+    True for the five canonical seed ids and nothing else. This is the check that
+    makes the endpoint description's "for the built-in examples only" a fact rather
+    than an aspiration — see the long note in ``serialize._demo_answer_for`` for
+    what it used to be. Reading ``ws.CANONICAL_IDS`` directly keeps ONE definition
+    of "canonical", the same one reset and removal already enforce.
+    """
+    return experiment_id in ws.CANONICAL_IDS
+
+
 @router.get(
     "/experiments/{experiment_id}/pending",
     tags=[TAG_DRAFTS],
@@ -1513,7 +1525,9 @@ def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: 
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
-    return serialize.pending_to_list(exp.draft, ws.load_demo_answers())
+    return serialize.pending_to_list(
+        exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+    )
 
 
 # --- 7. answers ---------------------------------------------------------------
@@ -1643,7 +1657,9 @@ def post_answers(
             pre_steps=pre_steps,
             post_exp=exp,
         )
-        result = serialize.pending_to_list(exp.draft, ws.load_demo_answers())
+        result = serialize.pending_to_list(
+            exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+        )
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
         result["workflow"] = _workflow_for(exp)
@@ -1769,7 +1785,9 @@ def post_edit(
             pre_steps=pre_steps,
             post_exp=exp,
         )
-        result = serialize.pending_to_list(exp.draft, ws.load_demo_answers())
+        result = serialize.pending_to_list(
+            exp.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+        )
         result["status"] = exp.status()
         result.update(vc.version_fields(exp))
         result["workflow"] = _workflow_for(exp)
@@ -3623,6 +3641,9 @@ def post_assistant_query(
     reader = memory.get_default_reader()
     ctx = assistant_query.AssistantContext(
         record_summary=_summary(exp),
+        # The assistant reads only the queue's LENGTH and labels, never an answer
+        # value, so the example channel is withheld outright here (the fail-closed
+        # default). An assistant that cannot see an example answer cannot echo one.
         pending=serialize.pending_to_list(exp.draft, ws.load_demo_answers()),
         evidence_trail=serialize.evidence_trail_from_draft(exp.draft),
         workflow=_workflow_for(exp),

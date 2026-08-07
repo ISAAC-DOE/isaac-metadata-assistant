@@ -43,6 +43,22 @@ _META = {
 _ELEMENT_RE = re.compile(r"[A-Z][a-z]?")
 
 
+def non_oxygen_elements(formula) -> tuple[str, ...]:
+    """The distinct non-oxygen element symbols in ``formula``, first-appearance order.
+
+    The tokenizing half of the absorbing-element rule, exposed so a caller can tell
+    the rule's three outcomes apart. ``_absorbing_element`` collapses "several
+    candidates" and "no candidates" into the same ``None``, which is right for a
+    builder that must not guess either way, but wrong for a caller that wants to say
+    *ambiguous* in one case and *not inferable* in the other. Splitting it here keeps
+    ONE tokenizer, so the two readings can never drift.
+    """
+    if not isinstance(formula, str) or not formula:
+        return ()
+    non_oxygen = [tok for tok in _ELEMENT_RE.findall(formula) if tok != "O"]
+    return tuple(dict.fromkeys(non_oxygen))
+
+
 def _absorbing_element(formula):
     """The sole non-oxygen element in ``formula`` (e.g. ``"CuO2" -> "Cu"``).
 
@@ -50,10 +66,7 @@ def _absorbing_element(formula):
     only when exactly one non-oxygen element remains; otherwise ``None`` (ambiguous
     or unparseable → no guess).
     """
-    if not isinstance(formula, str) or not formula:
-        return None
-    non_oxygen = [tok for tok in _ELEMENT_RE.findall(formula) if tok != "O"]
-    unique = list(dict.fromkeys(non_oxygen))
+    unique = non_oxygen_elements(formula)
     return unique[0] if len(unique) == 1 else None
 
 
@@ -265,4 +278,4 @@ def build_draft(structured_path, listing_path) -> dict:
     return draft
 
 
-__all__ = ["build_draft"]
+__all__ = ["build_draft", "non_oxygen_elements"]

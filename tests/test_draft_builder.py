@@ -176,3 +176,33 @@ def test_qc_blocker_when_sheet_lacks_qc(tmp_path):
     qc_blocks = [p for p in draft["pending"] if p.get("kind") == "qc"]
     assert len(qc_blocks) == 1
     assert "QC verdict" in qc_blocks[0]["question"]
+
+
+# --- the absorbing-element rule, split so a caller can tell its outcomes apart --
+#
+# `_absorbing_element` collapses "several candidates" and "no candidates" into the
+# same `None`, which is correct for a builder that must not guess either way. A
+# caller that wants to say *ambiguous* in one case and *not inferable* in the other
+# needs the candidate list, so the tokenizing half is now public. These tests pin
+# that the split is a REFACTOR: one tokenizer, two readings, no drift.
+
+
+def test_non_oxygen_elements_reports_the_candidates_in_order():
+    from isaac_records.extract.draft_builder import non_oxygen_elements
+
+    assert non_oxygen_elements("CuO2") == ("Cu",)
+    assert non_oxygen_elements("CuFeO2") == ("Cu", "Fe")
+    assert non_oxygen_elements("Fe2O3") == ("Fe",)   # repeats collapse
+    assert non_oxygen_elements("O2") == ()           # oxygen only
+    assert non_oxygen_elements("???") == ()          # unparseable
+    assert non_oxygen_elements("") == ()
+    assert non_oxygen_elements(None) == ()
+
+
+def test_absorbing_element_still_derives_from_the_same_tokenizer():
+    from isaac_records.extract.draft_builder import _absorbing_element, non_oxygen_elements
+
+    for formula in ("CuO2", "CuFeO2", "Fe2O3", "O2", "???", "", None):
+        candidates = non_oxygen_elements(formula)
+        expected = candidates[0] if len(candidates) == 1 else None
+        assert _absorbing_element(formula) == expected
