@@ -1,5 +1,14 @@
 # dependencies
 node_modules/
+# ...and `node_modules` WITHOUT the trailing slash, which is not redundant.
+# A trailing slash matches DIRECTORIES ONLY. A *symlink* named `node_modules`
+# is not a directory, so it slipped past the rule above and was staged by a
+# `git add -A` during a conflict resolution -- committing a self-referential
+# symlink (`apps/web/node_modules` -> its own absolute path) to `main`, where
+# it broke `npx` locally for anyone who cloned it. The root `.gitignore`
+# carries a comment about the same class of accident. Both spellings, so
+# neither shape can be staged again.
+node_modules
 
 # build output
 dist/

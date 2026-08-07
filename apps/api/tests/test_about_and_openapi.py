@@ -517,7 +517,12 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/runtime/database/recon", "get"): ["200", "401", "409"],
     ("/api/schema", "get"): ["200", "401"],
     ("/api/runtime/records", "get"): ["200", "401", "404", "422"],
-    ("/api/runtime/verification", "get"): ["200", "401"],
+    # 422 joins the pair when the route gains its `mode` query parameter: FastAPI
+    # documents a validation response for any operation that takes one. It is a
+    # SHAPE error only -- an unrecognised mode is not a 422, it is a 200 carrying
+    # `status: "refused"`, because refusing is a result the reader must see
+    # rather than a malformed request.
+    ("/api/runtime/verification", "get"): ["200", "401", "422"],
     ("/api/search", "get"): ["200", "401", "404", "422"],
     ("/api/tutorial/sessions", "post"): ["201", "401"],
     ("/api/tutorial/sessions/{session_id}", "delete"): ["204", "401", "422"],
