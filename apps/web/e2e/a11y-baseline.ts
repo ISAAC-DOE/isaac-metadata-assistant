@@ -501,8 +501,52 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
-      'settings-explorer@mobile-375x812': 55,
-      'settings-explorer@zoom-200': 57,
+      /*
+       * ── RECORD VERIFICATION, 2026-08-06: 55 -> 56 and 57 -> 58 (+1 each) ────
+       *
+       * A GROWTH at the two NARROW projects only, ratcheted rather than fixed.
+       * Measured by CI on `17cff95` and reproduced on darwin, which agree, so
+       * these stay scalars. The other three projects do not move — CI measured
+       * them unchanged and so did the local run.
+       *
+       * WHAT CAUSED IT. The Endpoint Explorer lists the live contract, and this
+       * branch adds one operation to it, `GET /api/runtime/verification`. Its
+       * row contributes TWO failing nodes: the `GET` method chip
+       * (`--verified-text` #2f7d78, 4.2:1) and the summary text
+       * `Read the Record Verification Aggregate Report` (`--text-tertiary`
+       * #78838f, 3.85:1). Both foregrounds are already in `foregrounds` above
+       * and neither is a colour this branch chose, so this is one more instance
+       * of documented token debt in a shared list row — ratcheted for the same
+       * reason as the `statistics@*` entry, and fixable only by darkening the
+       * tokens across all 18 surfaces.
+       *
+       * WHY +2 IS RECORDED AS +1, and why the wide projects do not move at all.
+       * `.api-browser-list` is a clipped scroll container — `overflow-y: auto`
+       * with `max-height: 520px` at desktop and `320px` at the narrow widths
+       * (measured in the page) over a ~2.2–2.9k-px scroll height — so axe only
+       * ever judges the handful of rows inside the box; the rest are outside it
+       * and are not scanned. Adding a row shifts that boundary. A/B MEASURED, by
+       * intercepting `GET /api/openapi` and deleting the one path (same build,
+       * same commit, one operation removed):
+       *
+       *   mobile-375x812  55 -> 56   +2 the new row, -1 `get …/artifacts`'s
+       *                              summary text, which leaves the measured
+       *                              window (its sibling `.api-docs-path` lands
+       *                              in axe's `incomplete` bucket as
+       *                              `elmPartiallyObscured`)
+       *   zoom-200        57 -> 58   +2 the new row, -1 `post …/export`'s
+       *                              summary text, the same displacement
+       *   desktop-1280x800 47 -> 47  the new row is outside the measured window
+       *                              at that width; nothing before it moves
+       *
+       * So the -1 in each pair is a MEASUREMENT ARTEFACT of the scroll clip, not
+       * an accessibility improvement: the displaced node is still painted and
+       * still fails, it is merely no longer judged. That the list's contents are
+       * mostly unscanned is a real, pre-existing limitation of this surface's
+       * coverage, and it is recorded here rather than left to be rediscovered.
+       */
+      'settings-explorer@mobile-375x812': 56,
+      'settings-explorer@zoom-200': 58,
       'settings-privacy@desktop-1280x800': 8,
       'settings-privacy@laptop-1024x768': 8,
       'settings-privacy@tablet-768x1024': 8,
@@ -595,11 +639,56 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * as darwin, unverified", so a scalar is the only honest form (see the note at
        * the bottom of this file). CI is the authority.
        */
-      'statistics@desktop-1280x800': 5,
-      'statistics@laptop-1024x768': 5,
-      'statistics@tablet-768x1024': 5,
-      'statistics@mobile-375x812': 4,
-      'statistics@zoom-200': 4,
+      /*
+       * ── RECORD VERIFICATION, 2026-08-06: 5/5/5/4/4 -> 9/9/9/8/8 (+4) ───────
+       *
+       * A GROWTH, and it is RATCHETED rather than fixed. Measured by CI on
+       * `17cff95` at laptop/tablet/mobile/zoom, and locally on darwin at all
+       * five projects (`npx playwright test e2e/specs/a11y-axe.spec.ts -g "a11y
+       * scan: Statistics"`), which agree exactly — so these stay SCALARS.
+       *
+       * WHAT CAUSED IT. The `Record Verification` section (`RecordVerification.tsx`,
+       * new on this branch) adds a four-card KPI row to the General ISAAC tab.
+       * The four new failing nodes are its four `.stat-card-note` lines, and
+       * NOTHING ELSE it renders fails the rule — not the grouped validator
+       * chart, not its axis, not its legend, not the disclosure panels:
+       *
+       *   section[aria-labelledby="stats-verification"] … .stat-card-note
+       *     "records in the corpus this run examined."          #78838f on #fbfcfd  3.75:1
+       *   .stat-card[data-tone="good"]:nth-child(2) .stat-card-note
+       *     "records satisfying the official ISAAC schema; …"   #78838f on #e9f4ee  3.42:1
+       *   .stat-card[data-tone="good"]:nth-child(3) .stat-card-note
+       *     "records with no format issue found by …"           #78838f on #e9f4ee  3.42:1
+       *   .stat-card[data-tone="good"]:nth-child(4) .stat-card-note
+       *     "trials run; 0 behaved unexpectedly."               #78838f on #e9f4ee  3.42:1
+       *
+       * WHY RATCHETED AND NOT FIXED, which is the question a +4 has to answer.
+       * Not one of them is a colour this branch chose. `.stat-card-note` is the
+       * shared `StatCard` primitive's note line; its colour is `--text-tertiary`
+       * #78838f, which is already the first entry in `foregrounds` above and
+       * already fails on every one of the 18 surfaces (922 occurrences), and the
+       * `data-tone="good"` tint #e9f4ee is the same pre-existing card surface the
+       * `statistics-example` note below already records at 3.43:1 / 3.42:1. The
+       * branch added four INSTANCES of documented debt, not a new token: the diff
+       * of `screens/statistics/statistics.css` introduces no colour literal and
+       * no new text colour rule. Fixing it means darkening `--text-tertiary`
+       * itself, which moves counts on all 18 surfaces at all 5 projects — a
+       * separate slice, not a line in this one. It is not a licence to relax the
+       * rule; the four nodes are one node away from red like every other entry.
+       *
+       * DETERMINISM, because this number could not have been recorded before.
+       * The section draws only once `GET /api/runtime/verification` answers
+       * `ok`, ~15s after the first request. On `17cff95` desktop measured 5 and
+       * the four later projects measured 9 — the same scan, decided by when it
+       * ran. `e2e/global-setup.ts` step 5 now settles the report before any
+       * project starts, so all five projects measure the same page; that is why
+       * `desktop-1280x800` moves here even though CI reported it green.
+       */
+      'statistics@desktop-1280x800': 9,
+      'statistics@laptop-1024x768': 9,
+      'statistics@tablet-768x1024': 9,
+      'statistics@mobile-375x812': 8,
+      'statistics@zoom-200': 8,
       /*
        * THE POPULATED Statistics page, at the same route inside a worked-example
        * session — ADDED 2026-08-04 to close a gap the tutorial-scope slice left open.
@@ -649,11 +738,27 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * already records. NOW not one is a chart — and this time the region was open
        * when that was checked.
        */
-      'statistics-example@desktop-1280x800': 11,
-      'statistics-example@laptop-1024x768': 11,
-      'statistics-example@tablet-768x1024': 11,
-      'statistics-example@mobile-375x812': 10,
-      'statistics-example@zoom-200': 10,
+      /*
+       * ── RECORD VERIFICATION, 2026-08-06: 11/11/11/10/10 -> 15/15/15/14/14 ──
+       *
+       * A GROWTH, ratcheted rather than fixed, and it is the SAME four nodes as
+       * `statistics@*` above — the same section renders on both surfaces, and
+       * the report it draws is the ten public upstream example records either
+       * way, because Record Verification does not read the workspace at all. The
+       * full account, including why a shared-token instance is ratcheted and a
+       * new colour would not be, is in the `statistics@*` note; it is not
+       * repeated here.
+       *
+       * Measured by CI on `17cff95` at laptop/tablet/mobile/zoom and locally on
+       * darwin at all five, agreeing exactly, so these stay scalars.
+       * `desktop-1280x800` moves for the determinism reason given there: CI
+       * reported it green only because it ran before the sweep landed.
+       */
+      'statistics-example@desktop-1280x800': 15,
+      'statistics-example@laptop-1024x768': 15,
+      'statistics-example@tablet-768x1024': 15,
+      'statistics-example@mobile-375x812': 14,
+      'statistics-example@zoom-200': 14,
       /*
        * THE MY STATS TAB — a NEW surface (`/statistics?tab=mine`), added with the
        * tab restructure because neither `statistics` nor `statistics-example` opens
@@ -953,6 +1058,40 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // they already were; if CI disagrees, transcribe ITS numbers and correct the
   // total — never loosen the assertion.
   //
+  // ── RECORD VERIFICATION, 2026-08-06: 1703 -> 1745 on both columns ──────────
+  //
+  // The arithmetic, so a reviewer can check it without a run:
+  //
+  //   statistics          5,5,5,4,4      ->  9,9,9,8,8         = +20
+  //   statistics-example  11,11,11,10,10 -> 15,15,15,14,14     = +20
+  //   settings-explorer   mobile 55 -> 56, zoom-200 57 -> 58   =  +2
+  //                                                        net = +42
+  //
+  // NOTHING WAS FIXED AND NOTHING REGRESSED IN THE PRODUCT. All 42 are new
+  // INSTANCES of two already-recorded token shortfalls — `--text-tertiary`
+  // #78838f and `--verified-text` #2f7d78, both already in `foregrounds` — on
+  // markup this branch added: forty on the four `.stat-card-note` lines of the
+  // new Record Verification KPI row (two Statistics surfaces x five projects),
+  // two on the Endpoint Explorer row for the one new operation. The per-entry
+  // notes carry the measured foregrounds, ratios and the A/B that separates the
+  // Explorer's +2 from its -1 displacement.
+  //
+  // BOTH COLUMNS ARE MEASURED FOR TWELVE OF THE FOURTEEN CHANGED KEYS: linux
+  // from the CI run on `17cff95` (which reported exactly these growths at
+  // laptop/tablet/mobile/zoom for the two Statistics surfaces and at
+  // mobile/zoom for the Explorer), darwin from a local sweep at the same commit.
+  // They agree, so the keys stay scalars.
+  //
+  // THE TWO EXCEPTIONS ARE `statistics@desktop-1280x800` AND
+  // `statistics-example@desktop-1280x800`, and they are stated rather than
+  // buried: CI could not measure them, because on `17cff95` the desktop project
+  // ran BEFORE the verification sweep landed and scanned the unsettled page.
+  // With `global-setup.ts` step 5 settling the report first, darwin measures
+  // both at the same numbers as laptop and tablet, and the linux values are
+  // written as scalars on that basis — an INFERENCE from a measured platform,
+  // not a measurement. CI is the authority; if it disagrees, transcribe ITS
+  // numbers into those two keys and correct this total, and never loosen the
+  // assertion. Both sums are CHECKED by the suite itself, per platform.
   // no-guessing slice: LINUX ONLY rises by 1, 1703 -> 1704. This slice adds
   // `.guided-inferability` (the paragraph stating why the app is asking rather
   // than answering), which fails `color-contrast` on Linux but NOT on darwin --
@@ -979,6 +1118,26 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // linux-column edit was caught, and why the entry and this constant are one
   // atomic change. Darwin is NOT raised to match; nothing measured darwin at 14.
   //
+  // ── MERGE OF THE TWO SLICES ABOVE: darwin 1745, linux 1746 ─────────────────
+  //
+  // The two notes above were written independently, each against a tree whose
+  // starting point was 1703/1703, and each is still correct about its OWN keys.
+  // They touch DISJOINT keys and therefore COMPOSE rather than conflict:
+  //
+  //   Record Verification    both columns +42 (statistics, statistics-example,
+  //                          settings-explorer)
+  //   coverage-disclosure    linux only  +1  (export-readiness-done@desktop-1280x800)
+  //                                          darwin 1703 + 42      = 1745
+  //                                          linux  1703 + 42 + 1  = 1746
+  //
+  // So the columns no longer agree, and that asymmetry is inherited from the
+  // coverage-disclosure slice, not introduced here. NEITHER number is my
+  // arithmetic: both were recomputed on the merged tree by importing this module
+  // and summing `platformCount` over every entry — darwin 1745, linux 1746. No
+  // per-key value was changed to reach them; only this total moved. The two
+  // inferred keys the Record Verification note names above are still inferred;
+  // CI remains the authority, and if it disagrees, transcribe ITS numbers and
+  // correct the total rather than loosening the assertion.
   // ── MERGE OF THE TWO SLICES ABOVE: linux 1704 -> 1705, darwin UNCHANGED ─────
   //
   // The two notes immediately above were written independently, each against a
@@ -999,8 +1158,19 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // arithmetic: both were recomputed by importing this module and summing
   // `platformCount` over every entry on the merged tree — darwin 1703, linux 1705.
   // No per-key value was changed to reach them; only this total moved.
-  darwin: 1703,
-  linux: 1705,
+  // MERGE OF THE RECORD-VERIFICATION SLICE WITH THE NO-GUESSING SLICE. Neither
+  // side's total was correct for the merged file and neither was copied: this
+  // branch had 1745/1746 against a 1703/1704 base, `origin/main` had 1703/1705
+  // after the no-guessing slice landed, and the merged entry set sums to
+  // 1745/1747 -- this branch's +42 on top of main's post-merge linux base of
+  // 1705. Both numbers were COMPUTED from the entry map by the same reduction
+  // the self-check in `specs/a11y-axe.spec.ts` performs, not derived by hand:
+  // summing `platformCount(entry.counts[key], platform)` over every entry and
+  // every key. Two independent +1 edits that each looked correct against their
+  // own base is precisely how a wrong total gets auto-merged without ever
+  // raising a conflict, which already happened once on this file.
+  darwin: 1745,
+  linux: 1747,
 };
 
 /**

@@ -17,6 +17,7 @@ import {
 } from '../lib/tutorialController';
 import {
   STATISTICS_ROUTE_KEYS,
+  STATISTICS_VERIFICATION_ROUTE_KEY,
   TUTORIAL_SESSION_ID,
   aboutResponse,
   graphStatusAvailable,
@@ -1452,20 +1453,30 @@ describe('truncated body', () => {
 describe('Refresh', () => {
   const refreshButton = () => screen.getByRole('button', { name: 'Refresh' });
 
-  it('re-issues EXACTLY the five GETs and no other request', async () => {
+  it('re-issues EXACTLY the five tracked GETs, and does NOT re-read verification', async () => {
     const { calls } = renderStatistics(statisticsRoutes());
     await settled();
 
-    expect([...calls].sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
+    // SIX reads on mount: the five tracked ones plus Record Verification's.
+    expect([...calls].sort()).toEqual(
+      [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY].sort(),
+    );
     const afterLoad = calls.length;
-    expect(afterLoad).toBe(5);
+    expect(afterLoad).toBe(6);
 
     fireEvent.click(refreshButton());
+    // FIVE, not six. This is the assertion that pins the design: the
+    // verification report is a cached artifact of a program run that states its
+    // own age, not a live view of this workspace, so Refresh leaves it alone.
+    // Re-reading it here would also make the "N of 5 reads failed" notice
+    // describe a denominator it does not count.
     await waitFor(() => expect(calls.length).toBe(afterLoad + 5));
 
     expect(calls.slice(afterLoad).sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
-    // Nothing outside the five, in either round.
-    for (const key of calls) expect(STATISTICS_ROUTE_KEYS).toContain(key);
+    expect(calls.slice(afterLoad)).not.toContain(STATISTICS_VERIFICATION_ROUTE_KEY);
+    // Nothing outside the six, in either round.
+    const allowed = [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY];
+    for (const key of calls) expect(allowed).toContain(key);
   });
 
   it('issues no POST, PUT, PATCH or DELETE — the page mutates nothing', async () => {
@@ -1473,7 +1484,8 @@ describe('Refresh', () => {
     await settled();
 
     fireEvent.click(refreshButton());
-    await waitFor(() => expect(calls.length).toBe(10));
+    // 6 on mount + 5 on Refresh. See the test above for why Refresh is 5.
+    await waitFor(() => expect(calls.length).toBe(11));
 
     for (const key of calls) expect(key.startsWith('GET ')).toBe(true);
     expect(calls.some((key) => /^(POST|PUT|PATCH|DELETE) /.test(key))).toBe(false);
@@ -1937,11 +1949,16 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
     ]);
   });
 
-  it('adds NO request to the page — the five reads are unchanged by its presence', async () => {
+  it('adds NO request to the page — the mount reads are unchanged by its presence', async () => {
     const { calls } = renderStatistics(statisticsRoutes());
     await settled();
 
-    expect([...calls].sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
+    // The five tracked reads plus Record Verification's, and nothing else. The
+    // verification read belongs to a different section; it is listed here so the
+    // set stays EXACT rather than being relaxed to a subset check.
+    expect([...calls].sort()).toEqual(
+      [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY].sort(),
+    );
     expect(calls.filter((c) => /portal|metrics|platform/i.test(c))).toEqual([]);
   });
 

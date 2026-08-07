@@ -126,17 +126,18 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
    * a skip or a backwards step hides in.
    *
    * THE EXPECTED OUTLINE CHANGED WITH THE TAB RESTRUCTURE, and again when the
-   * available-metrics slice added three sections. The reason is worth writing
-   * down because it is the interesting part. Its General ISAAC tab is now
-   * h1 → six h2 sections:
+   * available-metrics slice added three sections, and again when Record
+   * Verification landed. The reason is worth writing down because it is the
+   * interesting part. Its General ISAAC tab is now h1 → seven h2 sections:
    *
    *   Workspace at a Glance · Workflow Distribution · Open Questions ·
    *   Evidence and Validation (nesting `Evidence Support` and `Export Gate` as
-   *   h3) · Platform Metrics (nesting one h3 per planned view — SIX of them,
-   *   the same plan-card shape My Stats uses) · This Application Collects No
-   *   Analytics
+   *   h3) · Record Verification (nesting FIVE h3s — see the note at the
+   *   assertion) · Platform Metrics (nesting one h3 per planned view — SIX of
+   *   them, the same plan-card shape My Stats uses) · This Application Collects
+   *   No Analytics
    *
-   * …followed by a seventh h2 `Technical Details`, which nests FOUR h3 sections
+   * …followed by an eighth h2 `Technical Details`, which nests FOUR h3 sections
    * (Runtime · Record Schema · Project Memory · API Surface).
    *
    * The four trailing h3s are inside a `<details>` that is CLOSED by default, and
@@ -153,12 +154,23 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
     await view.findByText('Synthetic-Only');
 
     const found = levels(view.container);
+    // The FIVE 3s under Record Verification are its own sub-headings: the
+    // official/shadow comparison, the issue distributions, mutation
+    // verification, safeguards, and the run details. (It was four before the
+    // comparison became a grouped chart with a heading of its own — the outline
+    // is unchanged in shape, one level deeper nowhere.)
     expect(found).toEqual([
       1,
       2 /* Workspace at a Glance */,
       2 /* Workflow Distribution */,
       2 /* Open Questions */,
       2 /* Evidence and Validation */,
+      3,
+      3,
+      2 /* Record Verification */,
+      3,
+      3,
+      3,
       3,
       3,
       2 /* Platform Metrics */,

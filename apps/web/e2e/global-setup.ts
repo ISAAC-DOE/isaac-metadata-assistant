@@ -1,7 +1,7 @@
 /**
  * Global setup — run ONCE before any project, any worker, any spec.
  *
- * Four jobs, each of which fails with a message naming the STEP that failed:
+ * Five jobs, each of which fails with a message naming the STEP that failed:
  *
  *   1. Assert the backend precondition. Playwright does NOT start the FastAPI
  *      server (it needs the repo's Python venv, which is outside `apps/web`),
@@ -18,6 +18,10 @@
  *   4. Open ONE worked-example session for the whole read-only run, verify by
  *      MEASUREMENT that the five examples are in it, and publish its id to the
  *      workers.
+ *   5. SETTLE the Record Verification report, so that what Statistics renders is
+ *      a property of the build rather than of when a spec happened to run. See
+ *      the long note on `settleVerificationReport` below — this step exists
+ *      because its absence was a measured, two-directional flake.
  *
  * ── What this file no longer does, and why ──────────────────────────────────
  *
@@ -71,6 +75,83 @@ const EXPECTED_EXAMPLE_IDS = [
   '01SYNTHXANESSEED0000000004',
   '01SYNTHXANESSEED0000000005',
 ];
+
+/** How long step 5 will wait for the sweep. It measures ~15s locally; the
+ *  margin is for a loaded CI runner, not for a hung one. */
+const VERIFICATION_SETTLE_TIMEOUT_MS = 180_000;
+/** Gap between polls. The endpoint is a dictionary read while `running`. */
+const VERIFICATION_POLL_INTERVAL_MS = 2_000;
+
+/**
+ * Wait until `GET /api/runtime/verification` has a result, before any spec runs.
+ *
+ * ── WHY THIS STEP EXISTS: A MEASURED, TWO-DIRECTIONAL FLAKE ─────────────────
+ *
+ * `RecordVerification` is the fifth figure on Statistics, and it is drawn only
+ * once the report reaches `status: "ok"`. The sweep is deliberately kept off the
+ * request path (`apps/api/isaac_api/routes.py`, `verification.VerificationState`):
+ * the FIRST request starts it on a background thread and is answered `running`,
+ * and it lands ~15s later. So for the first ~15 seconds of a suite run the page
+ * renders four figures and one "not ready yet" panel, and after that it renders
+ * five figures and four extra `.stat-card-note` lines.
+ *
+ * Nothing pinned that, and the consequence was measured rather than theorised.
+ * CI run on `17cff95` failed 14 tests, and every one of them is the same clock:
+ * `specs/charts.spec.ts` counted 4 figures at `desktop-1280x800` (which runs
+ * first, inside the window) and 5 at the four later projects; the a11y sweep
+ * measured `statistics` at 5 nodes on desktop and 9 everywhere else. The
+ * ORDERING is what decided each result, so the same specs would have failed on
+ * desktop instead had the runner been slower — the failure was never "the count
+ * is wrong", it was "the count is a race".
+ *
+ * Settling here rather than in each spec is deliberate. The backend caches an
+ * `ok` report for `CACHE_TTL_SECONDS` = 3600s (`verification.py:131`), which is
+ * far longer than a suite run, so ONE settle at setup fixes the state for every
+ * project, every worker and every spec — including the a11y counts, which no
+ * spec-local wait would have reached without repeating itself 18 times. (The TTL
+ * is what makes one settle sufficient; a run somehow lasting past an hour would
+ * see a refresh, and the refreshed result is still served `ok` while it reruns.)
+ *
+ * It FAILS rather than warning. A report that cannot settle means Statistics
+ * renders a "not ready" panel that no baseline in this suite was recorded
+ * against, and the honest outcome of that is one explicit error here rather than
+ * a scatter of count mismatches naming neither the cause nor the endpoint.
+ */
+async function settleVerificationReport(
+  ctx: import('@playwright/test').APIRequestContext
+): Promise<{ status: string; waitedMs: number }> {
+  const started = Date.now();
+  const deadline = started + VERIFICATION_SETTLE_TIMEOUT_MS;
+  let status = 'unread';
+  for (;;) {
+    const res = await ctx.get(`${API_BASE}/runtime/verification`, { timeout: 30_000 });
+    if (!res.ok()) {
+      throw new Error(
+        `[e2e setup · step 5/5 settle verification report] GET ` +
+          `${API_BASE}/runtime/verification returned ${res.status()}. Statistics draws its ` +
+          `Record Verification figures from this endpoint; without it the suite's chart counts ` +
+          `and a11y baselines describe a page no reader sees.`
+      );
+    }
+    const payload = (await res.json()) as { status?: unknown };
+    status = typeof payload.status === 'string' ? payload.status : 'unreadable';
+    if (status !== 'running') break;
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, VERIFICATION_POLL_INTERVAL_MS));
+  }
+  if (status !== 'ok') {
+    throw new Error(
+      `[e2e setup · step 5/5 settle verification report] The verification sweep did not settle: ` +
+        `status="${status}" after ${Math.round((Date.now() - started) / 1000)}s ` +
+        `(limit ${VERIFICATION_SETTLE_TIMEOUT_MS / 1000}s).\n` +
+        `Every Statistics measurement in this suite — the figure counts in ` +
+        `specs/charts.spec.ts and the statistics/statistics-example counts in ` +
+        `e2e/a11y-baseline.ts — was recorded against a SETTLED report. Running with an ` +
+        `unsettled one would not be a weaker test, it would be a test of a different page.`
+    );
+  }
+  return { status, waitedMs: Date.now() - started };
+}
 
 export default async function globalSetup(): Promise<void> {
   // A stale handoff file from an interrupted run must never be inherited: a spec
@@ -185,10 +266,14 @@ export default async function globalSetup(): Promise<void> {
 
     publishWorkedExampleSession({ sessionId, recordIds: ids });
 
+    // ── 5. the verification report has a result ─────────────────────────────
+    const verification = await settleVerificationReport(ctx);
+
     // eslint-disable-next-line no-console
     console.log(
       `[e2e] backend ok at ${API_BASE} — ordinary workspace empty; worked-example session ` +
-        `opened with ${ids.length} examples (ttl ${session.ttl_hours ?? '?'}h).`
+        `opened with ${ids.length} examples (ttl ${session.ttl_hours ?? '?'}h); verification ` +
+        `report settled to "${verification.status}" after ${Math.round(verification.waitedMs / 1000)}s.`
     );
   } finally {
     await ctx.dispose();

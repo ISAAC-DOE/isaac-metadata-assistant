@@ -1,3 +1,17 @@
+> ## PARTIALLY SUPERSEDED — 2026-08-05
+>
+> One of the questions this draft carries — **Q19**, the mutation-harness disclosure question — has
+> since been **answered and approved**, relayed by the project owner; no direct agent-to-owner
+> communication occurred. The record is
+> [`docs/evidence/2026-08-05-q19-q20-authorization.md`](evidence/2026-08-05-q19-q20-authorization.md).
+>
+> **The rest of this draft is unaffected and still unsent**, including the
+> `attribution.uploaded_by` identifier question and **Q20** (`format` enforcement).
+>
+> Before sending, drop or rewrite anything that asks about Q19; asking a question that has already
+> been answered invites a second, possibly divergent answer. The draft is kept intact rather than
+> edited in place so the original framing stays legible.
+
 # Slack message to Dean — DRAFT, NOT SENT
 
 **Status: NOT SENT.** No approved workflow permits agent-to-Dean communication. This is drafted for
