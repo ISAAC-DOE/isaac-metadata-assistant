@@ -27,7 +27,8 @@
  *
  * WHY THIS FILE USES `lifecycle-fixtures.ts`. The reset control lives in the
  * persistent worked-example bar, which renders only while the APP holds a session —
- * so the walkthrough has to be really started, through the real offer. That is also
+ * so the walkthrough has to be really started, through the real control on My
+ * Experiments (see `startFromEmptyState`). That is also
  * why it must NOT inherit `fixtures.ts`'s shared scope: it opens and destroys
  * sessions, and the shared one is where `answers.spec.ts` and `export.spec.ts` keep
  * their baselines. The fixture disposes every session this file causes to exist.
@@ -38,9 +39,19 @@ import { SEED } from './env';
 
 const MODAL = '[role="dialog"][aria-modal="true"]';
 
-async function startFromOffer(page: import('@playwright/test').Page) {
+/**
+ * Start the walkthrough from My Experiments.
+ *
+ * IT IS THE EMPTY STATE'S PRIMARY, NOT THE FIRST-RUN OFFER CARD. This suite's ordinary
+ * workspace is empty by construction, and `ExperimentsHome` suppresses the offer card
+ * whenever the queue has no rows — so that one action is never offered by two primaries
+ * at once. `Launch Guided Demo` is the control that is on this screen, and it calls the
+ * same `startTutorial`, so the session this file's reset dialog needs is opened by the
+ * same code path it always was.
+ */
+async function startFromEmptyState(page: import('@playwright/test').Page) {
   await page.goto('/experiments', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'Start Tutorial' }).click();
+  await page.getByRole('button', { name: 'Launch Guided Demo' }).click();
   await expect(
     page.getByRole('complementary', { name: 'Worked example session' })
   ).toBeVisible({ timeout: 20_000 });
@@ -85,7 +96,7 @@ test.describe('R4 · reset preconditions', () => {
     lifecycle,
   }) => {
     const calls = watchResetCalls(page);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const mine = lifecycle.sessionsCreated()[0];
 
     await lifecycle.answerFirstBlocker(mine, SEED.fresh);
@@ -114,7 +125,7 @@ test.describe('R4 · reset preconditions', () => {
     lifecycle,
   }) => {
     const calls = watchResetCalls(page);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const mine = lifecycle.sessionsCreated()[0];
 
     // Progress that exists BEFORE the operator looks at the figures.
@@ -194,7 +205,7 @@ test.describe('R4 · reset preconditions', () => {
      * of them wrong.
      */
     const calls = watchResetCalls(page);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const mine = lifecycle.sessionsCreated()[0];
 
     await lifecycle.answerFirstBlocker(mine, SEED.fresh);

@@ -41,7 +41,12 @@ import {
   startTutorial,
 } from '../lib/tutorialController';
 import { TUTORIAL_SESSION_KEY, readTutorialSession } from '../lib/tutorialSession';
-import { TUTORIAL_PREFERENCE_KEY, isTutorialCompleted } from '../lib/tutorialPreference';
+import {
+  TUTORIAL_ID,
+  TUTORIAL_PREFERENCE_KEY,
+  TUTORIAL_VERSION,
+  isTutorialCompleted,
+} from '../lib/tutorialPreference';
 import { __resetHealthCache } from '../lib/useHealth';
 import {
   CANONICAL_RESET_IDS,
@@ -760,6 +765,113 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     expect(
       filled.queryByRole('button', { name: LABELS.actionLaunchGuidedDemo }),
     ).toBeNull();
+  }, 30000);
+
+  /*
+   * THE SLICE'S HEADLINE CLAIM, AND UNTIL THIS TEST IT WAS UNPINNED.
+   *
+   * The whole reason this control exists is the RETURNING reader: `shouldOfferTutorial`
+   * retires the first-run offer permanently on completion, so a browser that has
+   * finished the walkthrough once used to meet a permanently-empty screen with no way
+   * back into it. Every other test in this file and the last renders a browser that has
+   * NOT completed — so gating this button on `!isTutorialCompleted()`, which is exactly
+   * the defect the slice was opened to fix, reinstated on the new control, left all 2810
+   * frontend tests green. Measured, not supposed.
+   *
+   * Two assertions, and the second is what makes the first mean anything. The button is
+   * present; AND `shouldOfferTutorial` is FALSE, which proves the browser really is in
+   * the retired state rather than the button being present because the seeding silently
+   * failed to take. `readTutorialPreference` resolves a record with the wrong
+   * `tutorialId`, the wrong `version` or `completed !== true` to NOT completed, so a
+   * partial payload would produce a green test that asserts nothing — hence the full
+   * record and the store reload beneath it.
+   */
+  it('T7f · a browser that already FINISHED the walkthrough still has a way in', async () => {
+    // Written exactly as a completed run writes it, then the store is reloaded from
+    // storage the way a page load does — the in-memory mirror is read once at module
+    // init, so seeding after that point would leave it stale and the test would be
+    // about a state no real browser is in.
+    localStorage.setItem(
+      TUTORIAL_PREFERENCE_KEY,
+      JSON.stringify({
+        tutorialId: TUTORIAL_ID,
+        version: TUTORIAL_VERSION,
+        completed: true,
+        completedAt: '2099-01-01T00:00:00.000Z',
+      }),
+    );
+    __resetTutorialStore();
+    expect(isTutorialCompleted()).toBe(true);
+
+    stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes([]) } as never);
+    const view = renderAt();
+    await screen.findByRole('heading', { name: 'No experiments yet' });
+
+    const { shouldOfferTutorial } = await import('../lib/tutorialController');
+    // THE RETIRED STATE, asserted rather than assumed. This is the state that used to
+    // leave the screen with no tutorial affordance at all.
+    expect(shouldOfferTutorial(getTutorialState())).toBe(false);
+    expect(document.querySelectorAll('.tutorial-offer')).toHaveLength(0);
+
+    // ...and the way in is still there, and operable.
+    const launch = view.getByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    expect(launch).toBeInTheDocument();
+    expect((launch as HTMLButtonElement).disabled).toBe(false);
+    // Still exactly one CTA — a completed browser must not get the card back either.
+    expect(ctaCount(view.container)).toBe(1);
+
+    // And it still WORKS for this reader: completion retires the offer, not the
+    // walkthrough. Replaying does not un-finish it.
+    fireEvent.click(launch);
+    await waitFor(() => expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID));
+    expect(sentRequests().filter((r) => r.key === SESSION_CREATE)).toHaveLength(1);
+    expect(isTutorialCompleted()).toBe(true);
+  }, 30000);
+
+  /*
+   * THE DOUBLE-SUBMIT GUARD ON THE APP'S NEW PRIMARY.
+   *
+   * `startTutorial` reads `heldSessionId()` and then awaits `POST
+   * /api/tutorial/sessions`, so two calls entered before the first resolves both see
+   * "nothing held", both create, and neither disposes the other's — TWO sessions, ZERO
+   * `DELETE`s. Measured on this control before the guard: two creates.
+   *
+   * The offer card never reached that state, because `shouldOfferTutorial` goes false
+   * synchronously and unmounts it before a second click can land. This control does not
+   * unmount: the empty state is still the empty state until the session's five records
+   * arrive. That is why the guard is here and why the test is here — `ResetDemoDialog`
+   * has had both for its own destructive action for some time, and the app's single
+   * largest primary should not be the exception.
+   *
+   * Asserted on the WIRE, in this file's idiom: what matters is the number of sessions
+   * the backend was asked to mint, not whether a flag flipped.
+   */
+  it('T7e · a double-click opens ONE session, not two', async () => {
+    stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes([]) } as never);
+    const view = renderAt();
+    const launch = (await view.findByRole('button', {
+      name: LABELS.actionLaunchGuidedDemo,
+    })) as HTMLButtonElement;
+
+    // Two clicks with nothing awaited between them — the impatient double-click, and
+    // the create is still in flight when the second lands.
+    fireEvent.click(launch);
+    fireEvent.click(launch);
+
+    await waitFor(() => expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID));
+    const creates = sentRequests().filter((r) => r.key === SESSION_CREATE);
+    expect(
+      creates,
+      `a double-click minted ${creates.length} worked-example sessions; every one beyond ` +
+        'the first is a server-side workspace the reader can neither see nor discard',
+    ).toHaveLength(1);
+    // The mechanism, so a future change that keeps the count right by accident is
+    // still visible: the control disarms itself while the phase is not `idle`.
+    expect(launch.disabled).toBe(true);
+    // And nothing was orphaned — no session was opened that then needed discarding.
+    expect(sentRequests().filter((r) => r.key.startsWith('DELETE /api/tutorial/sessions'))).toEqual(
+      [],
+    );
   }, 30000);
 
   it('T7b · no ordinary request carries a tutorial scope', async () => {

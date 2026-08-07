@@ -224,8 +224,30 @@ export function useTutorialState(): TutorialState {
  * records are materialised by the backend inside the new session, and the
  * walkthrough then only navigates to them and reads them.
  *
- * Any session already held is discarded first, so a replay can never leave two
- * sessions open or show duplicated examples.
+ * ORDERING, STATED AS WHAT IT ACTUALLY GUARANTEES. Any session already held is
+ * discarded before a new one is opened, so a replay that runs to completion is
+ * exactly-one-session by construction rather than by the caller remembering to
+ * clean up.
+ *
+ * IT IS NOT A MUTUAL EXCLUSION, and it used to be written as though it were:
+ * "a replay can never leave two sessions open or show duplicated examples". That
+ * absolute is FALSE and was measured false. `heldSessionId()` is read at the top,
+ * and the create is awaited — so two calls entered before the first `POST
+ * /api/tutorial/sessions` resolves both observe "nothing held", both create, and
+ * the first session is orphaned with no `DELETE` ever issued. Nothing in this
+ * function serialises its callers, and this comment must not imply it does.
+ *
+ * WHERE THE GUARD ACTUALLY LIVES: at the call sites, one per control.
+ *   · `screens/ExperimentsHome.tsx` — disabled while `phase !== 'idle'`; that
+ *     control stays mounted across `starting`, so it needs an explicit guard.
+ *   · `components/TutorialPromotion.tsx` — no explicit guard, and does not need
+ *     one: `shouldOfferTutorial` is false as soon as the phase leaves `idle` and
+ *     the phase is emitted synchronously inside the click handler, so the card is
+ *     unmounted before a second click can land on it.
+ *   · `screens/settings/HelpAndTutorial.tsx` — replay, unguarded. Reachable only
+ *     from Settings, and re-entering from there is the control's purpose.
+ * A future caller must decide which of those it is; it does not inherit safety
+ * from here.
  *
  * On failure NOTHING is entered: the scope is left unset, no phase change to
  * `running` happens, and `sessionError: 'create_failed'` is surfaced. A

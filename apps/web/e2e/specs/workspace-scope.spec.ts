@@ -55,25 +55,39 @@ test.describe('@interaction the ordinary workspace', () => {
     // The two things a reader CAN do instead are offered and operable.
     await expect(page.getByRole('button', { name: 'Open Validator' })).toBeEnabled();
     /*
-     * RE-POINTED, AND THE DESTINATION IS ASSERTED RATHER THAN THE LABEL ALONE.
+     * THE CONTROL SET, AND WHY THE CLICK-THROUGH THAT USED TO BE HERE IS GONE.
      *
-     * This control was labelled "Replay Tutorial" — the exact name of the button in
-     * Settings that starts the walkthrough — while it only navigated, and navigated to
+     * History first, because both of its predecessors were real defects. This control
+     * was once labelled "Replay Tutorial" — the exact name of the button in Settings
+     * that starts the walkthrough — while it merely navigated, and navigated to
      * `/settings` with no `?tab=`, which `SettingsPage` resolves to `overview`: a tab
-     * with no tutorial control on it. The label now names navigation
-     * (`actionGoToHelpAndTutorial`, the same pair `LoadMaterials`'s refusal state
-     * already used) and the landing is checked, because a name-only assertion is what
-     * let the wrong destination ship.
+     * carrying no tutorial control at all. It was then re-pointed to
+     * `actionGoToHelpAndTutorial`, an honest pair — a name about navigation, on a
+     * button that navigated, landing on the tab that owns replay — and this test
+     * asserted the LANDING rather than the label, because a name-only assertion is
+     * what let the wrong destination ship in the first place.
+     *
+     * It is gone now, and not because it was dishonest. It was the LAST tutorial
+     * affordance on this screen, and the first-run offer retires permanently on
+     * completion — so a returning reader met a permanently empty page whose only route
+     * to the walkthrough was a quiet secondary that sent them elsewhere to press a
+     * different button. The empty state now holds a primary that starts a session
+     * itself.
+     *
+     * THIS SPEC DOES NOT CLICK IT, and that is a deliberate limit rather than an
+     * oversight: pressing it POSTs `/api/tutorial/sessions` and materialises five
+     * records server-side, and the contract of this file — stated in its header — is
+     * that nothing here mutates either scope. The behaviour that a name-only assertion
+     * cannot see is pinned where a session can be disposed afterwards:
+     * `specs/tutorial.spec.ts` → "the empty workspace's own primary" drives the real
+     * click under the `tutorial` fixture, and `src/__tests__/tutorial-session-lifecycle.test.tsx`
+     * → T7c asserts the request on the wire.
+     *
+     * Both retired names must stay absent: one label must address exactly one control.
      */
-    const go = page.getByRole('button', { name: 'Go to Help & Tutorial' });
-    await expect(go).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
-    await go.click();
-    await expect(page.getByRole('tab', { name: 'Help & Tutorial' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
-    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Go to Help & Tutorial' })).toHaveCount(0);
   });
 
   test('names itself "Workspace" in the mode chip, and claims only what this build enforces', async ({ page, app }) => {

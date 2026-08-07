@@ -10,7 +10,7 @@ import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
-import { startTutorial } from '../lib/tutorialController';
+import { startTutorial, useTutorialState } from '../lib/tutorialController';
 import { useFetch } from '../lib/useFetch';
 import { useWorkspaceScope } from '../lib/workspaceScope';
 import { subscribeWorkspaceRebuilt } from '../lib/workspaceInvalidation';
@@ -57,6 +57,32 @@ export function ExperimentsHome() {
    * it is read as `.current` at click time exactly as `TutorialPromotion` does.
    */
   const launchRef = useRef<HTMLButtonElement>(null);
+
+  /*
+   * THE DOUBLE-SUBMIT GUARD, and it is a guard this screen genuinely needs while the
+   * first-run offer card genuinely does not — the asymmetry is the whole reason it is
+   * here and not in `TutorialPromotion`.
+   *
+   * `startTutorial` reads `heldSessionId()` and then awaits a network round trip
+   * before it holds anything, so two calls made before the first `POST
+   * /api/tutorial/sessions` resolves BOTH see "no session held", both create one, and
+   * neither disposes the other's. The reader ends up paying for a workspace they
+   * cannot see or reach.
+   *
+   * The offer card never reaches that state by accident: `shouldOfferTutorial` is
+   * false the moment the phase leaves `idle`, and the phase is emitted synchronously
+   * inside the click handler, so the card is unmounted before a second click can land
+   * on it. THIS control is the first one in the app that stays mounted across
+   * `starting` — the empty state is still the empty state until the session's records
+   * arrive — so the shape that was theoretical there is reachable here.
+   *
+   * `phase !== 'idle'` rather than a bare in-flight ref, because the disabled state is
+   * also the honest thing to show: while a session is opening or open, "Launch Guided
+   * Demo" is not an action that is available. Pinned by
+   * `tutorial-session-lifecycle.test.tsx` → "T7e".
+   */
+  const tutorialPhase = useTutorialState().phase;
+  const launchBusy = tutorialPhase !== 'idle';
 
   // P27.6 — the dashboard is NOT tightly polled (no interval). It only refetches
   // the list once when the tab regains visibility, so a cross-tab reset/export
@@ -161,11 +187,19 @@ export function ExperimentsHome() {
               ref={launchRef}
               type="button"
               className="btn btn-primary queue-empty-cta"
+              disabled={launchBusy}
+              aria-describedby="queue-empty-launch-hint"
               onClick={() => startTutorial(launchRef.current)}
             >
               {LABELS.actionLaunchGuidedDemo}
             </button>
-            <span className="queue-empty-hint">{LABELS.launchGuidedDemoBody}</span>
+            {/* Associated with the button rather than left as adjacent text: a screen
+                reader announcing the control otherwise reads four words and none of
+                the disclosure. It is a DESCRIPTION, not a label — the accessible name
+                stays "Launch Guided Demo". */}
+            <span className="queue-empty-hint" id="queue-empty-launch-hint">
+              {LABELS.launchGuidedDemoBody}
+            </span>
           </div>
 
           <p className="queue-empty-body">Or, without starting the walkthrough:</p>
@@ -251,15 +285,42 @@ export function ExperimentsHome() {
         condition is shared with other callers, and the thing that varies here is
         this screen's layout, not whether the walkthrough is on offer.
 
-        BE CLEAR ABOUT THE CONSEQUENCE: in the ordinary workspace this list is
-        permanently empty (no create, no import), and inside a worked-example
-        session `shouldOfferTutorial` is false because the phase is not `idle`. So
-        in the shipped build this card now renders essentially nowhere, and it is
-        kept mounted rather than deleted because the condition that hides it is a
-        property of TODAY's deployment, not of the component: the moment a record
-        can be created or imported, the queue fills, and the offer is correct
-        again with no code to write back. The tests that exercise it drive a
-        non-empty list, which is the state it is for.
+        WHERE THIS CARD STILL RENDERS — stated as the two states it is actually
+        reachable in, because the sentence that stood here was FALSE and was
+        falsified by review rather than by a test. It read: "in the shipped build
+        this card now renders essentially nowhere". It is kept mounted because it
+        RENDERS, not as a courtesy to a future create path.
+
+        STATE A — persistent, and not hypothetical. Five canonical records can be
+        sitting in the ORDINARY scope, left by a build that predates scope
+        isolation; `apps/api/isaac_api/workspace.py` documents this state itself
+        and records that it is "NOT time-bounded, and NOT repairable through the
+        UI at all" — `list_experiments(None)` enumerates all five,
+        `remove_experiment` refuses a canonical id, and `POST /api/demo/reset`
+        refuses without a session header, so no in-app control can clear it. It
+        is reachable wherever the workspace directory is durable: an uncleared
+        developer `/tmp/isaac-ui-workspace`, or the Railway deployment's
+        persistent volume. In that state this list is NOT empty, the queue
+        renders, the empty state does not, and this card is the only tutorial CTA
+        on the screen.
+
+        STATE B — transient, on every reload mid-walkthrough. `initialState()`
+        returns `phase: 'idle'` with a non-null `sessionId` seeded from the api
+        scope, and `main.tsx` fires `resumeTutorialSession()` WITHOUT awaiting it,
+        so for the boot window the list read carries the session header (five
+        rows) while the phase is still `idle` — so for a browser that has not
+        completed the walkthrough, `shouldOfferTutorial` is true and the card
+        renders until resume resolves.
+
+        WHAT IS TRUE, and is the whole justification for the gate: the two CTAs
+        cannot both be on screen, because one requires rows and the other
+        requires none. That is a statement about the layout, not a claim that
+        either surface is dead.
+
+        The tests that exercise the card drive a non-empty list, which is the
+        state it is for — `e2e/specs/tutorial.spec.ts` does it at the transport
+        layer (State A's client-side shape: rows in the list, tutorial store
+        idle), and `tutorial-flow.test.tsx` does it with a five-record stub.
       */}
       {result.status === 'data' && !queueIsEmpty && <TutorialPromotion />}
 

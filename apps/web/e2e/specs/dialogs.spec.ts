@@ -202,7 +202,15 @@ test.describe('@interaction reset-worked-example confirmation dialog', () => {
   }) => {
     await app.open(experiments);
 
-    await page.getByRole('button', { name: 'Start Tutorial' }).click();
+    /*
+     * THE EMPTY STATE'S PRIMARY, not the first-run offer card. `app.open(experiments)`
+     * is the ORDINARY workspace, which is permanently empty, and `ExperimentsHome` now
+     * suppresses the offer whenever the queue has no rows so that one action is never
+     * offered by two primaries at once. `Launch Guided Demo` is therefore the control
+     * on this screen; it calls the same `startTutorial`, so the session this test needs
+     * is opened by the same code path it always was.
+     */
+    await page.getByRole('button', { name: 'Launch Guided Demo' }).click();
     // The bar is chrome and appears as soon as the session exists — before any
     // coach mark has settled.
     const bar = page.getByRole('complementary', { name: 'Worked example session' });

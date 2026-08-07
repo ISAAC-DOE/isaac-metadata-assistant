@@ -430,6 +430,16 @@ export const LABELS = {
    * saying: that the ordinary workspace is empty. It is a statement about this
    * button's reach — `_materialise_seed`, `reset_to_canonical_seed` and
    * `ensure_tutorial_seeded` all refuse a `None` session id — not about what exists.
+   *
+   * "VERBATIM" IS NOW ENFORCED, AND SO IS THE COPY ITSELF. Both were claims resting on
+   * a comment: `tutorial-flow.test.tsx`'s honesty ratchet queried `section.tutorial-offer`
+   * only, so this string could have been replaced with the retired false absolute
+   * ("It only reads — it answers nothing and changes nothing") and a wrong record count
+   * with every test still green — on the surface that this same slice makes the ONLY one
+   * a reader on an empty workspace ever sees. Two pins close it: the ratchet now runs the
+   * identical positive and negative matchers over the rendered EMPTY state, and
+   * `tutorialOfferBody.endsWith(launchGuidedDemoBody)` is asserted, so a change to either
+   * string that breaks the quotation fails rather than drifts.
    */
   actionLaunchGuidedDemo: 'Launch Guided Demo',
   launchGuidedDemoBody:
