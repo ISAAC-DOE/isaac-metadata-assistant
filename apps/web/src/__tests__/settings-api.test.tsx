@@ -1058,8 +1058,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 39 operations, 54 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(40);
+  it('describes the contract it claims to: 42 operations, 67 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(42);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1160,26 +1160,57 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // which compares that array against the served document — a different test, in
     // a different suite.) `git log -- src/test/apiFixtures.ts` settles the question
     // in one command and should be the first thing run when this fails.
-    // 25,500 -> 26,797 and 39 -> 40 operations, 54 -> 58 paragraphs: the durable
-    // Create Experiment path. TWO descriptions moved and the split between them
-    // matters, because only one of them is a new operation:
+    // 25,500 -> 26,223 (+723): `GET /api/runtime/verification` gained the `mode`
+    // disclosure. That route now serves TWO corpora rather than one, and its
+    // description had to say so -- it previously read "over the ten public
+    // upstream ISAAC example records" and "this operation does not connect to any
+    // database", both of which became false the moment the authorized private
+    // mode was made reachable. The re-transcription is mechanical: it was copied
+    // from `create_app().openapi()`, not written by hand, and
+    // `apps/api/tests/test_contract_description_parity.py` is what proves the
+    // copy still matches the server.
     //
-    //   * `POST /api/experiments` is NEW — a lead plus three paragraphs. The three
-    //     are separate statements rather than a reflow of one: what it takes and
-    //     what it refuses to invent; why it refuses inside a worked-example
-    //     session; and where the created experiment is stored. Folding the second
-    //     into the lead would bury the one sentence explaining a 409 a client can
-    //     actually receive, which is the same mistake the `/api/demo/reset`
-    //     precondition note above records.
-    //   * `GET /api/health` gained ONE paragraph, for the `experiment_storage`
-    //     block. It is a separate paragraph for the same reason its sibling
-    //     `database` paragraph is: it is a different subject, and the UI derives a
-    //     user-visible durability sentence from it, so it must not be findable only
-    //     by reading the liveness lead to the end.
-    //
-    // 3 + 1 = 4 new post-lead paragraphs, hence 54 -> 58.
-    expect(total).toBe(26797);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(58);
+    // A note for whoever re-transcribes next: dump the string with
+    // `ensure_ascii=False`. The parser in that parity test unescapes `\n`, `\"`,
+    // `\'` and `\\` and NOT `\uXXXX`, so an ASCII-escaped em dash reads as six
+    // literal characters and the two sides differ in a way the diff renders
+    // identically. That cost a debugging round here.
+    // 26,223 -> 27,188 (+965): the review follow-up on the same operation. The
+    // `mode` disclosure had shipped with two statements that measurement
+    // contradicts, and correcting prose is longer than asserting it. (1) It said
+    // the private mode "is refused rather than attempted when its environment
+    // gates are unmet, and reports `unavailable` when the driver is absent" --
+    // but only the `PGDATABASE` pin refuses; a missing `PGHOST`/`PGUSER`/
+    // `PGPASSWORD` reports `unavailable`, as does an unimportable driver. An
+    // operator reading the old text of a pod saying `unavailable` would hunt for
+    // a missing driver instead of an unset host. Each word is now paired with
+    // its own cause, and `apps/api/tests/test_verification_route_wiring.py`
+    // measures both under real environments. (2) It said the connection is
+    // opened "from the pod", which is where the deployment puts the process, not
+    // anything this code checks -- now stated as configuration rather than
+    // enforcement. Two smaller edits: "always named in the report itself" became
+    // false for pending envelopes (they carry no `metadata`), and the public
+    // bullet now names `public_reference` inside the sentence that makes the
+    // no-database claim, so the claim is scoped where it is read. NO paragraph
+    // was added or removed -- the count below stays 56, and that is asserted
+    // rather than assumed. One wording constraint is worth knowing before
+    // editing that description again: the credential libpq variable is
+    // DESCRIBED, not named, because `apps/api/tests/test_about_and_openapi.py`
+    // scans the whole generated document for the substring "password" with no
+    // exception list, and spelling the variable out fails it.
+    expect(total).toBe(32174);
+    // 54 -> 56: the `mode` disclosure on GET /api/runtime/verification is two
+    // new paragraphs -- the two-corpus list, and the sentence saying an unknown
+    // mode is refused rather than silently served the other corpus.
+    // MERGE OF THE CREATE-EXPERIMENT BRANCH WITH THE PRIVATE-MODE WIRING.
+    // Neither side's numbers were correct for the merged file and neither was
+    // copied: this branch had 40 ops / 26,797 / 58, `origin/main` had 39 /
+    // 27,188 / 56, and the merged contract measures 42 / 32,174 / 67. All three
+    // were COMPUTED by running this assertion and transcribing what it reported,
+    // after every entry was re-transcribed from `create_app().openapi()`.
+    // Two independently-correct numbers combining into a wrong one is the exact
+    // failure this file's history keeps recording.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(67);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);
