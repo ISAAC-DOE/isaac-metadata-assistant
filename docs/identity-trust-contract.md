@@ -363,12 +363,14 @@ without them would be adopting a weaker system than it looks:
 
 1. **ACL grantees are never verified to exist in Authentik.** A grant is a string write. A typo, a
    departed user, or a username that was never real all persist silently as a grant row.
-2. **The header-trust boundary fails open and is untested.** `portal/ontology.py`'s `trusted_identity`
-   *"fail[s]-open with a warning"* when `EDGE_AUTH_SECRET` is unset — its own comment says the gate is
-   *"INACTIVE (EDGE_AUTH_SECRET unset, fail-open)"* — and it carries **zero tests**. This is the same
-   boundary §2 of this document identifies as the hard part, and upstream has not closed it either.
-   A locked, adversarially-reviewed *decision layer* sitting on an unproven *trust layer* is exactly
-   the shape §2 warns about.
+2. **The upstream header-trust boundary is unproven, and ISAAC must not inherit it.** The specific
+   degradation condition and the setting that governs it are **withheld from this public document**
+   — that boundary belongs to another team's live system and the weakness is not ours to fix (same
+   rationale as `portal-identity-and-metrics-audit.md` §1 and §4). What matters here is the shape:
+   the upstream trust layer is not verified by tests, and it is the same boundary §2 of this
+   document identifies as the hard part. A locked, adversarially-reviewed *decision layer* sitting
+   on an unproven *trust layer* is exactly what §2 warns about — so ISAAC adopts the decision
+   pattern and **does not** adopt the trust mechanism.
 
 ### 5.3 Authentik's groups are coarse deployment-access groups, not collaboration groups
 

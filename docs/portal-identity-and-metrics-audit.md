@@ -17,38 +17,36 @@ one direction and wrong in another, and both corrections matter for what `/krish
 
 ## 1. The displayed username is not evidence of authentication
 
-The portal renders the username by echoing a forwarded header straight into server-rendered HTML —
-`portal/app.py` → `portal/branding.py` `user_chip()`. There is **no `/me`, `/whoami`, `/session`, or
-`/profile` route anywhere** in the portal's ~60 routes.
+The portal renders the username by echoing a forwarded header into server-rendered HTML. There is
+**no `/me`, `/whoami`, `/session`, or `/profile` route anywhere** in the portal.
 
 So the thing that looked like an identity contract is a header being printed. **ISAAC cannot ask the
 portal who a user is**, because there is nothing to ask.
 
-### Two mechanisms, only one of which authenticates
+> **Redacted for public release.** This section previously carried a mechanism-level comparison of
+> the portal's two identity paths, including the specific guard used on the weaker one and the
+> condition under which it degrades. That is another team's live production system, the weakness is
+> not ours to fix, and it was not fixed at the time of publication — so the operational specifics
+> are withheld from the public record and routed to the owning team privately. The conclusions that
+> govern **ISAAC's** engineering are kept in full below, because they are what future sessions must
+> not silently reverse.
 
-The image runs two processes with entirely separate identity models.
+### What ISAAC may conclude
 
-| | Streamlit UI (renders the username) | Flask API |
-|---|---|---|
-| Identity source | `X-authentik-username`, unsigned | `Authorization: Bearer` |
-| Verified? | **No.** A static shared-secret channel gate only: `hmac.compare_digest(X-Isaac-Edge, EDGE_AUTH_SECRET)` in `portal/ontology.py` `trusted_identity()` | **Yes** — server-to-server call to Authentik `/api/v3/core/users/me/`, 5-minute cache, fail-closed |
-| If the secret is unset | **Fail-open** — any caller is whoever they claim | Fail-closed, 401 |
-| Admin determined by | `ISAAC_ADMINS` **environment variable** | Authentik **group** membership |
+Two processes run with entirely separate identity models. One authenticates properly — a
+server-to-server call to the identity provider, cached briefly, fail-closed. The other **does not
+authenticate the subject at all**: it establishes at most that a request arrived over a channel
+presenting a shared secret, which is a **channel** assertion, not a **subject** one — unsigned,
+unbound to the username, replayable, and identical for any two parties holding it. The two paths
+also derive administrator status from different sources, so **the same record can be
+admin-editable through one door and not the other.**
 
-The exact set of `X-authentik-*` headers the portal consumes is **one**: `username`. `uid`, `email`,
-`groups`, `name` and `entitlements` are received and discarded.
+Of the forwarded `X-authentik-*` headers, the portal consumes exactly **one**: `username`. `uid`,
+`email`, `groups`, `name` and `entitlements` are received and discarded.
 
-**What the Streamlit guarantee actually is:** *a header arrived on a connection presenting the
-correct static shared secret.* `X-Isaac-Edge` is a **channel** assertion, not a **subject** one — it
-is unsigned, unbound to the username, replayable, and identical for any two parties holding it. The
-whole scheme rests on an assumption stated only in a docstring — *"the ingress overwrites any
-client-supplied value"* — which nothing in that repository verifies, tests, or configures.
-
-### The two admin definitions disagree
-
-`record_authz.can_edit_record` is called with an env-derived `is_admin` from Streamlit and a
-group-derived one from the API. **The same record can be admin-editable through one door and not the
-other.**
+**Binding consequence for ISAAC:** a forwarded identity header is not proof of authentication, and
+ISAAC must not build ownership, roles, or per-user statistics on one. See
+[`identity-trust-contract.md`](identity-trust-contract.md) §6A.
 
 ---
 
@@ -115,15 +113,21 @@ the Flask API computes live.
 
 ### A finding in the portal, reported not acted on
 
-The Flask metrics endpoints are correctly `@_require_admin`. **The Streamlit Dashboard is not
-gated** — it renders requests-grouped-by-username and unauthenticated-requests-grouped-by-source-IP
-at top level, against precisely the tables the portal's own `_AGENT_FORBIDDEN_TABLES` marks
-admin-only. A comment above those queries *asserts* the admin gate that is absent from the code.
+> **Redacted for public release.** A missing-authorization finding was identified in the portal
+> during this audit: one surface renders personal data that the portal's own code marks as
+> administrator-only. The component, the data classes, and the reason the gate is absent are
+> **deliberately withheld from this public document.**
+>
+> Rationale: this is **another team's repository and another team's live deployment.** It was not
+> tested against the deployment, not fixed by us, and not disclosed publicly. Publishing the
+> specifics would be disclosing an unremediated vulnerability in a system we do not own and cannot
+> patch. The detail is routed to the owning team privately.
+>
+> Exploitability depends on the ingress, which is not in that repository, so the honest bound is
+> *any authenticated institutional user, not necessarily the public.*
 
-Exploitability depends on the ingress, which is not in that repository, so the honest bound is *any
-authenticated institutional user, not necessarily the public.* **This is another team's repository:
-it was not tested against the deployment, not fixed, and not disclosed publicly.** It is routed to
-Dean privately.
+**Binding consequence for ISAAC:** ISAAC must not ingest the portal's per-user or per-source-address
+metrics. That conclusion is independent of the finding above and is restated in §6.
 
 ---
 
@@ -132,17 +136,21 @@ Dean privately.
 `docs/deployment.md` asserts — with no manifest, no citation and no observation — that `/krish` runs
 on the same `isaac-portal` Authentik application policy as `/portal`.
 
-**There is now evidence against it.** The portal's Streamlit security depends on the edge *injecting
-and overwriting* `X-Isaac-Edge`. ISAAC's own probe observed the opposite on the `/krish` path: the
-client's planted `X-Isaac-Edge` value **arrived untouched**
-([`identity-trust-contract.md`](identity-trust-contract.md) §6A.2). Had the edge overwritten it
-globally, that canary could not have survived.
+**There is now evidence against it.** ISAAC's own probe observed that on the `/krish` path, a
+client-planted value in one of the headers the portal's security model depends on **arrived
+untouched** ([`identity-trust-contract.md`](identity-trust-contract.md) §6A.2). Had the edge
+overwritten that header globally, the planted value could not have survived. So the two paths do
+not demonstrably receive the same header treatment, and the deployment doc's claim is unsupported.
 
-So either `EDGE_AUTH_SECRET` injection is `/portal`-specific, or it is not configured at all and the
-portal is running fail-open. Both are Dean's to answer.
+> **Redacted for public release.** The inference this supports about the *portal's* current
+> configuration state — and the environment setting it turns on — is withheld here for the same
+> reason as §4: it describes a possible weakness in a live system we do not own. It is Dean's to
+> answer privately.
 
-**Operational consequence: ISAAC must not copy the portal's `X-Isaac-Edge` pattern.** On the ingress
-as actually observed, it would be fail-open.
+**Operational consequence for ISAAC — unchanged and load-bearing: ISAAC must not copy the portal's
+edge-header trust pattern.** On the ingress as actually observed, an ISAAC copy of it would be
+fail-open. This is why `X-Isaac-Edge` is permanently disqualified as evidence of edge traversal in
+[`identity-trust-contract.md`](identity-trust-contract.md) §6A.
 
 ---
 
@@ -151,7 +159,7 @@ as actually observed, it would be fail-open.
 | Contract | Reusable? |
 |---|---|
 | **Identity** | **No.** No endpoint exists to consult. There is nothing to reuse |
-| **Metrics** | Technically, via `GET /portal/api/usage/summary` — but admin-token gated, **unversioned** (no OpenAPI, no version segment, no service-account concept; tokens are per-human and expire in 90 days), and `by_user`/`unauth_by_ip` carry other people's usernames and client IPs that ISAAC has no authorization to ingest |
+| **Metrics** | Technically, via the portal's usage-summary endpoint — but admin-token gated, **unversioned** (no OpenAPI, no version segment, no service-account concept; tokens are per-human and short-lived), and its per-user and per-source-address breakdowns carry other people's usernames and client IPs that ISAAC has no authorization to ingest |
 | **Portal DB direct read** | **Recommend against.** Separate logical database and role; would bypass every guard in `record_authz.py` |
 | **The design** | **Yes — copy the pattern, not the data.** ISAAC's own request logging is ~40 lines over its own tables and imports no foreign PII |
 
@@ -194,9 +202,10 @@ and **Q19**/**Q20** in [`dean-authorization-packet.md`](dean-authorization-packe
 
 ## 9. Method and limits
 
-Static source reading of a public repository at a pinned commit. **Not** established here: whether
-the ingress overwrites or appends `X-authentik-username`; whether `EDGE_AUTH_SECRET` is set in
-production; whether the pod is reachable in-cluster bypassing the edge; the value of `ISAAC_ADMINS`;
-the portal's real `PGDATABASE`; and whether the ungated dashboard is reachable by a non-admin in
+Static source reading of a public repository at a pinned commit. **Nothing about the running
+deployment was established**: not the ingress's header-rewriting behaviour, not any production
+environment setting, not whether the pod is reachable in-cluster bypassing the edge, not any
+database name, and not whether the surface described in §4 is reachable by a non-administrator in
 practice. Each requires deployment or infrastructure evidence this repository cannot see, and none
-was inferred.
+was inferred. The individual unknowns are not enumerated here, because the enumeration itself
+sketched a checklist against another team's live system.

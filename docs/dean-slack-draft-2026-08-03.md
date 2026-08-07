@@ -26,10 +26,11 @@ username non-reassignable across rename/departure/rehire? Is `X-authentik-uid` s
 This one gates everything else. If yes, forwarded `X-authentik-*` headers can't be trusted for
 anything, and we won't build ownership, roles, or per-user stats on them.
 
-Related: `/portal`'s Streamlit identity check depends on the edge **injecting and overwriting**
-`X-Isaac-Edge`. On the `/krish` path we observed a client-supplied `X-Isaac-Edge` arrive
-**untouched**, which suggests the two paths don't get the same header treatment. Our deployment doc
-claims `/krish` runs on the same `isaac-portal` Authentik application policy — is that actually true?
+Related: on the `/krish` path we observed a client-supplied value in one of the headers `/portal`'s
+identity check depends on arrive **untouched**, which suggests the two paths don't get the same
+header treatment. Our deployment doc claims `/krish` runs on the same `isaac-portal` Authentik
+application policy — is that actually true? (Specifics of what that implies for `/portal`'s own
+configuration are deliberately kept out of this public file; ask privately.)
 
 **3. Portal usage metrics — may we consume them, and how much may we show?**
 
@@ -43,11 +44,16 @@ written by its `after_request` hook — not GitHub PR data, which we'd previousl
 
 **4. One thing to look at in the portal, privately**
 
-The Streamlit **Dashboard** page renders "requests by user" (usernames) and "unauthenticated requests
-by source IP" with no admin gate — `app.py` guards `"Admin Review"` but not the Dashboard block.
-Those are the same tables `_AGENT_FORBIDDEN_TABLES` marks admin-only, and a comment right above the
-queries says "admin-only", so it looks like an intended gate that isn't in the code. How exposed it
-is depends on the ingress, so we didn't test it against the deployment.
+> **Redacted for public release.** This item is a missing-authorization finding in the portal: a
+> surface renders personal data that the portal's own code marks administrator-only. **The
+> component and the specifics are withheld from this public repository** — it is another team's
+> live system, the finding was not fixed by us, and publishing it would disclose an unremediated
+> vulnerability in infrastructure we do not own.
+>
+> **Krish: send this item to Dean privately (Slack/DM), not through this file.** Do not re-add the
+> specifics here, and do not restate them in a PR title, commit message, or issue.
+
+How exposed it is depends on the ingress, so we did not test it against the deployment.
 
 **Still open from before:** Q19 (may the deployed backend read the 30 records in memory only, mutate
 copies, and return aggregate pass/fail with no values or writes?) and Q20 (should we arm `format`
