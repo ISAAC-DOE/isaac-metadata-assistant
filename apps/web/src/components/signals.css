@@ -158,6 +158,23 @@
   font-size: 12px;
   color: var(--text-slate);
 }
+/* The record-specific denominator disclosure. It is a scope statement about the
+   count — never a verdict and never an advisory — so it must not borrow the amber
+   advisory or the reserved pass/fail hues, and it does not.
+
+   THE EMPHASIS HERE IS WEIGHT AND SPACING, NOT COLOUR, and the `color` line is
+   near enough to a no-op to say so: --cover-text and the sibling .coverage-sub's
+   --text-slate are BOTH #5b6b7d (styles/tokens.css:30,64 — measured). The
+   declaration is kept for intent (this line belongs to the coverage figure's
+   token, not to the generic sub-label's) but it changes no rendered pixel today,
+   and a reader must not infer a colour distinction that is not there. If this
+   disclosure ever needs to read as more than "weighted sibling", that is a token
+   change, not a class change. */
+.coverage-sub-scope {
+  margin-top: 6px;
+  font-weight: 600;
+  color: var(--cover-text);
+}
 .coverage-cmd {
   margin-top: 8px;
   font-size: 11px;

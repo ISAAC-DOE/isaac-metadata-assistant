@@ -461,7 +461,7 @@ function LoadedExport({
             <>
               <div className="signal-row">
                 {coverage !== 'pending' ? (
-                  <CoverageBadge audit={coverage} />
+                  <CoverageBadge audit={coverage} advisory={advisory} />
                 ) : (
                   <div className="coverage-loading card">Coverage loading…</div>
                 )}
