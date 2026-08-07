@@ -359,10 +359,19 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // this surface is a design-system change that moves counts on many screens
       // and belongs to its own slice, not to a no-guessing slice.
       //
-      // darwin is deliberately NOT touched — it was 11 before this change and is
-      // measured separately; it was not re-measured in this session, and the
-      // baseline harness explicitly forbids syncing one platform to the other.
-      'guided-completion@tablet-768x1024': { darwin: 11, linux: 11 },
+      // The entry COLLAPSES back to a bare number, and the number for darwin is
+      // MEASURED, not assumed. A first attempt wrote `{ darwin: 11, linux: 11 }`
+      // and the well-formedness guard rejected it correctly: a per-platform pair
+      // must mark a real measured difference, and equal halves are not one.
+      //
+      // darwin re-measured locally on this branch --
+      //   npx playwright test e2e/specs/a11y-axe.spec.ts \
+      //     --project=tablet-768x1024 -g "Guided Completion"
+      // -- passes against 11, so darwin did NOT gain a node from
+      // `.guided-inferability` while Linux did. The two platforms have therefore
+      // CONVERGED at 11, which is why the split that existed for the 11/10
+      // difference is no longer carrying any information and is removed.
+      'guided-completion@tablet-768x1024': 11,
       // Was `{ darwin: 7, linux: 8 }`; darwin caught up to Linux on 2026-08-01
       // and the split is no longer needed. `.guided-suggestion-not` moved from
       // axe's `incomplete` bucket into `violations` after the C1/I4 fix removed
@@ -901,8 +910,19 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // values for these ten keys remain darwin measurements written as scalars, as
   // they already were; if CI disagrees, transcribe ITS numbers and correct the
   // total — never loosen the assertion.
+  //
+  // no-guessing slice: LINUX ONLY rises by 1, 1703 -> 1704. This slice adds
+  // `.guided-inferability` (the paragraph stating why the app is asking rather
+  // than answering), which fails `color-contrast` on Linux but NOT on darwin --
+  // `guided-completion@tablet-768x1024` was `{ darwin: 11, linux: 10 }` and is
+  // now the scalar `11`, so the darwin half is unchanged and only the Linux half
+  // moves. darwin therefore stays 1703; it was re-measured locally on this branch
+  // (`playwright test e2e/specs/a11y-axe.spec.ts --project=tablet-768x1024
+  // -g "Guided Completion"` passes against 11) rather than assumed, because the
+  // note above records that assuming a DOM change affects both platforms equally
+  // has already been wrong once here.
   darwin: 1703,
-  linux: 1703,
+  linux: 1704,
 };
 
 /**
