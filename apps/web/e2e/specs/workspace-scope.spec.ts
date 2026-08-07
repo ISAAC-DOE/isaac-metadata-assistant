@@ -38,9 +38,34 @@ test.describe('@interaction the ordinary workspace', () => {
     // NOT a placeholder and not a loading state: the permanent condition of this
     // deployment. Asserted as the reader's own words rather than by a CSS class
     // alone, so replacing the copy with something that over-promises fails here.
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible();
-    await expect(page.locator('.queue-empty-state')).toContainText(
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible();
+    /*
+     * THE PROMISE-IT-CANNOT-KEEP ASSERTION, REDERIVED. This required the sentence
+     * "This deployment cannot yet create or import a record". That sentence became
+     * FALSE when `POST /api/experiments` shipped, so requiring it would make this
+     * test demand a lie. It is now asserted ABSENT, and the half that is still true
+     * — there is no import, `POST /api/uploads` is an unconditional 403 — is
+     * asserted directly.
+     */
+    await expect(page.locator('.queue-empty-state')).not.toContainText(
       /cannot yet create or import a record/i
+    );
+    await expect(page.locator('.queue-empty-state')).not.toContainText(/import/i);
+    // The create control is real and it is the primary.
+    const create = page.getByRole('button', { name: 'Create Experiment' });
+    await expect(create).toBeEnabled();
+    await expect(create).toHaveClass(/btn-primary/);
+    /*
+     * WHERE A NEW EXPERIMENT GOES, disclosed. This backend runs with no PGHOST, so
+     * the honest answer here is the ephemeral one — and it must never quietly become
+     * a durability promise on a deployment that has no database.
+     */
+    await expect(page.locator('.queue-empty-storage')).toHaveAttribute(
+      'data-durability',
+      'ephemeral'
+    );
+    await expect(page.locator('.queue-empty-storage')).toContainText(
+      /cleared when the server restarts/i
     );
 
     // Zero rows, and zero group headings. `.exp-row` is the queue's row element;

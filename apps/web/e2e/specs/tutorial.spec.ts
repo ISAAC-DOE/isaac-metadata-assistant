@@ -198,7 +198,7 @@ test.describe("@interaction the empty workspace's own primary", () => {
 
     // The retired state, measured on the screen a returning reader actually lands on.
     await expect(page.locator('.exp-row')).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible();
     await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
 
     // The way in — and it is the only one, under exactly one name.
@@ -493,7 +493,7 @@ test.describe('@interaction leaving the walkthrough', () => {
     // The examples are gone from the screen, because the scope they lived in is
     // gone — the ordinary queue is empty again, on the same route.
     await expect(page.locator('.exp-row')).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible();
 
     // Cleanup was a real request, and the session really stopped existing.
     await expect
@@ -526,7 +526,7 @@ test.describe('@interaction leaving the walkthrough', () => {
 
     // …and the reader is left on a usable screen: the way back in is present and
     // operable, not disabled by the walkthrough they just escaped from.
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toBeEnabled();
   });
 
@@ -627,7 +627,7 @@ test.describe('@interaction reloading', () => {
     // The persisted pointer was cleared on the way out, so the reload does not
     // resurrect the discarded session (which would 404 everything) and does not
     // show the expired notice either.
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('[data-tutorial-notice]')).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
     await expect(chip(page)).toHaveText('Workspace');
@@ -651,7 +651,7 @@ test.describe('@interaction reloading', () => {
     // The scope was LEFT, not clung to: the ordinary empty workspace is what is
     // shown, the chip agrees, and no walkthrough opened pointing at records that
     // would 404.
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible();
     await expect(mark(page)).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
     await expect(chip(page)).toHaveText('Workspace');
@@ -860,7 +860,7 @@ test.describe('@interaction the walkthrough is quiet', () => {
     // And My Experiments is the ordinary empty workspace again — the examples did
     // not survive the session that held them.
     await app.open(experiments);
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.exp-row')).toHaveCount(0);
   });
 });

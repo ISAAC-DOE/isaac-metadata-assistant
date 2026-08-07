@@ -22,7 +22,7 @@ import logging
 
 from fastapi import APIRouter, Body, Depends, Header, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from isaac_records.audit import audit_records, render_audit
 from isaac_records.complete import apply_answers, apply_corrections
@@ -38,6 +38,7 @@ from . import csv_ingest
 from . import db_recon
 from . import dependencies
 from . import evidence_classify
+from . import experiment_repository
 from . import memory
 from . import memory_graph
 from . import runtime_mode
@@ -231,18 +232,40 @@ OPENAPI_TAGS: list[dict] = [
             # "NO CODE PATH IN THIS BUILD CAN" is what this comment used to claim, and it
             # was too strong: ``create_experiment(title, source, draft, id=SEED_READY_ID,
             # session_id=None)`` is exactly such a path — ``rid = id or new_record_id()``
-            # (``workspace.py:608``), then ``exp.save()`` into ``scope_root(None)``. The
-            # sentence above survives for a DIFFERENT and stronger reason: this build
-            # exposes no record-creation surface at all. There is no ``POST
-            # /api/experiments``, and ``create_experiment`` has no caller anywhere under
-            # ``apps/api/isaac_api/`` — pinned by
-            # ``test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package``,
-            # so a future route that took a client-supplied id could not be added
-            # silently. ("Requires a session_id"
-            # was the earlier justification and it was too weak to carry the sentence:
+            # (``workspace.py``), then ``exp.save()`` into ``scope_root(None)``. ("Requires
+            # a session_id" was an even earlier justification and was weaker still:
             # ``scope_root(None)`` returns ``workspace_root()`` silently, and an explicit
             # ``session_id=None`` was measured writing a canonical record into the
             # ordinary root before the refusals were added.)
+            #
+            # THE JUSTIFICATION HAS NOW MOVED A SECOND TIME, AND THIS IS THE MOVE TO
+            # READ CAREFULLY. It used to be "this build exposes no record-creation
+            # surface at all — there is no ``POST /api/experiments``". **There is one
+            # now.** That sentence is retired; the claim above is not, because the claim
+            # is about BUILT-IN EXAMPLE records and the new route cannot make one.
+            #
+            # What carries it, in the order a reader should check it:
+            #
+            #  1. THE SEEDING REFUSALS. ``_materialise_seed``,
+            #     ``reset_to_canonical_seed`` and ``ensure_tutorial_seeded`` each RAISE
+            #     ``InvalidTutorialSession`` on a ``None`` session id. These are the only
+            #     functions that know what an example record CONTAINS, and none of them
+            #     can be aimed at the ordinary workspace.
+            #  2. THE ID CANNOT BE CHOSEN. ``POST /api/experiments`` never passes ``id=``,
+            #     so ``create_experiment`` mints a fresh ULID; and
+            #     ``CreateExperimentRequest`` sets ``extra="forbid"``, so a client that
+            #     sends one gets a 422 rather than having it ignored. The five canonical
+            #     ids are fixed constants and are therefore unreachable from the route.
+            #  3. THE DURABLE STORE REFUSES ONE ANYWAY.
+            #     ``PostgresOrdinaryStore.refuse_if_not_persistable`` raises on any
+            #     canonical id, in any scope, so an example cannot be made durable even
+            #     if one were somehow materialised.
+            #
+            # ``test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package``
+            # still guards this — it now pins that there is exactly ONE caller, that the
+            # caller passes neither ``id=`` nor ``session_id=``, and that no path can
+            # materialise a canonical record into the ordinary scope. Adding a second
+            # caller, or an ``id`` argument to this one, still fails.
             "Creating and discarding an isolated worked-example workspace. The "
             "built-in example records are created only inside one of these — no "
             "operation in this API materialises one into the ordinary workspace."
@@ -680,7 +703,11 @@ def _build_commit() -> str | None:
         "reconnaissance scan in this process. That block is derived from "
         "configuration alone: this operation never opens a database connection, "
         "issues a query, or waits on one, so a database problem can never change "
-        "its result and can never fail a container probe."
+        "its result and can never fail a container probe.\n\n"
+        "It states, in `experiment_storage`, whether an experiment created here is "
+        "stored durably or only for as long as this server runs. That is derived "
+        "from configuration alone as well, so it says how this deployment is set "
+        "up, never that a database is reachable right now."
     ),
     response_description="The liveness banner.",
 )
@@ -706,6 +733,14 @@ def health() -> dict:
             "record_display": _DB_RECON_RECORD_DISPLAY,
             "last_recon": _db_recon_last_summary(),
         },
+        # DELIBERATELY ADJACENT TO `database`, AND DELIBERATELY NOT PART OF IT.
+        # They answer different questions and conflating them would be the kind of
+        # error this file has made before: `database` is about the READ-ONLY
+        # diagnostic over the production-derived sample, which stays closed for
+        # per-record display; `experiment_storage` is about where THIS
+        # APPLICATION'S OWN experiments are stored. A deployment can have the
+        # second without the first ever being scanned.
+        "experiment_storage": experiment_repository.storage_status(),
     }
 
 
@@ -1407,6 +1442,154 @@ def demo_reset(
 )
 def list_experiments(scope: TutorialScopeDep) -> dict:
     return {"experiments": [_summary(e) for e in ws.list_experiments(scope)]}
+
+
+# --- 3b. create ---------------------------------------------------------------
+#
+# THE FIRST RECORD-CREATION SURFACE THIS APPLICATION HAS EVER HAD, and it is
+# deliberately the smallest one that can exist: a name, an optional note, and
+# nothing scientific at all.
+#
+# WHAT THE ABSENCE OF THIS ROUTE USED TO BE DOING. Three product strings claim
+# that nothing in this build adds a BUILT-IN EXAMPLE record to the ordinary
+# workspace (the mode chip's accessible name, the `tutorial` tag description
+# above, and the Statistics lead sentence). Until now their stated justification
+# was "this build exposes no record-creation surface at all", pinned by
+# `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package`.
+#
+# ALL THREE STRINGS ARE STILL TRUE, and their justification has moved rather than
+# weakened. They are about built-in EXAMPLE records, and this route cannot produce
+# one:
+#
+#   * the id is minted server-side by `create_experiment`'s `rid = id or
+#     new_record_id()` with no `id=` argument anywhere on the path, so the five
+#     fixed canonical ids are unreachable;
+#   * `CreateExperimentRequest` sets `extra="forbid"`, so a client cannot even
+#     name an `id` field — the request is rejected, not ignored;
+#   * `_materialise_seed`, `reset_to_canonical_seed` and `ensure_tutorial_seeded`
+#     each RAISE `InvalidTutorialSession` on a `None` session id, so no seeding
+#     path can put an example in the ordinary scope;
+#   * and `PostgresOrdinaryStore.refuse_if_not_persistable` raises on a canonical
+#     id whatever the scope, so one cannot be made durable either.
+#
+# WHY IT REFUSES INSIDE A WORKED-EXAMPLE SESSION rather than quietly creating in
+# the ordinary scope. Either alternative is worse. Creating into the SESSION would
+# put a user's own record inside a workspace that is discarded on a timer — the
+# examples are temporary by design and a real record must never inherit that.
+# Creating into the ORDINARY scope while the caller is reading the session would
+# write a record the caller cannot see, into a list they are not looking at. The
+# refusal is explicit, typed, and mirrors `/api/demo/run`'s opposite requirement.
+
+
+class CreateExperimentRequest(BaseModel):
+    """A new experiment: a title, and optionally a short note about it.
+
+    ``extra="forbid"`` is the load-bearing line. It is what makes "no
+    client-supplied record id" a property of the CONTRACT rather than of this
+    handler remembering not to read one: `{"id": "..."}` is a 422, and so is any
+    other field a future client invents.
+
+    There is deliberately no scientific field here. Everything an ISAAC record
+    needs — technique, facility, sample, energy window, series, descriptors — is
+    evidence-bearing, and this form has no evidence to attach. Those are asked
+    for by the Guided Completion workflow, where an answer is recorded with its
+    confirmation, rather than typed into a create form where it would arrive as
+    an unsourced assertion.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        min_length=1,
+        max_length=200,
+        description="What to call this experiment. Required, and it is not a scientific claim.",
+    )
+    description: str | None = Field(
+        default=None,
+        max_length=1000,
+        description=(
+            "Optional free-text note about what this experiment is. Stored as the "
+            "record's source description; it is never parsed and never becomes a "
+            "scientific value."
+        ),
+    )
+
+
+@router.post(
+    "/experiments",
+    status_code=201,
+    tags=[TAG_EXPERIMENTS],
+    summary="Create an Experiment",
+    description=(
+        "Creates a new, empty experiment in the ordinary workspace and returns its "
+        "full detail bundle, so a client can go straight to it.\n\n"
+        "It takes a title and an optional note, and nothing else. No scientific "
+        "value is invented: the new record starts with every scientific field "
+        "genuinely empty and with the blocking questions an ISAAC record has to "
+        "answer already open, which is what the guided completion workflow then "
+        "works through. The record id is always minted by the server — a "
+        "caller-supplied id is rejected, as is any other unrecognised field.\n\n"
+        "It refuses with `409` when the `X-Isaac-Tutorial-Session` header is "
+        "present, and writes nothing. A worked-example session is temporary and is "
+        "discarded on a timer; a record you created must not inherit that, and it "
+        "must not be written into a workspace you are not currently looking at "
+        "either.\n\n"
+        "Whether the new experiment is stored durably depends on this deployment. "
+        "`GET /api/health` reports which, in `experiment_storage`, and the reader "
+        "is told the same thing before they create anything."
+    ),
+    response_description="The created experiment's detail bundle, with its `ETag`.",
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_TUTORIAL_SCOPE,
+        409: {
+            "description": (
+                "The request carried a worked-example session header. This "
+                "operation acts only on the ordinary workspace. Nothing was "
+                "created."
+            )
+        },
+    },
+)
+def create_experiment_route(
+    scope: TutorialScopeDep, body: CreateExperimentRequest, response: Response
+):
+    if scope is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "ordinary_scope_required",
+                "operation": "POST /api/experiments",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "Experiments are created in the ordinary workspace, never "
+                    "inside a worked-example session — a session is discarded when "
+                    "it expires. Leave the worked example, then create it. Nothing "
+                    "was created."
+                ),
+            },
+        )
+    title = body.title.strip()
+    if not title:
+        # `min_length=1` accepts a string of spaces; a name that is only
+        # whitespace names nothing, so it is refused with the same typed shape a
+        # schema rejection would have produced.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_title",
+                "message": "An experiment needs a title. Nothing was created.",
+            },
+        )
+    description = (body.description or "").strip() or None
+    # The ONE call. Which backend stores it is `experiment_repository`'s decision
+    # and this route deliberately cannot tell — that is what keeps a future
+    # durable repository from needing a route change.
+    exp = experiment_repository.repository().create(title=title, description=description)
+    detail = _detail(exp)
+    detail.update(vc.version_fields(exp))
+    response.headers["ETag"] = exp.etag()
+    return detail
 
 
 # --- 4. detail ----------------------------------------------------------------

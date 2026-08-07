@@ -158,6 +158,13 @@ def test_health_commit_null_when_neither_env_set(tmp_path, monkeypatch):
             "record_display": "closed",
             "last_recon": None,
         },
+        # No PGHOST -> no application database -> experiments are stored in the
+        # workspace directory only, which on the deployed pod is an `emptyDir`.
+        "experiment_storage": {
+            "configured": False,
+            "backend": "filesystem",
+            "durable": False,
+        },
     }
 
 

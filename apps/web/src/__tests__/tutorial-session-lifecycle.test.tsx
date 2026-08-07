@@ -613,7 +613,7 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     stubFetchRoutes({ ...readOnlyRoutes([]) } as never);
     const view = renderAt();
 
-    await screen.findByRole('heading', { name: 'No experiments yet' });
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
     expect(view.container.querySelectorAll('.exp-row')).toHaveLength(0);
     // No canonical example is named, listed, or counted here.
     expect(view.container.textContent).not.toMatch(/XANES Example/);
@@ -621,13 +621,38 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     for (const id of CANONICAL_RESET_IDS) {
       expect(view.container.textContent).not.toContain(id);
     }
-    // D1: the empty state must not promise creation or import, because nothing in this
-    // build can do either — there is no `POST /api/experiments`, and `POST /api/uploads`
-    // refuses by design.
-    expect(view.queryByRole('button', { name: /new record|new experiment|create|import/i })).toBeNull();
-    expect(view.container.textContent).toMatch(/cannot yet create or import a record/i);
-    // What it MAY point at.
-    expect(view.getByRole('button', { name: 'Open Validator' })).toBeInTheDocument();
+    /*
+     * D1 — REDERIVED, AND HALVED RATHER THAN DROPPED.
+     *
+     * This used to assert that the empty state offers neither creation NOR import,
+     * and required the sentence "cannot yet create or import a record". Both halves
+     * rested on one premise — "there is no `POST /api/experiments`" — and that
+     * premise is now false. The route exists, so the sentence is false and the
+     * control is legitimate; requiring either would make this test demand a lie.
+     *
+     * THE IMPORT HALF IS UNCHANGED AND IS STILL ASSERTED. `POST /api/uploads` is
+     * still an unconditional 403, so an import affordance here would still promise
+     * a capability the build does not have. The retired sentence is additionally
+     * pinned as forbidden in `product-facing-language.test.tsx`, so it cannot come
+     * back through this screen either.
+     */
+    expect(view.queryByRole('button', { name: /import/i })).toBeNull();
+    expect(view.container.textContent).not.toMatch(/cannot yet create or import a record/i);
+    // The create control IS here, and it is the primary — `POST /api/experiments`
+    // is real, and the empty state is where a reader with no experiments meets it.
+    const create = view.getByRole('button', { name: LABELS.actionCreateExperiment });
+    expect(create).toHaveClass('btn-primary');
+    /*
+     * OPEN VALIDATOR IS NOT SECONDARY, and that is asserted on the class rather
+     * than left to a screenshot. It was the one control on this screen wearing the
+     * grey `btn-secondary` treatment, under a lead-in that read as a footnote; it
+     * opens the standalone validator, which is one of the three things this product
+     * does. Both directions are asserted: it carries the action-blue treatment, and
+     * it does NOT carry the secondary one.
+     */
+    const validator = view.getByRole('button', { name: LABELS.actionOpenValidator });
+    expect(validator).toHaveClass('btn-action');
+    expect(validator).not.toHaveClass('btn-secondary');
     /*
      * THE CONTROL SET, AND ITS TWO FORBIDDEN NAMES.
      *
@@ -739,7 +764,7 @@ describe('ordinary workspace — no example record, and no promise of one', () =
   it('T7d · exactly one tutorial CTA is on screen, never both', async () => {
     stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes([]) } as never);
     const empty = renderAt();
-    await screen.findByRole('heading', { name: 'No experiments yet' });
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
     // The precondition that makes this a real test: the offer's own condition is TRUE
     // here (nothing completed, nothing dismissed, phase idle), so the card is being
     // suppressed by the queue gate rather than by having nothing to offer.
@@ -805,7 +830,7 @@ describe('ordinary workspace — no example record, and no promise of one', () =
 
     stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes([]) } as never);
     const view = renderAt();
-    await screen.findByRole('heading', { name: 'No experiments yet' });
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
 
     const { shouldOfferTutorial } = await import('../lib/tutorialController');
     // THE RETIRED STATE, asserted rather than assumed. This is the state that used to
@@ -877,7 +902,7 @@ describe('ordinary workspace — no example record, and no promise of one', () =
   it('T7b · no ordinary request carries a tutorial scope', async () => {
     stubFetchRoutes({ ...readOnlyRoutes([]) } as never);
     renderAt();
-    await screen.findByRole('heading', { name: 'No experiments yet' });
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
     expect(sentRequests().filter((r) => r.scope !== undefined)).toEqual([]);
   });
 });
@@ -1082,7 +1107,7 @@ describe('worked-example session — the boot window after a reload', () => {
     void resumeTutorialSession();
 
     // The ordinary empty state — the one true description of this workspace.
-    await screen.findByRole('heading', { name: 'No experiments yet' });
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
     // ...and NOT any failure panel. Both titles are named: `Record Not Found` was
     // the false claim, and `Not Found` is the honest 404 copy that replaced it —
     // neither belongs on a screen that has successfully read an empty list.
@@ -1186,7 +1211,7 @@ describe('worked-example session — the boot window after a reload', () => {
     expect(readTutorialSession()?.sessionId).toBe(TUTORIAL_SESSION_ID);
     // The reader ends on the ordinary empty workspace, not on a failure panel about
     // a record — the 500 was answered for a LIST.
-    await screen.findByRole('heading', { name: 'No experiments yet' });
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
     expect(view.queryByText('Record Not Found')).toBeNull();
     const notice = document.querySelector<HTMLElement>('[data-tutorial-notice]');
     expect(notice).not.toBeNull();

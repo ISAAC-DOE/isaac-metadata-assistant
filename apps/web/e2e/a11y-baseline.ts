@@ -497,7 +497,33 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-api@zoom-200': 17,
       'settings-explorer@desktop-1280x800': 47,
       'settings-explorer@laptop-1024x768': 47,
-      'settings-explorer@tablet-768x1024': 63,
+      /*
+       * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
+       *
+       * THE SAME MEASUREMENT ARTEFACT the long note below already documents, in the
+       * opposite direction, and it is worth reading that note first: the Endpoint
+       * Explorer's `.api-browser-list` is a clipped scroll container, so axe judges
+       * only the rows inside the box and adding an operation SHIFTS WHICH ROWS THOSE
+       * ARE. This branch publishes one more operation, `POST /api/experiments`, and at
+       * the two narrow widths that displaces one already-failing summary text out of
+       * the measured window.
+       *
+       * IT IS NOT AN ACCESSIBILITY IMPROVEMENT, and the suite's "IMPROVED" wording
+       * should not be read as one. The displaced node is still painted and still
+       * fails; it is merely no longer judged. Lowering the number is still correct —
+       * a stale figure would silently absorb a real regression of the same size.
+       *
+       * HONEST LIMIT, AND IT IS DIFFERENT FROM THE 2026-08-06 ENTRY BELOW. That one
+       * says "measured by CI ... and reproduced on darwin, which agree, so these stay
+       * scalars". THESE TWO NUMBERS ARE DARWIN-MEASURED ONLY. This work could not run
+       * CI, so the linux figures are UNVERIFIED — they are left as scalars because the
+       * cause is a layout clip that has behaved identically on both platforms every
+       * time it has been measured, not because agreement was observed this time. If
+       * the first linux run disagrees, split the entry into
+       * `{ darwin: 62, linux: <measured> }` and do NOT change the darwin value to
+       * match: it was measured separately.
+       */
+      'settings-explorer@tablet-768x1024': 62,
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -545,7 +571,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * mostly unscanned is a real, pre-existing limitation of this surface's
        * coverage, and it is recorded here rather than left to be rediscovered.
        */
-      'settings-explorer@mobile-375x812': 56,
+      // 56 -> 55 on 2026-08-07 — the same clipped-scroll displacement as the
+      // tablet entry above; read that note, including its "darwin-measured only"
+      // caveat. `zoom-200` and the two wide projects did NOT move: the new row
+      // falls outside the measured window at those widths.
+      'settings-explorer@mobile-375x812': 55,
       'settings-explorer@zoom-200': 58,
       'settings-privacy@desktop-1280x800': 8,
       'settings-privacy@laptop-1024x768': 8,
@@ -1169,8 +1199,35 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // every key. Two independent +1 edits that each looked correct against their
   // own base is precisely how a wrong total gets auto-merged without ever
   // raising a conflict, which already happened once on this file.
-  darwin: 1745,
-  linux: 1747,
+  // ── CREATE EXPERIMENT, 2026-08-07: -2 on both columns (1745 -> 1743,
+  //    1747 -> 1745) ────────────────────────────────────────────────────────
+  //
+  // The arithmetic:
+  //
+  //   settings-explorer   tablet 63 -> 62, mobile 56 -> 55   = -2
+  //
+  // NOTHING WAS FIXED AND NOTHING REGRESSED. Both are the clipped-scroll
+  // displacement the `settings-explorer` notes describe: the new operation
+  // `POST /api/experiments` shifts which rows fall inside `.api-browser-list`'s
+  // measured window at the two narrow widths, so one already-failing summary
+  // text stops being judged. It is still painted and still fails.
+  //
+  // WHAT THIS BRANCH ADDED AND WHY IT COSTS NOTHING ELSEWHERE. My Experiments'
+  // empty state gained a durability disclosure (`.queue-empty-storage`). Its
+  // first version used `--text-tertiary` and the scan caught it at once as a
+  // fourth `color-contrast` node on `experiments@*`; it was FIXED at the surface
+  // (`--text-secondary`, matching the sibling `.queue-empty-hint`) rather than
+  // ratcheted here, so all five `experiments@*` entries are unchanged. That is
+  // the outcome this file exists to produce and it is worth naming: the scan
+  // found a new contrast failure the same day it was written.
+  //
+  // DARWIN IS MEASURED; LINUX IS NOT, and the linux figure is this branch's -2
+  // applied to the recorded 1747 rather than an observation. Actions minutes
+  // were unavailable to this work, so no CI run exists for it. If the first CI
+  // run disagrees, transcribe ITS numbers and correct the total — never loosen
+  // the assertion, and never change the darwin column to match.
+  darwin: 1743,
+  linux: 1745,
 };
 
 /**

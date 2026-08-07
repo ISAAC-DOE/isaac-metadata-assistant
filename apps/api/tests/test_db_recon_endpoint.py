@@ -1894,6 +1894,15 @@ def test_health_keeps_its_original_keys_byte_identical(client, monkeypatch):
         "version",
         "commit",
         "database",
+        # ADDED, and this test's own name explains why it had to be added here
+        # rather than tolerated by loosening the comparison: the point of the
+        # assertion is that `database` did not disturb the keys that predate it, so
+        # it has to be an exact set. `experiment_storage` is a SIBLING of
+        # `database`, never a member of it — the two answer different questions
+        # (the read-only diagnostic over the production-derived sample, versus
+        # where THIS application stores its own experiments), and nesting one
+        # inside the other would be the conflation this file exists to prevent.
+        "experiment_storage",
     }
 
 

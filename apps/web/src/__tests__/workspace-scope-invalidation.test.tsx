@@ -289,7 +289,7 @@ describe('D1 · leaving a worked-example session does not leave its record on sc
       // 1. The reader lands somewhere real, and Back cannot walk them into the
       //    discarded record (the redirect replaces the entry).
       await waitFor(() => expect(at()).toBe(ROUTES.experiments));
-      await screen.findByRole('heading', { name: 'No experiments yet' });
+      await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
 
       // 2. Nothing from the destroyed record is left on screen.
       expect(document.querySelector('.needsyou-banner')).toBeNull();
@@ -334,7 +334,7 @@ describe('D1 · leaving a worked-example session does not leave its record on sc
     fireEvent.keyDown(document, { key: 'Escape' });
 
     await waitFor(() => expect(at()).toBe(ROUTES.experiments));
-    await screen.findByRole('heading', { name: 'No experiments yet' });
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
     expect(document.querySelector('.needsyou-banner')).toBeNull();
     expect(getTutorialState().lastDismissal).toBe('escape');
   }, 30000);

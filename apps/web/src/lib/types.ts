@@ -1177,12 +1177,45 @@ export interface ApiHealthDatabase {
   last_recon: ApiHealthLastRecon | null;
 }
 
+/**
+ * The `experiment_storage` block on GET /api/health
+ * (apps/api/isaac_api/routes.py `health()` → `experiment_repository.storage_status`).
+ *
+ * WHAT IT IS FOR. It is the only honest basis for the sentence My Experiments
+ * shows about where a new experiment goes. Hard-coding either answer would make
+ * that sentence false on half the deployments — the deployed pod stores
+ * experiments in its own PostgreSQL database, a developer checkout and CI store
+ * them in a workspace directory, and on the pod that directory is an `emptyDir`
+ * that a restart empties.
+ *
+ * DERIVED FROM CONFIGURATION ALONE, exactly like the sibling `database` block:
+ * the handler opens no connection. So `durable: true` means "this deployment is
+ * set up to store experiments durably", NEVER "the database answered just now".
+ *
+ * `configured` and `durable` are separate on purpose. `configured: true,
+ * durable: false` is a real and reachable state — a database is wired up but its
+ * name does not match what the write path requires, so the app degrades to the
+ * workspace directory. Reporting that as one boolean would hide a
+ * misconfiguration behind a sentence promising durability.
+ *
+ * Optional here because a build predating this block, and a health body the
+ * client failed to fetch, simply have none. Absent is read as "unknown", and the
+ * UI then claims NEITHER durability nor ephemerality — see `ExperimentsHome`.
+ */
+export interface ApiHealthExperimentStorage {
+  configured: boolean;
+  /** "postgres" | "filesystem" — an implementation name, never rendered verbatim. */
+  backend: string;
+  durable: boolean;
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;
   core: string;
   version: string;
   database?: ApiHealthDatabase;
+  experiment_storage?: ApiHealthExperimentStorage;
 }
 
 // POST /api/demo/reset — the guarded example-workspace reset (DemoResetResponse in

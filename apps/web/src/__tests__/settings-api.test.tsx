@@ -1059,7 +1059,7 @@ describe('Settings → Endpoint Explorer', () => {
  */
 describe('the Full Description rule over the REAL generated contract', () => {
   it('describes the contract it claims to: 39 operations, 54 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(39);
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(40);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1160,8 +1160,26 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // which compares that array against the served document — a different test, in
     // a different suite.) `git log -- src/test/apiFixtures.ts` settles the question
     // in one command and should be the first thing run when this fails.
-    expect(total).toBe(25500);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(54);
+    // 25,500 -> 26,797 and 39 -> 40 operations, 54 -> 58 paragraphs: the durable
+    // Create Experiment path. TWO descriptions moved and the split between them
+    // matters, because only one of them is a new operation:
+    //
+    //   * `POST /api/experiments` is NEW — a lead plus three paragraphs. The three
+    //     are separate statements rather than a reflow of one: what it takes and
+    //     what it refuses to invent; why it refuses inside a worked-example
+    //     session; and where the created experiment is stored. Folding the second
+    //     into the lead would bury the one sentence explaining a 409 a client can
+    //     actually receive, which is the same mistake the `/api/demo/reset`
+    //     precondition note above records.
+    //   * `GET /api/health` gained ONE paragraph, for the `experiment_storage`
+    //     block. It is a separate paragraph for the same reason its sibling
+    //     `database` paragraph is: it is a different subject, and the UI derives a
+    //     user-visible durability sentence from it, so it must not be findable only
+    //     by reading the liveness lead to the end.
+    //
+    // 3 + 1 = 4 new post-lead paragraphs, hence 54 -> 58.
+    expect(total).toBe(26797);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(58);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

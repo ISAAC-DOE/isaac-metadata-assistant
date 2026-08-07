@@ -182,16 +182,33 @@ export const CHIP_CLAIMS_ALWAYS =
  * canonical record into the ordinary root before the refusal was added
  * (`apps/api/tests/test_tutorial_scope.py::test_the_seeding_functions_refuse_an_unscoped_call`).
  *
- * THERE IS NO OTHER PRODUCER OF A BUILT-IN EXAMPLE, and the reason given here was wrong.
- * `POST /api/uploads` is an unconditional 403 — that part holds. But "record creation mints
- * a fresh ULID rather than a canonical id" is false as stated: `create_experiment` does
- * `rid = id or new_record_id()` (`apps/api/isaac_api/workspace.py:608`), so it mints a fresh
- * ULID only when no explicit id is given, and `create_experiment(..., id=SEED_READY_ID,
- * session_id=None)` writes a canonical record into the ordinary root. The real reason is
- * stronger: this build exposes no record-creation surface at all — there is no
- * `POST /api/experiments`, and `create_experiment` has no caller under
- * `apps/api/isaac_api/`, pinned by
- * `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package`.
+ * THERE IS NO OTHER PRODUCER OF A BUILT-IN EXAMPLE, and the reason given here has been
+ * wrong TWICE. Both wrong versions are kept, because the second one was written by a
+ * reader who had just corrected the first and still landed on a claim that expired.
+ *
+ *  1. "record creation mints a fresh ULID rather than a canonical id" — false as stated.
+ *     `create_experiment` does `rid = id or new_record_id()`
+ *     (`apps/api/isaac_api/workspace.py`), so it mints a fresh ULID only when no explicit
+ *     id is given, and `create_experiment(..., id=SEED_READY_ID, session_id=None)` writes
+ *     a canonical record into the ordinary root.
+ *  2. "this build exposes no record-creation surface at all — there is no
+ *     `POST /api/experiments`" — TRUE when written, and now FALSE. That route exists.
+ *
+ * WHAT CARRIES THE SENTENCE NOW. Note first what the sentence actually says: nothing adds
+ * a **BUILT-IN EXAMPLE** record here. It has never been a claim that nothing adds a record
+ * — a reader creating their own experiment does exactly that, and the chip is not about
+ * them. Three properties, each checkable:
+ *
+ *   · `POST /api/uploads` is still an unconditional 403, so nothing is imported;
+ *   · the create route passes no `id=` (so the ULID default applies) and its request model
+ *     sets `extra="forbid"` (so a client that names one gets a 422, not silence) — the
+ *     five fixed canonical ids are therefore unreachable from it;
+ *   · `PostgresOrdinaryStore.refuse_if_not_persistable` raises on a canonical id in any
+ *     scope, so one cannot be made durable either.
+ *
+ * `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package` still
+ * guards this. It now pins that there is exactly ONE caller (the persistence seam) and
+ * that it passes neither `id=` nor `session_id=`, rather than that there are none.
  *
  * DO NOT REPLACE THIS WITH AN ABSENCE CLAIM WITHOUT MEASURING ONE. The honest way to
  * assert absence would be to read the scope's count, which this chip deliberately does

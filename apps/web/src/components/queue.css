@@ -226,13 +226,35 @@
  * If a create/import path ever lands, revisit this: the premise above is what
  * justifies it, and it expires with that premise.
  */
+/*
+ * THE EMPTY STATE IS A CONTAINED PANEL, not prose floating in a blank page.
+ *
+ * It borrows the `.card` primitive's exact values — `--surface`, a `--border`
+ * hairline, `--radius-card`, `--shadow-card` — rather than inventing a treatment,
+ * so it reads as the same KIND of object as the experiment groups it will be
+ * replaced by. An empty queue and a full queue are one screen in two states, and
+ * they should look like it.
+ *
+ * WHAT IT IS DELIBERATELY NOT: centred, full-bleed, or oversized. No centring, no
+ * display type, no illustration. `max-width` keeps the measure readable and keeps
+ * the panel on the same left edge the rows use, so nothing shifts when the first
+ * experiment arrives.
+ *
+ * The previous version was `max-width: 60ch; padding: 38px 4px 12px` with no
+ * background and no border — which is what made it read as text someone forgot to
+ * put anywhere.
+ */
 .queue-empty-state {
-  max-width: 60ch;
-  padding: 38px 4px 12px;
+  max-width: 62ch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 26px 26px 24px;
 }
 
 .queue-empty-title {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 19px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -247,46 +269,156 @@
 }
 
 /*
- * The one emphasised action, given its own band so the hierarchy is spatial as
- * well as tonal — the reader's eye should land on the button before it reads the
- * alternatives below it. Generous vertical rhythm, no box: this is a step in the
- * page flow, not a card competing with the screen it sits on.
+ * The strongest action, given its own band so the hierarchy is spatial as well as
+ * tonal — the reader's eye should land on it before it reads the two alternatives
+ * below. It also holds the create FORM once expanded, which is why it is a column
+ * rather than a row.
  */
 .queue-empty-primary {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 9px;
-  margin: 22px 0 30px;
+  gap: 8px;
+  margin: 18px 0 4px;
 }
 
-/* Slightly larger than a row-level `.btn`, because it is the only primary on the
-   screen and the default control size is tuned for dense toolbars. */
+/* Slightly larger than a row-level `.btn`: it is the screen's primary action and
+   the default control size is tuned for dense toolbars. */
 .queue-empty-cta {
   font-size: 13.5px;
   padding: 11px 20px;
 }
 
-.queue-empty-list {
-  margin: 4px 0 0;
-  padding: 0;
+/*
+ * THE TWO SECONDARY ACTIONS, side by side above 560px and stacked below it.
+ *
+ * A rule rather than a lead-in sentence separates them from the primary. The
+ * sentence that used to do this job read "Or, without starting the walkthrough:",
+ * which framed everything under it as a footnote — and one of the two is the
+ * standalone validator, which is a first-class thing this product does.
+ */
+.queue-empty-actions {
+  margin: 20px 0 0;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--border-faint);
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 18px 22px;
 }
 
 /* Button above its explanation, so the wrap at a narrow width is predictable and
    the hint never squeezes into a two-character column beside the control. */
-.queue-empty-list li {
+.queue-empty-action {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 5px;
+  gap: 6px;
 }
 
 .queue-empty-hint {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-secondary);
+}
+
+/*
+ * WHERE A NEW EXPERIMENT GOES. Quiet by design: it is a consequence of acting,
+ * not a reason to act, so it sits at the foot of the panel in the tertiary text
+ * colour. It is one line, and the component renders NOTHING here when durability
+ * has not been established — see `ExperimentsHome`'s `storageSentence`.
+ */
+/*
+ * `--text-secondary`, NOT `--text-tertiary`, and that is a fix rather than a
+ * preference: the first version used the tertiary token and the axe scan caught it
+ * as a new `color-contrast` node on every viewport. A disclosure the reader may
+ * not be able to read is not a disclosure. The size matches `.queue-empty-hint`,
+ * which carries the same token at the same weight and passes.
+ */
+.queue-empty-storage {
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-faint);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* --- create experiment ------------------------------------------------------
+ *
+ * An inline expansion, not a modal — see the component for why. It sits inside
+ * `.queue-empty-primary` on the empty state and directly in the page header when
+ * the queue has rows, so it carries no background of its own: it must not look
+ * like a card inside a card.
+ */
+.create-experiment {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 42ch;
+}
+
+.create-experiment-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.create-experiment-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.create-experiment-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.create-experiment-input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  color: var(--text-strong);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+}
+
+.create-experiment-input:focus-visible {
+  border-color: var(--action);
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.create-experiment-textarea {
+  resize: vertical;
+  min-height: 44px;
+}
+
+.create-experiment-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+/* The failure token on text and border only, never a solid fill: the same
+   restraint `.btn-danger-quiet` keeps, so an error message never out-shouts the
+   form it is attached to. */
+.create-experiment-error {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fail-text);
+}
+
+.create-experiment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
 }

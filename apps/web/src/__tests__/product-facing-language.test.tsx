@@ -18,17 +18,29 @@
  * detecting its own defect fails here rather than going quiet.
  *
  * THE DIRECTION OF THE RENAME MATTERS, and this file cannot enforce it. The five
- * records in the workspace are built-in worked examples restored from committed
- * reference files. There is provably no way for a user to create a record in this
- * build: `create_experiment()` has no production caller, `POST /api/uploads` is an
- * unconditional 403, and `POST /api/demo/run` writes nothing at all when its
- * canonical target is unchanged. So the correct replacement vocabulary is
- * "example" / "built-in example" / "reference", NEVER "Create a Record" / "New
- * Experiment" / "Import My Materials" / "Your Records". Renaming toward
- * user-authorship would be a WORSE defect than the jargon, because it would be
- * false rather than merely technical. `FORBIDDEN_CREATION_PROMISE` catches the
- * handful of shapes that have plausibly tempted someone; it is a tripwire, not a
- * detector (see the limits section).
+ * BUILT-IN EXAMPLE records are worked examples restored from committed reference
+ * files, and they live only inside a worked-example session. Copy about THEM must
+ * say "example" / "built-in example" / "reference", never "Your Records" — calling
+ * them the reader's own would be false rather than merely technical, which is a
+ * worse defect than the jargon this file exists to remove.
+ *
+ * WHAT HAS CHANGED, AND IT CHANGES ONE HALF OF THAT PARAGRAPH. This header used to
+ * continue: "There is provably no way for a user to create a record in this build:
+ * `create_experiment()` has no production caller". THAT IS NO LONGER TRUE.
+ * `POST /api/experiments` exists, `create_experiment` has exactly one production
+ * caller (the persistence seam, pinned by
+ * `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package`),
+ * and My Experiments has a Create Experiment control that calls it. So "Create
+ * Experiment" is now the accurate name for a real capability, and the two patterns
+ * that forbade it are retired — see `FORBIDDEN_CREATION_PROMISE`, which records
+ * them verbatim rather than deleting them.
+ *
+ * THE REST OF THE PARAGRAPH STILL HOLDS, and is what the remaining patterns guard.
+ * `POST /api/uploads` is still an unconditional 403, so there is still no import;
+ * `POST /api/demo/run` still writes nothing when its canonical target is unchanged;
+ * and the five examples are still not the reader's own work.
+ * `FORBIDDEN_CREATION_PROMISE` catches the handful of shapes that have plausibly
+ * tempted someone; it is a tripwire, not a detector (see the limits section).
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT THIS GUARD CANNOT CATCH. Stated plainly, because a guard that looks
@@ -295,8 +307,40 @@ const RETIRED_VOCABULARY: readonly [string, RegExp, string][] = [
  * route as the example-run button beside it.
  */
 const FORBIDDEN_CREATION_PROMISE: readonly [string, RegExp][] = [
-  ['a control offering to create a record', /\bnew\s+(record|experiment)\b/i],
-  ['a control offering to create a record', /\bcreate\s+(a\s+|your\s+)?(new\s+)?(record|experiment)\b/i],
+  /*
+   * TWO PATTERNS WERE RETIRED HERE, and they are recorded rather than deleted so
+   * the next reader can see what changed and why, instead of finding a shorter
+   * list and wondering whether someone weakened the guard to make their copy pass.
+   *
+   *   ['a control offering to create a record', /\bnew\s+(record|experiment)\b/i]
+   *   ['a control offering to create a record',
+   *    /\bcreate\s+(a\s+|your\s+)?(new\s+)?(record|experiment)\b/i]
+   *
+   * THE PROPERTY THEY GUARDED NO LONGER HOLDS, and that is a fact about the build,
+   * not a preference about the copy. This file's own header said it: "There is
+   * provably no way for a user to create a record in this build: `create_experiment()`
+   * has no production caller". There is now — `POST /api/experiments` — so a
+   * control saying "Create Experiment" describes exactly what happens when it is
+   * pressed. Keeping the patterns would have forced the shipped label to be a
+   * euphemism for the thing it does, which is the opposite of what this file is for.
+   *
+   * WHAT REPLACED THEM IS NOT NOTHING. The class this file guards is "copy
+   * promising a capability the build does not have", and two of those remain:
+   * IMPORT (`POST /api/uploads` is still an unconditional 403) and calling the
+   * built-in examples the reader's own. Both keep their patterns below. The third
+   * entry is new and guards the opposite direction — the retired sentence that
+   * became false the moment the route landed.
+   */
+  /*
+   * THE FALSE SENTENCE THAT MUST NOT COME BACK. My Experiments used to read "This
+   * deployment cannot yet create or import a record, so nothing has been added."
+   * The "import" half is still true; the "create" half is now false, and a
+   * half-true sentence in an empty state is worse than either half alone because a
+   * reader has no way to tell which half they are being told. If someone restores
+   * it — most likely by reverting a merge conflict in `ExperimentsHome` — this
+   * fails.
+   */
+  ['the retired claim that this build cannot create a record', /\bcannot\s+(yet\s+)?create\b/i],
   /*
    * Title Case, and CASE-SENSITIVE on purpose: this catches a LABEL or heading
    * ("Your Records"), not the ordinary possessive in a sentence. The app already
@@ -595,15 +639,29 @@ describe('P1 · product-facing language — every pattern still flags its own de
 
   it('the creation tripwire flags the shapes it was written for', () => {
     for (const promise of [
-      'New Record',
-      'New Experiment',
-      'Create a Record',
-      'Create your record',
       'Import My Materials',
       'Your Records',
+      'This deployment cannot yet create or import a record, so nothing has been added.',
     ]) {
       const flagged = FORBIDDEN_CREATION_PROMISE.some(([, p]) => p.test(promise));
       expect(flagged, `${promise} is no longer flagged`).toBe(true);
+    }
+  });
+
+  /*
+   * THE OTHER HALF OF THE RETIREMENT, and it is the assertion that stops this from
+   * having been a quiet weakening. The shipped create copy must NOT be flagged — if
+   * a future edit reinstates either retired pattern, this fails immediately and
+   * names the string it broke, rather than the label being softened to sneak past.
+   */
+  it('the shipped create-experiment copy is deliberately NOT flagged', () => {
+    for (const shipped of [
+      'Create Experiment',
+      'Create your first experiment, validate an existing record, or explore ISAAC with the guided demo.',
+      'Starts an empty record with the questions ISAAC needs already listed, and opens it.',
+    ]) {
+      const flagged = FORBIDDEN_CREATION_PROMISE.filter(([, p]) => p.test(shipped)).map(([l]) => l);
+      expect(flagged, `${shipped} is wrongly flagged — POST /api/experiments exists`).toEqual([]);
     }
   });
 

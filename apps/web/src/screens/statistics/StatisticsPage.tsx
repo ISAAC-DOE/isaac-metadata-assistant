@@ -268,6 +268,22 @@ function announceRound(round: Round, lastSuccess: Date | null): string {
  * one about what a directory HOLDS. Nothing here measures contents: there is no
  * startup migration, so a workspace that already held the five still lists them.
  *
+ * THE QUOTE ABOVE IS NOW PARTLY STALE, AND THE LEAD IS NOT. `workspace.py`'s
+ * "the NORMAL scope ... is **never** auto-seeded: on a fresh deployment it is empty
+ * and it stays empty until something explicitly creates a record in it" was quoted
+ * here when nothing COULD explicitly create one. `POST /api/experiments` now can,
+ * so the second clause is doing real work rather than describing an empty
+ * possibility — a fresh ordinary workspace is empty and stays empty *until a reader
+ * creates something*, which is the case the quote always allowed for.
+ *
+ * WHY THE BRANCH IS UNAFFECTED. What this lead names is WHICH WORKSPACE the figures
+ * describe, and that is still decided by the scope alone. The reason the ordinary
+ * branch must not mention the built-in examples is unchanged: they are created only
+ * inside a worked-example session, and the create route refuses a session header
+ * with 409 and mints a ULID that can never be one of the five canonical ids. So the
+ * ordinary scope can hold a reader's own records and still hold no example — which
+ * is exactly what this sentence has always been careful to say.
+ *
  * ONE SENTENCE CANNOT BE TRUE OF BOTH SCOPES, which is why this is a branch rather
  * than a rewording. The record read is keyed on the same `scope` value (see D1
  * below), so this page really does describe either workspace: only the session

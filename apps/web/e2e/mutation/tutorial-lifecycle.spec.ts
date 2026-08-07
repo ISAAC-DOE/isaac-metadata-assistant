@@ -184,7 +184,7 @@ test.describe('worked-example session lifecycle', () => {
     // empty, because the examples were never in it.
     await done.getByRole('button', { name: 'Go to My Experiments' }).click();
     await expect(page).toHaveURL(/\/experiments$/);
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.exp-row'), 'no example record may survive completion').toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
     await expect(page.locator('span.mode-chip')).toHaveText('Workspace');
@@ -192,7 +192,7 @@ test.describe('worked-example session lifecycle', () => {
     // And the offer is gone for good in this browser — the completion flag, not a
     // session-scoped dismissal.
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
   });
 
