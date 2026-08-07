@@ -6,7 +6,7 @@ Railway are retired. Here is what changes for you day to day.
 
 ## 1. Push to the org repo, not your personal repo
 
-The canonical repo is now **`ISAAC-DOE/isaac-metadata-assistant`** (private).
+The canonical repo is now **`ISAAC-DOE/isaac-metadata-assistant`** (public since 2026-08-06).
 Point your checkout at it:
 
 ```bash
