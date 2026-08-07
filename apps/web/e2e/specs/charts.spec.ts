@@ -659,17 +659,51 @@ async function openTechnicalDetails(page: import('@playwright/test').Page): Prom
     .toBe(0);
 }
 
+/**
+ * The precondition for the FIFTH figure, asserted where the figure is counted.
+ *
+ * ── Why a number here was a race, and what fixes it ─────────────────────────
+ *
+ * Record Verification draws `Official Validation and the Format Shadow, Side by
+ * Side` only once `GET /api/runtime/verification` answers `ok`. That sweep runs
+ * on a background thread and takes ~15s from the first request
+ * (`apps/api/isaac_api/routes.py`; `verification.VerificationState`), so a page
+ * opened inside that window renders FOUR figures and one "not ready" panel, and
+ * the same page opened afterwards renders FIVE. CI on `17cff95` measured exactly
+ * that: 4 at `desktop-1280x800`, which runs first, and 5 at the four later
+ * projects. The count was never wrong; it was a clock.
+ *
+ * `e2e/global-setup.ts` step 5 settles the report before any project starts, so
+ * the state is fixed for the whole run. This function does not repeat that work
+ * — it ASSERTS the precondition holds at the moment the figures are counted, so
+ * that a regression to the unsettled page fails by naming the section that is
+ * missing rather than by reporting a chart count nobody can explain.
+ *
+ * It waits on the SECTION rather than on the network: what the count depends on
+ * is what was rendered, and a settled response the component has not yet drawn
+ * would satisfy a request-level wait while the figure was still absent.
+ */
+async function settledVerificationSection(page: import('@playwright/test').Page): Promise<void> {
+  await expect(
+    page.getByRole('heading', { name: 'Official Validation and the Format Shadow, Side by Side' }),
+    'Record Verification must have a settled report before its figure is counted — see ' +
+      'e2e/global-setup.ts step 5',
+  ).toBeVisible({ timeout: 20_000 });
+}
+
 test.describe('@responsive Statistics charts (worked example)', () => {
   test('every chart carries BOTH text equivalents, at this viewport', async ({ page, app }) => {
     await app.open(STATISTICS_EXAMPLE);
+    await settledVerificationSection(page);
     await openTechnicalDetails(page);
 
     const figures = page.locator('figure.stats-chart');
     const count = await figures.count();
     // Workflow bars · the evidence stack · operations by method · operations by
-    // group. A count is asserted so a chart silently disappearing reads as a
-    // failure rather than as a vacuous pass over zero figures.
-    expect(count, 'the populated page draws four charts').toBe(4);
+    // group · the two validators side by side. A count is asserted so a chart
+    // silently disappearing reads as a failure rather than as a vacuous pass
+    // over zero figures.
+    expect(count, 'the populated page draws five charts').toBe(5);
 
     for (let i = 0; i < count; i++) {
       const figure = figures.nth(i);
