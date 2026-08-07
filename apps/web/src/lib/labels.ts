@@ -407,6 +407,46 @@ export const LABELS = {
   actionReplayTutorial: 'Replay Tutorial',
 
   /*
+   * THE EMPTY STATE'S OWN PRIMARY, and it needed a THIRD name rather than either of
+   * the two that already exist, because both were already spoken for on surfaces a
+   * reader can reach.
+   *
+   * Not `actionReplayTutorial`: that is the Settings control, and
+   * `tutorial-session-lifecycle.test.tsx` pins its ABSENCE from My Experiments so the
+   * name identifies exactly one control in the app. Not `actionStartTutorial`: that
+   * belongs to the first-run offer card, and two controls sharing a name on one screen
+   * is the same collision one step smaller.
+   *
+   * It is a verb that describes what the button DOES. The control it replaces was
+   * `actionGoToHelpAndTutorial`, which named navigation because navigation was all it
+   * did; this one starts a session, so naming it after a destination would repeat, in
+   * the other direction, the mismatch that removed its predecessor.
+   *
+   * The supporting line is NOT new copy. It is the last two sentences of
+   * `tutorialOfferBody` verbatim, and it is quoted rather than paraphrased on purpose:
+   * that wording was audited into its current form (see the comment above
+   * `tutorialOfferTitle`), and a fresh paraphrase on a second surface is exactly how
+   * the earlier false claims got in. Note what it does NOT say, and must not grow into
+   * saying: that the ordinary workspace is empty. It is a statement about this
+   * button's reach — `_materialise_seed`, `reset_to_canonical_seed` and
+   * `ensure_tutorial_seeded` all refuse a `None` session id — not about what exists.
+   *
+   * "VERBATIM" IS NOW ENFORCED, AND SO IS THE COPY ITSELF. Both were claims resting on
+   * a comment: `tutorial-flow.test.tsx`'s honesty ratchet queried `section.tutorial-offer`
+   * only, so this string could have been replaced with the retired false absolute
+   * ("It only reads — it answers nothing and changes nothing") and a wrong record count
+   * with every test still green — on the surface that this same slice makes the ONLY one
+   * a reader on an empty workspace ever sees. Two pins close it: the ratchet now runs the
+   * identical positive and negative matchers over the rendered EMPTY state, and
+   * `tutorialOfferBody.endsWith(launchGuidedDemoBody)` is asserted, so a change to either
+   * string that breaks the quotation fails rather than drifts.
+   */
+  actionLaunchGuidedDemo: 'Launch Guided Demo',
+  launchGuidedDemoBody:
+    'Starting it opens a worked example of its own — a temporary workspace holding five example ' +
+    'records, discarded when the tour ends. No record of yours is created, changed, or removed.',
+
+  /*
    * The reader walked away from the screen the current step describes.
    *
    * THIS EXISTS BECAUSE WALKING AWAY IS NOW ALLOWED. The overlay used to navigate

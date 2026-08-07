@@ -20,6 +20,7 @@ import axe from 'axe-core';
 import { AppRoutes } from '../App';
 import { GuidedTutorial } from '../components/GuidedTutorial';
 import { LABELS } from '../lib/labels';
+import { TUTORIAL_SESSION_HEADER } from '../lib/api';
 import { isTutorialCompleted } from '../lib/tutorialPreference';
 import { __resetTutorialStore, startTutorial } from '../lib/tutorialController';
 import { TUTORIAL_ANCHORS, TUTORIAL_STEPS } from '../lib/tutorialSteps';
@@ -544,6 +545,167 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
   }, 20000);
 
   /*
+   * THE EMPTY STATE'S PRIMARY — the one control that starts the walkthrough on the
+   * screen a returning reader actually lands on.
+   *
+   * It gets its own sweep rather than riding on the offer card's, because it is a
+   * DIFFERENT surface: the offer card is suppressed whenever the queue is empty, so the
+   * case above (five rows) never renders this control, and this case (no rows) never
+   * renders that one. A sweep of one says nothing about the other.
+   *
+   * Two properties here — the axe sweep and keyboard operability. Focus RETURN is the
+   * test below, because in this arrangement it lands on the documented fallback rather
+   * than on the button, and the reason is worth stating separately rather than burying.
+   */
+  it('reports no violation on the empty state or the walkthrough started from it', async () => {
+    // Scope-aware exactly as the backend is: empty until a session exists, five inside
+    // one. That transition is what puts the coach mark on a real anchor.
+    stubFetchRoutes({
+      ...tutorialSessionRoutes(),
+      ...bundleRoutes(PENDING_ID),
+      ...exportReadyRoutes(READY_ID),
+      'GET /api/health': { body: healthSynthetic },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'GET /api/experiments': (init?: RequestInit) => ({
+        status: 200,
+        body: {
+          experiments: (init?.headers as Record<string, string> | undefined)?.[
+            TUTORIAL_SESSION_HEADER
+          ]
+            ? canonicalFiveSummaries
+            : [],
+        },
+      }),
+    } as never);
+    const { container } = render(
+      <MemoryRouter
+        initialEntries={['/experiments']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+
+    const launch = (await screen.findByRole('button', {
+      name: LABELS.actionLaunchGuidedDemo,
+    })) as HTMLButtonElement;
+    expect(await axeRules(container, RULES)).toEqual([]);
+
+    // A real, natively focusable button with no positive tabindex — the DOM order is
+    // the tab order, and nothing here needs a synthetic key handler.
+    expect(launch.tagName).toBe('BUTTON');
+    expect(launch).toHaveAttribute('type', 'button');
+    expect(launch.getAttribute('tabindex')).toBeNull();
+    expect(launch.disabled).toBe(false);
+    launch.focus();
+    expect(document.activeElement).toBe(launch);
+
+    // Its supporting line is text next to the control, not the control's own name: the
+    // accessible name stays short enough to be useful in a screen reader's control list.
+    expect(launch.textContent?.trim()).toBe(LABELS.actionLaunchGuidedDemo);
+
+    fireEvent.click(launch);
+    const bubble = await waitFor(
+      () => {
+        const found = mark();
+        expect(found).not.toBeNull();
+        return found!;
+      },
+      { timeout: 4000 },
+    );
+    expect(await axeRules(document.body, RULES)).toEqual([]);
+
+    /*
+     * FOCUS LANDS ON `#main`, NOT BACK ON THE BUTTON, AND THAT IS CORRECT HERE.
+     *
+     * Opening a session makes the list non-empty, which replaces the empty state with
+     * the queue — so by the time the walkthrough closes, the control that started it
+     * has been unmounted. `tutorialReturnFocusTarget` refuses a node that is no longer
+     * in the document (`isConnected`), and the overlay falls back to the main region
+     * rather than dropping the reader on `<body>`.
+     *
+     * This is not a consequence of the new control: the offer card's `Start Tutorial`
+     * unmounts on exactly the same transition, for exactly the same reason, and the
+     * "falls back to the main region" case above is the pre-existing pin for it. The
+     * ref contract itself is proved by the next test, where the trigger survives.
+     */
+    fireEvent.click(within(bubble).getByRole('button', { name: LABELS.actionCloseTutorial }));
+    await waitFor(() => expect(mark()).toBeNull());
+    expect(document.activeElement).toBe(document.getElementById('main'));
+  }, 20000);
+
+  /*
+   * THE REF CONTRACT, AND THE CASE IT UNCOVERED.
+   *
+   * The ref is real and is asserted directly: `tutorialReturnFocusTarget()` is the
+   * live button node, which is what proves `startTutorial` was handed `ref.current` at
+   * click time rather than a stale node, a component, or `undefined`.
+   *
+   * WHAT IT DOES NOT PROVE, AND MUST NOT BE WRITTEN AS THOUGH IT DID: that focus ends
+   * up back on that button. It does not, and the reason is structural rather than a
+   * wiring mistake — leaving the session changes the workspace scope, My Experiments
+   * re-reads its list on that change, and the trigger goes with the loading branch.
+   * `Launch Guided Demo` is the first trigger in this app that is still mounted at the
+   * moment the walkthrough closes, and it is that survival, not its absence, that
+   * exposed the gap: `releaseFocus` focused it and the commit immediately afterwards
+   * unmounted it, leaving focus on `<body>`. Hence the post-commit re-check, and hence
+   * the assertion below is `#main` — the documented fallback — rather than the button.
+   *
+   * The list is held empty in BOTH scopes so the trigger survives the whole run, which
+   * is the only arrangement that reaches this path. Step one's anchor is the queue,
+   * which an empty list does not render, so the mark arrives via the anchor timeout in
+   * its degraded "the control is not here" form — the right shape for this test rather
+   * than a nuisance, since Close must keep working in exactly that state.
+   */
+  it('leaves focus somewhere workable when its trigger is unmounted by leaving', async () => {
+    stubFetchRoutes({
+      ...tutorialSessionRoutes(),
+      'GET /api/health': { body: healthSynthetic },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'GET /api/experiments': { body: { experiments: [] } },
+    } as never);
+    render(
+      <MemoryRouter
+        initialEntries={['/experiments']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+
+    const launch = await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    fireEvent.click(launch);
+    const bubble = await waitFor(
+      () => {
+        const found = mark();
+        expect(found).not.toBeNull();
+        return found!;
+      },
+      { timeout: 6000 },
+    );
+    // Focus really did leave the button, so the assertion below is a return rather
+    // than a no-op.
+    expect(document.activeElement).not.toBe(launch);
+
+    /*
+     * The trigger is STILL MOUNTED at the moment the walkthrough is closed — this is
+     * the case the offer card never produced — and it is unmounted a beat later, when
+     * leaving the session sends My Experiments back through its loading branch.
+     *
+     * So the honest requirement is not "focus is on the button": it is that focus is
+     * somewhere a keyboard reader can work from. `releaseFocus` re-checks after the
+     * commit and puts it on the main region. Before that re-check existed, this landed
+     * on `<body>`.
+     */
+    const { tutorialReturnFocusTarget } = await import('../lib/tutorialController');
+    expect(tutorialReturnFocusTarget()).toBe(launch);
+    fireEvent.click(within(bubble).getByRole('button', { name: LABELS.actionCloseTutorial }));
+    await waitFor(() => expect(mark()).toBeNull());
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(document.activeElement).toBe(document.getElementById('main'));
+  }, 20000);
+
+  /*
    * The session-failure notice. It exists because `sessionError` was set and rendered
    * nowhere; a notice that is itself inaccessible would be the same defect one layer on.
    */
@@ -562,7 +724,14 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
         <AppRoutes />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
+    /*
+     * The empty state's primary, because this case stubs an EMPTY list. With no rows,
+     * `ExperimentsHome` suppresses the first-run offer card and the empty state owns
+     * the CTA — one action, one primary — so `Start Tutorial` is not on this screen.
+     * Both controls call the same `startTutorial`, so the failure this exercises is
+     * unchanged.
+     */
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo }));
 
     const notice = await waitFor(() => {
       const found = document.querySelector<HTMLElement>('[data-tutorial-notice]');
