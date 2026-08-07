@@ -146,7 +146,44 @@ _FORBIDDEN_KEYWORDS = (
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 #: The clauses after which a table name appears.
-_TABLE_INTRODUCERS = ("from", "join", "into", "update", "table")
+#:
+#: ``on`` IS IN THIS LIST, AND IT WAS NOT AT FIRST. It was left out because
+#: ``INSERT ... ON CONFLICT (id) DO UPDATE`` would otherwise be read as naming a
+#: table called ``conflict``. That reasoning was right about ``ON CONFLICT`` and
+#: wrong about everything else: ``CREATE INDEX ... ON <table>`` names a table
+#: after ``on`` too, so a migration statement reading
+#: ``CREATE INDEX isaac_probe_idx ON records (record_id)`` PASSED this policy —
+#: as did ``CREATE TRIGGER ... ON records``. Neither reads or writes a row, which
+#: is why they read as harmless; both take a lock on the production-derived sample
+#: and change its schema permanently, which is exactly what this guard exists to
+#: stop.
+#:
+#: HOW IT WAS FOUND, since that is the part worth keeping: not by review, and not
+#: because the statement was ever committed. It was a deliberate temporary
+#: mutation during the negative-control pass over this feature — append a
+#: statement touching a table the migration does not own, run the tests, see what
+#: fails, revert. What failed was a statement-COUNT assertion in
+#: ``test_the_committed_migration_loads_and_is_create_only``, not this policy; had
+#: the statement replaced an existing one instead of being appended, nothing would
+#: have failed at all.
+#:
+#: ``ON CONFLICT`` is handled where it belongs, in :meth:`_table_after`, rather
+#: than by omitting the keyword and hoping no other ``ON`` clause ever appears.
+_TABLE_INTRODUCERS = ("from", "join", "into", "update", "table", "on")
+
+#: Tables that may NEVER be named, in any statement, in any position, whatever
+#: the surrounding syntax.
+#:
+#: This is a second, independent guard and it is deliberately redundant with the
+#: owned-tables check above. That check reasons about GRAMMAR — which token
+#: follows which clause — and grammar is where the bug above lived. This one
+#: reasons about nothing: if the identifier appears at all, the statement is
+#: refused. A future SQL shape nobody anticipated cannot slip a reference to
+#: ``records`` past it, because there is no shape to get right.
+#:
+#: ``records`` holds the production-derived 30-row sample. This application must
+#: not read it, write it, index it, analyze it, or reference it in a constraint.
+_FORBIDDEN_TABLES = ("records",)
 
 
 class WriteStatementPolicy:
@@ -173,6 +210,10 @@ class WriteStatementPolicy:
         for index, token in enumerate(tokens):
             if token in _FORBIDDEN_KEYWORDS:
                 raise WriteRefused(f"statement uses a forbidden verb: {token}")
+            if token in _FORBIDDEN_TABLES:
+                raise WriteRefused(
+                    "statement names a table this application must never reference"
+                )
             if token not in _TABLE_INTRODUCERS:
                 continue
             named = self._table_after(tokens, index)
@@ -204,7 +245,14 @@ class WriteStatementPolicy:
         if cursor >= len(tokens):
             return None
         candidate = tokens[cursor]
-        if candidate == "set":  # ``DO UPDATE SET`` — a conflict action, not a table
+        # ``DO UPDATE SET`` — a conflict action, not a table.
+        if candidate == "set":
+            return None
+        # ``ON CONFLICT`` — the upsert clause, not a table reference. This is the
+        # ONE reason ``on`` was originally kept out of the introducer list; naming
+        # the exception here is what let it go back in, which is what closes
+        # ``CREATE INDEX ... ON <table>``.
+        if candidate == "conflict":
             return None
         return candidate
 

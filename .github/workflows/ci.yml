@@ -41,6 +41,39 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,api]"
 
+      # THE FILESYSTEM FALLBACK IS COVERED BY THIS JOB, AND ONLY BECAUSE THIS JOB
+      # HAS NO DATABASE. That is currently true by omission — nothing here sets
+      # `PGHOST` — and a property held by omission is one a later edit can remove
+      # without anyone noticing. `experiment_repository.repository()` selects the
+      # filesystem backend precisely when `PGHOST` is unset, so if a future change
+      # added a service container to this job "for convenience", every test in it
+      # would silently start exercising the Postgres path and the fallback that
+      # every developer machine actually runs would stop being tested anywhere.
+      #
+      # Asserting it costs one line and turns the omission into a stated contract.
+      # The dedicated `postgres-migration` job below is where the durable path is
+      # exercised, deliberately separately.
+      - name: Assert this job has NO database, so the filesystem fallback is exercised
+        run: |
+          set -euo pipefail
+          if [ -n "${PGHOST:-}" ]; then
+            echo "::error::PGHOST is set in the default test job (\"${PGHOST}\"). This job must"
+            echo "::error::run without a database so the filesystem repository stays covered."
+            exit 1
+          fi
+          python - <<'PY'
+          import os, sys
+          sys.path.insert(0, "apps/api")
+          from isaac_api import experiment_repository as repo
+          selected = repo.repository()
+          assert selected.backend == repo.BACKEND_FILESYSTEM, selected.backend
+          assert selected.durable is False
+          assert repo.storage_status() == {
+              "configured": False, "backend": "filesystem", "durable": False
+          }, repo.storage_status()
+          print("no database configured: filesystem repository selected, durability NOT claimed")
+          PY
+
       - name: Run tests
         run: pytest -q
 
@@ -282,6 +315,33 @@ jobs:
           assert set(r[0] for r in after).isdisjoint(ws.CANONICAL_IDS)
           print("durable repository OK against a real PostgreSQL")
           PY
+
+      # THE SAME DIGEST, TAKEN AFTER THE APPLICATION HAS ACTUALLY RUN.
+      #
+      # The step above already proved the MIGRATION does not touch `records`. That
+      # is the smaller half of the claim. This one proves the RUNNING APPLICATION
+      # does not either — after it has opened write transactions, created records,
+      # upserted state, hydrated a wiped workspace, and refused a session write.
+      # Without it, "the production-derived sample is untouched" would be a
+      # statement about DDL only, and the thing the owner is actually being asked
+      # to trust is the write path.
+      #
+      # It is checked here rather than only after the rollback so that a failure
+      # names the application as the cause, instead of arriving mixed together with
+      # a rollback failure.
+      - name: Prove the RUNNING APPLICATION left `records` byte-identical
+        run: |
+          set -euo pipefail
+          psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
+            > /tmp/records-after-app.txt
+          diff /tmp/records-before.txt /tmp/records-after-app.txt || {
+            echo "::error::the application modified the production-derived stand-in table"; exit 1; }
+          # ...and it did not quietly add anything of its own beside it either.
+          psql -Atc "select table_name from information_schema.tables where table_schema='public' order by table_name" \
+            > /tmp/tables-after-app.txt
+          diff /tmp/tables-after.txt /tmp/tables-after-app.txt || {
+            echo "::error::running the application changed the table set"; exit 1; }
+          echo "records: byte-identical after the application ran; table set unchanged"
 
       # THE ROLLBACK, PROVEN. It is an operator action run with psql — the
       # application cannot run it, because every statement in it is a DROP and the

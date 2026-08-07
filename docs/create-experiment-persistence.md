@@ -120,11 +120,20 @@ DROP TABLE IF EXISTS isaac_schema_migrations;
   the filesystem fallback is what the whole suite exercises.
 - Frontend suite: **3145 passed / 126 files**.
 - `tsc -b`: exit 0.
-- `apps/api/tests/test_experiment_repository.py`: 62 tests covering the route, the
-  seam, the write path, the isolation refusals and the migration runner —
+- `apps/api/tests/test_experiment_repository.py`: **68 tests** covering the route,
+  the seam, the write path, the isolation refusals and the migration runner —
   **against an in-process fake driver**, which proves the shape and not the SQL.
 
-### Already run, in CI — `.github/workflows/ci.yml` → `postgres-migration`
+### Specified in CI, and NOT YET EXECUTED — `.github/workflows/ci.yml` → `postgres-migration`
+
+**Read the heading literally.** An earlier revision of this section was titled
+*"Already run, in CI"*, and that was false: the job is new on this branch, the
+branch had not been pushed when it was written, and **this job has never run**.
+The steps below are what it is written to do, not what it has been observed doing.
+Nothing in this section may be quoted as a result until a run exists.
+
+The same applies to the version: a `postgres:18` service container is *pinned*, and
+whether the hosted server is really 18 is a separate question answered below.
 
 A `postgres:18` service container. `docs/postgres-test-db-guide.md:18` states the
 SLAC cluster runs Postgres 18, so the version is **documented parity, not measured
@@ -146,6 +155,58 @@ version.
    create is refused with 409, and prove the database gained nothing.
 7. Run the documented rollback with psql; assert the table set returns to its
    pre-migration state and `records` is still byte-identical.
+
+8. The application's own `records` digest check, taken **after** the repository
+   step has run — so "the sample is untouched" covers the running write path and
+   not only the DDL.
+
+Two further guards live in the default `test` job: it asserts `PGHOST` is unset and
+that `repository()` therefore selects the filesystem backend with `durable: false`.
+That keeps the fallback covered by construction rather than by omission.
+
+### Negative controls — run 2026-08-07, and one of them found a real defect
+
+Every guard below was verified by **breaking it on purpose**, running the tests,
+recording the result, and reverting. A control that produces zero failures is a
+gap, not a pass.
+
+| # | Mutation | Failures | Verdict |
+|---|---|---|---|
+| a | Create button rendered but not wired to the API | 3 | caught |
+| b1 | tutorial gate removed from `workspace._ordinary_store` | 2 | caught |
+| b2 | route's 409 removed; create writes into the tutorial scope | 2 | caught |
+| c | client-supplied `id` accepted instead of server-minted | 2 | caught |
+| d | repository selection ignores `PGHOST`, always filesystem | 5 | caught |
+| e | UI claims durability while the filesystem repository is active | 2 | caught |
+| f1 | migration gains `ALTER TABLE records ADD COLUMN …` | 3 | caught |
+| f2 | migration gains `CREATE INDEX … ON records (record_id)` | **1** | **DEFECT — see below** |
+| g | write path builds SQL by string interpolation | 3 | caught |
+
+**Control f2 was the finding.** `WriteStatementPolicy` did not refuse it. `on` had
+been deliberately kept out of `_TABLE_INTRODUCERS` so that
+`INSERT … ON CONFLICT` would not be read as naming a table called `conflict` — but
+that left *every* statement which attaches an object to a table unchecked, because
+they all name the table after `ON`. `CREATE INDEX … ON records` and
+`CREATE TRIGGER … ON records` both passed. Neither reads or writes a row, which is
+why they read as harmless; both take a lock on the production-derived sample and
+change its schema permanently.
+
+The single failure it did produce came from a statement-**count** assertion
+(`len(statements) == 3`), not from the policy. Had the statement replaced an
+existing one rather than being appended, **nothing would have failed**.
+
+Two independent fixes, because the first one is a grammar judgement and grammar is
+where the bug lived:
+
+1. `on` is now an introducer, with `conflict` excepted in `_table_after`;
+2. `_FORBIDDEN_TABLES = ("records",)` refuses the identifier **anywhere in any
+   statement, in any position**, with no syntax to get right.
+
+Re-running control f2 after the fix produces **4 failures**, three of them from the
+policy. The refusal set is pinned by
+`test_the_statement_policy_refuses_anything_outside_this_applications_tables`, and a
+new `test_no_committed_migration_may_reference_the_production_table` scans the
+committed migration files directly.
 
 ### What CI does NOT prove
 

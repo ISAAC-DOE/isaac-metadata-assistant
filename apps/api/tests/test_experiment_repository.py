@@ -24,6 +24,7 @@ never dialled.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -543,6 +544,38 @@ def test_the_gate_refuses_before_a_connection_is_even_attempted():
         "UPDATE records SET data = %s",
         "DELETE FROM records",
         "SELECT * FROM pg_shadow",
+        # ── THE ONE THAT ACTUALLY GOT THROUGH ──────────────────────────────────
+        # HOW IT WAS FOUND, stated accurately because the first version of this
+        # comment got it wrong and the wrong version is the more alarming one. It
+        # was NOT discovered sitting in the committed migration file. It was a
+        # deliberate, temporary mutation — negative control (f) of the review of
+        # this feature: append a statement touching a table the migration does not
+        # own, run the tests, see what fails, revert. The migration file has never
+        # contained it and does not now.
+        #
+        # WHAT THE CONTROL REVEALED. The policy ACCEPTED it. `on` was not an
+        # introducer — it had been deliberately left out so `INSERT ... ON CONFLICT`
+        # would not be read as naming a table called `conflict` — so every statement
+        # that attaches an object to a table named that table after `ON` and was
+        # never checked. `CREATE INDEX ... ON records` and `CREATE TRIGGER ... ON
+        # records` both passed. Neither reads or writes a row, which is why they
+        # look harmless; both take a lock on the production-derived sample and
+        # change its schema permanently.
+        #
+        # The only thing that failed the control was
+        # `test_the_committed_migration_loads_and_is_create_only`, and it failed on
+        # its `len(statements) == 3` count rather than on the policy — a coincidence
+        # that would not have fired had the statement replaced an existing one.
+        #
+        # Two independent fixes now stop it — `on` is an introducer with `conflict`
+        # excepted, and `records` is on an absolute denylist — and this row is why
+        # neither may be removed.
+        "CREATE INDEX IF NOT EXISTS isaac_probe_idx ON records (record_id)",
+        # The same shape, in the other directions it could be written.
+        "CREATE INDEX isaac_probe_idx ON public.records (record_id)",
+        "ANALYZE records",
+        "SELECT count(*) FROM records",
+        "CREATE TABLE IF NOT EXISTS isaac_experiments (x text REFERENCES records (record_id))",
         "DROP TABLE isaac_experiments",
         "TRUNCATE isaac_experiments",
         "ALTER TABLE isaac_experiments ADD COLUMN x text",
@@ -585,6 +618,30 @@ def test_every_statement_this_application_actually_issues_passes_the_policy(sql)
 def test_records_is_not_and_never_becomes_an_owned_table():
     assert "records" not in dbw.OWNED_TABLES
     assert dbw.OWNED_TABLES == {"isaac_schema_migrations", "isaac_experiments"}
+    # ...and it is additionally on the absolute denylist, which does not reason
+    # about SQL grammar at all. Both guards are asserted, because the grammar one
+    # is the one that was already wrong once.
+    assert "records" in dbw._FORBIDDEN_TABLES
+
+
+def test_no_committed_migration_may_reference_the_production_table():
+    """A FILE-LEVEL guard, independent of the statement policy.
+
+    The policy only sees a statement when something executes it. This reads every
+    committed migration and rollback off disk, so a statement appended to a file
+    fails here even if it is never run — which is how the one that got through was
+    actually shaped: it sat in the committed file, and only the runner would have
+    tripped over it.
+    """
+    files = sorted(dbm.MIGRATIONS_DIR.glob("*.sql"))
+    assert files, "the migration directory is empty — this guard would pass vacuously"
+    for path in files:
+        for statement in dbm.split_statements(path.read_text(encoding="utf-8")):
+            tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", statement.lower()))
+            assert "records" not in tokens, (
+                f"{path.name} contains a statement naming the production-derived "
+                f"`records` table: {statement[:120]!r}"
+            )
 
 
 # =============================================================================
