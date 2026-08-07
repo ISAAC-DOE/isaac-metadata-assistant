@@ -343,15 +343,44 @@ export function GuidedTutorial({
   }, [overlayOpen, stepKey]);
 
   const releaseFocus = useCallback(() => {
-    const trigger = tutorialReturnFocusTarget();
-    if (trigger !== null) {
-      trigger.focus();
-      return;
-    }
     // Documented fallback: the trigger has been unmounted by the walkthrough's
     // own navigation, so focus goes to the main region rather than to <body>,
     // where a keyboard reader would have to Tab from the top of the document.
-    (document.getElementById('main') as HTMLElement | null)?.focus();
+    const toMain = () => (document.getElementById('main') as HTMLElement | null)?.focus();
+    const trigger = tutorialReturnFocusTarget();
+    if (trigger === null) {
+      toMain();
+      return;
+    }
+    trigger.focus();
+    /*
+     * AND THEN CHECK AGAIN AFTER THE RE-RENDER LEAVING CAUSES, because the
+     * connectivity test above is answered a moment too early to be the whole story.
+     *
+     * `leave` calls `dismissTutorial` FIRST and this second — so by the time the
+     * focus lands, React has been told to drop the scope but has not yet committed
+     * it. A trigger that is alive at this instant can still be unmounted by that
+     * commit, and when it is, the browser drops focus to `<body>` — the exact
+     * outcome the fallback below exists to prevent, arrived at by a different road.
+     *
+     * OBSERVED, not theorised. My Experiments re-reads its list whenever the
+     * workspace scope changes, so leaving a session puts that screen back through
+     * its loading branch and unmounts whatever the empty state was showing. The
+     * walkthrough's own first-run offer never hit this because it unmounts at the
+     * START (its condition stops holding the moment the phase leaves `idle`), so its
+     * trigger is already disconnected here and takes the branch above. A trigger that
+     * SURVIVES the walkthrough — the empty state's `Launch Guided Demo` is the first
+     * one in the app — is the case that reaches this line.
+     *
+     * A microtask rather than a timer: React commits a discrete event's update
+     * synchronously before the task ends, so this runs after the commit and still
+     * within the same tick, with no interval a reader could perceive. The
+     * `activeElement` half matters as much as `isConnected` — a node can be
+     * re-attached elsewhere, and what the reader actually has is where focus is.
+     */
+    queueMicrotask(() => {
+      if (!trigger.isConnected || document.activeElement === document.body) toMain();
+    });
   }, []);
 
   const leave = useCallback(

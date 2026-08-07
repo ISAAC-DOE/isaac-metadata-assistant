@@ -17,14 +17,19 @@
  *
  * ── How this stays safe beside the read-only projects ───────────────────────
  *
- * Every test here starts its OWN walkthrough, so the backend mints a session
- * that belongs to this test alone; the `tutorial` fixture records every session
- * id the page caused to exist and disposes all of them afterwards, whether or
- * not the test reached an exit path. The shared session that `global-setup.ts`
- * opened — the one the surface sweeps measure in five parallel projects — is
- * never entered, never mutated and never disposed here. And the ORDINARY
- * workspace stays empty throughout, which several tests re-assert rather than
- * assume.
+ * Every test that RUNS the walkthrough starts its own, so the backend mints a
+ * session that belongs to that test alone; the `tutorial` fixture records every
+ * session id the page caused to exist and disposes all of them afterwards,
+ * whether or not the test reached an exit path. And the ORDINARY workspace stays
+ * empty throughout, which several tests re-assert rather than assume.
+ *
+ * The `first-run offer` describe is the one group that does NOT start a
+ * walkthrough. It needs a NON-EMPTY list — the card is suppressed on an empty
+ * queue — so it reads the run's shared session at the TRANSPORT layer
+ * (`app.open(experimentsWithRows)`), which adds a request header and writes
+ * nothing. That shared session is never mutated and never disposed here; three
+ * read-only assertions against it are exactly what the five parallel viewport
+ * projects already do.
  *
  * ── What is deliberately NOT here ──────────────────────────────────────────
  *
@@ -40,6 +45,31 @@ import { SURFACES } from '../surfaces';
 import { enterWorkedExampleAsTheAppDoes } from '../worked-example';
 
 const experiments = SURFACES.find((s) => s.id === 'experiments')!;
+/**
+ * The SAME route with a NON-EMPTY list — where the first-run offer card renders.
+ *
+ * WHY THE OFFER TESTS MOVED HERE, and why this is a real state rather than a
+ * convenience. `ExperimentsHome` now suppresses the first-run offer whenever the
+ * queue is empty, so that a screen never carries two primaries for one action: the
+ * empty state owns the CTA (`Launch Guided Demo`), the queue state leaves it to the
+ * card. The ordinary workspace of THIS deployment is permanently empty, so the card
+ * cannot be exercised on it.
+ *
+ * This surface is `/experiments` inside the run's shared worked-example session, taken
+ * at the TRANSPORT layer (`e2e/worked-example.ts` → `enterWorkedExample`): the page's
+ * API requests carry the session header, so the list answers five rows, while the
+ * tutorial STORE is untouched — `phase: 'idle'`, `shouldOfferTutorial()` true, the chip
+ * still reading "Workspace". That is precisely the client-side shape of the state
+ * `apps/api/isaac_api/workspace.py` documents as reachable and NOT repairable through
+ * the UI: canonical records sitting in the ordinary scope on a durable workspace, left
+ * by a build predating scope isolation. The list is non-empty, the store is idle, and
+ * the card is the screen's only tutorial CTA.
+ *
+ * It is read-only over the shared session, as everything reached through the `app`
+ * fixture is: entering the scope adds a header and writes nothing, and none of the
+ * three tests below starts a walkthrough.
+ */
+const experimentsWithRows = SURFACES.find((s) => s.id === 'experiments-example')!;
 
 /** Well-formed (`^[A-Za-z0-9_-]{16,64}$`) but naming no session — what a
  *  reader's `sessionStorage` holds after their session expired or was swept. */
@@ -50,17 +80,35 @@ const bar = (page: import('@playwright/test').Page) =>
 const mark = (page: import('@playwright/test').Page) => page.locator('.tutorial-mark');
 const chip = (page: import('@playwright/test').Page) => page.locator('span.mode-chip');
 
-/** Start the walkthrough from the first-run offer and wait until step one is up. */
-async function startFromOffer(page: import('@playwright/test').Page) {
-  await page.getByRole('button', { name: 'Start Tutorial' }).click();
+/**
+ * Start the walkthrough the way a reader of THIS deployment does, and wait until step
+ * one is up.
+ *
+ * IT IS THE EMPTY STATE'S PRIMARY, NOT THE OFFER CARD, and the swap is the point
+ * rather than a locator repair. The ordinary workspace is permanently empty, and the
+ * first-run offer is now suppressed on an empty queue — so on the screen every reader
+ * of this build lands on, `Launch Guided Demo` is the control that exists. It calls the
+ * same `startTutorial` on the same contract, so every test below is driving the same
+ * code path it always drove, from the button a reader can actually press.
+ *
+ * The card's own semantics did not stop being tested; they moved to the state the card
+ * renders in — see `experimentsWithRows` above.
+ */
+async function startFromEmptyState(page: import('@playwright/test').Page) {
+  await page.getByRole('button', { name: 'Launch Guided Demo' }).click();
   await expect(bar(page)).toBeVisible({ timeout: 20_000 });
   await expect(mark(page)).toBeVisible({ timeout: 20_000 });
   await expect(mark(page)).toHaveAttribute('data-tutorial-step', 'experiments-overview');
 }
 
 test.describe('@interaction the first-run offer', () => {
-  test('is offered on My Experiments, and offers exactly two choices', async ({ page, app }) => {
-    await app.open(experiments);
+  test('is offered when the queue has rows, and offers exactly two choices', async ({ page, app }) => {
+    await app.open(experimentsWithRows);
+    // The precondition that makes this the card's real state rather than a contrived
+    // one: rows are present, so the empty state — which owns the CTA when there are
+    // none — is not on screen.
+    await expect(page.locator('.exp-row')).toHaveCount(5);
+    await expect(page.locator('.queue-empty-state')).toHaveCount(0);
 
     const offer = page.getByRole('region', { name: 'Take the Guided Walkthrough' });
     await expect(offer.or(page.locator('section.tutorial-offer')).first()).toBeVisible();
@@ -80,10 +128,13 @@ test.describe('@interaction the first-run offer', () => {
     await expect(offerCopy).not.toContainText(/changes nothing/i);
     await expect(page.getByRole('button', { name: 'Start Tutorial' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Skip for Now' })).toBeEnabled();
+    // Exactly two, and the empty state's primary is not a third: whichever surface
+    // owns the CTA, one action must not be offered under two names at once.
+    await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toHaveCount(0);
   });
 
   test('"Skip for Now" hides the offer and creates NO session', async ({ page, app, tutorial }) => {
-    await app.open(experiments);
+    await app.open(experimentsWithRows);
     await page.getByRole('button', { name: 'Skip for Now' }).click();
 
     await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
@@ -94,24 +145,105 @@ test.describe('@interaction the first-run offer', () => {
       'declining the offer must not open a worked-example session'
     ).toEqual([]);
     await expect(bar(page)).toHaveCount(0);
+    // The store never entered a session, which is what the chip reports. (It reads
+    // "Workspace" throughout this describe: the scope here is applied at the transport
+    // layer, so the tutorial store is untouched by construction — see `worked-example.ts`.
+    // The claim under test is that DISMISSING opened nothing, and `sessionsCreated()`
+    // above is the independent, wire-level form of it.)
     await expect(chip(page)).toHaveText('Workspace');
 
     // And it is "not now", not "never": a fresh visit offers it again, because
     // dismissal is session-scoped and deliberately unpersisted.
-    await app.open(experiments);
+    await app.open(experimentsWithRows);
     await expect(page.getByRole('heading', { name: 'Take the Guided Walkthrough' })).toBeVisible();
   });
 
   test('is not offered to a browser that already finished it', async ({ page, app, tutorial }) => {
     await tutorial.markCompleted();
-    await app.open(experiments);
+    await app.open(experimentsWithRows);
+    // The state that makes this meaningful: rows are present, so the card WOULD render
+    // here for a browser that had not finished — as the first test in this describe
+    // shows on this same surface. It is completion that retires it, not the layout.
+    await expect(page.locator('.exp-row')).toHaveCount(5);
     await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
-    // …and the empty state POINTS AT the permanent home of the replay control rather
-    // than duplicating its label. It used to render a second "Replay Tutorial" button
-    // here that only navigated — and navigated to `/settings` with no `?tab=`, which
-    // resolves to `overview` and holds no tutorial control at all.
+    // And nothing takes its place on this screen. "Replay Tutorial" is the exact label
+    // of the Settings control that starts the walkthrough; a second control under that
+    // name here is the defect this assertion has always guarded against.
     await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Go to Help & Tutorial' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start Tutorial' })).toHaveCount(0);
+  });
+});
+
+test.describe("@interaction the empty workspace's own primary", () => {
+  /*
+   * THE SLICE'S HEADLINE CLAIM, IN A REAL BROWSER.
+   *
+   * `shouldOfferTutorial` retires the first-run offer PERMANENTLY on completion, and
+   * the ordinary workspace of this deployment can never fill. So a returning reader —
+   * a browser that finished the walkthrough once — used to arrive at a permanently
+   * empty screen whose only remaining route to the walkthrough was a quiet secondary
+   * that navigated somewhere else to press a different button.
+   *
+   * The two halves are asserted together on purpose: the control is present in the
+   * retired state, AND the retired state is real (the offer card is genuinely gone,
+   * not merely off-screen). Either alone can be satisfied by an accident.
+   */
+  test('a browser that already finished still has a way into the walkthrough', async ({
+    page,
+    app,
+    tutorial,
+  }) => {
+    await tutorial.markCompleted();
+    await app.open(experiments);
+
+    // The retired state, measured on the screen a returning reader actually lands on.
+    await expect(page.locator('.exp-row')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible();
+    await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
+
+    // The way in — and it is the only one, under exactly one name.
+    const launch = page.getByRole('button', { name: 'Launch Guided Demo' });
+    await expect(launch).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Start Tutorial' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
+
+    // It STARTS the walkthrough rather than navigating to somewhere that might. This is
+    // the assertion the control it replaced could not have passed: that one's entire
+    // behaviour was `navigate(ROUTES.settingsTab('help'))`, and a query by role and name
+    // cannot tell the two apart.
+    await startFromEmptyState(page);
+    expect(tutorial.sessionsCreated().length, 'the primary must mint exactly one session').toBe(1);
+    await expect(page.locator('.exp-row')).toHaveCount(5);
+  });
+
+  test('disarms itself while a session is opening, so one press is one session', async ({
+    page,
+    app,
+    tutorial,
+  }) => {
+    /*
+     * THE DOUBLE-SUBMIT GUARD, in the browser where the impatient second click really
+     * happens. `startTutorial` reads the held session id and then awaits `POST
+     * /api/tutorial/sessions`, so two calls entered before the first resolves both
+     * create and neither disposes the other's — a server-side workspace the reader can
+     * neither see nor discard.
+     *
+     * The first-run offer never reached this: it unmounts synchronously when the phase
+     * leaves `idle`. This control does not — the empty state is still the empty state
+     * until the session's records arrive — which is why it carries an explicit guard.
+     */
+    await app.open(experiments);
+    const launch = page.getByRole('button', { name: 'Launch Guided Demo' });
+    // `dblclick` rather than two awaited clicks: the second lands while the create is
+    // still in flight, which is the only timing that reproduces the defect.
+    await launch.dblclick();
+
+    await expect(bar(page)).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.exp-row')).toHaveCount(5);
+    expect(
+      tutorial.sessionsCreated(),
+      'a double-click minted more than one worked-example session'
+    ).toHaveLength(1);
   });
 });
 
@@ -126,7 +258,7 @@ test.describe('@interaction starting the walkthrough', () => {
     // Precondition, measured rather than assumed: the ordinary queue is empty.
     await expect(page.locator('.exp-row')).toHaveCount(0);
 
-    await startFromOffer(page);
+    await startFromEmptyState(page);
 
     const sessions = tutorial.sessionsCreated();
     expect(sessions.length, `starting must open exactly one session, got ${sessions.length}`).toBe(1);
@@ -150,7 +282,7 @@ test.describe('@interaction starting the walkthrough', () => {
     await app.open(experiments);
     await expect(chip(page)).toHaveText('Workspace');
 
-    await startFromOffer(page);
+    await startFromEmptyState(page);
 
     await expect(chip(page)).toHaveText('Worked Example');
     const name = await chip(page).getAttribute('aria-label');
@@ -166,7 +298,7 @@ test.describe('@interaction starting the walkthrough', () => {
 
   test('the worked-example bar states the scope and holds the two example controls', async ({ page, app }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
 
     const region = bar(page);
     await expect(region).toBeVisible();
@@ -195,7 +327,7 @@ test.describe('@interaction starting the walkthrough', () => {
 test.describe('@interaction the coach marks', () => {
   test('point at a REAL control, on the surface that control lives on', async ({ page, app }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
 
     // Step 1 — `data-tutorial-step-available="true"` is the component's own
     // statement that it resolved an anchor rather than degrading to an
@@ -233,7 +365,7 @@ test.describe('@interaction the coach marks', () => {
 
   test('Next advances and navigates; Back returns without losing the session', async ({ page, app, tutorial }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const session = tutorial.sessionsCreated()[0];
 
     // Back is disabled on step one — there is nowhere behind it.
@@ -266,7 +398,7 @@ test.describe('@interaction the coach marks', () => {
 
   test('progresses by keyboard alone, and focus lands in the mark on every step', async ({ page, app }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
 
     // Focus is moved INTO the mark when a step becomes visible (not trapped
     // there — the described control must stay reachable).
@@ -292,7 +424,7 @@ test.describe('@interaction the coach marks', () => {
 
   test('stays inside the viewport at this width', async ({ page, app }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
 
     // Meaningful at 375 in particular: the mark is absolutely positioned against
     // a measured control and clamped to the viewport, so a mis-clamp shows up as
@@ -328,7 +460,7 @@ test.describe('@interaction the coach marks', () => {
     expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
 
     const aligned = await page.evaluate(() => {
       const a = document.querySelector('[data-tutorial-highlight="true"]')!.getBoundingClientRect();
@@ -342,7 +474,7 @@ test.describe('@interaction the coach marks', () => {
 test.describe('@interaction leaving the walkthrough', () => {
   test('Close discards the session, and the examples go with it', async ({ page, app, tutorial }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const session = tutorial.sessionsCreated()[0];
     await expect(page.locator('.exp-row')).toHaveCount(5);
 
@@ -374,7 +506,7 @@ test.describe('@interaction leaving the walkthrough', () => {
 
   test('Escape leaves it exactly as Close does, and does NOT mark it complete', async ({ page, app, tutorial }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const session = tutorial.sessionsCreated()[0];
 
     await page.keyboard.press('Escape');
@@ -392,18 +524,59 @@ test.describe('@interaction leaving the walkthrough', () => {
       'Escape must not record the walkthrough as completed'
     ).toBeNull();
 
+    // …and the reader is left on a usable screen: the way back in is present and
+    // operable, not disabled by the walkthrough they just escaped from.
+    await expect(page.getByRole('heading', { name: 'No experiments yet' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toBeEnabled();
+  });
+
+  /*
+   * ESCAPE'S EFFECT ON THE FIRST-RUN OFFER, asserted where the offer renders.
+   *
+   * These two claims were in the test above and had become vacuous there: the card is
+   * suppressed on an empty queue, so "the offer is hidden" passed whether or not
+   * escaping had dismissed anything. They are the OFFER's semantics, so they belong on
+   * the offer's state — a non-empty queue — and they are checked here rather than
+   * dropped.
+   *
+   * The scope is entered at the transport layer BEFORE the walkthrough starts, and it
+   * survives it: `applyWorkedExampleScope` never overwrites a header the app itself
+   * set, so while the app holds its own session the page addresses THAT one, and when
+   * escaping discards it the shared session's rows come back. That is what makes the
+   * queue non-empty on both sides of the Escape.
+   */
+  test('Escape hides the first-run offer for the session, and a fresh visit offers it again', async ({
+    page,
+    app,
+    tutorial,
+  }) => {
+    await app.open(experimentsWithRows);
+    await expect(page.getByRole('heading', { name: 'Take the Guided Walkthrough' })).toBeVisible();
+
+    // Started from the CARD, because that is the control this test is about.
+    await page.getByRole('button', { name: 'Start Tutorial' }).click();
+    await expect(bar(page)).toBeVisible({ timeout: 20_000 });
+    await expect(mark(page)).toBeVisible({ timeout: 20_000 });
+    expect(tutorial.sessionsCreated().length).toBe(1);
+
+    await page.keyboard.press('Escape');
+    await expect(bar(page)).toHaveCount(0);
+
+    // The queue still has rows — so a hidden card is a dismissal, not a layout.
+    await expect(page.locator('.exp-row')).toHaveCount(5);
     // The offer is hidden for the rest of THIS session so the reader is not
     // interrupted twice…
     await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
     // …and offered again on a fresh visit, because "not now" was not turned into
-    // "never".
-    await app.open(experiments);
+    // "never". Completion is the only thing that retires it, and escaping is not
+    // completion — asserted directly in the test above.
+    await app.open(experimentsWithRows);
     await expect(page.getByRole('heading', { name: 'Take the Guided Walkthrough' })).toBeVisible();
   });
 
   test('"Skip Tutorial" in the mark also discards the session', async ({ page, app, tutorial }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const session = tutorial.sessionsCreated()[0];
 
     await page.getByRole('button', { name: 'Skip Tutorial' }).click();
@@ -420,7 +593,7 @@ test.describe('@interaction leaving the walkthrough', () => {
 test.describe('@interaction reloading', () => {
   test('a refresh mid-walkthrough RESUMES the same step in the same session', async ({ page, app, tutorial }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const session = tutorial.sessionsCreated()[0];
 
     await page.getByRole('button', { name: 'Next', exact: true }).click();
@@ -445,7 +618,7 @@ test.describe('@interaction reloading', () => {
 
   test('after leaving, a refresh comes back to the ordinary empty workspace', async ({ page, app }) => {
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     await page.getByRole('button', { name: 'Close Tutorial' }).click();
     await expect(bar(page)).toHaveCount(0);
 
@@ -568,7 +741,7 @@ test.describe('@interaction the walkthrough is quiet', () => {
     });
 
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     await page.getByRole('button', { name: 'Next', exact: true }).click();
     await page.getByRole('button', { name: 'Next', exact: true }).click();
     await expect(mark(page)).toHaveAttribute('data-tutorial-step', 'record-readiness');
@@ -664,7 +837,7 @@ test.describe('@interaction the walkthrough is quiet', () => {
      * a passing test to do so. Reported instead.
      */
     await app.open(experiments);
-    await startFromOffer(page);
+    await startFromEmptyState(page);
     const session = tutorial.sessionsCreated()[0];
     await page.getByRole('button', { name: 'Next', exact: true }).click();
     await page.getByRole('button', { name: 'Next', exact: true }).click();

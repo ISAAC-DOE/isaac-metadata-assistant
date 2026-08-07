@@ -143,6 +143,31 @@ async function activateInMark(fromIndex: number, label: string): Promise<void> {
 /** Walk forward one step. */
 const next = (fromIndex: number) => activateInMark(fromIndex, LABELS.actionTutorialNext);
 
+/**
+ * THE HONESTY RATCHET, as one matcher set applied to whatever surface is passed in.
+ *
+ * Extracted so the two surfaces that carry this disclosure are held to the SAME
+ * standard by construction rather than by two lists that have to be kept in step —
+ * which is how the empty state's copy came to be guarded by nothing at all while the
+ * offer card's was guarded by six matchers.
+ *
+ * Three positives (the write is disclosed, the temporary workspace is named, the
+ * reassurance is scoped to the reader's own records) and three negatives (the exact
+ * absolutes that were false and shipped). The negatives matter as much as the
+ * positives: copy can satisfy all three positives and still re-add "it only reads"
+ * beside them.
+ */
+function assertDisclosesTheWrite(copy: string): void {
+  expect(copy).toMatch(/opens a worked example of its own/i);
+  expect(copy).toMatch(/five example records/i);
+  expect(copy).toMatch(/discarded when the tour ends/i);
+  expect(copy).toMatch(/no record of yours is created, changed, or removed/i);
+  // The exact absolutes that were false. If any returns, this fails.
+  expect(copy).not.toMatch(/only reads/i);
+  expect(copy).not.toMatch(/changes nothing/i);
+  expect(copy).not.toMatch(/answers nothing/i);
+}
+
 /** Start the walkthrough from the first-run offer on My Experiments. */
 async function startFromOffer(): Promise<void> {
   await screen.findByRole('heading', { name: LABELS.tutorialOfferTitle });
@@ -466,14 +491,52 @@ describe('R0 · finishing the walkthrough', () => {
     await screen.findByRole('heading', { name: LABELS.tutorialOfferTitle });
     const offer = document.querySelector<HTMLElement>('section.tutorial-offer');
     expect(offer).not.toBeNull();
-    const copy = offer!.textContent ?? '';
-    expect(copy).toMatch(/opens a worked example of its own/i);
-    expect(copy).toMatch(/discarded when the tour ends/i);
-    expect(copy).toMatch(/no record of yours is created, changed, or removed/i);
-    // The exact absolutes that were false. If either returns, this fails.
-    expect(copy).not.toMatch(/only reads/i);
-    expect(copy).not.toMatch(/changes nothing/i);
-    expect(copy).not.toMatch(/answers nothing/i);
+    assertDisclosesTheWrite(offer!.textContent ?? '');
+  });
+
+  /*
+   * THE SAME RATCHET, ON THE SURFACE THAT NOW CARRIES THE CLAIM FOR MOST READERS.
+   *
+   * THE GAP THIS CLOSES, stated plainly because it was found by review and not by any
+   * test. The ratchet above queries `section.tutorial-offer`. The empty state's
+   * supporting line (`LABELS.launchGuidedDemoBody`) lives in `.queue-empty-hint` and
+   * was guarded by NOTHING: replacing it with the retired false absolute — "It only
+   * reads — it answers nothing and changes nothing" — plus a wrong record count left
+   * the entire frontend suite green.
+   *
+   * It compounds rather than merely duplicating, which is why it is a separate test
+   * and not a nice-to-have: the slice that introduced this copy ALSO suppresses the
+   * offer card whenever the queue is empty, and the ordinary workspace's queue is
+   * permanently empty. So the unguarded surface is the one a reader of this
+   * deployment actually meets, and the guarded one is the one they do not.
+   *
+   * Asserted over the RENDERED text rather than over the label constant, for the same
+   * reason the offer's version is: a matcher that reads `LABELS.launchGuidedDemoBody`
+   * would pass no matter what that string said.
+   */
+  it('the empty state makes the identical disclosure, and quotes the offer verbatim', async () => {
+    stubFetchRoutes(readOnlyRoutes([]) as never);
+    renderAt();
+    await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+
+    // The precondition that makes this the reader's ONLY copy: with no rows, the
+    // guarded surface is not on screen at all.
+    expect(offer()).toBeNull();
+    const emptyState = document.querySelector<HTMLElement>('.queue-empty-state');
+    expect(emptyState).not.toBeNull();
+    assertDisclosesTheWrite(emptyState!.textContent ?? '');
+
+    /*
+     * AND THE "VERBATIM" CLAIM ITSELF, which was a comment and is now an assertion.
+     * `labels.ts` says the hint is "the last two sentences of `tutorialOfferBody`
+     * verbatim" and gives a reason for quoting rather than paraphrasing — that the
+     * offer's wording was audited into its current form. A paraphrase that drifts
+     * apart from the audited original is exactly the failure mode, and only this
+     * catches it: both strings could be independently wrong in the same direction and
+     * still satisfy every matcher above.
+     */
+    expect(LABELS.tutorialOfferBody.endsWith(LABELS.launchGuidedDemoBody)).toBe(true);
+    expect(LABELS.launchGuidedDemoBody.length).toBeGreaterThan(0);
   });
 
   it('the primary action returns to My Experiments, closes the overlay, and the offer is gone', async () => {
