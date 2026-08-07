@@ -44,12 +44,12 @@ that actually true?
 
 **3. Portal usage metrics — may we consume them, and how much may we show?**
 
-We traced the dashboard numbers to the portal's own request and access tables — not GitHub PR data,
-which we'd previously assumed.
+We traced the dashboard numbers to the portal's own instrumentation — not GitHub PR data, which
+we'd previously assumed.
 
 - May `/krish` consume aggregate usage metrics from the portal, or should we instrument our own
   requests?
-- Which aggregates are OK for an ordinary signed-in user vs admin-only?
+- Which aggregates would you want visible to an ordinary signed-in user, and which restricted?
 - Any minimum aggregation threshold you want enforced? ISAAC does not have one today.
 - May a signed-in user see *their own* API activity?
 
