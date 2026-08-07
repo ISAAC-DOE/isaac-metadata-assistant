@@ -27,10 +27,15 @@ Two deliberate content decisions, both governance-driven:
 
 - The optional `attribution` block is **omitted from all 18 files**, so no person, group, ORCID or
   account is named as the origin of any value.
-- Every record carries, in `sample.material.notes` and `measurement.qc.notes`, the sentence
-  *"Constructed by hand for validator exercise. Values are illustrative and carry no measurement
-  provenance."* Values are physically reasonable for a Cu K edge (edge at ~8979 eV, arctangent step
-  plus a white line and damped oscillations above the edge) but assert no measurement.
+- **All 18 files** carry the sentence *"Constructed by hand for validator exercise. Values are
+  illustrative and carry no measurement provenance."* — the 17 records in `sample.material.notes`
+  and `measurement.qc.notes`, and `unsupported-file.txt` in its own body. Values are physically
+  reasonable for a Cu K edge (edge at ~8979 eV, arctangent step plus a white line and damped
+  oscillations above the edge) but assert no measurement.
+  It was **17 of 18** until 2026-08-05: `unsupported-file.txt` carried no such note and read as a
+  genuine logbook transcription (a real-looking beamline designation and the textbook Cu K-edge
+  energy presented as a measured value), and nothing failed, because the convention was unasserted.
+  It is now pinned by `tests/test_validator_qa_package.py::test_every_shipped_fixture_states_its_own_provenance_in_its_own_text`.
 - Vocabulary constraint honoured: the strings `synthetic`, `demo`, `fixture`, `test data`, `mock`,
   `fake`, `sample data`, `dummy`, `scenario`, `seeded` appear in **no** record JSON and in **no**
   filename in the package. Verified:
@@ -45,7 +50,7 @@ Two deliberate content decisions, both governance-driven:
 Schema inspection (Draft 2020-12 structure, conditionals, closed objects, `minItems`):
 
 ```
-cd /Users/krishverma/Documents/ISAAC
+cd <repository root>          # the directory containing schema/isaac_record_v1.json
 .venv/bin/python -c "import json; s=json.load(open('schema/isaac_record_v1.json')); print(list(s.keys())); print(s['required']); print(s['additionalProperties'])"
 .venv/bin/python -c "import json; s=json.load(open('schema/isaac_record_v1.json')); [print(json.dumps(a,indent=1)) for a in s['allOf']]"
 # plus a recursive walk printing every object schema and whether additionalProperties is false,
@@ -64,7 +69,7 @@ Generation, then verification of all 17 JSON files against the repository's own 
 adaptation was needed. The literal single-file form was also run and is reproducible:
 
 ```
-cd /Users/krishverma/Documents/ISAAC
+cd <repository root>          # the directory containing schema/isaac_record_v1.json
 .venv/bin/python -c "
 import json,sys
 from pathlib import Path

@@ -6,6 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel a superseded run when a new commit lands on the SAME ref, so a fresh
+# push to an open PR does not leave the previous ~30-minute run queued behind it
+# (the org's Actions minutes are finite). Keyed by ref, so each PR branch and
+# `main` get their own group and never cancel each other.
+#
+# cancel-in-progress is TRUE for pull_request events only. For a push to `main`
+# (a merge commit — a distinct, releasable SHA) it is FALSE: every merged SHA
+# must be fully validated, never cancelled by the next merge.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
