@@ -14,7 +14,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# pyyaml is a TEST-ONLY dependency and earns its place: `test_release_gate.py`
+# asserts that the publishing job still cannot run without the CI gate, and a
+# regex over workflow YAML can be defeated by a reformat. The one thing this
+# slice must guarantee is that the gate cannot be quietly un-wired, so the check
+# parses the workflow rather than pattern-matching it — and must never skip.
+dev = ["pytest>=8", "pyyaml>=6"]
 api = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27", "psycopg2-binary>=2.9"]
 
 [project.scripts]
