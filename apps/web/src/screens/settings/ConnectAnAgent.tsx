@@ -24,6 +24,14 @@
  * {@link ConnectAnAgentFacts} no longer carries the two count fields: it renders
  * no count.
  *
+ * ONE claim came BACK in 2026-08-08, and the reversal is deliberate. Slice 13's
+ * de-duplication was right for claims this guide merely restated, and wrong for
+ * the one that is a PRECONDITION of the whole procedure: on a deployment that
+ * answers only browser sessions, no agent can connect at all, and this guide is
+ * a `<details>` a reader can open without ever seeing the sibling that said so.
+ * See `API_ACCESS_COPY.connectPrerequisite` — still authored once, still counted
+ * once, but rendered here rather than pointed at from here.
+ *
  * On hosted access: that boundary is stated provider-neutrally wherever it
  * appears. Naming the identity layer in front of a deployment would disclose
  * infrastructure topology, which `settings-page.test.tsx` forbids on every
@@ -31,6 +39,7 @@
  * `GET /api/about`).
  */
 import { SAMPLE_BASE_ENV, SAMPLE_CREDENTIAL_ENV } from '../../lib/apiDocsModel';
+import { API_ACCESS_COPY } from '../../lib/settingsContent';
 
 export interface ConnectAnAgentFacts {
   /** Request media types the contract declares, from the document. */
@@ -119,6 +128,17 @@ export function ConnectAnAgent({
         What a program calling this API has to get right — short, and only what this build actually
         supports.
       </p>
+      {/* FINDING B — the precondition, stated INSIDE the guide.
+          Slice 13 (see the note at the top of this file) moved the tab's shared
+          boundaries out to the access rows, which was right for claims this
+          guide merely restated. It was wrong for this one: a reader can open
+          this disclosure on its own and follow eight steps to an integration
+          that cannot be made on the deployment serving the page, with the
+          disqualifying fact one component away. A precondition has to sit with
+          the procedure it disqualifies.
+          Authored once, in `API_ACCESS_COPY`, so the duplication guard counts
+          it like every other canonical string on this tab. */}
+      <p className="api-connect-prerequisite">{API_ACCESS_COPY.connectPrerequisite}</p>
       <div className="api-connect-body">
         {sections.map((section) => (
           <section className="api-connect-section" key={section.heading}>

@@ -153,6 +153,12 @@ export function ApiKeysPanel({ onOpenExplorer }: { onOpenExplorer: () => void })
                 <li key={item}>{item}</li>
               ))}
             </ul>
+            {/* FINDING E — the requirement that is NOT the application's, so the
+                five app-owned ones are not read as the whole path to shipping.
+                A paragraph rather than a sixth `<li>`: the list is "what this
+                prototype would have to build", and this is precisely the thing
+                it could not. */}
+            <p className="api-keys-note">{API_ACCESS_COPY.requirementsBoundary}</p>
           </details>
         </section>
       </div>

@@ -2792,6 +2792,25 @@
   line-height: 1.6;
   color: var(--text-tertiary);
 }
+/* FINDING B — the precondition Connect an Agent never stated. It sits between
+   the lead and the eight steps because that is the reading order the claim
+   needs: the steps do not apply unless it holds.
+
+   Deliberately --text-secondary (8.07:1) rather than the lead's --text-tertiary
+   (#78838f, 3.86:1) — the latter is one of the eleven foregrounds the a11y
+   baseline records as a documented contrast shortfall, and a sentence a reader
+   must not miss is the wrong place to add another instance of it. The left rule
+   is an existing border token, not a new tint, so no new colour pair enters the
+   scan. */
+.api-connect-prerequisite {
+  margin: 8px 0 0;
+  max-width: 74ch;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-strong);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
 .api-connect-body {
   margin-top: 12px;
   display: flex;
