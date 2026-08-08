@@ -20,6 +20,8 @@ import {
   VALIDATOR_SERIES,
   VERIFICATION_CACHE_TTL_SECONDS,
   VERIFICATION_MODE_LABELS,
+  SAFEGUARD_LABELS,
+  safeguardDetail,
   corpusDisclosure,
   corpusSizeMismatch,
   histogramIsEmpty,
@@ -346,6 +348,61 @@ describe('what the decoder must preserve', () => {
     const serialized = JSON.stringify(verificationReportOk);
     expect(serialized).not.toContain('instance_path');
     expect(serialized).not.toContain('by_instance_path');
+  });
+});
+
+/* ================================================= the safeguard NAMING == */
+
+/*
+ * NOTHING PINNED THIS BEFORE, WHICH IS HOW IT SHIPPED.
+ *
+ * `source_records_modified` was labelled "Source Records Left Unchanged" — an
+ * outcome about the stored records. The backend measures no such thing: it
+ * computes the field from `source_mutation_failures == 0 &&
+ * source_objects_mutated == 0`, and both terms compare a record object with
+ * itself inside the process (`verification.py::_structural_snapshot` and
+ * `corpus_mutation.py::run_trial`). No post-run row re-read exists on this path,
+ * and none could — `db_provider.DatastoreRecordProvider._drain` closes the
+ * connection before the first record is yielded to the sweep.
+ *
+ * The whole suite passed on the overclaiming string, so the correction gets a
+ * guard rather than only a comment.
+ */
+describe('the safeguard labels, held to what the backend measures', () => {
+  it('does not label the in-memory comparison as an outcome about stored records', () => {
+    const label = SAFEGUARD_LABELS.source_records_modified;
+    expect(label).toBe('Source Records Unchanged in Memory');
+    // The exact string that was wrong, and the shape of the claim it made.
+    expect(label).not.toBe('Source Records Left Unchanged');
+    expect(label).not.toMatch(/left unchanged/i);
+    expect(label).not.toMatch(/\bnot (modified|altered|written)\b/i);
+    // The scope has to be IN the label, not only in the sentence beneath it:
+    // the row is skimmed as a finding.
+    expect(label).toMatch(/in memory/i);
+  });
+
+  it('states what the verified comparison covered, and what it did not', () => {
+    const detail = safeguardDetail('source_records_modified', 'verified');
+    expect(detail).toMatch(/compared with itself before and after/i);
+    expect(detail).toMatch(/in memory/i);
+    expect(detail).toMatch(/no stored record was re-read/i);
+    // It must not promote itself back into a durable claim.
+    expect(detail).not.toMatch(/database (row|record)s? (is|are|was|were) unchanged/i);
+  });
+
+  it('leaves the other seven labels and the pass/fail vocabulary alone', () => {
+    // This correction is a rename. Nothing about which states exist, or how a
+    // state is worded, moves with it.
+    expect(SAFEGUARD_LABELS.transaction_read_only).toBe('Read-Only Database Access');
+    expect(SAFEGUARD_LABELS.parameterized_queries_only).toBe('Parameterized Database Queries');
+    expect(SAFEGUARD_LABELS.dml_statements).toBe('Statements That Would Change Data');
+    expect(SAFEGUARD_LABELS.ddl_statements).toBe('Statements That Would Change Structure');
+    expect(SAFEGUARD_LABELS.private_values_exposed).toBe('No Record Values in This Report');
+    expect(SAFEGUARD_LABELS.official_validator_unchanged).toBe('Official Validator Unchanged');
+    expect(SAFEGUARD_LABELS.export_gating_unchanged).toBe('Export Gate Unchanged');
+    expect(safeguardDetail('source_records_modified', 'unverified')).toBe(
+      'This check did not run, so nothing here states that it holds.',
+    );
   });
 });
 

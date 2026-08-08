@@ -142,9 +142,31 @@
 .statistics .stats-card-headings {
   min-width: 0;
 }
-.statistics .stats-card-head h2,
-.statistics .stats-card-head h3 {
+/*
+ * THE TWO HEADING LEVELS ARE SIZED APART, and this used to be one block.
+ *
+ * `StatsSection` already distinguishes them — `headingLevel` picks `h2` or `h3`
+ * at `StatsPrimitives.tsx:59` — but both tags shared one declaration here, so
+ * the four sections that opt into level 3 (Runtime, Record Schema, Project
+ * Memory, API Surface) rendered at exactly the same 14px/600 as the level-2
+ * sections around them. The accessibility tree said "subordinate" and the screen
+ * said "peer". Worse inside a `TechnicalDetails`, where `.stats-technical-body
+ * .stats-card` strips the card border too, so a nested section had neither
+ * chrome nor size to mark it as nested.
+ *
+ * 13px is not a new step: it is what a bare `<h3>` inside `.stats-group` has
+ * always been (see `.stats-group > h3` below), so every `h3` on the surface now
+ * reads at one size instead of three.
+ */
+.statistics .stats-card-head h2 {
   font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+}
+.statistics .stats-card-head h3 {
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-heading);
   letter-spacing: -0.005em;
@@ -261,11 +283,30 @@
 
 /* A single at-a-glance metric, as a one-group <dl>: <dt> label, <dd> value,
    optional <dd> note. Never bare divs of numbers (screens.css:292-294). */
+/*
+ * `margin: 0` ON EVERY `<dl>` AND `<dd>` ON THIS SURFACE, and it was missing.
+ *
+ * `styles/base.css` resets `h1..h4, p, figure` and nothing else, so the UA
+ * defaults — `dl { margin-block: 1em }` and `dd { margin-inline-start: 40px }` —
+ * were live here. Statistics renders every figure as a real definition list (the
+ * repo rule: figures are a labelled `<dl>`, never bare divs of numbers), so that
+ * indented every stat-card value, every stat-card note, every `FigureList` value
+ * and both `<dd>`s of every safeguard by 40px, and added 13px above and below
+ * three `<dl>`s that already sit in gapped grids.
+ *
+ * Every OTHER definition list in the app already resets it — `.memory-figure dd`
+ * (screens.css:374), `.settings-figure dd` (:1649), `.api-browser-meta-item dd`
+ * (:2173), `.agent-proposal-fields dd` (assistant.css:1205), and six more. This
+ * surface was the one that did not, and it patched two symptoms rather than the
+ * cause (`.stats-verify-group .stats-figures { margin-top: 0 }` below kills only
+ * the top half, only in that one container).
+ */
 .statistics .stat-card {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  margin: 0;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-inner);
@@ -286,8 +327,9 @@
   color: var(--text-tertiary);
 }
 .statistics .stat-card-value {
+  margin: 0;
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.2;
   color: var(--text-heading);
   /* A ULID, a commit sha or a long word like "Synthetic-Only" must break
@@ -323,6 +365,7 @@
  * and platform.
  */
 .statistics .stat-card-note {
+  margin: 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -376,6 +419,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px 22px;
+  margin: 0;
 }
 .statistics .stats-figure {
   min-width: 0;
@@ -386,11 +430,27 @@
   color: var(--text-slate);
   line-height: 1.4;
 }
+/*
+ * THE FIGURE OUT-WEIGHS ITS OWN LABEL, and it did not.
+ *
+ * This is the primary numeric readout of the surface — every `FigureList` row on
+ * About This Run, Export Gate, Evidence Support, the freshness strip and the
+ * whole mutation panel. It was 13.5px at the default 400, sitting under an
+ * 11.5px/600 `<dt>`, so on a screen whose entire point is the numbers the label
+ * read heavier than the figure and both read lighter than the section heading.
+ *
+ * 15px/600 in `--text-heading` puts it a step above the 14px/600 `h2` and two
+ * steps above its label. 15px is not a new size on this surface
+ * (`.stats-verify-corpus-label` already uses it) and 13.5px — the only 13.5 in
+ * the file — is retired with it, so the scale loses a half-pixel step rather
+ * than gaining one.
+ */
 .statistics .stats-figure dd {
-  margin-top: 3px;
-  font-size: 13.5px;
-  color: var(--text-primary);
-  line-height: 1.45;
+  margin: 3px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-heading);
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
@@ -432,9 +492,13 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
   background: var(--surface-subtle);
-  font-size: 12px;
+  /* A count, so it is sized as a figure rather than as a label: it was 12px
+     against its own 11.5px label. `line-height` was undeclared, so the badge
+     inherited the body's 1.55 and was the only chip on the surface not on 1.4. */
+  font-size: 13px;
   font-weight: 600;
-  color: var(--text-strong);
+  line-height: 1.4;
+  color: var(--text-heading);
 }
 
 /* ---- UnavailableNote ------------------------------------------------- */
@@ -1304,11 +1368,15 @@
   border-radius: var(--radius-inner);
   background: var(--surface-subtle);
 }
+/* The third `h3` size, folded into the one above. It was 12.5px/1.4 with no
+   tracking while every other `h3` was 13px/1.35 at -0.005em — a fourth-of-a-step
+   difference that read as a rendering accident rather than a level. */
 .statistics .stats-plan-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-heading);
-  line-height: 1.4;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 .statistics .stats-plan-desc {
@@ -1397,6 +1465,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  margin: 0;
 }
 .statistics .stats-verify-safeguard {
   display: flex;
@@ -1435,6 +1504,7 @@
 /* The state WORD. Weight and case do the emphasis; no glyph, and pointedly no
    tick — a tick beside "Not applicable" would restate it as an affirmative. */
 .statistics .stats-verify-state {
+  margin: 0;
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -1451,6 +1521,7 @@
   color: var(--needsyou-text);
 }
 .statistics .stats-verify-safeguard-detail {
+  margin: 0;
   font-size: 11.5px;
   line-height: 1.55;
   color: var(--text-secondary);
@@ -1739,7 +1810,11 @@
   overflow-wrap: anywhere;
 }
 .statistics .stats-figure-hint {
+  /* `font-weight` is RESET, not omitted. `.stats-figure dt` sets 600 and this
+     span sits inside it, so the hint the comment above calls "quiet" was
+     rendering at the same semibold as the label it is subordinate to. */
   font-size: 10.5px;
+  font-weight: 400;
   line-height: 1.4;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
