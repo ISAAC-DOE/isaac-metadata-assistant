@@ -927,7 +927,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'memory@width-320': 17,
       'memory@width-390': 17,
       'record-detail@width-320': 12,
-      'record-detail@width-390': 13,
+      /* SPLIT, and CI is what established it. I measured darwin 13 after the
+         Graph tab landed and recorded it as a bare number, saying in the commit
+         that linux was not yet measured and CI would adjudicate. It did: linux
+         stayed at 12. So the tab's extra node is measurable on the darwin face
+         at 390 and not on the linux one — the two wrap at different words, which
+         is the whole reason this file has two columns. */
+      'record-detail@width-390': { darwin: 13, linux: 12 },
       'schema-reference@width-320': 20,
       'schema-reference@width-390': 22,
       'settings-about@width-320': 14,
@@ -1466,8 +1472,17 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   //
   // 1613 + 590 = 2203 darwin; 1613 + 588 = 2201 linux. They no longer coincide,
   // and that is correct -- the split pairs are why this file has two columns.
-  darwin: 2203,
-  linux: 2201,
+  // Corrected after CI adjudicated: darwin 2206, linux 2203.
+  //
+  // I set 2203/2201 and THEN bumped the two record-detail narrow pairs for the
+  // Graph tab without re-deriving the totals, so darwin was short by 3. CI caught
+  // it ("entries now sum to 2206"), which is exactly what the guard is for.
+  //
+  // The two deltas differ because the pairs do: width-320 moved +2 on BOTH faces
+  // (10 -> 12), while width-390 moved +1 on darwin (12 -> 13) and 0 on linux.
+  // darwin +3, linux +2.
+  darwin: 2206,
+  linux: 2203,
 };
 
 /**
