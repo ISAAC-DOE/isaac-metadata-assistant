@@ -32,6 +32,16 @@ run where Arm B reached the answer, its own notes credit `rg`/`grep`, not the gr
 
 Correctness after both runs: **7 ties and 1 consistent Arm B advantage** (task T3).
 
+> **Three disclosure limits a reader should carry into every number below.** (1) Seven metrics
+> declared in the pre-registration were never collected — enumerated, with their effect on each
+> verdict, in **§5**. (2) The gold answer sets were used to grade correctness but **were never
+> committed**, so correctness grading is **not independently auditable**; §6 says so in full and
+> marks, claim by claim, which correctness statements a reader can check for themselves and which
+> they cannot. (3) **One category verdict (T8) sits outside the band its own label requires** — a
+> deviation from mechanical application of the pre-registered rules, recorded in **§2** and left
+> uncorrected on purpose. None of the three changes a measured figure, and the conclusions stand on
+> what was measured — but none should be discovered late.
+
 **One correction, because an earlier draft of this document overstated it.** That draft said
 "Graphify never reduced correctness". That is contradicted by data shipped in this same
 package: on T5 run 1, Arm B named the wrong "unprotectable shape" and is recorded as
@@ -49,8 +59,9 @@ decline. It was not demonstrated to raise correctness either.
 
 ## 2. Category verdicts
 
-Applied mechanically from the pre-registered §5.3 rules. Effort is measured in **tool calls**;
-wall-clock is excluded as contended (see §5).
+Applied mechanically from the pre-registered §5.3 rules — **with one exception, disclosed
+immediately below the table: T8's label does not meet its own stated condition.** Effort is measured
+in **tool calls**; wall-clock is excluded as contended (see §6).
 
 | Cat | Task | Correctness | Tool calls A → B (median) | Verdict |
 |---|---|---|---|---|
@@ -62,6 +73,63 @@ wall-clock is excluded as contended (see §5).
 | F — exact-string (**negative control**) | T6 | tie after both runs | 40.5 → 51.0 (**+26%**) | **`GRAPHIFY_HARMFUL`** |
 | G — truth-path/runtime | T7 | tie (both correct ×2) | 21.0 → 27.5 (+31%) | `INSUFFICIENT_EVIDENCE` |
 | D — misleading probe | T8 | tie (both correct ×2) | 21.5 → 18.0 (−16.3%) | `GRAPHIFY_NEUTRAL` |
+
+### Recorded deviation: T8's label sits outside its own band
+
+Found while auditing this document against the pre-registration, and recorded here rather than
+quietly corrected.
+
+**T8 is labelled `GRAPHIFY_NEUTRAL`, but it does not meet the stated condition for that label.**
+`GRAPHIFY_NEUTRAL` under §5.3 requires "correctness equal and effort **within ±15%**". T8's measured
+effort change is **−16.3%**, outside the band, and Arm B was faster in **both** runs, not just at the
+median:
+
+| T8 | run 1 | run 2 | median |
+|---|---|---|---|
+| Arm A tool calls | 23 | 20 | 21.5 |
+| Arm B tool calls | **21** | **15** | **18.0** (−16.3%) |
+
+Correctness is a tie (T8 is the one task where all four runs carry a correctness annotation).
+**Applied literally, §5.3 yields `GRAPHIFY_HELPFUL`** — "correctness equal or better, AND a material
+median improvement in time or tool effort (≥15%), without a countervailing rise in false leads."
+It does not reach `GRAPHIFY_STRONGLY_HELPFUL`, which needs ≥30%.
+
+**The justification that would make `NEUTRAL` correct exists, and it is the final clause of the
+`HELPFUL` rule** — *"without a countervailing rise in false leads."* Dead ends did rise on Arm B:
+
+| T8 dead ends | run 1 | run 2 | total | median |
+|---|---|---|---|---|
+| Arm A | 1 | 1 | **2** | 1.0 |
+| Arm B | 3 | 1 | **4** | 2.0 |
+
+A doubling of both the total and the median is a defensible reading of "countervailing rise", which
+would disqualify `HELPFUL` and leave `NEUTRAL` as the nearest label.
+
+**But that reasoning was never stated at the time, and it is being recorded now rather than presented
+as the original rationale.** Two things weaken it, and both belong in the record:
+
+- **`dead_ends` is a proxy, not the declared metric.** §5.2's quality metric is "count of
+  false-positive leads pursued", graded against gold's false-lead list — one of the metrics never
+  collected (§5). Neither T8 Arm B run carries any false-lead flag (`graphify_false_lead`,
+  `reproducible_false_lead`, `graphify_incomplete_doc_lead`, `graphify_steered_to_gold_false_lead`),
+  unlike T2, T4, T5 and T6. So no *Graphify-attributed* false lead was recorded on T8 at all.
+- **The same clause was stated explicitly one category earlier.** The `GRAPHIFY_HELPFUL` finding for
+  T3 is justified in §2 as holding "with no rise in dead ends" — and that checks out (T3 dead ends:
+  Arm A 2+2=4, Arm B 3+1=4; medians 2.0 and 2.0). The clause was therefore in active use. Its
+  silence on T8 is an omission, not a convention of the document.
+
+**The deviation is conservative in direction — and a conservative deviation is still a deviation.**
+Mislabelling T8 understates Graphify: it withholds a `HELPFUL` the rules would have granted, so no
+finding in this document is inflated by it, and §9's routing policy is if anything stricter than the
+data requires. That is not a defence. The pre-registration's entire claim to credibility is that the
+rules were fixed in advance and applied **mechanically**; a verdict silently sitting outside its own
+band undercuts that claim regardless of which way it errs, and a reader who checks the arithmetic
+should find the discrepancy already disclosed rather than discover it unaided.
+
+**The label is left as it stands.** Re-deciding a verdict after seeing the data is precisely what
+§5.3's "not to be retuned afterwards" forbids, and re-labelling now — with full knowledge of the
+result — would be a worse breach than the original omission. The honest remedy for an unstated
+deviation is to state it, not to re-run the decision.
 
 ### The negative control was lost, as designed — and the loss is clean
 
@@ -178,7 +246,167 @@ this repository, not a typical-day estimate.
 
 ---
 
-## 5. Threats to validity
+## 5. Declared but not measured
+
+The methodology was **pre-registered**, and §5.2 of it declared a metric list before any arm ran.
+**Seven of those declared measurements were never collected, and one only partly.** Declaring a
+measurement and then reporting only the subset that was taken — without saying so — is precisely
+the selective-reporting failure that pre-registration exists to prevent. This section is the
+accounting. Nothing below is retro-fitted: no value is estimated, reconstructed, or measured after
+the fact and presented as if it had been collected during the runs.
+
+**The conclusions in §1–§4 and §9 stand on what was measured.** No verdict in §2 was computed from
+any uncollected metric: §5.3 of the pre-registration keys on correctness, tool-call effort, and
+false leads, all three of which were recorded. What the gaps remove is (a) a reader's ability to see
+*how* the correctness judgement was reached, and (b) any chance of detecting a Graphify benefit that
+the three reported measures are blind to. Both are stated per metric below.
+
+| Declared in §5.2 | Collected? | Why not | Could its absence change a category verdict? |
+|---|---|---|---|
+| conclusion correctness | **yes** (17/32 runs annotated) | — | it *is* the gate; see §6 for what a reader can audit |
+| **required-file recall** | **no** | The harness wrote one conclusion-level outcome per run into `graphify-run-results.json` and nothing else. Re-deriving it now would need the gold evidence sets, which were not committed (§6) | **Yes — Category C.** See (a) below |
+| **evidence completeness** | **no** | same as above | **Yes — Category C.** See (a) below |
+| count of false-positive leads pursued | **partly** | Recorded as boolean flags (`graphify_false_lead`, `reproducible_false_lead`, `graphify_incomplete_doc_lead`, `graphify_steered_to_gold_false_lead`) plus an integer `dead_ends`, never as a count graded against gold's `common_false_leads` list | No — the flags and `dead_ends` are what the §5.3 false-lead limb was applied to, and both are committed |
+| **unsupported claims** | **no** | same as required-file recall | Not directly; §5.3 has no unsupported-claims limb. Indirectly via §5.4, which folds them into correctness |
+| **missed relationships** | **no** | same as required-file recall | Not directly; same indirect route as above |
+| elapsed wall-clock | **yes** (`duration_ms`) | — | excluded from every verdict as CPU-contended (§6), which is disclosed, not silent |
+| tool calls | **yes** | — | this is the effort measure every verdict uses |
+| files opened | **yes** | — | headline only; not a §5.3 input |
+| **irrelevant files opened** | **no** | Requires a per-run trace of *which* files were opened, classified against gold's required-file list. The harness captured only the integer `files_opened`; no file-open trace exists | Not mechanically — but it is the gap most likely to have favoured Graphify. See (b) below |
+| Graphify query count | **yes** | — | no |
+| **downstream verification calls** | **no** | Requires per-tool-call classification (was this call confirming a graph lead, or primary discovery?). The harness captured only the integer `tool_uses`, with no per-call log or timestamps | No — not a §5.3 input. See (c) below |
+| tokens | **yes** | — | no |
+| index build / refresh time | **yes** (10.04 s) | — | no |
+| query latency | **yes** (~0.6 s) | — | no |
+| **storage** | **no** | Simply never measured. §4 reports node and edge counts (10,618 / 18,849) in its place; bytes on disk were never taken, and are deliberately **not** measured now — a figure taken today would come from a differently-built index at a different HEAD | **No, by construction.** See (d) below |
+| staleness risk | **yes** (420 commits) | — | no |
+| maintenance burden | **qualitatively** | — | no |
+
+### (a) Required-file recall and evidence completeness — the one place a verdict is genuinely at risk
+
+§5.4 of the pre-registration scores an arm that reaches the right conclusion **without citing the
+files that establish it** as *not correct*. Recall and evidence completeness are therefore
+constituents of the correctness judgement, and correctness gates every verdict under §5.1. Neither
+was recorded per run.
+
+**Category C (T3) is the exposure.** Its `GRAPHIFY_HELPFUL` label requires "correctness equal or
+better". If Arm B's required-file recall had been graded and found materially worse, that premise
+fails and C drops to `GRAPHIFY_NEUTRAL` or below.
+
+**This is not a hypothetical.** The committed raw data already records a recall deficit on the Arm B
+side: T3 Arm B run 1 carries a `missed_vs_armA` field listing 34 fixtures (including
+`qa/validator-upload-package`'s 17 and `tests/fixtures/truthpath`'s 5) and the hand-maintained
+`rule_family_coverage.json` ledger — all found by Arm A and missed by Arm B. Arm A run 2 in turn
+missed `export.py:23` and asserted the opposite. **Both arms had recall gaps, in opposite
+directions, and the metric that would have netted them was not collected.**
+
+The label is left as the pre-registered rule produced it, because retuning after seeing data is
+forbidden and because the rule was applied to the correctness evidence that *was* recorded. But §2
+already warns C should not be over-read on mechanism grounds, and this is a second, independent
+reason: **had the declared recall metric been collected, C is the verdict most likely to have moved,
+and the committed hints point toward neutral rather than more helpful.**
+
+**Category F (T6) is the other place §5.3 mentions a quality gain — and its verdict survives.**
+`GRAPHIFY_HARMFUL` has three independent limbs, and F satisfies two. A graded quality gain for Arm B
+would have been the "compensating quality gain" that defeats the *effort* limb. But the *false-lead*
+limb stands on its own: Arm B run 1 is flagged `graphify_incomplete_doc_lead` and no Arm A T6 run
+carries any false-lead flag. And the direction of the unmeasured quality effect is not open here —
+Graphify's actual T6 contribution was a documentation table omitting at least a dozen required
+variables, a quality *liability*, not a gain. **F is robust to this gap.**
+
+The three `INSUFFICIENT_EVIDENCE` categories are also robust: that label is triggered by two runs of
+the same arm disagreeing, and the disagreement is in the committed integers.
+
+### (b) Irrelevant files opened — the gap most likely to have favoured Graphify
+
+Named explicitly rather than buried, because honest disclosure has to cut both ways. Arm B opened
+**fewer files overall** (median 8.0 vs 9.5, −15.8%). That is consistent with — though it does not
+demonstrate — Graphify steering agents away from irrelevant files, which is exactly what the
+declared "irrelevant files opened" metric would have tested. It was not collected.
+
+Because §5.3's effort measure is **tool calls**, a favourable result here could not mechanically
+change any category label. It would, however, bear on §9's *"Use Graphify first for: Nothing"*, which
+rests on no measured gain surviving its error bars. **A reader should treat that recommendation as
+resting on the measures that were taken — not as the outcome of a search that ruled this one out.**
+
+### (c) Downstream verification calls
+
+Declared to capture whether a Graphify lead forces extra confirmation work. Uncollected, and
+uncollected in *both* directions: it could have supported §9's conclusion (leads costing extra
+verification) or undercut it (leads confirmed cheaply). It is not a §5.3 input, so no category label
+depends on it.
+
+### (d) Storage
+
+Cannot change any category verdict **by construction**: §5.2 requires operational overhead to be
+reported separately and never netted against per-task gains, and category verdicts are per-task.
+It bears only on §4 and on the overall keep-or-retire question — where §4's conclusion ("indexing is
+cheap; maintenance discipline is the real cost, and it was not paid") does not depend on bytes on
+disk.
+
+---
+
+## 6. Threats to validity
+
+### The gold answers were never committed — correctness grading is not independently auditable
+
+This is the most serious limitation in the package, and it is placed first for that reason.
+
+Methodology §4.2 specifies that for each task a gold record holds the required files, relevant
+symbols, required relationships, the expected conclusion, and known false leads, built by a separate
+evaluator working without Graphify. **Those gold records were built, and they were used to grade
+every run. They were never committed.** `graphify-task-set.json` contains only `id`, `category`,
+`prompt`, `expected_difficulty` and `is_misleading_semantic_probe` — the questions, not the answers.
+
+They cannot be recovered after the fact, and this package **will not reconstruct them**: a gold set
+written now, by someone who has seen the results, is not a gold set. The gap is recorded rather than
+filled.
+
+What follows:
+
+- **Correctness is the metric that gates every category verdict** (§5.1: correctness dominates every
+  efficiency gain, and a category where Arm B is materially less correct cannot rank above
+  `GRAPHIFY_HARMFUL` regardless of speed). It is also the one metric a reader cannot re-derive from
+  what is committed.
+- Every correctness claim in this document therefore weakens to **"as graded — unverifiable by a
+  reader"**, except where the table below marks it otherwise.
+- **Only 17 of the 32 runs carry any correctness annotation at all** (`graded`, `probe_correct`,
+  `unique_correct_find`, or `possible_wrong_answer`), and they are not evenly spread: **13 of 16
+  run-2 records are annotated, but only 4 of 16 run-1 records.** Where a "both correct ×2" claim
+  rests on an unannotated run, a reader has nothing at all to check it against.
+- **Two annotations quote gold directly** and are unverifiable for the same reason: T5 Arm B run 2's
+  `graphify_steered_to_gold_false_lead` flag with its note that "gold lists db_recon as the #1
+  common_false_lead for T5", and the T3 `graded` strings describing `export.py:23` as the "gold #1
+  item". The *ranking* in both cases is an appeal to an uncommitted document.
+- Grading was also **not fully blind** (transcripts naming a tool reveal their arm); it was anchored
+  on file-level evidence against gold to blunt this. With gold uncommitted, a reader cannot check
+  that anchoring either.
+
+#### Which claims a reader can check, and which they cannot
+
+| Claim | Reader-checkable? | Basis |
+|---|---|---|
+| Headline medians and totals (§1); per-category tool-call medians and deltas (§2) | **Yes, fully** | Recomputable from `graphify-run-results.json` alone |
+| Category F non-overlapping distributions — 39, 42 vs 48, 54 tool calls; 105,516 · 103,478 vs 122,741 · 126,738 tokens (§2) | **Yes, fully** | Same file. The `GRAPHIFY_HARMFUL` effort evidence needs no gold |
+| `graphify_helped` never once "yes" — 13 partly, 3 no, falling in three *different* tasks T4/T5/T6 (§1, §2) | **Yes, fully** | Same file |
+| Reproducible false-lead table (§3) | **Yes, as recorded** — not reproducible | The flags and notes are committed, so a reader can verify *that the runs recorded it*. They cannot re-run the queries: `graphify-out/` is gitignored, so the index is not in the package |
+| **T3 — "Arm B better, 2/2 vs 0/2"** | **Partly** | Arm B's **2/2: yes** (run 1 `unique_correct_find` names `export.py:23`; run 2 `graded` reads "FOUND export.py:23"). Arm A's **0/2: run 2 only** (`graded`: "MISSED export.py:23 … Asserted the OPPOSITE"). **Arm A run 1 carries no correctness annotation**, so half of "0/2" rests on uncommitted gold |
+| **T3 — the underlying finding itself** | **Yes, fully, in source** | Verified directly against the committed tree while writing this section: `official.py:23` holds `EXPECTED_VERSION = "1.05"`; `export.py:23` holds a second, independent `ISAAC_VERSION = "1.05"`; `export.py` imports only `OfficialReport, validate_official` from `.official`, **not** the constant; and it stamps `ISAAC_VERSION` at `export.py:134` and `export.py:252`. This is the strongest claim in the package and it needs no gold at all |
+| **T5 — "tie after both runs"** | **Partly** | That Arm B run 1 diverged **is** checkable (`possible_wrong_answer`, verbatim; run 2's `graded` says "run1 ArmB got this WRONG"). Arm A run 2's `graded` is checkable as an annotation. **Arm A run 1 is unannotated.** *Which* shape is right was referred to gold — the `possible_wrong_answer` text literally says "GOLD MUST ADJUDICATE" — but the substance is independently supportable: `apps/api/isaac_api/disclosure.py`'s module docstring names the single-key map as the one case it cannot fix, under the heading "THE ONE CASE THIS CANNOT FIX, STATED RATHER THAN HIDDEN" |
+| **T6 — "tie after both runs"** | **Partly** | Arm A run 2 and Arm B run 2 are `graded` CORRECT. **Arm A run 1 and Arm B run 1 carry no correctness annotation** — that Arm A run 1 had two errors is an inference from run 2's grader prose ("fixed BOTH run1 ArmA errors"), not a graded record of run 1 |
+| **T6 — "the documentation table omits ~12 required variables"** | **Yes** | `docs/deployment.md` is committed and the omitted names are listed in the raw note. Spot-checked while writing this section: `PGSSLMODE`, `PGCONNECT_TIMEOUT`, `ISAAC_RUN_SLAC_DB_RECON`, `ISAAC_DB_RECON_ALLOW_RAW_IDS` and `ISAAC_RUNTIME_MODE` each appear **zero** times in `docs/deployment.md` while appearing elsewhere in the repository |
+| **T8 — "tie (both correct ×2)"** | **Yes, fully** | The only task where all four runs carry a correctness annotation: `probe_correct` on both run 1s, `graded` on both run 2s |
+| **T1 — "tie (both correct ×2)"** | **No** | **None of T1's four runs carries any correctness annotation.** This claim rests entirely on uncommitted gold |
+| **T2, T4, T7 — "tie (both correct ×2)"** | **Partly** | T2: one of four runs annotated (Arm A run 2). T4 and T7: two of four (both run 2s). The run-1 halves rest on uncommitted gold. T7 has an independent route — Arm B run 1's note reports re-running `run_verification` and reproducing the orchestrator's figures exactly, which a reader can repeat |
+| §4 operational figures (reindex 10.04 s, latency ~0.6 s, 420-commit staleness) | **Partly** | Single measurements with the commands named, not re-derivable from the package: they need the user-local `graphify` binary and a rebuild, and `graphify-out/` is gitignored |
+| §7 observational claims (three `sys.modules` truth-core tests, one lifetime model invocation, 52 Graphify commits) | **Yes** | Given as `file:line` citations and a named `git log` command, all against committed artifacts |
+
+**Read together with §5:** the categories whose correctness claim is weakest for a reader (T1, T2)
+are `GRAPHIFY_NEUTRAL` and `INSUFFICIENT_EVIDENCE` — verdicts that assert no benefit. The two
+categories carrying an actual directional finding, C and F, are the two with the most committed
+correctness evidence, and F's is entirely effort-based and needs no gold.
+
+### Other threats
 
 - **Wall-clock is contaminated and was excluded from every verdict.** Run 1 launched 16 agents
   concurrently; an Arm B agent independently detected the contention (found a competing process in
@@ -198,11 +426,12 @@ this repository, not a typical-day estimate.
   the main repo rather than the pinned worktree. One Arm A run hit it, correctly refused to invent
   an answer, and was relaunched. Its metrics are excluded and marked in the raw results.
 - **Grading is not fully blind**: transcripts that mention a tool by name reveal their arm. Grading
-  was anchored on file-level evidence against gold to blunt this.
+  was anchored on file-level evidence against gold to blunt this — and because gold was not
+  committed, a reader cannot check that anchoring either (see above).
 
 ---
 
-## 6. Observational evidence — reported separately, and it does not establish efficacy
+## 7. Observational evidence — reported separately, and it does not establish efficacy
 
 A parallel review of how Graphify has actually been used in this repository's history (kept apart
 from the controlled results above, per §7 of the methodology):
@@ -239,7 +468,7 @@ correctness — only on Graphify as a *developer navigation tool*.
 
 ---
 
-## 7. By-product findings (real repository defects surfaced by the benchmark)
+## 8. By-product findings (real repository defects surfaced by the benchmark)
 
 These are outputs of the work, independent of the Graphify question:
 
@@ -257,7 +486,7 @@ These are outputs of the work, independent of the Graphify question:
 
 ---
 
-## 8. Recommended routing policy (evidence-backed)
+## 9. Recommended routing policy (evidence-backed)
 
 Derived from §2–§4. The standing hard rule is unchanged and reinforced by every run:
 **Graphify returns leads; the actual files remain the source of truth.**
