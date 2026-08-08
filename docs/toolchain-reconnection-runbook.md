@@ -265,9 +265,11 @@ checkpoint → shared repo → profile → resume.
 Never print or compare raw tokens, API keys, or secret values. Report presence/scope by
 name only (e.g. "`ISAAC_UI_API_KEY` is set on Railway" — not its value).
 
-`VITE_`-prefixed vars are compiled into the client bundle (browser-visible), so
-`VITE_API_KEY` is a shared demo credential, not a private secret — but still do not paste
-its value.
+`VITE_`-prefixed vars are compiled into the client bundle (browser-visible). **`VITE_API_KEY`
+was removed from the application on 2026-08-08** and nothing reads it any more; if you find it
+set on a service, it is inert and should be deleted rather than rotated. The general rule stands
+for any other `VITE_*` value: browser-visible is not secret, and a credential that has to be
+compiled into a page is the wrong shape of credential — do not paste its value regardless.
 
 ---
 

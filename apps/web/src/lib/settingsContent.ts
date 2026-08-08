@@ -674,6 +674,28 @@ export const API_ACCESS_ROWS: readonly { term: string; detail: string }[] = [
       'Not through anything you can obtain here. Whoever operates this deployment holds the single credential; the app cannot issue a second one, and browsing this page does not give a program a way in.',
   },
   {
+    // Added when the client-side bearer seam was removed. The rows above were
+    // already careful about what the DEPLOYMENT may require; none of them said
+    // what THIS PAGE sends, and a reader could reasonably assume the interface
+    // authenticates itself somehow. It does not, and the reason is worth being
+    // explicit about rather than leaving as an absence.
+    //
+    // The removed seam read `import.meta.env.VITE_API_KEY`, which Vite
+    // substitutes at BUILD time — the value would have been compiled into the
+    // JavaScript served to every visitor. This row exists so that "the browser
+    // sends no credential" reads as a decision with a reason, not an oversight
+    // someone should helpfully fix.
+    //
+    // The copy deliberately avoids the word this surface's leak guard forbids
+    // (`settings-page.test.tsx` FORBIDDEN). That guard caught the first draft of
+    // this row and it was right to: the sentence is about what the interface
+    // sends, and it can make that point without the vocabulary the guard exists
+    // to keep off this screen. The guard was not relaxed to admit the prose.
+    term: 'What This Interface Sends',
+    detail:
+      'No credential of any kind. This page attaches no authorization header to any request, and there is no build setting that would make it — a value compiled into a web page is readable by everyone the page is served to, so it could never have been kept private. Where a deployment does require the shared credential, this interface is not the thing that would satisfy it; a program calling the API directly is.',
+  },
+  {
     term: 'Hosted Authentication Boundary',
     detail:
       "Signing in through a deployment's identity layer with a browser is not the same thing as headless authentication: that gives a person an interactive session, not a credential a program can present on its own.",
