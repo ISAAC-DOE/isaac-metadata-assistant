@@ -1,0 +1,59 @@
+{
+  "corpus_type": "authorized 30-record reference sample",
+  "record_count": 30,
+
+  "official_passing": 30,
+  "official_failing": 0,
+
+  "shadow_passing": 30,
+  "shadow_failing": 0,
+
+  "operators_defined": 755,
+  "trials_attempted": 22650,
+  "trials_applicable": 9136,
+  "trials_skipped_not_applicable": 13514,
+  "expected_outcome_matches": 7021,
+  "unexpected_outcomes": 0,
+  "observation_only_trials": 2115,
+
+  "oracle_failures": {
+    "source_mutation_failures": 0,
+    "restoration_failures": 0,
+    "repeatability_failures": 0,
+    "ordering_instability_failures": 0,
+    "no_guessing_failures": 0,
+    "workflow_consistency_failures": 0,
+    "engine_disagreements": 0
+  },
+
+  "failures_by_error_code": {
+    "cells": [],
+    "suppressed_categories": 0,
+    "suppressed_total": 0,
+    "floor": 5
+  },
+  "failures_by_schema_path": {
+    "cells": [],
+    "suppressed_categories": 0,
+    "suppressed_total": 0,
+    "floor": 5
+  },
+
+  "transaction_read_only": "verified",
+  "parameterized_queries_only": "verified",
+  "dml_statements": 0,
+  "ddl_statements": 0,
+  "source_records_modified": "verified",
+  "private_values_exposed": "verified",
+  "official_validator_unchanged": "verified",
+  "export_gating_unchanged": "verified",
+
+  "schema_version": "1.05",
+  "approximate_duration_seconds": 225,
+
+  "deterministic_rerun": {
+    "runs_compared": 2,
+    "deterministic_fields_identical": 50,
+    "volatile_fields_differed": 3
+  }
+}
