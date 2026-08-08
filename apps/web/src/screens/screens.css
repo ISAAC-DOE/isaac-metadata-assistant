@@ -217,6 +217,48 @@
   max-width: var(--content-max, 640px);
   margin-top: 24px;
 }
+/* P2 — Governance & Safety → Policy.
+   The Policy tab is a `.placeholder`, so its prose was capped at 68ch by the
+   rule above while <main> ran to the `wide` mode's 1200px: one narrow column
+   with the tab underline stretching far past it. These two rules use the page
+   width WITHOUT lengthening a line — the measure moves from "one column of
+   68ch" to "as many 68ch-or-less columns as fit".
+   `auto-fit` + `minmax(min(…), 1fr)` rather than a viewport media query: the
+   number of columns has to answer to the width of THIS container (which the
+   left rail, the width mode and the gutters all change), not to the window.
+   The `min(…, 100%)` floor is the same guard `.settings-points` documents — a
+   bare track minimum cannot shrink below itself and overflows a narrow card. */
+.gov-policy {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: 22px 32px;
+  align-items: start;
+}
+.gov-policy-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+/* The single-column case: without this a section would run the full 1200px.
+   Scoped to the Policy sections, never a bare `p` rule — `layout-width-modes`
+   forbids a global prose measure, and rightly: paragraphs inside cards, grids
+   and detail panels are already bounded by their containers. */
+.gov-policy-section p {
+  max-width: 68ch;
+}
+.gov-policy-section h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+  letter-spacing: -0.005em;
+}
+/* The canonical-home pointer that leads the tab. Quieter than the policy
+   sections it introduces, because it is navigation, not policy. */
+.gov-canonical {
+  margin-top: 14px;
+}
 .placeholder-card {
   margin-top: 18px;
   padding: 18px 20px;
