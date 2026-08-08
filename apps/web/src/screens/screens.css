@@ -259,6 +259,25 @@
 .gov-canonical {
   margin-top: 14px;
 }
+/* UNDERLINED, and this is an accessibility fix rather than a style preference.
+   `base.css` sets `text-decoration: none` on every link, which is fine for the
+   standalone button-shaped links elsewhere in the app but not for a link sitting
+   INSIDE a sentence: colour alone then carries "this is a link", which fails
+   WCAG 1.4.1 (Use of Color) for anyone who cannot perceive the hue difference
+   against the surrounding prose.
+
+   MEASURED, not predicted. This slice shipped the link without an underline and
+   linux CI answered with `link-in-text-block` firing on 1 node at ALL FIVE
+   viewports — a rule not baselined anywhere in this project. It is fixed here
+   rather than baselined: a genuinely new failure is a defect, and adding it to
+   the baseline would be the exact move the baseline file exists to prevent.
+
+   Scoped to this link, deliberately. Making every link in the app underlined is
+   a design decision nobody asked for, and would move several baselines at once. */
+.gov-canonical a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .placeholder-card {
   margin-top: 18px;
   padding: 18px 20px;

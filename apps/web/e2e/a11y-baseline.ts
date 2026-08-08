@@ -440,11 +440,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'memory@tablet-768x1024': 18,
       'memory@mobile-375x812': 17,
       'memory@zoom-200': 17,
-      'memory-graph@desktop-1280x800': 42,
-      'memory-graph@laptop-1024x768': 42,
-      'memory-graph@tablet-768x1024': 34,
-      'memory-graph@mobile-375x812': 27,
-      'memory-graph@zoom-200': { darwin: 32, linux: 33 },
+      'memory-graph@desktop-1280x800': 31,
+      'memory-graph@laptop-1024x768': 31,
+      'memory-graph@tablet-768x1024': 23,
+      'memory-graph@mobile-375x812': 16,
+      'memory-graph@zoom-200': { darwin: 21, linux: 22 },
       'record-detail@desktop-1280x800': 16,
       'record-detail@laptop-1024x768': 16,
       'record-detail@tablet-768x1024': { darwin: 16, linux: 15 },
@@ -1169,8 +1169,37 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // every key. Two independent +1 edits that each looked correct against their
   // own base is precisely how a wrong total gets auto-merged without ever
   // raising a conflict, which already happened once on this file.
-  darwin: 1745,
-  linux: 1747,
+  // ── GRAPH COMMAND-SURFACE SLICE, 2026-08-08: BOTH columns fall by 55 ────────
+  // `memory-graph` colour-contrast falls by ELEVEN NODES AT EVERY ONE of the five
+  // viewports: desktop 42->31, laptop 42->31, tablet 34->23, mobile 27->16,
+  // zoom-200 33->22 (linux). darwin 1745-55 = 1690; linux 1747-55 = 1692.
+  //
+  // THE LINUX NUMBERS ARE TRANSCRIBED FROM CI, NOT MEASURED LOCALLY, which is
+  // what this file has always asked for and what a previous slice in this same
+  // session got wrong -- it lowered `statistics@desktop-1280x800` onto a darwin
+  // reading that turned out to be the settle race, and only one of five viewports
+  // had moved. THAT ASYMMETRY IS THE TELL, and it is absent here: a token change
+  // moves every viewport by the same amount, and this one moved all five by
+  // exactly -11.
+  //
+  // The one platform-split key is `memory-graph@zoom-200`. Its linux value (22)
+  // is CI's. Its darwin value (21) is 32 - 11, an INFERENCE from the uniform
+  // delta plus a local darwin measurement of the same -11 on desktop -- flagged
+  // as an inference rather than presented as a reading, exactly as the two
+  // Statistics keys above are.
+  //
+  // The drop is real and is NOT hidden content: three pairs inside the graph
+  // command surface (`.graph-cmd-suggestion-hint`, `-suggest-cmd`, `-suggest-mode`)
+  // were already below AA at 2.53:1, 3.86:1 and 2.53:1, and the slice that tinted
+  // their backgrounds raised them to `--text-slate` at 5.46:1 / 5.16:1 / 4.64:1.
+  // Nothing was collapsed into a `<details>` to earn this.
+  //
+  // NOT ADDED HERE: `link-in-text-block`, which CI reported as NEW on `governance`
+  // at all five viewports. A rule that has never been baselined firing for the
+  // first time is a DEFECT, not a number to record -- an inline link carried by
+  // colour alone (WCAG 1.4.1). It is fixed in `screens.css` with an underline.
+  darwin: 1690,
+  linux: 1692,
 };
 
 /**
