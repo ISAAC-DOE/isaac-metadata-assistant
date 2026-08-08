@@ -177,9 +177,15 @@ def test_create_experiment_has_no_caller_in_the_api_package():
 
     So the product claim carried on three surfaces — nothing in this build adds a
     built-in example record to the ordinary workspace (the mode chip's accessible name,
-    the OpenAPI ``tutorial`` tag description, the Statistics lead sentence) — does not
-    rest on the ULID default, which was the reason two of those comments gave and it
-    was wrong. It rests on something stronger: this build exposes no record-creation
+    the OpenAPI ``tutorial`` tag description, and the WORKSPACE CLAUSE of the Statistics
+    lead sentence: "this workspace" against "the open worked-example workspace",
+    ``StatisticsPage.tsx::leadSentence``) — does not rest on the ULID default, which was
+    the reason two of those comments gave and it was wrong.
+
+    The clause is named rather than the whole sentence because the sentence was
+    rewritten by the visual-first reorganisation, which moved Record Verification to the
+    top of the page and made the lead open by naming it. That rewrite did not touch the
+    scope branch, and this guard is about the branch. It rests on something stronger: this build exposes no record-creation
     surface at all. There is no ``POST /api/experiments``, and nothing under
     ``apps/api/isaac_api/`` calls ``create_experiment``.
 
@@ -237,9 +243,10 @@ def test_create_experiment_has_no_caller_in_the_api_package():
         f"create_experiment is called from the isaac_api package at {callers}. With an "
         "explicit `id` and `session_id=None` it writes a canonical record into the "
         "ordinary workspace, which falsifies the claim made on the mode chip, the "
-        "OpenAPI `tutorial` tag description and the Statistics lead sentence that "
-        "nothing in this build adds a built-in example record there. If the caller is "
-        "intended, re-derive those three strings in the same change."
+        "OpenAPI `tutorial` tag description and the workspace clause of the Statistics "
+        "lead sentence (`StatisticsPage.tsx::leadSentence`) that nothing in this build "
+        "adds a built-in example record there. If the caller is intended, re-derive "
+        "those three strings in the same change."
     )
 
 
