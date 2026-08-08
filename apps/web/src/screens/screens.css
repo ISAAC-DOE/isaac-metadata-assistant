@@ -1737,16 +1737,32 @@
 }
 
 /* Boundary statements — a titled list, not a wall of prose. */
-/* `min(260px, 100%)` — NOT a bare 260px: a bare track minimum cannot shrink
+/* `min(420px, 100%)` — NOT a bare 420px: a bare track minimum cannot shrink
    below its floor, so on a ~340px-wide card the tiles overflowed their own
    container by 5px (measured at 375×812). The min() clamps the floor to the
-   container, so the grid collapses to one column instead of overflowing. */
+   container, so the grid collapses to one column instead of overflowing.
+
+   THE FLOOR WAS 260px AND THAT WAS TOO LOW. At 1440px this card's content box
+   is ~1100px wide, which `auto-fit` filled with FOUR tracks — 233px of text
+   inside each once the 13px padding and the border are taken off, or about 36
+   characters a line at 12px. The definitions in here run to 250 words; 36
+   characters is a newspaper column, and the brief for this tab asked for
+   readable line lengths. 420px is the same floor `.gov-policy` already uses one
+   screen away, and it yields TWO columns at 1440 and the same two the 768
+   breakpoint already produced — the layout that was already proven, applied at
+   the width that needed it.
+
+   `align-items: start` is the other half. A CSS grid stretches every item in a
+   row to the tallest, so a four-line card sat in a 450px box beside a 250-word
+   one, with 380px of empty tinted panel under it. Each card is now its own
+   height. */
 .settings-points {
   margin: 14px 0 0;
   padding: 0;
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  align-items: start;
   gap: 12px;
 }
 .settings-points > li {
@@ -1762,11 +1778,18 @@
   font-weight: 700;
   color: var(--text-heading);
 }
+/* A wider track must not simply become a wider line. With two columns at 1440
+   the track carries ~500px of text, which is ~85 characters at 12px — past the
+   comfortable measure in the other direction. `68ch` is the cap
+   `.gov-policy-section p` already uses for the same kind of definition prose,
+   and it is scoped to these cards rather than declared on a bare `p`, which
+   `layout-width-modes` forbids. */
 .settings-points p {
   margin-top: 5px;
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-secondary);
+  max-width: 68ch;
   overflow-wrap: anywhere;
 }
 

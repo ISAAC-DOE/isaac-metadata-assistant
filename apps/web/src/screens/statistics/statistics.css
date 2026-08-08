@@ -294,10 +294,38 @@
      inside the track rather than widen it — see the minmax(0, …) note. */
   overflow-wrap: anywhere;
 }
+/*
+ * `--text-secondary` at 12px, NOT `--text-tertiary` at 11.5px, and the numbers
+ * are measured rather than asserted.
+ *
+ * WHAT IT WAS. `--text-tertiary` #78838f measures 3.76:1 on the neutral card
+ * (`--surface-subtle` #fbfcfd) and 3.43:1 on the three `good`-toned headline
+ * cards (`--pass-bg` #e9f4ee) — the three that carry the verification counts,
+ * so the tinting made the worst case the most-read one. WCAG 1.4.3 asks 4.5:1,
+ * and NO large-text exemption applies: the exemption starts at 18.66px bold or
+ * 24px, and this is 11.5px regular. Both figures were below the threshold and
+ * the tinted one was well below it.
+ *
+ * WHAT IT IS NOW. `--text-secondary` #46515f measures 7.86:1 on #fbfcfd,
+ * 7.16:1 on #e9f4ee and 7.18:1 on the `attention` tone's #f9f1df — every card
+ * on this surface clears AA and AAA. The size goes to 12px in the same change:
+ * the note is a sentence rather than a label, and 11.5px was the smallest text
+ * on the page.
+ *
+ * The `quiet` tone still overrides this colour with `--cover-text` below, and
+ * is deliberately left alone: it is the not-available treatment, it is measured
+ * against `--cover-bg` rather than against these two, and it is not what the
+ * review measured.
+ *
+ * This MOVES `color-contrast` node counts in `e2e/a11y-baseline.ts` DOWNWARD on
+ * every Statistics surface. No number in that file was edited here — Linux CI
+ * is the authority on the exact counts and reports them per surface, project
+ * and platform.
+ */
 .statistics .stat-card-note {
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
@@ -1180,8 +1208,37 @@
 .statistics .stats-disclosure .stats-technical-body .stats-note {
   margin-top: 0;
 }
+/*
+ * `list-item`, NOT `block`, and this is the whole affordance.
+ *
+ * `<summary>`'s UA rule is `display: list-item; list-style: disclosure-closed
+ * inside`, which is what paints Chrome's ▸ and flips it to ▾ when the region
+ * opens. Overriding `display` to `block` silently deletes the `::marker` — so
+ * these disclosures rendered as a bold title over a subtitle with NO triangle,
+ * no chevron and no "Show", and opening one changed nothing in its own header.
+ * Reported in review as five identical cards with no affordance, which is what
+ * they were.
+ *
+ * IT IS ALSO A CROSS-SLICE INCONSISTENCY, and that is the reason the fix is
+ * `list-item` rather than a hand-drawn glyph. Every other disclosure in the app
+ * — `.settings-more`, `.settings-technical`, `.api-browser-disclosure`,
+ * `.concept-lookup-technical`, `.rec-val-purpose`, `.fetch-state-technical` —
+ * leaves the UA display alone and gets the native marker. Statistics was the
+ * sole outlier, and the Statistics reorganisation multiplied it from one card
+ * to six. Restoring the default makes it a member of the set again, with the
+ * open/closed state carried by the platform rather than by a class this file
+ * would have to keep in sync.
+ *
+ * `list-style` is deliberately NOT restated: only `display` was ever
+ * overridden, so dropping the override is enough and there is no second
+ * declaration here to drift from the UA's.
+ *
+ * The block-displayed `.stats-card-sub` inside the summary is unaffected — the
+ * UA's `inside` position puts the marker on the first line, beside the title,
+ * exactly as it does on the sibling surfaces.
+ */
 .statistics .stats-technical-summary {
-  display: block;
+  display: list-item;
   cursor: pointer;
 }
 .statistics .stats-technical-summary:focus-visible {
@@ -1541,6 +1598,49 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary);
+}
+
+/* ---- run in progress --------------------------------------------------- */
+
+/*
+ * The `running` state, drawn as a state the reader is meant to WAIT OUT rather
+ * than as the shared not-available panel. `RecordVerification.tsx`'s
+ * `RunInProgressPanel` records why it exists; this is only its shape.
+ *
+ * It borrows the `.stats-chart-state-block` treatment — one bordered, subtle
+ * panel — rather than inventing a fourth one, and adds nothing but rhythm. The
+ * control INSIDE it is the whole point of the redesign, so the panel owns the
+ * spacing around it: `.stats-verify-controls`' own bottom margin is dropped
+ * here for the same reason the freshness strip drops it, because the flex `gap`
+ * is already the rhythm.
+ *
+ * NEUTRAL, deliberately. A run in progress is not a fault and not a warning:
+ * `--surface-subtle` and `--border`, no `--advisory-*`, no `--fail-*`, and no
+ * icon that would read as an alarm.
+ */
+.statistics .stats-verify-running {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+}
+.statistics .stats-verify-running-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+  line-height: 1.4;
+}
+/* `.stats-note` carries its own top margin for the paragraph rhythm of a plain
+   block; inside this panel the `gap` above is the rhythm, and both together
+   double it. */
+.statistics .stats-verify-running .stats-note {
+  margin-top: 0;
+}
+.statistics .stats-verify-running .stats-verify-controls {
+  margin-bottom: 0;
 }
 
 /* ---- the grouped validator chart --------------------------------------- */

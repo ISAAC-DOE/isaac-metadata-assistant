@@ -164,7 +164,29 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       // `GET /api/health` reports and what the operator configured, exactly as
       // the Help popover keeps it. The rule is not "never say synthetic-only",
       // it is "never leave it standing as an unqualified whole-deployment
-      // claim", so every bound of the diagnostic is stated on this same surface.
+      // claim", so the diagnostic is named on this same card.
+      //
+      // WHAT MOVED, AND WHY IT IS NOT A WEAKENING. This card used to end with
+      // the full 55-word capability paragraph — the SAME paragraph, verbatim,
+      // that `no-real-experiment-data` ends with. At 1440px the two render as
+      // adjacent columns, so the tab whose entire purpose is consolidation
+      // showed one reader the identical sentence twice, side by side. Reported
+      // in review as exactly that.
+      //
+      // The paragraph now lives ONCE, in `no-real-experiment-data`, which is
+      // the card a reader takes as the guarantee about real data and therefore
+      // the card the diagnostic is the exception TO. This card keeps a POINTER
+      // and names where the full statement is.
+      //
+      // The machine rule is unchanged and still holds: a unit that makes the
+      // capability statement ("may run a protected, read-only diagnostic")
+      // must state every bound of it, and the unit that makes it does. This
+      // card no longer makes it, so it is in exactly the position `what-resets`
+      // has occupied since Slice 2A — it REFERS to the diagnostic, which keeps
+      // its mode token from ever standing unqualified, without restating a
+      // capability it is not the home of. `__tests__/db-recon-truthfulness.test.tsx`
+      // §11 and §12 were re-pointed to assert that split, and §12 gained a
+      // duplication guard so the paragraph cannot come back twice.
       //
       // Same load-bearing wording constraints as components/GovernanceBanner.tsx
       // and screens/GovernancePage.tsx: "may run", never "is running"
@@ -177,7 +199,7 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
         ? 'Synthetic-only mode — file upload is refused outright, and the app cannot tell real data from synthetic.'
         : `The backend reports the data regime as "${dataRegime}".`,
       detail: syntheticOnly
-        ? 'This deployment runs in synthetic-only mode: file upload is refused outright, and the records in this workspace are synthetic. Real mode intentionally refuses to start, because the ingestion and governance guardrails it would need do not exist yet. What the app enforces is that mode, not the contents of what it is handed — it cannot tell real data from synthetic, so keeping real artifacts out of the workspace is a responsibility of whoever operates it, not a check the software performs. Separately, this deployment may run a protected, read-only diagnostic against an isolated SLAC test database containing production-derived records: those records are processed transiently in pod memory, only sanitized aggregate results are returned, no record is modified, no per-record content is displayed, and nothing is sent to any model. Database-backed record display remains disabled pending an explicit visibility decision.'
+        ? 'This deployment runs in synthetic-only mode: file upload is refused outright, and the records in this workspace are synthetic. Real mode intentionally refuses to start, because the ingestion and governance guardrails it would need do not exist yet. What the app enforces is that mode, not the contents of what it is handed — it cannot tell real data from synthetic, so keeping real artifacts out of the workspace is a responsibility of whoever operates it, not a check the software performs. The mode is not the whole picture: a protected, read-only diagnostic may separately read production-derived records from an isolated SLAC test database. Every bound on that is stated once on this tab, by the card No Real Experiment Data in the Workspace, rather than a second time here.'
         : `The backend reports the data regime as "${dataRegime}". This screen states only what the backend reports.`,
     },
     {
@@ -203,6 +225,16 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       // (configuration is not reachability); an isolated SLAC test database,
       // never the production database; and no claim that the app verified that
       // isolation — the guarantee is an external pg_hba grant.
+      //
+      // THIS CARD IS THE TAB'S SINGLE HOME FOR THE CAPABILITY STATEMENT. The
+      // closing paragraph — "Separately, this deployment may run …" through
+      // "…pending an explicit visibility decision" — is the ONE copy of it on
+      // Data & Privacy. `synthetic-data-only` used to end with the same 55 words
+      // verbatim, and at 1440px the two render side by side; the duplicate is
+      // gone and that card now points here. Do not restore it there, and do not
+      // delete it here: `db-recon-truthfulness.test.tsx` §10 requires every
+      // bound in this `detail`, and §12 requires the paragraph to appear on the
+      // tab exactly once.
       id: 'no-real-experiment-data',
       heading: 'No Real Experiment Data in the Workspace',
       summary:
