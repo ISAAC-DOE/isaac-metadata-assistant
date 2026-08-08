@@ -1298,8 +1298,24 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // lower a key onto a local darwin reading.
   //
   // 1610 - 2 = 1608 and 1612 - 2 = 1610, both CONFIRMED by the reduction.
-  darwin: 1608,
-  linux: 1610,
+  // 2026-08-08, experiment-graph slice. darwin 1608 -> 1613, linux 1610 -> 1614.
+  // The totals move by DIFFERENT amounts, and that is measured, not a slip.
+  //
+  // Four `record-detail@*` entries each gain the one node the `Graph` tab adds
+  // (`#record-view-tab-graph`, `class="section-tab"` — pre-existing documented
+  // contrast debt, one more instance of it rather than a new defect). Three of
+  // the four move +1 on both platforms. `record-detail@mobile-375x812` does not:
+  // it was `{ darwin: 10, linux: 11 }` and both platforms now measure 12, so
+  // darwin gains 2 where linux gains 1, and the entry collapses to a scalar.
+  //
+  // darwin +1+1+2+1 = +5; linux +1+1+1+1 = +4. Every one of those eight
+  // per-entry numbers was read from an actual axe run on its own platform —
+  // linux from CI job 93097731133, darwin from a local run of the same commit —
+  // so this is arithmetic over measured deltas, which is the only kind this file
+  // permits. `record-detail@tablet-768x1024` did not move on either platform and
+  // contributes 0.
+  darwin: 1613,
+  linux: 1614,
 };
 
 /**
