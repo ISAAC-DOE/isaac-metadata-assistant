@@ -2,6 +2,12 @@
 
 **Date:** 2026-08-06 · **Branch:** `feat/record-verification` at `59d65c7`
 
+> **Partially corrected 2026-08-08.** Three statements below were true when written and are
+> false now: that the authorized private verification mode had never executed, that it had no
+> route, and that no image could publish while GitHub Actions was billing-blocked. Each is
+> struck through in place with a dated correction rather than deleted. **Nothing about the
+> capture status changed: still 0 of 60.**
+
 ## This is a manifest of what does NOT exist
 
 **No screenshot in this inventory has been captured. No browser QA was performed. Playwright was not run.**
@@ -21,12 +27,12 @@ which is a weaker claim, and this file exists so that difference is not lost.
 | # | State | Status | Reason |
 |---|---|---|---|
 | 1 | Public reference preflight | **NOT CAPTURED** | No browser session run |
-| 2 | Authorized private result | **NOT CAPTURED** | **The private run has never executed.** This state cannot be photographed truthfully today — only faked from a fixture, which would misrepresent it |
+| 2 | Authorized private result | **NOT CAPTURED** | ~~**The private run has never executed.**~~ — **CORRECTED 2026-08-08:** the authorized private verification mode HAS since executed, twice, on the deployed application (verdict and limits: [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md)). **It was still never photographed, and the run was never captured in any form** — the figures are operator-relayed testimony read from an authenticated session, with no response body and no screenshot saved. So this state remains uncaptured, and today could only be faked from a fixture, which would misrepresent it |
 | 3 | Loading | **NOT CAPTURED** | No browser session run |
 | 4 | Running | **NOT CAPTURED** | No browser session run |
 | 5 | Stale | **NOT CAPTURED** | Requires a cached result aged past 3600 s |
 | 6 | Refreshing | **NOT CAPTURED** | No browser session run |
-| 7 | Database unavailable | **NOT CAPTURED** | Reachable only via the private mode, which has no route |
+| 7 | Database unavailable | **NOT CAPTURED** | ~~Reachable only via the private mode, which has no route~~ — **CORRECTED 2026-08-08:** `e710f4a` gave the verification route a `?mode=` parameter, so the authorized private verification mode is reachable and this state is now selectable. No browser session has been run against it, here or anywhere |
 | 8 | Timeout | **NOT CAPTURED** | No browser session run |
 | 9 | Safe error | **NOT CAPTURED** | No browser session run |
 | 10 | Technical details collapsed | **NOT CAPTURED** | No browser session run |
@@ -78,10 +84,19 @@ So the gap is precise rather than total:
 
 ## To close this gap
 
-The Statistics screens cannot be photographed in a hosted browser until an image publishes, and no image
-can publish while GitHub Actions is billing-blocked org-wide. A local dev-server run could capture items
-1, 3–6 and 8–12 without waiting on CI; item 2 cannot be captured honestly until the authorized private run
-has actually occurred.
+~~The Statistics screens cannot be photographed in a hosted browser until an image publishes, and no image
+can publish while GitHub Actions is billing-blocked org-wide.~~ — **CORRECTED 2026-08-08:** the org-wide
+billing block ended on 2026-08-07; Actions execute again and images publish. That removes the stated
+blocker, but **no image rollout has been observed from this environment**, so which image `/krish` is
+serving is still unverified here.
+
+A local dev-server run could capture items 1, 3–6 and 8–12 without waiting on CI.
+
+~~Item 2 cannot be captured honestly until the authorized private run has actually occurred.~~ —
+**CORRECTED 2026-08-08:** it has occurred, twice. That does **not** make item 2 capturable from here.
+What exists of those runs is operator-relayed testimony, not a captured artifact, and photographing the
+state honestly still requires an authenticated hosted browser session this environment cannot open — an
+agent must not enter credentials. A shot produced from a fixture would still misrepresent it.
 
 Hosted QA remains `HOSTED QA PENDING (Krish)`: `/krish` sits behind an Authentik edge this environment
 cannot authenticate to, and an agent must not enter credentials.

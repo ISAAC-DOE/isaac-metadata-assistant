@@ -76,7 +76,25 @@ def test_the_artifact_names_the_one_safeguard_that_is_asserted_not_measured():
 
     # The retraction itself must remain, with a citation a reader can open.
     assert "An earlier draft" in text
-    assert "verification.py:1149" in text
+    # And the citation must still RESOLVE. This used to pin the literal string
+    # "verification.py:1149"; an unrelated docstring edit above that line moved
+    # it, the doc was updated, and this test failed on a citation that was by
+    # then correct. A hard-coded line number tests the wrong thing -- what
+    # matters is that the number in the artifact points at the line that
+    # actually holds the asserted literal. So compute it.
+    source = (REPO_ROOT / "apps" / "api" / "isaac_api" / "verification.py").read_text(
+        encoding="utf-8"
+    )
+    literal_lines = [
+        n
+        for n, line in enumerate(source.splitlines(), start=1)
+        if '"export_gating_unchanged": "verified"' in line
+    ]
+    assert len(literal_lines) == 1, literal_lines
+    assert f"verification.py:{literal_lines[0]}" in text, (
+        f"the artifact must cite verification.py:{literal_lines[0]}, where the "
+        "asserted `export_gating_unchanged` literal actually lives"
+    )
     # And the row must be named, not merely alluded to.
     assert "export_gating_unchanged" in text
 

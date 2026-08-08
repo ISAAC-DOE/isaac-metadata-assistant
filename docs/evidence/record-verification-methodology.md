@@ -1,5 +1,29 @@
 # Record verification — methodology
 
+> ## ⚠ SUPERSEDED IN PART — read this before anything below
+>
+> **This document is dated 2026-08-06 and describes the state at `59d65c7`. It is kept as a
+> dated artifact and is NOT rewritten.** Retracted claims below are struck through and
+> labelled, never deleted, so the trail stays legible.
+>
+> **What changed after this document was written:**
+>
+> | When | What | Where |
+> |---|---|---|
+> | 2026-08-07 (`e710f4a`) | The authorized private mode was **wired and became reachable**. `VerificationState` is now constructed with a `provider_factory`, and the route takes a `?mode=` parameter. | `apps/api/isaac_api/routes.py` — `_verification_provider_factory`, `get_runtime_verification` |
+> | 2026-08-08 | The private mode **ran, twice, on the deployed application.** | [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md) |
+> | 2026-08-07 | GitHub Actions **executes again** (the org-wide billing block is over) and the repository is **public**. | CI runs on subsequent PRs |
+>
+> **Superseding artifact: [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md).**
+> Where this document and that one disagree about whether the private run has happened, that
+> one is correct. Note that it is **operator-relayed testimony, not a captured artifact** (its
+> §0.2), and that only some of the required conditions were measured per-run (its §7) — so
+> "it has run" replaces "it has never run", and replaces nothing else.
+>
+> Everything in this document about the **method** — the engine, the operators, the oracles,
+> the accounting, the disclosure control, the leak-scan defect and its fix — is unaffected and
+> still current.
+
 **Date:** 2026-08-06 · **Branch:** `feat/record-verification` · **Reviewed SHA:** `59d65c7`
 
 **Read this first.** Two corpora are discussed here and they must never be conflated.
@@ -7,7 +31,7 @@
 | Term | What it is | Has it been run? |
 |---|---|---|
 | `public_reference` | The **ten public upstream ISAAC example records** vendored at `tests/fixtures/official/`, recorded at `schema/PROVENANCE.md:26-27` as *"copied verbatim from the upstream `examples/` directory"* | **Yes**, locally, twice. See [`record-verification-summary.md`](record-verification-summary.md) |
-| `authorized_private_sample` | The authorized 30-record reference sample held in the application's own datastore | **No. It has never executed.** See §7 |
+| `authorized_private_sample` | The authorized 30-record reference sample held in the application's own datastore | ~~**No. It has never executed.** See §7~~ — **RETRACTED 2026-08-08: it has executed, twice**, on the deployed application. See [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md), and §7 below for which of this document's structural reasons are now false |
 
 The ten public records are **not** the actual 30 records, **not** production records, **not** the private
 sample, and **not** the complete ISAAC corpus. Any figure in this package that is not explicitly labelled
@@ -110,18 +134,48 @@ Two independent full runs were compared field by field, excluding only `generate
 `cache_age_seconds`. **Every remaining field was identical.** Commands and output in
 [`record-verification-summary.md`](record-verification-summary.md) §3.
 
-## 7. The authorized private mode — implemented, reviewed, NOT executed
+## 7. The authorized private mode — ~~implemented, reviewed, NOT executed~~ implemented, reviewed, and SINCE EXECUTED
 
-The mode exists in code and has passed independent adversarial review. **It has never run.** It cannot run
-from this environment, and it has not run anywhere:
+> **CORRECTED 2026-08-08. Four claims in this section were true on 2026-08-06 and are false at
+> HEAD.** They are struck through rather than deleted. The safety properties listed after them
+> are unaffected — they describe the code, and the code still does what they say.
 
-- The datastore is reachable only from a deployed pod.
-- GitHub Actions is **billing-blocked org-wide**, so no image can publish.
-- **No HTTP route reaches the mode.** `provider_factory` defaults to `None`, the endpoint accepts zero
+The mode exists in code and has passed independent adversarial review. ~~**It has never run.** It cannot run
+from this environment, and it has not run anywhere:~~
+
+**RETRACTED — it has run.** It executed twice on 2026-08-08 against the deployed application;
+figures and their limits are in
+[`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md). It remains
+true that it **cannot be run from this environment**: reaching it needs an authenticated
+hosted session behind the Authentik edge, which is why the resulting evidence is
+operator-relayed testimony rather than a captured response body.
+
+The three structural reasons given for "it cannot run", each corrected:
+
+- The datastore is reachable only from a deployed pod. — **STILL TRUE**, and it is why the run
+  had to happen on the deployment rather than here.
+- ~~GitHub Actions is **billing-blocked org-wide**, so no image can publish.~~ — **FALSE at
+  HEAD.** The org-wide billing block ended on 2026-08-07; Actions execute again, images
+  publish, and the repository is now public. (Recorded so the reason is not quoted onward from
+  this file; the billing state was never a property of this verification work.)
+- ~~**No HTTP route reaches the mode.** `provider_factory` defaults to `None`, the endpoint accepts zero
   parameters, and an AST scan confirms no production module imports `db_provider`. It is fail-closed by
-  construction, not by configuration.
+  construction, not by configuration.~~ — **FALSE at HEAD, in all three parts.** Commit
+  `e710f4a` wired the mode: `apps/api/isaac_api/routes.py` defines
+  `_verification_provider_factory` and passes it into `VerificationState`, so
+  `provider_factory` is no longer `None`; `get_runtime_verification` now takes a `?mode=`
+  query parameter; and a production module therefore does import `db_provider`. The two guard
+  tests that pinned the old shape were **deliberately inverted** in the same commit rather
+  than deleted — they were an honesty coupling, not a prohibition. **What survives verbatim:**
+  the default is still the public corpus, and a caller who names no mode is never handed the
+  datastore one. The mode is now fail-closed **by configuration** — the environment gates in
+  `db_recon.check_env_gates` and the provider — rather than by the absence of a wire.
 
-**No database connection was opened during any of this work.**
+~~**No database connection was opened during any of this work.**~~ — **CORRECTED.** True of the
+work described in this document, and false as a standing statement: the 2026-08-08 runs opened
+one short-lived read-only connection each, from the pod. The form this project requires is
+run-scoped — *"no database connection was opened during this session"* — never the unbounded
+past tense.
 
 Its safety properties, all verified under adversarial attack rather than asserted:
 
@@ -226,7 +280,11 @@ a claim about an event that never happened. The UI renders a distinct word per s
 
 ## 11. What this methodology does not establish
 
-- It does not establish that the actual 30 records pass. **That run has not occurred.**
+- It does not establish that the actual 30 records pass. ~~**That run has not occurred.**~~ —
+  **CORRECTED 2026-08-08: that run has since occurred**, and its result is reported in
+  [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md). The bullet
+  itself still stands as written: *this methodology document* establishes nothing about the 30
+  records; the separate artifact does, within the limits its §0.2 and §7 set out.
 - It does not establish that the private sample behaves identically to the public one.
 - It does not establish that the private sample contains no schema drift.
 - Zero oracle failures is evidence **over the corpus actually run**, not a proof over all records or all
