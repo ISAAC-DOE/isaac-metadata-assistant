@@ -90,6 +90,7 @@ export type SettingsConceptId =
   | 'no-real-experiment-data'
   | 'what-is-stored'
   | 'what-resets'
+  | 'how-long-it-is-kept'
   | 'reset-and-deletion'
   | 'export-handling'
   | 'no-telemetry'
@@ -117,7 +118,7 @@ export interface SettingsConcept {
 }
 
 /**
- * The eleven data/privacy concepts, in the order Data & Privacy presents them
+ * The twelve data/privacy concepts, in the order Data & Privacy presents them
  * (and the order Overview summarises them). Deterministic: same facts in, same
  * strings out, no time, no randomness, no locale.
  *
@@ -128,6 +129,14 @@ export interface SettingsConcept {
  * surface, and export was named only in passing inside the `what-is-stored`
  * disclosure — so a reader asking "what happens to a record I export?" had to
  * infer it from a list of directory contents.
+ *
+ * P2 FOLLOW-UP added `how-long-it-is-kept`, which closes the LAST of those six.
+ * `screens/GovernancePage.tsx` tells the reader in so many words that this tab is
+ * the canonical home for what the build "retains", and there was no concept, no
+ * heading and no duration anywhere behind that pointer — seven of the eight
+ * topics the consolidation named had landed and retention had not. It sits
+ * between `what-resets` and `reset-and-deletion` on purpose: what is stored,
+ * where it resets, HOW LONG it lasts, how it is deliberately removed.
  */
 export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
   const { dataRegime, persistence, recordSchemaVersion } = facts;
@@ -340,6 +349,104 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
         // and what is stripped first — not that nothing is stored.
         label: 'Assistant Conversations',
         text: 'Assistant conversations stay in the browser tab that created them, but they are not held only in memory: the transcript is written to sessionStorage in that tab, so it survives a page reload and is erased when the tab closes. It is never sent to a server, never logged, and never written to localStorage or IndexedDB. Only the most recent 40 messages are kept, and credentials, absolute file paths, long hex digests and record verdicts are stripped before anything is stored.',
+      },
+    },
+    {
+      // P2 FOLLOW-UP — RETENTION, which `GovernancePage.tsx` advertises this tab
+      // as canonical for and which no settings surface stated at all.
+      //
+      // WRITTEN FROM THE CODE. Every clause, with what establishes it:
+      //
+      //  · ONE STATED MAXIMUM AGE, and it belongs to the walkthrough.
+      //    `TUTORIAL_TTL_HOURS` (`workspace.py:128`) bounds a session's life and
+      //    is returned as `ttl_hours` by `POST /api/tutorial/sessions`
+      //    (`routes.py:836`). NOTHING else in the backend has an age limit —
+      //    `sweep_stale_tutorial_sessions` (`workspace.py:1206-1247`) is the only
+      //    expiry mechanism there is, and it can only ever look inside
+      //    `tutorial_namespace_root()`.
+      //  · THE NUMBER IS DELIBERATELY NOT PRINTED. Same rule `what-is-stored`
+      //    already follows: a value-dependent sentence is built from a fact the
+      //    backend reported to THIS module, and this module is given three facts,
+      //    none of them a TTL. A hardcoded "24 hours" would be a second copy of a
+      //    constant that can change without this file.
+      //  · AND THE COPY SAYS SO, because the first draft did not and was wrong.
+      //    It read "reports that figure when the walkthrough opens", which a
+      //    reader takes as "so I will be told what it is". They will not:
+      //    `ttl_hours` reaches the client (`lib/types.ts:842`) and NO screen
+      //    renders it — grep the frontend and the only hits are this comment and
+      //    that type. Promising a number the product never shows is the same
+      //    over-claim class as the retired absolute upload claim, one indirection
+      //    smaller. The sentence now states the limit exists, says where it is
+      //    set, and admits the number is not on screen.
+      //  · WHAT BECOMES OF AN EXPIRED ONE IS NOT RESTATED. `what-is-stored`
+      //    already says it is removed the next time a walkthrough is opened. This
+      //    card names that card instead of authoring a near-duplicate sentence on
+      //    the same tab — the defect the consolidation exists to prevent.
+      //  · THE WORKSPACE HAS NO EXPIRY OF ITS OWN. There is no timer, no
+      //    scheduled deletion and no retention period over `workspace_root()`;
+      //    its life is the life of the directory. On the deployed pod that
+      //    directory is an `emptyDir` (`docs/deployment.md:29-31`), so a restart
+      //    takes it. The copy does NOT put a duration on that, because
+      //    `what-resets` already says this screen cannot say when the temporary
+      //    storage goes away, and contradicting it one card later would be worse
+      //    than saying nothing.
+      //  · THE VERIFICATION REPORT. `_VERIFICATION_STATE` (`routes.py:4993`) is a
+      //    module-level singleton holding `_cached` in the process's own memory,
+      //    so a restart takes it; `CACHE_TTL_SECONDS` (`verification.py:156`)
+      //    bounds how long a result is served before a recomputation is offered,
+      //    and `metadata.cache_age_seconds` is rendered as "Report Age"
+      //    (`screens/statistics/RecordVerification.tsx:770`). The seconds are not
+      //    printed here for the same reason the TTL hours are not — and note that
+      //    `lib/verificationContract.ts:954` is a client-side MIRROR of that
+      //    constant, not a fact the backend reported, so it is not a licence to
+      //    print "an hour" on this tab either.
+      //  · THE DIAGNOSTIC RETAINS NOTHING. `verification.py:1032` — private
+      //    records are streamed and discarded, never retained. This card REFERS
+      //    to the diagnostic (which is what keeps a mode token from standing
+      //    unqualified) and does not make the capability statement, so it owes no
+      //    bounds; `no-real-experiment-data` is still the one home for those.
+      //    Same split `what-resets` has held since Slice 2A.
+      //  · EXPERIMENTS ARE DEPLOYMENT-DEPENDENT, AND DURABILITY IS NOT CLAIMED.
+      //    `GET /api/health` reports `experiment_storage.state`
+      //    (`routes.py:787`), and `screens/ExperimentsHome.tsx` renders the
+      //    matching sentence from `lib/labels.ts:524-549` — including the
+      //    `unavailable` one, which is the state the deployed pod is in today:
+      //    `docs/create-experiment-persistence.md:8` records that the migration
+      //    has not been applied anywhere, and §0/`:73` that the write returns
+      //    `503` with nothing written. So this card states the DEPENDENCE and
+      //    names the surface that resolves it, rather than promising rows that
+      //    persist. It could not do otherwise even if it wanted to: `SettingsFacts`
+      //    carries `/api/about` values and `experiment_storage` is on
+      //    `/api/health`, so this module has never been told which state is live.
+      //  · "NOTHING IS KEPT FOR A WHILE AND THEN LOST" is the precise consequence
+      //    of that 503 and is worth the words: a create that fails writes nothing
+      //    at all, rather than quietly leaving something temporary behind.
+      //
+      //  · WHAT THE TWO BROWSER ENTRIES HOLD, itemised rather than promised
+      //    away. `tutorialPreference.ts:16-21` states its own exhaustive list —
+      //    tutorial id, version, boolean, completion timestamp — and
+      //    `tutorialSession.ts:27-32` holds `sessionId` plus `index`. An earlier
+      //    draft said neither holds "a credential", which is a claim this file
+      //    should not make: the worked-example session id travels in
+      //    `X-Isaac-Tutorial-Session` and is what addresses that session's
+      //    directory, so whether it counts as one is an argument, not a fact. The
+      //    copy now enumerates the four and the two instead, which is stronger
+      //    than the denial it replaces and cannot be argued with.
+      //
+      // WHY THE BROWSER HALF IS BEHIND `more`. Hiding it cannot make the visible
+      // copy overstate: the visible copy makes no claim about the browser, and
+      // localStorage has no maximum age either, so "one stated maximum age" holds
+      // with the disclosure shut. The last visible sentence still points at it, so
+      // the reader is never left thinking the server is the whole story.
+      id: 'how-long-it-is-kept',
+      heading: 'How Long It Is Kept',
+      summary:
+        'Only a walkthrough has a stated maximum age; everything else lasts as long as the server, the deployment, or the browser holding it.',
+      detail:
+        'Only one thing in this build has a stated maximum age, and it is the worked-example walkthrough: the server sets how long an unfinished one may sit and states that limit to the page when the walkthrough opens, though no screen here shows the number. What Is Stored describes what becomes of one that passes it. Nothing else is kept to a schedule. The workspace has no expiry of its own and lasts as long as the working directory it sits in, which is the directory What Resets is about. The verification report is held in the server process memory for a bounded period before a recomputation is offered, is shown with its own age, and is gone when that process restarts; the protected, read-only diagnostic keeps none of what it reads. How long an experiment lasts depends on where this deployment stores experiments, and My Experiments states which before you make one — where a database is configured but is not accepting the work, nothing is kept for a while and then lost, because the attempt fails and nothing is written. Your browser also keeps two small things on lifetimes of their own.',
+      more: {
+        label: 'What the Browser Keeps',
+        text: 'Two things, and they expire differently. Whether this browser has finished the walkthrough is written to localStorage, so it outlives the tab and the browser being restarted and lasts until the site data is cleared; it describes this browser only, is filed under no account, and does not follow you to another device. The pointer to a walkthrough still in progress goes to sessionStorage instead and dies with the tab, as do the assistant conversations described under What Resets. Neither holds a record, a scientific value, or an identity value: the completion entry holds the walkthrough id, a version, a flag and the time you finished, and the pointer holds the session the server minted and which step you had reached.',
       },
     },
     {

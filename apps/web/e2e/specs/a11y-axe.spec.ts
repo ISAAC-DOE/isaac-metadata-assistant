@@ -26,6 +26,7 @@ import {
   A11Y_BASELINE_TOTAL_NODES,
   BASELINE_PLATFORMS,
   PROJECT_IDS,
+  SCAN_PROJECT_IDS,
   allScanPairs,
   applicableEntries,
   baselineKey,
@@ -215,7 +216,10 @@ for (const surface of SURFACES) {
  */
 test('@responsive a11y baseline file is well-formed and cannot silently exempt a rule', async () => {
   const surfaceIds = new Set(SURFACES.map((s) => s.id));
-  const projectIds = new Set<string>(PROJECT_IDS);
+  // Real Playwright projects PLUS the narrow-width pseudo-projects that
+  // `specs/a11y-narrow.spec.ts` scans under (`width-320`, `width-390`). A key
+  // naming neither is still a typo and still fails.
+  const projectIds = new Set<string>(SCAN_PROJECT_IDS);
   const seenRules = new Set<string>();
   // Per platform, so the column this machine will never execute is checked as
   // hard as the one it will. Without this a typo'd `linux:` number — or a
@@ -325,5 +329,13 @@ test('@responsive a11y baseline file is well-formed and cannot silently exempt a
   }
 
   // Sanity: the grid the counts are keyed against is the grid the suite scans.
-  expect(allScanPairs().length).toBe(SURFACES.length * PROJECT_IDS.length);
+  //
+  // SCAN_PROJECT_IDS, not PROJECT_IDS: the grid is now the five Playwright
+  // projects PLUS the two narrow widths `specs/a11y-narrow.spec.ts` sweeps
+  // (`width-390`, `width-320`), which are scanned by this same baseline and this
+  // same `auditScan` but inside one project rather than as projects of their own.
+  // Leaving them out would have left the "no entry may tolerate anything on a
+  // pair it did not record" loop above blind at exactly those two widths.
+  expect(allScanPairs().length).toBe(SURFACES.length * SCAN_PROJECT_IDS.length);
+  expect(SCAN_PROJECT_IDS.length).toBe(PROJECT_IDS.length + 2);
 });

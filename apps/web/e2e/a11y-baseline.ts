@@ -90,6 +90,57 @@ export const PROJECT_IDS = [
 
 export type ProjectId = (typeof PROJECT_IDS)[number];
 
+/**
+ * NARROW-WIDTH SCAN KEYS — the axe sweep that is NOT a Playwright project.
+ *
+ * ── The gap these close ─────────────────────────────────────────────────────
+ *
+ * `PROJECT_IDS` above is 1280 / 1024 / 768 / 375 / 640@DPR2. The narrowest width
+ * this product claims to support is 320 (WCAG 1.4.10 reflow), and 390 is the
+ * modern phone width; `specs/layout-widths.spec.ts` has measured LAYOUT at both
+ * since it was written, but nothing scanned CONTRAST, ACCESSIBLE NAMES or FOCUS
+ * VISIBILITY there — and 320 is exactly where text wraps hardest, where a line
+ * breaks onto a tighter background, and where controls crowd. So the widths at
+ * which this app is most likely to fail axe were the widths axe never saw.
+ *
+ * ── Why these are keys and not a sixth project ──────────────────────────────
+ *
+ * `specs/layout-widths.spec.ts` already answered this question for layout and
+ * the answer has not changed: a project multiplies the WHOLE suite — every
+ * `@responsive` spec, not just the scan that wanted it — and it perturbs the
+ * count ratchet in this file for 26 surfaces at once. `specs/a11y-narrow.spec.ts`
+ * therefore runs inside ONE project and moves the viewport itself, exactly as the
+ * layout sweep does, and its pairs are namespaced `surfaceId@width-<n>` so they
+ * can never collide with a real project's.
+ *
+ * The namespacing is not cosmetic. `mobile-375x812` and `width-390` are 15 CSS px
+ * apart; a shared key would let a defect recorded at one silently excuse the
+ * other.
+ *
+ * ── What is DELIBERATELY not here yet ───────────────────────────────────────
+ *
+ * NO COUNTS. Not one `width-320` or `width-390` pair appears in `A11Y_BASELINE`
+ * below, which means every one of them expects 0 — so any violation at either
+ * width reads as `new` and FAILS, and the failure prints the exact line to add.
+ * That is the intended state, not an oversight: the numbers must be transcribed
+ * from a **linux CI** run, and this file's own header says a laptop cannot
+ * measure the linux column and no attempt is made to guess it. Writing a
+ * darwin reading here as a bare number would be claiming it holds on both
+ * platforms — the precise mistake that cost this project a cycle once already.
+ *
+ * See `specs/a11y-narrow.spec.ts` for the transcription procedure.
+ */
+export const NARROW_WIDTHS = [390, 320] as const;
+
+/** `320` → `'width-320'`. The "project" component of a narrow-sweep key. */
+export const narrowWidthId = (width: number): string => `width-${width}`;
+
+/** The narrow-sweep pseudo-project ids, in sweep order. */
+export const NARROW_WIDTH_IDS: readonly string[] = NARROW_WIDTHS.map(narrowWidthId);
+
+/** Every id a baseline key may name: a real Playwright project, or a narrow width. */
+export const SCAN_PROJECT_IDS: readonly string[] = [...PROJECT_IDS, ...NARROW_WIDTH_IDS];
+
 /* ────────────────────────────────────────────────────────────────────────────
  * PLATFORM.
  *
@@ -1358,7 +1409,14 @@ export function isBaselined(
   return expectedNodeCount(rule, surfaceId, projectId, platform) > 0;
 }
 
-/** All (surface, project) pairs the suite scans — used by the well-formedness test. */
-export function allScanPairs(): { surfaceId: string; projectId: ProjectId }[] {
-  return SURFACES.flatMap((s) => PROJECT_IDS.map((p) => ({ surfaceId: s.id, projectId: p })));
+/**
+ * All (surface, project) pairs the suite scans — used by the well-formedness test.
+ *
+ * Includes the narrow-width pseudo-projects, so the "no entry may tolerate
+ * anything on a pair it did not record" assertion covers 320 and 390 too. Leaving
+ * them out would have made the well-formedness test silently weaker at exactly
+ * the widths this sweep was added to cover.
+ */
+export function allScanPairs(): { surfaceId: string; projectId: string }[] {
+  return SURFACES.flatMap((s) => SCAN_PROJECT_IDS.map((p) => ({ surfaceId: s.id, projectId: p })));
 }

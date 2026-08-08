@@ -678,6 +678,14 @@ describe('Settings — Data & Privacy', () => {
       'No Real Experiment Data in the Workspace',
       'What Is Stored',
       'What Resets',
+      // P2 FOLLOW-UP — the SIXTH of those six, and the last one missing.
+      // `screens/GovernancePage.tsx` sends the reader here for what the build
+      // "retains", and behind that pointer there was no concept, no heading and
+      // no duration. Its position is asserted, like the two below it: it belongs
+      // between where state resets and how it is deliberately removed, because
+      // "how long does this last?" is the question a reader carries out of
+      // `What Resets` and into `Reset and Deletion`.
+      'How Long It Is Kept',
       // P2 (privacy consolidation) — two ADDITIONS, not renames. This tab is
       // meant to answer "what is collected, stored, retained, reset, exported?"
       // in one place, and it answered five of those six: deletion appeared on no
@@ -809,6 +817,14 @@ describe('Settings — Data & Privacy', () => {
     expect(disclosures.map((d) => d.querySelector('summary')?.textContent)).toEqual([
       'What the Workspace Contains',
       'Assistant Conversations',
+      // P2 FOLLOW-UP — the retention card's browser half, and it belongs in a
+      // drawer under this rule rather than in spite of it. Nothing in the
+      // always-visible retention copy makes a claim about the browser, and
+      // localStorage has no maximum age either, so shutting this disclosure
+      // cannot turn "one stated maximum age" into an overstatement. The visible
+      // paragraph still ends by pointing at it, so a shut drawer is never read
+      // as "the server is the whole story".
+      'What the Browser Keeps',
       'About That Shared Key',
     ]);
     disclosures.forEach((d) => expect(d.open).toBe(false));
