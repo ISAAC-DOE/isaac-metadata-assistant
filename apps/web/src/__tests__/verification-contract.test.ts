@@ -16,6 +16,7 @@ import {
   VERIFICATION_SAFEGUARD_KEYS,
   VERIFICATION_STATUSES,
   SUPPRESSED_ROW_KEY,
+  SUPPRESSED_ROW_LABEL,
   VALIDATOR_SERIES,
   VERIFICATION_CACHE_TTL_SECONDS,
   VERIFICATION_MODE_LABELS,
@@ -31,12 +32,14 @@ import {
   readVerificationBody,
   reconciliationMismatch,
   reportFreshness,
+  suppressionDisclosure,
   validatorComparison,
   validatorComparisonSummary,
 } from '../lib/verificationContract';
 import {
   verificationFailureEnvelope,
   verificationFutureFormat,
+  verificationReportLoneWithheldCategory,
   verificationReportNoSuppression,
   verificationReportOk,
   verificationReportOkCorpusNull,
@@ -280,7 +283,7 @@ describe('readVerificationBody — fail closed', () => {
     expect(view.kind).toBe('unreadable');
     if (view.kind === 'unreadable') {
       expect(view.reason).toBe('format_version');
-      expect(view.formatVersion).toBe(3);
+      expect(view.formatVersion).toBe(4);
     }
   });
 
@@ -305,7 +308,9 @@ describe('readVerificationBody — fail closed', () => {
   });
 
   it('carries the current format version', () => {
-    expect(VERIFICATION_REPORT_FORMAT_VERSION).toBe(2);
+    // 3 since `suppressed_total` became nullable — see the backend's
+    // `verification.REPORT_FORMAT_VERSION` comment for what did and did not change.
+    expect(VERIFICATION_REPORT_FORMAT_VERSION).toBe(3);
   });
 });
 
@@ -568,5 +573,102 @@ describe('one predicate decides "withheld nothing", on both sides', () => {
   it('never calls a histogram with cells empty', () => {
     const histogram = verificationReportOk.format_shadow.failures_by_error_code;
     expect(histogramIsEmpty(histogram)).toBe(false);
+  });
+});
+
+describe('a withheld occurrence count is carried as withheld, never as a number', () => {
+  /*
+   * REPORT FORMAT 3. `suppressed_total` is `null` for exactly one body: one
+   * withheld category, nothing published. The backend withholds the figure
+   * because with one category withheld from an enumerable key set that figure IS
+   * the cell. Every assertion here is about the UI not undoing that — and about
+   * it not silently dropping the disclosure either, which is the other way to
+   * mislead.
+   */
+  const histogram = () =>
+    verificationReportLoneWithheldCategory.format_shadow.failures_by_error_code;
+
+  it('decodes an explicit null as null rather than refusing the report', () => {
+    const view = readVerificationBody(verificationReportLoneWithheldCategory);
+    expect(view.kind).toBe('report');
+    if (view.kind !== 'report') return;
+    const decoded = view.report.format_shadow.failures_by_error_code;
+    expect(decoded.suppressed_total).toBeNull();
+    // The withholding stays disclosed. Reading it as 0 categories would be the
+    // "0 withheld" false claim the backend rejects by name.
+    expect(decoded.suppressed_categories).toBe(1);
+  });
+
+  it('still refuses a MISSING or malformed suppressed_total', () => {
+    // An explicit null is a value; an absent or garbage field is a body this
+    // decoder must not guess at. Reading both as "withheld" would let a
+    // truncated payload masquerade as a deliberate withholding.
+    const { suppressed_total: _dropped, ...withoutTotal } = histogram();
+    for (const bad of [withoutTotal, { ...histogram(), suppressed_total: -1 }, {
+      ...histogram(),
+      suppressed_total: 'withheld',
+    }]) {
+      const view = readVerificationBody({
+        ...verificationReportLoneWithheldCategory,
+        format_shadow: {
+          ...verificationReportLoneWithheldCategory.format_shadow,
+          failures_by_error_code: bad,
+        },
+      });
+      expect(view.kind, JSON.stringify(bad)).toBe('unreadable');
+    }
+  });
+
+  it('reports NO total rather than the shown sum, which would be too small', () => {
+    // Falling back to the shown sum would print a denominator smaller than the
+    // truth and make the visible shares add to 100%.
+    expect(histogramTotal(histogram())).toBeNull();
+  });
+
+  it('says the count was withheld, and why, instead of printing a figure', () => {
+    const sentence = suppressionDisclosure(histogram());
+    expect(sentence).not.toBeNull();
+    expect(sentence!).toMatch(/1 further category is withheld/i);
+    expect(sentence!).toMatch(/withheld as well/i);
+    expect(sentence!).not.toMatch(/\b0\b/);
+    expect(sentence!).not.toMatch(/null|NaN|undefined/);
+  });
+
+  it('draws NO withheld bar, because a bar needs a length', () => {
+    // 0 would be a false claim -- the backend refuses to write it for exactly
+    // that reason -- and a bar of unknown length is not a bar.
+    expect(histogramRowsWithSuppressed(histogram())).toEqual([]);
+  });
+
+  it('still refuses to call the breakdown empty — the two sides agree', () => {
+    // The class of bug `histogramWithheldAnything`'s comment records: the row
+    // builder and the empty check must not disagree about whether anything was
+    // withheld. It WAS withheld; there is simply no quantity to draw.
+    expect(histogramWithheldAnything(histogram())).toBe(true);
+    expect(histogramIsEmpty(histogram())).toBe(false);
+  });
+
+  it('does not read a null total as a positive withheld quantity', () => {
+    // The complementary error. A body claiming zero withheld categories has
+    // said nothing was withheld, whatever the total field looks like.
+    const odd = { cells: [], suppressed_categories: 0, suppressed_total: null, floor: 5 };
+    expect(histogramWithheldAnything(odd)).toBe(false);
+    expect(histogramIsEmpty(odd)).toBe(true);
+    expect(histogramRowsWithSuppressed(odd)).toEqual([]);
+  });
+
+  it('leaves the safe histograms exactly as they were', () => {
+    // The withholding is narrow on purpose: `suppressed_categories === 1` and
+    // nothing else. Two withheld categories still publish their honest total.
+    const safe = verificationReportOk.format_shadow.failures_by_schema_path;
+    expect(safe.suppressed_categories).toBe(2);
+    expect(histogramTotal(safe)).toBe(8 + 6 + 5);
+    expect(suppressionDisclosure(safe)).toMatch(/accounting for 5 of the 19 occurrences/i);
+    const safeRows = histogramRowsWithSuppressed(safe);
+    expect(safeRows[safeRows.length - 1]).toEqual({
+      key: SUPPRESSED_ROW_KEY,
+      label: SUPPRESSED_ROW_LABEL,
+      value: 5,
+    });
   });
 });

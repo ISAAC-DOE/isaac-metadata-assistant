@@ -24,6 +24,7 @@ import {
   reportFreshness,
   safeguardCountRows,
   safeguardRows,
+  SUPPRESSED_ROW_KEY,
   suppressionDisclosure,
   validatorComparison,
   validatorComparisonSummary,
@@ -734,17 +735,47 @@ function IssueDistribution({
     );
   }
 
+  const rows = histogramRowsWithSuppressed(histogram);
+
+  /*
+   * A THIRD STATE, distinct from both of the others: something WAS withheld, and
+   * there is no quantity to plot — every category fell below the floor and the
+   * withheld occurrence count was itself withheld, because with one category
+   * withheld that count is that category's exact value.
+   *
+   * It must not fall through to the chart. A `StatsBarChart` with no rows draws
+   * an axis over nothing and would read as a measured emptiness. It must not
+   * fall through to `emptyTitle` either — "No Format Issues by Check Name"
+   * asserts an absence, and this is the opposite: issues were found and cannot
+   * be broken down without naming a category. So the disclosure sentence is the
+   * whole content, and it is never null on this path (`histogramIsEmpty` is
+   * false only because something was withheld).
+   */
+  if (rows.length === 0) {
+    return (
+      <ChartEmpty title="Breakdown Withheld">
+        {suppression ??
+          'This breakdown was withheld in full, and no figure is stated in its place.'}
+      </ChartEmpty>
+    );
+  }
+
   const scaleNote =
     'Bars share one scale, marked beneath them. The scale runs to the largest category, not to the total.';
-  const withheldNote =
-    suppression === null
-      ? null
-      : 'The final bar stands for every withheld category together; none of them is named here, because their names are not in the report.';
+  /*
+   * Gated on the bar EXISTING, not on there being a disclosure. The withheld
+   * bucket is now omitted whenever its count was withheld, so a note asserting
+   * "the final bar stands for every withheld category" would describe a bar that
+   * is not on screen.
+   */
+  const withheldNote = rows.some((row) => row.key === SUPPRESSED_ROW_KEY)
+    ? 'The final bar stands for every withheld category together; none of them is named here, because their names are not in the report.'
+    : null;
   return (
     <div className="stats-block">
       <StatsBarChart
         caption={caption}
-        rows={histogramRowsWithSuppressed(histogram)}
+        rows={rows}
         unit="occurrences"
         total={histogramTotal(histogram)}
         categoryHeader={categoryHeader}
