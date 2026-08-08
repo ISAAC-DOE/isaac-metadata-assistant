@@ -12,6 +12,84 @@ the payload was never a reason to publish.
 
 ---
 
+## 0. Verdict, and what kind of evidence this is
+
+### 0.1 Verdict
+
+```
+PRIVATE_30_VERIFICATION_PASS
+```
+
+This verdict was required by the authorizing instruction and, until 2026-08-08, **was stated
+in session and nowhere in the repository** — `grep -rn "PRIVATE_30_VERIFICATION_PASS" docs/`
+returned nothing. A verdict that exists only in a conversation is not evidence, so it is
+recorded here with its conditions attached.
+
+**What the verdict rests on.** All of the following were observed on both runs:
+
+- 30 records read; official validation **30 passing / 0 failing**;
+- the advisory format shadow **30 passing / 0 failing**;
+- **0** unexpected mutation outcomes over 9,136 applicable trials, with the terminal-outcome
+  accounting reconciling arithmetically (§2);
+- **0** failures across all seven oracles, including `source_mutation` — the deep-copy
+  isolation proof;
+- `dml_statements: 0` and `ddl_statements: 0`, as **counted** values;
+- `transaction_read_only: verified`, read back from the server rather than declared;
+- `source_records_modified: verified` and `private_values_exposed: verified`;
+- `official_validator_unchanged: verified`, from a runtime probe;
+- a second, genuinely fresh execution differing in **0** of 50 deterministic fields.
+
+**What the verdict does NOT cover.** It is a pass over *this corpus, on these two runs, for
+the conditions actually measured*. It is **not**:
+
+- a per-record claim of any kind (§5, first bullet);
+- a claim of scientific correctness (§5);
+- a claim that every safety condition in the authorizing instruction was *measured* —
+  **§7 walks all twenty and marks each one measured / structural / not measured**, and
+  three of them are not measurements at all;
+- a claim that any database **row** was compared before and after (it was not — §7, C12);
+- a claim about future runs, other corpora, or the deployment in general.
+
+Nothing in §2, §3 or §4 is weakened by this framing; §7 exists so the verdict cannot be read
+as broader than what stands behind it.
+
+### 0.2 This artifact is operator-relayed testimony, not an inspected artifact
+
+**The figures on this page were read from an authenticated browser session by the project
+owner and relayed. No response body was captured.** That is by design — the endpoint keeps
+its result in process memory only and this environment cannot authenticate to the Authentik
+edge in front of the deployment — but the consequence has to be stated plainly rather than
+left for a reader to infer from a table that reads like a measurement.
+
+So, in the same words this project already uses for facts of this shape (`CLAUDE.md` §15,
+where the Slice 2A scan and the Authentik header probe are both recorded this way):
+
+> **operator testimony, not a captured artifact.**
+
+Concretely, and each of these is a limitation of the *evidence*, not of the run:
+
+- there is no saved response body for run 1 or run 2 in this repository;
+- there is no committed comparison script and no committed diff output for the deterministic
+  rerun of §4; the freshness argument — that the second call was taken after the full cache
+  lifetime, with a changed report timestamp and a reset cache age — is recorded in a commit
+  message and in §4, and was not independently re-observed here;
+- the "50 deterministic fields, 0 differences" figure in §4 is a relayed count, not a figure
+  this artifact can reproduce;
+- the safeguard states in §3 are the words the endpoint emitted, as read off the screen.
+
+The sibling [`2026-08-08-private-30-publication-approval.md`](2026-08-08-private-30-publication-approval.md)
+already labels its own contents this way ("relayed by the project owner… no transcript");
+this file previously did not, which made a testimony read as a measurement. That asymmetry
+was the defect, and this section is the correction.
+
+**What is NOT testimony**, and can be checked by anyone with the repository: everything
+asserted about the *code* — the safeguard implementation, the projection allowlists, the
+scanner and its poisoned controls, the import-absence test behind `export_gating_unchanged`,
+and every structural claim marked as such in §7. Those are code review and CI, which is a
+different and weaker claim than a runtime observation, but it is a checkable one.
+
+---
+
 ## 1. What was run
 
 Three programs over one corpus, in a single pass, on the deployed application:
@@ -130,6 +208,14 @@ Every figure in §2 and §3 is identical across both runs.
   that the suppression mechanism is effective, since it had no input to act on.
 - **Two runs establish reproducibility, not stability over time.** They ran about an hour
   apart against the same deployment and the same data.
+- **The corpus leak scan did not run in this mode.** It needs the corpus, and this mode
+  discards it. A different, corpus-free check stood in. See §7, C15 — this was undisclosed
+  here until 2026-08-08.
+- **Seven safeguards is not twenty conditions.** §7 walks all twenty required conditions and
+  marks each measured / structural / not measured; three are not measurements, and one
+  (no source **row** compared, §7 C12) was never measured at all.
+- **Everything numeric on this page is operator-relayed testimony**, not an inspected
+  response body. §0.2 states the scope of that limitation.
 
 ## 6. What is deliberately not published here
 
@@ -144,3 +230,92 @@ tested against a deliberately-poisoned control file to confirm it fails when it 
 One honest limitation of that scanner: its **key allowlist** is the primary defence. Free
 text placed under an *approved* key would not be caught by any content pattern, which is why
 this artifact contains only enumerated scalars and prose written for publication.
+
+## 7. All twenty required conditions, and which of them were measured
+
+The authorizing instruction listed **twenty** safety conditions. §3 reports seven safeguard
+rows, which is roughly a third of them — and reporting a third of a list without saying so
+lets a reader assume the other two thirds were checked and simply not tabulated. They were
+not all checked. This section states, for every condition, one of three verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| **measured per-run** | a check executed during *this* run and its result is in the payload |
+| **holds structurally** | a property of the code, established by review and/or a CI test — true of the build, **not** an observation of the run |
+| **not measured** | neither of the above; the condition is argued for, not checked |
+
+**Two honesty notes about this section itself, before the table.**
+
+1. **The twenty-item list is reconstructed, not quoted.** The authorizing instruction was
+   given in session and **no copy of it is committed to this repository**, so the wording and
+   grouping below are this document's reconstruction from the instruction as relayed, the
+   safeguard set the endpoint actually serves, and
+   [`record-verification-methodology.md`](record-verification-methodology.md) §7. If the
+   original list is ever committed and disagrees, the original wins and this table is the bug
+   — the same rule the publication approval already sets for its own allowlist.
+2. **"Holds structurally" is a real guarantee and a weaker one.** It is established in CI
+   against the committed code, so it would not notice a change made after the test last ran,
+   and it is not evidence that anything happened during this run. §3 already makes exactly
+   this distinction for one row; this table applies it to all twenty.
+
+### Transport and database access
+
+| # | Condition | Verdict | Basis |
+|---|---|---|---|
+| C1 | Exactly one short-lived connection, opened only for this run | **holds structurally** | one `_drain` call per run, in code; no per-run connection counter is served |
+| C2 | The transaction is declared read-only | **measured per-run** | `transaction_read_only: verified` |
+| C3 | Read-only is confirmed **by the server**, not merely declared by the driver | **measured per-run** | same probe as C2 — the server setting is read back, and a value that is not affirmative refuses **before** the record query is issued. C2 and C3 are one measurement reported as two conditions |
+| C4 | Zero DML statements | **measured per-run** | `dml_statements: 0`, a counted value |
+| C5 | Zero DDL statements | **measured per-run** | `ddl_statements: 0`, a counted value |
+| C6 | Every statement parameterized; no identifier or value interpolation | **measured per-run, but withheld** | the endpoint serves this as an **eighth** safeguard. The publication approval enumerates **seven**, so its value is **not published here** and its name is not reproduced — it was removed from an earlier draft of this artifact in review. Its result is therefore not available to a reader of this page, and this row must not be read as a pass |
+| C7 | No write form admitted by the query-policy guard | **holds structurally** | five frozen statements; 29 smuggling attempts admitted zero, in CI. The run does serve a refusal counter, but it is not an approved publication field |
+| C8 | The connection is closed before the first record is yielded | **holds structurally** | code shape (`_drain` closes before yielding); nothing in the payload observes it |
+| C9 | The record identifier is dropped before the record reaches the caller | **holds structurally** | `parse_row` normalizes then drops it; test-backed |
+| C10 | Cross-references outside the sample are tolerated, never followed or repaired | **holds structurally** | code review; no counter is served |
+
+### Isolation of the source records
+
+| # | Condition | Verdict | Basis |
+|---|---|---|---|
+| C11 | Each record is deep-copied and only the copy is mutated | **measured per-run** | `source_mutation_failures: 0` — the oracle re-reads each source object after every trial |
+| C12 | **No source ROW changed** | **not measured** | This is the one worth reading twice. What was compared is the **in-memory source object**, before and after each trial (C11, and `source_records_modified` in §3). **No database row was re-read and compared after the run** — it could not be, because the connection is closed before the sweep begins (C8). The zero-write position rests on C2–C7, not on a row-level before/after comparison, and this artifact should never be cited as evidence that a stored row was checked |
+| C13 | The corpus is not retained | **holds structurally** | records are streamed and discarded one at a time; never all in memory at once. Not separately measured — and see C15, which is the price paid for it |
+
+### Output and privacy
+
+| # | Condition | Verdict | Basis |
+|---|---|---|---|
+| C14 | No private value appears in the served payload | **measured per-run** | `private_values_exposed: verified`, computed over the **assembled** payload by a structural string allowlist plus a planted-sentinel canary that proves the allowlist is not a no-op |
+| C15 | **The corpus leak scan does not run in this mode** | **DISCLOSURE — not a check that ran** | `_leak_scan` compares the payload against the corpus's own strings, so it *requires the corpus*. In this mode the corpus is streamed and discarded (C13) and is never available to scan against, so **it did not run**. `_structural_string_audit` stands in, asking the complementary question — *is every served string accountable to public information?* — which needs no corpus. That substitution is documented in the engine and is arguably the stronger question, since it catches a string arriving by a route nobody anticipated. **It was nevertheless undisclosed on this page until 2026-08-08, and that omission mattered**: a reader comparing this run to the public one would reasonably assume the same two scans ran in both, and they did not |
+| C16 | No private value appears in **logs** | **holds by structural ABSENCE** | there is **no logging call on this path** — neither the verification engine nor the datastore provider emits a log record, a warning or a print. So the condition holds because there is nothing that could log, which is *not* the same as a check that inspected log output and found it clean. No log was captured, examined, or asserted about |
+| C17 | Aggregate only — no identifier, title, field value, evidence entry or per-record outcome | **holds structurally, plus enforced at publication** | the report builder projects every block through a frozen key allowlist, and the published artifact is additionally scanned by a closed allowlist with poisoned controls |
+| C18 | Disclosure floor applied unconditionally | **armed, not exercised** | both distributions were empty (§2), so the suppression machinery had **no input**. Arming is structural; this run is not evidence that it suppresses correctly |
+
+### Truth path
+
+| # | Condition | Verdict | Basis |
+|---|---|---|---|
+| C19 | The official validator is unchanged | **measured per-run** | runtime probe of the loaded validator (`verification.py:1143`), so it would flip on the running deployment rather than only in a unit test |
+| C20 | Export gating is unchanged | **not measured — asserted** | a fixed literal at `verification.py:1149`, backed by a mechanical import-absence test in CI. **Already disclosed in §3**, which explains why the distinction matters; repeated here so the twenty-condition walk does not appear to add a measurement it does not have |
+
+### Summary of the walk
+
+All twenty accounted for:
+
+| Verdict | Count | Conditions |
+|---|---|---|
+| measured per-run | 7 | C2, C3, C4, C5, C11, C14, C19 |
+| measured per-run but **withheld** from publication | 1 | C6 |
+| holds structurally (incl. C16, which holds by *absence*) | 8 | C1, C7, C8, C9, C10, C13, C16, C17 |
+| armed but not exercised | 1 | C18 |
+| a check that **did not run** in this mode | 1 | C15 |
+| **not measured** | 2 | C12, C20 |
+
+Two arithmetic notes, so the table is not read as stronger than it is. Those **7 measured
+rows are 6 distinct measurements** — C2 and C3 are one server-side read-back reported as two
+conditions — which is why §3 counts "six measured at runtime" and this section counts seven
+rows. And **13 of the 20 have no per-run result at all**: the 8 structural, C18, C15, C12, C20
+and, from a published reader's position, C6.
+
+That is a materially different picture from a table of seven rows all reading `verified`, and
+it is the picture the verdict in §0.1 should be read against.

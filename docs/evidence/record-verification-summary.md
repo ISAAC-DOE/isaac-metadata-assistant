@@ -1,12 +1,35 @@
 # Record verification — measured summary
 
+> ## ⚠ SUPERSEDED IN PART — read this before anything below
+>
+> **This document is dated 2026-08-06 and describes the state at `59d65c7`. It is kept as a
+> dated artifact and is NOT rewritten.** Retracted claims are struck through and labelled.
+>
+> **What changed after it was written:** the authorized private mode was wired on 2026-08-07
+> (`e710f4a`), and it **ran twice on 2026-08-08**. The org-wide GitHub Actions billing block
+> also ended on 2026-08-07, so CI executes again and the repository is public.
+>
+> **Superseding artifact: [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md).**
+> Where this page says the private run has not happened, that one is correct. It is
+> **operator-relayed testimony, not a captured artifact** (its §0.2), and only some of the
+> required safety conditions were measured per-run (its §7).
+>
+> **Everything in §2–§6 below is unaffected**: those are the ten *public* records, measured
+> locally on 2026-08-06, and they were re-run on 2026-08-08 with identical figures — see
+> [`public-reference-verification-2026-08-08-rerun.md`](public-reference-verification-2026-08-08-rerun.md).
+> The stale claims are confined to §7.
+
 **Date:** 2026-08-06 · **Reviewed SHA:** `59d65c7` · **Method:** [`record-verification-methodology.md`](record-verification-methodology.md)
 
-> The verification framework was exercised against **ten public ISAAC reference records**. A read-only
+> The verification framework was exercised against **ten public ISAAC reference records**. ~~A read-only
 > mode for an **authorized 30-record reference sample is implemented and independently reviewed but has
-> not yet been executed.**
+> not yet been executed.**~~ — **CORRECTED 2026-08-08: that mode has since been wired and
+> executed twice.**
 
-**No database connection was opened during this work.**
+~~**No database connection was opened during this work.**~~ — **CORRECTED.** True of the work
+described on this page, and false as a standing statement: the 2026-08-08 private runs each
+opened one short-lived read-only connection from the deployed pod. The run-scoped form this
+project requires is *"no database connection was opened during this session"*.
 
 ---
 
@@ -115,14 +138,22 @@ Every non-volatile field was identical.
 **Zero-write.** No write was attempted or possible: the public path reads committed repository fixtures
 and opens no connection. `dml_statements: 0` and `ddl_statements: 0` are the counters' measured values,
 not assertions. In the private mode the query-policy guard rejects every write form, and read-only is
-verified server-side by reading back `SHOW transaction_read_only` — but **that mode has not run**.
+verified server-side by reading back `SHOW transaction_read_only` — ~~but **that mode has not run**~~
+**and, as of 2026-08-08, that mode HAS run: it reported `transaction_read_only: verified`,
+`dml_statements: 0` and `ddl_statements: 0` on both runs.** Note the scope precisely: those are
+**object-level and statement-level** results. **No database row was re-read and compared before
+and after** — see that artifact's §7, C12.
 
 **No-leak.** The payload carries no record id, title, field value, evidence entry, attribution, per-record
 outcome, raw validator message, unsuppressed small cell, database hostname, internal service name,
 connection string, or credential. Two runtime measurements enforce this and one is backed by a
 planted-sentinel canary across five shapes. Note the scope of that claim honestly: it is **code review
-plus a passing canary over the public corpus**, not an observation of the private mode, which has never
-executed.
+plus a passing canary over the public corpus**, ~~not an observation of the private mode, which has never
+executed~~ — **CORRECTED 2026-08-08: the private mode has since executed and reported
+`private_values_exposed: verified` on both runs.** That result carries one difference from the
+public run that this page could not have known and a reader must not gloss: **the corpus leak
+scan does not run in the private mode at all** (it needs the corpus, which that mode discards);
+a corpus-free structural audit stands in. See that artifact's §7, C15.
 
 Independent review found and this build fixed a Critical defect in that scan — it compared against
 JSON-escaped text and so was blind to any value containing a non-ASCII character, of which the shipped
@@ -158,11 +189,24 @@ test fail** — not by a green run alone.
 
 ## 7. What has NOT happened
 
-- **The authorized 30-record run has not occurred.** Records evaluated against the private sample: **0**.
-- No image has published. **CI is billing-blocked org-wide**: jobs terminate in 3–10 s with `steps: []`
+> **This entire section is SUPERSEDED as of 2026-08-08.** It was accurate on 2026-08-06.
+> Struck-through lines are retracted, not deleted.
+
+- ~~**The authorized 30-record run has not occurred.** Records evaluated against the private sample: **0**.~~
+  — **RETRACTED 2026-08-08.** The run occurred, twice, on the deployed application. **Records
+  evaluated against the private sample: 30.** Figures, and the limits on what they establish,
+  are in [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md). Two
+  things a reader must carry across with the number: the figures are **operator-relayed
+  testimony, not a captured artifact** (§0.2 there), and **only some of the twenty required
+  safety conditions were measured per-run** (§7 there).
+- ~~No image has published. **CI is billing-blocked org-wide**: jobs terminate in 3–10 s with `steps: []`
   and the annotation *"The job was not started because recent account payments have failed or your
-  spending limit needs to be increased."* Verified at `59d65c7`, `4f845ea`, `25c595d` and earlier runs.
-- Nothing here is CI-verified. Nothing has merged.
+  spending limit needs to be increased."* Verified at `59d65c7`, `4f845ea`, `25c595d` and earlier runs.~~
+  — **RETRACTED 2026-08-08.** The org-wide billing block ended on 2026-08-07; GitHub Actions
+  execute again and images publish. The repository is also public now, which it was not when
+  this line was written.
+- ~~Nothing here is CI-verified. Nothing has merged.~~ — **RETRACTED.** The work described on
+  this page has since merged, and CI has run on subsequent pull requests.
 - **No browser QA, no Playwright run, no screenshots.** See [`screenshot-inventory.md`](screenshot-inventory.md).
 - Hosted QA remains `HOSTED QA PENDING (Krish)` — `/krish` sits behind an Authentik edge this environment
   cannot authenticate to, and no image has published since `2fbecd4` regardless.
@@ -174,3 +218,8 @@ not a proof over all records, all mutations, or the private sample. It says noth
 actual 30 records pass, whether they contain schema drift, or whether AI suggestions are correct — that
 last is a separate property with separate evidence in
 [`suggestion-safety-methodology.md`](suggestion-safety-methodology.md).
+
+This bullet stands exactly as written: *these ten records* still establish nothing about the
+thirty. The separate 2026-08-08 artifact reports the thirty, and the boundary between the two
+corpora is unchanged — nothing here should be quoted as a figure about the private sample, and
+nothing there should be quoted as a figure about these ten.
