@@ -867,6 +867,59 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'validator@tablet-768x1024': 9,
       'validator@mobile-375x812': 8,
       'validator@zoom-200': { darwin: 6, linux: 7 },
+    
+      /* NARROW-WIDTH SWEEP, added 2026-08-08. The 320 and 390 narrow-width sweep (`specs/a11y-narrow.spec.ts`). These widths were
+       never scanned by the five Playwright projects (1280/1024/768/375/640@DPR2), and 320 is
+       the WCAG 1.4.10 reflow width where text wraps hardest and controls crowd. Every pair
+       here is PRE-EXISTING debt becoming visible at a width nobody had scanned — compared
+       per rule against the adjacent 375 baseline, all 49 findings sit within ±2. No new
+       defect class was found.
+
+         Every number MEASURED on BOTH platforms on the same commit and merged by
+         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
+         run rather than guessing the other. Nobody retyped a count. */
+      'evidence@width-320': 67,
+      'evidence@width-390': 68,
+      'experiments-example@width-320': 9,
+      'experiments-example@width-390': 9,
+      'experiments@width-320': 2,
+      'experiments@width-390': 2,
+      'export-readiness-done@width-320': 8,
+      'export-readiness-done@width-390': 9,
+      'export-readiness@width-320': 1,
+      'export-readiness@width-390': 1,
+      'governance@width-320': 3,
+      'governance@width-390': 3,
+      'guided-completion@width-320': 8,
+      'guided-completion@width-390': { darwin: 9, linux: 8 },
+      'load@width-320': 1,
+      'load@width-390': { darwin: 1, linux: 2 },
+      'memory-graph@width-320': 14,
+      'memory-graph@width-390': 16,
+      'memory@width-320': 17,
+      'memory@width-390': 17,
+      'record-detail@width-320': 10,
+      'record-detail@width-390': 12,
+      'schema-reference@width-320': 20,
+      'schema-reference@width-390': 22,
+      'settings-about@width-320': 14,
+      'settings-about@width-390': 14,
+      'settings-api@width-320': 17,
+      'settings-api@width-390': 17,
+      'settings-explorer@width-320': 56,
+      'settings-explorer@width-390': { darwin: 58, linux: 56 },
+      'settings-privacy@width-320': 7,
+      'settings-privacy@width-390': 7,
+      'settings@width-320': 15,
+      'settings@width-390': 15,
+      'statistics-example@width-320': 4,
+      'statistics-example@width-390': 4,
+      'statistics-mine@width-320': 2,
+      'statistics-mine@width-390': 2,
+      'statistics@width-320': 2,
+      'statistics@width-390': 2,
+      'validator@width-320': 8,
+      'validator@width-390': 8,
     },
   },
   /*
@@ -904,6 +957,15 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'evidence@desktop-1280x800': 1,
       'evidence@mobile-375x812': 1,
       'settings-api@mobile-375x812': 1,
+    
+      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (1 node per pair).
+
+         Every number MEASURED on BOTH platforms on the same commit and merged by
+         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
+         run rather than guessing the other. Nobody retyped a count. */
+      'evidence@width-320': 1,
+      'evidence@width-390': 1,
+      'settings-api@width-320': 1,
     },
   },
   {
@@ -920,6 +982,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'load@tablet-768x1024': 1,
       'load@mobile-375x812': 1,
       'load@zoom-200': 1,
+    
+      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (1 node).
+
+         Every number MEASURED on BOTH platforms on the same commit and merged by
+         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
+         run rather than guessing the other. Nobody retyped a count. */
+      'load@width-320': 1,
+      'load@width-390': 1,
     },
   },
   {
@@ -937,6 +1007,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-explorer@tablet-768x1024': 2,
       'settings-explorer@mobile-375x812': 2,
       'settings-explorer@zoom-200': 2,
+    
+      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (2 nodes), so purely width-invariant.
+
+         Every number MEASURED on BOTH platforms on the same commit and merged by
+         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
+         run rather than guessing the other. Nobody retyped a count. */
+      'settings-explorer@width-320': 2,
+      'settings-explorer@width-390': 2,
     },
   },
 ];
@@ -1328,8 +1406,18 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // lower a key onto a local darwin reading.
   //
   // 1610 - 2 = 1608 and 1612 - 2 = 1610, both CONFIRMED by the reduction.
-  darwin: 1608,
-  linux: 1610,
+  // 2026-08-08, narrow-width sweep. darwin 1608 -> 2198, linux 1610 -> 2198.
+  // +590 darwin / +588 linux, the sum of 49 newly-recorded (surface, width) pairs
+  // at 320 and 390 -- widths the five Playwright projects never scanned. The two
+  // deltas DIFFER because three pairs are platform-split
+  // (`guided-completion@width-390`, `load@width-390`, `settings-explorer@width-390`),
+  // and each of those was measured on its own platform rather than derived.
+  //
+  // This is pre-existing debt becoming VISIBLE, not new debt: compared per rule
+  // against the adjacent 375 baseline, all 49 sit within +/-2. The totals
+  // coincide at 2198 by arithmetic, not by assumption.
+  darwin: 2198,
+  linux: 2198,
 };
 
 /**
