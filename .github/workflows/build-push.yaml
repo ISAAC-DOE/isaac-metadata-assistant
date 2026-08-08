@@ -30,13 +30,44 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+    # THIS FILTER DOES NOT MEAN WHAT IT LOOKS LIKE, and the `if:` on the gate job
+    # below is what actually makes it safe.
+    #
+    # `branches:` here matches the TRIGGERING RUN's `head_branch` — and for a
+    # pull request opened from a FORK, that is the fork's branch name, recorded
+    # in this repository. A fork's default branch is `main`. This repo is public
+    # with forking enabled, so `branches: [main]` matches any fork PR opened from
+    # the fork's own `main`, by any GitHub user. Verified against real API data:
+    # base-repo runs with `head_branch: "main"` and a `head_repository` belonging
+    # to someone else are ordinary and common.
+    #
+    # That matters because a `workflow_run` workflow runs in the BASE repo with
+    # base-repo secrets and a write-scoped token. Checking out the triggering
+    # commit here and executing anything from it would hand that context to an
+    # outsider — the "pwn request" pattern. An earlier revision of this file did
+    # exactly that, and would have let any GitHub user publish an arbitrary image
+    # to GHCR and push a `v*` tag into this repo.
     branches: [main]
-  # A human pushing a release tag still goes through the same gate below; the tag
-  # path is not a bypass. Note that tags pushed by this workflow's own final step
-  # use GITHUB_TOKEN and so do not re-trigger workflows.
-  push:
-    tags:
-      - 'v*'
+
+# The `push: tags: ['v*']` trigger is deliberately GONE.
+#
+# It was here so a human could publish by pushing a release tag, and the claim
+# was that the tag path went through the same gate. It did not, and could not:
+# for a `push` event the workflow DEFINITION is read from the pushed ref's own
+# tree, so anyone able to push a tag could tag a commit whose `build-push.yaml`
+# has no gate — bypassing `main` entirely, and invisible to the wiring tests,
+# which can only inspect the file on the branch under test.
+#
+# Nothing needed it. The version tags this repo has are created by this
+# workflow's own final step using GITHUB_TOKEN, and GITHUB_TOKEN-created events
+# do not start workflow runs, so that path never re-triggered anything. Removing
+# it also disposes of a second, unresolved question — whether `github.sha` for a
+# pushed ANNOTATED tag is the commit or the tag object — which would have made
+# the documented release path fail closed for a reason nobody could see.
+#
+# If a manual release path is ever wanted, add `workflow_dispatch` with an
+# explicit sha input and route it through the same gate job. Do not reinstate a
+# trigger that reads its own definition from an untrusted ref.
 
 concurrency:
   group: build-and-push
@@ -50,6 +81,23 @@ jobs:
   gate:
     name: required CI gate
     runs-on: ubuntu-latest
+
+    # THE UNTRUSTED WORLD IS REFUSED HERE, BEFORE ANYTHING IS FETCHED.
+    #
+    # A false `if:` skips this job, and `build-and-push` needs it, so the whole
+    # workflow skips with it. Three conditions, each closing a distinct path:
+    #
+    #   * `workflow_run.event == 'push'` — a CI run triggered by a pull_request
+    #     is green against a merge-preview commit nobody is releasing.
+    #   * `head_repository.full_name == github.repository` — the fork check. This
+    #     is the one that matters; see the note on the trigger above.
+    #   * `head_branch == 'main'` — belt and braces with the trigger's filter,
+    #     which as noted is not the guarantee it appears to be.
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main'
+
     permissions:
       contents: read
       actions: read
@@ -59,16 +107,10 @@ jobs:
       - name: Resolve the commit actually under release
         id: resolve
         env:
-          EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-          PUSH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_run" ]; then
-            SHA="$WORKFLOW_RUN_SHA"
-          else
-            SHA="$PUSH_SHA"
-          fi
+          SHA="$WORKFLOW_RUN_SHA"
           if [ -z "$SHA" ]; then
             echo "could not resolve a commit to release; refusing" >&2
             exit 1
@@ -76,10 +118,21 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "commit under release: $SHA"
 
-      - name: Check out the gate script at the released commit
+      # NO `ref:`. Under `workflow_run` the default is the DEFAULT BRANCH tip —
+      # the same trusted ref this workflow file itself was read from. Checking
+      # out the released commit here would execute code from the tree being
+      # gated, which is the thing a gate must never do: the gate script would
+      # then be whatever that tree says it is.
+      #
+      # This costs nothing on the legitimate path. `ci_release_gate.py` is a
+      # stdlib-only decision function whose behaviour does not depend on the tree
+      # it is judging — it asks the Actions API about a sha. The BUILD job below
+      # is where the released tree is checked out, and by then the gate has
+      # already passed.
+      - name: Check out the gate script from the trusted default branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.resolve.outputs.sha }}
+          persist-credentials: false
 
       # This is the enforcement point. It exits non-zero unless the required CI
       # workflow CONCLUDED SUCCESS for exactly this commit, on main, from a push
@@ -107,25 +160,44 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
           # The gate-approved commit, never the branch tip, which may have moved.
+          # A test pins this line as well as the build-arg below: reverting only
+          # this one would build a DIFFERENT tree while `ISAAC_BUILD_COMMIT` kept
+          # reporting the gated commit — a health endpoint describing a tree that
+          # was never built.
           ref: ${{ needs.gate.outputs.sha }}
+
+      # Belt and braces on top of the gate: the released commit must be an
+      # ancestor of `main`. The gate already establishes this via the Actions
+      # API, so this can only fire if that reasoning is wrong — which is exactly
+      # when a second, independent check earns its place.
+      - name: Refuse a commit that is not on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${{ needs.gate.outputs.sha }}" origin/main; then
+            echo "refusing: ${{ needs.gate.outputs.sha }} is not an ancestor of origin/main" >&2
+            exit 1
+          fi
 
       - name: Get version
         id: version
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          else
-            # Auto-increment: find latest tag and bump patch
-            LATEST=$(git tag -l 'v*' --sort=-v:refname | head -n1)
-            if [ -z "$LATEST" ]; then
-              echo "version=0.0.1" >> $GITHUB_OUTPUT
-            else
-              VERSION=${LATEST#v}
-              IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-              echo "version=$MAJOR.$MINOR.$((PATCH + 1))" >> $GITHUB_OUTPUT
-            fi
+          set -euo pipefail
+          # Auto-increment: find latest tag and bump patch.
+          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$LATEST" ]; then
+            # REFUSE rather than default to 0.0.1. This repo is well past v0.0.42,
+            # so an empty tag list means the fetch did not bring tags, not that
+            # this is the first release — and defaulting would overwrite `:0.0.1`
+            # AND `:latest` with a build nobody asked for.
+            echo "refusing: no v* tag found. Tags were not fetched, or history is wrong." >&2
+            exit 1
           fi
+          VERSION=${LATEST#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          echo "version=$MAJOR.$MINOR.$((PATCH + 1))" >> $GITHUB_OUTPUT
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -151,8 +223,10 @@ jobs:
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
 
+      # No `if:` guarding against a tag ref any more — the tag trigger is gone,
+      # so this workflow only ever runs from `workflow_run`, and the tag it
+      # creates points at the checked-out gate-approved commit.
       - name: Create and push git tag
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
           TAG="v${{ steps.version.outputs.version }}"
           if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then

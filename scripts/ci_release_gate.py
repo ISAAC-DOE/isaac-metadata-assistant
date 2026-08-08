@@ -44,8 +44,20 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-#: The workflow whose success is required before anything may be published.
-#: This is the ``name:`` field of ``.github/workflows/ci.yml``, not its filename.
+#: The workflow whose success is required before anything may be published,
+#: identified by its FILE PATH.
+#:
+#: It used to be identified by display ``name:``, which is mutable and not
+#: unique. Two failure directions followed from that, and an adversarial review
+#: demonstrated both against this module: rename ``ci.yml``'s ``name:`` and every
+#: release silently stops; add any second workflow also displaying as ``CI`` and
+#: it becomes an alternate authority whose green can authorise a publish while
+#: the real CI is red.
+REQUIRED_WORKFLOW_PATH = ".github/workflows/ci.yml"
+
+#: Kept only so failure messages name something a human recognises. It is NOT
+#: what the gate matches on. ``test_release_gate.py`` pins it to ``ci.yml``'s
+#: actual ``name:`` so the two cannot drift into a misleading message.
 REQUIRED_WORKFLOW_NAME = "CI"
 
 #: The only branch a deployable image may be built from.
@@ -99,50 +111,86 @@ def _fetch_runs(repo: str, sha: str, token: str | None, *, api_root: str) -> lis
         raise GateRefusal(f"the Actions API returned HTTP {exc.code}, so CI status is unknown") from exc
     except urllib.error.URLError as exc:  # pragma: no cover - exercised via injected fetcher
         raise GateRefusal(f"the Actions API was unreachable ({exc.reason}), so CI status is unknown") from exc
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:  # noqa: BLE001 - deliberately broad; see below
+        # A read timeout raises TimeoutError and a non-JSON error page raises
+        # JSONDecodeError, neither of which is a URLError. Uncaught, those left
+        # the process on a traceback — still a non-zero exit, so still fail-closed,
+        # but fail-closed BY ACCIDENT rather than by design, and printing a stack
+        # trace where the docstring promised a refusal with a reason. Anything
+        # that goes wrong reaching the API means CI status is unknown, and
+        # unknown is refusal.
+        raise GateRefusal(
+            f"the Actions API could not be read ({type(exc).__name__}: {exc}), so CI status is unknown"
+        ) from exc
     runs = payload.get("workflow_runs")
     if not isinstance(runs, list):
         raise GateRefusal("the Actions API response had no workflow_runs list, so CI status is unknown")
     return runs
 
 
-def _relevant(runs: Iterable[dict[str, Any]], sha: str) -> list[dict[str, Any]]:
+def _relevant(runs: Iterable[dict[str, Any]], sha: str, repo: str) -> list[dict[str, Any]]:
     """Runs of the required workflow, for this exact commit, on the release branch.
 
     Every filter here is a way the gate could otherwise be fooled, so each is
     checked rather than assumed: the API is asked for one ``head_sha`` but the
     answer is re-checked, because trusting a query parameter to have been honoured
     is the same class of mistake as trusting CI to have run.
+
+    ``head_repository`` is the one that is easy to leave out and expensive to
+    omit. A pull request opened from a FORK produces a run recorded in THIS
+    repository whose ``head_branch`` is the fork's branch name — and a fork's
+    default branch is ``main``. Without this check, a stranger's green run on
+    their own ``main`` satisfies every other filter here.
     """
     kept = []
     for run in runs:
         if not isinstance(run, dict):
             continue
-        if run.get("name") != REQUIRED_WORKFLOW_NAME:
+        if run.get("path") != REQUIRED_WORKFLOW_PATH:
             continue
-        if run.get("head_sha") != sha:
+        if str(run.get("head_sha") or "").lower() != sha:
             continue
         if run.get("head_branch") != RELEASE_BRANCH:
             continue
         if run.get("event") not in RELEASE_EVENTS:
             continue
+        head_repo = run.get("head_repository")
+        if not isinstance(head_repo, dict) or head_repo.get("full_name") != repo:
+            continue
         kept.append(run)
     return kept
 
 
-def _latest_attempt(runs: list[dict[str, Any]]) -> dict[str, Any]:
-    """The most recent attempt wins, so a rerun-to-green can authorise a publish.
+def _all_succeeded(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The run to report on if every relevant run is green, else the offender.
 
-    That is deliberate and is the one direction the gate is permissive in: a red
-    run that a human reruns successfully *is* a commit whose required CI has
-    concluded successfully. What the old pipeline did — publish while CI was still
-    running — is a different thing entirely, and stays refused.
+    Returns ``None`` when all are green; otherwise returns the first run that is
+    not, so the caller can name it.
+
+    **This used to pick a single "latest attempt" and judge only that**, ordering
+    by ``run_attempt`` — which is a number that only means anything WITHIN one
+    run id. An adversarial review showed the consequence: a stale run sitting at
+    attempt 3 outranked a newer run at attempt 1, so a green from the morning
+    could authorise a publish while the most recent CI verdict for that same
+    commit was ``failure``. Reachable by a force-push of ``main`` back onto a
+    commit, or a revert-and-re-merge of the same tree.
+
+    Requiring *all* of them removes the ordering question entirely, which is
+    better than getting the ordering right: there is no comparison left to get
+    wrong. It is also the honest reading of the invariant — if any completed CI
+    verdict for this commit says failure, the commit does not have a clean
+    required-CI result.
+
+    Note the API returns ONE record per run, reflecting that run's latest
+    attempt. So a rerun-to-green updates the existing record rather than adding
+    one, and the ordinary case here is a list of length 1.
     """
-
-    def sort_key(run: dict[str, Any]) -> tuple[int, str]:
-        attempt = run.get("run_attempt")
-        return (attempt if isinstance(attempt, int) else 0, str(run.get("updated_at") or ""))
-
-    return sorted(runs, key=sort_key)[-1]
+    for run in runs:
+        if run.get("status") != "completed" or run.get("conclusion") != "success":
+            return run
+    return None
 
 
 def evaluate(
@@ -163,44 +211,48 @@ def evaluate(
     if not _looks_like_sha(sha):
         return Decision(False, str(sha or ""), "no full 40-character commit sha was supplied to check CI against")
 
+    # Compared case-insensitively against the API's value below, so normalise
+    # once here. `_looks_like_sha` accepts uppercase; without this an uppercase
+    # input matched nothing and became the indistinguishable "no CI run found".
+    sha = sha.lower()
+
     fetch = fetcher or (lambda: _fetch_runs(repo, sha, token, api_root=api_root))
     try:
         runs = fetch()
     except GateRefusal as exc:
         return Decision(False, sha, str(exc))
 
-    candidates = _relevant(runs, sha)
+    candidates = _relevant(runs, sha, repo)
     if not candidates:
         return Decision(
             False,
             sha,
-            f"no completed {REQUIRED_WORKFLOW_NAME!r} run exists for this commit on {RELEASE_BRANCH!r} "
-            "— absence of a result is refusal, not permission",
+            f"no completed {REQUIRED_WORKFLOW_PATH!r} run exists for this commit on {RELEASE_BRANCH!r} "
+            f"in {repo!r} — absence of a result is refusal, not permission",
         )
 
-    run = _latest_attempt(candidates)
-    status = run.get("status")
-    conclusion = run.get("conclusion")
-
-    if status != "completed":
+    offender = _all_succeeded(candidates)
+    if offender is not None:
+        status = offender.get("status")
+        if status != "completed":
+            return Decision(
+                False,
+                sha,
+                f"a required {REQUIRED_WORKFLOW_NAME!r} run for this commit is {status!r}, not finished "
+                "— publishing before CI finishes is the exact defect this gate exists to stop",
+            )
         return Decision(
             False,
             sha,
-            f"the required {REQUIRED_WORKFLOW_NAME!r} run is {status!r}, not finished — "
-            "publishing before CI finishes is the exact defect this gate exists to stop",
-        )
-    if conclusion != "success":
-        return Decision(
-            False,
-            sha,
-            f"the required {REQUIRED_WORKFLOW_NAME!r} run concluded {conclusion!r}, not 'success'",
+            f"a required {REQUIRED_WORKFLOW_NAME!r} run for this commit concluded "
+            f"{offender.get('conclusion')!r}, not 'success'",
         )
 
-    attempt = run.get("run_attempt", 1)
     return Decision(
         True,
         sha,
-        f"the required {REQUIRED_WORKFLOW_NAME!r} run (attempt {attempt}) concluded 'success' for this commit",
+        f"all {len(candidates)} required {REQUIRED_WORKFLOW_NAME!r} run(s) for this commit "
+        "concluded 'success'",
     )
 
 
