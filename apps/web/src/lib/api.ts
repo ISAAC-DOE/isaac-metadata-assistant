@@ -57,6 +57,7 @@ import type {
   ApiValidateResult,
   ApiWarningsResponse,
   EvidenceBundle,
+  ExperimentGraphBundle,
   ExportReadinessBundle,
   RecordBundle,
 } from './types';
@@ -957,6 +958,29 @@ export const api = {
       sourcePreviews[f] = previews[i];
     });
     return { detail, evidence, artifacts, graph, sourcePreviews, classification };
+  },
+
+  /**
+   * The EXPERIMENT-SCOPED graph bundle — seven EXISTING endpoints, fetched
+   * concurrently and kept as separate values.
+   *
+   * No backend route was added or changed for the experiment graph: every fact
+   * it draws is already served to the record screens. It is fetched lazily (only
+   * when the Graph view is opened) and re-fetched per mount rather than cached,
+   * which is what makes a stale experiment graph structurally impossible.
+   */
+  async getExperimentGraphBundle(id: string): Promise<ExperimentGraphBundle> {
+    const [detail, groups, evidence, artifacts, validate, warnings, classification] =
+      await Promise.all([
+        this.getExperiment(id),
+        this.getDraftGroups(id),
+        this.getEvidence(id),
+        this.getArtifacts(id),
+        this.validate(id),
+        this.getWarnings(id),
+        this.getEvidenceClassification(id),
+      ]);
+    return { detail, groups, evidence, artifacts, validate, warnings, classification };
   },
 } as const;
 
