@@ -468,7 +468,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          would have written `{ darwin: 11, linux: 12 }`, which is wrong. */
       'record-detail@desktop-1280x800': 17,
       'record-detail@laptop-1024x768': 17,
-      'record-detail@tablet-768x1024': { darwin: 16, linux: 15 },
+      /* linux 15 -> 14: the 320px clipping fix (min-width/overflow-wrap on
+         `.fg-summary`, scoped to `.record-view-panel`) let the summary WRAP
+         instead of running past its clip, and one contrast node stopped firing
+         on the Linux face. An IMPROVEMENT, measured in CI, not a baseline
+         loosening. darwin measured 16 on the same commit and is unchanged —
+         the two faces wrap at different words, which is the entire reason this
+         file has two columns. */
+      'record-detail@tablet-768x1024': { darwin: 16, linux: 14 },
       'record-detail@mobile-375x812': 12,
       'record-detail@zoom-200': 14,
       'schema-reference@desktop-1280x800': 19,
@@ -1314,8 +1321,11 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // so this is arithmetic over measured deltas, which is the only kind this file
   // permits. `record-detail@tablet-768x1024` did not move on either platform and
   // contributes 0.
+  // Revised in the same slice: linux 1614 -> 1613 for the tablet improvement
+  // above (-1, measured in CI). darwin is unaffected and stays 1613, so the two
+  // totals coincide here by arithmetic rather than by assumption.
   darwin: 1613,
-  linux: 1614,
+  linux: 1613,
 };
 
 /**
