@@ -25,7 +25,11 @@ in session and nowhere in the repository** — `grep -rn "PRIVATE_30_VERIFICATIO
 returned nothing. A verdict that exists only in a conversation is not evidence, so it is
 recorded here with its conditions attached.
 
-**What the verdict rests on.** All of the following were observed on both runs:
+**What the verdict rests on.** Every figure in this list is **operator-relayed testimony** —
+read off the screen in an authenticated browser session by the project owner and relayed, with
+no response body captured anywhere. That qualification belongs here, at the point of use, and
+not only in §0.2 forty lines below, which is where it used to live alone. With it stated: the
+following were reported on both runs.
 
 - 30 records read; official validation **30 passing / 0 failing**;
 - the advisory format shadow **30 passing / 0 failing**;
@@ -36,8 +40,14 @@ recorded here with its conditions attached.
 - `dml_statements: 0` and `ddl_statements: 0`, as **counted** values;
 - `transaction_read_only: verified`, read back from the server rather than declared;
 - `source_records_modified: verified` and `private_values_exposed: verified`;
-- `official_validator_unchanged: verified`, from a runtime probe;
-- a second, genuinely fresh execution differing in **0** of 50 deterministic fields.
+- `official_validator_unchanged: verified`, from a runtime probe.
+
+And one further figure that deliberately sits outside that list, because it is not the kind of
+thing that can be "observed on both runs": ~~a second, genuinely fresh execution differing in
+**0** of 50 deterministic fields~~ — **restated 2026-08-08 —** the two runs were compared with
+each other **once**, and that single cross-run comparison found **0** differences across 50
+deterministic fields (§4). One comparison over two runs is not an observation made on each of
+them, and listing it beside the per-run figures blurred that.
 
 **What the verdict does NOT cover.** It is a pass over *this corpus, on these two runs, for
 the conditions actually measured*. It is **not**:
@@ -45,8 +55,9 @@ the conditions actually measured*. It is **not**:
 - a per-record claim of any kind (§5, first bullet);
 - a claim of scientific correctness (§5);
 - a claim that every safety condition in the authorizing instruction was *measured* —
-  **§7 walks all twenty and marks each one measured / structural / not measured**, and
-  three of them are not measurements at all;
+  **§7 walks a reconstructed twenty-item list and marks each one measured / structural /
+  not measured**, and three of them are not measurements at all. That list was
+  reconstructed *after* the run and is not pre-registered criteria; §7's opening says so;
 - a claim that any database **row** was compared before and after (it was not — §7, C12);
 - a claim about future runs, other corpora, or the deployment in general.
 
@@ -100,8 +111,13 @@ Three programs over one corpus, in a single pass, on the deployed application:
 3. **A deterministic mutation harness** — deep-clones each record, mutates only the clone,
    and checks the validator reacted as the injected change intended.
 
-Records were read one at a time, deep-copied in memory, mutated only as copies, and
-discarded. The corpus was never retained.
+Records were parsed one at a time, deep-copied in memory, mutated only as copies, and
+discarded. Stated precisely, because a looser earlier wording ("read one at a time… the corpus
+was never retained") overclaimed: the raw rows arrive as **one bounded page which is held
+whole**, capped by `MAX_RECORDS_CEILING` and identical to what the driver had already buffered;
+rows are released progressively as they are consumed; exactly one *parsed* record exists at a
+time; and **nothing is retained past the sweep**. That last property — not an impossibility of
+holding the rows — is what the corpus-retention condition actually rests on. See §7, C13.
 
 ## 2. Results
 
@@ -153,14 +169,14 @@ category by elimination) was armed throughout and simply had no input.
 
 **One row is asserted, not measured, and saying so is the point of this table.**
 `export_gating_unchanged` is a fixed literal in the report builder
-(`apps/api/isaac_api/verification.py:1149`). Its backing is real but static: this module
+(`apps/api/isaac_api/verification.py:1187`). Its backing is real but static: this module
 imports nothing from the export path and writes nothing, and a test asserts that
 import-absence mechanically. That is a good guarantee — but it is a property of the code,
 established in CI, **not a measurement taken during this run**, and it would not notice a
 change made after the test last ran.
 
 Contrast `official_validator_unchanged` immediately above it, which *is* a runtime probe
-(`verification.py:1143`, calling `_official_validator_is_unchanged`): it loads the official
+(`verification.py:1181`, calling `_official_validator_is_unchanged`): it loads the official
 validator on the running deployment and checks it is still format-blind, so it would flip to
 `unverified` in production rather than only failing a test.
 
@@ -208,12 +224,16 @@ Every figure in §2 and §3 is identical across both runs.
   that the suppression mechanism is effective, since it had no input to act on.
 - **Two runs establish reproducibility, not stability over time.** They ran about an hour
   apart against the same deployment and the same data.
-- **The corpus leak scan did not run in this mode.** It needs the corpus, and this mode
-  discards it. A different, corpus-free check stood in. See §7, C15 — this was undisclosed
-  here until 2026-08-08.
-- **Seven safeguards is not twenty conditions.** §7 walks all twenty required conditions and
+- **The corpus leak scan did not run in this mode.** It needs the corpus, and this mode does
+  not retain it past the sweep — and the skip is a *design decision* (`records = None`), not
+  something the code was unable to do. A different, corpus-free check stood in. See §7, C15 —
+  this was undisclosed here until 2026-08-08.
+- **Seven safeguards is not twenty conditions.** §7 walks a twenty-item condition list and
   marks each measured / structural / not measured; three are not measurements, and one
-  (no source **row** compared, §7 C12) was never measured at all.
+  (no source **row** compared, §7 C12) was never measured at all. That list is a
+  **reconstruction written after the run**, not pre-registered execution criteria, and even
+  its cardinality is reconstructed — §7's opening and its honesty notes 1 and 2 state the
+  consequences, including that the list post-dates the results by about seven hours.
 - **Everything numeric on this page is operator-relayed testimony**, not an inspected
   response body. §0.2 states the scope of that limitation.
 
@@ -231,10 +251,17 @@ One honest limitation of that scanner: its **key allowlist** is the primary defe
 text placed under an *approved* key would not be caught by any content pattern, which is why
 this artifact contains only enumerated scalars and prose written for publication.
 
-## 7. All twenty required conditions, and which of them were measured
+## 7. The reconstructed safety-condition checklist, and which of them were measured
 
-The authorizing instruction listed **twenty** safety conditions. §3 reports seven safeguard
-rows, which is roughly a third of them — and reporting a third of a list without saying so
+> **This section is a RECONSTRUCTED AUDIT CHECKLIST, not pre-registered execution criteria.**
+> The authorizing instruction was given in session and no copy of it is committed, so the
+> conditions below — **and the count "twenty" itself** — are this document's reconstruction,
+> written *after* the run. "Twenty" is therefore not an independently attested cardinality and
+> must not be quoted as one; the document already concedes that two of the twenty (C2 and C3)
+> are one measurement reported as two conditions. Honesty notes 1 and 3 below give the detail.
+
+Read on that footing: the reconstruction lists **twenty** safety conditions. §3 reports seven
+safeguard rows, which is roughly a third of them — and reporting a third of a list without saying so
 lets a reader assume the other two thirds were checked and simply not tabulated. They were
 not all checked. This section states, for every condition, one of three verdicts:
 
@@ -244,16 +271,31 @@ not all checked. This section states, for every condition, one of three verdicts
 | **holds structurally** | a property of the code, established by review and/or a CI test — true of the build, **not** an observation of the run |
 | **not measured** | neither of the above; the condition is argued for, not checked |
 
-**Two honesty notes about this section itself, before the table.**
+**Three honesty notes about this section itself, before the table.**
 
-1. **The twenty-item list is reconstructed, not quoted.** The authorizing instruction was
-   given in session and **no copy of it is committed to this repository**, so the wording and
-   grouping below are this document's reconstruction from the instruction as relayed, the
-   safeguard set the endpoint actually serves, and
-   [`record-verification-methodology.md`](record-verification-methodology.md) §7. If the
-   original list is ever committed and disagrees, the original wins and this table is the bug
-   — the same rule the publication approval already sets for its own allowlist.
-2. **"Holds structurally" is a real guarantee and a weaker one.** It is established in CI
+1. **The twenty-item list is reconstructed, not quoted — and so is the number twenty.** The
+   authorizing instruction was given in session and **no copy of it is committed to this
+   repository**, so the wording, the grouping *and the cardinality* below are this document's
+   reconstruction from the instruction as relayed, the safeguard set the endpoint actually
+   serves, and [`record-verification-methodology.md`](record-verification-methodology.md) §7.
+   The count is soft in a way the table can be seen making: C2 and C3 are **one** server-side
+   read-back reported as two conditions (see C3 and the summary), so a differently-grouped
+   reconstruction of the same instruction would not have said "twenty". If the original list
+   is ever committed and disagrees, the original wins and this table is the bug — the same
+   rule the publication approval already sets for its own allowlist.
+
+2. **This checklist was written AFTER the results were known.** The run and its first evidence
+   artifact were committed in `95e9d64` (2026-08-07 19:28). This §7 twenty-condition list first
+   appears in `0edad53` (2026-08-08 02:14) — about seven hours later. So the author fixing
+   *what the conditions were* already knew *which results existed*: which checks had passed,
+   which had never run, and which had never been measured at all. That is the reverse of
+   pre-registration, and it is the weakness a reader should hold against this section. It does
+   not make any individual verdict below false — each cites a basis that can be checked
+   independently — but it does mean the **set** is not evidence that the right things were
+   required in advance, and a list assembled with the answers in hand can be shaped to them,
+   unconsciously or otherwise. Read §7 as an after-the-fact audit of what was done, never as
+   the criteria the run was held to while it ran.
+3. **"Holds structurally" is a real guarantee and a weaker one.** It is established in CI
    against the committed code, so it would not notice a change made after the test last ran,
    and it is not evidence that anything happened during this run. §3 already makes exactly
    this distinction for one row; this table applies it to all twenty.
@@ -279,14 +321,14 @@ not all checked. This section states, for every condition, one of three verdicts
 |---|---|---|---|
 | C11 | Each record is deep-copied and only the copy is mutated | **measured per-run** | `source_mutation_failures: 0` — the oracle re-reads each source object after every trial |
 | C12 | **No source ROW changed** | **not measured** | This is the one worth reading twice. What was compared is the **in-memory source object**, before and after each trial (C11, and `source_records_modified` in §3). **No database row was re-read and compared after the run** — it could not be, because the connection is closed before the sweep begins (C8). The zero-write position rests on C2–C7, not on a row-level before/after comparison, and this artifact should never be cited as evidence that a stored row was checked |
-| C13 | The corpus is not retained | **holds structurally** | records are streamed and discarded one at a time; never all in memory at once. Not separately measured — and see C15, which is the price paid for it |
+| C13 | The corpus is not retained | **holds structurally** | ~~records are streamed and discarded one at a time; never all in memory at once~~ — **CORRECTED 2026-08-08, because the code says otherwise and already said so in its own docstring.** `DatastoreRecordProvider._drain` accumulates the ENTIRE bounded page into one `rows` list and returns it whole (`apps/api/isaac_api/db_provider.py:857-862`). The accurate statement, which is the one the module itself makes (`db_provider.py:738-742`): **the raw drained page IS held**, bounded by `MAX_RECORDS_CEILING` and identical to what the driver had already buffered client-side; **rows are released progressively as they are consumed** (the list is popped and cleared, `:760-791`); **exactly one *parsed* record exists at a time**; and **nothing is retained past the sweep**, which is why the corpus is unavailable at report-assembly time. The condition holds on non-retention, NOT on an "all in memory" impossibility. Not separately measured — and see C15, which is the price paid for it |
 
 ### Output and privacy
 
 | # | Condition | Verdict | Basis |
 |---|---|---|---|
 | C14 | No private value appears in the served payload | **measured per-run** | `private_values_exposed: verified`, computed over the **assembled** payload by a structural string allowlist plus a planted-sentinel canary that proves the allowlist is not a no-op |
-| C15 | **The corpus leak scan does not run in this mode** | **DISCLOSURE — not a check that ran** | `_leak_scan` compares the payload against the corpus's own strings, so it *requires the corpus*. In this mode the corpus is streamed and discarded (C13) and is never available to scan against, so **it did not run**. `_structural_string_audit` stands in, asking the complementary question — *is every served string accountable to public information?* — which needs no corpus. That substitution is documented in the engine and is arguably the stronger question, since it catches a string arriving by a route nobody anticipated. **It was nevertheless undisclosed on this page until 2026-08-08, and that omission mattered**: a reader comparing this run to the public one would reasonably assume the same two scans ran in both, and they did not |
+| C15 | **The corpus leak scan does not run in this mode** | **DISCLOSURE — not a check that ran** | `_leak_scan` compares the payload against the corpus's own strings, so it *requires the corpus*. In this mode the corpus is consumed and dropped as the sweep proceeds (C13) — it is ~~never available to scan against~~ **not retained past the sweep, and therefore unavailable at report-assembly time**, which is when this scan would run — so **it did not run**. Two precisions the earlier wording elided. First, the raw page IS held whole while the sweep runs (C13); the property being relied on is non-retention afterwards, not an impossibility of holding it. Second, **the skip is a DESIGN DECISION, not a physical impossibility**: `run_verification` sets `records = None` for this mode (`apps/api/isaac_api/verification.py:1072`), and the corpus *could* be retained to make the scan runnable. It deliberately is not, because non-retention is worth more than the scan. `_structural_string_audit` stands in, asking the complementary question — *is every served string accountable to public information?* — which needs no corpus. That substitution is documented in the engine and is arguably the stronger question, since it catches a string arriving by a route nobody anticipated. **It was nevertheless undisclosed on this page until 2026-08-08, and that omission mattered**: a reader comparing this run to the public one would reasonably assume the same two scans ran in both, and they did not |
 | C16 | No private value appears in **logs** | **holds by structural ABSENCE** | there is **no logging call on this path** — neither the verification engine nor the datastore provider emits a log record, a warning or a print. So the condition holds because there is nothing that could log, which is *not* the same as a check that inspected log output and found it clean. No log was captured, examined, or asserted about |
 | C17 | Aggregate only — no identifier, title, field value, evidence entry or per-record outcome | **holds structurally, plus enforced at publication** | the report builder projects every block through a frozen key allowlist, and the published artifact is additionally scanned by a closed allowlist with poisoned controls |
 | C18 | Disclosure floor applied unconditionally | **armed, not exercised** | both distributions were empty (§2), so the suppression machinery had **no input**. Arming is structural; this run is not evidence that it suppresses correctly |
@@ -295,8 +337,8 @@ not all checked. This section states, for every condition, one of three verdicts
 
 | # | Condition | Verdict | Basis |
 |---|---|---|---|
-| C19 | The official validator is unchanged | **measured per-run** | runtime probe of the loaded validator (`verification.py:1143`), so it would flip on the running deployment rather than only in a unit test |
-| C20 | Export gating is unchanged | **not measured — asserted** | a fixed literal at `verification.py:1149`, backed by a mechanical import-absence test in CI. **Already disclosed in §3**, which explains why the distinction matters; repeated here so the twenty-condition walk does not appear to add a measurement it does not have |
+| C19 | The official validator is unchanged | **measured per-run** | runtime probe of the loaded validator (`verification.py:1181`), so it would flip on the running deployment rather than only in a unit test |
+| C20 | Export gating is unchanged | **not measured — asserted** | a fixed literal at `verification.py:1187`, backed by a mechanical import-absence test in CI. **Already disclosed in §3**, which explains why the distinction matters; repeated here so the twenty-condition walk does not appear to add a measurement it does not have |
 
 ### Summary of the walk
 

@@ -812,6 +812,25 @@ so no application route reaches it.
 `v0.0.32`, and only Dean can say whether they were within his intent. Do not restore any of them
 without his answer, and do not repeat "aggregate output is authorized" without this qualification.
 
+**The authorized private verification mode HAS RUN (2026-08-08), verdict
+`PRIVATE_30_VERIFICATION_PASS`.** Terminology first, because it has been got wrong: this is the
+**authorized private verification mode** — a bounded diagnostic/verification path over the
+authorized 30-record production-derived corpus that returns only sanitized aggregate results. It
+is not a "privacy mode" and not a user-facing toggle. It was unreachable until `e710f4a` gave the
+verification route a `?mode=` parameter; it then executed **twice** on the deployed application.
+Reported: 30 records read, official validation **30 passing / 0 failing**, **0** unexpected
+mutation outcomes over 9,136 applicable trials, **0** oracle failures, `dml_statements: 0` and
+`ddl_statements: 0`. **The limits are as load-bearing as the verdict and must travel with it:**
+the figures are **operator-relayed testimony, not a captured artifact** (no response body exists
+in this repository, by design); only *some* of the safety conditions were measured per-run, and
+that condition list is a **reconstruction written ~7 hours after the run**, not pre-registered
+criteria; **no database row was re-read and compared** after the sweep (the connection closes
+first); and the corpus leak scan **did not run** in this mode — a corpus-free structural audit
+stood in, and that skip is a *design decision* (the corpus is not retained past the sweep), not
+an impossibility. **No image build or rollout was observed from this environment**, so nothing
+about which image `/krish` serves is verified here. Evidence, with every qualification attached:
+[`docs/evidence/private-30-verification-2026-08-08.md`](docs/evidence/private-30-verification-2026-08-08.md).
+
 **The Authentik header contract has been OBSERVED, and the probe that observed it is GONE
 (2026-08-02).** A temporary endpoint `POST {base}/api/runtime/identity/probe` shipped in `v0.0.42`
 (`d521dd7`), ran once in an authenticated session — **operator testimony, not a captured artifact; see

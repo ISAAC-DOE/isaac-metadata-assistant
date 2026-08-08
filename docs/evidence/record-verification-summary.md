@@ -193,12 +193,20 @@ test fail** — not by a green run alone.
 > Struck-through lines are retracted, not deleted.
 
 - ~~**The authorized 30-record run has not occurred.** Records evaluated against the private sample: **0**.~~
-  — **RETRACTED 2026-08-08.** The run occurred, twice, on the deployed application. **Records
-  evaluated against the private sample: 30.** Figures, and the limits on what they establish,
-  are in [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md). Two
-  things a reader must carry across with the number: the figures are **operator-relayed
-  testimony, not a captured artifact** (§0.2 there), and **only some of the twenty required
-  safety conditions were measured per-run** (§7 there).
+  — **RETRACTED 2026-08-08.** The run occurred, twice, on the deployed application, and the
+  recorded verdict is:
+
+  ```
+  PRIVATE_30_VERIFICATION_PASS
+  ```
+
+  **Records evaluated against the private sample: 30.** Figures, and the limits on what they
+  establish, are in [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md).
+  Three things a reader must carry across with the verdict: the figures are **operator-relayed
+  testimony, not a captured artifact** (§0.2 there); **only some of the safety conditions were
+  measured per-run** (§7 there), and that condition list is itself a **reconstruction written
+  after the run**, not pre-registered criteria; and the verdict is a pass over *that corpus, on
+  those two runs, for the conditions actually measured* — nothing wider.
 - ~~No image has published. **CI is billing-blocked org-wide**: jobs terminate in 3–10 s with `steps: []`
   and the annotation *"The job was not started because recent account payments have failed or your
   spending limit needs to be increased."* Verified at `59d65c7`, `4f845ea`, `25c595d` and earlier runs.~~
@@ -209,7 +217,13 @@ test fail** — not by a green run alone.
   this page has since merged, and CI has run on subsequent pull requests.
 - **No browser QA, no Playwright run, no screenshots.** See [`screenshot-inventory.md`](screenshot-inventory.md).
 - Hosted QA remains `HOSTED QA PENDING (Krish)` — `/krish` sits behind an Authentik edge this environment
-  cannot authenticate to, and no image has published since `2fbecd4` regardless.
+  cannot authenticate to ~~, and no image has published since `2fbecd4` regardless~~ — **RETRACTED
+  2026-08-08.** That clause contradicted the billing-block retraction two bullets above, and it could not
+  have been true alongside this page's own central fact: the authorized private verification mode was
+  wired in `e710f4a`, and it then ran **on the deployment** — which requires an image carrying `e710f4a`
+  to have published. The honest statement is narrower and is about this environment, not about the world:
+  **no image build or rollout was observed from here.** Which image `/krish` is serving has not been
+  verified by this session, and no rollout is claimed as verified.
 
 ## 8. What these results do not establish
 
