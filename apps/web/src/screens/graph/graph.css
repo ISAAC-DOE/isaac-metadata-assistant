@@ -450,13 +450,26 @@
    dispatch. Deliberately NOT styled as a terminal or a chat: one input row, a
    compact completion list, and a short ephemeral results log. Every border here
    is a full `border:` shorthand (no-vertical-rail.test.ts). */
+/* THE SURFACE IS TINTED AT REST, not only on interaction. An earlier pass put
+   the indigo on FOREGROUNDS only (`--assist-text` labels on white/plain fills),
+   and the result read as navy-on-grey: the product owner looked at the rendered
+   screen and asked why it was not purple, and an independent reviewer called it
+   "nearly invisible at rest". Both were right, and the diagnosis is the same —
+   the Assistant reads purple because its SURFACES carry `--assist-tint` /
+   `--assist-panel-bg` fills with `--assist-border` edges (assistant.css
+   `.assistant-jump` :424-426, `.kind-badge-deterministic` :381,
+   `.assistant-msg` :330-331), not because its text is indigo.
+   So this box now wears the same soft `--assist-panel-bg` wash the Assistant's
+   own panels wear. `--assist-border` is 1.24:1 on the white card behind it —
+   lighter than 3:1, but STRONGER than the `--border-faint` (1.11:1) it replaces,
+   so the container edge improves rather than regresses. */
 .graph-cmd {
   position: relative;
   margin-top: 12px;
   padding: 9px 11px 10px;
-  border: 1px solid var(--border-faint);
+  border: 1px solid var(--assist-border);
   border-radius: var(--radius-inner);
-  background: var(--surface-subtle);
+  background: var(--assist-panel-bg);
 }
 .graph-cmd-row {
   display: flex;
@@ -471,25 +484,42 @@
   flex: 1 1 260px;
   min-width: 160px;
   padding: 6px 10px;
-  border: 1px solid var(--border-input);
+  border: 1px solid var(--assist);
   border-radius: var(--radius-control);
   background: var(--surface);
 }
-/* Focus/active. The command surface wears the ASSISTANT indigo family
-   (--assist*, tokens.css "assistant — indigo"), not the task-action blue: this
-   bar and the Assistant are the two conversational, non-authoritative entry
-   points in the app, and they now read as one family. Nothing about the graph
-   itself moves — see the note above `.graph-canvas`. `--assist` is 5.79:1 on
-   the bar's own `--surface-subtle` and 5.95:1 on the field's `--surface`, so
-   the indicator clears the 3:1 non-text minimum with room to spare. */
+/* The command surface wears the ASSISTANT indigo family (--assist*, tokens.css
+   "assistant — indigo"), not the task-action blue: this bar and the Assistant
+   are the two conversational, non-authoritative entry points in the app, and
+   they read as one family. Nothing about the graph itself moves — see the note
+   above `.graph-canvas`.
+
+   THE RESTING BORDER IS `--assist`, NOT `--assist-border`. Two reasons, and the
+   second is the load-bearing one:
+   (1) the field is white on a `--assist-panel-bg` wash, so a `--assist-border`
+       edge would be 1.17:1 against its own container — fainter than the
+       `--border-input`-on-`--surface-subtle` (1.22:1) it replaces. `--assist`
+       is 5.62:1 against the wash and 5.95:1 against the field's own white fill,
+       which is the first time this input's boundary has cleared the 3:1
+       non-text minimum of WCAG 1.4.11.
+   (2) it is the one edge a person sees before touching anything.
+
+   Because the resting border is already indigo, FOCUS can no longer be signalled
+   by the border turning indigo. It is signalled by a two-layer halo instead: a
+   3px `--assist-tint` cushion and a 1px `--assist` ring outside it (5.62:1 on
+   the wash). Both are box-shadows, so nothing reflows on focus. */
 .graph-cmd-field:focus-within {
   border: 1px solid var(--assist);
-  box-shadow: 0 0 0 3px var(--assist-tint);
+  box-shadow: 0 0 0 3px var(--assist-tint), 0 0 0 4px var(--assist);
 }
+/* The `>` glyph is the smallest at-rest indigo mark in the bar and the one that
+   sits inside the field itself. `--text-quaternary` was 2.53:1 on the white
+   field — a failing pair on a purely decorative glyph; `--assist-text` is
+   8.37:1. */
 .graph-cmd-prompt {
   flex: none;
   font-size: 12px;
-  color: var(--text-quaternary);
+  color: var(--assist-text);
 }
 .graph-cmd-input {
   flex: 1;
@@ -503,29 +533,47 @@
 .graph-cmd-input::placeholder {
   color: var(--text-quaternary);
 }
-/* Run stays a SECONDARY control — exactly like `.assistant-composer-send`, and
-   for the same reason: running a bounded read-only query is not the primary
-   task action on this screen. Only the accent moves to indigo. The three
-   descendant selectors below out-specify `.btn-secondary:hover/:active` in
-   base.css rather than relying on stylesheet order. */
-.graph-cmd-run {
+/* Run is this surface's action, and it is FILLED at rest: `--assist-tint`
+   background, `--assist` edge, `--assist-text` label — the `.kind-badge-
+   deterministic` triple (assistant.css :381) at button scale. It is still not a
+   primary control (no solid fill, no `--action` blue, no lift), so it does not
+   compete with the page's blue task actions; it simply stops being mistakable
+   for one of them. The previous version was a plain white `.btn-secondary` with
+   an indigo LABEL, which is what read as navy.
+
+   Ratios: label 7.12:1 on the tint; the `--assist` edge 5.05:1 against its own
+   fill and 5.62:1 against the surrounding wash.
+
+   Hover and pressed go DARKER rather than lighter, matching `.btn-secondary` in
+   base.css: solid `--assist` (white label, 5.95:1) then solid `--assist-text`
+   (white label, 8.37:1). The four descendant selectors below out-specify
+   `.btn-secondary` and its state rules in base.css rather than relying on
+   stylesheet order. */
+.graph-cmd .graph-cmd-run {
   flex: none;
-  color: var(--assist-text);
-}
-.graph-cmd .graph-cmd-run:hover {
   color: var(--assist-text);
   background: var(--assist-tint);
   border: 1px solid var(--assist);
 }
-.graph-cmd .graph-cmd-run:active {
-  color: var(--assist-text);
-  background: var(--assist-panel-bg);
+.graph-cmd .graph-cmd-run:hover {
+  color: var(--surface);
+  background: var(--assist);
   border: 1px solid var(--assist);
+}
+.graph-cmd .graph-cmd-run:active {
+  color: var(--surface);
+  background: var(--assist-text);
+  border: 1px solid var(--assist-text);
 }
 .graph-cmd .graph-cmd-run:focus-visible {
   outline: 2px solid var(--assist);
   outline-offset: 2px;
 }
+/* Syntax is Run's quieter sibling: the same indigo family, drawn OUTLINED
+   instead of filled so the two are ranked without either going neutral. White
+   fill, `--assist` edge (5.95:1 on its own fill, 5.62:1 on the wash — it was
+   `--border-input` at 1.18:1), `--assist-text` label at 8.37:1. Hover fills it
+   with `--assist-tint`, where the label is 7.12:1. */
 .graph-cmd-help {
   display: inline-flex;
   align-items: center;
@@ -533,22 +581,34 @@
   padding: 4px 10px;
   font-size: 11.5px;
   color: var(--assist-text);
-  background: none;
-  border: 1px solid var(--border-input);
+  background: var(--surface);
+  border: 1px solid var(--assist);
   border-radius: var(--radius-pill);
 }
 .graph-cmd-help:hover {
   color: var(--assist-text);
   background: var(--assist-tint);
+  border: 1px solid var(--assist);
 }
 .graph-cmd-help:focus-visible {
   outline: 2px solid var(--assist);
   outline-offset: 2px;
 }
+/* The colour here is `--text-secondary`, and the reason is worth writing down
+   because reading this file alone gets it wrong. This is a `<p>` inside
+   `.placeholder`, so `screens.css` `.placeholder p` (0,1,1) OUT-SPECIFIES this
+   single-class rule (0,1,0) and has been supplying `--text-secondary` all
+   along — the `--text-quaternary` that stood here rendered nowhere. Measured
+   off the live DOM, not inferred: `getComputedStyle` reports rgb(70,81,95).
+   `--text-secondary` is 7.62:1 on the `--assist-panel-bg` wash, so the rendered
+   state passes AA and this declaration now states the truth rather than a
+   losing 2.39:1 one. Do not "fix" it to --text-slate (5.16:1): that would be a
+   real contrast LOSS dressed as a correction, and it would only take effect if
+   someone also raised the specificity. */
 .graph-cmd-hint {
   margin-top: 6px;
   font-size: 10.5px;
-  color: var(--text-quaternary);
+  color: var(--text-secondary);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -618,13 +678,20 @@
   padding-top: 8px;
   border-top: 1px solid var(--border-faint);
 }
-.graph-cmd-suggest-title {
+/* The group's eyebrow moves to --assist-text (7.91:1 on the wash, up from the
+   --text-secondary that `.placeholder p` was actually supplying at 7.62:1), so
+   the words SUGGESTED COMMANDS themselves say which surface the group belongs
+   to. The selector is DESCENDANT-QUALIFIED on purpose: this is a `<p>`, and
+   `screens.css` `.placeholder p` (0,1,1) beats a bare `.graph-cmd-suggest-title`
+   (0,1,0). The single-class version of this rule was written first, rendered
+   nothing, and was caught by reading the colour back off the live DOM. */
+.graph-cmd .graph-cmd-suggest-title {
   margin: 0 0 6px;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-slate);
+  color: var(--assist-text);
 }
 .graph-cmd-suggest-list {
   margin: 0;
@@ -634,6 +701,23 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+/* These cards used to be plain white with a grey edge, and reached for indigo
+   only on hover — a state a screenshot never shows and a touch user rarely
+   sees. They are now tinted at rest: `--assist-tint` fill, `--assist` edge.
+
+   Why the edge is `--assist` and not `--assist-border`: the fill sits on the
+   `--assist-panel-bg` wash, and tint-on-wash is 1.11:1, so the fill alone
+   cannot delimit the card. `--assist` is 5.62:1 against the wash — the card
+   boundary goes from 1.22:1 (`--border-input` on `--surface-subtle`) to well
+   past the 3:1 UI-component minimum. Contents on the tint: label 14.91:1,
+   command 7.12:1, mode word 4.64:1.
+
+   Hover LIGHTENS to the wash and pressed returns to the tint with a doubled
+   edge (an inset ring, not a wider border — `no-vertical-rail.test.ts` aside,
+   a border that only exists in one state reflows the row). Lightening on hover
+   is the inverse of `.btn-secondary`, and it is deliberate: rest is already the
+   deeper of the two available indigo fills, and going deeper would mean a solid
+   `--assist` card, which would out-rank Run. */
 .graph-cmd-suggest-btn {
   display: flex;
   flex-direction: column;
@@ -642,8 +726,8 @@
   max-width: 100%;
   padding: 5px 9px;
   text-align: left;
-  background: var(--surface);
-  border: 1px solid var(--border-input);
+  background: var(--assist-tint);
+  border: 1px solid var(--assist);
   border-radius: var(--radius-inner);
 }
 .graph-cmd-suggest-btn:hover {
@@ -653,23 +737,31 @@
 .graph-cmd-suggest-btn:active {
   border: 1px solid var(--assist);
   background: var(--assist-tint);
+  box-shadow: inset 0 0 0 1px var(--assist);
 }
 .graph-cmd-suggest-btn:focus-visible {
   outline: 2px solid var(--assist);
   outline-offset: 1px;
 }
-/* A view action that acts on the click is drawn on the subtle surface so it
-   reads as a different KIND of control — alongside, never instead of, the
-   "runs now" word inside it and the accessible name that says the same. */
+/* A view action that acts on the click keeps BOTH of its non-colour signals and
+   gains the lighter of the two indigo fills, so it reads as a different KIND of
+   control at rest as well as on hover: the DASHED stroke is how a "runs now"
+   card is told apart without colour, and the `--assist-panel-bg` fill sits one
+   step back from the insert cards' `--assist-tint`. The dash survives every
+   state below — only the fill moves. `--assist` dashed is 5.62:1 on the wash,
+   against `--border-strong` dashed at 1.37:1 before. */
 .graph-cmd-suggest-btn.is-view {
-  background: var(--surface-subtle);
-  border: 1px dashed var(--border-strong);
-}
-/* The DASHED stroke is how a "runs now" card is told apart without colour, so
-   it survives the indigo hover/active states above — only the hue moves. */
-.graph-cmd-suggest-btn.is-view:hover,
-.graph-cmd-suggest-btn.is-view:active {
+  background: var(--assist-panel-bg);
   border: 1px dashed var(--assist);
+}
+.graph-cmd-suggest-btn.is-view:hover {
+  background: var(--surface);
+  border: 1px dashed var(--assist);
+}
+.graph-cmd-suggest-btn.is-view:active {
+  background: var(--assist-tint);
+  border: 1px dashed var(--assist);
+  box-shadow: none;
 }
 .graph-cmd-suggest-label {
   font-size: 11.5px;
@@ -684,13 +776,16 @@
   gap: 2px 7px;
   min-width: 0;
 }
-/* Both of these now sit on the tinted hover/active fills, so both move to
-   --text-slate for AA: on --assist-panel-bg 5.16:1 and on --assist-tint 4.64:1
-   (--text-tertiary was 3.65 / 3.28 and --text-quaternary 2.39 / 2.15 — all
-   four failing, on the untinted resting card too). */
+/* The literal command is the thing this card exists to hand over, and it is now
+   the card's second indigo mark: --assist-text is 7.12:1 on the resting tint,
+   7.91:1 on the hover wash, 8.37:1 on the is-view hover white — up from
+   --text-slate's 4.64 / 5.16 / 5.46, all of which passed but read grey.
+   The MODE word deliberately stays --text-slate (4.64 / 5.16 / 5.46, all AA):
+   "fills the bar" / "runs now" is the non-colour signal for what a press does,
+   and hue-coding it would make a colour carry meaning it must not carry. */
 .graph-cmd-suggest-cmd {
   font-size: 10px;
-  color: var(--text-slate);
+  color: var(--assist-text);
   overflow-wrap: anywhere;
 }
 .graph-cmd-suggest-mode {
@@ -698,10 +793,13 @@
   font-style: italic;
   color: var(--text-slate);
 }
+/* `--text-secondary` for the same reason, and with the same caveat, as
+   `.graph-cmd-hint` above: `.placeholder p` wins here too (measured
+   rgb(70,81,95)), and 7.62:1 on the wash is the rendered, passing state. */
 .graph-cmd-suggest-note {
   margin: 6px 0 0;
   font-size: 10.5px;
-  color: var(--text-quaternary);
+  color: var(--text-secondary);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -718,28 +816,35 @@
   justify-content: space-between;
   gap: 8px;
 }
+/* --text-slate (5.16:1 on the wash) rather than --text-quaternary (2.39:1) —
+   the third instance of the same correction in this box. */
 .graph-cmd-history-title {
   font-size: 10.5px;
   font-style: italic;
-  color: var(--text-quaternary);
+  color: var(--text-slate);
 }
+/* Clear is the last interactive control inside the command box; leaving it on a
+   neutral label with a blue-family hover would have left one non-indigo control
+   in an otherwise indigo surface. It stays OUTLINED and quiet — it is a
+   discard, not an action to invite — but its label is now --assist-text
+   (7.91:1 on the wash, up from --text-tertiary at a failing 3.65:1) and its
+   edge is --assist at 5.62:1 rather than --border-input at 1.18:1. */
 .graph-cmd-history-clear {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
   font-size: 10.5px;
-  color: var(--text-tertiary);
-  background: none;
-  border: 1px solid var(--border-input);
+  color: var(--assist-text);
+  background: var(--surface);
+  border: 1px solid var(--assist);
   border-radius: var(--radius-pill);
 }
-/* Clear is the last interactive control inside the command box; leaving its
-   hover on the action blue would have left one blue tint in an otherwise
-   indigo surface. --assist-text on --assist-tint is 7.12:1. */
+/* --assist-text on --assist-tint is 7.12:1. */
 .graph-cmd-history-clear:hover {
   color: var(--assist-text);
   background: var(--assist-tint);
+  border: 1px solid var(--assist);
 }
 .graph-cmd-history-clear:focus-visible {
   outline: 2px solid var(--assist);
@@ -767,12 +872,15 @@
   color: var(--text-heading);
   overflow-wrap: anywhere;
 }
+/* Dimmed relative to --text-heading (5.16:1 vs 16.57:1) but no longer BELOW AA:
+   --text-tertiary was 3.65:1 on the wash at 11px. The line-through, not the
+   dimming, is what says "this one was refused". */
 .graph-cmd-history-item.is-error .graph-cmd-history-cmd {
-  color: var(--text-tertiary);
+  color: var(--text-slate);
   text-decoration: line-through;
 }
 .graph-cmd-history-out {
-  color: var(--text-tertiary);
+  color: var(--text-slate);
   overflow-wrap: anywhere;
 }
 
