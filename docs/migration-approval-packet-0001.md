@@ -111,7 +111,12 @@ The runner refuses unless `PGDATABASE` is exactly `metadata_assistant`.
 # 1. Confirm the target. Must print exactly: metadata_assistant
 echo "$PGDATABASE"
 
-# 2. See what WOULD be applied. Changes nothing.
+# 2. See what WOULD be applied. Applies no MIGRATION — but it is not read-only:
+#    `pending_versions` opens a transaction and ensures the bookkeeping table
+#    exists, so it may CREATE TABLE isaac_schema_migrations. That is idempotent
+#    and harmless, and it is not nothing. (Corrected 2026-08-08; this line
+#    previously read "Changes nothing", which the function's own docstring
+#    contradicts.)
 python scripts/db_migrate.py --plan
 
 # 3. Confirm the production sample is present and its size, to compare afterwards.
@@ -249,13 +254,36 @@ describes is present and correct*, verified mechanically, rather than *a byte co
 quoted original*. That is a weaker form of match than the phrase suggests, and it is worth saying so
 rather than letting the checkmarks imply more.
 
-## Why it is still unapplied: there is no path from here to that database
+## Why it is still unapplied: no *authorized* path from here to that database
 
-This is not caution and it is not an oversight. There is no mechanism.
+This is not caution and it is not an oversight. **Corrected 2026-08-08:** this section previously
+said *"There is no mechanism."* That was too strong, and the overstatement mattered, because it
+implied a rebuild was needed when none is.
 
-1. **The operator CLI is not in the container image.** `Dockerfile:42` copies exactly one file out of
-   `scripts/`: `COPY scripts/check_graphify_freshness.py`. `scripts/db_migrate.py` is not in the
-   allowlist, so it does not exist inside the running pod.
+**The migration logic and both `.sql` files ARE inside the running image.** `Dockerfile:34` is
+`COPY apps/api/ apps/api/`, and `.dockerignore` excludes neither `isaac_api/db_migrate.py` nor
+`isaac_api/migrations/`. `MIGRATIONS_DIR` resolves relative to the installed package
+(`db_migrate.py:62`), so it points at real files in the pod. What is absent is only the ~30-line
+argparse wrapper in `scripts/`. An operator with cluster access can apply this today with one
+`kubectl exec` and no rebuild:
+
+```bash
+kubectl -n <ns> exec deploy/<isaac> -- python -c "
+import os,sys; sys.path.insert(0,'/app/apps/api')
+from isaac_api import db_migrate; print(db_migrate.migrate(os.environ))"
+```
+
+**That path is not a safety bypass**, which is the reason it is safe to document: every gate lives
+in the module rather than in the wrapper. `db_write.pgdatabase_gate` refuses a wrong target
+(verified offline: `PGDATABASE must be exactly 'metadata_assistant' (got 'postgres')`), the
+statement policy and `_FORBIDDEN_TABLES` apply identically, and the one-transaction-per-migration
+behaviour is `migrate()`'s, not the CLI's.
+
+So the three real reasons it is unapplied are:
+
+1. **The operator *CLI wrapper* is not in the container image.** `Dockerfile:42` copies exactly one
+   file out of `scripts/`: `COPY scripts/check_graphify_freshness.py`. `scripts/db_migrate.py` is
+   not in the allowlist. This is an inconvenience, not a barrier — see the `kubectl exec` form above.
 2. **The application never migrates itself.** Nothing in `apps/api/isaac_api/app.py` calls
    `db_migrate.migrate`, and §5 of this packet says that is deliberate: *"A pod that silently
    migrated its own production database on every rollout is precisely what this design excludes."*
