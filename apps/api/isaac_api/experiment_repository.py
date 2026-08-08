@@ -122,6 +122,7 @@ __all__ = [
     "STORAGE_STATE_DURABLE",
     "STORAGE_STATE_EPHEMERAL",
     "STORAGE_STATE_UNAVAILABLE",
+    "DurableWriteConflict",
     "ExperimentRepository",
     "FilesystemExperimentRepository",
     "NotPersistable",
@@ -189,6 +190,62 @@ class StorageUnavailable(RuntimeError):
     underlying exception is chained (``raise ... from exc``) so a server log still
     has the cause; only the CLASS NAME is ever kept in process state.
     """
+
+
+class DurableWriteConflict(RuntimeError):
+    """The database ANSWERED, and it declined this particular write.
+
+    THE THIRD FAILURE, AND ALL THREE ARE DELIBERATELY DIFFERENT. The distinction
+    :class:`StorageUnavailable` draws against :class:`NotPersistable` is drawn once
+    more here, one step further out:
+
+    * :class:`NotPersistable` — this record may NEVER be stored. A permanent
+      property of the record. Nobody can fix it and nobody should try.
+    * :class:`StorageUnavailable` — the record should have been stored and the
+      database did not take it: unreachable, un-migrated, credentials changed. A
+      temporary property of the DEPLOYMENT. An operator fixes it.
+    * :class:`DurableWriteConflict` — the record should have been stored, the
+      database took the request, evaluated it, and refused it because the stored
+      document has moved on since this copy was read. A property of the
+      CONCURRENCY, and the only one of the three the CLIENT can resolve — by
+      re-reading and retrying, which is exactly what ``412 stale_write`` means.
+
+    Rendering it as a ``503`` would tell an operator to go and look at a database
+    that is behaving perfectly, and would tell the client to wait rather than to
+    refresh. So it is NOT recorded as a storage failure either: the round trip
+    worked, and ``/api/health`` must not report an outage because two writers
+    raced.
+
+    ``stored_state`` is the document the row ACTUALLY holds, read back inside the
+    SAME transaction that refused the write. The route uses it to report the true
+    current rev and ETag — reporting the losing write's own (already bumped) rev
+    would echo a version that exists nowhere.
+    """
+
+    def __init__(self, stored_state: dict | None = None) -> None:
+        super().__init__(
+            "the stored experiment has moved on since this copy was read; "
+            "nothing was written"
+        )
+        #: The winner's state document, or ``None`` if it could not be read back.
+        self.stored_state = stored_state
+
+    def current_experiment(self, fallback: "ws.Experiment") -> "ws.Experiment":
+        """The experiment as the DATABASE holds it, or ``fallback`` unchanged.
+
+        Fails SOFT rather than raising: this is only ever called while rendering an
+        error response, and a failure to parse the winner's row must not turn a
+        clean ``412`` into a ``500``. The id is re-checked because a row filed
+        under one id holding another describes a different record, and the rest of
+        this module already refuses to act on that shape (see :meth:`hydrate`).
+        """
+        state = self.stored_state
+        if not isinstance(state, dict) or state.get("id") != fallback.id:
+            return fallback
+        try:
+            return ws.Experiment.from_state(state, session_id=fallback.session_id)
+        except (KeyError, TypeError, ValueError):  # pragma: no cover - defensive
+            return fallback
 
 
 # --- the degradation this process has actually observed -----------------------
@@ -358,16 +415,123 @@ def blank_draft() -> dict:
 
 # --- the durable store --------------------------------------------------------
 
+#: THE DURABLE COMPARE-AND-SWAP. The ``WHERE`` on the conflict action is the whole
+#: point of this statement and is not an optimisation.
+#:
+#: WHAT IT REPLACED, AND WHY THAT WAS A DEFECT. This used to be a bare
+#: ``DO UPDATE SET state = EXCLUDED.state`` — last writer wins, unconditionally.
+#: The API's ``If-Match`` / ``ETag`` contract promises a stale write is REFUSED,
+#: and that promise was kept only by an in-process ``threading.Lock`` around the
+#: read-modify-write. A lock in one process says nothing about a second process:
+#: two writers could each pass their own local precondition and the second would
+#: silently overwrite the first, with both told they had succeeded. The predicate
+#: moves the decision to the one place every process shares.
+#:
+#: STATED PRECISELY, BECAUSE THE OVERSTATED VERSION IS TEMPTING: this repository
+#: does not record how many replicas the hosted deployment runs, and nothing here
+#: claims it runs more than one. The defect is that the guarantee was scoped to a
+#: process while the STORAGE is shared — a lock cannot enforce a property of a
+#: database — and that a rollout, which the deployment does perform, overlaps an
+#: old process with a new one. It is a real hole whether or not it has been hit,
+#: and it is not observable from here either way.
+#:
+#: THE PREDICATE, CLAUSE BY CLAUSE. Each is here for a case that really occurs;
+#: none is defensive padding.
+#:
+#: 1. ``generation`` DIFFERS -> accept. ``generation`` is an opaque per-creation
+#:    nonce (``workspace._new_generation``) and ``rev`` restarts at 0 with it, so a
+#:    genuine re-creation of the same id legitimately arrives carrying a LOWER rev
+#:    than the row it replaces. Ordering two generations is meaningless — the nonce
+#:    is random by design — so a differing generation is treated as a new object
+#:    rather than as a stale write. It must be first: without it a re-created
+#:    record would be permanently unwritable behind its predecessor's rev.
+#: 2. ``rev`` STRICTLY AHEAD -> accept. The ordinary case. Every authoritative
+#:    mutation goes through ``Experiment.save_versioned``, which bumps
+#:    ``max(in-memory rev, on-disk rev) + 1``, so a writer that read revision N
+#:    offers N+1. A writer whose copy is behind offers a rev the row already has or
+#:    has passed, and is refused.
+#: 3. The DOCUMENT IS IDENTICAL -> accept. This is the rev-EQUAL case, and it is
+#:    admitted deliberately and narrowly. ``save()`` writes the database FIRST and
+#:    the workspace file second, so a fault between the two leaves a durable copy
+#:    that a retry re-offers at the SAME rev with the SAME content. Refusing that
+#:    would report a conflict for a write that had already succeeded. It cannot
+#:    weaken clause 2: ``rev`` is INSIDE the document, so an identical document is
+#:    identical in every field, and applying it changes nothing at all. Two racing
+#:    writers producing byte-identical states are not in conflict in any sense a
+#:    reader could observe. Comparison is ``jsonb`` equality, which is by VALUE and
+#:    not by text, so key order and whitespace cannot make an identical document
+#:    look different.
+#:
+#: THE ONE LIMIT OF CLAUSE 1, STATED RATHER THAN GLOSSED. ``generation`` is an
+#: opaque random nonce, so two generations cannot be ORDERED — only compared. The
+#: clause is therefore symmetric: a writer holding the OLD generation is also
+#: admitted over a row carrying a new one. Within a generation the swap is strict;
+#: across one it is last-writer-wins, which is what "this is a different object"
+#: means. That asymmetry is not reachable in this build — an ordinary-scope
+#: record's generation never changes once created, because nothing deletes and
+#: re-creates one (``remove_experiment`` is reached only by the tutorial reset,
+#: whose records never touch this table) — so the clause is forward-looking. It is
+#: kept LOOSE on purpose: tightening it to "a differing generation must also carry
+#: ``rev = 0``" would close a hole nothing can reach today at the price of a
+#: record that could wedge permanently at ``412`` if the assumption ever failed,
+#: and a permanent wedge is the worse failure.
+#:
+#: ``RETURNING`` exists so the refusal is DETECTABLE: a conflict action whose
+#: ``WHERE`` is false updates nothing and raises nothing, so without a returned row
+#: (``cursor.rowcount``) a refused write would be indistinguishable from a
+#: successful one — which is the original defect wearing a different hat.
+#:
+#: NO MIGRATION IS REQUIRED OR IMPLIED. This changes a statement, not a schema:
+#: ``rev`` and ``generation`` already live inside the stored ``state`` document,
+#: which is why the predicate reads them out of ``jsonb`` instead of asking for new
+#: columns. It still names only ``isaac_experiments`` and contains no forbidden
+#: verb, so it passes ``db_write.WriteStatementPolicy`` — asserted, not assumed
+#: (``test_experiment_repository.py``).
+#:
+#: ``IS DISTINCT FROM`` IS DELIBERATELY NOT USED, and this is the one non-obvious
+#: line. It would read better than ``COALESCE(...) <> COALESCE(...)``, and the
+#: statement policy would REFUSE it: ``from`` is a table introducer, so the
+#: tokenizer would read the following ``COALESCE`` as a table this application does
+#: not own. The over-broad refusal is the policy behaving as designed (it refuses
+#: loudly rather than admitting quietly); the statement is written around it.
 Q_UPSERT_EXPERIMENT = (
     "INSERT INTO isaac_experiments (experiment_id, state) VALUES (%s, %s::jsonb)"
     " ON CONFLICT (experiment_id) DO UPDATE"
     " SET state = EXCLUDED.state, updated_utc = now()"
+    " WHERE COALESCE(isaac_experiments.state ->> 'generation', '')"
+    " <> COALESCE(EXCLUDED.state ->> 'generation', '')"
+    " OR COALESCE((isaac_experiments.state ->> 'rev')::bigint, 0)"
+    " < COALESCE((EXCLUDED.state ->> 'rev')::bigint, 0)"
+    " OR isaac_experiments.state = EXCLUDED.state"
+    " RETURNING experiment_id"
 )
+
+#: The winner's document, read back in the SAME transaction that refused a write,
+#: so the ``412`` can report the rev that actually exists.
+Q_ONE_EXPERIMENT = "SELECT state FROM isaac_experiments WHERE experiment_id = %s"
 
 Q_ALL_EXPERIMENTS = (
     "SELECT experiment_id, state FROM isaac_experiments"
     " ORDER BY created_utc, experiment_id"
 )
+
+
+def _row_state(row: Any) -> dict | None:
+    """The state document in a ``(state,)`` row, or ``None`` if it is unusable.
+
+    ``jsonb`` comes back as a ``dict`` from psycopg2 and as text from anything
+    that has not registered the adapter, so both are accepted — the same tolerance
+    :meth:`PostgresOrdinaryStore.hydrate` already applies to the rows it reads.
+    """
+    if not row:
+        return None
+    state = row[0]
+    if isinstance(state, (str, bytes, bytearray)):
+        try:
+            state = json.loads(state)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return None
+    return state if isinstance(state, dict) else None
 
 
 class PostgresOrdinaryStore:
@@ -417,7 +581,7 @@ class PostgresOrdinaryStore:
     # -- write-through ---------------------------------------------------------
 
     def persist(self, exp: "ws.Experiment") -> None:
-        """Upsert one ordinary-scope experiment's authoritative state.
+        """COMPARE-AND-SWAP one ordinary-scope experiment's authoritative state.
 
         RAISES :class:`StorageUnavailable` if the database does not take the write,
         and deliberately does NOT fall back to the filesystem. The caller
@@ -428,19 +592,46 @@ class PostgresOrdinaryStore:
         means the workspace file is not rewritten either, so the record is not left
         looking saved.
 
-        The isolation refusal is raised OUTSIDE the try, and that ordering is
-        load-bearing: :class:`NotPersistable` is a permanent property of the
-        record, not an outage, and must never be reported as one or recorded as a
-        storage failure.
+        RAISES :class:`DurableWriteConflict` if the database evaluated the write
+        and REFUSED it — the stored document had already moved on. That is not an
+        outage and is not recorded as one; see the exception's own docstring for
+        why all three failure types are kept apart, and :data:`Q_UPSERT_EXPERIMENT`
+        for the predicate itself.
+
+        THE TWO REFUSALS ARE RAISED IN DIFFERENT PLACES, AND BOTH PLACEMENTS ARE
+        LOAD-BEARING. :class:`NotPersistable` is raised before the try, because it
+        is a permanent property of the record and must never be reported as, or
+        recorded as, a storage failure. :class:`DurableWriteConflict` is raised
+        AFTER the ``with`` block for the same family of reason: inside it, the
+        blanket ``except Exception`` would relabel it as an outage, and the
+        transaction would roll back rather than commit — which is harmless (nothing
+        was written) but would leave the read-back of the winner's row in a
+        rolled-back transaction. Committing an empty transaction and then raising
+        keeps "what the database decided" and "how this application reports it"
+        separable.
         """
         self.refuse_if_not_persistable(exp)
         payload = json.dumps(exp.to_state(), sort_keys=True)
         try:
             with write_transaction(self.env, **self._connect_kwargs) as (cursor, policy):
                 cursor.execute(policy.check(Q_UPSERT_EXPERIMENT), (exp.id, payload))
+                # A conflict action whose WHERE is false updates nothing and
+                # raises nothing. `rowcount` over `RETURNING` is what makes that
+                # silence observable.
+                accepted = cursor.rowcount == 1
+                stored = None
+                if not accepted:
+                    cursor.execute(policy.check(Q_ONE_EXPERIMENT), (exp.id,))
+                    stored = _row_state(cursor.fetchone())
         except Exception as exc:  # noqa: BLE001 - any driver/server failure, uniformly
             raise _unavailable(exc) from exc
+        # The round trip WORKED, whichever way it was decided — so an earlier
+        # outage is cleared either way. A refused write is not evidence of a sick
+        # database, and `/api/health` must not start reporting one because two
+        # writers raced.
         _note_storage_success()
+        if not accepted:
+            raise DurableWriteConflict(stored)
 
     # -- restore ---------------------------------------------------------------
 

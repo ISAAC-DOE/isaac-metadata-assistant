@@ -439,6 +439,9 @@ class FakeCursor:
     def __init__(self, connection: "FakeConnection") -> None:
         self._connection = connection
         self._pending: list = []
+        #: DB-API's "unknown". Set per statement below; only the upsert's value is
+        #: ever read by the application.
+        self.rowcount = -1
         self.closed = False
 
     def execute(self, sql, params=None):
@@ -446,12 +449,27 @@ class FakeCursor:
         boom = self._connection.raise_on.get(sql)
         if boom is not None:
             raise boom
+        self.rowcount = -1
         if sql == dbw.Q_CURRENT_DATABASE:
             self._pending = [(self._connection.database,)]
         elif sql == dbm.Q_APPLIED_VERSIONS:
             self._pending = [(v,) for v in sorted(self._connection.applied)]
         elif sql == repo.Q_ALL_EXPERIMENTS:
             self._pending = list(self._connection.rows)
+        elif sql == repo.Q_UPSERT_EXPERIMENT:
+            # THE FAKE DOES NOT EVALUATE THE PREDICATE, AND MUST NOT PRETEND TO.
+            # It reports the server's DECISION — one row returned, or none — so the
+            # application's handling of a refusal is exercised. Whether the SQL
+            # predicate itself decides correctly is a question about PostgreSQL, and
+            # it is answered in `.github/workflows/ci.yml`'s `postgres-migration`
+            # job against a real engine, never here. See this file's own docstring.
+            self._pending = []
+            refused = bool(params) and params[0] in self._connection.refuse_upsert
+            self.rowcount = 0 if refused else 1
+        elif sql == repo.Q_ONE_EXPERIMENT:
+            state = self._connection.stored.get(params[0]) if params else None
+            self._pending = [] if state is None else [(json.dumps(state),)]
+            self.rowcount = len(self._pending)
         else:
             self._pending = []
             if sql == dbm.Q_RECORD_VERSION and params:
@@ -471,11 +489,27 @@ class FakeCursor:
 class FakeConnection:
     """A connection double that records everything the write path does to it."""
 
-    def __init__(self, *, database=None, rows=(), applied=(), raise_on=None) -> None:
+    def __init__(
+        self,
+        *,
+        database=None,
+        rows=(),
+        applied=(),
+        raise_on=None,
+        refuse_upsert=(),
+        stored=None,
+    ) -> None:
         self.database = dbw.EXPECTED_DATABASE if database is None else database
         self.rows = list(rows)
         self.applied = set(applied)
         self.raise_on = dict(raise_on or {})
+        #: Experiment ids whose upsert the server DECIDES to refuse (the
+        #: compare-and-swap predicate did not match). Mutable, so one test can let a
+        #: create through and then have a later write lose the race.
+        self.refuse_upsert = set(refuse_upsert)
+        #: ``experiment_id -> state document`` the winner's row holds, read back by
+        #: ``Q_ONE_EXPERIMENT`` when an upsert is refused.
+        self.stored: dict = dict(stored or {})
         self.autocommit = True  # the write path must set this False itself
         self.statements: list = []
         self.cursors: list[FakeCursor] = []
@@ -613,6 +647,7 @@ def test_the_statement_policy_refuses_anything_outside_this_applications_tables(
         dbm.Q_APPLIED_VERSIONS,
         dbm.Q_RECORD_VERSION,
         repo.Q_UPSERT_EXPERIMENT,
+        repo.Q_ONE_EXPERIMENT,
         repo.Q_ALL_EXPERIMENTS,
     ],
 )
@@ -1159,3 +1194,356 @@ def test_the_storage_error_body_names_no_host_path_user_or_driver_message(
     text = client.post("/api/experiments", json={"title": "Doomed"}).text
     for leak in ("db.invalid", "PGHOST", "PGUSER", "PGPASSWORD", "relation does not exist"):
         assert leak not in text, leak
+
+
+# =============================================================================
+# 11. THE DURABLE COMPARE-AND-SWAP (defect C1)
+# =============================================================================
+#
+# WHAT WAS WRONG. The upsert was `ON CONFLICT ... DO UPDATE SET state =
+# EXCLUDED.state` with no predicate — last writer wins, unconditionally. The API's
+# `If-Match`/`ETag` contract promises a stale write is REFUSED, and that promise
+# was kept only by an in-process `threading.Lock` around the read-modify-write. A
+# lock in one process says nothing about a second replica, so two writers could
+# each pass their own local precondition and the second would silently overwrite
+# the first — with both told they had succeeded.
+#
+# WHAT IS PROVEN HERE, AND WHAT IS NOT. Everything below proves how the
+# APPLICATION behaves when the database accepts or refuses: the statement it
+# issues, that a refusal is detected rather than mistaken for success, that it is
+# raised as its own type, that it is not recorded as an outage, and that it reaches
+# the client as the 412 the contract already promises. It does NOT prove that the
+# SQL predicate decides correctly — no PostgreSQL is involved in this file, and a
+# fake that evaluated the predicate would be testing the fake. That half is the
+# `postgres-migration` job's, against a real engine.
+
+
+def test_the_upsert_predicate_is_a_compare_and_swap_and_not_a_blind_overwrite():
+    """The three accept clauses, pinned in the statement text.
+
+    A text assertion is a weak instrument and it is the right one HERE: the
+    property is "the predicate exists at all", and the defect being closed is
+    precisely a predicate that was missing. A future edit that reverts to a bare
+    `DO UPDATE SET` fails this, wherever else it might still pass.
+    """
+    sql = repo.Q_UPSERT_EXPERIMENT
+    normalized = " ".join(sql.split()).lower()
+    assert "on conflict (experiment_id) do update" in normalized
+    # 1. a fresh generation is a new object, not a stale write
+    assert (
+        "coalesce(isaac_experiments.state ->> 'generation', '') "
+        "<> coalesce(excluded.state ->> 'generation', '')" in normalized
+    )
+    # 2. otherwise the incoming rev must be STRICTLY ahead
+    assert (
+        "coalesce((isaac_experiments.state ->> 'rev')::bigint, 0) "
+        "< coalesce((excluded.state ->> 'rev')::bigint, 0)" in normalized
+    )
+    # 3. ...or the document is identical, which is a no-op in every field
+    assert "isaac_experiments.state = excluded.state" in normalized
+    # and the refusal must be DETECTABLE: a conflict action whose WHERE is false
+    # updates nothing and raises nothing.
+    assert normalized.endswith("returning experiment_id")
+
+
+def test_the_compare_and_swap_statement_passes_the_write_policy():
+    """Acceptance criterion 6, asserted by calling the policy rather than reading it.
+
+    The predicate had to be written AROUND the policy, and the constraint is not
+    obvious: `IS DISTINCT FROM` would read better than the `COALESCE(...) <>
+    COALESCE(...)` that is there, and it is refused, because `from` is a table
+    introducer and the tokenizer reads the following `COALESCE` as a table this
+    application does not own. Both halves are asserted so a future "tidy-up" that
+    reintroduces it fails here rather than in the deployed pod.
+    """
+    policy = dbw.WriteStatementPolicy()
+    assert policy.check(repo.Q_UPSERT_EXPERIMENT) == repo.Q_UPSERT_EXPERIMENT
+    assert policy.seen == [repo.Q_UPSERT_EXPERIMENT]
+    # It names only this application's own table, and no forbidden verb.
+    tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", repo.Q_UPSERT_EXPERIMENT.lower()))
+    assert "isaac_experiments" in tokens
+    assert "records" not in tokens
+    assert tokens.isdisjoint(set(dbw._FORBIDDEN_KEYWORDS))
+    # The read-back of the winner's row is subject to the same policy.
+    assert dbw.WriteStatementPolicy().check(repo.Q_ONE_EXPERIMENT)
+    # ...and the shape that would have read better is genuinely refused.
+    with pytest.raises(dbw.WriteRefused):
+        dbw.WriteStatementPolicy().check(
+            "INSERT INTO isaac_experiments (experiment_id) VALUES (%s) ON CONFLICT "
+            "(experiment_id) DO UPDATE SET state = EXCLUDED.state WHERE "
+            "isaac_experiments.state IS DISTINCT FROM EXCLUDED.state"
+        )
+
+
+def _ordinary(rid="01ABCDEFGHJKMNPQRSTVWXYZ00", rev=3, generation="g0"):
+    return ws.Experiment(
+        id=rid,
+        title="Racing",
+        created_utc="2026-01-01T00:00:00Z",
+        source={},
+        draft={},
+        rev=rev,
+        generation=generation,
+    )
+
+
+def test_a_refused_write_raises_a_conflict_rather_than_reporting_success():
+    """THE DEFECT, AT THE SEAM. A refused upsert used to be indistinguishable from
+    an applied one — `execute` returned, nothing raised, and `persist` reported
+    success. It now raises its own type."""
+    exp = _ordinary()
+    conn = FakeConnection(refuse_upsert={exp.id})
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    with pytest.raises(repo.DurableWriteConflict):
+        store.persist(exp)
+    # The statement really was issued — the refusal is the SERVER's answer, not an
+    # early return that never asked.
+    assert [sql for sql, _ in conn.statements].count(repo.Q_UPSERT_EXPERIMENT) == 1
+
+
+def test_a_conflict_is_neither_an_outage_nor_a_permanent_refusal():
+    """Three failure types, three meanings, and this is the one the CLIENT resolves.
+
+    Reusing `StorageUnavailable` would send an operator to look at a database that
+    is behaving perfectly and would tell the client to wait rather than to refresh;
+    reusing `NotPersistable` would say the record may never be stored at all.
+    """
+    repo.forget_storage_failure()
+    exp = _ordinary()
+    conn = FakeConnection(refuse_upsert={exp.id})
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    with pytest.raises(repo.DurableWriteConflict) as excinfo:
+        store.persist(exp)
+    assert not isinstance(excinfo.value, repo.StorageUnavailable)
+    assert not isinstance(excinfo.value, repo.NotPersistable)
+    # The round trip WORKED. `/api/health` must not start reporting an outage
+    # because two writers raced.
+    assert repo.storage_failure() is None
+    assert repo.storage_status(_env())["state"] == repo.STORAGE_STATE_DURABLE
+    # The message names no host, path, credential or driver text.
+    for leak in ("db.invalid", "PGHOST", "PGUSER", "PGPASSWORD"):
+        assert leak not in str(excinfo.value)
+
+
+def test_a_conflict_reads_the_winners_document_back_in_the_same_transaction():
+    """So the 412 can echo a version that actually exists, rather than the losing
+    write's own."""
+    exp = _ordinary(rev=3)
+    winner = dict(exp.to_state(), rev=9, title="Theirs")
+    conn = FakeConnection(refuse_upsert={exp.id}, stored={exp.id: winner})
+    store = repo.PostgresOrdinaryStore(_env(), connect=_connector(conn))
+    with pytest.raises(repo.DurableWriteConflict) as excinfo:
+        store.persist(exp)
+    current = excinfo.value.current_experiment(exp)
+    assert current.rev == 9 and current.title == "Theirs"
+    assert current.version_token() == f"{exp.generation}.9"
+    # It was read inside the SAME transaction that refused the write — one
+    # connection, one commit, no second round trip.
+    issued = [sql for sql, _ in conn.statements]
+    assert issued.index(repo.Q_ONE_EXPERIMENT) == issued.index(repo.Q_UPSERT_EXPERIMENT) + 1
+    assert conn.commits == 1 and conn.rollbacks == 0
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        None,  # the row could not be read back
+        {"id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ", "title": "t", "created_utc": "x"},  # wrong id
+    ],
+)
+def test_an_unreadable_winner_falls_back_instead_of_turning_412_into_500(stored):
+    """`current_experiment` is only ever called while rendering an error. A row it
+    cannot parse — or one filed under a different id, which describes a different
+    record — must not escalate a clean refusal into a server error."""
+    exp = _ordinary()
+    conflict = repo.DurableWriteConflict(stored)
+    assert conflict.current_experiment(exp) is exp
+
+
+def _durable_client(app, monkeypatch, conn):
+    """A client on a deployment whose durable store is ``conn``. No socket is opened."""
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
+    return TestClient(app)
+
+
+def _upsert_count(conn) -> int:
+    return [sql for sql, _ in conn.statements].count(repo.Q_UPSERT_EXPERIMENT)
+
+
+def test_a_byte_stable_no_op_never_reaches_the_database_at_all(app, monkeypatch):
+    """ACCEPTANCE CRITERION 4, at its source, and it is why an equal-rev write is
+    not simply refused by the predicate.
+
+    `save_versioned` returns False for an identical authoritative state BEFORE it
+    bumps `rev` and BEFORE it calls `save()`, so the non-bumping path issues no
+    statement at all. A naive `stored.rev < new.rev` predicate would have been
+    correct for every write that DOES reach the database — the question was only
+    ever what happens to the writes that do not, and the answer is that there are
+    none. (The predicate still admits an identical document at an equal rev, for
+    the retry-after-a-partial-failure case; that is clause 3, and it is a no-op in
+    every field by construction.)
+
+    Asserted against a store that refuses EVERYTHING from that point on: if a
+    byte-stable no-op reached the database, this would raise.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Stable"}).json()["id"]
+    exp = ws.load_experiment(rid)
+    assert exp is not None
+    before = (exp.rev, exp.updated_utc)
+    upserts_before = _upsert_count(conn)
+
+    conn.refuse_upsert.add(rid)
+    assert exp.save_versioned() is False, "an identical re-entry was written"
+    assert (exp.rev, exp.updated_utc) == before, "a no-op bumped the version"
+    assert _upsert_count(conn) == upserts_before, "the byte-stable no-op issued a statement"
+
+
+def test_an_identical_re_entry_through_the_api_still_succeeds(app, monkeypatch):
+    """ACCEPTANCE CRITERION 7(b), at the contract rather than at the seam.
+
+    A client that re-submits the same answers gets 200, not 412 — the legitimate
+    non-bumping save is unaffected by the compare-and-swap. The store is set to
+    refuse before the second call, so a 200 here can only mean the write never
+    reached it.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Twice"}).json()["id"]
+
+    first = client.post(
+        f"/api/experiments/{rid}/answers",
+        json=_answers_payload(),
+        headers={"If-Match": client.get(f"/api/experiments/{rid}").headers["ETag"]},
+    )
+    assert first.status_code == 200, first.text
+    token = first.json()["version"]
+
+    conn.refuse_upsert.add(rid)
+    upserts_before = _upsert_count(conn)
+    second = client.post(
+        f"/api/experiments/{rid}/answers",
+        json=_answers_payload(),
+        headers={"If-Match": f'"{token}"'},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["version"] == token, "an identical re-entry churned the token"
+    assert _upsert_count(conn) == upserts_before
+
+
+def test_a_refused_write_rolls_the_in_memory_version_bump_back(app, monkeypatch):
+    """The instance must not go on claiming a revision that was never stored.
+
+    Without this, the 412 built from it would echo a version no client could ever
+    match — and the fallback path in `current_experiment` would report the LOSING
+    write's rev as though it were current.
+    """
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    conn = FakeConnection()
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
+
+    created = TestClient(app).post("/api/experiments", json={"title": "Racing"}).json()
+    exp = ws.load_experiment(created["id"])
+    assert exp is not None
+    before = (exp.rev, exp.updated_utc)
+
+    conn.refuse_upsert.add(exp.id)
+    exp.title = "Changed"
+    with pytest.raises(repo.DurableWriteConflict):
+        exp.save_versioned()
+    assert (exp.rev, exp.updated_utc) == before
+    # ...and the workspace file was not rewritten either: the durable write goes
+    # first, so a refusal means the reader is never shown a change that did not stick.
+    assert json.loads(exp.state_path.read_text())["title"] == "Racing"
+
+
+# --- the contract the client actually sees ------------------------------------
+
+
+def _answers_payload():
+    answers = ws.load_demo_answers()
+    return {
+        "confirmed_by_user": True,
+        "answers": {"series": answers.get("series"), "descriptor": answers.get("descriptor")},
+    }
+
+
+def test_a_lost_race_surfaces_as_the_412_stale_write_the_contract_already_promises(
+    app, tmp_path, monkeypatch
+):
+    """ACCEPTANCE CRITERION 3, end to end through HTTP.
+
+    NO NEW STATUS CODE AND NO NEW BODY. `_check_if_match` and the durable
+    compare-and-swap are the same contract enforced at two distances — "does your
+    version match the copy this process read" and "…is that copy still current for
+    every process". The client's remedy is identical (re-read, re-apply, retry), so
+    a second name for it would only be a second name.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    created = client.post("/api/experiments", json={"title": "Racing"}).json()
+    rid = created["id"]
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+
+    # Another replica got there first: it holds rev 9, and our write is refused.
+    winner = dict(ws.load_experiment(rid).to_state(), rev=9)
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = winner
+
+    r = client.post(
+        f"/api/experiments/{rid}/answers", json=_answers_payload(), headers={"If-Match": etag}
+    )
+    assert r.status_code == 412, r.text
+    body = r.json()
+    assert body["error"] == "stale_write"
+    assert body["experiment_id"] == rid
+    # The SAME body shape the header-level 412 produces — the fields are asserted
+    # by name so a divergence between the two paths is visible.
+    assert set(body) == {
+        "error",
+        "experiment_id",
+        "expected_rev",
+        "current_rev",
+        "expected_version",
+        "current_version",
+    }
+    # It reports the WINNER's version, not the losing write's, and echoes it as the
+    # ETag so the client can refresh in one hop.
+    assert body["current_rev"] == 9
+    assert body["current_version"] == f"{winner['generation']}.9"
+    assert r.headers["ETag"] == f'"{winner["generation"]}.9"'
+    # `expected_version` echoes the client's own token UNQUOTED, exactly as the
+    # header-level 412 does — this path reuses `_stale_write` rather than
+    # reimplementing it, and `expected_rev` parses only in that form.
+    assert body["expected_version"] == etag.strip('"')
+    assert body["expected_rev"] == 0
+    # NOTHING WAS WRITTEN. The durable write goes before the file write.
+    assert json.loads((tmp_path / "ws" / rid / "experiment.json").read_text())["rev"] == 0
+
+
+def test_a_lost_race_is_not_a_503_and_does_not_mark_the_deployment_unhealthy(
+    app, monkeypatch
+):
+    """The distinction the whole exception hierarchy exists for, at the HTTP edge.
+
+    503 tells an operator the database is sick and tells the client to wait. Both
+    would be false: the database answered, correctly, in the time it took to ask.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Racing"}).json()["id"]
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = dict(ws.load_experiment(rid).to_state(), rev=9)
+
+    r = client.post(
+        f"/api/experiments/{rid}/answers", json=_answers_payload(), headers={"If-Match": etag}
+    )
+    assert r.status_code == 412
+    assert r.json()["error"] != "experiment_storage_unavailable"
+    storage = client.get("/api/health").json()["experiment_storage"]
+    assert storage["durable"] is True and storage["state"] == repo.STORAGE_STATE_DURABLE

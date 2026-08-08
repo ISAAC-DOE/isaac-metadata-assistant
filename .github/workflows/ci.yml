@@ -435,6 +435,72 @@ jobs:
           assert [r[0] for r in after] == [rid], "a session write reached the database"
           # ...and the five examples the session materialised are not in it either.
           assert set(r[0] for r in after).isdisjoint(ws.CANONICAL_IDS)
+
+          # ── THE DURABLE COMPARE-AND-SWAP (defect C1) ─────────────────────────
+          # THE HALF THAT CANNOT BE PROVEN ANYWHERE ELSE. The in-process fake in
+          # `test_experiment_repository.py` reports the server's DECISION, so it
+          # proves the application handles a refusal; only a real engine can say
+          # whether the PREDICATE decides correctly. Before this predicate existed
+          # the conflict clause was a bare `DO UPDATE SET state = EXCLUDED.state`,
+          # so case 2 below silently overwrote — with both writers told they had
+          # succeeded.
+          import json as _json
+
+          def upsert(state):
+              with dbw.write_transaction(os.environ) as (cur, pol):
+                  cur.execute(
+                      pol.check(repo.Q_UPSERT_EXPERIMENT),
+                      (state["id"], _json.dumps(state, sort_keys=True)),
+                  )
+                  return cur.rowcount
+
+          def stored_state():
+              with dbw.write_transaction(os.environ) as (cur, pol):
+                  cur.execute(pol.check(repo.Q_ONE_EXPERIMENT), (rid,))
+                  value = cur.fetchone()[0]
+              return _json.loads(value) if isinstance(value, (str, bytes)) else value
+
+          base = ws.load_experiment(rid).to_state()
+          assert base["rev"] == 0, base["rev"]
+
+          # 1. STRICTLY AHEAD -> applied. The ordinary case.
+          assert upsert(dict(base, rev=1, title="rev 1 wins")) == 1
+          assert stored_state()["title"] == "rev 1 wins"
+
+          # 2. A STALE WRITE IS REFUSED. THIS IS THE DEFECT. A second replica whose
+          #    copy is behind must not win, and must be told it did not.
+          assert upsert(dict(base, rev=1, title="stale writer overwrites")) == 0, \
+              "a stale write was applied"
+          assert stored_state()["title"] == "rev 1 wins", "the stale write landed anyway"
+
+          # 3. BEHIND -> refused, for the same reason.
+          assert upsert(dict(base, rev=0, title="behind")) == 0
+          assert stored_state()["title"] == "rev 1 wins"
+
+          # 4. IDENTICAL DOCUMENT AT AN EQUAL REV -> admitted. The retry case: the
+          #    durable write lands, the workspace file write faults, the same state
+          #    is offered again. `rev` is INSIDE the document, so an identical
+          #    document changes nothing in any field.
+          assert upsert(dict(base, rev=1, title="rev 1 wins")) == 1
+          assert stored_state()["title"] == "rev 1 wins"
+
+          # 5. A FRESH GENERATION -> admitted even though its rev restarts at 0. A
+          #    re-creation is a new object, and a random nonce cannot be ordered.
+          reborn = dict(base, rev=0, generation="ffffffffffffffff", title="recreated")
+          assert upsert(reborn) == 1
+          assert stored_state()["title"] == "recreated"
+
+          # 6. THE STATED LIMIT OF (5), asserted rather than glossed: because two
+          #    generations cannot be ordered, the OLD generation is admitted over
+          #    the new one too. Within a generation the swap is strict; across one
+          #    it is last-writer-wins. Not reachable in this build — nothing deletes
+          #    and re-creates an ordinary-scope record — and documented at
+          #    `Q_UPSERT_EXPERIMENT` so it is a known property, not a surprise.
+          assert upsert(dict(base, rev=99, title="old generation")) == 1
+
+          # Leave the row as the app itself last wrote it.
+          assert upsert(dict(base, rev=100)) == 1
+          print("durable compare-and-swap OK against a real PostgreSQL")
           print("durable repository OK against a real PostgreSQL")
           PY
 

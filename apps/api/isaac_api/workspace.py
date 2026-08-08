@@ -509,14 +509,31 @@ class Experiment:
         The bump is taken from ``max(self.rev, on-disk rev) + 1`` so a stale
         in-memory instance can never *regress* the persisted ``rev`` (defence in
         depth; the API rejects stale writes via ``If-Match`` in P27.3).
+
+        A BYTE-STABLE NO-OP NEVER REACHES ``save()`` AT ALL — it returns above,
+        before the bump. That matters to the durable compare-and-swap
+        (``experiment_repository.Q_UPSERT_EXPERIMENT``): the only writes that reach
+        the database from here carry a rev strictly ahead of the one this process
+        read, so the predicate refuses exactly the writes that lost a race and
+        nothing else.
+
+        IF THE SAVE FAILS, THE VERSION METADATA IS ROLLED BACK. Without this, an
+        instance whose write was refused (or whose database was unreachable) would
+        go on reporting a ``rev`` and an ``updated_utc`` that exist nowhere — and
+        the 412 built from it would echo a version no client could ever match.
         """
         old_sig, disk_rev = self._persisted_sig_and_rev()
         new_sig = _authoritative_signature(self)
         if old_sig is not None and old_sig == new_sig:
             return False
+        previous = (self.rev, self.updated_utc)
         self.rev = max(self.rev, disk_rev) + 1
         self.updated_utc = _now_iso()
-        self.save()
+        try:
+            self.save()
+        except BaseException:
+            self.rev, self.updated_utc = previous
+            raise
         return True
 
     @classmethod
