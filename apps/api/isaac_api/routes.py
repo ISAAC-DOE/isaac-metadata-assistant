@@ -408,6 +408,46 @@ async def storage_unavailable_handler(request, exc) -> JSONResponse:
     )
 
 
+async def durable_write_conflict_handler(request, exc) -> JSONResponse:
+    """The LAST RESORT for a refused durable write: still a 412, never a 500.
+
+    The three mutation handlers render this themselves (``_save_versioned``),
+    because only they hold the experiment and the client's ``If-Match`` and can
+    therefore fill the whole body. This handler exists for the one call site that
+    persists WITHOUT going through them — ``POST /api/experiments``, whose create
+    reaches ``Experiment.save`` directly. Reaching it requires a ULID collision
+    with a row carrying the same generation, which is not a case this application
+    can produce; an unguarded call site for a new exception class is the defect,
+    not the likelihood.
+
+    SAME DISCRIMINATOR, SAME KEYS, HONEST NULLS. A client must not have to learn a
+    second shape for one condition, so the body is ``_stale_write``'s key set
+    exactly. ``expected_*`` are ``null`` because this path carries no client
+    validator to echo — the honest answer, not a fabricated one — and the
+    ``current_*`` pair is filled only from the winner's row when it can be read,
+    never from the losing write.
+    """
+    state = exc.stored_state if isinstance(exc.stored_state, dict) else {}
+    rev = state.get("rev")
+    rev = rev if isinstance(rev, int) and not isinstance(rev, bool) else None
+    generation = state.get("generation")
+    version = f"{generation}.{rev}" if generation and rev is not None else None
+    resp = JSONResponse(
+        status_code=412,
+        content={
+            "error": "stale_write",
+            "experiment_id": state.get("id"),
+            "expected_rev": None,
+            "current_rev": rev,
+            "expected_version": None,
+            "current_version": version,
+        },
+    )
+    if version is not None:
+        resp.headers["ETag"] = f'"{version}"'
+    return resp
+
+
 def tutorial_scope(
     x_isaac_tutorial_session: Annotated[
         str | None,
@@ -576,16 +616,37 @@ def _save_versioned(exp, if_match: str | None) -> tuple[bool, JSONResponse | Non
     two names for one condition. The response body and the echoed ETag are
     unchanged.
 
+    THAT "THE REMEDY IS IDENTICAL" IS A CLAIM ABOUT THE STORE, NOT A TURN OF
+    PHRASE, and it is only true because ``Experiment.save`` makes it true. A
+    refused durable write adopts the winner's document into the workspace file
+    before it re-raises; without that, a re-read would return the SAME stale local
+    copy, the retry would offer the SAME already-taken rev, and the 412 would
+    repeat forever. Re-read → re-apply → retry converges in one extra round trip
+    because of that adoption. See ``ws.Experiment._adopt_winner_locally``.
+
     THE ECHOED VERSION COMES FROM THE WINNER, NOT FROM US.
     ``conflict.current_experiment`` prefers the document the database actually
     holds, read back inside the transaction that refused the write. Passing ``exp``
     would echo the losing write's own version, which exists nowhere and which a
     client re-reading would never see.
 
-    NOTHING WAS WRITTEN when this returns a response: the durable write happens
-    before the workspace file (``Experiment.save``), and ``save_versioned`` rolls
-    its in-memory rev bump back on any failure. In-memory mutations the handler
-    made to ``exp`` are discarded with the request.
+    WHAT WAS AND WAS NOT WRITTEN, STATED PER LAYER — this used to say "NOTHING WAS
+    WRITTEN", unconditionally, and it was wrong at one of the three call sites.
+
+    * The DATABASE took nothing: the durable write is what was refused.
+    * This experiment's STATE was not applied. The durable write goes before the
+      workspace file (``Experiment.save``), so the client's version never lands;
+      ``save_versioned`` rolls its in-memory rev/``updated_utc`` bump back, and the
+      handler's other in-memory mutations to ``exp`` are discarded with the
+      request. The workspace file IS rewritten whenever the winner's row could be
+      read and loaded — with the WINNER's document, which is the adoption above
+      and never this client's change.
+    * SIDE EFFECTS EARLIER IN THE HANDLER STAND. ``post_export`` writes the
+      official record and its evidence sidecar (``_write_record``) BEFORE calling
+      this, and those two files remain on disk. That is the half-written shape a
+      fault between the two writes already produces, and the one the export
+      handler's own reconciliation branch repairs on the next export — see the
+      comment at that call site, which is the authority on this path.
     """
     try:
         return exp.save_versioned(), None

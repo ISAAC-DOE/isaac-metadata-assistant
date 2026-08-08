@@ -1521,8 +1521,14 @@ def test_a_lost_race_surfaces_as_the_412_stale_write_the_contract_already_promis
     # reimplementing it, and `expected_rev` parses only in that form.
     assert body["expected_version"] == etag.strip('"')
     assert body["expected_rev"] == 0
-    # NOTHING WAS WRITTEN. The durable write goes before the file write.
-    assert json.loads((tmp_path / "ws" / rid / "experiment.json").read_text())["rev"] == 0
+    # THE CLIENT'S CHANGE WAS NOT APPLIED — the durable write goes before the file
+    # write, so nothing of theirs reached either copy. The workspace file IS
+    # rewritten, with the WINNER's document: this used to assert `rev == 0`, back
+    # when the refusal left the local copy stale and the retry therefore offered the
+    # same already-taken rev forever. See the wedge-recovery test below.
+    on_disk = json.loads((tmp_path / "ws" / rid / "experiment.json").read_text())
+    assert on_disk["rev"] == 9, "the refusal did not adopt the winner locally"
+    assert on_disk["draft"] == winner["draft"], "the losing write's draft was applied"
 
 
 def test_a_lost_race_is_not_a_503_and_does_not_mark_the_deployment_unhealthy(
@@ -1547,3 +1553,365 @@ def test_a_lost_race_is_not_a_503_and_does_not_mark_the_deployment_unhealthy(
     assert r.json()["error"] != "experiment_storage_unavailable"
     storage = client.get("/api/health").json()["experiment_storage"]
     assert storage["durable"] is True and storage["state"] == repo.STORAGE_STATE_DURABLE
+
+
+# =============================================================================
+# 12. THE WEDGE THE COMPARE-AND-SWAP WOULD OTHERWISE CREATE (defect C1, review)
+# =============================================================================
+#
+# WHAT THE INDEPENDENT REVIEW FOUND. A strict compare-and-swap over storage that
+# can drift AHEAD of the local workspace file does not merely refuse one write —
+# it refuses every write after it, forever, while reads keep serving the stale
+# local copy. `save_versioned` offers `max(self.rev, disk_rev) + 1`; once the row
+# holds that rev, clause 1 is false (same generation), clause 2 is false (not
+# strictly ahead) and clause 3 is false (`updated_utc` differs). The previous
+# behaviour — last writer wins — converged, wrongly. This one stops, permanently.
+# The trade was silent data loss for a hard stop, and two comments asserted the
+# opposite ("the remedy is identical", "a permanent wedge is the worse failure").
+#
+# TWO ORDINARY WAYS THE ROW GETS AHEAD OF THE FILE, NEITHER NEEDING A SECOND
+# REPLICA to be interesting:
+#   A. a fault between `save()`'s two writes — the durable write lands, the file
+#      write does not;
+#   B. a replica that hydrated the record before it moved on — `hydrate` skips any
+#      record whose `experiment.json` already exists, so it never refreshes one.
+#
+# WHAT CLOSES IT. `Experiment._adopt_winner_locally`: the refusal copies the
+# winner's document (read back inside the refusing transaction) into the workspace
+# file on the way out. The client re-reads, gets the winner, and its next write is
+# strictly ahead. Convergence is restored WITHOUT weakening the predicate.
+#
+# WHAT IS PROVEN HERE, AND WHAT IS NOT — the same split as section 11. The fake
+# reports the server's DECISION and does not evaluate the predicate, so these
+# tests prove the application recovers: the local copy is refreshed, and the retry
+# OFFERS a rev strictly ahead of the winner's. Whether PostgreSQL then admits that
+# offer is a question about PostgreSQL, and it is answered end to end in
+# `.github/workflows/ci.yml`'s `postgres-migration` job, case 7.
+
+
+def _offered_revs(conn) -> list[int]:
+    """Every `rev` this application OFFERED to the upsert, in order.
+
+    Reads the parameter the statement was executed with, so it measures what was
+    sent rather than what the fake decided — the one half of convergence a fake
+    cannot fake.
+    """
+    return [
+        json.loads(params[1])["rev"]
+        for sql, params in conn.statements
+        if sql == repo.Q_UPSERT_EXPERIMENT and params
+    ]
+
+
+def test_a_wedged_record_recovers_instead_of_412ing_forever(app, monkeypatch):
+    """THE REVIEW'S CRITICAL FINDING, end to end through HTTP.
+
+    The row is ahead of the file — scenario A above, and indistinguishable from
+    scenario B from the application's side. Before the local adoption every retry
+    re-offered the rev the row already held and every one was refused.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Wedged"}).json()["id"]
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+
+    # The row has moved on to rev 9; the workspace file is still at rev 0.
+    winner = dict(ws.load_experiment(rid).to_state(), rev=9, title="The winner")
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = winner
+    assert ws.load_experiment(rid).rev == 0, "the file moved; there is no wedge to test"
+
+    first = client.post(
+        f"/api/experiments/{rid}/answers", json=_answers_payload(), headers={"If-Match": etag}
+    )
+    assert first.status_code == 412, first.text
+
+    # THE RECOVERY, HALF ONE: a re-read returns the WINNER, not the same stale copy
+    # the retry would otherwise be built from.
+    refreshed = client.get(f"/api/experiments/{rid}")
+    assert refreshed.json()["rev"] == 9, refreshed.text
+    assert refreshed.json()["title"] == "The winner"
+    assert refreshed.headers["ETag"] == f'"{winner["generation"]}.9"'
+
+    # THE RECOVERY, HALF TWO: the retry OFFERS a rev strictly ahead of the winner's.
+    # Asserted on the statement parameters, so it is a property of what this
+    # application SENT and not of what the fake chose to answer.
+    conn.refuse_upsert.discard(rid)
+    retried = client.post(
+        f"/api/experiments/{rid}/answers",
+        json=_answers_payload(),
+        headers={"If-Match": refreshed.headers["ETag"]},
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["rev"] == 10
+    assert _offered_revs(conn)[-1] == 10 > winner["rev"], _offered_revs(conn)
+
+
+def test_without_the_adoption_the_retry_would_re_offer_the_taken_rev(app, monkeypatch):
+    """The wedge itself, pinned — so a future edit that drops the adoption fails
+    HERE, naming the mechanism, rather than only in the real-engine job.
+
+    With the adoption removed, the second attempt offers the SAME rev as the first,
+    which is the rev the row already holds. That is the permanent 412.
+    """
+    monkeypatch.setattr(ws.Experiment, "_adopt_winner_locally", lambda self, conflict: None)
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Wedged"}).json()["id"]
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = dict(ws.load_experiment(rid).to_state(), rev=9)
+
+    for _ in range(2):
+        r = client.post(
+            f"/api/experiments/{rid}/answers",
+            json=_answers_payload(),
+            headers={"If-Match": etag},
+        )
+        assert r.status_code == 412, r.text
+    offered = _offered_revs(conn)[-2:]
+    assert offered[0] == offered[1] == 1, offered
+    assert ws.load_experiment(rid).rev == 0, "the local copy was refreshed after all"
+
+
+def test_the_adoption_writes_the_local_file_only_and_does_not_bump_rev(app, monkeypatch):
+    """It copies the winner verbatim: no merge, no bump, no second database call.
+
+    The database already holds this document — writing it back would be at best a
+    round trip for nothing and at worst a new race.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Adopting"}).json()["id"]
+    winner = dict(ws.load_experiment(rid).to_state(), rev=9, title="The winner")
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = winner
+    upserts_before = _upsert_count(conn)
+
+    exp = ws.load_experiment(rid)
+    exp.title = "Mine"
+    with pytest.raises(repo.DurableWriteConflict):
+        exp.save_versioned()
+
+    # ONE upsert — the refused one. The adoption issued no statement of its own.
+    assert _upsert_count(conn) == upserts_before + 1
+    # The file holds the winner byte-for-byte, and `rev` is the winner's, unbumped.
+    assert json.loads(exp.state_path.read_text()) == winner
+    # ...and the losing in-memory instance was rolled back, not left claiming rev 1.
+    assert exp.rev == 0
+
+
+@pytest.mark.parametrize(
+    "make_stored",
+    [
+        pytest.param(lambda rid: None, id="unreadable"),
+        pytest.param(lambda rid: {"id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ", "rev": 9}, id="other-id"),
+        # Right id, but not loadable as an Experiment (no `title`, no `created_utc`).
+        pytest.param(lambda rid: {"id": rid, "rev": 9}, id="unparseable"),
+    ],
+)
+def test_an_unusable_winner_leaves_the_local_file_alone_and_still_412s(
+    app, monkeypatch, make_stored
+):
+    """A row this application cannot use must not be written into the workspace.
+
+    The record stays wedged in that case — which is the honest outcome, and is why
+    `Q_ONE_EXPERIMENT` runs inside the refusing transaction rather than being
+    treated as optional. What must NOT happen is a 412 escalating into a 500, a
+    directory named one record holding another, or a state file that the next read
+    cannot parse — this is the only writer that puts a database row into the
+    workspace on an ERROR path.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Unusable"}).json()["id"]
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    before = json.loads(ws.load_experiment(rid).state_path.read_text())
+    conn.refuse_upsert.add(rid)
+    stored = make_stored(rid)
+    if stored is not None:
+        conn.stored[rid] = stored
+
+    r = client.post(
+        f"/api/experiments/{rid}/answers", json=_answers_payload(), headers={"If-Match": etag}
+    )
+    assert r.status_code == 412, r.text
+    assert json.loads(ws.load_experiment(rid).state_path.read_text()) == before
+
+
+def test_a_failing_adoption_degrades_and_never_turns_the_412_into_a_500(app, monkeypatch):
+    """The adoption is a convenience on an error path; it may not own the outcome.
+
+    A read-only filesystem, a full disk, a permission change — none of them make a
+    concurrency refusal into a server error.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Degrading"}).json()["id"]
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = dict(ws.load_experiment(rid).to_state(), rev=9)
+
+    def _boom(self, conflict):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(ws.Experiment, "_adopt_winner_locally", _boom)
+    r = client.post(
+        f"/api/experiments/{rid}/answers", json=_answers_payload(), headers={"If-Match": etag}
+    )
+    assert r.status_code == 412, r.text
+    assert r.json()["error"] == "stale_write"
+
+
+def test_a_worked_example_record_can_never_be_healed_from_a_row():
+    """TUTORIAL ISOLATION, asserted at the one method that writes files from a row.
+
+    A session record cannot reach this method — `_ordinary_store` returns `None`
+    for any non-`None` `session_id`, so `persist` is never called and no conflict
+    can be raised — but this method WRITES, and "cannot happen" is exactly the
+    claim that stops being true when a seam moves. It refuses rather than writing
+    into a session directory, and writes nothing on the way to refusing.
+    """
+    exp = _ordinary()
+    exp.session_id = "01SESSION0000000000000000"
+    conflict = repo.DurableWriteConflict(dict(exp.to_state(), rev=9))
+    with pytest.raises(AssertionError):
+        exp._adopt_winner_locally(conflict)
+    assert not exp.state_path.exists()
+
+
+# --- the other two mutation routes, and the create path (review I-5, M-4) -----
+
+
+def _durable_ordinary(client, conn, title="Racing"):
+    """A created, durably-stored ordinary experiment: ``(id, its state document)``."""
+    rid = client.post("/api/experiments", json={"title": title}).json()["id"]
+    return rid, ws.load_experiment(rid).to_state()
+
+
+def test_a_lost_race_on_edit_is_the_same_412(app, monkeypatch):
+    """`post_edit` shares `_save_versioned` with `post_answers`; sharing a helper is
+    not the same as being covered by its test, and this route had no conflict test
+    at all."""
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid, _ = _durable_ordinary(client, conn, title="Editing")
+    # A completed draft, so there is a real evidenced field to correct.
+    exp = ws.load_experiment(rid)
+    exp.draft = ws._full_draft()
+    assert exp.save_versioned() is True
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+
+    winner = dict(ws.load_experiment(rid).to_state(), rev=42)
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = winner
+
+    edited = client.post(
+        f"/api/experiments/{rid}/edit",
+        # The raw-scan-set asset in the committed synthetic full draft, corrected to
+        # a new well-formed sha256 — the same edit `test_edit_field.py` makes.
+        json={
+            "confirmed_by_user": True,
+            "answers": {"ssrl-archive://BL15-2/2099_run_000/raw/": "f" * 64},
+        },
+        headers={"If-Match": etag},
+    )
+    assert edited.status_code == 412, edited.text
+    assert edited.json()["error"] == "stale_write"
+    assert edited.json()["current_rev"] == 42
+    assert edited.headers["ETag"] == f'"{winner["generation"]}.42"'
+    # ...and the local copy adopted the winner, so the client's retry converges.
+    assert ws.load_experiment(rid).rev == 42
+
+
+def test_a_lost_race_on_export_keeps_the_artifact_pair_and_still_recovers(app, monkeypatch):
+    """THE ONE PATH THAT RETURNS 412 AFTER A FILESYSTEM SIDE EFFECT, and it had no
+    conflict test at all.
+
+    `post_export` writes the official record and its evidence sidecar BEFORE it
+    saves the state, so a refusal here leaves an orphan artifact pair on disk. That
+    is the shape the handler's own reconciliation branch already repairs, which is
+    why the refusal degrades into a state the app handles rather than a new one —
+    and it is why `_save_versioned`'s docstring no longer says "NOTHING WAS
+    WRITTEN" unconditionally.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid, _ = _durable_ordinary(client, conn, title="Exporting")
+
+    # Make it genuinely export-ready with the committed synthetic full draft.
+    exp = ws.load_experiment(rid)
+    exp.draft = ws._full_draft()
+    assert exp.save_versioned() is True
+    assert client.get(f"/api/experiments/{rid}").json()["status"] == "ready_to_export"
+    etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+
+    winner = dict(ws.load_experiment(rid).to_state(), rev=42)
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = winner
+
+    refused = client.post(f"/api/experiments/{rid}/export", headers={"If-Match": etag})
+    assert refused.status_code == 412, refused.text
+    assert refused.json()["error"] == "stale_write"
+    assert refused.json()["current_rev"] == 42
+
+    # THE SIDE EFFECT STANDS: the artifact pair is on disk while the state says the
+    # record was never exported. Asserted rather than assumed, because the docstring
+    # now claims it.
+    reloaded = ws.load_experiment(rid)
+    assert reloaded.record_id is None, "the state claims an export that was refused"
+    written = sorted(p.name for p in (reloaded.dir / "records").glob("*.json"))
+    assert len(written) == 2, written
+    assert any(n.endswith(".evidence.json") for n in written), written
+
+    # ...and the retry, from the adopted local copy, completes the export.
+    conn.refuse_upsert.discard(rid)
+    retried = client.post(
+        f"/api/experiments/{rid}/export",
+        headers={"If-Match": client.get(f"/api/experiments/{rid}").headers["ETag"]},
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["record_id"], retried.text
+
+
+def test_a_conflict_on_create_is_a_412_and_not_an_unhandled_500(app, monkeypatch):
+    """REVIEW M-4. `POST /api/experiments` is the one `persist` call site that does
+    not go through `_save_versioned`, and the app registered a handler for
+    `StorageUnavailable` only — so a `DurableWriteConflict` escaping there was an
+    unhandled 500 for a condition that is not a server error.
+
+    Reaching it needs a ULID collision with a row of the same generation, which
+    this application cannot produce; the defect is the unguarded call site, not the
+    likelihood. Forced here by refusing every upsert.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+
+    # The fake refuses by id, and a created id is minted INSIDE the request, so it
+    # cannot be named in advance. Refused at the seam instead — the store's own
+    # method — which is exactly the shape a real collision presents to the route.
+    def _always_conflict(self, exp):
+        raise repo.DurableWriteConflict({"id": exp.id, "rev": 4, "generation": "gwin"})
+
+    monkeypatch.setattr(repo.PostgresOrdinaryStore, "persist", _always_conflict)
+    created = client.post("/api/experiments", json={"title": "Colliding"})
+    assert created.status_code == 412, created.text
+    body = created.json()
+    assert body["error"] == "stale_write"
+    assert set(body) == {
+        "error",
+        "experiment_id",
+        "expected_rev",
+        "current_rev",
+        "expected_version",
+        "current_version",
+    }
+    assert body["current_rev"] == 4 and body["current_version"] == "gwin.4"
+    # No client validator exists on a create, so the echoed expectation is null
+    # rather than invented.
+    assert body["expected_rev"] is None and body["expected_version"] is None
+    assert created.headers["ETag"] == '"gwin.4"'
+    # The refusal created nothing on disk either: the durable write goes first, and
+    # the winner's document here is not loadable as an Experiment, so the adoption
+    # declines to write it rather than leaving an unreadable state file behind.
+    assert not (ws.workspace_root() / body["experiment_id"]).exists()

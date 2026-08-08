@@ -451,16 +451,31 @@ def blank_draft() -> dict:
 #:    offers N+1. A writer whose copy is behind offers a rev the row already has or
 #:    has passed, and is refused.
 #: 3. The DOCUMENT IS IDENTICAL -> accept. This is the rev-EQUAL case, and it is
-#:    admitted deliberately and narrowly. ``save()`` writes the database FIRST and
-#:    the workspace file second, so a fault between the two leaves a durable copy
-#:    that a retry re-offers at the SAME rev with the SAME content. Refusing that
-#:    would report a conflict for a write that had already succeeded. It cannot
-#:    weaken clause 2: ``rev`` is INSIDE the document, so an identical document is
-#:    identical in every field, and applying it changes nothing at all. Two racing
-#:    writers producing byte-identical states are not in conflict in any sense a
-#:    reader could observe. Comparison is ``jsonb`` equality, which is by VALUE and
-#:    not by text, so key order and whitespace cannot make an identical document
-#:    look different.
+#:    admitted deliberately and narrowly.
+#:
+#:    THE JUSTIFICATION THIS CLAUSE USED TO CARRY WAS FALSE, and is corrected here
+#:    rather than quietly dropped. It said the clause exists for the retry after a
+#:    fault between the durable write and the workspace-file write: same rev, same
+#:    content, re-offered. It is almost never the same content. That retry goes
+#:    through ``Experiment.save_versioned``, which re-stamps ``updated_utc``
+#:    (``workspace._now_iso``, ONE-SECOND resolution) — and ``updated_utc`` is
+#:    INSIDE the compared document. So the retried document matches only when the
+#:    retry lands in the same wall-clock second as the write it retries. The clause
+#:    is a same-second coincidence, not the partial-failure remedy, and the
+#:    partial-failure wedge is closed somewhere else entirely: by
+#:    ``Experiment._adopt_winner_locally``, which copies the winner's document into
+#:    the workspace file on the way to the 412 so the client's next write is
+#:    strictly ahead.
+#:
+#:    IT IS KEPT, because what it actually covers is worth covering and costs
+#:    nothing: ANY re-offer of a byte-identical document at an equal rev — that
+#:    same-second retry, two writers producing byte-identical states, and any
+#:    caller reaching ``save()`` directly rather than through ``save_versioned``.
+#:    Refusing those would report a conflict for a write that changes nothing. It
+#:    cannot weaken clause 2: ``rev`` is INSIDE the document, so an identical
+#:    document is identical in every field, and applying it is a no-op in all of
+#:    them. Comparison is ``jsonb`` equality, which is by VALUE and not by text, so
+#:    key order and whitespace cannot make an identical document look different.
 #:
 #: THE ONE LIMIT OF CLAUSE 1, STATED RATHER THAN GLOSSED. ``generation`` is an
 #: opaque random nonce, so two generations cannot be ORDERED — only compared. The
@@ -473,8 +488,24 @@ def blank_draft() -> dict:
 #: whose records never touch this table) — so the clause is forward-looking. It is
 #: kept LOOSE on purpose: tightening it to "a differing generation must also carry
 #: ``rev = 0``" would close a hole nothing can reach today at the price of a
-#: record that could wedge permanently at ``412`` if the assumption ever failed,
-#: and a permanent wedge is the worse failure.
+#: record that could wedge at ``412`` if the assumption ever failed.
+#:
+#: THAT SENTENCE USED TO END "…and a permanent wedge is the worse failure" — and
+#: clause 2 then created exactly that wedge, one clause further down. Corrected
+#: rather than deleted, because the correction is the point. Whenever the ROW is
+#: ahead of the WORKSPACE FILE, every later mutation computes
+#: ``max(self.rev, disk_rev) + 1``, which is the rev the row already holds: clause
+#: 1 is false (same generation), clause 2 is false (not strictly ahead), clause 3
+#: is false (``updated_utc`` differs) — a 412 that repeats forever, over reads that
+#: keep serving the stale local file. Two ordinary events produce that skew: a
+#: fault between ``save()``'s two writes, and a second replica that hydrated the
+#: record before it moved on (``hydrate`` skips a record whose directory already
+#: exists, so it never refreshes one). WHAT CLOSES IT IS NOT THIS PREDICATE. It is
+#: ``Experiment._adopt_winner_locally``: a refusal writes the winner's document
+#: into the workspace file before the 412 is raised, so re-read → re-apply → retry
+#: converges in one extra round trip. Clause 1 stays loose for the reason above,
+#: which is still a reason — but the recovery it appealed to now exists instead of
+#: being assumed.
 #:
 #: ``RETURNING`` exists so the refusal is DETECTABLE: a conflict action whose
 #: ``WHERE`` is false updates nothing and raises nothing, so without a returned row
@@ -640,6 +671,14 @@ class PostgresOrdinaryStore:
 
         Returns how many were restored — a MEASURED count of directories this
         call created, not the row count.
+
+        IT RESTORES; IT DOES NOT REFRESH. The skip is on ``experiment.json``, not
+        on the row: a record whose state file is already present is left exactly as
+        it is, however stale it is — so a replica that hydrated a
+        record once never sees a later revision of it through this path. That is
+        deliberate (a re-read must not silently overwrite local state), and it is
+        the reason a refused durable write adopts the winner's document into the
+        workspace file itself — see ``ws.Experiment._adopt_winner_locally``.
 
         It writes ONLY into ``workspace_root()``. The tutorial namespace is never
         addressed: there is no session id anywhere in this method, and a stored
