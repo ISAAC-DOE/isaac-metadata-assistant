@@ -1063,7 +1063,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 40 operations, 61 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 40 operations, 62 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(40);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1240,8 +1240,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `experiment_storage` was "derived from configuration alone", which is what
     // let a pod report `durable: true` while every write against it failed), and
     // `POST /api/experiments` gained a paragraph documenting its `503`.
-    expect(total).toBe(29052);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(61);
+    //
+    // 29,052 -> 29,460 and 61 -> 62 paragraphs (C2). `POST /api/demo/reset` gained a
+    // paragraph, and one sentence in the paragraph above it was CORRECTED rather than
+    // extended. The reset now re-checks the `plan_digest` per record, inside that
+    // record's own lock, immediately before touching it — so a write that lands
+    // between the first check and the mutation is refused rather than destroyed. That
+    // made the old sentence "A missing digest is `428`, a stale one is `412`, and
+    // neither mutates anything" false: a `412` from the per-record check is the one
+    // refusal that can leave earlier records already reset. The `412` response
+    // description says so too, though that block is not part of this measurement.
+    //
+    // Cross-checked in Python rather than only by re-running this assertion, exactly
+    // as the corrected 29,052 was: the re-transcribed entry is 2,047 characters where
+    // the old one was 1,637 (+410), and it holds one more `\n\n` separator, which this
+    // sum drops (+410 - 2 = +408).
+    expect(total).toBe(29460);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(62);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

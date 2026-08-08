@@ -1309,9 +1309,15 @@ def _reset_response(
         "runs only if that session still matches it. Without this, a client that "
         "previewed, showed a confirmation dialog, and executed a while later would "
         "destroy anything committed in between — the operator would have approved a "
-        "classification that no longer held. A missing digest is `428`, a stale one "
-        "is `412`, and neither mutates anything. Every response carries the CURRENT "
-        "digest, so a `412` can be recovered from in one further request.\n\n"
+        "classification that no longer held. A missing digest is `428` and mutates "
+        "nothing; a stale one is `412`. Every response carries the CURRENT digest, so "
+        "a `412` can be recovered from in one further request.\n\n"
+        "The digest is also re-checked PER RECORD, inside that record's own lock and "
+        "immediately before it is touched, because a per-record write can otherwise "
+        "land between the first check and the mutation. A write in that window is "
+        "therefore never destroyed: the reset refuses instead. That is the one "
+        "refusal that can leave earlier records already reset, and the response's "
+        "measured counts say so — see the `412` description.\n\n"
         "There is deliberately no general per-experiment delete operation."
     ),
     response_description=(
@@ -1341,10 +1347,18 @@ def _reset_response(
         },
         412: {
             "description": (
-                "Refused without mutating: the `plan_digest` does not match the "
-                "current workspace, so it changed after the preview the operator "
-                "approved. The response carries the current `plan_digest`; preview "
-                "again and let the operator re-approve what they would now lose."
+                "Refused: the `plan_digest` does not match, so the workspace changed "
+                "after the preview the operator approved. The response carries the "
+                "current `plan_digest`; preview again and let the operator re-approve "
+                "what they would now lose.\n\n"
+                "Almost always nothing was mutated. The one exception is deliberate "
+                "and is disclosed by the counts rather than hidden: the precondition "
+                "is re-checked per record, inside that record's own lock, immediately "
+                "before it is touched — so a write that lands mid-reset is never "
+                "destroyed, and the reset stops there instead. Records reset before "
+                "that point stay reset. `removed_count` and `final_count` are "
+                "MEASURED, so they describe what is actually on disk either way, and "
+                "the status is never `ok`."
             )
         },
         428: {

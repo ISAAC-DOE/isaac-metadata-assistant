@@ -1379,12 +1379,23 @@ def _canonical_state_counts(session_id: str | None = None) -> dict:
 #: ever waits for it, so the classic two-lock cycle cannot form.
 #:
 #: WHAT IT DOES NOT COVER, stated plainly: a per-record writer (``/answers``,
-#: ``/edit``, ``/export``) does NOT take this lock, so a write can still land in the
-#: window between the digest check and the per-id mutation. That window is
-#: sub-millisecond and in-process; the defect the digest exists to fix is the
-#: human-scale one (a dialog left open). Each individual record's mutation IS
-#: serialised against that writer by ``record_lock``, which is what keeps the
-#: filesystem consistent.
+#: ``/edit``, ``/export``) does NOT take this lock. It deliberately never will —
+#: putting a workspace-wide lock on the hot mutation path would invert the ordering
+#: documented above (a ``record_lock`` holder would then wait for this lock, which is
+#: exactly the two-lock cycle the paragraph above rules out).
+#:
+#: So a write CAN still land in the window between the workspace-wide digest check
+#: and the per-id mutation. That window used to be an unguarded hole: the write
+#: returned 200 and was then destroyed, and the response's ``at_risk`` summary —
+#: computed from the pre-write snapshot — under-reported by exactly what it had
+#: destroyed. **C2 closes it by making the precondition PER-RECORD as well**: inside
+#: each id's own ``record_lock``, and before that id is touched, the reset re-reads
+#: that one record and rebuilds its digest row (:func:`_plan_digest_row`). A row that
+#: no longer matches the one classified at the top of this function means a write
+#: landed in the window, so the reset ABORTS that id unmutated and refuses with the
+#: existing ``plan_digest_stale`` reason. The write therefore either SURVIVES or the
+#: reset REFUSES — never neither. ``record_lock`` still keeps the filesystem
+#: consistent; the row re-check is what keeps the outcome honest.
 _reset_lock = threading.Lock()
 
 
@@ -1426,6 +1437,47 @@ def _classify_workspace(experiments: list["Experiment"]) -> dict[str, list["Expe
     return buckets
 
 
+def _plan_digest_row(exp: "Experiment", bucket: str) -> list:
+    """ONE record's row in the reset plan — the unit :func:`_plan_digest` hashes.
+
+    Extracted so the per-record precondition in :func:`reset_to_canonical_seed` can
+    re-derive exactly the same row for one id, rather than re-implementing the rule
+    beside it and drifting from it. Anything that would change this row changes the
+    digest, and vice versa, BY CONSTRUCTION — there is only one definition.
+
+    See :func:`_plan_digest` for what each element is and why it is included.
+    """
+    return [
+        exp.id,
+        bucket,
+        exp.version_token(),
+        len(exp.answer_log or []),
+        _authoritative_signature(exp),
+    ]
+
+
+def _current_plan_row(experiment_id: str, session_id: str | None) -> list | None:
+    """Re-read ONE record from disk NOW and rebuild its plan row (``None`` if absent).
+
+    Deliberately reads and rehydrates by exactly the same two steps
+    ``_load_all_experiments`` uses (``read_text`` -> ``Experiment.from_state``), so a
+    record nobody touched produces a row byte-identical to the one classified
+    earlier and the comparison can never refuse spuriously. Absence is a real answer,
+    not an error: a record removed in the window has no row, which differs from the
+    row it had when it was classified — which is the point.
+
+    Callers hold that id's ``record_lock``; the ``FileNotFoundError`` guard mirrors
+    ``_load_all_experiments``'s and exists for the same benign reason.
+    """
+    state_path = scope_root(session_id) / experiment_id / "experiment.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    exp = Experiment.from_state(state, session_id=session_id)
+    return _plan_digest_row(exp, classify_experiment(exp))
+
+
 def _plan_digest(buckets: dict[str, list["Experiment"]]) -> str:
     """A deterministic, opaque digest of the CLASSIFIED workspace.
 
@@ -1453,13 +1505,7 @@ def _plan_digest(buckets: dict[str, list["Experiment"]]) -> str:
     reduced to one sha256, so nothing is recoverable from the digest itself.
     """
     rows = sorted(
-        [
-            exp.id,
-            bucket,
-            exp.version_token(),
-            len(exp.answer_log or []),
-            _authoritative_signature(exp),
-        ]
+        _plan_digest_row(exp, bucket)
         for bucket, exps in buckets.items()
         for exp in exps
     )
@@ -1525,7 +1571,10 @@ def reset_to_canonical_seed(
 
     Refuses (makes NO changes) if ANY ambiguous record exists, and — when
     ``expected_plan_digest`` is supplied — if it does not match the digest of the
-    session as classified here. Otherwise, on execute, removes ONLY the
+    session as classified here, or if any single record changes between that
+    classification and the moment this reset is about to touch it (see the
+    per-record precondition below, which is the one refusal that can leave earlier
+    ids already reset). Otherwise, on execute, removes ONLY the
     managed_legacy directories via ``remove_experiment`` (path-safe, each under that
     record's own ``record_lock``), then re-materialises EVERY canonical scenario to
     its deterministic seed baseline — a present-but-drifted canonical record (partial
@@ -1548,6 +1597,25 @@ def reset_to_canonical_seed(
     ALWAYS supplies it for an execute: the precondition is part of the API contract,
     not of this function's contract.
 
+    **The precondition is checked TWICE, and the second check is the point (C2).**
+    Once here, over the whole classification; and then again PER RECORD, inside each
+    id's own ``record_lock`` and before that id is touched, by rebuilding that one
+    record's row (:func:`_current_plan_row`) and comparing it to the row classified
+    above. Without the second check the span from the snapshot to the per-id mutation
+    was open to a writer — ``/answers``, ``/edit`` and ``/export`` take ``record_lock``
+    but not ``_reset_lock`` — so a write could return 200 and then be destroyed by a
+    reset reporting success. It now cannot: the write either lands before that id's
+    check (and the reset aborts) or it cannot land at all (the lock is held).
+
+    **So a refusal is NOT always "made no changes".** A workspace-wide refusal, and
+    every refusal that existed before C2, still mutates nothing. A per-record abort
+    part-way through leaves the ids BEFORE the aborted one already reset — which is
+    why ``final_count``/``plan_digest``/``at_risk`` are measured from disk in that case
+    rather than echoed from the snapshot, and why it still reports ``refused``. A
+    partial reset is the honest price of never destroying an acknowledged write; the
+    alternative (holding every record's lock at once) would break the one-lock-at-a-time
+    rule that makes this deadlock-free.
+
     ``final_count`` is MEASURED after the mutation, never asserted from
     ``len(CANONICAL_IDS)``. A record created between the classification and the
     mutation is not classified, so it is not removed — it survives, and the reported
@@ -1565,6 +1633,17 @@ def reset_to_canonical_seed(
         plan_digest = _plan_digest(buckets)
         at_risk = _at_risk_summary(canonical, legacy)
 
+        # The digest above is one number over the WHOLE classification; these are the
+        # individual rows it was reduced from, kept so each id can be re-checked
+        # against its own row inside its own lock (C2 — see ``_reset_lock``). An id
+        # that was ABSENT here simply has no entry, and ``.get`` returning ``None``
+        # is the correct comparison value: "absent then" must match "absent now".
+        planned_rows: dict[str, list] = {
+            exp.id: _plan_digest_row(exp, bucket)
+            for bucket, exps in buckets.items()
+            for exp in exps
+        }
+
         # Precondition BEFORE the ambiguity verdict: a client holding a stale plan
         # must be told to look again, not handed a classification verdict about a
         # workspace it has never seen.
@@ -1576,18 +1655,47 @@ def reset_to_canonical_seed(
         refused = refusal is not None
 
         removed = 0
+        #: Has ANY id been removed or re-materialised yet? Only consulted when the
+        #: reset aborts part-way (C2): a refusal that already mutated must MEASURE
+        #: what it left behind rather than report the pre-reset snapshot.
+        mutated = False
         if not dry_run and not refused:
+            # C2 — the PER-RECORD precondition. Armed only when the caller supplied a
+            # precondition at all: ``expected_plan_digest is None`` means "no
+            # precondition" (the documented contract for the direct in-process
+            # callers), and refusing such a call with ``plan_digest_stale`` would
+            # invent a precondition it never presented. The HTTP route ALWAYS supplies
+            # one for an execute, so the production path is always guarded.
+            check_rows = expected_plan_digest is not None
+
+            def _row_changed(experiment_id: str) -> bool:
+                """Did this ONE record change since it was classified above?
+
+                Called inside that id's ``record_lock``, so between this answer and
+                the mutation that follows it no writer can intervene — which is what
+                makes the check a precondition rather than a guess.
+                """
+                return _current_plan_row(experiment_id, session_id) != planned_rows.get(
+                    experiment_id
+                )
+
             # Symmetric locking: BOTH the managed-legacy removal and the canonical
             # re-materialisation hold that record's own ``record_lock``, so a
             # concurrent writer can never race an unlocked directory removal. Taken
             # one at a time and released before the next (never two at once), which
-            # is what keeps this deadlock-free. Every lock key is scope-qualified with
+            # is what keeps this deadlock-free — and the row re-check adds no lock, so
+            # that argument is unchanged. Every lock key is scope-qualified with
             # this session, so a reset in one session never blocks — and is never
             # blocked by — a mutation in another.
             for exp in legacy:
                 with record_lock(exp.id, session_id=session_id):
+                    if check_rows and _row_changed(exp.id):
+                        refusal = "plan_digest_stale"
+                        refused = True
+                        break
                     remove_experiment(exp)
                 removed += 1
+                mutated = True
             # Restore canonical CONTENT to the deterministic seed baseline (not just
             # fill missing). Each canonical id is removed and re-materialised, so
             # drifted content, partial answers, and wrongly-exported artifacts are
@@ -1595,18 +1703,32 @@ def reset_to_canonical_seed(
             # ETag). Targeted to the fixed canonical id set — NOT a broad filesystem
             # wipe.
             for spec in _seed_specs():
+                if refused:
+                    break
                 with record_lock(spec.id, session_id=session_id):
+                    if check_rows and _row_changed(spec.id):
+                        refusal = "plan_digest_stale"
+                        refused = True
+                        break
                     target = scope_root(session_id) / spec.id
                     if target.exists():
                         # path-safe (direct-child-of-THIS-scope guard)
                         _remove_experiment_dir(target, session_id=session_id)
                     # baseline content + fresh generation + DONE artifact
                     _materialise_seed(spec, session_id=session_id)
+                    mutated = True
 
         # ``final_count`` — three cases, and the difference between them is the point
         # of D3. Keep them distinct; collapsing any two makes the number dishonest.
         #
-        #  * REFUSED: nothing changed, so the classification snapshot IS the truth.
+        #  * REFUSED WITHOUT MUTATING: nothing changed, so the classification snapshot
+        #    IS the truth. Every pre-C2 refusal was decided before the mutation block,
+        #    so this stayed exactly the case it always was.
+        #  * REFUSED AFTER MUTATING (C2, a per-record abort part-way through): the
+        #    snapshot is NOT the truth any more — ids before the aborted one were
+        #    already removed / re-materialised. It falls through to the MEASURED arm
+        #    below, so a partial abort reports what it actually left behind. It still
+        #    reports ``refused``, so it can never read as success.
         #  * PREVIEW that would proceed: nothing has happened yet, so this is
         #    necessarily a PROJECTION — and the projection is exactly the canonical
         #    five, because a non-refused reset removes the legacy set and rebuilds the
@@ -1624,7 +1746,7 @@ def reset_to_canonical_seed(
         #    ``len(CANONICAL_IDS)``, which was the D3 defect — a record created between
         #    the classification and the mutation is not classified, so it is not
         #    removed, so it survives, and the response must say so.
-        if refused:
+        if refused and not mutated:
             final_count = previous_count
             final_digest = plan_digest
             final_at_risk = at_risk
