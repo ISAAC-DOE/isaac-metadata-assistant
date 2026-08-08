@@ -10624,7 +10624,7 @@
       },
       {
         "path": "docs/deployment.md",
-        "sha256": "51d42348809e87f128819388aed97df2cc7278fff5a97863cc8ec015c34db886"
+        "sha256": "ca6fc3a45eff999b26454c13c63e78cd363f0fdcee0204e68279550d039e8d61"
       },
       {
         "path": "docs/extraction.md",
@@ -10776,7 +10776,7 @@
       },
       {
         "path": "pyproject.toml",
-        "sha256": "45fa6c9d1a178be61064169c30c1b557fcd31bf48cf33359d92274a275798c01"
+        "sha256": "e14f838d23ca60006673cc7694037238019a433925bd66042b53ed772f49a164"
       },
       {
         "path": "schema/PROVENANCE.md",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "37c959d58b068dea9eb18e7713463ad772384ee9d784d1da11a074ad4ad59ec7"
+    "served_manifest_fingerprint": "60aa6acc2631821e08bb7252b6f84088b05b2c4f00037a0287261fddf9a6e624"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
