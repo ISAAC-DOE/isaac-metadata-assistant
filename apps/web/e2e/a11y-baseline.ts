@@ -714,11 +714,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * project starts, so all five projects measure the same page; that is why
        * `desktop-1280x800` moves here even though CI reported it green.
        */
-      'statistics@desktop-1280x800': 9,
-      'statistics@laptop-1024x768': 9,
-      'statistics@tablet-768x1024': 9,
-      'statistics@mobile-375x812': 8,
-      'statistics@zoom-200': 8,
+      'statistics@desktop-1280x800': 3,
+      'statistics@laptop-1024x768': 3,
+      'statistics@tablet-768x1024': 3,
+      'statistics@mobile-375x812': 2,
+      'statistics@zoom-200': 2,
       /*
        * THE POPULATED Statistics page, at the same route inside a worked-example
        * session — ADDED 2026-08-04 to close a gap the tutorial-scope slice left open.
@@ -784,11 +784,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * `desktop-1280x800` moves for the determinism reason given there: CI
        * reported it green only because it ran before the sweep landed.
        */
-      'statistics-example@desktop-1280x800': 15,
-      'statistics-example@laptop-1024x768': 15,
-      'statistics-example@tablet-768x1024': 15,
-      'statistics-example@mobile-375x812': 14,
-      'statistics-example@zoom-200': 14,
+      'statistics-example@desktop-1280x800': 5,
+      'statistics-example@laptop-1024x768': 5,
+      'statistics-example@tablet-768x1024': 5,
+      'statistics-example@mobile-375x812': 4,
+      'statistics-example@zoom-200': 4,
       /*
        * THE MY STATS TAB — a NEW surface (`/statistics?tab=mine`), added with the
        * tab restructure because neither `statistics` nor `statistics-example` opens
@@ -1228,35 +1228,57 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // at all five viewports. A rule that has never been baselined firing for the
   // first time is a DEFECT, not a number to record -- an inline link carried by
   // colour alone (WCAG 1.4.1). It is fixed in `screens.css` with an underline.
+  // ── STAT-CARD-NOTE CONTRAST FIX, 2026-08-08: BOTH columns fall by 80 ────────
+  // `statistics` -6 at every viewport (9->3, 9->3, 9->3, 8->2, 8->2) and
+  // `statistics-example` -10 at every viewport (15->5 x3, 14->4 x2).
+  // darwin 1690-80 = 1610; linux 1692-80 = 1612. LINUX FIGURES ARE CI'S.
+  //
+  // The cause is a real remedy, not a re-baselining: `.stat-card-note` moved
+  // from `--text-tertiary` (#78838f, 11.5px) to `--text-secondary` at 12px,
+  // taking it from 3.76:1 on the neutral card and 3.43:1 on the green ones to
+  // 7.86:1 and 7.16:1. Both "before" figures were independently measured twice.
+  //
+  // READ THIS KEY'S HISTORY BEFORE TOUCHING IT AGAIN. Earlier in this same
+  // session `statistics@desktop-1280x800` was edited from 9 to 5 on a LOCAL
+  // darwin reading that turned out to be the report-settle race described
+  // above -- and the tell, ignored at the time, was that only ONE of the five
+  // viewports had moved. That edit was reverted and CI then passed at 9,
+  // proving 9 correct. It is now 3, because the underlying defect was actually
+  // FIXED. So this key has been wrong in both directions within one session,
+  // and both times the corrective was the same: a token change moves EVERY
+  // viewport by the same amount, and the number comes from CI.
   //
   // ── MERGE WITH `feat/my-experiments-create`, 2026-08-08: a FURTHER -2 on both
   //    columns, and it is arithmetic rather than a reading ────────────────────
   //
-  // The two branches moved different keys and neither touched the other's, so
-  // the deltas stack:
+  // The create branch and main moved DIFFERENT keys and neither touched the
+  // other's, so the deltas stack:
   //
   //   settings-explorer   tablet 63 -> 62, mobile 56 -> 55   = -2
   //
   // Those two entries came in on the create branch and merged without conflict;
   // only this total conflicted, because both sides had recomputed it. THE
-  // NUMBERS BELOW ARE THE SUM OF THE ENTRY MAP AS IT NOW STANDS, computed by the
-  // same reduction `specs/a11y-axe.spec.ts` performs — they are not a hand
-  // subtraction and they are not a new measurement of anything.
+  // NUMBERS BELOW ARE THE SUM OF THE ENTRY MAP AS IT NOW STANDS, computed by
+  // running the same reduction `specs/a11y-axe.spec.ts` performs over the merged
+  // map. They are not a hand subtraction and they are not a measurement.
   //
-  // WHAT IS AND IS NOT MEASURED HERE. The `memory-graph` and `statistics` values
-  // above are CI's, transcribed. The two `settings-explorer` values are DARWIN
-  // ONLY (their own note says so). And nothing in this merge has been scanned at
-  // all: the create branch's UI now sits inside the polish slice's card idiom —
-  // a third `.queue-empty-action` card, a `Plus` mark, an inline create form —
-  // and the `experiments@*` keys are UNCHANGED here because no run has been made
-  // to change them from, not because a run said they held. If the first CI run
-  // on the merged tree reports movement on `experiments@*`, transcribe ITS
-  // numbers. Do not pre-empt them, and never lower a key onto a local reading.
+  // WHAT IS AND IS NOT MEASURED HERE, stated because this key's own history
+  // above is a record of getting exactly this wrong twice. The `statistics`,
+  // `statistics-example` and `memory-graph` values are CI's, transcribed. The two
+  // `settings-explorer` values are DARWIN ONLY, and their own note says so.
   //
-  // 1690 - 2 = 1688 and 1692 - 2 = 1690, and both were CONFIRMED by running the
-  // reduction over the merged entry map rather than by doing the subtraction.
-  darwin: 1688,
-  linux: 1690,
+  // AND NOTHING IN THIS MERGE HAS BEEN SCANNED AT ALL. The create branch's UI now
+  // sits inside the polish slice's card idiom — a third `.queue-empty-action`
+  // card with a `Plus` mark, an inline create form, and a durability line — so
+  // `experiments@*` is the family most likely to move. Those five keys are
+  // UNCHANGED here because no run has been made to change them from, NOT because
+  // a run said they held. If the first CI run on the merged tree reports movement
+  // on `experiments@*`, transcribe ITS numbers. Do not pre-empt them, and never
+  // lower a key onto a local darwin reading.
+  //
+  // 1610 - 2 = 1608 and 1612 - 2 = 1610, both CONFIRMED by the reduction.
+  darwin: 1608,
+  linux: 1610,
 };
 
 /**

@@ -107,6 +107,9 @@ import { FigureList, StatCard, StatsSection, UnavailableNote } from './StatsPrim
  * exactly the shape the backend's own rate limiter exists to survive, and this
  * client will not be the thing testing it.
  *
+ * THAT INVARIANT PUTS THE WHOLE WEIGHT OF THE `running` STATE ON ITS DESIGN,
+ * and for a while the design did not carry it — see `RunInProgressPanel`.
+ *
  * ── THE TRI-STATE SAFEGUARDS ───────────────────────────────────────────────
  *
  * `not_applicable` is rendered as its own state, in its own words, with its own
@@ -382,6 +385,15 @@ export function RecordVerification({ verification }: RecordVerificationProps) {
               refreshFailed={refreshFailed}
               onRefresh={refresh}
             />
+          ) : view.kind === 'notReady' && view.status === 'running' ? (
+            /* The one not-ready status a reader is meant to WAIT OUT, so it gets
+               a designed state of its own rather than the shared not-available
+               panel. See `RunInProgressPanel`. */
+            <RunInProgressPanel
+              refreshing={refreshing}
+              refreshFailed={refreshFailed}
+              onRefresh={refresh}
+            />
           ) : (
             /* No report, so no corpus banner and nothing to date: the control
                leads, because there is nothing above it for it to follow. */
@@ -413,26 +425,151 @@ export function RecordVerification({ verification }: RecordVerificationProps) {
  * was three lines of prose standing between the reader and the first figure.
  * `Report Age`, which is the part of it a reader acts on, is rendered beside
  * this button instead.
+ *
+ * TWO THINGS ARE VARIABLE AND THE NAME IS NOT. `emphasis` picks the button
+ * treatment and `busyNote` the sentence beside it, because the run-in-progress
+ * state needs a prominent control and cannot say "the results below are still
+ * the ones last read" — there are no results below it. The accessible name,
+ * which is what every test and every reader addresses this control by, is the
+ * same string in every state.
  */
-function ReadControls({ refreshing, onRefresh }: { refreshing: boolean; onRefresh: () => void }) {
+function ReadControls({
+  refreshing,
+  onRefresh,
+  emphasis = 'secondary',
+  busyNote = 'Re-reading… the results below are still the ones last read.',
+}: {
+  refreshing: boolean;
+  onRefresh: () => void;
+  emphasis?: 'primary' | 'secondary';
+  busyNote?: string;
+}) {
   return (
     <div className="stats-verify-controls">
       <div className="stats-verify-controls-row">
         <button
           type="button"
-          className="btn btn-secondary"
+          className={emphasis === 'primary' ? 'btn btn-primary' : 'btn btn-secondary'}
           onClick={onRefresh}
           aria-busy={refreshing}
           disabled={refreshing}
         >
           Refresh the verification report
         </button>
-        {refreshing && (
-          <span className="stats-verify-refreshing">
-            Re-reading… the results below are still the ones last read.
-          </span>
-        )}
+        {refreshing && <span className="stats-verify-refreshing">{busyNote}</span>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * How long a run takes, as an ORDER OF MAGNITUDE — never as a measurement of the
+ * run the reader is waiting on, and never as a countdown.
+ *
+ * WHERE THE PHRASE COMES FROM, because this repository does not print figures it
+ * did not measure. There is no backend constant to mirror: the duration is a
+ * property of the corpus and the machine, not of the code, and the `running`
+ * envelope carries no metadata at all (`verification.build_pending_report`), so
+ * nothing on the wire could tell this build a number. What IS known is the
+ * magnitude, from two independent measurements of this build: `e2e/global-setup.ts`
+ * records the sweep at "~15s locally", and a cold run measured while this panel
+ * was being written reported `metadata.duration_ms` of 19,325. Both are tens of
+ * seconds, so tens of seconds is what the copy claims — and it is hedged as
+ * typical, because the next corpus may not be this one.
+ *
+ * A precise "about 20 seconds" was deliberately NOT written. It would read as a
+ * property of the run in progress, which this screen cannot see, and it would rot
+ * silently the first time the corpus grew.
+ */
+const RUN_MAGNITUDE = 'tens of seconds';
+
+/**
+ * `running`, as a FIRST-CLASS STATE.
+ *
+ * ── THE DEFECT THIS REPLACES, WHICH WAS MEASURED AND NOT THEORISED ─────────
+ *
+ * Record Verification is the LEDE of this page, so `running` is what a
+ * first-time visitor meets on a cold backend — and `running` is the one state
+ * that ends on its own without telling anybody. An independent review loaded
+ * `/statistics` against a cold backend and read "Verification Run in Progress"
+ * at 5s, 20s, 40s and 65s; the sweep itself had finished at 19.6s. The state was
+ * never wrong. It was USELESS: it said what was true, said nothing about what
+ * the reader should do, and left the one control that ends the wait sitting
+ * above the message as a quiet secondary button that reads as page furniture.
+ *
+ * ── WHY THE OBVIOUS FIX IS NOT THE FIX ─────────────────────────────────────
+ *
+ * Polling would repaint the page and would also be the one thing this section is
+ * built not to do. The reasons are in this file's header and are real — a sweep
+ * that takes tens of seconds, a server-side minimum interval between runs, and
+ * as many pollers as there are open tabs — and `record-verification.test.tsx`
+ * pins them twice, once by advancing an hour of clock and once by proving
+ * nothing is SCHEDULED at all. A presentation defect does not justify weakening
+ * a deliberate invariant, so nothing here schedules anything: this is the same
+ * one-read-per-press section, wearing a state that admits what it is.
+ *
+ * ── WHAT IT SAYS, AND WHAT IT MUST KEEP SAYING ─────────────────────────────
+ *
+ * The first paragraph is `notReadyMessage('running')` VERBATIM — the same title
+ * and the same body the shared not-ready panel rendered. It is the load-bearing
+ * honesty in this state ("no earlier result is shown in its place"), it is
+ * asserted in `record-verification.test.tsx` and in `e2e/specs/statistics-states.spec.ts`,
+ * and it is deliberately not re-authored here. What is ADDED is the part the
+ * reader was missing: that nothing on this screen will change on its own, what
+ * order of time a run takes, and the control — promoted to the primary
+ * treatment and placed after the sentence that tells you to press it, rather
+ * than before the sentence that explains it.
+ *
+ * The closing sentence exists so the control does not feel dangerous to press.
+ * Both halves are properties of the backend rather than hopes: a request made
+ * while a sweep is in flight is answered `running` from the run already under
+ * way instead of starting a second one (`verification.VerificationState.report`),
+ * and a finished report is held for `CACHE_TTL_SECONDS`, which is the same
+ * constant `StalenessNote` already states to the reader.
+ */
+function RunInProgressPanel({
+  refreshing,
+  refreshFailed,
+  onRefresh,
+}: {
+  refreshing: boolean;
+  refreshFailed: boolean;
+  onRefresh: () => void;
+}) {
+  const message = notReadyMessage('running');
+  return (
+    <div className="stats-block stats-verify-running">
+      <p className="stats-verify-running-title">{message.title}</p>
+      <p className="stats-note">{message.body}</p>
+      <p className="stats-note">
+        The run happens away from this request, so this page is not waiting on it and nothing on
+        this screen changes on its own. A run of this program usually takes {RUN_MAGNITUDE}; this
+        screen cannot see how far along this one is, and it will not tell you when the result
+        lands.
+      </p>
+      <ReadControls
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        emphasis="primary"
+        busyNote="Re-reading… nothing has been discarded, and no result is being replaced."
+      />
+      <p className="stats-note">
+        Pressing it costs nothing while a run is under way: the API answers from the run already in
+        flight rather than starting a second one, and once a report exists it is held for{' '}
+        {formatAgeSeconds(VERIFICATION_CACHE_TTL_SECONDS)}.
+      </p>
+      {/* NOT `RefreshFailedNote`, which qualifies a `Report Age` and a set of
+          figures — neither of which exists in this state. Its sentences would
+          describe a screen the reader is not looking at. */}
+      {refreshFailed && (
+        <UnavailableNote>
+          <p>
+            The most recent attempt to re-read this report did not return anything, so nothing on
+            screen has changed: a run in progress is still the last thing this build heard, and no
+            result has been assumed in its place.
+          </p>
+        </UnavailableNote>
+      )}
     </div>
   );
 }
@@ -459,6 +596,13 @@ function RefreshFailedNote() {
  * `VerificationView`'s third member (`report`) is handled by the caller, which
  * decodes the body once and needs the outcome to decide whether the sibling
  * safeguards section renders at all.
+ *
+ * `notReady` WITH STATUS `running` is also handled by the caller, by
+ * `RunInProgressPanel`. It is the one status a reader is meant to wait out
+ * rather than read and leave, and it needs a control and an expectation this
+ * panel has nowhere to put. The branch here is kept rather than narrowed by
+ * type: it renders the same message the panel opens with, so a future caller
+ * that forgets the split degrades to correct-but-plain instead of to nothing.
  */
 function NotReadyBody({ view }: { view: Exclude<VerificationView, { kind: 'report' }> }) {
   if (view.kind === 'notReady') {

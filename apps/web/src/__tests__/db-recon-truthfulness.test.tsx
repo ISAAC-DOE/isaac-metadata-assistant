@@ -451,6 +451,28 @@ const DIAGNOSTIC_CLAIMS: [string, RegExp][] = [
 const REQUIRED_CLAIMS: [string, RegExp][] = [...WORKSPACE_CLAIMS, ...DIAGNOSTIC_CLAIMS];
 
 /**
+ * The capability paragraph, verbatim, as the ONE Settings card that owns it
+ * states it.
+ *
+ * A literal rather than a pattern, on purpose: this is the string §12 counts,
+ * and a count is only meaningful against an exact thing. It is duplicated here
+ * from `settingsContent.ts` deliberately — a test that imported the string it
+ * checks would pass whatever that string became.
+ *
+ * Two other frontend surfaces (`components/GovernanceBanner.tsx`,
+ * `components/TopBar.tsx`) still carry this claim in their own words, and one
+ * (`components/HelpPanel.tsx`) carries this wording. That is out of scope here:
+ * §12 counts occurrences across the Data & Privacy CARD SET, which is the one
+ * surface that showed a reader the same sentence twice in one screenful.
+ */
+const CAPABILITY_PARAGRAPH =
+  'Separately, this deployment may run a protected, read-only diagnostic against an isolated ' +
+  'SLAC test database containing production-derived records: those records are processed ' +
+  'transiently in pod memory, only sanitized aggregate results are returned, no record is ' +
+  'modified, no per-record content is displayed, and nothing is sent to any model. ' +
+  'Database-backed record display remains disabled pending an explicit visibility decision.';
+
+/**
  * Each entry is one way the copy could OVER-claim — the ways that hold on EVERY
  * surface, whatever else that surface is for.
  *
@@ -702,6 +724,38 @@ describe('Settings copy — the real-experiment-data concept states a scope it c
  * substance: mode-not-content enforcement, "it cannot tell real data from
  * synthetic", real mode refusing to start with its guardrail reason, and
  * operator responsibility. Each is pinned below.
+ *
+ * ── RE-POINTED (de-duplication slice), AND WHAT THAT DID AND DID NOT CHANGE ─
+ *
+ * This describe used to require all seven `DIAGNOSTIC_CLAIMS` inside THIS
+ * card's `detail`, twice over — once directly, once through "never leaves the
+ * mode token standing as a whole-deployment claim". It passed, and the way it
+ * passed was that this card carried the full 55-word capability paragraph
+ * character-for-character identically to the card rendered beside it. At 1440px
+ * Data & Privacy is a multi-column grid, so the tab whose whole purpose is
+ * consolidation showed a reader the same paragraph twice, adjacent. A guard
+ * that can only be satisfied by duplicating a paragraph is a guard that
+ * mandates the defect.
+ *
+ * THE RULE IT ENFORCED IS UNCHANGED AND IS STILL ENFORCED, in `missingBounds`:
+ * a unit that makes the CAPABILITY statement ("may run a protected, read-only
+ * diagnostic") must state every bound of it. That predicate runs over every
+ * copy unit in §13(a) and over every frontend source file in §13(b), and it did
+ * not move. What changed is which card MAKES the statement:
+ * `no-real-experiment-data` does, and §10 above still requires all seven bounds
+ * there. This card now REFERS to the diagnostic instead — the same position
+ * `what-resets` has held since Slice 2A and which `settingsContent.ts` documents
+ * as correct — which is what keeps its mode token from ever standing
+ * unqualified.
+ *
+ * So three assertions replace the two that were dropped, and together they are
+ * strictly stronger than what they replace:
+ *
+ *   · this card must still carry the QUALIFICATION, so the token is never bare;
+ *   · it must NAME the card that holds the full statement, so the pointer
+ *     cannot decay into a dangling reference;
+ *   · §12 must find the paragraph on the tab EXACTLY ONCE — which neither
+ *     re-duplication nor deletion can satisfy.
  */
 
 function conceptById(id: string): SettingsConcept {
@@ -742,8 +796,28 @@ describe('Settings copy — the synthetic-only concept is a MODE claim, fully bo
     expect(concept.more).toBeUndefined();
   });
 
-  it.each(DIAGNOSTIC_CLAIMS)('states %s', (_what, pattern) => {
-    expect(concept.detail).toMatch(pattern);
+  it('names the diagnostic, so the mode token never stands unqualified', () => {
+    // The exact predicate §13 exonerates a unit by. Deleting the diagnostic
+    // sentence while leaving the mode sentence — the state this sweep
+    // corrected — fails here, and fails in §13(a) too.
+    expect(QUALIFICATION.test(concept.detail)).toBe(true);
+    expect(unqualifiedClaims(concept.detail)).toEqual([]);
+  });
+
+  it('points at the card that states the capability in full', () => {
+    // A pointer that does not name its target decays into "somewhere on this
+    // tab", which is how the second copy got written in the first place.
+    const home = conceptById('no-real-experiment-data');
+    expect(concept.detail).toContain(home.heading);
+  });
+
+  it('does not make the capability statement itself, so it owes no bounds', () => {
+    // The split this card now sits on: it REFERS to the diagnostic without
+    // claiming the capability, exactly as `what-resets` does. `missingBounds`
+    // is therefore vacuous here — and is asserted so, rather than assumed, so
+    // that re-adding "may run …" without its bounds fails loudly.
+    expect(CAPABILITY_STATEMENT.test(concept.detail)).toBe(false);
+    expect(missingBounds(concept.detail)).toEqual([]);
   });
 
   /* `FORBIDDEN_CLAIMS_SHARED`, not `FORBIDDEN_CLAIMS`: this card keeps the mode
@@ -753,17 +827,6 @@ describe('Settings copy — the synthetic-only concept is a MODE claim, fully bo
      over-claiming in the other direction. */
   it.each(FORBIDDEN_CLAIMS_SHARED)('never claims %s', (_what, pattern) => {
     expect(text).not.toMatch(pattern);
-  });
-
-  it('never leaves the mode token standing as a whole-deployment claim', () => {
-    // Deleting the diagnostic sentences while leaving the mode sentence —
-    // exactly the state this sweep corrected — fails here.
-    for (const [what, pattern] of DIAGNOSTIC_CLAIMS) {
-      expect(
-        concept.detail,
-        `"synthetic-only" is unqualified: the copy no longer states ${what}`,
-      ).toMatch(pattern);
-    }
   });
 });
 
@@ -793,6 +856,44 @@ describe('Settings → Data & Privacy — no two cards contradict each other', (
     ['calls the whole thing a synthetic build', /\bthis\s+synthetic\s+(build|prototype|deployment|app|application|preview)\b/i],
   ])('no card %s', (_what, pattern) => {
     expect(tab).not.toMatch(pattern);
+  });
+
+  /*
+   * ── THE DE-DUPLICATION GUARD ──────────────────────────────────────────────
+   *
+   * The capability paragraph is honesty-critical, so the failure mode this tab
+   * has is not that it goes missing — every guard above would fire — but that
+   * it gets stated twice, which is what shipped: `synthetic-data-only` and
+   * `no-real-experiment-data` ended with the identical 55 words, and Data &
+   * Privacy renders them as adjacent columns at 1440px.
+   *
+   * EXACTLY ONE, asserted in both directions and at two granularities: the
+   * capability SENTENCE (the wire-level marker every other guard keys off) and
+   * the whole paragraph verbatim. A single count of 1 catches deletion and
+   * duplication with the same assertion, which is the property that makes it
+   * safe to leave in place — a future editor cannot satisfy it by removing the
+   * claim.
+   *
+   * The bounds themselves are deliberately NOT counted. `what-resets`
+   * legitimately restates two of them ("only sanitized aggregate results are
+   * returned", "no record is modified") in the narrower storage context, and
+   * requiring uniqueness of a bound would force that card to go vaguer.
+   */
+  it('makes the capability statement on exactly one card', () => {
+    const carriers = concepts.filter((c) => CAPABILITY_STATEMENT.test(c.detail));
+    expect(carriers.map((c) => c.id)).toEqual(['no-real-experiment-data']);
+  });
+
+  it('states the full capability paragraph exactly once across the tab', () => {
+    const occurrences = concepts.filter((c) => c.detail.includes(CAPABILITY_PARAGRAPH)).length;
+    expect(occurrences, 'the capability paragraph must appear once — not twice, not zero').toBe(1);
+  });
+
+  it('leaves the other card pointing at it rather than repeating it', () => {
+    const mode = conceptById('synthetic-data-only');
+    expect(mode.detail).not.toContain(CAPABILITY_PARAGRAPH);
+    // ...but it still names the diagnostic, so its mode token is qualified.
+    expect(QUALIFICATION.test(mode.detail)).toBe(true);
   });
 
   it('keeps the storage card truthful about what the test database is not', () => {
