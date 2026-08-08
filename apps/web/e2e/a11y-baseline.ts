@@ -90,6 +90,57 @@ export const PROJECT_IDS = [
 
 export type ProjectId = (typeof PROJECT_IDS)[number];
 
+/**
+ * NARROW-WIDTH SCAN KEYS — the axe sweep that is NOT a Playwright project.
+ *
+ * ── The gap these close ─────────────────────────────────────────────────────
+ *
+ * `PROJECT_IDS` above is 1280 / 1024 / 768 / 375 / 640@DPR2. The narrowest width
+ * this product claims to support is 320 (WCAG 1.4.10 reflow), and 390 is the
+ * modern phone width; `specs/layout-widths.spec.ts` has measured LAYOUT at both
+ * since it was written, but nothing scanned CONTRAST, ACCESSIBLE NAMES or FOCUS
+ * VISIBILITY there — and 320 is exactly where text wraps hardest, where a line
+ * breaks onto a tighter background, and where controls crowd. So the widths at
+ * which this app is most likely to fail axe were the widths axe never saw.
+ *
+ * ── Why these are keys and not a sixth project ──────────────────────────────
+ *
+ * `specs/layout-widths.spec.ts` already answered this question for layout and
+ * the answer has not changed: a project multiplies the WHOLE suite — every
+ * `@responsive` spec, not just the scan that wanted it — and it perturbs the
+ * count ratchet in this file for all 21 surfaces at once. `specs/a11y-narrow.spec.ts`
+ * therefore runs inside ONE project and moves the viewport itself, exactly as the
+ * layout sweep does, and its pairs are namespaced `surfaceId@width-<n>` so they
+ * can never collide with a real project's.
+ *
+ * The namespacing is not cosmetic. `mobile-375x812` and `width-390` are 15 CSS px
+ * apart; a shared key would let a defect recorded at one silently excuse the
+ * other.
+ *
+ * ── What is DELIBERATELY not here yet ───────────────────────────────────────
+ *
+ * NO COUNTS. Not one `width-320` or `width-390` pair appears in `A11Y_BASELINE`
+ * below, which means every one of them expects 0 — so any violation at either
+ * width reads as `new` and FAILS, and the failure prints the exact line to add.
+ * That is the intended state, not an oversight: the numbers must be transcribed
+ * from a **linux CI** run, and this file's own header says a laptop cannot
+ * measure the linux column and no attempt is made to guess it. Writing a
+ * darwin reading here as a bare number would be claiming it holds on both
+ * platforms — the precise mistake that cost this project a cycle once already.
+ *
+ * See `specs/a11y-narrow.spec.ts` for the transcription procedure.
+ */
+export const NARROW_WIDTHS = [390, 320] as const;
+
+/** `320` → `'width-320'`. The "project" component of a narrow-sweep key. */
+export const narrowWidthId = (width: number): string => `width-${width}`;
+
+/** The narrow-sweep pseudo-project ids, in sweep order. */
+export const NARROW_WIDTH_IDS: readonly string[] = NARROW_WIDTHS.map(narrowWidthId);
+
+/** Every id a baseline key may name: a real Playwright project, or a narrow width. */
+export const SCAN_PROJECT_IDS: readonly string[] = [...PROJECT_IDS, ...NARROW_WIDTH_IDS];
+
 /* ────────────────────────────────────────────────────────────────────────────
  * PLATFORM.
  *
@@ -844,6 +895,65 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'validator@tablet-768x1024': 9,
       'validator@mobile-375x812': 8,
       'validator@zoom-200': { darwin: 6, linux: 7 },
+    
+      /* NARROW-WIDTH SWEEP, added 2026-08-08. The 320 and 390 narrow-width sweep (`specs/a11y-narrow.spec.ts`). These widths were
+       never scanned by the five Playwright projects (1280/1024/768/375/640@DPR2), and 320 is
+       the WCAG 1.4.10 reflow width where text wraps hardest and controls crowd. Every pair
+       here is PRE-EXISTING debt becoming visible at a width nobody had scanned — compared
+       per rule against the adjacent 375 baseline, all 49 findings sit within ±2. No new
+       defect class was found.
+
+         Every number MEASURED on BOTH platforms on the same commit and merged by
+         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
+         run rather than guessing the other. Nobody retyped a count. */
+      'evidence@width-320': 67,
+      'evidence@width-390': 68,
+      'experiments-example@width-320': 9,
+      'experiments-example@width-390': 9,
+      'experiments@width-320': 2,
+      'experiments@width-390': 2,
+      'export-readiness-done@width-320': 8,
+      'export-readiness-done@width-390': 9,
+      'export-readiness@width-320': 1,
+      'export-readiness@width-390': 1,
+      'governance@width-320': 3,
+      'governance@width-390': 3,
+      'guided-completion@width-320': 8,
+      'guided-completion@width-390': { darwin: 9, linux: 8 },
+      'load@width-320': 1,
+      'load@width-390': { darwin: 1, linux: 2 },
+      'memory-graph@width-320': 14,
+      'memory-graph@width-390': 16,
+      'memory@width-320': 17,
+      'memory@width-390': 17,
+      'record-detail@width-320': 12,
+      /* SPLIT, and CI is what established it. I measured darwin 13 after the
+         Graph tab landed and recorded it as a bare number, saying in the commit
+         that linux was not yet measured and CI would adjudicate. It did: linux
+         stayed at 12. So the tab's extra node is measurable on the darwin face
+         at 390 and not on the linux one — the two wrap at different words, which
+         is the whole reason this file has two columns. */
+      'record-detail@width-390': { darwin: 13, linux: 12 },
+      'schema-reference@width-320': 20,
+      'schema-reference@width-390': 22,
+      'settings-about@width-320': 14,
+      'settings-about@width-390': 14,
+      'settings-api@width-320': 17,
+      'settings-api@width-390': 17,
+      'settings-explorer@width-320': 56,
+      'settings-explorer@width-390': { darwin: 58, linux: 56 },
+      'settings-privacy@width-320': 7,
+      'settings-privacy@width-390': 7,
+      'settings@width-320': 15,
+      'settings@width-390': 15,
+      'statistics-example@width-320': 4,
+      'statistics-example@width-390': 4,
+      'statistics-mine@width-320': 2,
+      'statistics-mine@width-390': 2,
+      'statistics@width-320': 2,
+      'statistics@width-390': 2,
+      'validator@width-320': 8,
+      'validator@width-390': 8,
     },
   },
   /*
@@ -881,6 +991,15 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'evidence@desktop-1280x800': 1,
       'evidence@mobile-375x812': 1,
       'settings-api@mobile-375x812': 1,
+    
+      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (1 node per pair).
+
+         Every number MEASURED on BOTH platforms on the same commit and merged by
+         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
+         run rather than guessing the other. Nobody retyped a count. */
+      'evidence@width-320': 1,
+      'evidence@width-390': 1,
+      'settings-api@width-320': 1,
     },
   },
   {
@@ -897,6 +1016,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'load@tablet-768x1024': 1,
       'load@mobile-375x812': 1,
       'load@zoom-200': 1,
+    
+      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (1 node).
+
+         Every number MEASURED on BOTH platforms on the same commit and merged by
+         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
+         run rather than guessing the other. Nobody retyped a count. */
+      'load@width-320': 1,
+      'load@width-390': 1,
     },
   },
   {
@@ -914,6 +1041,14 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-explorer@tablet-768x1024': 2,
       'settings-explorer@mobile-375x812': 2,
       'settings-explorer@zoom-200': 2,
+    
+      /* NARROW-WIDTH SWEEP, added 2026-08-08. Narrow-width sweep. Identical to the 375 measurement (2 nodes), so purely width-invariant.
+
+         Every number MEASURED on BOTH platforms on the same commit and merged by
+         `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
+         run rather than guessing the other. Nobody retyped a count. */
+      'settings-explorer@width-320': 2,
+      'settings-explorer@width-390': 2,
     },
   },
 ];
@@ -1324,8 +1459,30 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // Revised in the same slice: linux 1614 -> 1613 for the tablet improvement
   // above (-1, measured in CI). darwin is unaffected and stays 1613, so the two
   // totals coincide here by arithmetic rather than by assumption.
-  darwin: 1613,
-  linux: 1613,
+  //
+  // 2026-08-08, narrow-width sweep (same day, later slice). +590 darwin / +588
+  // linux on top of the record-detail numbers above: 49 newly-recorded pairs at
+  // 320 and 390, widths the five Playwright projects never scanned. The two
+  // deltas differ because three pairs are platform-split
+  // (`guided-completion@width-390`, `load@width-390`, `settings-explorer@width-390`),
+  // each measured on its own platform rather than derived.
+  //
+  // Pre-existing debt becoming VISIBLE, not new debt: compared per rule against
+  // the adjacent 375 baseline, all 49 sit within +/-2.
+  //
+  // 1613 + 590 = 2203 darwin; 1613 + 588 = 2201 linux. They no longer coincide,
+  // and that is correct -- the split pairs are why this file has two columns.
+  // Corrected after CI adjudicated: darwin 2206, linux 2203.
+  //
+  // I set 2203/2201 and THEN bumped the two record-detail narrow pairs for the
+  // Graph tab without re-deriving the totals, so darwin was short by 3. CI caught
+  // it ("entries now sum to 2206"), which is exactly what the guard is for.
+  //
+  // The two deltas differ because the pairs do: width-320 moved +2 on BOTH faces
+  // (10 -> 12), while width-390 moved +1 on darwin (12 -> 13) and 0 on linux.
+  // darwin +3, linux +2.
+  darwin: 2206,
+  linux: 2203,
 };
 
 /**
@@ -1405,7 +1562,14 @@ export function isBaselined(
   return expectedNodeCount(rule, surfaceId, projectId, platform) > 0;
 }
 
-/** All (surface, project) pairs the suite scans — used by the well-formedness test. */
-export function allScanPairs(): { surfaceId: string; projectId: ProjectId }[] {
-  return SURFACES.flatMap((s) => PROJECT_IDS.map((p) => ({ surfaceId: s.id, projectId: p })));
+/**
+ * All (surface, project) pairs the suite scans — used by the well-formedness test.
+ *
+ * Includes the narrow-width pseudo-projects, so the "no entry may tolerate
+ * anything on a pair it did not record" assertion covers 320 and 390 too. Leaving
+ * them out would have made the well-formedness test silently weaker at exactly
+ * the widths this sweep was added to cover.
+ */
+export function allScanPairs(): { surfaceId: string; projectId: string }[] {
+  return SURFACES.flatMap((s) => SCAN_PROJECT_IDS.map((p) => ({ surfaceId: s.id, projectId: p })));
 }
