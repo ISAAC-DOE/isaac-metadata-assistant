@@ -388,6 +388,7 @@ function LoadedWorkbench({
       {activeView === 'graph' ? (
         <div
           id={viewPanelId('graph')}
+          className="record-view-panel"
           role="tabpanel"
           aria-labelledby={viewTabId('graph')}
           tabIndex={-1}
@@ -397,6 +398,7 @@ function LoadedWorkbench({
       ) : (
         <div
           id={viewPanelId('fields')}
+          className="record-view-panel"
           role="tabpanel"
           aria-labelledby={viewTabId('fields')}
           tabIndex={-1}

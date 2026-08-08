@@ -2965,3 +2965,41 @@
 
   .artifact-modal-backdrop { padding: 16px; }
 }
+
+/* THE TAB PANELS THAT WRAP THE RECORD'S TWO VIEWS.
+ *
+ * `min-width: 0` is the whole rule and it is load-bearing. `<main>` is a flex
+ * container, and before the Graph tab existed the record's sections were its
+ * direct flex items. Wrapping them in a tabpanel put a NEW flex item between
+ * them, and a flex item's default `min-width: auto` refuses to shrink below its
+ * content's intrinsic width — so at 320px the field-group summaries overflowed
+ * their own clipped section by 8px, hiding text.
+ *
+ * Caught by `e2e/specs/layout-widths.spec.ts` at 320, which passed on the commit
+ * before this one and failed on it. It was NOT baselined: the sweep reports
+ * clipped content, and recording it would have written a real regression down as
+ * tolerated debt.
+ */
+.record-view-panel {
+  min-width: 0;
+}
+
+/* And the same refusal one level down, which is where it actually bit.
+ *
+ * `.fg-header` is a flex row and `.fg-summary` is a flex child, so both default
+ * to `min-width: auto` — they will not shrink below the summary's intrinsic
+ * width. The field-group clips (`overflow-x: hidden`), so at 320px the summary
+ * ran 8px past the clip and the text under it was simply unreachable.
+ *
+ * Scoped to `.record-view-panel` on purpose: `.fg-*` is used on other surfaces
+ * and this slice has no business changing their measurements. `overflow-wrap`
+ * is here because `min-width: 0` alone only helps if the content CAN break.
+ */
+.record-view-panel .fg-header {
+  min-width: 0;
+}
+
+.record-view-panel .fg-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
