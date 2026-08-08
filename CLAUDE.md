@@ -265,9 +265,36 @@ Do not use Graphify for:
 - audit truth
 - data-governance decisions
 
-If `graphify-out/graph.json` exists, use Graphify before answering architecture/codebase questions.
+### Measured routing rule (2026-08-07) — replaces "use Graphify first"
 
-Recommended commands:
+**This section previously said: "If `graphify-out/graph.json` exists, use Graphify before answering
+architecture/codebase questions." That instruction is WITHDRAWN — it presumed a benefit that a
+controlled benchmark did not find.** Evidence:
+[`docs/evidence/graphify-benchmark-results.md`](docs/evidence/graphify-benchmark-results.md)
+(methodology and decision rules pre-registered before any run:
+[`graphify-benchmark-methodology.md`](docs/evidence/graphify-benchmark-methodology.md)).
+
+32 runs, 8 frozen tasks, two arms, fresh index built at the exact commit under test. Median tool
+calls +5.7% and total tokens +4.2% **against** Graphify; correctness tied in 7 of 8 categories.
+Across 16 Graphify-arm runs the agents' own `graphify_helped` rating was **never "yes"** (13
+"partly", 3 "no"), and every answer they found was found with `rg`.
+
+| Route | Rule |
+|---|---|
+| **First choice** | *(none)* — no category showed a gain surviving its own error bars. |
+| **Optional** | Orienting in unfamiliar **documentation**; frontend/TypeScript neighbourhood discovery. Treat output as a pointer to a *document*, then verify in source. |
+| **Do NOT use** | Exhaustive/exact-string inventories (**measured HARMFUL**: +26% effort, +19% tokens, no accuracy gain — use `rg`); locating **backend Python**; import/dependency questions; runtime or truth-path verification; disambiguating similarly-named concepts. |
+
+Two reproducible failure modes, both measured across independent runs:
+
+1. **Flat label space.** BFS start-node matching resolves short generic tokens to whatever node
+   carries the label — `"preview"` → `ResetDemoDialog.tsx`, `"version"` and `"private"` →
+   `apps/web/package.json`, `"If-Match"` → the tutorial-session cluster.
+2. **Backend Python is systematically under-surfaced.** `export.py`, `official.py`, `serialize.py`,
+   `verification.py`, `disclosure.py`, `csv_ingest.py`, `routes.py`, `auth.py` were all missed by
+   the graph *even when they were the answer*.
+
+Commands, if used:
 
 ```bash
 graphify query "<question>"
@@ -275,11 +302,18 @@ graphify explain "<concept>"
 graphify path "<A>" "<B>"
 ```
 
-Use `graphify-out/wiki/index.md` if present for broad navigation.
+`graphify-out/GRAPH_REPORT.md` for broad architecture review only. **`graphify-out/graph.html` no
+longer generates** at this repo's size (10,618 nodes exceeds the tool's own 5,000-node viz limit).
 
-Use `graphify-out/GRAPH_REPORT.md` only for broad architecture review or when query/explain/path are insufficient.
+**Refresh before relying on it.** `graphify update .` costs ~10 s and no model call, but nothing in
+CI can run it: the binary is user-local. The index was found **420 commits / 529 files stale** when
+the benchmark began. A stale graph is worse than no graph, because its answers look authoritative.
 
-Known caveat: Graphify may contain dangling/collapsed semantic edges from AST/semantic ID mismatch. Treat Graphify as helpful context, not guaranteed truth. Spot-check important graph claims against source files, schema, and tests.
+Known caveat, stated precisely: `CLAUDE.md` has long asserted "dangling/collapsed semantic edges
+from AST/semantic ID mismatch". **No measured instance of that specific defect exists in this
+repository** — the sources for the claim are mutually-citing prose. A *different*, real staleness
+defect was measured (a renamed symbol persisting in the deep graph artifact). Do not conflate them.
+Treat Graphify as leads, never truth; spot-check every graph claim against source, schema, tests.
 
 Never commit `graphify-out/`.
 
