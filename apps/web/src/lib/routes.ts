@@ -51,6 +51,27 @@ export function isStatisticsTab(value: string | null | undefined): value is Stat
   return STATISTICS_TAB_IDS.includes(value as StatisticsTabId);
 }
 
+/**
+ * The Review Record screen's two VIEWS — the field workbench and the
+ * experiment-scoped graph — on the SAME `?tab=`-style mechanism as Settings,
+ * Governance and Statistics. A fourth use of one convention, not a fourth
+ * convention.
+ *
+ * Deep-linkability is the point: a graph a scientist reached by clicking a tab
+ * and cannot then link a colleague to is half a feature. Anything unrecognised
+ * falls back to `fields`, so there is no dead route and an old bookmark still
+ * lands on the record.
+ */
+export const RECORD_VIEW_PARAM = 'view';
+
+export const RECORD_VIEW_IDS = ['fields', 'graph'] as const;
+
+export type RecordViewId = (typeof RECORD_VIEW_IDS)[number];
+
+export function isRecordView(value: string | null | undefined): value is RecordViewId {
+  return RECORD_VIEW_IDS.includes(value as RecordViewId);
+}
+
 export const ROUTES = {
   experiments: '/experiments',
   load: '/load',
@@ -82,6 +103,12 @@ export const ROUTES = {
    *  query parameter survives. */
   statisticsTab: (tab: StatisticsTabId) => `/statistics?${STATISTICS_TAB_PARAM}=${tab}`,
   record: (id: string) => `/record/${id}`,
+  /** A deep link to one Review Record view, e.g. `/record/<id>?view=graph`.
+   *  Same division of labour as `settingsTab`: whole-URL links use this, while
+   *  the screen itself switches views by copying its own `URLSearchParams` so
+   *  any other query parameter survives. */
+  recordView: (id: string, view: RecordViewId) =>
+    `/record/${id}?${RECORD_VIEW_PARAM}=${view}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,
   export: (id: string) => `/record/${id}/export`,

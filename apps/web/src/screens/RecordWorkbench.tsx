@@ -1,7 +1,8 @@
 import './screens.css';
 import '../components/evidence.css';
-import { useMemo, useState } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
@@ -13,12 +14,13 @@ import { LiveSyncNote } from '../components/LiveSyncNote';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleAlert, ExternalLink } from '../components/icons';
+import { ExperimentGraphPanel } from './graph/ExperimentGraphPanel';
 import { LABELS } from '../lib/labels';
-import { ROUTES } from '../lib/routes';
+import { RECORD_VIEW_PARAM, ROUTES, isRecordView, type RecordViewId } from '../lib/routes';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
-import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
+import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
@@ -246,6 +248,20 @@ function LoadedWorkbench({
   const navigate = useNavigate();
   const { detail, pending, validate, audit, warnings, evidence, graph } = bundle;
 
+  // The active VIEW is held in the URL, not in component state, so a graph can
+  // be linked, bookmarked and reloaded back into. Anything unrecognised falls
+  // back to the field workbench — there is no dead view. Switching COPIES the
+  // existing params rather than rebuilding the URL, so any other query
+  // parameter on the address survives the switch.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedView = searchParams.get(RECORD_VIEW_PARAM);
+  const activeView: RecordViewId = isRecordView(requestedView) ? requestedView : 'fields';
+  const selectView = (view: RecordViewId) => {
+    const next = new URLSearchParams(searchParams);
+    next.set(RECORD_VIEW_PARAM, view);
+    setSearchParams(next, { replace: true });
+  };
+
   const evidenceByPath = useMemo(
     () => new Map<string, ApiEvidenceEntry>(evidence.map((e) => [e.path, e])),
     [evidence],
@@ -367,6 +383,26 @@ function LoadedWorkbench({
         excludeSteps={['complete_metadata']}
       />
 
+      <RecordViewTabs active={activeView} onSelect={selectView} />
+
+      {activeView === 'graph' ? (
+        <div
+          id={viewPanelId('graph')}
+          className="record-view-panel"
+          role="tabpanel"
+          aria-labelledby={viewTabId('graph')}
+          tabIndex={-1}
+        >
+          <RecordGraphView id={id} />
+        </div>
+      ) : (
+        <div
+          id={viewPanelId('fields')}
+          className="record-view-panel"
+          role="tabpanel"
+          aria-labelledby={viewTabId('fields')}
+          tabIndex={-1}
+        >
       {pending.length > 0 && (
         <div
           className="needsyou-banner"
@@ -428,6 +464,114 @@ function LoadedWorkbench({
           }
         />
       ))}
+        </div>
+      )}
     </AppShell>
+  );
+}
+
+// --- the record's two VIEWS ------------------------------------------------
+//
+// The field workbench and the experiment-scoped graph are two views of the SAME
+// record, so they are local page tabs on this screen rather than a separate
+// route or a separate nav entry — the same `.section-tabs` pattern (roving
+// tabindex, arrow/Home/End) Project Memory and Governance already use, and the
+// same `?param=` deep-link mechanism as Settings, Governance and Statistics.
+//
+// The graph is deliberately mounted HERE and not on a screen a scientist has to
+// go looking for: this is the surface they are already on when they are working
+// on a record.
+
+const RECORD_VIEWS: { id: RecordViewId; label: string }[] = [
+  { id: 'fields', label: 'Record Fields' },
+  { id: 'graph', label: 'Graph' },
+];
+
+const viewTabId = (id: RecordViewId) => `record-view-tab-${id}`;
+const viewPanelId = (id: RecordViewId) => `record-view-panel-${id}`;
+
+function RecordViewTabs({
+  active,
+  onSelect,
+}: {
+  active: RecordViewId;
+  onSelect: (view: RecordViewId) => void;
+}) {
+  function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      nextIndex = (index + 1) % RECORD_VIEWS.length;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      nextIndex = (index - 1 + RECORD_VIEWS.length) % RECORD_VIEWS.length;
+    } else if (e.key === 'Home') {
+      nextIndex = 0;
+    } else if (e.key === 'End') {
+      nextIndex = RECORD_VIEWS.length - 1;
+    }
+    if (nextIndex === null) return;
+    e.preventDefault();
+    const next = RECORD_VIEWS[nextIndex];
+    onSelect(next.id);
+    (document.getElementById(viewTabId(next.id)) as HTMLButtonElement | null)?.focus();
+  }
+
+  return (
+    <div className="section-tabs" role="tablist" aria-label="Record views">
+      {RECORD_VIEWS.map((view, i) => {
+        const selected = active === view.id;
+        return (
+          <button
+            key={view.id}
+            id={viewTabId(view.id)}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-controls={selected ? viewPanelId(view.id) : undefined}
+            tabIndex={selected ? 0 : -1}
+            className={`section-tab${selected ? ' active' : ''}`}
+            onClick={() => onSelect(view.id)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+          >
+            {view.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The graph's own data load.
+ *
+ * Deliberately a SEPARATE fetch from the record bundle, and deliberately lazy:
+ * this component only mounts when the Graph view is selected, so a reader who
+ * never opens it never pays for it. It is also deliberately NOT cached — the
+ * graph is rebuilt from a fresh read every time the view is opened, which is
+ * what makes a stale experiment graph structurally impossible.
+ *
+ * The scope pair is what enforces tutorial isolation at the model boundary: the
+ * scope the bundle was READ in is captured at mount, and compared against the
+ * scope the surface is addressing now. They disagree only when a worked-example
+ * session was entered or left while this view was open — at which point the
+ * records this graph describes no longer exist in the workspace being
+ * addressed, and the model refuses rather than drawing them.
+ */
+function RecordGraphView({ id }: { id: string }) {
+  const bundle = useFetch(() => api.getExperimentGraphBundle(id), [id]);
+  const currentScope = useWorkspaceScope();
+  const readInScope = useRef(currentScope);
+
+  if (bundle.status === 'loading') {
+    return <LoadingPanel label="Loading this experiment's graph from the ISAAC API…" />;
+  }
+  if (bundle.status !== 'data') {
+    return <BackendDown error={bundle.error} onRetry={bundle.reload} />;
+  }
+  return (
+    <ExperimentGraphPanel
+      bundle={bundle.data}
+      readInScope={readInScope.current}
+      currentScope={currentScope}
+    />
   );
 }

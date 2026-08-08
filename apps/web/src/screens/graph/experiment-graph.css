@@ -1,0 +1,811 @@
+/*
+ * The EXPERIMENT-SCOPED graph.
+ *
+ * Visual posture, stated so a later slice does not undo it by accident: the
+ * SCIENTIFIC graph stays neutral and readable. Node categories reuse the
+ * motifs this application already established — teal for verified evidence,
+ * tan for a human confirmation, the derivation purple that `EvidenceRow`
+ * already uses for a rule, action-blue for the anchor, and the reserved
+ * fail/advisory tokens for issues and warnings. Nothing here is decorated in
+ * the Assistant's indigo: that family belongs to the command/interaction
+ * layer, not to the science.
+ *
+ * Responsive posture: the desktop split (canvas + detail rail) is NOT
+ * preserved at narrow widths, and it is opted into by a CONTAINER query rather
+ * than a viewport one — see `.expgraph` below for the measurement that forced
+ * that. The default is the stacked layout: a full-width canvas with the detail
+ * drawer beneath it. Below 620px the controls stack completely and the touch
+ * targets grow. Verified in Chromium at 1440, 1280, 1024, 768, 390 and 320:
+ * `document.documentElement.scrollWidth === window.innerWidth` at every one,
+ * and no descendant of `.expgraph` extends past the viewport's right edge.
+ */
+
+.expgraph {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+  /*
+   * The split between canvas and detail is decided by the width of THIS
+   * ELEMENT, not by the width of the window — because on the record screen the
+   * two are very different numbers. The main column sits between the workflow
+   * spine and the assistant rail, so a 1440px window leaves the graph about
+   * 830px, and a viewport media query at 900px would have happily drawn a
+   * 451x520 sliver of canvas beside a 360px detail rail and called it desktop.
+   * Measured in Chromium at 1440/1280/1024/768/390/320 before this was written.
+   *
+   * Where container queries are unsupported the `@container` block never
+   * applies, and the surface stays in the stacked layout below — a full-width
+   * canvas with the detail underneath, which is the safe direction to fail in.
+   */
+  container-type: inline-size;
+  container-name: expgraph;
+}
+
+.expgraph-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.expgraph-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
+}
+
+.expgraph-intro {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.expgraph-counts {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.expgraph-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A full 1px border + tint, never a thick coloured left edge: the
+   no-vertical-rail rule (no-vertical-rail-rule.md) is system-wide, and a note
+   is exactly the kind of element that tempts one. */
+.expgraph-note {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-token);
+  background: var(--cover-bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.expgraph-note[data-note='artifact_stale'] {
+  border-color: var(--advisory-border);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+}
+
+.expgraph-refusal {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* --- controls ----------------------------------------------------------- */
+
+.expgraph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 18px;
+  min-width: 0;
+}
+
+.expgraph-search {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.expgraph-search-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.expgraph-search-input {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 8px 11px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.expgraph-search-input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.expgraph-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+  padding: 4px;
+}
+
+.expgraph-results-empty {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.expgraph-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-token);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.expgraph-result:hover,
+.expgraph-result:focus-visible {
+  background: var(--selected-row-bg);
+}
+
+.expgraph-result-label {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.expgraph-result-kind {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.expgraph-result-match {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
+}
+
+.expgraph-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-self: flex-end;
+}
+
+.expgraph-btn {
+  padding: 7px 12px;
+  min-height: 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.expgraph-btn:hover:not(:disabled) {
+  background: var(--surface-subtle);
+  border-color: var(--action-selected-border);
+}
+
+.expgraph-btn:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.expgraph-btn.primary {
+  background: var(--action);
+  border-color: var(--action);
+  color: #fff;
+}
+
+.expgraph-btn.primary:hover {
+  background: var(--action-hover);
+  border-color: var(--action-hover);
+}
+
+.expgraph-kinds {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.expgraph-kinds-legend {
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.expgraph-kinds-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.expgraph-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.expgraph-kind-chip.on {
+  color: var(--text-strong);
+  border-color: var(--action-selected-border);
+  background: var(--surface);
+}
+
+.expgraph-kind-chip:not(.on) .expgraph-kind-swatch {
+  opacity: 0.3;
+}
+
+.expgraph-kind-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+
+.expgraph-kind-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--expgraph-neutral);
+}
+
+/* --- the ONE place a node category's colour is declared ----------------- */
+
+.expgraph {
+  --expgraph-neutral: #6b7684;
+  --expgraph-anchor: #2c6ab0;
+  --expgraph-section: #5b6b7d;
+  --expgraph-field: #33404e;
+  --expgraph-block: #4a7fb0;
+  --expgraph-implicit: #5b6b7d;
+  --expgraph-evidence: #2f7d78;
+  --expgraph-source: #6b7684;
+  --expgraph-rule: #7a6bb0;
+  --expgraph-confirm: #8a6d4a;
+  --expgraph-step: #46515f;
+  --expgraph-issue: #b23a30;
+  --expgraph-warning: #b07d2b;
+  --expgraph-linked: #21568f;
+  --expgraph-class: #5b6b7d;
+}
+
+[data-kind='experiment'].expgraph-kind-swatch,
+[data-kind='record'].expgraph-kind-swatch { background: var(--expgraph-anchor); }
+[data-kind='section'].expgraph-kind-swatch { background: var(--expgraph-section); }
+[data-kind='field'].expgraph-kind-swatch { background: var(--expgraph-field); }
+[data-kind='block_object'].expgraph-kind-swatch { background: var(--expgraph-block); }
+[data-kind='implicit'].expgraph-kind-swatch { background: var(--expgraph-implicit); }
+[data-kind='evidence'].expgraph-kind-swatch { background: var(--expgraph-evidence); }
+[data-kind='source_file'].expgraph-kind-swatch { background: var(--expgraph-source); }
+[data-kind='rule'].expgraph-kind-swatch { background: var(--expgraph-rule); }
+[data-kind='confirmation'].expgraph-kind-swatch { background: var(--expgraph-confirm); }
+[data-kind='workflow_step'].expgraph-kind-swatch { background: var(--expgraph-step); }
+[data-kind='issue'].expgraph-kind-swatch { background: var(--expgraph-issue); }
+[data-kind='warning'].expgraph-kind-swatch { background: var(--expgraph-warning); }
+[data-kind='linked_record'].expgraph-kind-swatch { background: var(--expgraph-linked); }
+[data-kind='evidence_class'].expgraph-kind-swatch { background: var(--expgraph-class); }
+
+/* --- body: canvas + detail ---------------------------------------------- */
+
+/* DEFAULT = stacked. The split is opted into by the container query further
+   down, so a narrow container never has to be un-split. */
+.expgraph-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.expgraph-canvas-wrap {
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  background: var(--screen-base);
+  overflow: hidden;
+}
+
+.expgraph-canvas {
+  display: block;
+  width: 100%;
+  height: 460px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.expgraph-canvas:active {
+  cursor: grabbing;
+}
+
+/* --- edges --------------------------------------------------------------- */
+
+.expgraph-edge {
+  stroke: #b9c3cd;
+  stroke-width: 1.1;
+  opacity: 0.75;
+}
+
+.expgraph-edge.active {
+  stroke: var(--action);
+  stroke-width: 2;
+  opacity: 1;
+}
+
+.expgraph-edge[data-edge-kind='fails'] { stroke: var(--expgraph-issue); }
+.expgraph-edge[data-edge-kind='advises'] { stroke: var(--expgraph-warning); }
+.expgraph-edge[data-edge-kind='links_to'] { stroke: var(--expgraph-linked); stroke-dasharray: 5 4; }
+.expgraph-edge[data-edge-kind='precedes'] { stroke-dasharray: 3 4; }
+
+/* --- nodes --------------------------------------------------------------- */
+
+.expgraph-node {
+  cursor: pointer;
+}
+
+.expgraph-node-shape {
+  fill: #fff;
+  stroke: var(--expgraph-neutral);
+  stroke-width: 1.6;
+}
+
+.expgraph-node[data-kind='experiment'] .expgraph-node-shape,
+.expgraph-node[data-kind='record'] .expgraph-node-shape { stroke: var(--expgraph-anchor); fill: #eaf1fa; }
+.expgraph-node[data-kind='section'] .expgraph-node-shape { stroke: var(--expgraph-section); }
+.expgraph-node[data-kind='field'] .expgraph-node-shape { stroke: var(--expgraph-field); }
+.expgraph-node[data-kind='block_object'] .expgraph-node-shape { stroke: var(--expgraph-block); }
+.expgraph-node[data-kind='implicit'] .expgraph-node-shape { stroke: var(--expgraph-implicit); stroke-dasharray: 4 3; }
+.expgraph-node[data-kind='evidence'] .expgraph-node-shape { stroke: var(--expgraph-evidence); fill: var(--verified-bg); }
+.expgraph-node[data-kind='source_file'] .expgraph-node-shape { stroke: var(--expgraph-source); fill: var(--cover-bg); }
+.expgraph-node[data-kind='rule'] .expgraph-node-shape { stroke: var(--expgraph-rule); }
+.expgraph-node[data-kind='confirmation'] .expgraph-node-shape { stroke: var(--expgraph-confirm); fill: var(--confirmed-bg); }
+.expgraph-node[data-kind='workflow_step'] .expgraph-node-shape { stroke: var(--expgraph-step); }
+.expgraph-node[data-kind='issue'] .expgraph-node-shape { stroke: var(--expgraph-issue); fill: var(--fail-bg); }
+.expgraph-node[data-kind='warning'] .expgraph-node-shape { stroke: var(--expgraph-warning); fill: var(--advisory-bg); }
+.expgraph-node[data-kind='linked_record'] .expgraph-node-shape { stroke: var(--expgraph-linked); }
+.expgraph-node[data-kind='evidence_class'] .expgraph-node-shape { stroke: var(--expgraph-class); stroke-dasharray: 2 3; }
+
+.expgraph-node.anchor .expgraph-node-shape {
+  stroke-width: 2.6;
+}
+
+.expgraph-node.selected .expgraph-node-shape {
+  stroke: var(--action);
+  stroke-width: 3.2;
+}
+
+.expgraph-node.stale .expgraph-node-shape {
+  stroke-dasharray: 3 3;
+}
+
+.expgraph-node:focus-visible {
+  outline: none;
+}
+
+.expgraph-node:focus-visible .expgraph-node-shape {
+  stroke: var(--action);
+  stroke-width: 3.4;
+  filter: drop-shadow(0 0 0 3px rgba(44, 106, 176, 0.35));
+}
+
+.expgraph-node-more {
+  fill: var(--action);
+  stroke: #fff;
+  stroke-width: 1.2;
+}
+
+.expgraph-node-label {
+  font-family: var(--font-ui);
+  /* Size and halo are set as ATTRIBUTES on the element (screen-bounded, see
+     ExperimentGraphPanel): a CSS px value here is a user unit that grows with
+     the viewBox and swallows the glyphs at deep zoom. */
+  fill: var(--text-strong);
+  paint-order: stroke;
+  stroke: var(--screen-base);
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.expgraph-node.selected .expgraph-node-label {
+  font-weight: 650;
+  fill: var(--text-heading);
+}
+
+/* --- detail -------------------------------------------------------------- */
+
+.expgraph-detail {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 14px;
+}
+
+.expgraph-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.expgraph-detail-empty {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.expgraph-detail-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.expgraph-detail-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+
+.expgraph-detail-stale {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-token);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.expgraph-detail-producer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.expgraph-detail-producer-term {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-quaternary);
+}
+
+.expgraph-detail-producer-value {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+}
+
+.expgraph-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.expgraph-detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 88px) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.expgraph-detail-row dt {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.expgraph-detail-row dd {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.expgraph-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.expgraph-detail-subhead {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.expgraph-detail-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+}
+
+.expgraph-conn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.expgraph-conn {
+  padding: 9px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-token);
+  background: var(--surface-subtle);
+  min-width: 0;
+}
+
+.expgraph-conn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+}
+
+.expgraph-conn-rel {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-slate);
+}
+
+.expgraph-conn-tag {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--cover-bg);
+  color: var(--cover-text);
+  overflow-wrap: anywhere;
+}
+
+.expgraph-conn-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  text-align: left;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--action);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.expgraph-conn-target:hover {
+  text-decoration: underline;
+}
+
+.expgraph-conn-kind {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-quaternary);
+}
+
+.expgraph-conn-why {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.expgraph-legend {
+  margin-top: 4px;
+  border-top: 1px solid var(--border-hair);
+  padding-top: 8px;
+}
+
+.expgraph-legend summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-slate);
+  cursor: pointer;
+  min-height: 26px;
+}
+
+.expgraph-legend p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.expgraph-legend-kinds {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+}
+
+/* --- responsive ---------------------------------------------------------- */
+
+/*
+ * The split, opted into only when the GRAPH'S OWN box is wide enough to carry
+ * both a legible canvas and a readable detail rail. 900px is the measured
+ * threshold: below it the canvas loses more than it gains from the rail.
+ */
+@container expgraph (min-width: 900px) {
+  .expgraph-body {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  }
+
+  .expgraph-canvas {
+    height: 520px;
+  }
+
+  .expgraph-detail {
+    max-height: 520px;
+    overflow-y: auto;
+  }
+}
+
+/*
+ * Narrow VIEWPORT concerns — a device question, not a container question, so
+ * these stay media queries.
+ *
+ * The canvas shortens and the detail becomes a drawer directly beneath it,
+ * scrolled by the PAGE rather than by a nested pane. `position: sticky` was
+ * tried here and removed: the panel is routinely taller than a phone viewport,
+ * and a sticky element taller than its scrollport simply does not stick — the
+ * rule looked like a bottom sheet in the stylesheet and did nothing in
+ * Chromium at 390px. Measured, then deleted.
+ */
+@media (max-width: 900px) {
+  .expgraph-canvas {
+    height: 380px;
+  }
+
+  .expgraph-detail {
+    box-shadow: var(--shadow-card);
+  }
+}
+
+@media (max-width: 620px) {
+  .expgraph-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .expgraph-buttons {
+    align-self: stretch;
+  }
+
+  .expgraph-buttons .expgraph-btn {
+    flex: 1 1 auto;
+    min-height: 40px;
+  }
+
+  .expgraph-canvas {
+    height: 320px;
+  }
+
+  /* Touch targets: a node is pressed with a finger here, not a pointer. */
+  .expgraph-node-shape {
+    stroke-width: 2.2;
+  }
+
+  .expgraph-kind-chip {
+    min-height: 36px;
+  }
+
+  .expgraph-conn-target {
+    min-height: 40px;
+  }
+
+  .expgraph-detail-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+  }
+}
+
+@media (max-width: 380px) {
+  .expgraph-canvas {
+    height: 280px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expgraph-node,
+  .expgraph-edge {
+    transition: none;
+  }
+}
