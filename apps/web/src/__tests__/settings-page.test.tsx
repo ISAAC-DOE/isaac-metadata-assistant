@@ -678,6 +678,15 @@ describe('Settings — Data & Privacy', () => {
       'No Real Experiment Data in the Workspace',
       'What Is Stored',
       'What Resets',
+      // P2 (privacy consolidation) — two ADDITIONS, not renames. This tab is
+      // meant to answer "what is collected, stored, retained, reset, exported?"
+      // in one place, and it answered five of those six: deletion appeared on no
+      // settings surface at all, and export appeared only as one item inside
+      // `What Is Stored`'s collapsed disclosure. The list is asserted in order,
+      // so both sit beside the storage/retention cards a reader reaches them
+      // from rather than at the end of the tab.
+      'Reset and Deletion',
+      'Exporting a Record',
       'No Telemetry or Analytics',
       'No External Model Calls',
       'Project Memory Boundary',
