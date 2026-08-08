@@ -1632,3 +1632,170 @@ describe('Settings → the API tabs — accessibility', () => {
     expect(create).toHaveAccessibleDescription(API_ACCESS_COPY.createDisabledReason);
   });
 });
+
+// --- the deployment condition, on every claim that needs it -------------------
+
+/**
+ * The 2026-08-08 capability audit (`docs/settings-api-capability-audit.md` §5)
+ * found no false sentence on this tab and a false AFFORDANCE anyway. The
+ * governing fact none of the copy carried:
+ *
+ *  · `ISAAC_UI_API_KEY` is unset in the deployment (`docs/deployment.md`), so
+ *    `auth.py`'s middleware returns `call_next` immediately and requires the
+ *    credential on ZERO operations; the edge is the sole control.
+ *  · That edge answers browser sessions only — `docs/developer-guide-k8s.md`:
+ *    "Scripted access (curl) to the deployed URL won't work without a browser
+ *    session; test against a local run or `docker run` instead."
+ *
+ * So on the hosted deployment no program can call this API, with or without a
+ * key. Four claims stated the unconditional half of that and the fifth
+ * (Connect an Agent) gave eight steps for doing it.
+ *
+ * These guards pin the CONDITION, not the sentence. Each asserts both branches,
+ * because the failure mode this replaces has an equal and opposite twin: the
+ * API, the contract and the bearer seam are real, and a locally run deployment
+ * does answer a program directly. "This API cannot be called" would be as
+ * wrong as "a key would let you call it".
+ */
+describe('Settings → API Access — the deployment condition is carried, both ways', () => {
+  const row = (term: string) => API_ACCESS_ROWS.find((r) => r.term === term)!.detail;
+
+  /** FINDING C. */
+  it('Current Access Model states BOTH branches, and neither unconditionally', async () => {
+    const detail = row('Current Access Model');
+    // The unconditional form is gone: "…before the app starts AND required on
+    // every operation" was the exact shape that made this false in production.
+    expect(detail).not.toMatch(/before the app starts and required on every operation/i);
+    // Branch 1 — a deployment that sets one.
+    expect(detail).toMatch(
+      /sets one requires it on every operation except the liveness check/i,
+    );
+    // Branch 2 — a deployment that sets none. This is the deployed build.
+    expect(detail).toMatch(/sets none requires it on no operation at all/i);
+    // The epistemic limit was not dropped while the modality was fixed.
+    expect(detail).toMatch(/this screen cannot see which/i);
+    await openApiAccess();
+    expect(within(keysRegion()).getByText(detail)).toBeInTheDocument();
+  });
+
+  /** FINDING A. */
+  it('What an API Key Would Enable names the deployment it would NOT enable', async () => {
+    const detail = row('What an API Key Would Enable');
+    // The capability is still stated — this must not become a flat denial.
+    expect(detail).toMatch(/could call the operations listed on the Endpoint Explorer tab/i);
+    // …but no longer as the first clause of the sentence, unqualified.
+    expect(detail).toMatch(/^On a deployment that answers a program directly,/);
+    // And the other branch is stated, in the same row, not one component away.
+    expect(detail).toMatch(/answers only browser sessions/i);
+    expect(detail).toMatch(/a key would enable none of that/i);
+    expect(detail).toMatch(/whether or not it carries a credential/i);
+    await openApiAccess();
+    expect(within(keysRegion()).getByText(detail)).toBeInTheDocument();
+  });
+
+  /** FINDING B — the precondition is INSIDE the guide it disqualifies. */
+  it('Connect an Agent states the precondition before its eight steps', async () => {
+    await openApiAccess();
+    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
+    fireEvent.click(connect.querySelector('summary') as HTMLElement);
+
+    const prerequisite = within(connect).getByText(API_ACCESS_COPY.connectPrerequisite);
+    expect(prerequisite).toBeInTheDocument();
+    // Reading order: it precedes every step, so it cannot be read as a footnote
+    // to instructions already followed.
+    const firstStep = connect.querySelector('.api-connect-heading') as HTMLElement;
+    expect(
+      prerequisite.compareDocumentPosition(firstStep) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // The disqualifying fact itself, in the guide — the audit's finding was that
+    // it lived only in a sibling component this disclosure can be opened without.
+    const text = norm(connect.textContent ?? '');
+    expect(text).toMatch(/answers only browser sessions/i);
+    expect(text).toMatch(/no agent can connect to it/i);
+    // Not the inverted over-claim: the steps still apply somewhere real.
+    expect(text).toMatch(/does answer a program directly, such as one run locally/i);
+    // Still exactly eight sections — the precondition is a lead, not a ninth step.
+    expect(connect.querySelectorAll('h4')).toHaveLength(8);
+    // Said once on the tab, like every other canonical string here.
+    expect(
+      countOccurrences(
+        norm(apiAccessPanel().textContent ?? ''),
+        norm(API_ACCESS_COPY.connectPrerequisite),
+      ),
+    ).toBe(1);
+  });
+
+  /** FINDING D — Quick Start's auth row hedges the way the Explorer legend does. */
+  it("Quick Start's authentication row no longer asserts the credential is always sent", async () => {
+    await openApiAccess();
+    const rows = Array.from(document.querySelectorAll('.api-quickstart-row')).map((r) =>
+      norm(r.textContent ?? ''),
+    );
+    const auth = rows.find((r) => r.includes('Authorization: Bearer'))!;
+    expect(auth).toMatch(/sent on every call that needs it — where a deployment sets one/i);
+    expect(auth).toMatch(/Where none is set, no operation refuses a call for want of it/i);
+    // The contract-derived count is untouched: it was always honest, because it
+    // reports what the DOCUMENT says, not what a deployment does.
+    expect(auth).toMatch(/\d+ of \d+ operations document a 401/);
+  });
+
+  /** FINDING E — the requirement that is not the application's to build. */
+  it('Technical Requirements says the five app-owned items are not sufficient', async () => {
+    await openApiAccess();
+    const drawer = keysRegion().querySelector('details.api-keys-technical') as HTMLElement;
+    const boundary = within(drawer).getByText(API_ACCESS_COPY.requirementsBoundary);
+    expect(boundary).toBeInTheDocument();
+    // It is a note, not a sixth requirement: the list is still the five
+    // app-owned contracts and nothing else.
+    expect(drawer.querySelectorAll('.api-keys-requirements li')).toHaveLength(
+      API_KEY_REQUIREMENTS.length,
+    );
+    expect(API_ACCESS_COPY.requirementsBoundary).toMatch(/One requirement is not ours/i);
+    expect(API_ACCESS_COPY.requirementsBoundary).toMatch(/answers only browser sessions/i);
+  });
+
+  /** The overcorrection guard. None of the five may claim the API is unusable
+   *  everywhere, or that the bearer seam is fake. */
+  it('never claims the API itself is unreachable or the credential mechanism unreal', async () => {
+    await openApiAccess();
+    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
+    fireEvent.click(connect.querySelector('summary') as HTMLElement);
+    const text = norm(apiAccessPanel().textContent ?? '');
+    for (const pattern of [
+      /cannot be called at all/i,
+      /no program can (ever )?call this API\b/i,
+      /the (API|credential|bearer).{0,24}\b(is|are) (not real|fake|pretend|a placeholder)/i,
+      /authentication is not implemented/i,
+    ]) {
+      expect(text, `overcorrected: ${pattern}`).not.toMatch(pattern);
+    }
+    // The conditional is genuinely conditional: the enabling branch survives.
+    expect(text).toMatch(/On a deployment that answers a program directly/i);
+  });
+
+  /** Still provider-neutral after all six edits — the same withheld list the
+   *  backend enforces on `GET /api/about`. Re-asserted here because every one of
+   *  these fixes is about the identity layer, which is the thing this copy may
+   *  never name. */
+  it('names no identity product or protocol while saying all of this', async () => {
+    await openApiAccess();
+    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
+    fireEvent.click(connect.querySelector('summary') as HTMLElement);
+    const drawer = keysRegion().querySelector('details.api-keys-technical') as HTMLElement;
+    fireEvent.click(drawer.querySelector('summary') as HTMLElement);
+    const lower = (apiAccessPanel().textContent ?? '').toLowerCase();
+    for (const needle of [
+      'authentik',
+      'ingress',
+      'k8s',
+      'kubernetes',
+      'oauth',
+      'saml',
+      'sso',
+      'single sign-on',
+      'forward auth',
+    ]) {
+      expect(lower.includes(needle), `named provider or protocol: ${needle}`).toBe(false);
+    }
+  });
+});

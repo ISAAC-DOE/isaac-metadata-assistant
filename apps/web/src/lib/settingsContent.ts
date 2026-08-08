@@ -429,12 +429,23 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       detail: `Validity and export are decided only by the official ISAAC v${recordSchemaVersion} schema and the deterministic validators, working from evidence you confirmed. No advisory surface — not the assistant, not Project Memory — can override that.`,
     },
     {
+      // FINDING F — "institutional single sign-on" WEAKENED to "an interactive
+      // sign-in step". The stronger phrase's plainest reading is "your
+      // institutional account signs you in", and nothing observed supports it:
+      // the one unauthenticated observation of the deployment's login flow
+      // (`docs/developer-guide-k8s.md`, the 2026-08-01 correction) found only an
+      // Email-or-Username field and an ORCID button at the identification stage,
+      // with later stages UNOBSERVED. The fix is to weaken, NOT to specify —
+      // naming the identity product is forbidden on every Settings tab by
+      // `settings-page.test.tsx`'s withheld list and by the backend's own.
+      // The final clause states the retraction rather than leaving the reader to
+      // notice the missing word.
       id: 'authentication-boundary',
       heading: 'Authentication Boundary',
       summary:
         'Access is controlled by the deployment, not by ISAAC accounts — and this screen cannot report whether access is restricted.',
       detail:
-        'Four separate things, deliberately not merged into one. First, access to a deployed ISAAC instance is controlled in front of ISAAC, at the network edge where it is operated. The SLAC-hosted deployment is configured to sit behind institutional single sign-on, so a browser session is established there before any ISAAC page loads — a statement about how the deployment is operated, never something this app verified, because the browser cannot see the edge. Second, ISAAC itself does not manage user accounts, profiles, or application roles, and none of that is configurable here. Third, the backend can additionally require one shared bearer key on every operation except the liveness check; it belongs to the deployment rather than to a person, and this screen has no way to report whether either restriction is active. Fourth, there is no per-user API-key management in this build: no operation creates, lists, revokes, or rotates a credential.',
+        'Four separate things, deliberately not merged into one. First, access to a deployed ISAAC instance is controlled in front of ISAAC, at the network edge where it is operated. The SLAC-hosted deployment is configured to sit behind an interactive sign-in step, so a browser session is established there before any ISAAC page loads — a statement about how the deployment is operated, never something this app verified, because the browser cannot see the edge, and deliberately not a claim about which account signs you in. Second, ISAAC itself does not manage user accounts, profiles, or application roles, and none of that is configurable here. Third, the backend can additionally require one shared bearer key on every operation except the liveness check; it belongs to the deployment rather than to a person, and this screen has no way to report whether either restriction is active. Fourth, there is no per-user API-key management in this build: no operation creates, lists, revokes, or rotates a credential.',
       more: {
         label: 'About That Shared Key',
         text: 'The backend reads it once at startup from its own environment and compares it on each request. The app never displays it, and nothing on this screen can create, replace, or reveal one.',
@@ -548,6 +559,42 @@ export const API_ACCESS_COPY = {
    */
   authMarkerLegend:
     "Auth reports whether the contract documents a 401 for an operation. Where a deployment enables authentication those operations need the deployment's credential, and the liveness check is the one that stays reachable without it.",
+  /**
+   * FINDING B — the prerequisite Connect an Agent never stated.
+   *
+   * That guide is eight steps under the lead "only what this build actually
+   * supports", and it is a `<details>` a reader can open on its own. Slice 13
+   * de-duplicated the tab's boundaries out to the access rows, which was right
+   * for the SHARED claims — but it left the guide able to be read start to
+   * finish without ever meeting the fact that disqualifies the whole procedure
+   * on this deployment. Pointing at a sibling component is not enough when the
+   * sibling holds the precondition.
+   *
+   * So the fact is carried HERE, in the guide itself, and stated once: this is
+   * a new canonical string, which means `settings-page.test.tsx`'s duplication
+   * guard counts it across all five surfaces and requires exactly 1.
+   *
+   * It is conditional on purpose. The API, the contract and the bearer seam are
+   * real; a self-run deployment answers a program directly, which is what
+   * `docs/developer-guide-k8s.md` tells a developer to do instead. Claiming the
+   * API is unreachable everywhere would be the same defect inverted.
+   */
+  connectPrerequisite:
+    'One thing has to be true before any of these steps applies: the deployment has to answer a program at all. A deployment that answers only browser sessions — as the SLAC-hosted one is documented to — will not answer a call made outside one, with or without a credential, so no agent can connect to it and nothing obtainable from this screen changes that. What follows describes a deployment that does answer a program directly, such as one run locally.',
+  /**
+   * FINDING E — the requirement that is not the application's.
+   *
+   * The five requirements below it are all app-owned, and a reader takes the
+   * list as the full path to shipping. It is the app half: even with all five
+   * built, a program still has to be able to reach the API, and that is the
+   * deployment's to arrange rather than something this codebase can implement.
+   * Stated as a boundary on the list, so the list itself stays true.
+   *
+   * No positional reference ("the list above"): slice 12 had to retire exactly
+   * that construction on this surface once the content moved.
+   */
+  requirementsBoundary:
+    "Those five are the application's to build, and building all five would still not be enough on its own. One requirement is not ours: a program has to be able to reach the API in the first place, and a deployment that answers only browser sessions does not let it — that part belongs to whoever operates the deployment.",
 } as const;
 
 /**
@@ -557,14 +604,37 @@ export const API_ACCESS_COPY = {
  */
 export const API_ACCESS_ROWS: readonly { term: string; detail: string }[] = [
   {
+    // FINDING C — the modality was wrong under a heading reading "How Access
+    // Works Today". "Required on every operation except the liveness check" is
+    // true of a deployment that SETS the key; where none is set the backend
+    // requires it on ZERO operations, because `auth.py`'s middleware returns
+    // `call_next` immediately when the expected value is empty. The trailing
+    // "cannot see whether it is switched on" rescued the sentence only for a
+    // reader who got that far. This file already had the right modality one
+    // concept away ("the backend CAN ADDITIONALLY require…"); both branches are
+    // now stated, and the epistemic limit is kept rather than dropped.
     term: 'Current Access Model',
     detail:
-      'One credential belonging to the whole deployment, set on the server before the app starts and required on every operation except the liveness check. It identifies the deployment, not a person, and this screen cannot see whether it is switched on.',
+      'One credential belonging to the whole deployment, set on the server before the app starts. A deployment that sets one requires it on every operation except the liveness check; a deployment that sets none requires it on no operation at all, and refuses nothing for want of it. It identifies the deployment, not a person, and this screen cannot see which of the two it is running on.',
   },
   {
+    // FINDING A — this was stated unconditionally, and on the deployment the
+    // reader is looking at it is false: a key enables none of it, because a
+    // call made outside a browser session does not arrive
+    // (`docs/developer-guide-k8s.md`: "Scripted access (curl) to the deployed
+    // URL won't work without a browser session; test against a local run or
+    // `docker run` instead"). The missing CONDITION is added rather than the
+    // capability denied — the second sentence must not become the opposite
+    // over-claim, because the API and the bearer seam are real and a
+    // self-run deployment does answer a program directly.
+    //
+    // The second sentence is adapted from `External Agent Access` below, which
+    // is the sharpest true sentence on this tab; it is deliberately NOT copied
+    // verbatim, since every row is counted exactly once across all five
+    // surfaces by `settings-page.test.tsx`.
     term: 'What an API Key Would Enable',
     detail:
-      'A program running outside this browser — a script, a notebook, or an agent — could call the operations listed on the Endpoint Explorer tab directly, without a person driving the interface.',
+      'On a deployment that answers a program directly, a program running outside this browser — a script, a notebook, or an agent — could call the operations listed on the Endpoint Explorer tab directly, without a person driving the interface. Where a deployment instead answers only browser sessions, as the SLAC-hosted one is documented to, a key would enable none of that: the call does not reach these operations at all, whether or not it carries a credential.',
   },
   {
     term: 'External Agent Access',
