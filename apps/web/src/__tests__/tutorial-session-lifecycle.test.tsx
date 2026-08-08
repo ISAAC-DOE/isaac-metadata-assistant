@@ -643,16 +643,31 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     const create = view.getByRole('button', { name: LABELS.actionCreateExperiment });
     expect(create).toHaveClass('btn-primary');
     /*
-     * OPEN VALIDATOR IS NOT SECONDARY, and that is asserted on the class rather
-     * than left to a screenshot. It was the one control on this screen wearing the
-     * grey `btn-secondary` treatment, under a lead-in that read as a footnote; it
-     * opens the standalone validator, which is one of the three things this product
-     * does. Both directions are asserted: it carries the action-blue treatment, and
-     * it does NOT carry the secondary one.
+     * THE HIERARCHY, ASSERTED ON THE CLASSES RATHER THAN LEFT TO A SCREENSHOT.
+     * Exactly one solid primary, and it is the control that creates something.
+     *
+     * WHAT CHANGED WHEN THE TWO DESIGNS MERGED, recorded because an earlier
+     * revision asserted the opposite and a future reader will otherwise read this
+     * as drift. Open Validator was briefly `btn-action`, promoted out of grey
+     * because it was then the only control on the screen wearing the secondary
+     * treatment under a lead-in that read as a footnote. It is no longer a
+     * footnote for a structural reason instead of a tonal one: it has its own
+     * CARD, with its own heading and description, the same shape as the other
+     * two. So it keeps `btn-secondary` and the three controls read
+     * solid → tinted → grey, which is one unmistakable primary and two peers.
+     *
+     * Launch Guided Demo is `btn-action`: the same action blue, tinted rather
+     * than filled. It was the solid primary while the screen had no other action;
+     * it does now.
      */
     const validator = view.getByRole('button', { name: LABELS.actionOpenValidator });
-    expect(validator).toHaveClass('btn-action');
-    expect(validator).not.toHaveClass('btn-secondary');
+    expect(validator).toHaveClass('btn-secondary');
+    expect(validator).not.toHaveClass('btn-primary');
+    const demo = view.getByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    expect(demo).toHaveClass('btn-action');
+    expect(demo).not.toHaveClass('btn-primary');
+    // Exactly one solid primary on the empty state, and it is the create control.
+    expect(view.container.querySelectorAll('.btn-primary')).toHaveLength(1);
     /*
      * THE CONTROL SET, AND ITS TWO FORBIDDEN NAMES.
      *
@@ -668,9 +683,12 @@ describe('ordinary workspace — no example record, and no promise of one', () =
      * the LAST tutorial affordance on this screen. The first-run offer retires
      * permanently on completion (`shouldOfferTutorial`), so a returning reader was left
      * with a quiet secondary that took them elsewhere to press a different button. The
-     * empty state now holds a primary that starts a session itself; the navigate-only
+     * empty state now holds a control that starts a session itself; the navigate-only
      * control was redundant once it did, and its old hint described what the new button
      * does. Replay is untouched and still lives in Settings → Help & Tutorial.
+     * (That control was the solid primary when this note was written and is now
+     * `btn-action` — see the hierarchy note above. It still starts a session, which
+     * is the only property this paragraph ever depended on.)
      *
      * Both old names must stay absent, for the same reason each time: one label must
      * address exactly one control in the app.

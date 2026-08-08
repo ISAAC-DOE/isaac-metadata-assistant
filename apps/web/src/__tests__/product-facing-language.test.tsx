@@ -31,9 +31,15 @@
  * caller (the persistence seam, pinned by
  * `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package`),
  * and My Experiments has a Create Experiment control that calls it. So "Create
- * Experiment" is now the accurate name for a real capability, and the two patterns
- * that forbade it are retired — see `FORBIDDEN_CREATION_PROMISE`, which records
- * them verbatim rather than deleting them.
+ * Experiment" is the accurate name for a real capability ON THAT ONE SCREEN.
+ *
+ * THE PATTERNS THAT FORBADE IT ARE STILL LIVE, EVERYWHERE. What changed is that a
+ * handful of exact strings at two named files are exempt from them —
+ * `CREATION_CAPABILITY_SITES`, per-file and per-occurrence, with four assertions
+ * keeping it from widening. The capability is scoped to one route and one screen;
+ * the exemption is scoped to match. An earlier revision of this branch deleted the
+ * two patterns outright, which would have let "New Record" back onto every screen
+ * that still cannot create one.
  *
  * THE REST OF THE PARAGRAPH STILL HOLDS, and is what the remaining patterns guard.
  * `POST /api/uploads` is still an unconditional 403, so there is still no import;
@@ -308,29 +314,26 @@ const RETIRED_VOCABULARY: readonly [string, RegExp, string][] = [
  */
 const FORBIDDEN_CREATION_PROMISE: readonly [string, RegExp][] = [
   /*
-   * TWO PATTERNS WERE RETIRED HERE, and they are recorded rather than deleted so
-   * the next reader can see what changed and why, instead of finding a shorter
-   * list and wondering whether someone weakened the guard to make their copy pass.
+   * THESE TWO PATTERNS ARE LIVE, AND THEY STAY LIVE EVERYWHERE. `POST
+   * /api/experiments` exists now (`apps/api/isaac_api/routes.py`, the
+   * `create_experiment` route; its single production caller is pinned by
+   * `apps/api/tests/test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package`),
+   * so ONE screen may honestly say "Create Experiment". Every other screen still
+   * may not, and the patterns are what keeps that true.
    *
-   *   ['a control offering to create a record', /\bnew\s+(record|experiment)\b/i]
-   *   ['a control offering to create a record',
-   *    /\bcreate\s+(a\s+|your\s+)?(new\s+)?(record|experiment)\b/i]
+   * AN EARLIER REVISION OF THIS BRANCH DELETED BOTH, and that was wrong in a way
+   * worth recording. The capability arriving on My Experiments is not a reason to
+   * stop checking the Load screen, the record surfaces, or anything written next
+   * year: `POST /api/uploads` is still an unconditional 403, `/load` still accepts
+   * nothing a user supplies, and a "New Record" button there would be the exact
+   * defect P1 removed. A deleted pattern would have let it back everywhere in
+   * order to permit it in one place.
    *
-   * THE PROPERTY THEY GUARDED NO LONGER HOLDS, and that is a fact about the build,
-   * not a preference about the copy. This file's own header said it: "There is
-   * provably no way for a user to create a record in this build: `create_experiment()`
-   * has no production caller". There is now — `POST /api/experiments` — so a
-   * control saying "Create Experiment" describes exactly what happens when it is
-   * pressed. Keeping the patterns would have forced the shipped label to be a
-   * euphemism for the thing it does, which is the opposite of what this file is for.
-   *
-   * WHAT REPLACED THEM IS NOT NOTHING. The class this file guards is "copy
-   * promising a capability the build does not have", and two of those remain:
-   * IMPORT (`POST /api/uploads` is still an unconditional 403) and calling the
-   * built-in examples the reader's own. Both keep their patterns below. The third
-   * entry is new and guards the opposite direction — the retired sentence that
-   * became false the moment the route landed.
+   * THE NARROW EXEMPTION IS `CREATION_CAPABILITY_SITES` below — per-file,
+   * per-exact-string, one occurrence each, and self-tested in both directions.
    */
+  ['a control offering to create a record', /\bnew\s+(record|experiment)\b/i],
+  ['a control offering to create a record', /\bcreate\s+(a\s+|your\s+)?(new\s+)?(record|experiment)\b/i],
   /*
    * THE FALSE SENTENCE THAT MUST NOT COME BACK. My Experiments used to read "This
    * deployment cannot yet create or import a record, so nothing has been added."
@@ -429,12 +432,107 @@ describe('P1 · product-facing language — no retired vocabulary in user-visibl
   );
 });
 
+/**
+ * THE CREATE CAPABILITY'S EXEMPTION, AND IT IS DELIBERATELY THE SMALLEST ONE THAT
+ * WORKS: per-file, per-exact-string, one occurrence per entry.
+ *
+ * WHY THERE IS AN EXEMPTION AT ALL. `POST /api/experiments` is a real route. The
+ * control that calls it is on My Experiments, and its label is the accurate name
+ * for what pressing it does. `FORBIDDEN_CREATION_PROMISE` exists to stop copy
+ * promising a capability the build does not have; on this one control the build
+ * has it, so the pattern is no longer describing a defect there.
+ *
+ * WHY IT IS NOT A DELETED PATTERN. The capability is scoped to ONE route and ONE
+ * screen. Every other surface still lacks it — import is still an unconditional
+ * 403 at `POST /api/uploads`, `/load` still accepts nothing a user supplies — so
+ * "New Record" on any of them is still the defect P1 removed. Deleting the
+ * patterns would have permitted the label everywhere in order to permit it here.
+ *
+ * WHY IT IS NOT `ALLOWED`. That list is for wire constants and runtime-MODE
+ * statements, and its own note sets that bar explicitly. This is product copy
+ * whose justification is a ROUTE EXISTING, which is a different claim with a
+ * different way of going stale — so it is checked separately and says so.
+ *
+ * WHAT KEEPS IT HONEST, all four asserted below: every string here must really
+ * occur in its file (a dead exemption fails); every string here must really be
+ * caught by a live pattern (an exemption for something already legal fails); the
+ * exemption is per-FILE, so the same string elsewhere is still an offender; and
+ * one occurrence per entry, so a second copy in the same file is still caught.
+ *
+ * IF THE ROUTE GOES AWAY, THIS GOES WITH IT. That is the whole justification, and
+ * there is no second reason holding it up.
+ */
+const CREATION_CAPABILITY_SITES: Readonly<Record<string, readonly string[]>> = {
+  /*
+   * The label, twice: the control that opens the form and the form's own submit
+   * button. Two occurrences, so two entries — the per-entry count is pinned at 1,
+   * and listing it twice is the deliberate act that mechanism is designed to force.
+   */
+  'lib/labels.ts': ['Create Experiment', 'Create Experiment'],
+  /*
+   * The lead card's own title. The button beside it carries the label; this is the
+   * heading over it, and it is the ONE string in this file the patterns catch.
+   */
+  'screens/ExperimentsHome.tsx': ['New experiment'],
+};
+
+function creationScannedCopy(path: string): string {
+  let copy = scannedCopy(path);
+  for (const allowed of CREATION_CAPABILITY_SITES[path] ?? []) {
+    copy = removeOneOccurrence(copy, allowed);
+  }
+  return copy;
+}
+
 describe('P1 · product-facing language — no copy promises record creation', () => {
   const files = frontendSourceFiles();
 
   it.each(FORBIDDEN_CREATION_PROMISE)('no file contains %s', (_label, pattern) => {
-    const offenders = files.filter((path) => pattern.test(scannedCopy(path)));
+    const offenders = files.filter((path) => pattern.test(creationScannedCopy(path)));
     expect(offenders).toEqual([]);
+  });
+
+  /*
+   * THE EXEMPTION IS NARROW — asserted, not asserted-in-a-comment.
+   *
+   * Each exempt string is put back into a DIFFERENT file's copy and must still be
+   * flagged there. If someone widens the mechanism to "exempt this string
+   * everywhere", or drops the per-file key, this fails.
+   */
+  it('an exempt string is still an offender in any other file', () => {
+    for (const [path, strings] of Object.entries(CREATION_CAPABILITY_SITES)) {
+      for (const s of strings) {
+        const elsewhere = files.find((f) => f !== path) ?? '';
+        const flagged = FORBIDDEN_CREATION_PROMISE.some(([, p]) =>
+          p.test(`${creationScannedCopy(elsewhere)} ${s}`),
+        );
+        expect(flagged, `"${s}" is exempt beyond ${path}`).toBe(true);
+      }
+    }
+  });
+
+  /*
+   * NO DEAD AND NO DECORATIVE ENTRIES. A string that no longer ships would sit here
+   * quietly widening the hole; a string no pattern catches would suggest the guard
+   * covers more than it does.
+   */
+  it('every exempt string still ships, and is still caught without the exemption', () => {
+    for (const [path, strings] of Object.entries(CREATION_CAPABILITY_SITES)) {
+      expect(frontendSourceFiles(), `${path} must still be scanned`).toContain(path);
+      const raw = scannedCopy(path);
+      for (const s of strings) {
+        expect(occurrences(raw, s), `"${s}" no longer occurs in ${path}`).toBeGreaterThan(0);
+        const caught = FORBIDDEN_CREATION_PROMISE.some(([, p]) => p.test(s));
+        expect(caught, `"${s}" is exempt but no pattern catches it`).toBe(true);
+      }
+      // One entry exempts one occurrence: the count listed must be the count that ships.
+      for (const s of new Set(strings)) {
+        expect(
+          occurrences(raw, s),
+          `${path} ships a different number of "${s}" than the exemption lists`,
+        ).toBe(strings.filter((x) => x === s).length);
+      }
+    }
   });
 });
 
@@ -637,8 +735,21 @@ describe('P1 · product-facing language — every pattern still flags its own de
     }
   });
 
+  /*
+   * ALL SIX SHAPES, INCLUDING THE FOUR THE CREATE ROUTE MADE SAYABLE ON ONE SCREEN.
+   *
+   * "New Record", "New Experiment", "Create a Record" and "Create your record" are
+   * back in this list on purpose. They are not legal now: they are legal at the
+   * exempt sites in `CREATION_CAPABILITY_SITES` and nowhere else, and the whole
+   * point of keeping them here is that the pattern which permits the exemption is
+   * still a pattern that fires.
+   */
   it('the creation tripwire flags the shapes it was written for', () => {
     for (const promise of [
+      'New Record',
+      'New Experiment',
+      'Create a Record',
+      'Create your record',
       'Import My Materials',
       'Your Records',
       'This deployment cannot yet create or import a record, so nothing has been added.',
@@ -649,19 +760,24 @@ describe('P1 · product-facing language — every pattern still flags its own de
   });
 
   /*
-   * THE OTHER HALF OF THE RETIREMENT, and it is the assertion that stops this from
-   * having been a quiet weakening. The shipped create copy must NOT be flagged — if
-   * a future edit reinstates either retired pattern, this fails immediately and
-   * names the string it broke, rather than the label being softened to sneak past.
+   * THE COPY THAT DESCRIBES THE REAL CAPABILITY WITHOUT NAMING IT. These ship on the
+   * create path and are NOT exempt anywhere — they pass because no pattern matches
+   * them, which is the state the exemption list should be kept as small as.
    */
-  it('the shipped create-experiment copy is deliberately NOT flagged', () => {
+  it('create copy that no pattern was written for stays unflagged', () => {
     for (const shipped of [
-      'Create Experiment',
-      'Create your first experiment, validate an existing record, or explore ISAAC with the guided demo.',
       'Starts an empty record with the questions ISAAC needs already listed, and opens it.',
+      'Name your experiment',
+      'Give the experiment a title to create it.',
+      // The empty state's lede. It reads "Create your FIRST experiment", and the
+      // pattern requires `record|experiment` immediately after the optional
+      // `a |your `, so it does not fire. Listed here so the near-miss is a recorded
+      // fact rather than something a later reader has to re-derive from the regex —
+      // and so that widening the pattern shows up as a decision, not a surprise.
+      'Create your first experiment, validate an existing record, or explore ISAAC with the guided demo.',
     ]) {
       const flagged = FORBIDDEN_CREATION_PROMISE.filter(([, p]) => p.test(shipped)).map(([l]) => l);
-      expect(flagged, `${shipped} is wrongly flagged — POST /api/experiments exists`).toEqual([]);
+      expect(flagged, `${shipped} is wrongly flagged`).toEqual([]);
     }
   });
 

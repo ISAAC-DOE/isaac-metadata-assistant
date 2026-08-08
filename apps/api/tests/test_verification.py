@@ -8,11 +8,13 @@ implementation would have shipped a claim nothing backed.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from isaac_api import corpus_mutation, verification
+from isaac_api.disclosure import suppress_small_cells
 from isaac_api.verification import (
     AUTHORIZED_PRIVATE_SAMPLE,
     LIMITATIONS,
@@ -279,6 +281,226 @@ def test_a_histogram_never_withholds_exactly_one_category_while_publishing(repor
         hist = report["format_shadow"][name]
         if hist["cells"]:
             assert hist["suppressed_categories"] != 1, (name, hist)
+
+
+def test_a_single_withheld_category_never_serves_its_exact_count():
+    """THE DELEGATED DUTY, DISCHARGED — and this test is why it now is.
+
+    `disclosure.py`'s module docstring ends by handing the decision to whoever
+    publishes: *"The caller is responsible for not publishing a histogram whose
+    universe is a single key … returns the honest numbers and the caller
+    withholds the whole block."* `_histogram` is that caller, and it used to
+    copy `suppressed_total` straight onto the wire. So `{"X": 1}` served
+    `{"cells": [], "suppressed_categories": 1, "suppressed_total": 1,
+    "floor": 5}` — one key's exact count against a universe (shadow error codes,
+    schema paths) an observer enumerates from the public schema. Over the
+    authorized 30-record corpus, one record with one format finding produces
+    exactly that body.
+
+    The served total is now `None`. Note what is NOT asserted here, because
+    `disclosure.py` names both alternatives as false claims: the total is not
+    `0`, and `suppressed_categories` is not reduced. The withholding stays
+    disclosed; only the recoverable figure goes.
+    """
+    for counts, occurrences in (({"ISAAC_SHADOW_FORMAT_DATE": 1}, 1), ({"X": 3}, 3)):
+        served = verification._histogram(suppress_small_cells(counts))
+        assert served["cells"] == []
+        assert served["suppressed_categories"] == 1, (
+            "the withholding must stay visible; hiding it would be the '0 withheld' "
+            "false claim disclosure.py rejects by name"
+        )
+        assert served["suppressed_total"] is None, (
+            f"served the withheld key's exact count ({occurrences}); with one "
+            "category withheld from an enumerable universe that IS the cell"
+        )
+        assert served["suppressed_total"] != 0, "zeroing it is a differently false claim"
+        assert set(served) == set(verification._HISTOGRAM_KEYS), (
+            "all four frozen keys stay present -- the strict projection requires it, "
+            "and a dropped key would be an undisclosed withholding"
+        )
+
+
+def _served_format_shadow(
+    by_code: dict[str, int], by_schema_path: dict[str, int], *, records_scanned: int
+) -> dict:
+    """The SERVED `format_shadow` block for a hand-built pair of distributions.
+
+    Goes through `build_report` rather than calling `_histogram` twice, because
+    the property under test is a relationship BETWEEN the two histograms and the
+    block builder is the only place that sees both. A test that drove
+    `_histogram` directly would pass against code that still leaks.
+    """
+    sweep = verification._SweepResult(schema_fingerprint="not-a-real-fingerprint")
+    sweep.corpus.update(
+        {
+            "records_scanned": records_scanned,
+            "records_passing_baseline": 0,
+            "records_failing_baseline": records_scanned,
+        }
+    )
+    sweep.by_code = Counter(by_code)
+    sweep.by_schema_path = Counter(by_schema_path)
+    report = verification.build_report(
+        sweep=sweep,
+        mode=PUBLIC_REFERENCE,
+        provider=None,
+        records=None,
+        duration_ms=0,
+        root=ROOT,
+    )
+    return report["format_shadow"]
+
+
+def test_a_withheld_total_is_not_recoverable_from_the_sibling_histogram():
+    """THE REVIEWER'S REPRODUCTION. Withholding one total is not enough.
+
+    `_sweep` increments `by_code` and `by_schema_path` ONCE PER FINDING
+    (`verification.py`, the `for finding in shadow.findings` loop), so by
+    construction
+
+        sum(by_code) == sum(by_schema_path) == F
+
+    where F is the total number of format findings. Every served histogram then
+    satisfies `F = sum(published cells) + suppressed_total`. So a total withheld
+    on ONE histogram is recoverable by arithmetic the moment the OTHER publishes
+    one: `withheld = F - sum(cells)`.
+
+    Two records with a `date-time` violation at two DIFFERENT pointers is enough,
+    and it is an ordinary shape rather than a contrived one: the shadow error
+    code vocabulary is closed and small (many pointers map to one code) while the
+    schema paths are distinct. Before this fix the block served
+
+        failures_by_error_code:  cells [] categories 1 total null
+        failures_by_schema_path: cells [] categories 2 total 2
+
+    -- the withheld figure printed adjacent to the withholding, on one screen.
+
+    The fix is cross-histogram because the leak is: EITHER histogram reaching one
+    category withholds the total on BOTH, since the two totals are the same
+    number by construction.
+    """
+    shadow = _served_format_shadow(
+        {"ISAAC_SHADOW_FORMAT_DATE_TIME": 2},
+        {
+            "properties/collection/properties/date/format": 1,
+            "properties/processing/properties/date/format": 1,
+        },
+        records_scanned=2,
+    )
+    by_code = shadow["failures_by_error_code"]
+    by_path = shadow["failures_by_schema_path"]
+
+    assert by_code["cells"] == [] and by_path["cells"] == [], (
+        "the premise of the arithmetic: with no published cells the withheld "
+        "total IS F, so publishing either one publishes both"
+    )
+    assert by_code["suppressed_categories"] == 1
+    assert by_path["suppressed_categories"] == 2, (
+        "the sibling is at two categories, which is exactly why the "
+        "single-histogram rule considered it safe to publish"
+    )
+    assert by_code["suppressed_total"] is None
+    assert by_path["suppressed_total"] is None, (
+        "served the sibling's total (2) while the other histogram withheld the "
+        "same number; `F - sum(cells)` recovers the withheld figure exactly"
+    )
+    # Both `suppressed_categories` values are unchanged and still real: the
+    # withholding stays disclosed on both sides, which is the whole difference
+    # between this and the "0 withheld" false claim `disclosure.py` rejects.
+    assert by_code["suppressed_categories"] == 1
+    assert by_path["suppressed_categories"] == 2
+
+
+def test_the_record_counts_do_not_reconstruct_the_finding_total():
+    """Why nulling both totals actually removes F, checked rather than asserted.
+
+    The remaining served integers that might carry F are `records_failing` and
+    `official_validation.failing`. Both count RECORDS; F counts FINDINGS, and a
+    record may carry several. So the record counts are a LOWER BOUND on F and not
+    F itself -- stated at exactly that strength, because in the reproduction
+    above the two happen to coincide numerically (two records, one finding each).
+    Coincidence at one corpus shape is not derivability, and this case shows the
+    bound is not tight: one record, three findings, three schema paths.
+    """
+    shadow = _served_format_shadow(
+        {"ISAAC_SHADOW_FORMAT_DATE_TIME": 3},
+        {"a/format": 1, "b/format": 1, "c/format": 1},
+        records_scanned=1,
+    )
+    assert shadow["records_failing"] == 1
+    assert shadow["failures_by_error_code"]["suppressed_total"] is None
+    assert shadow["failures_by_schema_path"]["suppressed_total"] is None
+    # F is 3. Nothing served says so.
+    assert 3 not in (shadow["records_passing"], shadow["records_failing"])
+
+
+@pytest.mark.parametrize(
+    ("counts", "expected"),
+    [
+        # Two sub-floor keys: the differencing attack does not apply, so the
+        # honest total is served exactly as before.
+        ({"A": 1, "B": 2}, {"cells": [], "suppressed_categories": 2, "suppressed_total": 3}),
+        # Nothing observed: nothing withheld, and 0 here is measured, not a
+        # stand-in for an unknown.
+        ({}, {"cells": [], "suppressed_categories": 0, "suppressed_total": 0}),
+        # Everything at or above the floor: no suppression at all.
+        (
+            {"A": 9, "B": 7},
+            {
+                "cells": [{"key": "A", "count": 9}, {"key": "B", "count": 7}],
+                "suppressed_categories": 0,
+                "suppressed_total": 0,
+            },
+        ),
+        # ONE KEY WITH A COUNT OF ZERO. Nothing is actually withheld -- the
+        # withheld bucket sums to 0 -- yet `suppressed_categories` is 1, so the
+        # rule fires and the total is nulled. This is OVER-withholding, and it is
+        # pinned rather than left to chance: a future refactor that "corrects" it
+        # into publishing `0` would reintroduce the leak, because from outside
+        # the report a served `0` and a served `1` are the same channel. `null`
+        # here costs nothing, since 0 withheld occurrences is not a fact any
+        # reader needs.
+        ({"A": 0}, {"cells": [], "suppressed_categories": 1, "suppressed_total": None}),
+    ],
+)
+def test_the_safe_histogram_shapes_are_unchanged(counts, expected):
+    """The withholding is narrow ON PURPOSE, and this pins how narrow.
+
+    Called WITHOUT `withhold_total`, `suppressed_total` goes to `None` for
+    `suppressed_categories == 1` and for nothing else. A fix that nulled the
+    total whenever anything was withheld would destroy a figure that is safe to
+    publish and would make every breakdown less informative than the floor
+    requires. (The cross-histogram rule that CAN null a two-category total lives
+    in `build_report`, not here, and is pinned by
+    `test_a_withheld_total_is_not_recoverable_from_the_sibling_histogram`.)
+    """
+    served = verification._histogram(suppress_small_cells(counts))
+    assert served == {**expected, "floor": 5}
+
+
+@pytest.mark.parametrize("counts", [{"A": 1, "B": 2}, {"A": 9, "B": 7}, {}])
+def test_the_cross_histogram_flag_nulls_a_total_this_histogram_would_publish(counts):
+    """The forced case, isolated from the block builder that decides it.
+
+    Each of these shapes publishes an honest `suppressed_total` on its own. With
+    `withhold_total=True` -- what `build_report` passes when the SIBLING
+    histogram reached one category -- the number goes and nothing else moves.
+
+    These are FLAG MECHANICS, not served bodies. In a real report the forced case
+    always arrives with `cells == []` on both sides, because one category implies
+    a single sub-floor key and therefore `F < floor`, which puts every sibling
+    cell under the floor as well. The published-cell rows here exercise the flag
+    in isolation so a refactor cannot make it conditional on the cells.
+    """
+    hist = suppress_small_cells(counts)
+    alone = verification._histogram(hist)
+    forced = verification._histogram(hist, withhold_total=True)
+
+    assert alone["suppressed_total"] is not None
+    assert forced["suppressed_total"] is None
+    assert {k: v for k, v in forced.items() if k != "suppressed_total"} == {
+        k: v for k, v in alone.items() if k != "suppressed_total"
+    }, "only the total may change; cells, categories and floor are untouched"
 
 
 # ---------------------------------------------------------------------------

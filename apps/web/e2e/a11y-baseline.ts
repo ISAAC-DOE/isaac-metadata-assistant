@@ -440,11 +440,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'memory@tablet-768x1024': 18,
       'memory@mobile-375x812': 17,
       'memory@zoom-200': 17,
-      'memory-graph@desktop-1280x800': 42,
-      'memory-graph@laptop-1024x768': 42,
-      'memory-graph@tablet-768x1024': 34,
-      'memory-graph@mobile-375x812': 27,
-      'memory-graph@zoom-200': { darwin: 32, linux: 33 },
+      'memory-graph@desktop-1280x800': 31,
+      'memory-graph@laptop-1024x768': 31,
+      'memory-graph@tablet-768x1024': 23,
+      'memory-graph@mobile-375x812': 16,
+      'memory-graph@zoom-200': { darwin: 21, linux: 22 },
       'record-detail@desktop-1280x800': 16,
       'record-detail@laptop-1024x768': 16,
       'record-detail@tablet-768x1024': { darwin: 16, linux: 15 },
@@ -1199,35 +1199,64 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // every key. Two independent +1 edits that each looked correct against their
   // own base is precisely how a wrong total gets auto-merged without ever
   // raising a conflict, which already happened once on this file.
-  // ── CREATE EXPERIMENT, 2026-08-07: -2 on both columns (1745 -> 1743,
-  //    1747 -> 1745) ────────────────────────────────────────────────────────
+  // ── GRAPH COMMAND-SURFACE SLICE, 2026-08-08: BOTH columns fall by 55 ────────
+  // `memory-graph` colour-contrast falls by ELEVEN NODES AT EVERY ONE of the five
+  // viewports: desktop 42->31, laptop 42->31, tablet 34->23, mobile 27->16,
+  // zoom-200 33->22 (linux). darwin 1745-55 = 1690; linux 1747-55 = 1692.
   //
-  // The arithmetic:
+  // THE LINUX NUMBERS ARE TRANSCRIBED FROM CI, NOT MEASURED LOCALLY, which is
+  // what this file has always asked for and what a previous slice in this same
+  // session got wrong -- it lowered `statistics@desktop-1280x800` onto a darwin
+  // reading that turned out to be the settle race, and only one of five viewports
+  // had moved. THAT ASYMMETRY IS THE TELL, and it is absent here: a token change
+  // moves every viewport by the same amount, and this one moved all five by
+  // exactly -11.
+  //
+  // The one platform-split key is `memory-graph@zoom-200`. Its linux value (22)
+  // is CI's. Its darwin value (21) is 32 - 11, an INFERENCE from the uniform
+  // delta plus a local darwin measurement of the same -11 on desktop -- flagged
+  // as an inference rather than presented as a reading, exactly as the two
+  // Statistics keys above are.
+  //
+  // The drop is real and is NOT hidden content: three pairs inside the graph
+  // command surface (`.graph-cmd-suggestion-hint`, `-suggest-cmd`, `-suggest-mode`)
+  // were already below AA at 2.53:1, 3.86:1 and 2.53:1, and the slice that tinted
+  // their backgrounds raised them to `--text-slate` at 5.46:1 / 5.16:1 / 4.64:1.
+  // Nothing was collapsed into a `<details>` to earn this.
+  //
+  // NOT ADDED HERE: `link-in-text-block`, which CI reported as NEW on `governance`
+  // at all five viewports. A rule that has never been baselined firing for the
+  // first time is a DEFECT, not a number to record -- an inline link carried by
+  // colour alone (WCAG 1.4.1). It is fixed in `screens.css` with an underline.
+  //
+  // ── MERGE WITH `feat/my-experiments-create`, 2026-08-08: a FURTHER -2 on both
+  //    columns, and it is arithmetic rather than a reading ────────────────────
+  //
+  // The two branches moved different keys and neither touched the other's, so
+  // the deltas stack:
   //
   //   settings-explorer   tablet 63 -> 62, mobile 56 -> 55   = -2
   //
-  // NOTHING WAS FIXED AND NOTHING REGRESSED. Both are the clipped-scroll
-  // displacement the `settings-explorer` notes describe: the new operation
-  // `POST /api/experiments` shifts which rows fall inside `.api-browser-list`'s
-  // measured window at the two narrow widths, so one already-failing summary
-  // text stops being judged. It is still painted and still fails.
+  // Those two entries came in on the create branch and merged without conflict;
+  // only this total conflicted, because both sides had recomputed it. THE
+  // NUMBERS BELOW ARE THE SUM OF THE ENTRY MAP AS IT NOW STANDS, computed by the
+  // same reduction `specs/a11y-axe.spec.ts` performs — they are not a hand
+  // subtraction and they are not a new measurement of anything.
   //
-  // WHAT THIS BRANCH ADDED AND WHY IT COSTS NOTHING ELSEWHERE. My Experiments'
-  // empty state gained a durability disclosure (`.queue-empty-storage`). Its
-  // first version used `--text-tertiary` and the scan caught it at once as a
-  // fourth `color-contrast` node on `experiments@*`; it was FIXED at the surface
-  // (`--text-secondary`, matching the sibling `.queue-empty-hint`) rather than
-  // ratcheted here, so all five `experiments@*` entries are unchanged. That is
-  // the outcome this file exists to produce and it is worth naming: the scan
-  // found a new contrast failure the same day it was written.
+  // WHAT IS AND IS NOT MEASURED HERE. The `memory-graph` and `statistics` values
+  // above are CI's, transcribed. The two `settings-explorer` values are DARWIN
+  // ONLY (their own note says so). And nothing in this merge has been scanned at
+  // all: the create branch's UI now sits inside the polish slice's card idiom —
+  // a third `.queue-empty-action` card, a `Plus` mark, an inline create form —
+  // and the `experiments@*` keys are UNCHANGED here because no run has been made
+  // to change them from, not because a run said they held. If the first CI run
+  // on the merged tree reports movement on `experiments@*`, transcribe ITS
+  // numbers. Do not pre-empt them, and never lower a key onto a local reading.
   //
-  // DARWIN IS MEASURED; LINUX IS NOT, and the linux figure is this branch's -2
-  // applied to the recorded 1747 rather than an observation. Actions minutes
-  // were unavailable to this work, so no CI run exists for it. If the first CI
-  // run disagrees, transcribe ITS numbers and correct the total — never loosen
-  // the assertion, and never change the darwin column to match.
-  darwin: 1743,
-  linux: 1745,
+  // 1690 - 2 = 1688 and 1692 - 2 = 1690, and both were CONFIRMED by running the
+  // reduction over the merged entry map rather than by doing the subtraction.
+  darwin: 1688,
+  linux: 1690,
 };
 
 /**

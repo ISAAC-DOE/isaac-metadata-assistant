@@ -45,7 +45,7 @@
  */
 export const verificationReportOk = {
   status: 'ok',
-  report_format_version: 2,
+  report_format_version: 3,
   schema_version: '1.05',
   schema_fingerprint: 'fb0c9d2a7e114c63',
   metadata: {
@@ -262,6 +262,38 @@ export const verificationReportWithheldButEmpty = {
 };
 
 /**
+ * ONE withheld category, and its occurrence count withheld too.
+ *
+ * `verification._histogram` serves `suppressed_total: null` (report format 3)
+ * when exactly one category is withheld from a key set an observer can
+ * enumerate — shadow error codes, schema paths — because the withheld total IS
+ * that category's exact count. `suppressed_categories: 1` stays visible so the
+ * withholding is still disclosed.
+ *
+ * A DECODER INPUT, NOT A SERVED BODY. This fixture nulls one histogram and
+ * leaves the sibling publishing its total, which `build_report` no longer emits:
+ * both breakdowns count the same findings, so either reaching one category nulls
+ * the total on BOTH. It is kept because the UI must survive a body it did not
+ * expect; the served shape is covered by "renders BOTH breakdowns withheld" in
+ * `record-verification.test.tsx`.
+ *
+ * `null` means WITHHELD. Every assertion built on this fixture exists to prove
+ * the UI never turns it into `0`, `"null"` or `"NaN"`.
+ */
+export const verificationReportLoneWithheldCategory = {
+  ...verificationReportOk,
+  format_shadow: {
+    ...verificationReportOk.format_shadow,
+    failures_by_error_code: {
+      cells: [],
+      suppressed_categories: 1,
+      suppressed_total: null,
+      floor: 5,
+    },
+  },
+};
+
+/**
  * `status: "ok"` with a block missing — THE decoder trap, and not the one the
  * null-filled failure envelope tests.
  *
@@ -344,7 +376,7 @@ export const verificationReportPrivateSampleShort = {
  */
 export const verificationFailureEnvelope = {
   status: 'unavailable',
-  report_format_version: 2,
+  report_format_version: 3,
   schema_version: '1.05',
   schema_fingerprint: null,
   metadata: null,
@@ -378,5 +410,5 @@ export const verificationErrorEnvelope = {
 /** A report announcing a format this build has not been checked against. */
 export const verificationFutureFormat = {
   ...verificationReportOk,
-  report_format_version: 3,
+  report_format_version: 4,
 };

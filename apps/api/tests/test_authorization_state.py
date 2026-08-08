@@ -248,6 +248,64 @@ def test_the_parity_check_would_notice_a_withdrawal(monkeypatch):
     assert _modes_declared_in_typescript() != list(authorization.verification_modes())
 
 
+def _report_format_version_declared_in_typescript() -> int:
+    """Extract `VERIFICATION_REPORT_FORMAT_VERSION` from the TS contract.
+
+    READ-ONLY and formatting-tolerant, in the same style as
+    `_modes_declared_in_typescript` above and for the same reason: this exists to
+    detect drift, so it must not be able to cause any.
+    """
+    source = CONTRACT_TS.read_text(encoding="utf-8")
+    match = re.search(
+        r"export\s+const\s+VERIFICATION_REPORT_FORMAT_VERSION\s*=\s*(\d+)",
+        source,
+    )
+    assert match, (
+        "could not find `VERIFICATION_REPORT_FORMAT_VERSION` in "
+        "verificationContract.ts; if its shape changed, update this parser "
+        "rather than deleting the check"
+    )
+    return int(match.group(1))
+
+
+def test_the_report_format_version_agrees_across_the_two_languages():
+    """The SECOND pair of underived copies of one fact, now checked.
+
+    `verification.REPORT_FORMAT_VERSION` and the TypeScript
+    `VERIFICATION_REPORT_FORMAT_VERSION` are two hand-maintained literals of the
+    same number, and `readVerificationBody` REFUSES any report announcing a
+    different one -- it renders `unreadable`. So a one-sided bump does not
+    degrade gracefully: it ships a UI that rejects every single report, while
+    every test in both suites still passes, because neither suite crossed the
+    language boundary to compare them.
+
+    That is the identical shape `VERIFICATION_MODES` drifted in, which is why
+    that guard exists a few lines above. This one is its counterpart. Bumping
+    the format is fine; bumping it on one side only is what this catches.
+    """
+    assert (
+        _report_format_version_declared_in_typescript()
+        == verification.REPORT_FORMAT_VERSION
+    ), (
+        "the frontend and backend disagree on the report format version; the UI "
+        "would refuse every report as unreadable. Bump BOTH, in one change."
+    )
+
+
+def test_the_format_version_check_would_notice_a_one_sided_bump(monkeypatch):
+    """NEGATIVE CONTROL, matching `test_the_parity_check_would_notice_a_withdrawal`.
+
+    Moves the backend copy and nothing else -- exactly what a one-sided bump is
+    -- and requires the two to disagree. Without this, a parser that silently
+    returned the backend's own value would pass the test above forever.
+    """
+    monkeypatch.setattr(verification, "REPORT_FORMAT_VERSION", 999)
+    assert (
+        _report_format_version_declared_in_typescript()
+        != verification.REPORT_FORMAT_VERSION
+    )
+
+
 # ---------------------------------------------------------------------------
 # The route's honesty claims are true only because it takes no parameters
 # ---------------------------------------------------------------------------

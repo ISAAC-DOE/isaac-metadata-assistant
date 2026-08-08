@@ -10236,11 +10236,11 @@
       },
       {
         "path": "AGENTS.md",
-        "sha256": "fcf72d80f928825236687f074145c8b8b2776eeab649718e77a8cafc39a838c5"
+        "sha256": "d94fb53642ce710b1f0c6d5893fa486d59526aea1774f02fb7676d48c3429bad"
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "153d76f368976068de3615f670257c942902498679bfef1287fefff8c76e9351"
+        "sha256": "0ebaeb136371908d62f485dc27f580d1a30caea87f65fc711f6df105b60af17a"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10540,7 +10540,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "d2e1863ac33c161b5c5838e7bbdb78944e3b5ecde443ff1124be0046275b38ff"
+        "sha256": "1969b46f4794503591955e4d0f94745a85a8d81f4d6b6da8316b419ad20d26b3"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10548,7 +10548,7 @@
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
-        "sha256": "1104ed0e0c00a4768cb0a82d2e16d3a56acd57f5ea865a1c408c3ced741c4957"
+        "sha256": "02b343448426a006e82e5d8f62c789c755bf50e065d77c831745fc12397a93f3"
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
@@ -10568,7 +10568,7 @@
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "a2e79b5b4bde932b58b67fe5a0bdae039f8ea6a47f4bb289ce3039c311bd74ed"
+        "sha256": "a9b2a911a629ca6c44e9353e401ecb153d4838b94de1344c6e49bb07e3eb27a3"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "081109358095e94cc573231ba241440c7165a70c0058843fbef51139ce228dba"
+    "served_manifest_fingerprint": "b18213341337f21a9898dc3260b92e3cbb91bfc850ca78d17b0bb8060c6001e0"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

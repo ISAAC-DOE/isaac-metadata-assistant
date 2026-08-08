@@ -21,6 +21,7 @@ import {
   verificationFailureEnvelope,
   verificationFutureFormat,
   verificationRefusedEnvelope,
+  verificationReportLoneWithheldCategory,
   verificationReportNoSuppression,
   verificationReportOk,
   verificationReportPrivateSample,
@@ -375,6 +376,19 @@ describe('runtime states', () => {
     expect(document.querySelectorAll('.stat-card')).toHaveLength(4);
     expect(bodyText()).toMatch(/what is shown below is the result of the last read that did/i);
     expect(bodyText()).toMatch(/older than it says/i);
+    /*
+     * PIN THE DIRECTION, not just the claim. This note points AT the report age,
+     * and the visual-first reorganisation moved that figure from the bottom of
+     * `About This Run` into the freshness strip ABOVE this note — which left the
+     * copy saying "further down" about something now rendered above it. Every
+     * test here matched only `/older than it says/`, so a false direction passed
+     * unnoticed until a review read the rendered order.
+     *
+     * Asserted in BOTH directions: the wrong word must be absent, and the right
+     * one present. Matching only the new word would still pass if both appeared.
+     */
+    expect(bodyText()).not.toMatch(/report age stated further down/i);
+    expect(bodyText()).toMatch(/the report age shown above was measured at that earlier read/i);
     // The rejection's own text never reaches the screen.
     expect(bodyText()).not.toContain('ECONNRESET');
     expect(bodyText()).not.toContain('example.invalid');
@@ -468,12 +482,12 @@ describe('runtime states', () => {
   it('UNREADABLE — refuses a format version it has not been checked against', async () => {
     await renderReport(verificationFutureFormat);
     expect(screen.getByText('Verification Results Not Shown')).toBeInTheDocument();
-    expect(bodyText()).toMatch(/answered in format 3/i);
+    expect(bodyText()).toMatch(/answered in format 4/i);
     expect(document.querySelectorAll('.stats-verify-state')).toHaveLength(0);
   });
 
   it('UNREADABLE — refuses a malformed body rather than partially drawing it', async () => {
-    await renderReport({ status: 'ok', report_format_version: 2 });
+    await renderReport({ status: 'ok', report_format_version: 3 });
     expect(bodyText()).toMatch(/cannot read as a verification report/i);
     expect(document.querySelectorAll('.stat-card')).toHaveLength(0);
   });
@@ -961,6 +975,118 @@ describe('the privacy-protected distributions', () => {
     );
     expect(labels).toEqual(['format']);
     expect(errorCodeChart!.textContent).not.toMatch(/withheld/i);
+  });
+
+  it('renders a WITHHELD occurrence count as withheld — never as 0, null or NaN', async () => {
+    /*
+     * REPORT FORMAT 3, and the whole point of the change. `suppressed_total`
+     * arrives as `null` when exactly one category was withheld, because that
+     * number is that one category's exact count against a key set an observer
+     * can enumerate. This asserts the UI carries the withholding through to the
+     * screen instead of quietly restoring a figure the backend refused to send.
+     *
+     * A `null` reaching the DOM through `String(...)`, `?? 0` or arithmetic
+     * would surface as exactly one of the three strings banned below — which is
+     * why they are checked on the rendered text rather than on the helpers.
+     */
+    const { container } = await renderReport(verificationReportLoneWithheldCategory);
+
+    const section = container.textContent ?? '';
+    // Nowhere on the screen — the three strings a leaked `null` would produce.
+    expect(section).not.toMatch(/NaN|undefined/);
+    expect(section).not.toMatch(/\bnull\b/i);
+
+    // The affected breakdown states the withholding, and states BOTH halves of
+    // it: the category, and the count it will not give.
+    const block = Array.from(container.querySelectorAll('.stats-chart-state-block')).find(
+      (node) => node.textContent?.includes('Breakdown Withheld'),
+    );
+    expect(block, 'the withheld breakdown must render its own block').toBeDefined();
+    const withheld = block!.textContent ?? '';
+    expect(withheld).toMatch(/1 further category is withheld/i);
+    expect(withheld).toMatch(/withheld as well/i);
+    // No invented quantity. The two numbers it MAY carry are the category count
+    // (1) and the floor (5); the withheld occurrence count and the total must
+    // not appear in any form, least of all as 0.
+    expect(withheld).not.toMatch(/accounting for/i);
+    expect(withheld).not.toMatch(/occurrences counted/i);
+    expect(withheld).not.toMatch(/\b0\b/);
+
+    // And it is NOT reported as an absence. "No occurrence was recorded" and
+    // "every category was withheld" are opposite claims.
+    expect(withheld).not.toMatch(/No occurrence was recorded in this breakdown/i);
+
+    // No bar is drawn for the withheld bucket, because a bar needs a length.
+    // (The OTHER histogram on this screen still draws its own withheld bar, so
+    // this is scoped to the affected breakdown's chart, which does not exist.)
+    expect(
+      Array.from(container.querySelectorAll('figure.stats-chart')).map(
+        (figure) => figure.querySelector('.stats-chart-caption')?.textContent,
+      ),
+    ).not.toContain('Format issues by check name');
+  });
+
+  it('renders BOTH breakdowns withheld, which is the body the backend now sends', async () => {
+    /*
+     * THE SHAPE THE FIXTURE ABOVE NO LONGER DESCRIBES.
+     *
+     * `verificationReportLoneWithheldCategory` nulls ONE histogram, which the
+     * backend can no longer produce: the two breakdowns count the same findings,
+     * so `sum(by_code) == sum(by_schema_path)`, and a total published on either
+     * one gives back the other's withheld figure by subtraction. `build_report`
+     * therefore nulls BOTH whenever either reaches one category. That fixture is
+     * kept as a decoder input -- the UI must survive a body it did not expect --
+     * but this test covers what is actually served.
+     *
+     * No frontend change was needed for it: each histogram is decoded and
+     * rendered independently, so both-null is the single-null path run twice.
+     * This asserts that rather than assuming it.
+     */
+    const bothWithheld = {
+      ...verificationReportOk,
+      format_shadow: {
+        ...verificationReportOk.format_shadow,
+        failures_by_error_code: {
+          cells: [],
+          suppressed_categories: 1,
+          suppressed_total: null,
+          floor: 5,
+        },
+        failures_by_schema_path: {
+          cells: [],
+          suppressed_categories: 2,
+          suppressed_total: null,
+          floor: 5,
+        },
+      },
+    };
+
+    const { container } = await renderReport(bothWithheld);
+    const section = container.textContent ?? '';
+    expect(section).not.toMatch(/NaN|undefined/);
+    expect(section).not.toMatch(/\bnull\b/i);
+
+    const blocks = Array.from(container.querySelectorAll('.stats-chart-state-block')).filter(
+      (node) => node.textContent?.includes('Breakdown Withheld'),
+    );
+    expect(blocks, 'both breakdowns must state their own withholding').toHaveLength(2);
+    for (const block of blocks) {
+      const text = block.textContent ?? '';
+      expect(text).toMatch(/withheld as well/i);
+      // No invented quantity on either side, and never a zero standing in for
+      // an unknown.
+      expect(text).not.toMatch(/accounting for/i);
+      expect(text).not.toMatch(/occurrences counted/i);
+      expect(text).not.toMatch(/\b0\b/);
+      expect(text).not.toMatch(/No occurrence was recorded in this breakdown/i);
+    }
+
+    // Neither distribution draws a chart, because neither has a bar to draw.
+    const captions = Array.from(container.querySelectorAll('figure.stats-chart')).map(
+      (figure) => figure.querySelector('.stats-chart-caption')?.textContent,
+    );
+    expect(captions).not.toContain('Format issues by check name');
+    expect(captions).not.toContain('Format issues by position in the ISAAC schema');
   });
 
   it('carries a textual summary and a data table for each distribution', async () => {

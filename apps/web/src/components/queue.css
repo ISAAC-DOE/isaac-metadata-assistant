@@ -215,42 +215,64 @@
  * WHAT CHANGED IS THE FACT UNDERNEATH IT, not the taste. There is no
  * `POST /api/experiments`, `create_experiment` has no production caller, and
  * `POST /api/uploads` refuses by design, so in the ordinary workspace there is no
- * queue for this to out-shout — this IS the screen, permanently, and it now owns
- * the screen's only real action (`Launch Guided Demo`). A resting state that is
- * also the only state has to carry a hierarchy.
+ * queue for this to out-shout — this IS the screen, permanently, and it owns the
+ * screen's only real actions. A resting state that is also the only state has to
+ * carry a hierarchy.
  *
- * The lift is measured, not loud: a wider measure, more room above, a heading that
- * reads as the screen's own rather than as a caption, and ONE emphasised control.
- * Nothing here gets a card, a fill, or a border — the restraint the old comment
- * asked for is spent on the container, and the emphasis is spent on the action.
- * If a create/import path ever lands, revisit this: the premise above is what
- * justifies it, and it expires with that premise.
+ * ── AND THE "NO CARD, NO FILL, NO BORDER" RULE IS NOW GONE, DELIBERATELY. ──
+ * The previous revision of this comment ended: "Nothing here gets a card, a fill,
+ * or a border — the restraint the old comment asked for is spent on the
+ * container, and the emphasis is spent on the action." That produced a screen of
+ * unattached prose sitting on the app canvas: correct, and visually unrelated to
+ * the experiment UI it stands in for. The polish slice inverts exactly that one
+ * clause and nothing else. The cards below reuse `.exp-row`'s own geometry —
+ * `--surface`, 1px `--border`, `--radius-inner`, the same 14/16px padding and the
+ * same hover border/shadow shift — so what the reader sees when the queue is
+ * empty is built from the same parts as the queue. That is the whole point: it
+ * belongs, rather than merely coexisting.
+ *
+ * If a create/import path ever lands, revisit the CONTENT: the premise above is
+ * what justifies a two-card "what you can do here" list, and it expires with that
+ * premise. The geometry can stay.
  */
-/*
- * THE EMPTY STATE IS A CONTAINED PANEL, not prose floating in a blank page.
- *
- * It borrows the `.card` primitive's exact values — `--surface`, a `--border`
- * hairline, `--radius-card`, `--shadow-card` — rather than inventing a treatment,
- * so it reads as the same KIND of object as the experiment groups it will be
- * replaced by. An empty queue and a full queue are one screen in two states, and
- * they should look like it.
- *
- * WHAT IT IS DELIBERATELY NOT: centred, full-bleed, or oversized. No centring, no
- * display type, no illustration. `max-width` keeps the measure readable and keeps
- * the panel on the same left edge the rows use, so nothing shifts when the first
- * experiment arrives.
- *
- * The previous version was `max-width: 60ch; padding: 38px 4px 12px` with no
- * background and no border — which is what made it read as text someone forgot to
- * put anywhere.
- */
+/* Two measures, not one. The CARDS want room — a description squeezed into a
+   280px column beside a 172px button reads as cramped at every desktop width —
+   while the lede PROSE still wants a readable line. So the container is sized for
+   the cards and `.queue-empty-lede-text` re-narrows the paragraph. */
 .queue-empty-state {
-  max-width: 62ch;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-  padding: 26px 26px 24px;
+  max-width: 800px;
+  padding: 30px 4px 12px;
+}
+
+/*
+ * The lede: mark, heading and the honest explanation of the absence. The mark is
+ * the queue's own list glyph in a soft action tint — the same family of quiet
+ * icon squares the assistant and status chips use, never a "nothing here" mascot.
+ */
+.queue-empty-lede {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.queue-empty-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-inner);
+  background: var(--action-tint);
+  color: var(--action);
+}
+
+.queue-empty-lede-text {
+  /* min-width:0 so the paragraph wraps inside the flex row instead of forcing the
+     row wider than the screen at 320px; the ch cap holds the line length where
+     prose stays readable while the cards below use the full container. */
+  min-width: 0;
+  max-width: 64ch;
 }
 
 .queue-empty-title {
@@ -268,72 +290,163 @@
   color: var(--text-secondary);
 }
 
-/*
- * The strongest action, given its own band so the hierarchy is spatial as well as
- * tonal — the reader's eye should land on it before it reads the two alternatives
- * below. It also holds the create FORM once expanded, which is why it is a column
- * rather than a row.
- */
-.queue-empty-primary {
+/* Labels the two action cards without adding a heading level. `--text-strong`
+   rather than a lighter eyebrow token: it is small and uppercase, which is where
+   contrast is most easily lost. */
+.queue-empty-eyebrow {
+  margin: 26px 0 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-strong);
+}
+
+.queue-empty-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 18px 0 4px;
-}
-
-/* Slightly larger than a row-level `.btn`: it is the screen's primary action and
-   the default control size is tuned for dense toolbars. */
-.queue-empty-cta {
-  font-size: 13.5px;
-  padding: 11px 20px;
+  gap: 10px;
 }
 
 /*
- * THE TWO SECONDARY ACTIONS, side by side above 560px and stacked below it.
- *
- * A rule rather than a lead-in sentence separates them from the primary. The
- * sentence that used to do this job read "Or, without starting the walkthrough:",
- * which framed everything under it as a footnote — and one of the two is the
- * standalone validator, which is a first-class thing this product does.
+ * ONE ACTION PER CARD, and the card is `.exp-row`'s twin on purpose (see the
+ * block comment above). It wraps rather than squeezes: `.queue-empty-action-main`
+ * carries a 200px floor exactly as `.exp-main` carries 160px, so at a narrow
+ * width the cta column drops to its own line instead of starving the description
+ * into a one-character column — the defect `.exp-row`'s M1 note measured.
  */
-.queue-empty-actions {
-  margin: 20px 0 0;
-  padding: 18px 0 0;
-  border-top: 1px solid var(--border-faint);
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 18px 22px;
-}
-
-/* Button above its explanation, so the wrap at a narrow width is predictable and
-   the hint never squeezes into a two-character column beside the control. */
 .queue-empty-action {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 14px;
+  flex-wrap: wrap;
+  row-gap: 12px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.queue-empty-action:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+
+/* The lead card is the only one with a stronger resting border, so the hierarchy
+   survives even before the button is read. No fill and no coloured left edge: rows
+   in this app never carry one.
+
+   IT MOVED, AND THE MOVE IS THE POINT. This marked the guided demo while the demo
+   was the screen's strongest action — which it was only because there was nothing
+   to create. `POST /api/experiments` exists now, so the lead treatment sits on
+   Create Experiment and the demo keeps the same card with the ordinary border. */
+.queue-empty-action-lead {
+  border-color: var(--action-selected-border);
+}
+
+.queue-empty-action-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-token);
+  background: var(--cover-bg);
+  color: var(--text-slate);
+}
+
+.queue-empty-action-lead .queue-empty-action-mark {
+  background: var(--action-tint);
+  color: var(--action);
+}
+
+/* Basis 320 rather than 200: it is the width at which the description reads as a
+   paragraph instead of a column, and — because it is a BASIS, not a min-width —
+   the row still breaks to a second line the moment main + gap + cta no longer
+   fits, which is the wrap `.exp-row`'s M1 note describes. */
+.queue-empty-action-main {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.queue-empty-action-title {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+/*
+ * Its own column, top-aligned with the title it belongs to (`align-self: center`
+ * would float it against a three-line description).
+ *
+ * THE `min-width` IS WHY BOTH CARDS WRAP AT THE SAME WIDTH, and it was added
+ * after measuring the alternative. Without it the column is exactly as wide as
+ * its own button, so "Launch Guided Demo" (172px) broke to a second line at the
+ * 200%-zoom width while the narrower "Open Validator" (130px) stayed inline —
+ * two cards, two different layouts, at one viewport. Sizing both columns to the
+ * wider button makes the break point a property of the CARD rather than of the
+ * label, so they reflow together. `flex-end` keeps each button on the card's
+ * right edge inside that column.
+ */
+.queue-empty-action-cta {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  min-width: 172px;
+}
+
+/* Slightly larger than a row-level `.btn`, because these are the screen's own
+   controls and the default control size is tuned for dense toolbars. */
+.queue-empty-cta {
+  font-size: 13px;
+  padding: 10px 18px;
 }
 
 .queue-empty-hint {
+  margin: 0;
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--text-secondary);
 }
 
 /*
- * WHERE A NEW EXPERIMENT GOES. Quiet by design: it is a consequence of acting,
- * not a reason to act, so it sits at the foot of the panel in the tertiary text
- * colour. It is one line, and the component renders NOTHING here when durability
- * has not been established — see `ExperimentsHome`'s `storageSentence`.
+ * THE CREATE CARD WHILE ITS FORM IS OPEN.
+ *
+ * The card keeps its box — same border, same padding, same radius — and only
+ * changes direction, so the form grows out of the card the reader pressed rather
+ * than replacing it with an unrelated panel. `flex-wrap` is cleared because a
+ * column that wraps is a column that silently becomes two.
+ *
+ * The hover lift is removed while the form is open: it is a control affordance,
+ * and a card the reader is typing into is no longer a control.
  */
+.queue-empty-action-form {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+}
+
+.queue-empty-action-form:hover {
+  border-color: var(--action-selected-border);
+  box-shadow: none;
+}
+
 /*
- * `--text-secondary`, NOT `--text-tertiary`, and that is a fix rather than a
- * preference: the first version used the tertiary token and the axe scan caught it
- * as a new `color-contrast` node on every viewport. A disclosure the reader may
- * not be able to read is not a disclosure. The size matches `.queue-empty-hint`,
- * which carries the same token at the same weight and passes.
+ * WHERE A NEW EXPERIMENT GOES. One line, below the cards, separated by the same
+ * faint rule the rest of the screen uses for a footnote that is not an action.
+ *
+ * `--text-secondary`, NOT `--text-tertiary`. The first version used tertiary and
+ * the axe scan caught it the same day as a fourth `color-contrast` node on
+ * `experiments@*`; it was fixed at the surface rather than ratcheted into the
+ * baseline, which is why the five `experiments@*` entries are unchanged. It
+ * matches its sibling `.queue-empty-hint` exactly.
  */
 .queue-empty-storage {
   margin: 18px 0 0;
@@ -344,12 +457,12 @@
   color: var(--text-secondary);
 }
 
-/* --- create experiment ------------------------------------------------------
+/*
+ * THE CREATE FORM — two fields, inline, no modal.
  *
- * An inline expansion, not a modal — see the component for why. It sits inside
- * `.queue-empty-primary` on the empty state and directly in the page header when
- * the queue has rows, so it carries no background of its own: it must not look
- * like a card inside a card.
+ * `max-width` on the form rather than on the inputs: the fields are 100% of the
+ * form so they stay flush with each other at every width, and the measure is set
+ * once. 42ch is a title field, not a paragraph field.
  */
 .create-experiment {
   display: flex;
@@ -400,27 +513,12 @@
   min-height: 44px;
 }
 
-/*
- * `--text-secondary`, NOT `--text-tertiary` — the SAME fix `.queue-empty-storage`
- * carries one rule above, reintroduced here and then caught in review.
- * `--text-tertiary` (#78838f) on `--surface` is 3.86:1, below the 4.5:1 WCAG AA
- * threshold for text this size.
- *
- * WHY axe DID NOT CATCH IT, which is the part worth remembering: the create form
- * is collapsed by default, so this element is not in the DOM when the accessibility
- * scan runs. An automated scan can only see rendered nodes, so "axe is green" says
- * nothing about a surface behind a disclosure. The rule to carry forward is that
- * the token choice is decided at authoring time, not delegated to the scan.
- */
 .create-experiment-hint {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary);
 }
 
-/* The failure token on text and border only, never a solid fill: the same
-   restraint `.btn-danger-quiet` keeps, so an error message never out-shouts the
-   form it is attached to. */
 .create-experiment-error {
   margin: 0;
   font-size: 12.5px;

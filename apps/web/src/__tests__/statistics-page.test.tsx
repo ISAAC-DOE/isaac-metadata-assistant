@@ -382,9 +382,9 @@ describe('the lead sentence is truthful in each workspace scope', () => {
 
     expect(
       screen.getByText(
-        'A read-only view of this workspace, workflow readiness, open questions, evidence, ' +
-          'the official record schema, Project Memory, and the API surface — and, for ' +
-          'platform-wide figures, why none is stated.',
+        'Record verification first, then a read-only view of this workspace, workflow ' +
+          'readiness, open questions, evidence, the official record schema, Project Memory, ' +
+          'and the API surface — and, for platform-wide figures, why none is stated.',
       ),
     ).toBeInTheDocument();
     // The retired claim is gone from the PAGE, not relocated within it.
@@ -397,13 +397,43 @@ describe('the lead sentence is truthful in each workspace scope', () => {
 
     expect(
       screen.getByText(
-        'A read-only view of the open worked-example workspace, workflow readiness, open questions, ' +
-          'evidence, the official record schema, Project Memory, and the API surface — and, for ' +
-          'platform-wide figures, why none is stated.',
+        'Record verification first, then a read-only view of the open worked-example ' +
+          'workspace, workflow readiness, open questions, evidence, the official record ' +
+          'schema, Project Memory, and the API surface — and, for platform-wide figures, ' +
+          'why none is stated.',
       ),
     ).toBeInTheDocument();
     // The neutral ordinary wording must not leak into the scope that has examples.
-    expect(screen.queryByText(/A read-only view of this workspace/)).toBeNull();
+    expect(screen.queryByText(/read-only view of this workspace/)).toBeNull();
+  });
+
+  /*
+   * THE LEAD NAMES THE SECTION IT SITS ABOVE, and that is why it was rewritten
+   * rather than left alone.
+   *
+   * The visual-first reorganisation made Record Verification the FIRST section
+   * of the General tab. The lead named six other topics and not that one — so a
+   * sentence that is a correct summary of the page would have been read as a
+   * promise about the panel directly beneath it, which is the exact defect
+   * `leadSentence`'s own header records the tab split producing once already.
+   *
+   * BOTH DIRECTIONS, because only the pair is falsifiable: the topic is named,
+   * and it is named FIRST — ahead of the workspace clause, matching where the
+   * section now is. A lead that merely appended "and record verification" to the
+   * old list would satisfy the first half and reinstate the defect.
+   */
+  it('names record verification, and names it before the workspace clause', async () => {
+    await renderIn('ordinary');
+    const lead = document.querySelector('.placeholder > p')!.textContent ?? '';
+
+    expect(lead).toMatch(/record verification/i);
+    expect(lead.toLowerCase().indexOf('record verification')).toBeLessThan(
+      lead.toLowerCase().indexOf('this workspace'),
+    );
+    // Verification Safeguards is deliberately NOT named: it renders only when a
+    // readable report is on screen, so naming it would promise a heading that is
+    // legitimately absent in four of the section's runtime states.
+    expect(lead).not.toMatch(/safeguard/i);
   });
 });
 
@@ -1075,9 +1105,25 @@ describe('analytics are not collected', () => {
    *
    * So this pins BOTH halves: every claim is scoped to the application, and the
    * server-side logging the app cannot deny is named rather than denied.
+   *
+   * ── THE SECOND HALF MOVED, AND THIS TEST MOVED WITH IT ────────────────────
+   *
+   * The visual-first reorganisation reduced this section to ONE sentence plus the
+   * Settings link: Statistics is not where this app's privacy policy is
+   * explained, and the owner's brief was to stop repeating it here. The
+   * server-side-logging paragraph is the one thing that could NOT simply be cut,
+   * because it is the correction of a claim this section shipped falsely — so it
+   * is relocated, verbatim, into the `Known Limitations` disclosure.
+   *
+   * THE ASSERTIONS ARE THEREFORE SPLIT RATHER THAN DELETED, and the split is the
+   * point: this test now checks the paragraph is IN Known Limitations AND that
+   * the no-analytics section points there. Deleting these four patterns — the
+   * cheap way to make a reorganisation pass — would have left the narrow claim
+   * standing on a page with nothing to scope it, which is the state the original
+   * defect was corrected out of.
    */
   it('scopes every claim to the app, and denies neither the access log nor the operation log', async () => {
-    renderStatistics(statisticsRoutes());
+    const { container } = renderStatistics(statisticsRoutes());
     await settled();
     const text = pageText(regionOf(NO_ANALYTICS_HEADING));
 
@@ -1092,12 +1138,26 @@ describe('analytics are not collected', () => {
     expect(text).toMatch(/no third-party network request/);
     expect(text).toMatch(/stores no per-user or per-operation metric/);
 
-    // Server-side logging is disclosed, not denied — including that the page
-    // cannot speak for the gateway in front of a hosted deployment.
-    expect(text).toMatch(/outcome line per operation/);
-    expect(text).toMatch(/access line per request/);
-    expect(text).toMatch(/identity gateway/);
-    expect(text).toMatch(/the browser cannot see them/);
+    // ONE sentence of body copy, which is the reduction the brief asked for.
+    // Counted on the section's own `.stats-note` paragraphs, so the supporting
+    // line and the link line are not mistaken for body prose.
+    expect(regionOf(NO_ANALYTICS_HEADING).querySelectorAll('p.stats-note')).toHaveLength(1);
+
+    // …and the scope is still disclosed AT the claim, in the section's own
+    // supporting line, naming where the full statement is.
+    expect(text).toMatch(/Server-side logs belong to whoever operates the deployment/);
+    expect(text).toMatch(/Known Limitations/);
+
+    // The server-side logging paragraph itself: relocated, not dropped. Resolved
+    // through the disclosure's own heading id, so a rename cannot make this
+    // vacuous — `closest('details')` on a missing element would throw.
+    const limitations = container.querySelector('#stats-limitations')!.closest('details');
+    expect(limitations, 'the Known Limitations disclosure must render').not.toBeNull();
+    const limitationsText = pageText(limitations as HTMLElement);
+    expect(limitationsText).toMatch(/outcome line per operation/);
+    expect(limitationsText).toMatch(/access line per request/);
+    expect(limitationsText).toMatch(/identity gateway/);
+    expect(limitationsText).toMatch(/the browser cannot see them/);
 
     // The vetted Settings wording is linked rather than re-authored.
     expect(
@@ -1105,6 +1165,152 @@ describe('analytics are not collected', () => {
         name: 'Open Data & Privacy Settings',
       }),
     ).toHaveAttribute('href', ROUTES.settingsTab('privacy'));
+  });
+});
+
+/*
+ * ── THE VISUAL-FIRST ORDER, AND THE RULE THAT DECIDES WHAT MAY BE COLLAPSED ──
+ *
+ * Record Verification was the FIFTH h2 on this tab, roughly 1,700px down. Every
+ * item the brief named as above-the-fold material — the corpus that ran, the
+ * report's age, the four headline counts, the two validators side by side, the
+ * mutation harness, the protected distributions — is inside it, so the fix was
+ * to promote the section rather than to compress the page.
+ *
+ * Supporting PROSE went the other way, into four new closed disclosures beside
+ * `Technical Details`. The rule the split was made on is asserted here rather
+ * than only written down, because it is the one that can be violated silently:
+ * A DISCLOSURE MAY HOLD PROSE AND MUST NOT HOLD A MEASUREMENT. A closed
+ * `<details>` is not scanned by axe, is skipped by a reader scanning headings,
+ * and reads as optional — so collapsing a finding is hiding it.
+ *
+ * `Technical Details` is deliberately exempt from that assertion and is checked
+ * separately: it holds build-internal FIGURES on purpose and always has.
+ */
+describe('the visual-first order', () => {
+  /** Every section element, in document order, by its accessible name. */
+  function sectionNames(container: HTMLElement): string[] {
+    return [...container.querySelectorAll('section[aria-labelledby]')].map(
+      (s) => container.querySelector(`#${s.getAttribute('aria-labelledby')}`)?.textContent ?? '',
+    );
+  }
+
+  it('opens with Record Verification and its safeguards, before any workspace figure', async () => {
+    const { container } = renderStatistics(statisticsRoutes());
+    await settled();
+
+    const names = sectionNames(container);
+    // Vacuity guard: an empty or mis-rooted scan would satisfy every index
+    // comparison below without having read anything.
+    expect(names.length, 'the scan found no sections at all').toBeGreaterThan(5);
+    expect(names.slice(0, 3)).toEqual([
+      'Record Verification',
+      'Verification Safeguards',
+      'Workspace at a Glance',
+    ]);
+  });
+
+  it('renders the four prose disclosures, closed, in the documented order', async () => {
+    const { container } = renderStatistics(statisticsRoutes());
+    await settled();
+
+    const prose = [...container.querySelectorAll('details.stats-disclosure')];
+    expect(prose.map((d) => d.querySelector('h2')?.textContent)).toEqual([
+      'How Verification Works',
+      'How to Interpret Results',
+      'Mutation Methodology',
+      'Known Limitations',
+    ]);
+    for (const d of prose) {
+      expect(d.hasAttribute('open'), 'a supporting disclosure must arrive closed').toBe(false);
+    }
+    // The build-internals region keeps its own class, and stays the ONLY one
+    // carrying it: three e2e helpers address `details.stats-technical` through
+    // strict-mode locators, one of them asserting exactly one match.
+    expect(container.querySelectorAll('details.stats-technical')).toHaveLength(1);
+  });
+
+  it('puts NO measurement inside a prose disclosure', async () => {
+    const { container } = renderStatistics(statisticsRoutes());
+    await settled();
+
+    const prose = [...container.querySelectorAll('details.stats-disclosure')];
+    expect(prose.length, 'no prose disclosure rendered, so this asserts nothing').toBe(4);
+    for (const d of prose) {
+      const figures = d.querySelectorAll(
+        '.stat-card, .stats-figure, figure.stats-chart, .stats-verify-safeguard, .stats-mini-item',
+      );
+      expect(
+        [...figures].map((n) => n.className),
+        `${d.querySelector('h2')?.textContent} holds a measurement; a closed disclosure is ` +
+          'not scanned by axe and is skipped by a reader, so a figure inside one is a hidden figure',
+      ).toEqual([]);
+    }
+    // The negative control: the guard's own selector really does match the
+    // figures this page draws, so an empty result means "none here" rather than
+    // "the selector is broken".
+    expect(
+      container.querySelectorAll(
+        '.stat-card, .stats-figure, figure.stats-chart, .stats-verify-safeguard, .stats-mini-item',
+      ).length,
+    ).toBeGreaterThan(20);
+  });
+
+  /*
+   * The six tri-state safeguards are MEASUREMENTS, so the block that renders
+   * them was promoted to a visible `h2` section rather than folded into a fifth
+   * disclosure. Pinned in both directions: it is a real section with that
+   * accessible name, and it is inside no `<details>` at all.
+   */
+  it('keeps Verification Safeguards visible, with its "does not apply" sentence intact', async () => {
+    const { container } = renderStatistics(statisticsRoutes());
+    await settled();
+
+    const safeguards = regionOf('Verification Safeguards');
+    expect(safeguards.closest('details')).toBeNull();
+    expect(safeguards.querySelectorAll('.stats-verify-safeguard').length).toBe(6);
+    expect(pageText(safeguards)).toMatch(
+      /A safeguard that does not apply is not a safeguard that held\./,
+    );
+    // …and it is a SIBLING of Record Verification, not nested inside it.
+    expect(
+      container.querySelector('section[aria-labelledby="stats-verification"]')!.contains(safeguards),
+    ).toBe(false);
+  });
+
+  /*
+   * C7 — TWO CLOCKS, and they are never merged. The page's own
+   * `Last Read From the API` is a CLIENT instant captured when one of its five
+   * reads returned a body; `Report Generated` / `Report Age` are SERVER values
+   * the verification report carries about the program run. The freshness strip
+   * moved the report clock up beside the figures it dates; the page clock did
+   * not move and did not change label.
+   */
+  it('keeps the page clock and the report clock apart', async () => {
+    const { container } = renderStatistics(statisticsRoutes());
+    await settled();
+
+    // The page clock, still in the meta row above the tab panel body.
+    expect(metaLabel(container)).toBe('Last Read From the API');
+
+    // The report clock, now in Record Verification's freshness strip — and
+    // stated exactly once, so the two rows cannot disagree with each other.
+    const verification = container.querySelector(
+      'section[aria-labelledby="stats-verification"]',
+    ) as HTMLElement;
+    const strip = verification.querySelector('.stats-verify-freshness') as HTMLElement;
+    expect(strip, 'the freshness strip must render').not.toBeNull();
+    expect(pageText(strip)).toMatch(/Report Generated/);
+    expect(pageText(strip)).toMatch(/Report Age/);
+    expect(pageText(verification).match(/Report Generated/g)).toHaveLength(1);
+    expect(pageText(verification).match(/Report Age/g)).toHaveLength(1);
+
+    // The report clock is NOT on the page meta row, and the page clock is not
+    // inside the verification section.
+    expect(pageText(container.querySelector('.stats-meta') as HTMLElement)).not.toMatch(
+      /Report (Generated|Age)/,
+    );
+    expect(pageText(verification)).not.toMatch(/Last Read From the API/);
   });
 });
 
@@ -1428,7 +1634,32 @@ describe('truncated body', () => {
     await settled();
 
     const note = container.querySelector('.stats-block-lead .stats-unavailable');
-    const grid = container.querySelector('.statistics .stats-cards');
+    /*
+     * SCOPED TO THE GLANCE REGION, not to the first `.stats-cards` on the page.
+     *
+     * It used to be `container.querySelector('.statistics .stats-cards')`, which
+     * was the glance grid ONLY because that section happened to be first. Record
+     * Verification now opens the tab and draws its own four-card KPI row, so the
+     * unscoped query resolves to a grid this caveat says nothing about.
+     *
+     * BE PRECISE ABOUT WHAT THAT DID, because an earlier version of this comment
+     * was not, and a review caught it. It claimed the stale assertion was "both
+     * true and worthless" — i.e. that the rescope merely tightened something
+     * already passing. That is FALSE and the flattering version of events. The
+     * Record Verification grid renders BEFORE this caveat, so
+     * `note.compareDocumentPosition(rvGrid) & DOCUMENT_POSITION_FOLLOWING` is 0:
+     * the old assertion would have gone RED, and the rescope was REQUIRED to make
+     * the reorganisation pass.
+     *
+     * That distinction is the whole point of writing these comments. "I tightened
+     * a weak assertion" and "I changed an assertion that my change broke" carry
+     * very different burdens of proof, and only the second one obliges the author
+     * to show the new assertion is as strong as the old. It is: the old form
+     * pinned the caveat against whichever grid came first, which after this
+     * change is a grid in another section; this form pins it against the grid it
+     * actually qualifies, resolved from the same region.
+     */
+    const grid = regionOf('Workspace at a Glance').querySelector('.stats-cards');
     expect(note, 'the truncation caveat must render').not.toBeNull();
     expect(grid, 'the glance grid must render').not.toBeNull();
     // Node.DOCUMENT_POSITION_FOLLOWING === 4: the grid follows the note.

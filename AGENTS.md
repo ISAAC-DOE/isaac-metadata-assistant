@@ -237,7 +237,13 @@ Do not use Graphify to decide:
 - vocabulary authority
 - audit status
 
-If `graphify-out/graph.json` exists, use Graphify before answering architecture/codebase questions.
+**WITHDRAWN (2026-08-07):** this file previously said "If `graphify-out/graph.json` exists, use
+Graphify before answering architecture/codebase questions." A controlled 32-run benchmark did not
+find that benefit — median effort was slightly *worse* with Graphify, correctness tied in 7 of 8
+categories, and the exact-string category measured **harmful**. The measured routing rule lives in
+`CLAUDE.md` §7 ("Measured routing rule"); evidence in
+`docs/evidence/graphify-benchmark-results.md`. Do not reinstate the "use it first" instruction
+without new evidence.
 
 Suggested commands:
 

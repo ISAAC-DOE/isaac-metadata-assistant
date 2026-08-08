@@ -90,6 +90,8 @@ export type SettingsConceptId =
   | 'no-real-experiment-data'
   | 'what-is-stored'
   | 'what-resets'
+  | 'reset-and-deletion'
+  | 'export-handling'
   | 'no-telemetry'
   | 'no-external-model-calls'
   | 'project-memory-boundary'
@@ -115,9 +117,17 @@ export interface SettingsConcept {
 }
 
 /**
- * The nine data/privacy concepts, in the order Data & Privacy presents them
+ * The eleven data/privacy concepts, in the order Data & Privacy presents them
  * (and the order Overview summarises them). Deterministic: same facts in, same
  * strings out, no time, no randomness, no locale.
+ *
+ * P2 (privacy consolidation) added `reset-and-deletion` and `export-handling`.
+ * They are not decoration: this tab is meant to be the ONE place a reader can
+ * answer "what is collected, stored, retained, reset, exported?", and until now
+ * it answered five of those six. Deletion was described nowhere on any settings
+ * surface, and export was named only in passing inside the `what-is-stored`
+ * disclosure — so a reader asking "what happens to a record I export?" had to
+ * infer it from a list of directory contents.
  */
 export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
   const { dataRegime, persistence, recordSchemaVersion } = facts;
@@ -301,11 +311,89 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       },
     },
     {
+      // P2 — DELETION, which no settings surface described at all.
+      //
+      // Every clause is checked against the code, and nothing stronger is
+      // claimed than it enforces:
+      //
+      //  · CONFINED TO A WALKTHROUGH. `POST /api/demo/reset` requires the
+      //    worked-example session header and refuses without it, so the control
+      //    renders only inside `components/TutorialSessionBar.tsx` and addresses
+      //    a directory namespace that contains nothing else.
+      //  · PREVIEW IS READ-ONLY, and execution carries the preview's own
+      //    `plan_digest` — 428 when absent, 412 when stale — so a reset
+      //    authorised against figures that have since moved writes nothing
+      //    (`components/ResetDemoDialog.tsx`'s `doExecute`).
+      //  · THE TYPED PHRASE IS NOT NAMED HERE ON PURPOSE. The dialog's own
+      //    field states it (`TYPED_GATE`); the backend phrase is different and
+      //    is deliberately never surfaced. Printing either here would put a
+      //    second, driftable copy of a destructive gate on a settings screen.
+      //  · THE BROWSER-SIDE CLEAR. A successful execute calls `clearAllSessions()`,
+      //    which erases the assistant transcripts this tab holds in
+      //    sessionStorage — the one effect of a reset that is NOT server-side,
+      //    and therefore the one a reader would not otherwise expect.
+      //  · ENDING A WALKTHROUGH. `DELETE /api/tutorial/sessions/{id}` discards
+      //    the session directory and everything in it. It is best effort (see
+      //    `what-is-stored`), which is why the expiry fallback is stated there
+      //    and not promised again here.
+      //  · WHAT HAS NO DELETE. There is exactly one DELETE operation in the
+      //    whole API (the session discard above); nothing removes the workspace,
+      //    a record, or an exported artifact.
+      id: 'reset-and-deletion',
+      heading: 'Reset and Deletion',
+      summary:
+        'Deliberate removal reaches only a walkthrough — nothing here deletes the workspace, a record, or an exported file.',
+      detail:
+        "Deliberate removal is narrow in this build, and everything it can reach sits inside a worked-example walkthrough. Reset Worked Example rebuilds that walkthrough's own copies of the built-in example records: it previews the effect without changing anything, requires a typed confirmation, and is checked against the figures you were shown — if the walkthrough moved in between, the server refuses and writes nothing. When it does run it permanently discards the confirmed answers, the progress, and the exported artifacts inside that walkthrough, and it also clears the assistant conversations this browser tab is holding. Ending a walkthrough discards its whole temporary directory along with everything in it. Nothing in this build deletes the workspace itself, an individual record, or a single exported artifact — no operation offers it.",
+    },
+    {
+      // P2 — EXPORT, which was named only inside `what-is-stored`'s collapsed
+      // disclosure ("exported records, and evidence sidecars") as one item in a
+      // list of directory contents. That answers "is it stored?" and not "where
+      // does it go?", which is the question a reader actually brings here.
+      //
+      //  · TWO FILES, SERVER-SIDE. `_write_record` (`routes.py`) writes
+      //    `<id>.json` and `<id>.evidence.json` into `Experiment.records_dir`,
+      //    which hangs off the experiment's own scope — the same scope the
+      //    record already lives in, so an export moves nothing between scopes.
+      //  · THE DOWNLOAD IS PURELY CLIENT-SIDE. `screens/ExportReadiness.tsx`'s
+      //    `download()` builds a `Blob` from data already in the page and uses
+      //    an object URL; there is no request, no service, and no third party.
+      //  · AND THEN IT STOPS BEING OURS. Stated plainly rather than left
+      //    implied: once the file is on the reader's machine, nothing on this
+      //    tab describes what happens to it. Claiming otherwise would be the
+      //    same over-reach as the retired absolute upload claim.
+      id: 'export-handling',
+      heading: 'Exporting a Record',
+      summary:
+        'An export writes two files on the server; downloading one happens in your browser and puts the copy beyond this app.',
+      detail:
+        'Exporting writes two files into the same server-side directory the record already lives in: the official ISAAC record and its evidence sidecar. Nothing leaves the deployment in the process — there is no upload, no third-party service, and no model involved. Downloading either file happens entirely in your browser: it is assembled from data already on the screen and saved to your machine. From that point the copy on your machine is outside this app, and nothing stated on this tab describes what happens to it.',
+    },
+    {
+      // P2 — THE SCOPE SENTENCE, relocated rather than re-authored.
+      //
+      // The first sentence used to read "Nothing about your session is measured,
+      // collected, or transmitted" with no subject bound to it. Statistics had
+      // ALREADY had to retract exactly that shape: its no-analytics section once
+      // claimed the preview "does not track visits, users, source IPs, request
+      // history, or behavioral analytics", which is false of the deployment —
+      // `uvicorn` writes an access line per request, `routes.py` writes
+      // metadata-only per-operation outcome lines, and a hosted deployment sits
+      // behind an identity gateway the browser cannot see. That correction was
+      // relocated into Statistics' Known Limitations, and Statistics' section
+      // links HERE for the full statement — so the full statement now has to
+      // include the scope. The wording is taken from the already-vetted
+      // paragraph in `screens/statistics/StatisticsPage.tsx` rather than
+      // invented a third time.
+      //
+      // It stays in the always-visible `detail`. A caveat that keeps the visible
+      // sentence from overstating what the code does may never go behind `more`.
       id: 'no-telemetry',
       heading: 'No Telemetry or Analytics',
-      summary: 'Nothing about your session is measured or transmitted anywhere.',
+      summary: 'This application measures and transmits nothing about your session.',
       detail:
-        'Nothing about your session is measured, collected, or transmitted: no analytics, no usage tracking, and no cloud sync. The app makes no third-party network requests at all and loads nothing from a CDN.',
+        'Nothing about your session is measured, collected, or transmitted by this application: no analytics, no usage tracking, and no cloud sync. The app makes no third-party network requests at all and loads nothing from a CDN. Server-side logs are a separate matter and this claim does not cover them: the backend writes a metadata-only outcome line per operation, the web server it runs under writes an access line per request, and a hosted deployment sits behind an identity gateway that keeps records of its own. Those belong to whoever operates the deployment, the browser cannot see them, and nothing here is a claim about what they contain or how long they are kept.',
     },
     {
       id: 'no-external-model-calls',
@@ -315,15 +403,24 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       // deployment — so both name WHERE the catalog and the data actually are.
       summary:
         'No language model at all — the assistant answers from a bounded in-repository catalog.',
+      // P2 — the last sentence absorbed the MODEL half of a clause relocated off
+      // Governance & Safety → Policy ("nothing on any screen here is sent to a
+      // model or an index"). "Nothing you type" was narrower than what Governance
+      // was promising, so the wider subject moved with it rather than being
+      // quietly dropped. The INDEX half landed on `project-memory-boundary`.
       detail:
-        "There is no language model in this build. The assistant answers from a bounded, deterministic catalog over the deployment's own data, and refuses anything outside it rather than guessing. Nothing you type is sent to a model provider.",
+        "There is no language model in this build. The assistant answers from a bounded, deterministic catalog over the deployment's own data, and refuses anything outside it rather than guessing. Nothing you type, and nothing shown on any screen here, is sent to a model provider.",
     },
     {
       id: 'project-memory-boundary',
       heading: 'Project Memory Boundary',
       summary: 'Project Memory returns leads to verify, never a correctness ruling.',
+      // P2 — the second sentence is the INDEX half of the clause relocated off
+      // Governance & Safety → Policy. It is a statement about direction: the
+      // snapshot is built from repository content by `scripts/build_memory_snapshot.py`
+      // before the app runs and is served read-only, so no screen writes into it.
       detail:
-        'Project Memory reads a committed, sanitized snapshot of served repository content. It returns navigational leads and provenance to verify — never a correctness ruling — and it cannot mark a record valid, change one, or authorize an export.',
+        'Project Memory reads a committed, sanitized snapshot of served repository content. Nothing you type, confirm, or export is added to that snapshot — it is built before the app runs and no screen writes into it. It returns navigational leads and provenance to verify — never a correctness ruling — and it cannot mark a record valid, change one, or authorize an export.',
     },
     {
       id: 'record-truth-boundary',
@@ -332,12 +429,23 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       detail: `Validity and export are decided only by the official ISAAC v${recordSchemaVersion} schema and the deterministic validators, working from evidence you confirmed. No advisory surface — not the assistant, not Project Memory — can override that.`,
     },
     {
+      // FINDING F — "institutional single sign-on" WEAKENED to "an interactive
+      // sign-in step". The stronger phrase's plainest reading is "your
+      // institutional account signs you in", and nothing observed supports it:
+      // the one unauthenticated observation of the deployment's login flow
+      // (`docs/developer-guide-k8s.md`, the 2026-08-01 correction) found only an
+      // Email-or-Username field and an ORCID button at the identification stage,
+      // with later stages UNOBSERVED. The fix is to weaken, NOT to specify —
+      // naming the identity product is forbidden on every Settings tab by
+      // `settings-page.test.tsx`'s withheld list and by the backend's own.
+      // The final clause states the retraction rather than leaving the reader to
+      // notice the missing word.
       id: 'authentication-boundary',
       heading: 'Authentication Boundary',
       summary:
         'Access is controlled by the deployment, not by ISAAC accounts — and this screen cannot report whether access is restricted.',
       detail:
-        'Four separate things, deliberately not merged into one. First, access to a deployed ISAAC instance is controlled in front of ISAAC, at the network edge where it is operated. The SLAC-hosted deployment is configured to sit behind institutional single sign-on, so a browser session is established there before any ISAAC page loads — a statement about how the deployment is operated, never something this app verified, because the browser cannot see the edge. Second, ISAAC itself does not manage user accounts, profiles, or application roles, and none of that is configurable here. Third, the backend can additionally require one shared bearer key on every operation except the liveness check; it belongs to the deployment rather than to a person, and this screen has no way to report whether either restriction is active. Fourth, there is no per-user API-key management in this build: no operation creates, lists, revokes, or rotates a credential.',
+        'Four separate things, deliberately not merged into one. First, access to a deployed ISAAC instance is controlled in front of ISAAC, at the network edge where it is operated. The SLAC-hosted deployment is configured to sit behind an interactive sign-in step, so a browser session is established there before any ISAAC page loads — a statement about how the deployment is operated, never something this app verified, because the browser cannot see the edge, and deliberately not a claim about which account signs you in. Second, ISAAC itself does not manage user accounts, profiles, or application roles, and none of that is configurable here. Third, the backend can additionally require one shared bearer key on every operation except the liveness check; it belongs to the deployment rather than to a person, and this screen has no way to report whether either restriction is active. Fourth, there is no per-user API-key management in this build: no operation creates, lists, revokes, or rotates a credential.',
       more: {
         label: 'About That Shared Key',
         text: 'The backend reads it once at startup from its own environment and compares it on each request. The app never displays it, and nothing on this screen can create, replace, or reveal one.',
@@ -451,6 +559,42 @@ export const API_ACCESS_COPY = {
    */
   authMarkerLegend:
     "Auth reports whether the contract documents a 401 for an operation. Where a deployment enables authentication those operations need the deployment's credential, and the liveness check is the one that stays reachable without it.",
+  /**
+   * FINDING B — the prerequisite Connect an Agent never stated.
+   *
+   * That guide is eight steps under the lead "only what this build actually
+   * supports", and it is a `<details>` a reader can open on its own. Slice 13
+   * de-duplicated the tab's boundaries out to the access rows, which was right
+   * for the SHARED claims — but it left the guide able to be read start to
+   * finish without ever meeting the fact that disqualifies the whole procedure
+   * on this deployment. Pointing at a sibling component is not enough when the
+   * sibling holds the precondition.
+   *
+   * So the fact is carried HERE, in the guide itself, and stated once: this is
+   * a new canonical string, which means `settings-page.test.tsx`'s duplication
+   * guard counts it across all five surfaces and requires exactly 1.
+   *
+   * It is conditional on purpose. The API, the contract and the bearer seam are
+   * real; a self-run deployment answers a program directly, which is what
+   * `docs/developer-guide-k8s.md` tells a developer to do instead. Claiming the
+   * API is unreachable everywhere would be the same defect inverted.
+   */
+  connectPrerequisite:
+    'One thing has to be true before any of these steps applies: the deployment has to answer a program at all. A deployment that answers only browser sessions — as the SLAC-hosted one is documented to — will not answer a call made outside one, with or without a credential, so no agent can connect to it and nothing obtainable from this screen changes that. What follows describes a deployment that does answer a program directly, such as one run locally.',
+  /**
+   * FINDING E — the requirement that is not the application's.
+   *
+   * The five requirements below it are all app-owned, and a reader takes the
+   * list as the full path to shipping. It is the app half: even with all five
+   * built, a program still has to be able to reach the API, and that is the
+   * deployment's to arrange rather than something this codebase can implement.
+   * Stated as a boundary on the list, so the list itself stays true.
+   *
+   * No positional reference ("the list above"): slice 12 had to retire exactly
+   * that construction on this surface once the content moved.
+   */
+  requirementsBoundary:
+    "Those five are the application's to build, and building all five would still not be enough on its own. One requirement is not ours: a program has to be able to reach the API in the first place, and a deployment that answers only browser sessions does not let it — that part belongs to whoever operates the deployment.",
 } as const;
 
 /**
@@ -460,14 +604,37 @@ export const API_ACCESS_COPY = {
  */
 export const API_ACCESS_ROWS: readonly { term: string; detail: string }[] = [
   {
+    // FINDING C — the modality was wrong under a heading reading "How Access
+    // Works Today". "Required on every operation except the liveness check" is
+    // true of a deployment that SETS the key; where none is set the backend
+    // requires it on ZERO operations, because `auth.py`'s middleware returns
+    // `call_next` immediately when the expected value is empty. The trailing
+    // "cannot see whether it is switched on" rescued the sentence only for a
+    // reader who got that far. This file already had the right modality one
+    // concept away ("the backend CAN ADDITIONALLY require…"); both branches are
+    // now stated, and the epistemic limit is kept rather than dropped.
     term: 'Current Access Model',
     detail:
-      'One credential belonging to the whole deployment, set on the server before the app starts and required on every operation except the liveness check. It identifies the deployment, not a person, and this screen cannot see whether it is switched on.',
+      'One credential belonging to the whole deployment, set on the server before the app starts. A deployment that sets one requires it on every operation except the liveness check; a deployment that sets none requires it on no operation at all, and refuses nothing for want of it. It identifies the deployment, not a person, and this screen cannot see which of the two it is running on.',
   },
   {
+    // FINDING A — this was stated unconditionally, and on the deployment the
+    // reader is looking at it is false: a key enables none of it, because a
+    // call made outside a browser session does not arrive
+    // (`docs/developer-guide-k8s.md`: "Scripted access (curl) to the deployed
+    // URL won't work without a browser session; test against a local run or
+    // `docker run` instead"). The missing CONDITION is added rather than the
+    // capability denied — the second sentence must not become the opposite
+    // over-claim, because the API and the bearer seam are real and a
+    // self-run deployment does answer a program directly.
+    //
+    // The second sentence is adapted from `External Agent Access` below, which
+    // is the sharpest true sentence on this tab; it is deliberately NOT copied
+    // verbatim, since every row is counted exactly once across all five
+    // surfaces by `settings-page.test.tsx`.
     term: 'What an API Key Would Enable',
     detail:
-      'A program running outside this browser — a script, a notebook, or an agent — could call the operations listed on the Endpoint Explorer tab directly, without a person driving the interface.',
+      'On a deployment that answers a program directly, a program running outside this browser — a script, a notebook, or an agent — could call the operations listed on the Endpoint Explorer tab directly, without a person driving the interface. Where a deployment instead answers only browser sessions, as the SLAC-hosted one is documented to, a key would enable none of that: the call does not reach these operations at all, whether or not it carries a credential.',
   },
   {
     term: 'External Agent Access',

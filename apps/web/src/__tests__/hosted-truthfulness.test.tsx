@@ -150,7 +150,25 @@ describe('Settings copy — the authentication boundary keeps four things separa
   });
 
   it('states edge access as how the deployment is operated, never as verified', () => {
-    expect(auth.detail).toMatch(/single sign-on/i);
+    /*
+     * FINDING F — this used to assert `/single sign-on/i`, which pinned a claim
+     * nothing observed supports. "Institutional single sign-on" reads plainest
+     * as "your institutional account signs you in"; the one unauthenticated
+     * observation of the deployment's login flow (`docs/developer-guide-k8s.md`,
+     * 2026-08-01) found only an Email-or-Username field and an ORCID button at
+     * the identification stage, with later stages UNOBSERVED. The copy was
+     * WEAKENED rather than specified, because naming the identity product is
+     * forbidden on every Settings tab (see the withheld list below, and the
+     * same list in `settings-page.test.tsx` and the backend's own guard).
+     *
+     * The assertion is inverted rather than deleted: the retired phrase must
+     * not come back, and the edge must still be described as a real sign-in
+     * step, so this does not drift into "no authentication" — which the test
+     * above it already forbids.
+     */
+    expect(auth.detail).not.toMatch(/single sign-on/i);
+    expect(auth.detail).toMatch(/sit behind an interactive sign-in step/i);
+    expect(auth.detail).toMatch(/a browser session is established there/i);
     expect(auth.detail).toMatch(/how the deployment is operated/i);
     expect(auth.detail).toMatch(/never something this app verified/i);
     expect(auth.detail).toMatch(/the browser cannot see the edge/i);

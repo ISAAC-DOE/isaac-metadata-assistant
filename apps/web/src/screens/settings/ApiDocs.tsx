@@ -189,8 +189,16 @@ function QuickStart({
           {/* The HEADER and the contract-derived COUNT, and nothing else: the
               key-unavailable status is the banner's (stated once, above this),
               and the hosted-session boundary is one of the access rows'. */}
+          {/* FINDING D — the count was already honest ("the contract DOCUMENTS a
+              401"), but the sentence in front of it was not conditional, and a
+              deployment that sets no credential returns a 401 from the
+              application on no operation at all. The Explorer's own legend for
+              the same marker already hedges this way ("where a deployment
+              enables authentication…"); this row now matches it rather than
+              contradicting it one tab away. */}
           <span className="api-quickstart-note">
-            One credential belonging to the deployment, sent on every call that needs it.{' '}
+            One credential belonging to the deployment, sent on every call that needs it — where a
+            deployment sets one. Where none is set, no operation refuses a call for want of it.{' '}
             {facts.authRequiredCount} of {facts.operationCount} operations document a 401, and the
             Endpoint Explorer tab marks which.
           </span>

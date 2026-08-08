@@ -14,6 +14,7 @@ import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
+import { Compass, LayoutList, Plus, ShieldCheck } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
@@ -308,11 +309,19 @@ export function ExperimentsHome() {
 
         AND IT IS NOW ALSO GATED ON THE QUEUE HAVING ROWS, which resolves a
         double-CTA this slice would otherwise have created. The empty state below
-        gained its own `btn btn-primary` that calls `startTutorial`; on a first
-        visit the offer card's `Start Tutorial` is a SECOND primary, ten pixels
-        away, doing the identical thing under a different name. Two primaries for
-        one action is not a styling nit — it makes a reader stop and work out
-        which one is the real one, on the screen where we most need them not to.
+        carries its own Launch Guided Demo control that calls `startTutorial`; on a
+        first visit the offer card's `Start Tutorial` is a SECOND call to action,
+        ten pixels away, doing the identical thing under a different name. Two
+        controls for one action is not a styling nit — it makes a reader stop and
+        work out which one is the real one, on the screen where we most need them
+        not to.
+
+        (That empty-state control was `btn btn-primary` when this note was
+        written, and is now `btn btn-action` — the same action blue, tinted rather
+        than filled. The solid primary moved to Create Experiment when a real
+        `POST /api/experiments` landed. The duplication argument is unaffected: it
+        was never about the variant, it was about two controls starting the same
+        walkthrough.)
 
         The empty state wins the CTA rather than the card, because the empty state
         is the whole screen when the queue is empty and it is what a RETURNING
@@ -374,22 +383,34 @@ export function ExperimentsHome() {
 }
 
 /**
- * THE EMPTY STATE, redesigned as a contained panel rather than prose floating in
- * a blank page.
+ * THE EMPTY STATE — the polish slice's card idiom, now carrying the action the
+ * polish slice deliberately could not build.
  *
- * WHAT IT IS NOT: a centred marketing hero. It is left-aligned on the same
- * column the queue occupies, bounded by the same `--border` hairline and
- * `--radius-card` the experiment groups use, so it reads as the same kind of
- * object as the rows it will be replaced by. An empty queue and a full queue
- * should look like the same screen in two states.
+ * WHAT CAME FROM WHICH SIDE, because this is a merge of two designs and a future
+ * reader should not have to reconstruct it from the git history:
  *
- * THE HIERARCHY IS THREE REAL ACTIONS, ALL IN THE ACTION BLUE, AND ONE OF THEM IS
- * STRONGEST. All three use `--action`, never the `--assist` indigo, which is
- * reserved for advisory surfaces and would say the wrong thing about a control
- * that creates a record. Create Experiment is the solid fill; Guided Demo and
- * Open Validator are `btn-action` — the same hue, tinted rather than filled.
- * That gives one unmistakable primary without demoting the other two to the grey
- * `btn-secondary` treatment that made Open Validator look forgotten.
+ *   FROM THE POLISH SLICE (#72) — everything about the SHAPE. The lede with its
+ *   decorative `LayoutList` mark, the eyebrow that labels the actions without
+ *   adding an outline level, and one action per card built on `.exp-row`'s exact
+ *   geometry, so an empty queue and a full queue read as one screen in two
+ *   states. That slice's own note said where a create action would go when one
+ *   existed — "the slot below the lede" — and this is that slot.
+ *
+ *   FROM THE PERSISTENCE SLICE (#69) — the CAPABILITY. `POST /api/experiments`
+ *   is real, so Create Experiment is a real control that calls it, not a
+ *   disabled affordance and not a navigation dressed as an action.
+ *
+ * THE HIERARCHY, AND THE ONE THING THAT MOVED. Three real actions, all in the
+ * action blue, never the `--assist` indigo (reserved for advisory surfaces, and
+ * it would say the wrong thing about a control that creates a record). Create
+ * Experiment is the solid `btn-primary` and holds the lead card's stronger
+ * border; Guided Demo steps down to `btn-action` — same hue, tinted rather than
+ * filled; Open Validator keeps `btn-secondary`. That is one unmistakable primary
+ * and two peers, which is what the polish slice's "two blues" note asked for.
+ *
+ * Guided Demo was the solid primary before this, and it held that only because
+ * the screen had no other action — the polish slice said so in as many words.
+ * It has one now.
  */
 function EmptyExperiments({
   launchRef,
@@ -407,78 +428,134 @@ function EmptyExperiments({
   const storage = storageSentence(durability);
   return (
     <section className="queue-empty-state" aria-labelledby="queue-empty-title">
-      <h2 className="queue-empty-title" id="queue-empty-title">
-        {LABELS.emptyExperimentsTitle}
-      </h2>
-      <p className="queue-empty-body">{LABELS.emptyExperimentsBody}</p>
+      <div className="queue-empty-lede">
+        {/* Decorative only. The heading beside it carries the meaning, so it is
+            hidden from the accessibility tree rather than given a label that
+            would be read out ahead of the heading. */}
+        <span className="queue-empty-mark" aria-hidden="true">
+          <LayoutList size={20} strokeWidth={1.75} />
+        </span>
+        <div className="queue-empty-lede-text">
+          <h2 className="queue-empty-title" id="queue-empty-title">
+            {LABELS.emptyExperimentsTitle}
+          </h2>
+          {/*
+            THE BODY CHANGED BECAUSE THE OLD ONE BECAME FALSE, not because it read
+            better. It said "This deployment cannot yet create or import a record,
+            so nothing has been added" — true when it was written, and untrue the
+            moment `POST /api/experiments` shipped. Leaving it would have been the
+            one failure this screen's whole comment history is about.
 
-      {/* THE PRIMARY. It owns its own band so the hierarchy is spatial as well as
-          tonal — the eye lands here before it reads the two alternatives. */}
-      <div className="queue-empty-primary">
-        <CreateExperimentControl variant="empty-state" onCreated={onCreated} />
+            What it does NOT claim: it does not promise import. There is still no
+            import path — `POST /api/uploads` refuses every upload by design — so
+            the sentence names creating, validating and the demo, which are the
+            three things a reader can actually do from here.
+          */}
+          <p className="queue-empty-body">{LABELS.emptyExperimentsBody}</p>
+        </div>
       </div>
 
-      <ul className="queue-empty-actions">
+      {/* An eyebrow, not a heading: it labels the cards below without adding an
+          outline level, and the cards carry their own h3 titles. */}
+      <p className="queue-empty-eyebrow">What you can do here now</p>
+
+      <ul className="queue-empty-list">
+        <CreateExperimentControl variant="card" onCreated={onCreated} />
+
+        {/*
+          LAUNCH GUIDED DEMO — behaviour UNCHANGED, and every part of it is
+          load-bearing.
+
+          It calls `startTutorial` directly, on exactly the contract
+          `TutorialPromotion` uses: the live node from a ref, so
+          `tutorialReturnFocusTarget` can hand focus back here when the overlay
+          closes, and so a node that has since unmounted is correctly refused.
+          `disabled={launchBusy}` is the double-submit guard documented at its
+          definition above. What stood here before either design was
+          `actionGoToHelpAndTutorial`, a secondary button whose entire behaviour
+          was to navigate somewhere else to press a different button; that is not
+          reintroduced.
+
+          NOT a duplicate of Settings → Help & Tutorial, which keeps `Replay
+          Tutorial` as the walkthrough's permanent home. This is an entry point,
+          not a second home, and it carries a third name so that no label in the
+          app addresses two controls.
+
+          WHAT CHANGED IS ONLY THE TREATMENT — `btn-primary` to `btn-action`. See
+          the hierarchy note above.
+        */}
         <li className="queue-empty-action">
-          {/*
-            LAUNCH GUIDED DEMO — behaviour UNCHANGED, and every part of it is
-            load-bearing.
-
-            It calls `startTutorial` directly, on exactly the contract
-            `TutorialPromotion` uses: the live node from a ref, so
-            `tutorialReturnFocusTarget` can hand focus back here when the overlay
-            closes, and so a node that has since unmounted is correctly refused.
-            `disabled={launchBusy}` is the double-submit guard documented at its
-            definition above. What stood here before was `actionGoToHelpAndTutorial`,
-            a secondary button whose entire behaviour was to navigate somewhere else
-            to press a different button; that is not reintroduced.
-
-            WHAT CHANGED IS ONLY THE TREATMENT. It was the screen's sole primary
-            because the screen had no other action. It now shares the surface with a
-            real create path, so it steps down from the solid fill to the tinted one
-            — still the action blue, still a real action, no longer the strongest.
-          */}
-          <button
-            ref={launchRef}
-            type="button"
-            className="btn btn-action"
-            disabled={launchBusy}
-            aria-describedby="queue-empty-launch-hint"
-            onClick={() => startTutorial(launchRef.current)}
-          >
-            {LABELS.actionLaunchGuidedDemo}
-          </button>
-          {/* Associated with the button rather than left as adjacent text: a screen
-              reader announcing the control otherwise reads four words and none of
-              the disclosure. It is a DESCRIPTION, not a label — the accessible name
-              stays "Launch Guided Demo". */}
-          <span className="queue-empty-hint" id="queue-empty-launch-hint">
-            {LABELS.launchGuidedDemoBody}
+          <span className="queue-empty-action-mark" aria-hidden="true">
+            <Compass size={18} strokeWidth={1.75} />
           </span>
+          <div className="queue-empty-action-main">
+            <h3 className="queue-empty-action-title">Guided demo</h3>
+            {/* Associated with the button rather than left as adjacent text: a
+                screen reader announcing the control otherwise reads three words and
+                none of the disclosure. It is a DESCRIPTION, not a label — the
+                accessible name stays "Launch Guided Demo". */}
+            <p className="queue-empty-hint" id="queue-empty-launch-hint">
+              {LABELS.launchGuidedDemoBody}
+            </p>
+          </div>
+          <div className="queue-empty-action-cta">
+            <button
+              ref={launchRef}
+              type="button"
+              className="btn btn-action queue-empty-cta"
+              disabled={launchBusy}
+              aria-describedby="queue-empty-launch-hint"
+              onClick={() => startTutorial(launchRef.current)}
+            >
+              {LABELS.actionLaunchGuidedDemo}
+            </button>
+          </div>
         </li>
+
+        {/*
+          THE STANDALONE VALIDATOR. It used to be a bare secondary button with a
+          one-line caption trailing it in a list, under a lead-in that literally
+          read "Or, without starting the walkthrough:" — which framed it as a
+          footnote to the real actions. It gets the same card, the same
+          title-and-description shape and the same cta column as the other two, so
+          it is a peer; only the button variant separates them.
+
+          The description is checkable, not promotional. "Never stored" is the
+          route's documented contract — `POST /api/validate/record`: "the body is
+          never written anywhere (no workspace file, no temp file, no record
+          mutation), and nothing about its content is logged". "The same check" is
+          the same docstring's parity claim: it calls the same `validate_official`
+          over the same vendored schema that the per-experiment validation uses.
+        */}
         <li className="queue-empty-action">
-          {/*
-            OPEN VALIDATOR — promoted out of `btn-secondary`.
-            It was the only control on this screen wearing the grey treatment, under
-            a lead-in that literally said "Or, without starting the walkthrough:",
-            which read as a footnote to the real actions. It is a real action: it
-            opens the standalone validator, which is one of the three things this
-            product does. Same `--action` hue as the other two, tinted rather than
-            filled, so the hierarchy is Create > (Demo, Validator) rather than
-            Create > Demo > afterthought.
-          */}
-          <button type="button" className="btn btn-action" onClick={onOpenValidator}>
-            {LABELS.actionOpenValidator}
-          </button>
-          <span className="queue-empty-hint">{LABELS.openValidatorHint}</span>
+          <span className="queue-empty-action-mark" aria-hidden="true">
+            <ShieldCheck size={18} strokeWidth={1.75} />
+          </span>
+          <div className="queue-empty-action-main">
+            <h3 className="queue-empty-action-title">Schema validator</h3>
+            <p className="queue-empty-hint">
+              Check a record file you already have against the official ISAAC schema —
+              the same deterministic check this app runs on an exported record. It
+              names every failing path, and the file you check is never stored.
+            </p>
+          </div>
+          <div className="queue-empty-action-cta">
+            <button
+              type="button"
+              className="btn btn-secondary queue-empty-cta"
+              onClick={onOpenValidator}
+            >
+              {LABELS.actionOpenValidator}
+            </button>
+          </div>
         </li>
       </ul>
 
       {/*
         WHERE A NEW EXPERIMENT GOES. One line, derived from `/api/health`, and
         absent entirely when the answer is not known — see `storageSentence`. It
-        sits below the actions rather than in the lead because it is a consequence
-        of acting, not a reason to act, and the lead has one job.
+        sits below the cards rather than in the lede because it is a consequence of
+        acting, not a reason to act, and the lede has one job.
       */}
       {storage !== null && (
         <p className="queue-empty-storage" data-durability={durability}>
@@ -493,28 +570,35 @@ function EmptyExperiments({
  * CREATE EXPERIMENT — the button, the form it expands into, and the one call.
  *
  * ONE COMPONENT FOR BOTH MOUNTS (the page header when the queue has rows, the
- * empty state when it does not), because they are the same action and an action
- * with two implementations drifts. `variant` changes the button's weight and
- * whether the supporting hint is shown; it changes nothing about what happens.
+ * empty state's lead card when it does not), because they are the same action and
+ * an action with two implementations drifts. `variant` changes the wrapper and the
+ * supporting hint; it changes nothing about what happens.
+ *
+ * THE `card` VARIANT RENDERS ITS OWN `<li>`, which is why this is called from
+ * inside `<ul className="queue-empty-list">`. A wrapper element between the list
+ * and the item would be invalid list markup and would break the `.queue-empty-list`
+ * flex gap; returning the `<li>` keeps the DOM exactly as the two sibling cards
+ * expect it.
  *
  * AN INLINE EXPANSION, NOT A MODAL. A modal would need a focus trap, a scrim, an
  * escape contract and a restore-focus contract — four things to get right for a
  * form with two fields, on a screen that has nothing behind it worth dimming.
- * Expanding in place keeps the reader in one place and keeps the DOM order and
- * the reading order the same.
+ * Expanding in place keeps the reader in one place and keeps the DOM order and the
+ * reading order the same. In the card variant the form grows inside the card the
+ * reader pressed, so the thing that changed is the thing they touched.
  *
- * WHAT IT DOES NOT COLLECT. Nothing scientific. The server's request model
- * forbids any field but `title` and `description`, and there is nowhere here to
- * type a technique, a sample or an energy. Those are evidence-bearing values and
- * they are asked for by the guided completion workflow, where an answer is
- * recorded together with its confirmation — not typed into a create form where
- * they would arrive as unsourced assertions.
+ * WHAT IT DOES NOT COLLECT. Nothing scientific. The server's request model forbids
+ * any field but `title` and `description`, and there is nowhere here to type a
+ * technique, a sample or an energy. Those are evidence-bearing values and they are
+ * asked for by the guided completion workflow, where an answer is recorded together
+ * with its confirmation — not typed into a create form where they would arrive as
+ * unsourced assertions.
  */
 function CreateExperimentControl({
   variant,
   onCreated,
 }: {
-  variant: 'header' | 'empty-state';
+  variant: 'header' | 'card';
   onCreated: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -529,6 +613,7 @@ function CreateExperimentControl({
   const descriptionId = `${formId}-description`;
   const descriptionHintId = `${formId}-description-hint`;
   const errorId = `${formId}-error`;
+  const hintId = `${formId}-open-hint`;
 
   /*
    * FOCUS MOVES WITH THE FORM, IN BOTH DIRECTIONS, AND IT HAS TO BE AN EFFECT.
@@ -589,34 +674,7 @@ function CreateExperimentControl({
     }
   };
 
-  if (!open) {
-    return (
-      <>
-        <button
-          ref={openRef}
-          type="button"
-          className={
-            variant === 'header'
-              ? 'btn btn-primary'
-              : 'btn btn-primary queue-empty-cta'
-          }
-          onClick={() => setOpen(true)}
-          {...(variant === 'empty-state'
-            ? { 'aria-describedby': `${formId}-open-hint` }
-            : {})}
-        >
-          {LABELS.actionCreateExperiment}
-        </button>
-        {variant === 'empty-state' && (
-          <span className="queue-empty-hint" id={`${formId}-open-hint`}>
-            {LABELS.createExperimentHint}
-          </span>
-        )}
-      </>
-    );
-  }
-
-  return (
+  const form = (
     <form className="create-experiment" onSubmit={submit} aria-labelledby={`${formId}-heading`}>
       <h3 className="create-experiment-title" id={`${formId}-heading`}>
         {LABELS.createExperimentFormTitle}
@@ -679,5 +737,44 @@ function CreateExperimentControl({
         </button>
       </div>
     </form>
+  );
+
+  const opener = (
+    <button
+      ref={openRef}
+      type="button"
+      className={variant === 'header' ? 'btn btn-primary' : 'btn btn-primary queue-empty-cta'}
+      onClick={() => setOpen(true)}
+      {...(variant === 'card' ? { 'aria-describedby': hintId } : {})}
+    >
+      {LABELS.actionCreateExperiment}
+    </button>
+  );
+
+  if (variant === 'header') return open ? form : opener;
+
+  return (
+    <li
+      className={`queue-empty-action queue-empty-action-lead${
+        open ? ' queue-empty-action-form' : ''
+      }`}
+    >
+      {open ? (
+        form
+      ) : (
+        <>
+          <span className="queue-empty-action-mark" aria-hidden="true">
+            <Plus size={18} strokeWidth={1.75} />
+          </span>
+          <div className="queue-empty-action-main">
+            <h3 className="queue-empty-action-title">New experiment</h3>
+            <p className="queue-empty-hint" id={hintId}>
+              {LABELS.createExperimentHint}
+            </p>
+          </div>
+          <div className="queue-empty-action-cta">{opener}</div>
+        </>
+      )}
+    </li>
   );
 }

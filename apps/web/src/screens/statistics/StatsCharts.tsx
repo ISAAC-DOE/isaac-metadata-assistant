@@ -1325,20 +1325,59 @@ export interface TechnicalDetailsProps {
   title: string;
   sub?: string;
   children: ReactNode;
+  /**
+   * Which disclosure this is, and it decides the ROOT CLASS ONLY.
+   *
+   * `technical` (the default) keeps `stats-technical` — the ONE build-internals
+   * region. `prose` renders `stats-disclosure` instead, for the supporting-copy
+   * disclosures at the foot of the page.
+   *
+   * IT IS A CLASS SPLIT RATHER THAN A STYLE CHOICE, and the reason is that four
+   * suites address the build-internals region by
+   * `details.stats-technical` — two of them through Playwright STRICT-MODE
+   * locators (`e2e/specs/charts.spec.ts`, `e2e/specs/statistics-states.spec.ts`)
+   * and one asserting `toHaveCount(1)`. Giving five new disclosures the same
+   * class would turn every one of those into "resolved to 6 elements", an opaque
+   * failure inside helpers whose job is coverage. The a11y sweep opens BOTH
+   * classes (`e2e/specs/a11y-axe.spec.ts`), because axe does not scan a closed
+   * disclosure and a count that drops because content is hidden is a coverage
+   * loss rather than a fix.
+   *
+   * The INNER classes are deliberately shared: one summary, title and body
+   * treatment for every disclosure on the surface, so the two cannot drift
+   * apart visually.
+   */
+  variant?: 'technical' | 'prose';
 }
 
 /**
- * The collapsed-by-default region for build internals.
+ * The collapsed-by-default disclosure.
  *
  * A native `<details>`, so it is keyboard operable, announces its expanded
  * state, and works with no JavaScript state of its own. Its heading is inside
  * the `<summary>`, which keeps the document outline correct whether the region
  * is open or closed — the alternative (a heading outside a disclosure) leaves an
  * `h2` pointing at nothing when collapsed.
+ *
+ * NOT EVERYTHING MAY GO IN ONE. A disclosure is for SUPPORTING PROSE and for
+ * build internals; it is not a place to put measurements. Statistics' tri-state
+ * `Verification Safeguards` renders six measured states and is deliberately a
+ * visible `h2` section for that reason — collapsing it would hide data behind a
+ * summary that reads as an invitation to skip it.
  */
-export function TechnicalDetails({ id, title, sub, children }: TechnicalDetailsProps) {
+export function TechnicalDetails({
+  id,
+  title,
+  sub,
+  children,
+  variant = 'technical',
+}: TechnicalDetailsProps) {
   return (
-    <details className="card placeholder-card stats-card stats-technical">
+    <details
+      className={`card placeholder-card stats-card ${
+        variant === 'prose' ? 'stats-disclosure' : 'stats-technical'
+      }`}
+    >
       {/* `<summary>` takes phrasing content optionally intermixed with HEADING
           content — so the `h2` is valid here and a `<p>` would not be. The
           supporting line is therefore a block-displayed `<span>`, not a

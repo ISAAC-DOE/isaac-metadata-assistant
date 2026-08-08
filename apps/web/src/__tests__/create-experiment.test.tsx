@@ -214,16 +214,43 @@ describe('My Experiments · the empty state', () => {
     expect(create).toHaveClass('btn-primary');
 
     /*
-     * BOTH OTHERS ARE `btn-action`: the same `--action` blue, tinted rather than
-     * filled. Asserted in BOTH directions, because "is blue" and "is not the grey
-     * afterthought treatment" are different claims and only the second is the one
-     * Open Validator failed before.
+     * THE OTHER TWO, and the three treatments now read solid → tinted → grey.
+     *
+     * WHY OPEN VALIDATOR IS GREY AGAIN, since an earlier revision of this test
+     * asserted the opposite and this would otherwise look like a regression. It was
+     * promoted to `btn-action` when it was the ONLY control on this screen wearing
+     * the grey treatment, sitting under a lead-in that literally read "Or, without
+     * starting the walkthrough:" — a footnote by position as much as by tone.
+     *
+     * It is no longer a footnote for a STRUCTURAL reason, which is the better fix:
+     * it has its own card, its own heading and its own description, the same shape
+     * as the other two actions. Grey on a peer card is a tone; grey on a loose
+     * button under a dismissive lead-in was a demotion. The defect that promotion
+     * addressed is gone, so the promotion is not needed to hold it off.
+     *
+     * Launch Guided Demo keeps `btn-action` — the same `--action` blue, tinted
+     * rather than filled. Asserted in both directions: "is blue" and "is not the
+     * solid primary" are different claims.
      */
-    for (const name of [LABELS.actionLaunchGuidedDemo, LABELS.actionOpenValidator]) {
-      const button = within(section).getByRole('button', { name });
-      expect(button, `${name} lost the action treatment`).toHaveClass('btn-action');
-      expect(button, `${name} was demoted to secondary`).not.toHaveClass('btn-secondary');
-      expect(button, `${name} became a second primary`).not.toHaveClass('btn-primary');
+    const demo = within(section).getByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    expect(demo, 'Launch Guided Demo lost the action treatment').toHaveClass('btn-action');
+    expect(demo, 'Launch Guided Demo became a second primary').not.toHaveClass('btn-primary');
+
+    const validator = within(section).getByRole('button', { name: LABELS.actionOpenValidator });
+    expect(validator, 'Open Validator became a second primary').not.toHaveClass('btn-primary');
+    expect(validator, 'Open Validator left the secondary treatment').toHaveClass('btn-secondary');
+
+    /*
+     * AND IT IS STILL A PEER, which is the property the promotion was really
+     * protecting. Asserted on the STRUCTURE rather than on the button variant: it
+     * carries the same card, the same heading level and the same description slot
+     * as the guided demo, so nothing about it reads as a trailing footnote.
+     */
+    const cards = section.querySelectorAll('.queue-empty-action');
+    expect(cards).toHaveLength(3);
+    for (const card of cards) {
+      expect(card.querySelector('.queue-empty-action-title')).not.toBeNull();
+      expect(card.querySelector('.queue-empty-hint')).not.toBeNull();
     }
 
     // Exactly ONE primary in the panel: a second would make a reader stop and work

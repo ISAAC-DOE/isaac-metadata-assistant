@@ -1,7 +1,7 @@
 import './statistics.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Table2 } from '../../components/icons';
+import { ShieldCheck, Table2 } from '../../components/icons';
 import { api } from '../../lib/api';
 import {
   ORACLE_LABELS,
@@ -24,6 +24,7 @@ import {
   reportFreshness,
   safeguardCountRows,
   safeguardRows,
+  SUPPRESSED_ROW_KEY,
   suppressionDisclosure,
   validatorComparison,
   validatorComparisonSummary,
@@ -34,6 +35,7 @@ import {
   type VerificationFigure,
   type VerificationHistogram,
   type VerificationReport,
+  type VerificationView,
 } from '../../lib/verificationContract';
 import {
   axisTicks,
@@ -131,6 +133,42 @@ import { FigureList, StatCard, StatsSection, UnavailableNote } from './StatsPrim
  * things that went wrong. A zero is therefore rendered calmly and affirmatively
  * rather than as an empty or alarming state, and the copy says what the zero
  * means so the reader is not left to infer it.
+ *
+ * ── THIS FILE RENDERS TWO SECTIONS, NOT ONE ────────────────────────────────
+ *
+ * `RecordVerification` returns a FRAGMENT: the `Record Verification` section,
+ * and — only when a readable report is on screen — a sibling `h2` section
+ * `Verification Safeguards`. They were one section with the safeguards as an
+ * `h3` inside it.
+ *
+ * THE SPLIT IS A CONSEQUENCE OF PROMOTING THIS MATERIAL TO THE LEDE. Record
+ * Verification is now the first thing on the page, and the reorganisation that
+ * put it there moved supporting PROSE into collapsed disclosures at the foot.
+ * The safeguards panel is not prose: it renders six tri-state MEASUREMENTS and
+ * two counts, so it may not be collapsed — and once it is neither collapsed nor
+ * buried three screens down inside another section, its own `h2` is what it
+ * actually is. `A safeguard that does not apply is not a safeguard that held.`
+ * is kept verbatim beside it, because that sentence is the whole reason the
+ * three states are not two.
+ *
+ * The safeguards section renders ONLY for a readable report, exactly as the
+ * panel did: a `running`, `refused`, `unavailable`, `error` or unreadable body
+ * carries no safeguard block, and drawing an empty one would state six absences
+ * as six measurements.
+ *
+ * ── THE FRESHNESS STRIP, AND WHY IT IS NOT THE PAGE'S CLOCK ────────────────
+ *
+ * `Report Generated` and `Report Age` used to sit at the BOTTOM of the section,
+ * in `About This Run`, three screens below the figures they date. They are now
+ * a strip directly under the corpus banner, beside the re-read control.
+ *
+ * THEY ARE STILL THE REPORT'S CLOCK AND NOT THE PAGE'S. `StatisticsPage`'s
+ * `Last Read From the API` is a CLIENT-side instant captured when one of its own
+ * five reads returned a body; these two are SERVER-side values the report
+ * carries about the program run that produced it, and `Report Age` is measured
+ * against the backend's cache rather than against this browser. Merging them
+ * would produce a single timestamp that is true of neither. The two stay in
+ * different places, under different labels, for that reason.
  */
 
 /** The one literal this page uses wherever a figure genuinely was not returned. */
@@ -305,56 +343,80 @@ export function RecordVerification({ verification }: RecordVerificationProps) {
      in rather than re-announced as if it had just happened. */
   useEffect(() => clearAnnouncement(), [clearAnnouncement]);
 
+  /* Decoded HERE rather than deeper down, because the outcome now decides
+     whether a SECOND section renders. `readVerificationBody` is pure and holds
+     no state, so calling it at this level costs nothing and keeps the contract
+     module the only thing that decides what a body is. */
+  const view = phase.kind === 'read' ? readVerificationBody(phase.body) : null;
+  const report = view !== null && view.kind === 'report' ? view.report : null;
+
   return (
-    <StatsSection
-      id="stats-verification"
-      title="Record Verification"
-      sub="Aggregate results of an automated program that checks official ISAAC records against ISAAC's own validator, against a stricter format-aware second validator, and against a harness that injects small deterministic changes and checks the validator reacts as the change was designed to make it react. Every figure is a count across the whole corpus; no individual record is named."
-      icon={<Table2 size={18} strokeWidth={2} aria-hidden="true" />}
-    >
-      {/* Present from the FIRST render, so a change to its text is what gets
-          announced — a live region that appears together with its message is
-          unreliable. It only ever speaks in response to a press. */}
-      <p className="stats-verify-live sr-only" role="status">
-        {announcement}
-      </p>
+    <>
+      <StatsSection
+        id="stats-verification"
+        title="Record Verification"
+        sub="Aggregate results of an automated program run over a corpus of official ISAAC records. Every figure is a count across the whole corpus; no individual record is named. How the program works is set out under How Verification Works, at the foot of this page."
+        icon={<Table2 size={18} strokeWidth={2} aria-hidden="true" />}
+      >
+        {/* Present from the FIRST render, so a change to its text is what gets
+            announced — a live region that appears together with its message is
+            unreliable. It only ever speaks in response to a press. */}
+        <p className="stats-verify-live sr-only" role="status">
+          {announcement}
+        </p>
 
-      {phase.kind === 'loading' && <ChartLoading label="Loading the verification report…" />}
+        {phase.kind === 'loading' && <ChartLoading label="Loading the verification report…" />}
 
-      {phase.kind === 'unreachable' && (
-        <ChartError
-          message="The verification report could not be read from the API, so no result from it is stated here. Nothing is shown in its place and no count is assumed to be zero."
-          onRetry={retry}
-        />
-      )}
+        {phase.kind === 'unreachable' && (
+          <ChartError
+            message="The verification report could not be read from the API, so no result from it is stated here. Nothing is shown in its place and no count is assumed to be zero."
+            onRetry={retry}
+          />
+        )}
 
-      {phase.kind === 'read' && (
-        <>
-          <ReadControls refreshing={refreshing} onRefresh={refresh} />
-          {refreshFailed && <RefreshFailedNote />}
-          <VerificationBody body={phase.body} />
-        </>
-      )}
-    </StatsSection>
+        {view !== null &&
+          (view.kind === 'report' ? (
+            <VerificationReportBody
+              report={view.report}
+              refreshing={refreshing}
+              refreshFailed={refreshFailed}
+              onRefresh={refresh}
+            />
+          ) : (
+            /* No report, so no corpus banner and nothing to date: the control
+               leads, because there is nothing above it for it to follow. */
+            <>
+              <ReadControls refreshing={refreshing} onRefresh={refresh} />
+              {refreshFailed && <RefreshFailedNote />}
+              <NotReadyBody view={view} />
+            </>
+          ))}
+      </StatsSection>
+
+      {report !== null && <SafeguardsSection report={report} />}
+    </>
   );
 }
 
 /**
- * The re-read control and what it is for.
+ * The re-read control.
  *
  * ITS ACCESSIBLE NAME NEVER CHANGES. The busy state is carried by `aria-busy`,
  * by the disabled state, by a visible sentence and by the live region — not by
  * relabelling the button, which would move the control out from under a reader
  * who was about to press it again and would break any reference to it by name.
+ *
+ * THE PARAGRAPH THAT USED TO SIT ABOVE IT MOVED, and it was not deleted: "This
+ * report is produced by a program run that is kept off the request path… Nothing
+ * on this screen polls" is now the second paragraph of `How Verification Works`
+ * on the page. It explains the control rather than reporting anything, and it
+ * was three lines of prose standing between the reader and the first figure.
+ * `Report Age`, which is the part of it a reader acts on, is rendered beside
+ * this button instead.
  */
 function ReadControls({ refreshing, onRefresh }: { refreshing: boolean; onRefresh: () => void }) {
   return (
     <div className="stats-verify-controls">
-      <p className="stats-note">
-        This report is produced by a program run that is kept off the request path, so it is read
-        as a cached result and states its own age. Nothing on this screen polls: it is read once
-        when the page opens, and again only when this control is pressed.
-      </p>
       <div className="stats-verify-controls-row">
         <button
           type="button"
@@ -382,8 +444,7 @@ function RefreshFailedNote() {
         <p>
           The most recent attempt to re-read this report did not return anything, so what is shown
           below is the result of the last read that did. It has not been replaced by a guess, and
-          the report age stated further down was measured at that earlier read — it is older than
-          it says.
+          the report age shown above was measured at that earlier read — it is older than it says.
         </p>
       </UnavailableNote>
     </div>
@@ -391,13 +452,15 @@ function RefreshFailedNote() {
 }
 
 /**
- * The three things the body can be, decided by the contract module rather than
- * by branching on fields here. A report that is not fully readable never reaches
- * the figure-rendering path at all.
+ * The two things a READ body can be that are not a report, decided by the
+ * contract module rather than by branching on fields here. A report that is not
+ * fully readable never reaches the figure-rendering path at all.
+ *
+ * `VerificationView`'s third member (`report`) is handled by the caller, which
+ * decodes the body once and needs the outcome to decide whether the sibling
+ * safeguards section renders at all.
  */
-function VerificationBody({ body }: { body: unknown }) {
-  const view = readVerificationBody(body);
-
+function NotReadyBody({ view }: { view: Exclude<VerificationView, { kind: 'report' }> }) {
   if (view.kind === 'notReady') {
     const message = notReadyMessage(view.status);
     return (
@@ -405,22 +468,50 @@ function VerificationBody({ body }: { body: unknown }) {
     );
   }
 
-  if (view.kind === 'unreadable') {
-    return (
-      <ChartSourceUnavailable title="Verification Results Not Shown">
-        {view.reason === 'format_version'
-          ? `This build reads verification reports in format 2. The API answered in format ${
-              view.formatVersion === null ? 'none it stated' : String(view.formatVersion)
-            }, so its figures are not displayed rather than displayed under labels that may not match them.`
-          : 'The API answered with a body this build cannot read as a verification report, so no figure from it is shown. Nothing is substituted for what could not be read.'}
-      </ChartSourceUnavailable>
-    );
-  }
-
-  return <VerificationReportBody report={view.report} />;
+  return (
+    <ChartSourceUnavailable title="Verification Results Not Shown">
+      {view.reason === 'format_version'
+        ? `This build reads verification reports in format 2. The API answered in format ${
+            view.formatVersion === null ? 'none it stated' : String(view.formatVersion)
+          }, so its figures are not displayed rather than displayed under labels that may not match them.`
+        : 'The API answered with a body this build cannot read as a verification report, so no figure from it is shown. Nothing is substituted for what could not be read.'}
+    </ChartSourceUnavailable>
+  );
 }
 
-function VerificationReportBody({ report }: { report: VerificationReport }) {
+/**
+ * The report, in the order a reader needs it.
+ *
+ * WHAT QUALIFIES A FIGURE COMES BEFORE THE FIGURE. The corpus banner is first —
+ * a public-corpus result read as the authorized sample misattributes every count
+ * at once — then the freshness strip, which dates the whole report and carries
+ * the control that re-reads it, and only then the four headline counts. That
+ * order is asserted (`record-verification.test.tsx`, "states the corpus BEFORE
+ * the first figure").
+ *
+ * THE THREE FIGURE GROUPS FOLLOW IN DESCENDING WEIGHT: the two validators side
+ * by side, the mutation harness, and the format-issue breakdowns. `About This
+ * Run` is last, because it is provenance for everything above it rather than a
+ * finding of its own.
+ *
+ * `About This Run` was NOT moved into a disclosure with the page's supporting
+ * prose. Every row in it is a measurement the report carried — run duration,
+ * corpus size, the schema fingerprint, the two baseline counts — and the
+ * report's own `limitations` list is its statement of what its numbers do not
+ * establish. Collapsing measurements is the thing this reorganisation
+ * deliberately does not do.
+ */
+function VerificationReportBody({
+  report,
+  refreshing,
+  refreshFailed,
+  onRefresh,
+}: {
+  report: VerificationReport;
+  refreshing: boolean;
+  refreshFailed: boolean;
+  onRefresh: () => void;
+}) {
   const disclosure = corpusDisclosure(report.metadata.verification_mode);
   const [official, shadow] = validatorComparison(
     report.official_validation,
@@ -432,13 +523,20 @@ function VerificationReportBody({ report }: { report: VerificationReport }) {
   return (
     <>
       <CorpusBanner report={report} disclosure={disclosure} />
-      <StalenessNote report={report} />
+      <FreshnessStrip
+        report={report}
+        refreshing={refreshing}
+        refreshFailed={refreshFailed}
+        onRefresh={onRefresh}
+      />
 
       {/* Four headline figures with no shared scale and no ordering between
           them — the KPI form, deliberately not a chart, for the same reason
           `WorkspaceGlance` gives. FOUR, and no more: a fifth card is how a row
-          of headlines becomes a second, worse copy of the sections below it. */}
-      <div className="stats-cards">
+          of headlines becomes a second, worse copy of the sections below it.
+          `stats-cards-headline` is a NARROW-WIDTH treatment only (two-up rather
+          than one-up under 560px); it changes no count and no wording. */}
+      <div className="stats-cards stats-cards-headline">
         <StatCard
           label="Records Evaluated"
           value={String(report.corpus.records_scanned)}
@@ -466,6 +564,8 @@ function VerificationReportBody({ report }: { report: VerificationReport }) {
 
       <ValidatorComparison groups={groups} />
 
+      <MutationPanel report={report} />
+
       <div className="stats-block stats-group">
         <h3>Where the Stricter Checks Disagreed</h3>
         <IssueDistribution
@@ -483,10 +583,54 @@ function VerificationReportBody({ report }: { report: VerificationReport }) {
         />
       </div>
 
-      <MutationPanel report={report} />
-      <SafeguardsPanel report={report} />
       <RunDetails report={report} disclosure={disclosure} />
     </>
+  );
+}
+
+/**
+ * When this report was produced, how old it is, and the control that re-reads it
+ * — one strip, directly under the corpus banner.
+ *
+ * THESE TWO ROWS MOVED UP FROM `About This Run`, where they sat below every
+ * figure they date. A report that states its own age is only useful if the age
+ * is read before the counts are, and the staleness note — which is the case the
+ * age exists to catch — belongs beside the age rather than three screens above
+ * it.
+ *
+ * IT IS THE REPORT'S CLOCK, NOT THE PAGE'S. See this file's header: the page's
+ * own `Last Read From the API` is a client-side instant for a different set of
+ * reads, and the two are never merged.
+ *
+ * `RefreshFailedNote` renders here too, because what it qualifies is exactly the
+ * `Report Age` beside it: the age was measured at the last read that returned a
+ * body, so a failed re-read leaves the report older than the strip says.
+ */
+function FreshnessStrip({
+  report,
+  refreshing,
+  refreshFailed,
+  onRefresh,
+}: {
+  report: VerificationReport;
+  refreshing: boolean;
+  refreshFailed: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="stats-block stats-verify-freshness">
+      <div className="stats-verify-freshness-row">
+        <FigureList
+          rows={[
+            { label: 'Report Generated', value: report.metadata.generated_at, mono: true },
+            { label: 'Report Age', value: formatAgeSeconds(report.metadata.cache_age_seconds) },
+          ]}
+        />
+        <ReadControls refreshing={refreshing} onRefresh={onRefresh} />
+      </div>
+      <StalenessNote report={report} />
+      {refreshFailed && <RefreshFailedNote />}
+    </div>
   );
 }
 
@@ -734,17 +878,47 @@ function IssueDistribution({
     );
   }
 
+  const rows = histogramRowsWithSuppressed(histogram);
+
+  /*
+   * A THIRD STATE, distinct from both of the others: something WAS withheld, and
+   * there is no quantity to plot — every category fell below the floor and the
+   * withheld occurrence count was itself withheld, because with one category
+   * withheld that count is that category's exact value.
+   *
+   * It must not fall through to the chart. A `StatsBarChart` with no rows draws
+   * an axis over nothing and would read as a measured emptiness. It must not
+   * fall through to `emptyTitle` either — "No Format Issues by Check Name"
+   * asserts an absence, and this is the opposite: issues were found and cannot
+   * be broken down without naming a category. So the disclosure sentence is the
+   * whole content, and it is never null on this path (`histogramIsEmpty` is
+   * false only because something was withheld).
+   */
+  if (rows.length === 0) {
+    return (
+      <ChartEmpty title="Breakdown Withheld">
+        {suppression ??
+          'This breakdown was withheld in full, and no figure is stated in its place.'}
+      </ChartEmpty>
+    );
+  }
+
   const scaleNote =
     'Bars share one scale, marked beneath them. The scale runs to the largest category, not to the total.';
-  const withheldNote =
-    suppression === null
-      ? null
-      : 'The final bar stands for every withheld category together; none of them is named here, because their names are not in the report.';
+  /*
+   * Gated on the bar EXISTING, not on there being a disclosure. The withheld
+   * bucket is now omitted whenever its count was withheld, so a note asserting
+   * "the final bar stands for every withheld category" would describe a bar that
+   * is not on screen.
+   */
+  const withheldNote = rows.some((row) => row.key === SUPPRESSED_ROW_KEY)
+    ? 'The final bar stands for every withheld category together; none of them is named here, because their names are not in the report.'
+    : null;
   return (
     <div className="stats-block">
       <StatsBarChart
         caption={caption}
-        rows={histogramRowsWithSuppressed(histogram)}
+        rows={rows}
         unit="occurrences"
         total={histogramTotal(histogram)}
         categoryHeader={categoryHeader}
@@ -923,7 +1097,14 @@ function FigureGroup({
 /* ---- safeguards --------------------------------------------------------- */
 
 /**
- * The tri-state panel.
+ * The tri-state panel, as its own `h2` SECTION rather than an `h3` inside
+ * Record Verification.
+ *
+ * IT IS NOT PROSE AND IT IS NOT COLLAPSED. Six measured states and two counts;
+ * the reorganisation that moved this page's supporting copy into disclosures at
+ * the foot deliberately left every measurement in the visible flow, and this is
+ * the block that rule was written for. A `<details>` summary reading
+ * "Verification Safeguards" is an invitation to skip six findings.
  *
  * EVERY ROW RENDERS ITS STATE AS A WORD, from `SAFEGUARD_STATE_LABELS` — three
  * distinct words for three distinct states. Nothing here maps two states onto
@@ -931,17 +1112,26 @@ function FigureGroup({
  * beside "Not applicable" is precisely how the affirmative reading gets back in
  * after the word was kept out.
  *
+ * THE INTRO SENTENCE IS UNCHANGED, to the byte. "A safeguard that does not apply
+ * is not a safeguard that held." is the sentence that keeps `not_applicable`
+ * from being read as an affirmative, and it is rendered as visible copy inside
+ * the section — not as the section's supporting line, where a future tidy-up of
+ * subtitles could shorten it away.
+ *
  * The two counts are separate, and a 0 is stated calmly and affirmatively —
  * these count statements that would have changed something, so none is the good
  * reading and the sentence says so.
  */
-function SafeguardsPanel({ report }: { report: VerificationReport }) {
+function SafeguardsSection({ report }: { report: VerificationReport }) {
   const rows = safeguardRows(report.safeguards);
   const counts = safeguardCountRows(report.safeguards);
 
   return (
-    <div className="stats-block stats-group">
-      <h3>Verification Safeguards</h3>
+    <StatsSection
+      id="stats-safeguards"
+      title="Verification Safeguards"
+      icon={<ShieldCheck size={18} strokeWidth={2} aria-hidden="true" />}
+    >
       <p className="stats-note">
         What the run did and did not check about itself. Each safeguard states one of three
         things: it was checked, it does not apply to this run, or it was not checked. A
@@ -974,7 +1164,7 @@ function SafeguardsPanel({ report }: { report: VerificationReport }) {
           }))}
         />
       </div>
-    </div>
+    </StatsSection>
   );
 }
 
@@ -991,7 +1181,15 @@ function SafeguardsPanel({ report }: { report: VerificationReport }) {
  *
  * `limitations` is the report's own statement of what its numbers do not
  * establish, rendered as it arrived. Rewriting it in this file would put the UI
- * in the position of deciding how strong the report's own caveats are.
+ * in the position of deciding how strong the report's own caveats are. It is
+ * NOT folded into the page's `Known Limitations` disclosure for that reason:
+ * this list is data the report sent, and that disclosure is authored copy about
+ * the application.
+ *
+ * `Report Generated` and `Report Age` USED TO BE THE FIRST TWO ROWS HERE and are
+ * now in the freshness strip at the top of the section, beside the control that
+ * re-reads the report. They are not duplicated: a figure stated twice on one
+ * screen is a figure that can disagree with itself.
  */
 function RunDetails({
   report,
@@ -1005,8 +1203,6 @@ function RunDetails({
       <h3>About This Run</h3>
       <FigureList
         rows={[
-          { label: 'Report Generated', value: report.metadata.generated_at, mono: true },
-          { label: 'Report Age', value: formatAgeSeconds(report.metadata.cache_age_seconds) },
           { label: 'Run Duration', value: formatDurationMs(report.metadata.duration_ms) },
           { label: 'Corpus Size', value: String(report.metadata.corpus_size), mono: true },
           { label: 'Verification Mode', value: report.metadata.verification_mode, mono: true },

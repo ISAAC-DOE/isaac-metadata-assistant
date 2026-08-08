@@ -192,10 +192,17 @@ def test_create_experiment_has_no_caller_in_the_api_package():
 
     WHAT CHANGED, AND WHAT DID NOT. ``POST /api/experiments`` now exists — the first
     record-creation surface this application has ever had. The product claim carried
-    on three surfaces (the mode chip's accessible name, the OpenAPI ``tutorial`` tag
-    description, the Statistics lead sentence) is that nothing in this build adds a
-    **built-in EXAMPLE record** to the ordinary workspace. That claim is UNCHANGED
-    and still true; only its justification moved.
+    on three surfaces is that nothing in this build adds a **built-in EXAMPLE
+    record** to the ordinary workspace: the mode chip's accessible name, the OpenAPI
+    ``tutorial`` tag description, and the WORKSPACE CLAUSE of the Statistics lead
+    sentence — "this workspace" against "the open worked-example workspace",
+    ``StatisticsPage.tsx::leadSentence``. That claim is UNCHANGED and still true;
+    only its justification moved.
+
+    THE CLAUSE IS NAMED RATHER THAN THE WHOLE SENTENCE, and that precision arrived
+    from the visual-first reorganisation, which moved Record Verification to the top
+    of the page and made the lead open by naming it. That rewrite did not touch the
+    scope branch, and this guard is about the branch.
 
     Its previous justification — "this build exposes no record-creation surface at
     all" — is retired, because that sentence is now false. Three properties carry it
@@ -274,9 +281,10 @@ def test_create_experiment_has_no_caller_in_the_api_package():
         "repository abstraction, and with an explicit `id` and `session_id=None` it "
         "writes a canonical record into the ordinary workspace — which falsifies the "
         "claim made on the mode chip, the OpenAPI `tutorial` tag description and the "
-        "Statistics lead sentence that nothing in this build adds a built-in example "
-        "record there. If a second caller is intended, re-derive those three strings "
-        "in the same change."
+        "workspace clause of the Statistics lead sentence "
+        "(`StatisticsPage.tsx::leadSentence`) that nothing in this build adds a "
+        "built-in example record there. If a second caller is intended, re-derive "
+        "those three strings in the same change."
     )
 
     # 2. That caller may not choose the id, and may not choose the scope.

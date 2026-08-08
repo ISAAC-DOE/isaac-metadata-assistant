@@ -1,6 +1,6 @@
 import './screens.css';
 import { useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
@@ -17,7 +17,7 @@ import {
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
-import { SETTINGS_TAB_PARAM, isSettingsTab, type SettingsTabId } from '../lib/routes';
+import { ROUTES, SETTINGS_TAB_PARAM, isSettingsTab, type SettingsTabId } from '../lib/routes';
 import {
   ABOUT_RESPONSE_FIELDS,
   REPO_DOCS,
@@ -455,20 +455,35 @@ function PrivacyTab({ state }: { state: AboutState }) {
 function PrivacyBody({ data }: { data: ApiAboutResponse }) {
   const concepts = useMemo(() => settingsConcepts(settingsFactsFrom(data)), [data]);
   return (
-    <ul className="settings-points">
-      {concepts.map((concept) => (
-        <li key={concept.id}>
-          <h3>{concept.heading}</h3>
-          <p>{concept.detail}</p>
-          {concept.more && (
-            <details className="settings-more">
-              <summary>{concept.more.label}</summary>
-              <p>{concept.more.text}</p>
-            </details>
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="settings-points">
+        {concepts.map((concept) => (
+          <li key={concept.id}>
+            <h3>{concept.heading}</h3>
+            <p>{concept.detail}</p>
+            {concept.more && (
+              <details className="settings-more">
+                <summary>{concept.more.label}</summary>
+                <p>{concept.more.text}</p>
+              </details>
+            )}
+          </li>
+        ))}
+      </ul>
+      {/* P2 — the reciprocal of Governance & Safety → Policy's canonical-home
+          pointer. This tab owns the data-handling DEFINITIONS; the policy those
+          definitions serve, the standalone Validator and the schema reference
+          live on one screen, and a reader who arrives here from Governance
+          needs a way back that is not the browser's. It states no claim — it is
+          navigation only, so nothing on it can drift from the definitions
+          above. */}
+      <nav className="settings-jump" aria-label="Related governance surfaces">
+        <Link className="settings-jump-btn" to={ROUTES.governance}>
+          Governance &amp; Safety
+          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
+        </Link>
+      </nav>
+    </>
   );
 }
 

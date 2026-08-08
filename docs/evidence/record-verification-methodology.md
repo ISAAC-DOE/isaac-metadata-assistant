@@ -141,7 +141,10 @@ Its safety properties, all verified under adversarial attack rather than asserte
 - Cross-references pointing outside the sample are **expected**; missing rows are tolerated, never
   repaired, followed, or disclosed.
 - Withdrawal is **absence, not a disabled switch**: `verification_modes()` computes the mode tuple from
-  the approval flag, and a test parses `verificationContract.ts` so the TypeScript copy cannot drift.
+  the approval flag, and a test parses `verificationContract.ts` so the TypeScript copy cannot drift. The
+  same test file parses `VERIFICATION_REPORT_FORMAT_VERSION` for the same reason: it is a second
+  underived copy of a backend constant, and a one-sided bump would ship a UI that refuses every report as
+  `unreadable` without failing a test in either suite.
 
 ## 8. Disclosure control
 
@@ -157,8 +160,27 @@ ascending, for determinism) until at least two are withheld.
 
 Verified by brute force over 44,681 count-maps: `suppressed_categories == 1` occurs **only** when the
 input has a single sub-floor key and there is nothing left to absorb. With zero published cells there is
-nothing to eliminate against, so the key is not identified — only its count is. That case is carved out
-explicitly and pinned by its own test rather than skipped.
+nothing to eliminate against, so the key is not identified by elimination — but its **count** still was,
+and against a universe an observer enumerates from the public schema a lone key's exact count *is* the
+cell. **So `suppressed_total` is now served as `null` in that case.** Not `0`, which would be a false
+claim, and `suppressed_categories` is not reduced — the withholding stays disclosed, only the recoverable
+figure goes. This is what bumped the report format to **3**; the field's type is `int | null` from that
+version on.
+
+**Both histograms withhold the total together, because they share one.** `failures_by_error_code` and
+`failures_by_schema_path` are two breakdowns of the *same* findings — the sweep increments one cell in
+each per finding — so `sum(by_code) == sum(by_schema_path) == F`, and every served histogram satisfies
+`F = sum(published cells) + suppressed_total`. Nulling only the histogram that reached one category
+therefore withholds nothing: the sibling, published adjacent to it on the same screen, gives back
+`F − sum(cells)`. The trigger shape is ordinary rather than contrived, since the shadow error-code
+vocabulary is closed and small while schema paths are many — two records with a `date-time` violation at
+two different pointers produce one error code and two schema paths. So **either** histogram reaching one
+category nulls the total on **both**. The decision lives in the block builder, which is the only place
+that sees both distributions; the `null` cannot be undone by the record counts, because `records_failing`
+and `official_validation.failing` count **records** and are a lower bound on `F`, not `F`.
+
+Both the single-histogram case and the cross-histogram case are pinned by their own tests, including a
+reproduction of the two-pointer shape above, rather than skipped.
 
 **Instance-path histograms are withheld.** This project shipped `by_instance_path` in `v0.0.32` and
 withdrew it: over a ~30-row corpus an error count of one at an instance path **is** a single-record fact.
