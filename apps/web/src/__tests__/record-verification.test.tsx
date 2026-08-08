@@ -376,6 +376,19 @@ describe('runtime states', () => {
     expect(document.querySelectorAll('.stat-card')).toHaveLength(4);
     expect(bodyText()).toMatch(/what is shown below is the result of the last read that did/i);
     expect(bodyText()).toMatch(/older than it says/i);
+    /*
+     * PIN THE DIRECTION, not just the claim. This note points AT the report age,
+     * and the visual-first reorganisation moved that figure from the bottom of
+     * `About This Run` into the freshness strip ABOVE this note — which left the
+     * copy saying "further down" about something now rendered above it. Every
+     * test here matched only `/older than it says/`, so a false direction passed
+     * unnoticed until a review read the rendered order.
+     *
+     * Asserted in BOTH directions: the wrong word must be absent, and the right
+     * one present. Matching only the new word would still pass if both appeared.
+     */
+    expect(bodyText()).not.toMatch(/report age stated further down/i);
+    expect(bodyText()).toMatch(/the report age shown above was measured at that earlier read/i);
     // The rejection's own text never reaches the screen.
     expect(bodyText()).not.toContain('ECONNRESET');
     expect(bodyText()).not.toContain('example.invalid');

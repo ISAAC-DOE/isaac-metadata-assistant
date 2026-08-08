@@ -226,6 +226,35 @@
   .statistics .stats-cards {
     grid-template-columns: minmax(0, 1fr);
   }
+  /*
+   * ...EXCEPT the four headline figures of Record Verification, which stay
+   * TWO-UP.
+   *
+   * WHY THE EXCEPTION IS NARROW AND DELIBERATE. Record Verification is now the
+   * first section on the page, and at 390px the general one-column rule turns
+   * its four headline counts into four full-width cards — roughly two screens
+   * of scrolling before the first chart. Two-up puts all four in one glance,
+   * which is the job a KPI row exists to do.
+   *
+   * IT IS HONEST ABOUT WHAT IT CANNOT DO. Corpus banner + freshness strip +
+   * four cards + the side-by-side chart do NOT fit above the fold at 390px, and
+   * no arrangement of them would; what this rule buys is that the corpus, the
+   * report age and all four headline counts are readable without scrolling past
+   * a card each. Nothing is truncated, hidden or abbreviated to achieve it —
+   * every label, value and note is the same string it is at 1440px, and each
+   * card's own `min-width: 0` plus `overflow-wrap: anywhere` on its value keeps
+   * the page's scroll width at the viewport width (the property
+   * `e2e/specs/statistics-states.spec.ts` measures at 320px).
+   *
+   * The GLANCE grid is deliberately NOT given this treatment: its cards can be
+   * five (an `Unrecognized Status` card appears when one is measured), and an
+   * odd count two-up leaves a half-empty row directly under a caveat that
+   * qualifies the row.
+   */
+  .statistics .stats-cards-headline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
 }
 
 /* ---- StatCard -------------------------------------------------------- */
@@ -1128,6 +1157,29 @@
 .statistics .stats-technical {
   min-width: 0;
 }
+/*
+ * The PROSE disclosures at the foot of the General tab — How Verification Works,
+ * How to Interpret Results, Mutation Methodology, Known Limitations.
+ *
+ * Same component, same summary/title/body treatment, DIFFERENT root class. The
+ * class split is not cosmetic: `details.stats-technical` is addressed by three
+ * e2e helpers, two of them through Playwright strict-mode locators and one
+ * asserting `toHaveCount(1)`, so five more elements carrying that class would
+ * turn every one into an opaque "resolved to 6 elements". See
+ * `StatsCharts.tsx` → `TechnicalDetailsProps.variant`.
+ */
+.statistics .stats-disclosure {
+  min-width: 0;
+}
+/* These bodies hold paragraphs rather than nested section cards, so the region
+   gap is the paragraph rhythm and `.stats-note`'s own top margin would double
+   it. */
+.statistics .stats-disclosure .stats-technical-body {
+  gap: 12px;
+}
+.statistics .stats-disclosure .stats-technical-body .stats-note {
+  margin-top: 0;
+}
 .statistics .stats-technical-summary {
   display: block;
   cursor: pointer;
@@ -1430,6 +1482,42 @@
   color: var(--text-strong);
 }
 
+/* ---- the freshness strip ----------------------------------------------- */
+
+/*
+ * When this report was produced, how old it is, and the control that re-reads
+ * it — directly under the corpus banner and above the first figure.
+ *
+ * The two figures and the button share one row and WRAP rather than compress:
+ * `generated_at` is a full timestamp, so at narrow widths the button drops to
+ * its own line instead of squeezing the value that dates the whole report.
+ * `justify-content: space-between` keeps the control at the trailing edge on a
+ * wide row without either side being given a fixed width.
+ */
+.statistics .stats-verify-freshness {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.statistics .stats-verify-freshness-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 18px;
+  min-width: 0;
+}
+/* The figure grid takes the row's spare width; the control keeps its own. */
+.statistics .stats-verify-freshness-row .stats-figures {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+/* The strip owns its rhythm through `gap`, so the blocks nested inside it drop
+   the top margin `.stats-block` would otherwise add on top of it. */
+.statistics .stats-verify-freshness .stats-block {
+  margin-top: 0;
+}
+
 /* ---- the read controls ------------------------------------------------- */
 
 .statistics .stats-verify-controls {
@@ -1437,6 +1525,11 @@
   flex-direction: column;
   gap: 8px;
   margin-bottom: 14px;
+}
+/* Inside the freshness strip the control is one item of a wrapping row rather
+   than a block of its own, so it contributes no bottom margin there. */
+.statistics .stats-verify-freshness .stats-verify-controls {
+  margin-bottom: 0;
 }
 .statistics .stats-verify-controls-row {
   display: flex;

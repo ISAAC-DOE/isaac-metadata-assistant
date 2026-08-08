@@ -304,6 +304,21 @@ const section = (page: Page): Locator =>
   page.locator('section[aria-labelledby="stats-verification"]');
 
 /**
+ * The tri-state safeguards, which are a SIBLING SECTION rather than a block
+ * inside Record Verification.
+ *
+ * They were an `h3` inside the section above until the visual-first
+ * reorganisation, which promoted them to a visible `h2` of their own: six
+ * measured states may not go into a collapsed disclosure with the page's
+ * supporting prose, and once the block is neither collapsed nor nested three
+ * screens down, a section is what it is. The guards below therefore resolve
+ * them from HERE and not from `section(page)` — which is why they fail closed
+ * on a missing row (see the note at the private-corpus guard).
+ */
+const safeguardsSection = (page: Page): Locator =>
+  page.locator('section[aria-labelledby="stats-safeguards"]');
+
+/**
  * What each classifier says, in words, when it is burnt into the image.
  *
  * Short enough to survive 320px, and phrased so the reader needs no key: the
@@ -487,7 +502,14 @@ interface VerificationState {
   /** Console messages this state DELIBERATELY causes. Anything else fails. */
   readonly allowedConsole?: readonly RegExp[];
   /** Does this state put a decoded report (figures, charts, safeguards) on
-   *  screen? Drives the shared report assertions. */
+   *  screen? Drives the shared report assertions.
+   *
+   *  NOTE ON THE CAPTURED PIXELS, since the visual-first reorganisation: a
+   *  report state's `reach` returns the Record Verification section, and the
+   *  safeguards are now a SIBLING section, so they are ASSERTED (through
+   *  `safeguardsSection`, fail-closed) but no longer inside the attached
+   *  screenshot. The assertions are the guard; the image is documentation, and
+   *  it is documentation of one section rather than two. */
   readonly rendersReport?: boolean;
   /** Which corpus the report on screen claims, when it renders one. */
   readonly corpus?: 'public' | 'private';
@@ -1184,14 +1206,18 @@ async function reportAssertions(
   // trust boundary must report when the boundary moves.
   if (state.corpus === 'private') {
     for (const label of ['Read-Only Database Access', 'Parameterized Database Queries']) {
-      const row = s.locator('.stats-verify-safeguard', { hasText: label });
+      // Scoped to the safeguards SECTION, which is no longer inside `s`. The
+      // fail-closed branch below covers the case where this move is undone or
+      // the section is renamed: a scope that finds nothing is a FAILURE here.
+      const row = safeguardsSection(page).locator('.stats-verify-safeguard', { hasText: label });
       const count = await row.count();
       if (count === 0) {
         push(
           `the private-corpus safeguard row "${label}" was not found (selector ` +
-            `.stats-verify-safeguard). The guard that stops this capture claiming a ` +
-            `database check was Verified cannot run, so this is a FAILURE, not a pass — ` +
-            `if the label or the class was renamed, update this guard with it`
+            `section[aria-labelledby="stats-safeguards"] .stats-verify-safeguard). The ` +
+            `guard that stops this capture claiming a database check was Verified cannot ` +
+            `run, so this is a FAILURE, not a pass — if the label, the class or the ` +
+            `section id was renamed, update this guard with it`
         );
         continue;
       }
@@ -1241,7 +1267,12 @@ async function reportAssertions(
   }
 
   // ── status is not conveyed by colour alone ────────────────────────────────
-  const safeguards = await s.evaluate((root) => {
+  //
+  // Read from the safeguards SECTION, not from `s`: the block is a sibling of
+  // Record Verification since the visual-first reorganisation. The `!== 6` guard
+  // two lines below is what makes a wrong scope a failure rather than a silent
+  // pass over an empty list.
+  const safeguards = await safeguardsSection(page).evaluate((root) => {
     return Array.from(root.querySelectorAll('.stats-verify-safeguard')).map((row) => ({
       label: row.querySelector('.stats-verify-safeguard-label')?.textContent?.trim() ?? '',
       state: row.querySelector('.stats-verify-state')?.getAttribute('data-state') ?? '',

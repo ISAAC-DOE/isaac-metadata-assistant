@@ -125,52 +125,84 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
    * only screen whose outline goes THREE levels deep, which is precisely the shape
    * a skip or a backwards step hides in.
    *
-   * THE EXPECTED OUTLINE CHANGED WITH THE TAB RESTRUCTURE, and again when the
-   * available-metrics slice added three sections, and again when Record
-   * Verification landed. The reason is worth writing down because it is the
-   * interesting part. Its General ISAAC tab is now h1 → seven h2 sections:
+   * THE EXPECTED OUTLINE CHANGED WITH THE TAB RESTRUCTURE, again when the
+   * available-metrics slice added three sections, again when Record Verification
+   * landed, and again with the VISUAL-FIRST reorganisation this array now
+   * describes. The reason is the interesting part, so it is written down rather
+   * than left to be reconstructed from a diff.
    *
+   * WHAT THE REORGANISATION DID, IN OUTLINE TERMS. Record Verification was the
+   * FIFTH h2 and is now the FIRST — about 1,700px of scrolling removed from
+   * between the reader and the corpus that ran, the two validator results, the
+   * mutation harness and the protected distributions. Nothing above it survived
+   * being above it; the four workspace sections simply follow instead of
+   * preceding.
+   *
+   * FOUR MOVES, and each one is a decision rather than a consequence:
+   *
+   *   1. `Record Verification` first, and it keeps FOUR h3s, not five. Its
+   *      running order changed — the side-by-side validators, then Mutation
+   *      Verification, then Where the Stricter Checks Disagreed, then About This
+   *      Run — and `Verification Safeguards` left it entirely.
+   *   2. `Verification Safeguards` is a SECOND-POSITION h2, promoted from an h3
+   *      inside Record Verification and rendered by the same component as a
+   *      sibling section. It renders six tri-state MEASUREMENTS, so it was not
+   *      eligible for a disclosure; once it is neither collapsed nor nested,
+   *      h2 is what it is. It is present here because the fixture report is
+   *      readable — a `running` or unreadable body renders no safeguards at all,
+   *      and this array would be one element shorter, correctly.
+   *   3. FOUR NEW h2 DISCLOSURES join `Technical Details` at the foot: How
+   *      Verification Works · How to Interpret Results · Mutation Methodology ·
+   *      Known Limitations. Each holds supporting PROSE moved out of the main
+   *      flow. None holds a figure — that is the rule the split was made on, and
+   *      it is why (2) is a section rather than a fifth disclosure.
+   *   4. `This Application Collects No Analytics` stays an h2 in the main flow
+   *      and stays uncollapsed. Its body is reduced to one sentence; the
+   *      paragraph it used to carry about server-side logging is inside Known
+   *      Limitations, which is why the disclosure count is four and not three.
+   *
+   * So the General ISAAC tab is now h1 → THIRTEEN h2s:
+   *
+   *   Record Verification (nesting FOUR h3s) · Verification Safeguards ·
    *   Workspace at a Glance · Workflow Distribution · Open Questions ·
-   *   Evidence and Validation (nesting `Evidence Support` and `Export Gate` as
-   *   h3) · Record Verification (nesting FIVE h3s — see the note at the
-   *   assertion) · Platform Metrics (nesting one h3 per planned view — SIX of
-   *   them, the same plan-card shape My Stats uses) · This Application Collects
-   *   No Analytics
+   *   Evidence and Validation (nesting `Evidence Support` and `Export Gate`) ·
+   *   Platform Metrics (nesting one h3 per planned view — SIX of them, the same
+   *   plan-card shape My Stats uses) · This Application Collects No Analytics ·
+   *   How Verification Works · How to Interpret Results · Mutation Methodology ·
+   *   Known Limitations · Technical Details (nesting FOUR h3 sections: Runtime ·
+   *   Record Schema · Project Memory · API Surface)
    *
-   * …followed by an eighth h2 `Technical Details`, which nests FOUR h3 sections
-   * (Runtime · Record Schema · Project Memory · API Surface).
-   *
-   * The four trailing h3s are inside a `<details>` that is CLOSED by default, and
-   * they are counted here on purpose: `querySelectorAll` sees the whole DOM, so
-   * this asserts the outline is well-formed in BOTH states of the disclosure.
-   * (`e2e/specs/structure.spec.ts` filters by computed style and therefore checks
-   * the collapsed state as a real browser renders it — the two are complementary,
-   * and neither alone would catch a heading that is only wrong when open.)
+   * FIVE of those h2s are the `<summary>` heading of a `<details>` that is CLOSED
+   * by default, and all five are counted here on purpose: `querySelectorAll` sees
+   * the whole DOM, so this asserts the outline is well-formed in BOTH states of
+   * every disclosure. (`e2e/specs/structure.spec.ts` filters by computed style and
+   * therefore checks the collapsed state as a real browser renders it — the two
+   * are complementary, and neither alone would catch a heading that is only wrong
+   * when open.)
    */
-  it('Statistics · General ISAAC (every section loaded, Technical Details closed)', async () => {
+  it('Statistics · General ISAAC (every section loaded, disclosures closed)', async () => {
     stubFetchRoutes(statisticsRoutes());
     const view = renderAt('/statistics');
     // Settles /api/about, which is the last of the five reads to paint.
     await view.findByText('Synthetic-Only');
 
     const found = levels(view.container);
-    // The FIVE 3s under Record Verification are its own sub-headings: the
-    // official/shadow comparison, the issue distributions, mutation
-    // verification, safeguards, and the run details. (It was four before the
-    // comparison became a grouped chart with a heading of its own — the outline
-    // is unchanged in shape, one level deeper nowhere.)
+    // The FOUR 3s under Record Verification are its own sub-headings, in its own
+    // running order: the official/shadow comparison, mutation verification, the
+    // issue distributions, and the run details. It was FIVE until the safeguards
+    // became an h2 of their own — the outline is one level deeper nowhere.
     expect(found).toEqual([
       1,
+      2 /* Record Verification */,
+      3 /* Official Validation and the Format Shadow, Side by Side */,
+      3 /* Mutation Verification */,
+      3 /* Where the Stricter Checks Disagreed */,
+      3 /* About This Run */,
+      2 /* Verification Safeguards */,
       2 /* Workspace at a Glance */,
       2 /* Workflow Distribution */,
       2 /* Open Questions */,
       2 /* Evidence and Validation */,
-      3,
-      3,
-      2 /* Record Verification */,
-      3,
-      3,
-      3,
       3,
       3,
       2 /* Platform Metrics */,
@@ -181,6 +213,10 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
       3,
       3,
       2 /* This Application Collects No Analytics */,
+      2 /* How Verification Works */,
+      2 /* How to Interpret Results */,
+      2 /* Mutation Methodology */,
+      2 /* Known Limitations */,
       2 /* Technical Details */,
       3,
       3,

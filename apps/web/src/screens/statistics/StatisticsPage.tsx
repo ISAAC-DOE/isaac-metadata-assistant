@@ -153,6 +153,35 @@ import { RecordVerification, useVerificationReport } from './RecordVerification'
  * cannot produce — the honest gate lives in `MyStats.tsx` and is the whole of
  * that tab.
  *
+ * ── THE ORDER OF THE GENERAL TAB, AND WHY IT CHANGED ───────────────────────
+ *
+ * RECORD VERIFICATION IS THE LEDE. It used to be the fifth section, roughly
+ * 1,700px down a ~5,500px page at 1440x900 — so the corpus that ran, the
+ * official-validation result, the format shadow, the mutation harness and the
+ * protected distributions were all below the fold, behind four sections of
+ * workspace counts. It now opens the tab, followed immediately by
+ * `Verification Safeguards`, which `RecordVerification.tsx` renders as a sibling
+ * `h2` (see its header for why that block may not be collapsed).
+ *
+ * THE SUPPORTING PROSE MOVED THE OTHER WAY, into five collapsed `<details>` at
+ * the foot: How Verification Works · How to Interpret Results · Mutation
+ * Methodology · Known Limitations · Technical Details. Every one is authored
+ * copy that explains something; NOT ONE of them holds a measurement, and that
+ * is the rule the split was made on. Where a sentence QUALIFIES a specific
+ * figure — the suppression disclosures beside their histograms, the truncation
+ * caveat above the glance grid, the "these five may not be added" notes — it
+ * stayed where it was, because a caveat moved into a disclosure leaves the
+ * visible figure reading as if it had none.
+ *
+ * WHAT DID NOT MOVE, and each is deliberate:
+ *   · `Verification Safeguards` — six measured states, so it is a visible `h2`.
+ *   · `About This Run` — measurements plus the report's OWN limitations list.
+ *   · the no-analytics section — a governance claim, and `my-stats.test.tsx`
+ *     pins that it is not inside a `<details>`. It is REDUCED to one sentence
+ *     and the existing Settings link; the paragraph it used to carry about
+ *     server-side logging is in `Known Limitations`, not deleted. See
+ *     `NoAnalytics` for why that paragraph is load-bearing.
+ *
  * BUILD INTERNALS MOVED INTO ONE COLLAPSED REGION. Project Memory's snapshot
  * counts and provenance commits, the API surface breakdown, and the two runtime
  * facts `/api/about` reports (runtime mode and persistence) are properties of the
@@ -330,11 +359,30 @@ function leadSentence(scope: string | null, tab: StatisticsTabId): string {
    * alongside the others would promise a platform-wide number this build cannot
    * produce, which is the same defect class as the workspace clause this function
    * already branches on.
+   *
+   * ── RECORD VERIFICATION IS NAMED, AND NAMED FIRST ─────────────────────────
+   *
+   * It was not named at all, while the section itself sat fifth. The
+   * visual-first reorganisation made it the FIRST thing under this sentence —
+   * and a lead that opens by naming six other topics, directly above a section
+   * it does not mention, reproduces the defect this function's own header
+   * records: a lead sitting immediately above a panel reads as a promise about
+   * that panel, whatever it is technically a summary of. So the sentence now
+   * opens where the page opens.
+   *
+   * `Verification Safeguards` is deliberately NOT named beside it. That section
+   * renders only when a readable report is on screen — a `running`, `refused` or
+   * unreadable body carries no safeguards — so naming it would promise a heading
+   * that is legitimately absent, which is exactly the failure mode the workspace
+   * clause branches to avoid. `Record verification` itself is safe to name: that
+   * section renders in every state, stating what it could not read when it could
+   * not read it.
    */
   return (
-    `A read-only view of ${workspace}, workflow readiness, open questions, ` +
-    'evidence, the official record schema, Project Memory, and the API surface — ' +
-    'and, for platform-wide figures, why none is stated.'
+    `Record verification first, then a read-only view of ${workspace}, ` +
+    'workflow readiness, open questions, evidence, the official record schema, ' +
+    'Project Memory, and the API surface — and, for platform-wide figures, why ' +
+    'none is stated.'
   );
 }
 
@@ -698,13 +746,21 @@ export function StatisticsPage() {
             />
           ) : (
             <>
+              {/* THE LEDE. `RecordVerification` renders TWO sections — itself and,
+                  when a readable report is on screen, `Verification Safeguards` —
+                  so the first two `h2`s of this tab come out of one component. */}
+              <RecordVerification verification={verification} />
               <WorkspaceGlance records={records} />
               <WorkflowDistribution records={records} />
               <OpenQuestions records={records} />
               <EvidenceAndValidation records={records} />
-              <RecordVerification verification={verification} />
               <PlatformMetrics />
               <NoAnalytics />
+              {/* ---- the collapsed disclosures, all supporting copy ---------- */}
+              <HowVerificationWorks />
+              <HowToInterpretResults />
+              <MutationMethodology />
+              <KnownLimitations />
               <TechnicalDetails
                 id="stats-technical"
                 title="Technical Details"
@@ -1701,20 +1757,227 @@ function PlatformMetrics({
  * `lib/settingsContent.ts` (`no-telemetry`, `no-real-experiment-data`); this
  * section states the same boundary for the page's own subject and links there
  * instead of authoring a third variant.
+ *
+ * ── REDUCED TO ONE SENTENCE, AND THE OTHER PARAGRAPH RELOCATED ─────────────
+ *
+ * Statistics is not where this application's privacy policy is explained — that
+ * is `Settings › Data & Privacy`, which this section has always linked to. What
+ * has to stay HERE is the one claim a reader of this page needs: why there is no
+ * traffic figure on a page of figures. So the body is now that single sentence.
+ *
+ * THE SERVER-SIDE-LOGGING PARAGRAPH WAS NOT DELETED. It is the CORRECTION of a
+ * claim this section shipped falsely once already, and dropping it would restate
+ * a narrow truth in a place where it reads as a wide one. It is rendered in full,
+ * verbatim, in `KnownLimitations` below, and the section's own supporting line
+ * points there — so the scope is disclosed at the claim and stated in full one
+ * disclosure away. `statistics-page.test.tsx` pins both halves, in both places.
+ *
+ * The section stays OUT of any `<details>` regardless: `my-stats.test.tsx`
+ * asserts `section[aria-labelledby="stats-no-analytics"]` has no `<details>`
+ * ancestor, and a governance claim behind a disclosure is a weaker claim.
  */
 function NoAnalytics() {
   return (
     <StatsSection
       id="stats-no-analytics"
       title="This Application Collects No Analytics"
+      sub="Scoped to this application — what it ships, measures and stores. Server-side logs belong to whoever operates the deployment; what this page can and cannot say about them is stated under Known Limitations below."
       icon={<Shield size={18} strokeWidth={2} aria-hidden="true" />}
     >
       <p className="stats-note">
         This application ships no analytics SDK, no tracking pixel, and makes no third-party
-        network request. It measures nothing about how it is used and stores no per-user or
-        per-operation metric, which is why this page shows no figure for visits, traffic or request
-        volume: no such figure exists in this app to read.
+        network request; it stores no per-user or per-operation metric, which is why this page
+        shows no figure for visits, traffic or request volume — no such figure exists in this app
+        to read.
       </p>
+      <p className="stats-actions">
+        <Link to={ROUTES.settingsTab('privacy')}>Open Data &amp; Privacy Settings</Link>
+      </p>
+    </StatsSection>
+  );
+}
+
+/* ---- the collapsed disclosures ---------------------------------------- */
+
+/*
+ * FIVE `<details>`, closed by default, at the foot of the General tab.
+ *
+ * ── THE RULE THAT DECIDES WHAT MAY GO IN ONE ───────────────────────────────
+ *
+ * PROSE MAY BE COLLAPSED; A MEASUREMENT MAY NOT. Everything below is authored
+ * copy that explains how something works or what it does not establish. Nothing
+ * below states a count, a state, a timestamp or any other figure — because a
+ * disclosure is not scanned by axe when it is closed, is skipped by a reader
+ * scanning headings, and reads as optional. Collapsing a finding is hiding it.
+ *
+ * That rule is why `Verification Safeguards` is a visible `h2` section
+ * (`RecordVerification.tsx`) and why `About This Run` stays inside Record
+ * Verification: six tri-state readings and eleven provenance rows respectively.
+ *
+ * ── AND WHY A CAVEAT STAYS BESIDE ITS FIGURE ───────────────────────────────
+ *
+ * A sentence that qualifies a specific number is not "supporting prose" — it is
+ * part of what that number means. The histogram suppression disclosures, the
+ * truncation caveat above the glance grid, the "these five may not be added
+ * together" notes and the mutation panel's "reported below rather than promised
+ * here" all stayed in place for that reason. Moving them here would leave the
+ * visible figure reading as complete.
+ *
+ * They are `TechnicalDetails variant="prose"`, which is the SAME component the
+ * build-internals region uses — one disclosure treatment on the surface — with a
+ * different root class so the suites that address `details.stats-technical`
+ * through strict-mode locators still resolve to exactly one element. See
+ * `StatsCharts.tsx`.
+ */
+
+/**
+ * What the verification program actually does, moved out of the section's own
+ * supporting line (which used to carry all three programs in one 60-word
+ * sentence, directly above the corpus banner) and out of the re-read control
+ * (which carried the cache-and-polling paragraph).
+ */
+function HowVerificationWorks() {
+  return (
+    <TechnicalDetails
+      variant="prose"
+      id="stats-how-verification"
+      title="How Verification Works"
+      sub="What the program at the top of this page runs, and how its result reaches this screen."
+    >
+      <p className="stats-note">
+        An automated program runs three things over a corpus of official ISAAC records: ISAAC&rsquo;s
+        own official-schema validator; a stricter format-aware second validator; and a harness that
+        injects small deterministic changes into a copy of each record and checks that the validator
+        reacts the way that change was designed to make it react. The report it produces is
+        aggregate: it carries no record identifier, title, field value, evidence entry or per-record
+        outcome, so there is no slot on this screen for one.
+      </p>
+      <p className="stats-note">
+        This report is produced by a program run that is kept off the request path, so it is read as
+        a cached result and states its own age. Nothing on this screen polls: it is read once when
+        the page opens, and again only when the control in Record Verification is pressed.
+      </p>
+      <p className="stats-note">
+        Two corpora can produce this same report, and they carry very different weight — a public
+        reference preflight over already-published upstream example records, and an authorized
+        sample of the records this application holds. Which one ran is stated at the top of Record
+        Verification before any count — as a product name AND as the value the report itself sent,
+        verbatim — and a value this build does not recognise becomes its own label rather than
+        being mapped onto either shipped one.
+      </p>
+    </TechnicalDetails>
+  );
+}
+
+/**
+ * How to read what the figures above mean — the reading rules that were
+ * previously only implicit, or stated once beside one chart and nowhere else.
+ *
+ * Every sentence here restates something the visible page already carries; none
+ * of them is the only place a caveat appears.
+ */
+function HowToInterpretResults() {
+  return (
+    <TechnicalDetails
+      variant="prose"
+      id="stats-interpretation"
+      title="How to Interpret Results"
+      sub="The reading rules behind the figures above — what may be compared, what may not be added, and what a zero means."
+    >
+      <p className="stats-note">
+        The two validators are never added together. Each states its own number of records, and the
+        shared scale in the side-by-side chart runs to the largest single count rather than to any
+        total. The official validator is the authority; the format shadow is advisory, reports
+        issues the official schema tolerates, and gates nothing.
+      </p>
+      <p className="stats-note">
+        A zero is the good reading wherever this page counts things that went wrong. The harness
+        self-checks and the two statement counts under Verification Safeguards all count events
+        nobody wants, so a zero there is stated calmly and affirmatively rather than as an empty
+        panel.
+      </p>
+      <p className="stats-note">
+        A safeguard that does not apply is not a safeguard that held. The three safeguard states
+        have three distinct words and none of them stands in for another: a check that never arose
+        is reported as not applicable, never as verified.
+      </p>
+      <p className="stats-note">
+        Where a breakdown withholds small categories, the bars you can see are not the whole
+        distribution. The withheld occurrences are carried by a bar of their own and the number of
+        withheld categories is stated beside that chart, so the visible shares deliberately do not
+        add to 100%.
+      </p>
+      <p className="stats-note">
+        Nothing on this screen validates, exports or gates anything. It reports what a program
+        measured; it decides nothing about any record.
+      </p>
+    </TechnicalDetails>
+  );
+}
+
+/**
+ * The harness vocabulary, glossed.
+ *
+ * DELIBERATELY NOT the mutation panel's own intro sentence, which stays visible
+ * in Record Verification. That sentence exists so the panel makes no flat
+ * "records are never altered" claim, and `record-verification.test.tsx` pins its
+ * presence AND the absence of the claim it replaced. What is here is the naming
+ * — what a change type is against what a trial is, what the two accounting
+ * identities assert, and what the run's checks on itself are called.
+ */
+function MutationMethodology() {
+  return (
+    <TechnicalDetails
+      variant="prose"
+      id="stats-mutation-method"
+      title="Mutation Methodology"
+      sub="What a change type, a trial and a self-check are, and how the seven trial counts are meant to add up."
+    >
+      <p className="stats-note">
+        Each trial pairs one change type with one record. The harness works on a copy, applies the
+        change to that copy, and compares what the validator then reports against what the change
+        was designed to make it report. Change Types Defined counts the kinds of change the harness
+        has available; Trials Attempted counts the pairings it tried. They are different quantities
+        and neither is a share of the other.
+      </p>
+      <p className="stats-note">
+        A trial recorded as skipped for not applying is counted in its own row rather than folded
+        into either the expected or the unexpected group, so a skip can never be read as a change
+        that behaved as designed.
+      </p>
+      <p className="stats-note">
+        The seven trial counts are meant to satisfy two accounting identities. Both are printed as
+        arithmetic beside the figures, computed from the values that actually arrived, and stated
+        plainly when they do not hold — a single tidy total would have hidden exactly that.
+      </p>
+      <p className="stats-note">
+        The run also checks itself. The rows under Checks on the Verification Run Itself are counts
+        of trials that tripped one of those checks; the backend calls them oracles, a word that
+        means nothing on a product screen, so each row is named for what it counts instead. Whether
+        the source records were in fact left unchanged is one of those checks, and it is reported
+        as a measurement in Verification Safeguards rather than promised in advance.
+      </p>
+    </TechnicalDetails>
+  );
+}
+
+/**
+ * What this page does not establish.
+ *
+ * IT CARRIES THE SERVER-SIDE-LOGGING PARAGRAPH, verbatim, out of the
+ * no-analytics section. That paragraph is the correction of a claim this app
+ * shipped falsely once — see `NoAnalytics` — so it is relocated rather than
+ * shortened, and the section it came from points here in its own supporting
+ * line.
+ */
+function KnownLimitations() {
+  return (
+    <TechnicalDetails
+      variant="prose"
+      id="stats-limitations"
+      title="Known Limitations"
+      sub="What the figures on this page do not establish, and what this page cannot speak for."
+    >
       <p className="stats-note">
         Server-side logs are a different matter, and this page does not speak for them. The backend
         writes a metadata-only outcome line per operation, the web server it runs under writes an
@@ -1722,9 +1985,21 @@ function NoAnalytics() {
         records of its own. Those belong to whoever operates the deployment, the browser cannot see
         them, and nothing here is a claim about what they contain or how long they are kept.
       </p>
-      <p className="stats-actions">
-        <Link to={ROUTES.settingsTab('privacy')}>Open Data &amp; Privacy Settings</Link>
+      <p className="stats-note">
+        Record Verification reports a cached result. Once it is older than the lifetime the API
+        holds one for, the next read starts a fresh run and is still answered with the earlier
+        result — so a superseded report looks no different from a current one. Its age is stated
+        with it, and a note appears beside the age once it is past that lifetime.
       </p>
-    </StatsSection>
+      <p className="stats-note">
+        Every figure on this page is read from this build&rsquo;s own API and describes either this
+        workspace or this build. None of them is a platform-wide figure; Platform Metrics states why
+        this deployment can produce none.
+      </p>
+      <p className="stats-note">
+        This page mutates nothing and gates nothing. Refresh re-issues the same read-only reads and
+        does nothing else, and no control on this screen writes, validates or exports anything.
+      </p>
+    </TechnicalDetails>
   );
 }
