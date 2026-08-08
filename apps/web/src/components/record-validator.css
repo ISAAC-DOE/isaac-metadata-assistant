@@ -27,7 +27,35 @@
   margin-top: 2px;
   color: var(--text-slate);
 }
+/*
+ * `width: fit-content` is a FOCUS-INDICATOR fix, not a typographic one.
+ *
+ * WHAT WAS REPORTED, AND WHAT IT ACTUALLY IS. Review saw "a 2px solid blue
+ * outline around the `<h2>` on plain page load" and read it as a text input,
+ * and diagnosed a `:focus` rule that should have been `:focus-visible`. The
+ * observation is real and reproducible; the diagnosis is not. There is no
+ * `:focus` rule on this heading anywhere — the ring comes from `base.css`'s
+ * global `:focus-visible`, which is already the correct selector. It appears
+ * because `GovernancePage.tsx` moves focus to this heading on ARRIVAL (it is
+ * `tabIndex={-1}` for exactly that), and per the `:focus-visible` heuristic a
+ * programmatic focus matches when the previous focus did — i.e. whenever a
+ * keyboard was last used, which on a real visit it usually was. Measured in
+ * Chrome: `h.matches(':focus-visible') === true` after a Tab press followed by
+ * the arrival focus.
+ *
+ * SO THE INDICATOR MUST STAY. This heading is where keyboard and screen-reader
+ * arrivals land; hiding the landing would trade a cosmetic complaint for a
+ * WCAG 2.4.7 failure, and switching an already-correct selector would change
+ * nothing at all.
+ *
+ * WHAT IS ACTUALLY WRONG IS THE SHAPE. An `h2` is a block, so the ring spanned
+ * the full 514px of the header and sat directly above a labelled textarea — a
+ * full-width rounded blue box in a form, which is a text field. `fit-content`
+ * makes it hug the three words instead, and it then reads as what it is: focus
+ * landed on a heading.
+ */
 .rec-val-head h2 {
+  width: fit-content;
   font-size: 15px;
   font-weight: 600;
   color: var(--text-heading);
