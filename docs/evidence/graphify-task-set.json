@@ -1,0 +1,63 @@
+{
+    "frozen_at_commit": "9df2ef7",
+    "frozen_utc": "2026-08-07",
+    "designer": "independent agent, Graphify forbidden, gold answers and results unknown at freeze time",
+    "tasks": [
+        {
+            "id": "T1",
+            "category": "A",
+            "is_misleading_semantic_probe": false,
+            "expected_difficulty": "medium",
+            "prompt": "When this project finalizes a record it writes two artifacts: the official record and a companion \"evidence sidecar\". Write a complete account of that concept as it exists across the whole codebase at HEAD. Cover, with file paths: (1) the exact function that builds the sidecar payload, with file:line; (2) the sidecar's filename convention and the exact place in the running API where it is written to disk, including the write ordering relative to the record file; (3) the sidecar's top-level keys, and what its evidence map is keyed by - give at least three structurally different key forms the builder can emit; (4) whether the sidecar is part of the official ISAAC schema, plus the specific property of the vendored schema document that forces that answer; (5) the frontend screen or component that surfaces the sidecar to a user, and the exact API response field that carries its filename; (6) at least three test files (backend or frontend) that assert something about the sidecar; (7) the documentation file that audits it. Distinguish clearly between what the truth core produces and what the web API adds on top."
+        },
+        {
+            "id": "T2",
+            "category": "B",
+            "is_misleading_semantic_probe": false,
+            "expected_difficulty": "medium",
+            "prompt": "A user supplies a campaign metadata CSV in the web UI and receives a preview of what it would reconcile against an experiment. Trace that single request end to end and present it as an ordered pipeline. Your answer must include: the frontend component that initiates it and the client function it calls; the exact HTTP method and URL path template; the request Content-Type; every request header that must be present for the request to succeed; the backend route handler function name and its file; every backend module the request body passes through in order, ending at the parser that actually reads the CSV rows; the complete set of numeric ingress/parse limits that are enforced, giving each constant's name, its value, and the single file where all of them are defined; and a definitive, code-grounded statement of whether this request mutates any stored record or writes any file anywhere. Finally, list every distinct HTTP status code this endpoint can return and, in one line each, the condition that produces it."
+        },
+        {
+            "id": "T3",
+            "category": "C",
+            "is_misleading_semantic_probe": false,
+            "expected_difficulty": "medium",
+            "prompt": "The vendored official ISAAC schema document in this repository is about to be refreshed from upstream to a newer version, which changes the pinned schema version string. Produce the review list for that change. Group your answer into three buckets: (a) files that must be edited by hand, (b) files or committed artifacts that must be re-generated or re-run, and (c) files that must be re-verified but will probably not need editing. For every entry give the file path and one line saying why it is affected. Be specific about where the version string is defined canonically and which modules import it rather than repeating it; call out anything that computes a fingerprint, a display label, a cached validator, or a derived catalog from the schema document itself; and include test files and any frontend literals that would break. Explicitly distinguish load-bearing references from incidental prose mentions of the version number, and say which of the many documents that mention it are merely incidental."
+        },
+        {
+            "id": "T4",
+            "category": "D",
+            "is_misleading_semantic_probe": false,
+            "expected_difficulty": "medium",
+            "prompt": "This backend enforces optimistic concurrency on mutating requests using an HTTP precondition header. Document the contract as it exists at HEAD: (1) the single place in the code that decides whether the precondition is mandatory - give file:line and its current value, and explain why it is a single toggle rather than a scattered check; (2) the HTTP status code AND the machine-readable error-code string returned in each of these three cases: header absent, header present but not a valid strong validator, header present and well-formed but stale; (3) the client-side code that sends the header, with file:line and the exact quoting it applies to the value; (4) at least four backend test files and one frontend test file that assert this behaviour; (5) at least one mutating endpoint that is NOT gated by this header precondition, and what mechanism gates it instead. Ground every claim in a file:line."
+        },
+        {
+            "id": "T5",
+            "category": "E",
+            "is_misleading_semantic_probe": false,
+            "expected_difficulty": "high",
+            "prompt": "This application exposes a runtime endpoint that serves an aggregate report about a corpus of records, where the corpus content itself must never leave the process. Identify every mechanism in the code that enforces that boundary for this report. For each mechanism give the module, the function or constant, one sentence on what it prevents, and any numeric constant it uses. At minimum your answer must cover: how the served response's key set is constrained so an unlisted field cannot ship; how histogram cells with small counts are handled, including the specific additional step taken beyond a plain minimum-count threshold and the concrete attack that step defeats; the one input shape the code openly admits it cannot protect, and why; how the report demonstrates at runtime that no record-derived string was emitted, why that particular demonstration is unavailable in one of the two operating modes, and what stands in for it there; and why property names taken from the vendored schema are deliberately excluded from that scan. Finish by naming the block of the served report where the outcome of these checks is published, and list that block's field names."
+        },
+        {
+            "id": "T6",
+            "category": "F",
+            "is_misleading_semantic_probe": false,
+            "expected_difficulty": "medium",
+            "prompt": "Produce a complete and exact inventory of every operating-system environment variable that this repository's code reads. For each variable report: its exact full name; every file:line where it is read; whether it is read through a bare string literal or through a named constant (and if so, the constant's name and where it is defined); whether a default value is applied at the read site and what that default is; and one line on what it controls. Organize the inventory into three groups: variables read by the running application, variables read only by standalone scripts, and variables read only by test code. Exhaustiveness and exactness are the point - a missing variable, a misspelled name, or a variable listed in the wrong group counts as an error. State the commands you used so the result is reproducible."
+        },
+        {
+            "id": "T7",
+            "category": "G",
+            "is_misleading_semantic_probe": false,
+            "expected_difficulty": "medium",
+            "prompt": "Do not answer this from documentation, comments, or plan files. By actually executing this repository's own code in its virtual environment, generate the record-verification report for the public reference corpus and report the values you observed. Report: the report's `status` and format-version fields; the value of the verification mode field; the number of records scanned and how many passed and failed baseline official schema validation; the format-shadow pass/fail counts and the floor value used by its histograms; every field and value in the mutation summary (operators defined, trials attempted, trials applicable, trials skipped, expected-outcome matches, unexpected outcomes, observation-only trials); every field and value in the oracle summary; and every field and value in the safeguards block. State the exact command you ran and roughly how long it took. If any number you report was not produced by a run you performed yourself, say so explicitly and mark it."
+        },
+        {
+            "id": "T8",
+            "category": "D",
+            "is_misleading_semantic_probe": true,
+            "expected_difficulty": "high",
+            "prompt": "This application operates under a strict no-guessing policy: it must not put a scientific value in front of a user unless the user supplied it or evidence supports it. There is nevertheless exactly one concrete field value that the running app can display which the user did not supply and which is not read from that record's own stored data. Identify it precisely and prove it from the code: the exact function that produces it, with file:line; the keyword-only parameter that gates it and that parameter's default value at every call site; what confines it to a specific set of records; the provenance or disclaimer text shipped alongside it so a user cannot mistake it for evidence; and the API response field it appears under. Then answer this directly: a reader would reasonably expect responsibility for 'may the app show the user a concrete value it derived itself' to belong to the backend module that models whether a field's value is inferable from evidence and classifies suggestion states. Is that module what produces this value? Answer yes or no and justify strictly from code, naming the file you concluded about."
+        }
+    ]
+}

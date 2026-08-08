@@ -111,7 +111,32 @@ __all__ = [
 #:
 #: If any of those three stops holding, bump to 3. In particular, point 3 is a
 #: fact about a moment in time and will expire.
-REPORT_FORMAT_VERSION = 2
+#:
+#: BUMPED TO 3 by the single-category withholding in :func:`_histogram`. What
+#: changed is one value TYPE and nothing else: ``suppressed_total`` is now
+#: ``int | null`` where it was always ``int``. It is ``null`` when EITHER
+#: ``format_shadow`` histogram reaches ``suppressed_categories == 1``, and then
+#: on BOTH of them. The first half is because the honest numbers
+#: ``disclosure.suppress_small_cells`` returns are then a single key's exact
+#: count against an enumerable universe, and this module is the caller that
+#: module's docstring delegates the withholding to. The second half is because
+#: the two histograms count the same findings, so their totals are one number
+#: and the sibling would republish by subtraction what the other withheld —
+#: see the comment in :func:`build_report`.
+#:
+#: What did NOT change, stated so a consumer knows the blast radius: the key set
+#: of every block is identical, no block was added or removed, all four
+#: ``_HISTOGRAM_KEYS`` are still present on every histogram,
+#: ``suppressed_categories`` is still an ``int`` and still reports the real
+#: number of withheld categories, and no other field became nullable. A consumer
+#: that reads ``suppressed_total`` as a number must now handle ``null``; one that
+#: does not read it is unaffected.
+#:
+#: Unlike the two-mode change above, this one IS breaking on its own terms — a
+#: reader doing arithmetic on ``suppressed_total`` gets a type error rather than
+#: a wrong number — so it is versioned rather than argued around. The only
+#: consumer remains ``apps/web``, whose contract was updated in the same change.
+REPORT_FORMAT_VERSION = 3
 
 #: The mode names, re-exported from the authorization record so there is one
 #: spelling of each. Do NOT inline the string literals.
@@ -240,7 +265,10 @@ LIMITATIONS: tuple[str, ...] = (
     "export, and does not change what the official validator accepts.",
     "Histogram cells below the floor are withheld, and the number of withheld "
     "categories is never exactly one while any cell is published — one withheld "
-    "key against an enumerable universe is identified by elimination.",
+    "key against an enumerable universe is identified by elimination. Where "
+    "exactly one category is withheld and nothing is published, the number of "
+    "withheld occurrences is itself withheld and reported as null, because that "
+    "number would be that one category's exact count.",
     "Failure paths are SCHEMA paths. The per-record instance-path breakdown is "
     "computed internally and deliberately not served: over a small corpus a "
     "count of one at an instance path is a single-record fact.",
@@ -322,12 +350,55 @@ def _project(
     return {key: built.get(key) for key in allowlist}
 
 
-def _histogram(hist: SuppressedHistogram) -> dict:
+def _histogram(hist: SuppressedHistogram, *, withhold_total: bool = False) -> dict:
+    """Serve a suppressed histogram, withholding a recoverable total.
+
+    WHAT THIS DOES AND DOES NOT DO, stated precisely because the two are easy to
+    conflate. ``disclosure.py`` (module docstring, "THE ONE CASE THIS CANNOT
+    FIX") hands a decision to whoever publishes: *"The caller is responsible for
+    not publishing a histogram whose universe is a single key … returns the
+    honest numbers and the caller withholds the whole block."* This function is
+    that caller. It does **not** withhold the whole block — it withholds one
+    field, ``suppressed_total``, and serves the rest. That is a narrower remedy
+    than ``disclosure.py`` describes, and it is chosen deliberately: with
+    ``cells`` empty (the only shape that reaches the single-category case) the
+    remaining fields are ``suppressed_categories``, which is the disclosure of
+    the withholding itself, and ``floor``, which is a published constant. The
+    number that identified a cell is gone; nothing else in the block does.
+
+    Until this change the function withheld nothing — it copied
+    ``suppressed_total`` straight onto the wire. So for the one input shape that
+    reaches ``suppressed_categories == 1`` (a single key whose count is below
+    the floor, the only shape the absorption loop cannot break up) the served
+    block carried that key's EXACT count against a universe — schema paths and
+    ``format_shadow.SHADOW_ERROR_CODES`` — an observer can enumerate. Over a
+    ~30-record corpus one record with one format finding produces exactly that.
+
+    ``suppressed_total`` therefore becomes ``None``. It is deliberately NOT the
+    two alternatives ``disclosure.py`` names by name — reporting ``0`` withheld
+    is a false claim, and zeroing ``suppressed_total`` is a differently false
+    one. ``suppressed_categories`` stays at its real value, so the report still
+    says that something was withheld; only the recoverable figure goes.
+
+    ``withhold_total`` FORCES that same withholding on a histogram whose own
+    category count is 2 or more. This function cannot see the reason on its own,
+    because the reason is a relationship between two histograms rather than a
+    property of either: :func:`build_report` serves ``failures_by_error_code``
+    and ``failures_by_schema_path`` over the SAME findings, so their totals are
+    one number, and publishing one publishes the other by subtraction. The
+    caller decides; see the comment at the call site.
+
+    All four frozen keys are still present. ``_HISTOGRAM_KEYS`` is projected
+    strictly, and a key dropped rather than nulled would raise.
+    """
+    withheld_total: int | None = hist.suppressed_total
+    if withhold_total or hist.suppressed_categories == 1:
+        withheld_total = None
     return _project(
         {
             "cells": [{"key": key, "count": count} for key, count in hist.cells],
             "suppressed_categories": hist.suppressed_categories,
-            "suppressed_total": hist.suppressed_total,
+            "suppressed_total": withheld_total,
             "floor": hist.floor,
         },
         _HISTOGRAM_KEYS,
@@ -1017,15 +1088,36 @@ def build_report(
         strict=True,
     )
     # Floor suppression on BOTH distributions, in BOTH modes, unconditionally.
+    by_code = suppress_small_cells(dict(sweep.by_code))
+    by_schema_path = suppress_small_cells(dict(sweep.by_schema_path))
+    # THE TWO HISTOGRAMS SHARE ONE TOTAL, so they must withhold it together.
+    # `_sweep` increments `by_code` and `by_schema_path` once per finding, so
+    # `sum(by_code) == sum(by_schema_path) == F` by construction, and each served
+    # histogram satisfies `F = sum(cells) + suppressed_total`. Withholding the
+    # total on only the histogram that reached one category therefore withholds
+    # nothing: the sibling publishes F - sum(cells), which is the same number, on
+    # the same screen. Either one reaching the single-category case nulls both.
+    #
+    # When that happens BOTH histograms are in fact cell-less, which is why
+    # nulling both totals removes F rather than merely obscuring it: one category
+    # means a single key below the floor, so F < floor, so every cell of the
+    # sibling is also below the floor and is suppressed too. Nothing else served
+    # carries F -- `records_failing` and `official_validation.failing` count
+    # RECORDS, and a record may carry several findings, so they are a lower bound
+    # on F and not F. Pinned by `test_verification.py`.
+    withhold_shared_total = 1 in (
+        by_code.suppressed_categories,
+        by_schema_path.suppressed_categories,
+    )
     format_shadow = _project(
         {
             "records_passing": sweep.shadow_passing,
             "records_failing": total - sweep.shadow_passing,
             "failures_by_error_code": _histogram(
-                suppress_small_cells(dict(sweep.by_code))
+                by_code, withhold_total=withhold_shared_total
             ),
             "failures_by_schema_path": _histogram(
-                suppress_small_cells(dict(sweep.by_schema_path))
+                by_schema_path, withhold_total=withhold_shared_total
             ),
         },
         _FORMAT_SHADOW_KEYS,

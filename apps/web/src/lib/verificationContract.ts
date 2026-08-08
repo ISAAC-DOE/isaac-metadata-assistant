@@ -42,7 +42,7 @@
  * updating the blocks below would mean rendering a payload whose meaning we have
  * not checked.
  */
-export const VERIFICATION_REPORT_FORMAT_VERSION = 2;
+export const VERIFICATION_REPORT_FORMAT_VERSION = 3;
 
 /** The occurrence floor the backend suppresses beneath. Disclosed, never hidden. */
 export const VERIFICATION_HISTOGRAM_FLOOR = 5;
@@ -213,8 +213,23 @@ export interface VerificationHistogram {
   cells: readonly VerificationHistogramCell[];
   /** HOW MANY keys were withheld — never which. */
   suppressed_categories: number;
-  /** How many occurrences those withheld keys account for. */
-  suppressed_total: number;
+  /**
+   * How many occurrences those withheld keys account for — or `null` when the
+   * backend withheld that number as well.
+   *
+   * NULLABLE SINCE REPORT FORMAT 3, and the reason is the whole point of the
+   * field. When exactly ONE category is withheld, the withheld occurrences are
+   * that one category's exact count, and the key set here (schema paths, shadow
+   * error codes) is enumerable from the public schema — so publishing the number
+   * publishes the cell. `verification._histogram` therefore serves `null`, and
+   * keeps `suppressed_categories` at its real value so the withholding is still
+   * disclosed.
+   *
+   * `null` means WITHHELD, never zero. Nothing in this module may coerce it to
+   * `0`, sum it as `0`, or render it as `"0"`, `"null"` or `"NaN"` — the backend
+   * rejected zeroing it as a false claim and so does the UI.
+   */
+  suppressed_total: number | null;
   floor: number;
 }
 
@@ -340,12 +355,27 @@ function readHistogram(value: unknown): VerificationHistogram | null {
     if (key === null || count === null) return null;
     cells.push({ key, count });
   }
-  const scalars = readCounts(value, ['suppressed_categories', 'suppressed_total', 'floor']);
+  const scalars = readCounts(value, ['suppressed_categories', 'floor']);
   if (scalars === null) return null;
+  /*
+   * `suppressed_total` is read SEPARATELY from the other scalars because it is
+   * the one field that may legitimately be `null` (report format 3 — see
+   * {@link VerificationHistogram}). Running it through `readCounts` would
+   * conflate two different bodies: an explicit `null`, which is a real value
+   * meaning "withheld", and a missing or malformed field, which is a body this
+   * decoder must refuse. The first is kept; the second still makes the whole
+   * histogram unreadable, exactly as before.
+   */
+  const rawSuppressedTotal = value.suppressed_total;
+  let suppressedTotal: number | null = null;
+  if (rawSuppressedTotal !== null) {
+    suppressedTotal = countOrNull(rawSuppressedTotal);
+    if (suppressedTotal === null) return null;
+  }
   return {
     cells,
     suppressed_categories: scalars.suppressed_categories,
-    suppressed_total: scalars.suppressed_total,
+    suppressed_total: suppressedTotal,
     floor: scalars.floor,
   };
 }
@@ -498,7 +528,16 @@ export function histogramRows(histogram: VerificationHistogram): VerificationCha
  * quietly erase the withheld ones from the arithmetic — the numbers would then
  * contradict the suppression note printed beside them.
  */
-export function histogramTotal(histogram: VerificationHistogram): number {
+export function histogramTotal(histogram: VerificationHistogram): number | null {
+  /*
+   * `null` when the withheld occurrences were themselves withheld, because the
+   * denominator is then genuinely unknown — the shown sum plus an unstated
+   * number. Falling back to the shown sum would print a total that is smaller
+   * than the truth and make the visible shares add to 100%, which is the exact
+   * erasure this function was written to prevent. `StatsBarChart` accepts a
+   * `null` total and prints "Not Available" for every share.
+   */
+  if (histogram.suppressed_total === null) return null;
   return (
     histogram.cells.reduce((sum, cell) => sum + cell.count, 0) + histogram.suppressed_total
   );
@@ -510,15 +549,43 @@ export function histogramTotal(histogram: VerificationHistogram): number {
  *
  * Says HOW MANY and WHY, never which — the withheld keys are not in the payload
  * and there is no place in this UI where they could be.
+ *
+ * TWO SENTENCES, because there are two facts to state. When the report also
+ * withheld the occurrence COUNT (`suppressed_total === null`, report format 3),
+ * the sentence says so and says why, rather than printing a number nobody sent
+ * or quietly omitting the clause. An omitted clause reads as "and that is all
+ * there is to say", which is the failure mode this whole disclosure exists for.
  */
 export function suppressionDisclosure(histogram: VerificationHistogram): string | null {
   const categories = histogram.suppressed_categories;
   if (categories <= 0) return null;
   const noun = categories === 1 ? 'category is' : 'categories are';
+  // "each occurring" reads wrong for a single category, and the single-category
+  // body is now the one that matters most — it is the only one that reaches the
+  // withheld-count branch below.
+  const each = categories === 1 ? 'occurring' : 'each occurring';
+  const opening = `${categories} further ${noun} withheld, ${each} fewer than ${histogram.floor} times`;
+  const total = histogramTotal(histogram);
+  if (histogram.suppressed_total === null || total === null) {
+    /*
+     * The REASON is stated only for the body that reason describes. The backend
+     * withholds the count when exactly one category was withheld, and only then;
+     * a report withholding it alongside several categories is a body this UI has
+     * never seen, so it says what happened and does not explain a cause it
+     * cannot vouch for. A confident wrong explanation is worse than none.
+     */
+    const why =
+      categories === 1
+        ? " With one category withheld from a set of keys that can be enumerated, that number would be that category's exact count."
+        : '';
+    return (
+      `${opening}. The number of occurrences they account for is withheld as well, ` +
+      `so the total counted here is not stated.${why}`
+    );
+  }
   return (
-    `${categories} further ${noun} withheld, each occurring fewer than ` +
-    `${histogram.floor} times, accounting for ${histogram.suppressed_total} of the ` +
-    `${histogramTotal(histogram)} occurrences counted.`
+    `${opening}, accounting for ${histogram.suppressed_total} of the ` +
+    `${total} occurrences counted.`
   );
 }
 
@@ -1075,9 +1142,17 @@ export function reconciliationMismatch(identity: MutationIdentity): string {
  *
  * Either signal counts. Withholding is withholding, and the disclosure sentence
  * beside it states the categories and the occurrences separately anyway.
+ *
+ * A `null` `suppressed_total` (report format 3) contributes NOTHING to this
+ * predicate on its own — `?? 0` — and that is deliberate rather than lazy. The
+ * backend emits `null` only together with `suppressed_categories === 1`, so the
+ * first arm already answers yes; and a body claiming zero withheld categories
+ * has told us nothing was withheld, whatever the total says. What must never
+ * happen is `null` being read here as a POSITIVE number of withheld occurrences,
+ * which would make this say "withheld" for a histogram that withheld nothing.
  */
 export function histogramWithheldAnything(histogram: VerificationHistogram): boolean {
-  return histogram.suppressed_categories > 0 || histogram.suppressed_total > 0;
+  return histogram.suppressed_categories > 0 || (histogram.suppressed_total ?? 0) > 0;
 }
 
 /**
@@ -1086,6 +1161,12 @@ export function histogramWithheldAnything(histogram: VerificationHistogram): boo
  * The distinction matters. "No occurrence was recorded" and "every category was
  * too small to name" are different facts, and only the first justifies drawing
  * nothing at all.
+ *
+ * So a histogram with no cells, one withheld category and a withheld occurrence
+ * count is NOT empty: it is a breakdown whose every category was withheld. It
+ * has no bar to draw — see {@link histogramRowsWithSuppressed} — but it still
+ * has something to say, and the caller must say it rather than reporting nothing
+ * recorded.
  */
 export function histogramIsEmpty(histogram: VerificationHistogram): boolean {
   return histogram.cells.length === 0 && !histogramWithheldAnything(histogram);
@@ -1115,6 +1196,23 @@ export function histogramRowsWithSuppressed(
 ): VerificationChartRow[] {
   const rows = histogramRows(histogram);
   if (!histogramWithheldAnything(histogram)) return rows;
+  /*
+   * NO BAR WHEN THERE IS NO NUMBER, and this is NOT the two-branch disagreement
+   * the comment on {@link histogramWithheldAnything} records. That bug was two
+   * places computing THE SAME question ("did it withhold anything?") by
+   * different tests; both now call the one predicate above, and this check asks
+   * a different question with a different answer type: "is there a quantity to
+   * draw?". A bar needs a length, and `suppressed_total === null` means the
+   * quantity was withheld — 0 would be a false claim (the backend refuses to
+   * write it for exactly that reason) and a bar of unknown length is not a bar.
+   *
+   * Withholding is still disclosed, in two places that cannot drift from this
+   * one: {@link histogramWithheldAnything} still answers `true`, so
+   * {@link histogramIsEmpty} refuses to call the breakdown empty, and
+   * {@link suppressionDisclosure} still returns its sentence, which in this case
+   * states that the occurrence count itself was withheld.
+   */
+  if (histogram.suppressed_total === null) return rows;
   return [
     ...rows,
     {

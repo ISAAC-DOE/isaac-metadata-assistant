@@ -531,6 +531,63 @@ def test_floor_suppression_runs_in_the_datastore_mode_unconditionally(public_rec
     assert report["official_validation"]["failing"] == 0
 
 
+def test_a_lone_sub_floor_category_reaches_the_wire_with_its_count_withheld(
+    public_records,
+):
+    """THE LEAK, END TO END — the shape the deployment actually produces.
+
+    The test above proves the floor bites; this one proves what is served when
+    it bites all the way down. ONE record with ONE format finding leaves exactly
+    one withheld category and nothing published, which is the single input shape
+    `disclosure.suppress_small_cells` cannot break up (there is no published cell
+    to absorb). Its honest return is that key's exact count, and
+    `disclosure.py`'s docstring delegates the withholding to the caller —
+    `verification._histogram`, which until now published the number.
+
+    So the served body carried a sub-floor count against a universe an observer
+    enumerates from the vendored public schema. Over the authorized 30-record
+    corpus this is not a corner case: one record with one finding produces it.
+
+    Asserted on the SERVED report rather than on `_histogram`, because a unit
+    test of the helper cannot show the shape is reachable through the run.
+    """
+    bad = json.loads(json.dumps(public_records[0]))
+    bad["timestamps"]["created_utc"] = "not-a-date"
+    provider = FakeRecordProvider([bad, public_records[1]])
+    report = run_verification(
+        ROOT, mode=AUTHORIZED_PRIVATE_SAMPLE, provider=provider, repeat=1
+    )
+
+    lone = [
+        (name, hist)
+        for name in ("failures_by_error_code", "failures_by_schema_path")
+        for hist in [report["format_shadow"][name]]
+        if hist["suppressed_categories"] == 1
+    ]
+    assert lone, (
+        "this fixture is supposed to REACH the single-withheld-category shape; "
+        "if it no longer does, the regression is untested rather than fixed"
+    )
+    for name, hist in lone:
+        assert hist["cells"] == [], name
+        assert hist["suppressed_total"] is None, (
+            f"{name} served the lone withheld category's exact count "
+            f"({hist['suppressed_total']}) -- that number IS the cell"
+        )
+        assert hist["suppressed_categories"] == 1, (
+            "the withholding must stay disclosed, not be hidden by reporting 0"
+        )
+
+    # And it survives serialization as JSON `null`, not as a dropped key: the
+    # frontend decoder distinguishes an explicit null (withheld) from an absent
+    # field (malformed body it must refuse).
+    for name, _ in lone:
+        assert (
+            '"suppressed_total": null'
+            in json.dumps(report["format_shadow"][name], indent=0).replace("\n", " ")
+        )
+
+
 # ---------------------------------------------------------------------------
 # Withdrawal must be complete
 # ---------------------------------------------------------------------------
