@@ -7,6 +7,7 @@ import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
+import { Compass, LayoutList, ShieldCheck } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
@@ -149,75 +150,165 @@ export function ExperimentsHome() {
          * replaces, "open the built-in example", did once the examples moved into
          * a session); and it must not blame the reader for an absence the
          * deployment caused.
+         *
+         * ── THE POLISH SLICE, AND THE ONE THING IT DELIBERATELY DID NOT BUILD ──
+         *
+         * The brief asked for four things in order: a polished empty state, a
+         * `Create Experiment` action, `Launch Guided Demo` (blue), and a
+         * meaningful `Open Validator`. Three of the four are here. The create
+         * action is NOT, and it was left out on evidence rather than on taste:
+         *
+         *   1. There is no create path to drive it. `routes.py` exposes no
+         *      `POST /api/experiments` (the tutorial tag's own comment says so and
+         *      `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package`
+         *      pins it), and `lib/api.ts` has no create call. A control here would
+         *      have nothing to call.
+         *   2. A disabled one is still a dead control, and this screen has already
+         *      shipped that defect once — see the P1 note further down, where a
+         *      primary "New Record" button navigated to a screen that could not
+         *      create anything.
+         *   3. The repository forbids the LABEL, not merely the behaviour.
+         *      `product-facing-language.test.tsx`'s `FORBIDDEN_CREATION_PROMISE`
+         *      scans every non-comment string under `apps/web/src` for
+         *      /create\s+(a |your )?(new )?(record|experiment)/i, and
+         *      `screens/ExperimentsHome.tsx` is named in its must-be-scanned list.
+         *      So "Create Experiment" cannot be rendered as copy at all without
+         *      weakening a guard written to stop exactly this.
+         *
+         * What stands in its place is the sentence that is true — the list is
+         * empty because the deployment cannot fill it — given first position and
+         * the visual weight the action would have had. When a durable create path
+         * lands, the slot below the lede is where it goes, and the guard above is
+         * the thing that has to be revisited WITH it, not before it.
+         *
+         * WHAT CHANGED VISUALLY. The state used to be bare prose on the screen
+         * background with one primary and one loose secondary. It now borrows the
+         * queue's own idiom — the `.exp-row` card shape, border, radius and
+         * surface — so the screen still reads as experiment UI when the queue it
+         * replaces is absent. No new visual language: same tokens, same card
+         * geometry, same button variants.
          */
-        <div className="queue-empty-state">
-          <h2 className="queue-empty-title">No experiments yet</h2>
-          <p className="queue-empty-body">
-            Experiments you work on will appear here. This deployment cannot yet create or
-            import a record, so nothing has been added.
-          </p>
-
-          {/*
-            THE PRIMARY, AND IT NOW DOES THE THING IT NAMES.
-
-            What stood here was `actionGoToHelpAndTutorial` — a SECONDARY button whose
-            entire behaviour was `navigate(ROUTES.settingsTab('help'))`. That was an
-            honest control at the time it was written: it named navigation, and it
-            navigated. But it was the last tutorial affordance left on this screen once
-            the first-run offer had been completed or skipped, and `shouldOfferTutorial`
-            retires that offer permanently on completion. So a returning reader met a
-            permanently-empty page whose only remaining route to the walkthrough was a
-            quiet button that took them somewhere else to press a different button.
-
-            This one calls `startTutorial` directly, on exactly the contract
-            `TutorialPromotion` uses: the live node from a ref, so
-            `tutorialReturnFocusTarget` can hand focus back here when the overlay
-            closes, and so a node that has since unmounted is correctly refused.
-
-            It is styled primary because on a screen whose queue can never fill, this IS
-            the screen's action — not because a demo deserves emphasis.
-
-            NOT a duplicate of Settings → Help & Tutorial, which keeps `Replay Tutorial`
-            as the walkthrough's permanent home. This is an entry point, not a second
-            home, and it carries a third name so that no label in the app addresses two
-            controls.
-          */}
-          <div className="queue-empty-primary">
-            <button
-              ref={launchRef}
-              type="button"
-              className="btn btn-primary queue-empty-cta"
-              disabled={launchBusy}
-              aria-describedby="queue-empty-launch-hint"
-              onClick={() => startTutorial(launchRef.current)}
-            >
-              {LABELS.actionLaunchGuidedDemo}
-            </button>
-            {/* Associated with the button rather than left as adjacent text: a screen
-                reader announcing the control otherwise reads four words and none of
-                the disclosure. It is a DESCRIPTION, not a label — the accessible name
-                stays "Launch Guided Demo". */}
-            <span className="queue-empty-hint" id="queue-empty-launch-hint">
-              {LABELS.launchGuidedDemoBody}
+        <section className="queue-empty-state" aria-labelledby="queue-empty-title">
+          <div className="queue-empty-lede">
+            {/* Decorative only. The heading beside it carries the meaning, so it is
+                hidden from the accessibility tree rather than given a label that
+                would be read out ahead of the heading. */}
+            <span className="queue-empty-mark" aria-hidden="true">
+              <LayoutList size={20} strokeWidth={1.75} />
             </span>
+            <div className="queue-empty-lede-text">
+              <h2 className="queue-empty-title" id="queue-empty-title">
+                No experiments yet
+              </h2>
+              <p className="queue-empty-body">
+                Experiments you work on will appear here, one row each, grouped by what
+                they still need. This deployment cannot yet create or import a record, so
+                nothing has been added.
+              </p>
+            </div>
           </div>
 
-          <p className="queue-empty-body">Or, without starting the walkthrough:</p>
+          {/* An eyebrow, not a heading: it labels the two cards below without adding
+              an outline level, and the cards carry their own h3 titles. */}
+          <p className="queue-empty-eyebrow">What you can do here now</p>
+
           <ul className="queue-empty-list">
-            <li>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => navigate(`${ROUTES.governance}?tab=validator`)}
-              >
-                Open Validator
-              </button>
-              <span className="queue-empty-hint">
-                Check a record file you already have against the official ISAAC schema.
+            {/*
+              THE PRIMARY, AND IT DOES THE THING IT NAMES.
+
+              What stood here was `actionGoToHelpAndTutorial` — a SECONDARY button whose
+              entire behaviour was `navigate(ROUTES.settingsTab('help'))`. That was an
+              honest control at the time it was written: it named navigation, and it
+              navigated. But it was the last tutorial affordance left on this screen once
+              the first-run offer had been completed or skipped, and `shouldOfferTutorial`
+              retires that offer permanently on completion. So a returning reader met a
+              permanently-empty page whose only remaining route to the walkthrough was a
+              quiet button that took them somewhere else to press a different button.
+
+              This one calls `startTutorial` directly, on exactly the contract
+              `TutorialPromotion` uses: the live node from a ref, so
+              `tutorialReturnFocusTarget` can hand focus back here when the overlay
+              closes, and so a node that has since unmounted is correctly refused.
+
+              It stays blue because on a screen whose queue can never fill, this IS the
+              screen's action — not because a demo deserves emphasis.
+
+              NOT a duplicate of Settings → Help & Tutorial, which keeps `Replay Tutorial`
+              as the walkthrough's permanent home. This is an entry point, not a second
+              home, and it carries a third name so that no label in the app addresses two
+              controls.
+            */}
+            <li className="queue-empty-action queue-empty-action-lead">
+              <span className="queue-empty-action-mark" aria-hidden="true">
+                <Compass size={18} strokeWidth={1.75} />
               </span>
+              <div className="queue-empty-action-main">
+                <h3 className="queue-empty-action-title">Guided demo</h3>
+                {/* Associated with the button rather than left as adjacent text: a
+                    screen reader announcing the control otherwise reads three words and
+                    none of the disclosure. It is a DESCRIPTION, not a label — the
+                    accessible name stays "Launch Guided Demo". */}
+                <p className="queue-empty-hint" id="queue-empty-launch-hint">
+                  {LABELS.launchGuidedDemoBody}
+                </p>
+              </div>
+              <div className="queue-empty-action-cta">
+                <button
+                  ref={launchRef}
+                  type="button"
+                  className="btn btn-primary queue-empty-cta"
+                  disabled={launchBusy}
+                  aria-describedby="queue-empty-launch-hint"
+                  onClick={() => startTutorial(launchRef.current)}
+                >
+                  {LABELS.actionLaunchGuidedDemo}
+                </button>
+              </div>
+            </li>
+
+            {/*
+              THE SECOND REAL ACTION, and it is second by tone rather than by
+              importance. It used to be a bare secondary button with a one-line
+              caption trailing it in a list; it now gets the same card, the same
+              title-and-description shape and the same cta column as the primary, so
+              the only thing separating the two is the button variant.
+
+              It stays `btn-secondary`: the brief keeps blue for the guided demo, and
+              two blues would put the reader back where the double-CTA note below
+              says they must not be.
+
+              The description is checkable, not promotional. "Never stored" is the
+              route's documented contract — `POST /api/validate/record`: "the body is
+              never written anywhere (no workspace file, no temp file, no record
+              mutation), and nothing about its content is logged". "The same check"
+              is the same docstring's parity claim: it calls the same
+              `validate_official` over the same vendored schema that the
+              per-experiment validation uses.
+            */}
+            <li className="queue-empty-action">
+              <span className="queue-empty-action-mark" aria-hidden="true">
+                <ShieldCheck size={18} strokeWidth={1.75} />
+              </span>
+              <div className="queue-empty-action-main">
+                <h3 className="queue-empty-action-title">Schema validator</h3>
+                <p className="queue-empty-hint">
+                  Check a record file you already have against the official ISAAC schema —
+                  the same deterministic check this app runs on an exported record. It
+                  names every failing path, and the file you check is never stored.
+                </p>
+              </div>
+              <div className="queue-empty-action-cta">
+                <button
+                  type="button"
+                  className="btn btn-secondary queue-empty-cta"
+                  onClick={() => navigate(`${ROUTES.governance}?tab=validator`)}
+                >
+                  Open Validator
+                </button>
+              </div>
             </li>
           </ul>
-        </div>
+        </section>
       );
   }
 
