@@ -1278,6 +1278,49 @@ function evidenceClassLabel(key: string): string {
 }
 
 /**
+ * The schema's top-level property names as words, for the by-section chart.
+ *
+ * PRESENTATION ONLY — nothing renames a schema property. `SchemaSectionCount`
+ * still carries `section` verbatim from the document (`statisticsModel.ts:449`),
+ * the Schema Reference browser still renders these names in the mono face as the
+ * exact tokens they are, and the note beneath the chart already points a reader
+ * there. What is fixed is that Statistics was rendering them in the PROSE face,
+ * under a column called "Section" — so `isaac_record_version`, `record_id`,
+ * `record_type`, `record_domain` and `source_type` appeared as if they were the
+ * words for these groups, and the chart's `sr-only` summary read them aloud that
+ * way to a screen-reader user.
+ *
+ * The set is not closed — it is whatever the vendored schema declares — so an
+ * UNMAPPED PROPERTY FALLS BACK TO ITS OWN NAME rather than to a generated
+ * phrase. `evidenceClassLabel` above may de-snake a key mechanically because its
+ * key set is the backend's own histogram; doing the same here would invent
+ * English for whatever a future schema revision adds, and a name this build has
+ * never seen is exactly the thing not to guess at.
+ */
+const SCHEMA_SECTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  isaac_record_version: 'ISAAC Record Version',
+  record_id: 'Record Identifier',
+  record_type: 'Record Type',
+  record_domain: 'Record Domain',
+  source_type: 'Source Type',
+  timestamps: 'Timestamps',
+  sample: 'Sample',
+  system: 'System',
+  context: 'Context',
+  measurement: 'Measurement',
+  links: 'Links',
+  assets: 'Assets',
+  descriptors: 'Descriptors',
+  computation: 'Computation',
+  attribution: 'Attribution',
+  tags: 'Tags',
+});
+
+function schemaSectionLabel(section: string): string {
+  return SCHEMA_SECTION_LABELS[section] ?? section;
+}
+
+/**
  * FORM CHOICE — a figure list, and DELIBERATELY NOT A CHART.
  *
  * Every chart form for these five numbers would state something false.
@@ -1448,7 +1491,7 @@ function SchemaBody({ body }: { body: ApiSchemaResponse }) {
           caption="Fields by top-level section, in the schema's own declaration order"
           rows={facts.bySection.map((row) => ({
             key: row.section,
-            label: row.section,
+            label: schemaSectionLabel(row.section),
             value: row.count,
           }))}
           unit="fields"
@@ -1970,8 +2013,23 @@ function MutationMethodology() {
         The run also checks itself. The rows under Checks on the Verification Run Itself are counts
         of trials that tripped one of those checks; the backend calls them oracles, a word that
         means nothing on a product screen, so each row is named for what it counts instead. Whether
-        the source records were in fact left unchanged is one of those checks, and it is reported
-        as a measurement in Verification Safeguards rather than promised in advance.
+        the source records in this process were in fact left unmodified is one of those checks, and
+        it is reported as a measurement in Verification Safeguards rather than promised in advance.
+      </p>
+      {/* THE SCOPE OF THAT MEASUREMENT, STATED RATHER THAN ASSUMED. The
+          safeguard it points at is "Source Records Unchanged in Memory", and the
+          sentence has to carry the same limit the label now does: the backend
+          compares each record object with itself before and after its trials and
+          checks that the mutated clone shares no container with it. Nothing
+          re-reads a stored copy afterwards — on the datastore path the
+          connection is closed before the first record is even handed to the
+          sweep. Reported here because a reader who is told a check exists, and
+          not what it compares, supplies the stronger reading themselves. */}
+      <p className="stats-note">
+        That check compares the records as this process held them, before and after each trial. It
+        is not a re-read of stored records, and nothing on this page establishes one. What is
+        separately measured about writing is in the same panel: the transaction was read-only, and
+        the counts of statements that would have changed data or structure are printed there.
       </p>
     </TechnicalDetails>
   );

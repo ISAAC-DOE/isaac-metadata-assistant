@@ -515,9 +515,59 @@ export interface VerificationChartRow {
  * back.
  */
 
-/** Histogram cells as chart rows, in the order the backend sorted them. */
-export function histogramRows(histogram: VerificationHistogram): VerificationChartRow[] {
-  return histogram.cells.map((cell) => ({ key: cell.key, label: cell.key, value: cell.count }));
+/**
+ * Plain-English names for the format shadow's error codes.
+ *
+ * PRESENTATION ONLY. The wire vocabulary is unchanged and is not renamed
+ * anywhere: `apps/api/isaac_api/format_shadow.py` still emits
+ * `ADDITIONAL_PROPERTIES`, `REQUIRED_MISSING` and the rest, and
+ * `SHADOW_ERROR_CODES` there is still the closed tuple a consumer switches on.
+ * This table exists because those codes were reaching the screen RAW — as the
+ * visible bar label, as the `<th scope="row">` of the data table, and inside the
+ * `sr-only` summary sentence a screen-reader user hears, in the prose face,
+ * under a caption that called them "check name".
+ *
+ * The set is closed and eight members long (`format_shadow.py:407-411`), so a
+ * complete mapping is possible here in a way it is NOT for the sibling
+ * schema-path histogram — those are RFC 6901 pointers into the public schema,
+ * open-ended and genuinely the data, and they are left verbatim.
+ *
+ * AN UNMAPPED CODE FALLS BACK TO ITSELF. If the backend ever adds a member this
+ * build has not seen, the reader gets the raw token rather than a guessed
+ * phrase — the same discipline `corpusDisclosure` applies to an unknown mode.
+ */
+export const SHADOW_ERROR_CODE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  ADDITIONAL_PROPERTIES: 'Property Not Declared in the Schema',
+  CONST_MISMATCH: 'Value Is Not the Required Constant',
+  ENUM_NOT_ALLOWED: 'Value Is Not in the Allowed List',
+  PATTERN_MISMATCH: 'Value Does Not Match the Required Pattern',
+  REQUIRED_MISSING: 'Required Property Is Missing',
+  TYPE_MISMATCH: 'Value Is of the Wrong Type',
+  FORMAT_DATE_TIME: 'Date-Time Not in the Required Format',
+  OTHER: 'Other Format Issue',
+});
+
+export function shadowErrorCodeLabel(code: string): string {
+  return SHADOW_ERROR_CODE_LABELS[code] ?? code;
+}
+
+/**
+ * Histogram cells as chart rows, in the order the backend sorted them.
+ *
+ * `labelFor` is OPT-IN and defaults to the identity, so a histogram whose keys
+ * are genuinely the data (the schema paths) keeps rendering them verbatim while
+ * the closed error-code vocabulary gets plain words. It never reorders, never
+ * merges two keys onto one label, and never drops a cell.
+ */
+export function histogramRows(
+  histogram: VerificationHistogram,
+  labelFor: (key: string) => string = (key) => key,
+): VerificationChartRow[] {
+  return histogram.cells.map((cell) => ({
+    key: cell.key,
+    label: labelFor(cell.key),
+    value: cell.count,
+  }));
 }
 
 /**
@@ -679,13 +729,54 @@ export function oracleTotal(oracles: VerificationOracles): number {
 
 /* ---- safeguards -------------------------------------------------------- */
 
+/**
+ * Plain-English names for the eight safeguard fields.
+ *
+ * EVERY LABEL HERE MUST BE NO STRONGER THAN THE MEASUREMENT BEHIND IT. A
+ * safeguard label is read as a finding, so a label that names a better outcome
+ * than the backend computed is a false statement the state word cannot undo —
+ * "Verified" beside an overclaiming label verifies the overclaim.
+ *
+ * ── `source_records_modified` — CORRECTED, and this note is why ─────────────
+ *
+ * It read **"Source Records Left Unchanged"**, which asserts an outcome about
+ * the stored records. Nothing measures that. `apps/api/isaac_api/verification.py`
+ * computes the field as
+ *
+ *     oracles["source_mutation_failures"] == 0 && sweep.source_objects_mutated == 0
+ *
+ * and BOTH terms are object-level comparisons inside this process:
+ *
+ * - `source_objects_mutated` compares `json.dumps(record, sort_keys=True)` of the
+ *   in-process record dict before and after that record's trials
+ *   (`verification.py::_structural_snapshot`, called at `_sweep`).
+ * - `source_mutation_failures` is the harness's own per-trial equivalent —
+ *   `canonical(record)` before against after, plus an aliasing check that the
+ *   mutated clone shares no container with the record
+ *   (`corpus_mutation.py::run_trial`). The mutation operators act on
+ *   `copy.deepcopy` clones; the source object is the thing held constant.
+ *
+ * There is NO independent post-run re-read and no row-equality sweep. There
+ * could not be one on this path: `db_provider.DatastoreRecordProvider._drain`
+ * opens exactly one connection, fetches the bounded page, and rolls back and
+ * closes it BEFORE the first record is yielded, so by the time the sweep ends no
+ * connection is open and nothing in that module reconnects.
+ *
+ * What IS separately established, and is separately labelled above, is that the
+ * transaction was server-confirmed read-only, that DML and DDL counts were 0,
+ * and that only parameterized bounded reads were issued. Those are the
+ * write-side facts; this row is the in-memory fact, and folding the two together
+ * into one confident sentence is exactly what the old label did.
+ *
+ * The pass/fail logic is UNCHANGED. This is a naming correction only.
+ */
 export const SAFEGUARD_LABELS: Readonly<Record<SafeguardStateKey | SafeguardCountKey, string>> =
   Object.freeze({
     transaction_read_only: 'Read-Only Database Access',
     parameterized_queries_only: 'Parameterized Database Queries',
     dml_statements: 'Statements That Would Change Data',
     ddl_statements: 'Statements That Would Change Structure',
-    source_records_modified: 'Source Records Left Unchanged',
+    source_records_modified: 'Source Records Unchanged in Memory',
     private_values_exposed: 'No Record Values in This Report',
     official_validator_unchanged: 'Official Validator Unchanged',
     export_gating_unchanged: 'Export Gate Unchanged',
@@ -725,8 +816,54 @@ export function safeguardStateLabel(state: SafeguardState): string {
  *
  * `verified` says the check RAN and found nothing, which is what the backend
  * means by it — not "we assume so".
+ *
+ * ONE `verified` SENTENCE IS PER-KEY, for the same reason the label above was
+ * corrected: `source_records_modified` is a before-and-after comparison of the
+ * record objects this process held, and a reader who is told only that "this
+ * check ran" will fill in the stronger reading — that the stored records were
+ * re-read and found identical. They were not, and no code path on this run could
+ * have done so. The sentence therefore states the scope of the comparison rather
+ * than leaving it to be assumed.
  */
 export function safeguardDetail(key: SafeguardStateKey, state: SafeguardState): string {
+  if (state === 'verified' && key === 'source_records_modified') {
+    return (
+      'This check ran: each record object this run held was compared with itself before and ' +
+      'after its trials, and none differed. The comparison is of the copies in memory — no ' +
+      'stored record was re-read afterwards to confirm it.'
+    );
+  }
+  if (state === 'verified' && key === 'export_gating_unchanged') {
+    // THIS ONE IS NOT A RUNTIME OBSERVATION, AND THE PANEL SAYS EVERY SAFEGUARD
+    // "WAS CHECKED", SO THE DIFFERENCE HAS TO BE ON THE SCREEN.
+    //
+    // The backend emits this as a hard-coded literal — `verification.py:1149`
+    // writes `"export_gating_unchanged": "verified"` unconditionally, with no
+    // measurement of any kind behind it. What actually holds it up is that the
+    // verification module imports nothing from `isaac_records.export`, asserted
+    // mechanically by a test. That is a real guarantee and a strong one, but it
+    // is a fact about the CODEBASE established in CI, not a fact about THIS RUN.
+    //
+    // Rendering it as plain "Verified" beside seven safeguards that genuinely
+    // were measured invites the reader to count eight measurements where there
+    // were seven. The state value is left alone — it is the backend's contract
+    // and `ok` must not move — and the sentence carries the distinction instead,
+    // which is the frontend's to fix.
+    return (
+      'Guaranteed by construction rather than measured on this run: the verification code ' +
+      'imports nothing from the export path, so it has no way to reach it. A test asserts ' +
+      'that import absence. Nothing was observed while this run executed.'
+    );
+  }
+  if (state === 'verified' && key === 'official_validator_unchanged') {
+    // Narrower than the label sounds, so say what was actually compared. The
+    // check reads one property — that the loaded validator has no format
+    // checker. It does not compare schema bytes, rule set or version.
+    return (
+      'This check ran and compared one property: the validator this run loaded applies no ' +
+      'format checking. The schema itself was not compared byte for byte.'
+    );
+  }
   if (state === 'verified') return 'This check ran and found nothing to report.';
   if (state === 'unverified') {
     return 'This check did not run, so nothing here states that it holds.';
@@ -1193,8 +1330,9 @@ export const SUPPRESSED_ROW_LABEL = 'Withheld (categories below the disclosure f
  */
 export function histogramRowsWithSuppressed(
   histogram: VerificationHistogram,
+  labelFor?: (key: string) => string,
 ): VerificationChartRow[] {
-  const rows = histogramRows(histogram);
+  const rows = histogramRows(histogram, labelFor);
   if (!histogramWithheldAnything(histogram)) return rows;
   /*
    * NO BAR WHEN THERE IS NO NUMBER, and this is NOT the two-branch disagreement

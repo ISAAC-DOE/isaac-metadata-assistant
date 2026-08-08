@@ -28,7 +28,7 @@ definition — every operation except the liveness check documents a 401.
 | Per-record DB display | **no — owner decision** | no | **yes** | gate **G2**; closed by default pending an explicit visibility decision. |
 | External LLM | **no — authorization** | no | no | no provider client, no key seam. Phase 37. |
 | File upload | no — governance gate | refusal is production-ready | no | `POST /api/uploads` always 403 by design (`routes.py:2882-2913`). |
-| **`VITE_API_KEY` frontend seam** | **should be removed/gated** | dormant **footgun** | **no — app-owned** | `api.ts:102` reads `import.meta.env.VITE_API_KEY`; Vite substitutes it **at build time**, so any value is baked into the shipped JS. Not set today (`Dockerfile:24` passes only `VITE_BASE_PATH`/`VITE_API_BASE`) — but a Phase-20 plan doc describes baking in the same value as `ISAAC_UI_API_KEY`. That is precisely "expose secrets to the frontend". |
+| **`VITE_API_KEY` frontend seam** | **REMOVED 2026-08-08** | n/a — the seam no longer exists | **no — app-owned** | ~~`api.ts:102` reads `import.meta.env.VITE_API_KEY`~~. The reader and the `Authorization: Bearer` attach are **deleted**. Vite substitutes `VITE_*` **at build time**, so any value would have been compiled into the JavaScript served to every visitor — a bearer token published as public JS is not an authentication control. It was never set (`Dockerfile:22` passes only `VITE_BASE_PATH`/`VITE_API_BASE`), but a Phase-20 plan doc described baking in the same value as `ISAAC_UI_API_KEY`, which is precisely "expose secrets to the frontend". `__tests__/api.test.ts` now pins the inverse with the key **planted**: a set `VITE_API_KEY` must produce no `Authorization` header and must not appear anywhere in the request. |
 | Inbound webhooks | no | none exist | no | no inbound integration route, no signature primitive. |
 
 ---
@@ -37,7 +37,7 @@ definition — every operation except the liveness check documents a 401.
 
 Escalating any of these wastes the infrastructure owner's time.
 
-1. **Remove or gate the `VITE_API_KEY` build-time seam** (`api.ts:102`). App design decision.
+1. ~~**Remove or gate the `VITE_API_KEY` build-time seam** (`api.ts:102`).~~ **DONE 2026-08-08** — removed outright rather than gated. The residual consequence is deliberate and is recorded rather than hidden: the backend's `ISAAC_UI_API_KEY` seam still works, so a deployment that sets it will now 401 the browser client, which has no way to authenticate. `ISAAC_UI_API_KEY` is henceforth a control for **non-browser callers**, the only kind that can hold a shared secret without publishing it.
 2. **Every item on the API-key requirements list** (`settingsContent.ts:486-492`) — hashed storage, per-key identity, revocation, expiry, scopes, audit. All backend code. (Blocked on *Krish's* phase approval, not Dean's.)
 3. **A callback route**, if OAuth is ever built. Only the *registration* is Dean's.
 4. **The Connect-an-Agent honesty fix** (§5 A and B). Copy only.

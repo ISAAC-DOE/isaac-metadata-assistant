@@ -57,6 +57,7 @@ import type {
   ApiValidateResult,
   ApiWarningsResponse,
   EvidenceBundle,
+  ExperimentGraphBundle,
   ExportReadinessBundle,
   RecordBundle,
 } from './types';
@@ -93,15 +94,47 @@ export const API_BASE = RAW_BASE.replace(/\/+$/, '');
  */
 export const isHostedBuild = RAW_BASE !== LOCAL_API_BASE;
 
-/**
- * Optional shared-secret for the deployed demo backend. Read lazily per request
- * (not a module constant) so tests can stub the env. Unset locally → no header,
- * matching the auth-disabled local backend.
+/*
+ * THE CLIENT SENDS NO BEARER TOKEN, AND CANNOT BE MADE TO.
+ *
+ * There used to be an `apiKey()` here that read `import.meta.env.VITE_API_KEY`
+ * and attached `Authorization: Bearer <key>` to every request. It is gone, and
+ * the reason is not that it was unused — it is that the mechanism cannot work.
+ *
+ * Vite substitutes `import.meta.env.VITE_*` at BUILD time. The value does not
+ * travel as configuration; it is compiled into the JavaScript bundle that is
+ * served to every visitor. A shared secret in that bundle is not a secret, and
+ * a bearer token that anyone who loads the page can read is not an
+ * authentication control — it is a credential published on a website that
+ * happens to be checked by a server.
+ *
+ * The seam was DORMANT rather than harmless: `Dockerfile:22` builds with only
+ * `VITE_BASE_PATH` and `VITE_API_BASE`, so no key has ever shipped. But a
+ * Phase-20 deployment plan described setting it to the same value as the
+ * server's `ISAAC_UI_API_KEY`, which is exactly the mistake this removal makes
+ * unavailable. Leaving a loaded footgun on the floor because nobody has picked
+ * it up yet is not a security posture.
+ *
+ * WHAT PROTECTS THE HOSTED APP INSTEAD: the Authentik edge in front of
+ * `/krish`, which authenticates before a request reaches this application at
+ * all. That boundary is real, external to the bundle, and not something a
+ * reader of the JavaScript can defeat.
+ *
+ * WHAT THIS COSTS, STATED PLAINLY: the backend's `ISAAC_UI_API_KEY` seam
+ * (`apps/api/isaac_api/auth.py`) still exists and still works. If it is ever
+ * set, this browser client will receive 401s, because it no longer has any way
+ * to authenticate. That asymmetry is deliberate. `ISAAC_UI_API_KEY` is now a
+ * control for NON-BROWSER callers — scripts, probes, other services — which is
+ * the only kind of caller that can hold a shared secret without publishing it.
+ * A browser session that needs authentication needs a session, not a baked
+ * constant, and that is a design decision rather than a missing feature.
+ *
+ * Several tests still plant a `VITE_API_KEY` value on purpose. They are leak
+ * canaries — they assert the value never surfaces in diagnostics, reset
+ * payloads or error states — and they get STRONGER with no consumer, not
+ * weaker. `__tests__/api.test.ts` additionally pins that a planted key produces
+ * no `Authorization` header, so this removal cannot be quietly undone.
  */
-function apiKey(): string | undefined {
-  const key = (import.meta.env.VITE_API_KEY as string | undefined)?.trim();
-  return key ? key : undefined;
-}
 
 /**
  * The exact phrase the backend requires to EXECUTE a reset of the example
@@ -316,7 +349,6 @@ export function getTutorialScope(): string | null {
 }
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
-  const key = apiKey();
   try {
     return await fetch(`${API_BASE}${path}`, {
       ...init,
@@ -326,7 +358,6 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
       signal: init?.signal,
       headers: {
         Accept: 'application/json',
-        ...(key !== undefined ? { Authorization: `Bearer ${key}` } : {}),
         ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(tutorialScope !== null ? { [TUTORIAL_SESSION_HEADER]: tutorialScope } : {}),
         ...init?.headers,
@@ -957,6 +988,29 @@ export const api = {
       sourcePreviews[f] = previews[i];
     });
     return { detail, evidence, artifacts, graph, sourcePreviews, classification };
+  },
+
+  /**
+   * The EXPERIMENT-SCOPED graph bundle — seven EXISTING endpoints, fetched
+   * concurrently and kept as separate values.
+   *
+   * No backend route was added or changed for the experiment graph: every fact
+   * it draws is already served to the record screens. It is fetched lazily (only
+   * when the Graph view is opened) and re-fetched per mount rather than cached,
+   * which is what makes a stale experiment graph structurally impossible.
+   */
+  async getExperimentGraphBundle(id: string): Promise<ExperimentGraphBundle> {
+    const [detail, groups, evidence, artifacts, validate, warnings, classification] =
+      await Promise.all([
+        this.getExperiment(id),
+        this.getDraftGroups(id),
+        this.getEvidence(id),
+        this.getArtifacts(id),
+        this.validate(id),
+        this.getWarnings(id),
+        this.getEvidenceClassification(id),
+      ]);
+    return { detail, groups, evidence, artifacts, validate, warnings, classification };
   },
 } as const;
 

@@ -202,3 +202,96 @@ user data.
 - **Any subsequent migration.** `0002` and later need their own packet.
 - **Backup/restore of the wider database.** Out of scope for this application, and
   `records` is untouched regardless.
+
+---
+
+# Re-verification, 2026-08-08 — and why this is still unapplied
+
+The standing authorization is conditional: apply the first hosted migration **only if the exact
+current committed migration still matches the reviewed packet**. It was re-checked today.
+
+## The migration has not drifted
+
+`git log --follow -- apps/api/isaac_api/migrations/0001_experiments.sql` returns **one commit**,
+`d4c9e08` — the commit that introduced it. The packet above was written later, in `43837b9`. So the
+file has never changed since it was reviewed, and no post-review difference exists.
+
+Checked element by element against §1 rather than by eye. All seventeen hold:
+
+| Claim in §1 | Result |
+|---|---|
+| `CREATE TABLE IF NOT EXISTS isaac_schema_migrations` | ✅ |
+| `CREATE TABLE IF NOT EXISTS isaac_experiments` | ✅ |
+| `CREATE INDEX IF NOT EXISTS isaac_experiments_created_idx` | ✅ |
+| index is on `(created_utc)` | ✅ |
+| `version text PRIMARY KEY` | ✅ |
+| `applied_utc timestamptz NOT NULL DEFAULT now()` | ✅ |
+| `experiment_id text PRIMARY KEY` | ✅ |
+| CHECK constraint named `isaac_experiments_id_shape` | ✅ |
+| CHECK pattern is `'^[0-9A-Z]{26}$'` | ✅ |
+| `state jsonb NOT NULL` | ✅ |
+| `created_utc timestamptz NOT NULL DEFAULT now()` | ✅ |
+| `updated_utc timestamptz NOT NULL DEFAULT now()` | ✅ |
+| the word `records` appears **nowhere** in the statement body | ✅ |
+| no `DROP` | ✅ |
+| no `TRUNCATE` | ✅ |
+| no `ALTER` | ✅ |
+| statements separated by a line containing only `--;` (3 statements) | ✅ |
+
+The forward file's sha256 is `69f924c72d31d3f1fbb9cf0f21ea197f67bdd1d1c79b6fd44c1228e72dcfa311` and
+the rollback's is `da20f5c177dca878595e1d97e80db84518df93c0cd6dc75c71f1029952915fa5`. Quote these in
+any future re-check rather than re-reading the file by eye.
+
+**One honest note about §7 of the packet.** The packet describes the migration in structured prose —
+a column-by-column table — and does **not** quote the forward SQL verbatim; its single fenced `sql`
+block is the rollback. So "the migration matches the packet" means *every element the packet
+describes is present and correct*, verified mechanically, rather than *a byte comparison against a
+quoted original*. That is a weaker form of match than the phrase suggests, and it is worth saying so
+rather than letting the checkmarks imply more.
+
+## Why it is still unapplied: there is no path from here to that database
+
+This is not caution and it is not an oversight. There is no mechanism.
+
+1. **The operator CLI is not in the container image.** `Dockerfile:42` copies exactly one file out of
+   `scripts/`: `COPY scripts/check_graphify_freshness.py`. `scripts/db_migrate.py` is not in the
+   allowlist, so it does not exist inside the running pod.
+2. **The application never migrates itself.** Nothing in `apps/api/isaac_api/app.py` calls
+   `db_migrate.migrate`, and §5 of this packet says that is deliberate: *"A pod that silently
+   migrated its own production database on every rollout is precisely what this design excludes."*
+3. **The agent may not reach the database from outside the cluster.** The project rule at
+   `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md:48-52` blocks any connection
+   originating from a laptop or from CI, and blocks requesting a kubeconfig, a port-forward, or a
+   Secret. That rule is unaffected by the 2026-08-07 scope lift, which authorizes implementation and
+   local/CI testing and explicitly does **not** authorize applying a migration to the hosted
+   environment.
+
+Points 1 and 2 are properties of this repository; point 3 is a rule about who may act. Together they
+mean **applying `0001_experiments` is an operator action, and can only be one.**
+
+## What CI has proven, and what it has not
+
+`.github/workflows/ci.yml` → `postgres-migration` runs this migration against a `postgres:18` service
+container on every PR, and asserts the `records` table is byte-identical across the run. That proves
+the SQL is valid, idempotent, transactional, and harmless to `records` **on a clean container**.
+
+It does **not** prove anything about the hosted database with its real data — different server
+version, different extensions, different roles, different existing objects. Do not read a green
+`postgres-migration` check as a hosted rehearsal.
+
+## Consequence for Create Experiment, stated plainly
+
+Until the migration is applied, `isaac_experiments` does not exist in the hosted database. The app
+degrades honestly rather than crashing — `experiment_repository.storage_status` reports
+`state: unavailable` and `durable: false` once a write has actually been attempted and failed, and
+the UI derives its durability sentence from that — but **a created experiment is not durable on the
+hosted deployment today.** Any demo that claims durability before the migration is applied is
+claiming something untrue.
+
+## The exact operator sequence
+
+Unchanged from §6–§8 above. It must be run by someone who already holds a SLAC cluster context, from
+a shell where the five `PG*` variables point at the database (see `docs/postgres-test-db-guide.md`).
+Run the §6 prechecks, then `python scripts/db_migrate.py --apply`, then every §8 postcheck — the
+record count in postcheck 1 must equal precheck 3 exactly, in either direction, or the migration has
+failed its own contract.

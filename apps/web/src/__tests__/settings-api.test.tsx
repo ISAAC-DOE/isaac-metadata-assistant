@@ -315,6 +315,11 @@ describe('Settings → API Access — an honest unavailable state', () => {
       'Current Access Model',
       'What an API Key Would Enable',
       'External Agent Access',
+      // Added when the client-side bearer seam was removed. Every row above says
+      // what the DEPLOYMENT may require; none said what this page actually
+      // sends, and the answer — nothing — is a decision worth stating rather
+      // than an absence a reader has to infer.
+      'What This Interface Sends',
       'Hosted Authentication Boundary',
     ]);
     const text = norm(apiAccessPanel().textContent ?? '');

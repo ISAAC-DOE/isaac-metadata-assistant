@@ -24,6 +24,7 @@ import {
   reportFreshness,
   safeguardCountRows,
   safeguardRows,
+  shadowErrorCodeLabel,
   SUPPRESSED_ROW_KEY,
   suppressionDisclosure,
   validatorComparison,
@@ -712,11 +713,18 @@ function VerificationReportBody({
 
       <div className="stats-block stats-group">
         <h3>Where the Stricter Checks Disagreed</h3>
+        {/* `shadowErrorCodeLabel` — the codes were reaching the bar label, the
+            table row header and the `sr-only` summary raw
+            (`ADDITIONAL_PROPERTIES`, `REQUIRED_MISSING`, …) under a caption that
+            called them a "check name". The wire vocabulary is untouched; only
+            the presentation is mapped, and an unmapped code still renders as
+            itself. */}
         <IssueDistribution
           caption="Format issues by check name"
           categoryHeader="Check"
           histogram={report.format_shadow.failures_by_error_code}
           emptyTitle="No Format Issues by Check Name"
+          labelFor={shadowErrorCodeLabel}
         />
         <IssueDistribution
           caption="Format issues by position in the ISAAC schema"
@@ -1004,12 +1012,19 @@ function IssueDistribution({
   histogram,
   emptyTitle,
   note,
+  labelFor,
 }: {
   caption: string;
   categoryHeader: string;
   histogram: VerificationHistogram;
   emptyTitle: string;
   note?: string;
+  /**
+   * Presentation mapping for the category keys, when a closed vocabulary makes
+   * one possible. Omitted for the schema-path breakdown, whose keys are RFC 6901
+   * pointers into the public schema and are genuinely the data.
+   */
+  labelFor?: (key: string) => string;
 }) {
   const suppression = suppressionDisclosure(histogram);
 
@@ -1022,7 +1037,7 @@ function IssueDistribution({
     );
   }
 
-  const rows = histogramRowsWithSuppressed(histogram);
+  const rows = histogramRowsWithSuppressed(histogram, labelFor);
 
   /*
    * A THIRD STATE, distinct from both of the others: something WAS withheld, and
@@ -1116,12 +1131,20 @@ function MutationPanel({ report }: { report: VerificationReport }) {
           the harness is built to do) and the OUTCOME is handed to the data,
           which is measured and already on screen. `not_applicable` and
           `unverified` reach the reader intact instead of being overruled by a
-          sentence written in advance. */}
+          sentence written in advance.
+
+          THE LAST SENTENCE ALSO NAMES THE SCOPE, since the safeguard it points
+          at was renamed to "Source Records Unchanged in Memory": the check is a
+          before-and-after comparison of the record objects this process held,
+          not a re-read of anything stored. Pointing at a measurement while
+          leaving its scope to be assumed is how the stronger reading got back
+          in the first time. */}
       <p className="stats-note">
         Each trial works on a copy of one record, makes one small deliberate change to it, and
         checks that the validator reacts the way that change was designed to make it react.
-        Whether the source records were in fact left unchanged is one of the checks the run makes
-        on itself, and it is reported below rather than promised here.
+        Whether the source records in this process were in fact left unmodified is one of the
+        checks the run makes on itself, and it is reported below rather than promised here — as a
+        comparison of the records as this process held them, not as a re-read of anything stored.
       </p>
 
       <MutationAccounting identities={identities} />

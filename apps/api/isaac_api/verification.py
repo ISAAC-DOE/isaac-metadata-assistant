@@ -105,12 +105,25 @@ __all__ = [
 #:    ``apps/web``, which renders ``verification_mode`` VERBATIM as a disclosure
 #:    and switches on nothing; its contract literal was updated in the same
 #:    change.
-#: 3. No build carrying the old value was ever released. CI is billing-blocked,
-#:    so no image has published and nothing has merged since the old name
-#:    existed — there is no deployed reader to break.
+#: 3. No published build can pair a new server value with an old client
+#:    literal. This point has been RE-GROUNDED, and the old ground is recorded
+#:    rather than deleted. It used to read: "No build carrying the old value was
+#:    ever released. CI is billing-blocked, so no image has published and
+#:    nothing has merged since the old name existed — there is no deployed
+#:    reader to break." That EXPIRED on 2026-08-07, when the org-wide billing
+#:    block ended: Actions execute again, this work has merged, and the
+#:    publish-blocking premise no longer holds (no rollout has been OBSERVED
+#:    from a development environment, which is a weaker statement than "none
+#:    happened" and must not be used as one). The judgement survives on a
+#:    fact that does not expire the same
+#:    way — the sole consumer, ``apps/web``, is built into the SAME image as
+#:    this module and ships with it, so server and client literal move
+#:    together and no deployment can hold a stale reader. An independently
+#:    deployed or external consumer would break that argument; none exists.
 #:
-#: If any of those three stops holding, bump to 3. In particular, point 3 is a
-#: fact about a moment in time and will expire.
+#: If any of those three stops holding, bump to 3. Point 3 in particular is
+#: contingent: it lasts exactly as long as the only consumer ships in the same
+#: image as this module.
 #:
 #: BUMPED TO 3 by the single-category withholding in :func:`_histogram`. What
 #: changed is one value TYPE and nothing else: ``suppressed_total`` is now
@@ -527,12 +540,29 @@ def _leak_scan(
     served rather than what the code intends to serve.
 
     **It requires the corpus, so it is only available in the public mode.** In
-    the private mode the records are streamed and discarded one at a time and are
-    never all in memory at once — retaining them to scan against would defeat the
-    property the streaming exists to provide. :func:`_structural_string_audit`
-    is what covers the private mode, and it is strictly stronger in one respect:
-    it does not need the corpus, because it accounts for every served string
-    from public information alone.
+    the private mode the records are consumed and dropped as the sweep proceeds,
+    and nothing is retained past it — so by the time this payload is assembled
+    there is no corpus left to scan against.
+
+    State that precisely, because an earlier revision of this docstring said the
+    private records "are never all in memory at once", and that was FALSE. It is
+    recorded rather than silently replaced.
+    ``DatastoreRecordProvider._drain`` accumulates the ENTIRE bounded page into
+    one list and returns it whole. What is true: the page is BOUNDED (by
+    ``MAX_RECORDS_CEILING``, and identical to what the driver had already
+    buffered client-side anyway); its rows are RELEASED PROGRESSIVELY as they are
+    consumed; exactly one *parsed record* exists at a time; and nothing survives
+    the sweep. The guarantee is non-retention, not an inability to hold the rows.
+
+    And the skip is a DESIGN DECISION, not a physical impossibility:
+    :func:`run_verification` sets ``records = None`` for this mode, so this scan
+    has nothing to run against. The corpus *could* be retained to make it
+    runnable — it deliberately is not, because retaining it would defeat the
+    non-retention boundary, which is worth more than this scan.
+
+    :func:`_structural_string_audit` is what covers the private mode, and it is
+    strictly stronger in one respect: it does not need the corpus, because it
+    accounts for every served string from public information alone.
 
     ``limitations`` is blanked before scanning. Those strings are authored in
     this file, are identical on every run, and provably carry nothing
@@ -1029,8 +1059,16 @@ def run_verification(
         records: Sequence[Mapping[str, Any]] | None = load_public_corpus(root)
         stream: Iterable[Mapping[str, Any]] = iter(records)
     else:
-        # Private records: streamed and discarded. Never retained, so never
-        # available to scan against afterwards.
+        # Private records: consumed and dropped as the sweep proceeds, and not
+        # retained past it — so by report-assembly time there is no corpus.
+        #
+        # `records = None` is a DESIGN DECISION, not a physical impossibility.
+        # It is what makes `_leak_scan` unavailable below. The corpus could be
+        # retained to make that scan runnable; it deliberately is not, because
+        # the non-retention boundary is worth more than the scan. Note also that
+        # the raw page IS held whole while the sweep runs (see
+        # `DatastoreRecordProvider._drain`) — the property relied on here is
+        # non-retention afterwards, never "never all in memory at once".
         records = None
         stream = provider.records()
 

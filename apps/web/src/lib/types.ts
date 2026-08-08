@@ -1362,6 +1362,28 @@ export interface EvidenceBundle {
   classification: ApiEvidenceClassification;
 }
 
+/**
+ * Everything the EXPERIMENT-SCOPED graph needs, fetched concurrently from SEVEN
+ * endpoints that all already existed. No route was added or changed for this
+ * surface — the graph is a projection of data the record screens already hold,
+ * assembled client-side and re-derived per render so it can never be stale.
+ *
+ * The seven are the union of `RecordBundle` and `EvidenceBundle` minus what the
+ * graph does not read: the memory-graph status (a different plane entirely),
+ * the pending list (the workflow already reports what is blocking), the audit
+ * (post-export coverage, reported on its own screen) and the cited-source
+ * previews (file CONTENT, which the graph links to rather than embeds).
+ */
+export interface ExperimentGraphBundle {
+  detail: ApiExperimentDetail;
+  groups: ApiDraftGroup[];
+  evidence: ApiEvidenceEntry[];
+  artifacts: ApiArtifactsResponse;
+  validate: ApiValidateResult;
+  warnings: ApiWarningsResponse;
+  classification: ApiEvidenceClassification;
+}
+
 // --- P36.4 Settings: Help / About + API Documentation --------------------
 
 // GET /api/about — non-sensitive app/provenance metadata (apps/api/isaac_api/
