@@ -7,7 +7,8 @@ name: PR Docker Smoke
 # with respect to release infrastructure:
 #   * triggers ONLY on pull_request -> main (never push, never tags, never
 #     workflow_dispatch), so it can NEVER overlap build-push.yaml, whose triggers
-#     are push:main + v* tags;
+#     is a workflow_run ordered after CI (it was push:main + v* tags until
+#     2026-08-08; see docs/release-gating.md);
 #   * permissions are contents:read ONLY — no packages:write, no id-token:, no
 #     contents:write, so it cannot push an image, log in to GHCR, mint a tag, or
 #     create a release;
