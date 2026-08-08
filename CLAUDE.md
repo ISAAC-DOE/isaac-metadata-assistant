@@ -271,8 +271,18 @@ Do not use Graphify for:
 architecture/codebase questions." That instruction is WITHDRAWN — it presumed a benefit that a
 controlled benchmark did not find.** Evidence:
 [`docs/evidence/graphify-benchmark-results.md`](docs/evidence/graphify-benchmark-results.md)
-(methodology and decision rules pre-registered before any run:
+(methodology and decision rules:
 [`graphify-benchmark-methodology.md`](docs/evidence/graphify-benchmark-methodology.md)).
+
+**Read the pre-registration claim precisely.** The methodology was **written** before any arm ran —
+that ordering is **asserted by the author, not witnessed by git**: all four artifacts first appear
+in one commit, `35c4cbb`, so no commit has ever held the methodology without the results. Do not
+repeat the stronger phrasing "written *and committed* before any arm ran"; it was in an earlier
+revision and is withdrawn. What a reader *can* check mechanically, and what does hold: **no decision
+rule or category label changed after results existed** — §5.1 and §5.3–§5.4 are byte-identical
+between `35c4cbb` and HEAD. Note also that the results document now records **five tasks where the
+§5.3 rules were not applied purely mechanically** (T8, T5, T4, T2, T7), with the direction each cuts;
+no label was changed.
 
 32 runs, 8 frozen tasks, two arms, fresh index built at the exact commit under test. Median tool
 calls +5.7% and total tokens +4.2% **against** Graphify; correctness tied in 7 of 8 categories.
@@ -287,7 +297,7 @@ number is not a kindness to the tool; it is the methodology applied consistently
 
 | Route | Rule |
 |---|---|
-| **First choice** | *(none)* — no category showed a gain surviving its own error bars. |
+| **First choice** | *(none)* — no category showed a gain distinguishable from run-to-run variance. **No confidence interval or significance test was computed anywhere**; at 2 runs per arm per task none would be meaningful, and none is claimed. Do not write "survives its own error bars" — there were no error bars. |
 | **Optional** | Orienting in unfamiliar **documentation**; frontend/TypeScript neighbourhood discovery. Treat output as a pointer to a *document*, then verify in source. |
 | **Do NOT use** | Exhaustive/exact-string inventories (**measured HARMFUL**: +26% effort, +19% tokens, no accuracy gain — use `rg`); locating **backend Python**; import/dependency questions; runtime or truth-path verification; disambiguating similarly-named concepts. |
 
@@ -811,6 +821,25 @@ so no application route reaches it.
 **G3 remains OPEN**, narrowed from a live exposure to a question: all five *were* served in
 `v0.0.32`, and only Dean can say whether they were within his intent. Do not restore any of them
 without his answer, and do not repeat "aggregate output is authorized" without this qualification.
+
+**The authorized private verification mode HAS RUN (2026-08-08), verdict
+`PRIVATE_30_VERIFICATION_PASS`.** Terminology first, because it has been got wrong: this is the
+**authorized private verification mode** — a bounded diagnostic/verification path over the
+authorized 30-record production-derived corpus that returns only sanitized aggregate results. It
+is not a "privacy mode" and not a user-facing toggle. It was unreachable until `e710f4a` gave the
+verification route a `?mode=` parameter; it then executed **twice** on the deployed application.
+Reported: 30 records read, official validation **30 passing / 0 failing**, **0** unexpected
+mutation outcomes over 9,136 applicable trials, **0** oracle failures, `dml_statements: 0` and
+`ddl_statements: 0`. **The limits are as load-bearing as the verdict and must travel with it:**
+the figures are **operator-relayed testimony, not a captured artifact** (no response body exists
+in this repository, by design); only *some* of the safety conditions were measured per-run, and
+that condition list is a **reconstruction written ~7 hours after the run**, not pre-registered
+criteria; **no database row was re-read and compared** after the sweep (the connection closes
+first); and the corpus leak scan **did not run** in this mode — a corpus-free structural audit
+stood in, and that skip is a *design decision* (the corpus is not retained past the sweep), not
+an impossibility. **No image build or rollout was observed from this environment**, so nothing
+about which image `/krish` serves is verified here. Evidence, with every qualification attached:
+[`docs/evidence/private-30-verification-2026-08-08.md`](docs/evidence/private-30-verification-2026-08-08.md).
 
 **The Authentik header contract has been OBSERVED, and the probe that observed it is GONE
 (2026-08-02).** A temporary endpoint `POST {base}/api/runtime/identity/probe` shipped in `v0.0.42`

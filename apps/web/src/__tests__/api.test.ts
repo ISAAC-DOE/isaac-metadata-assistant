@@ -156,12 +156,24 @@ describe('bearer auth header', () => {
     return seen;
   }
 
-  it('attaches Authorization: Bearer when VITE_API_KEY is set', async () => {
-    vi.stubEnv('VITE_API_KEY', 'demo-secret');
+  // The inverted form of the test that used to live here. It asserted that a set
+  // VITE_API_KEY produced `Authorization: Bearer <key>` — i.e. it pinned the
+  // footgun in place. A `VITE_*` value is substituted by Vite at BUILD time and
+  // compiled into the bundle served to every visitor, so that header was a
+  // shared secret published as public JavaScript.
+  //
+  // This test now pins the opposite, and does it with the key PLANTED rather
+  // than absent: absence would pass just as well against a client that still
+  // read the variable, so only the planted form can detect a reintroduction.
+  it('sends no Authorization header even when VITE_API_KEY is set', async () => {
+    vi.stubEnv('VITE_API_KEY', 'planted-secret-that-must-never-be-sent');
     const seen = captureFetch();
     await api.health();
     const headers = seen[0].headers as Record<string, string>;
-    expect(headers.Authorization).toBe('Bearer demo-secret');
+    expect(headers.Authorization).toBeUndefined();
+    // Not merely absent from `Authorization` — absent from the request entirely,
+    // so a future rename of the header cannot smuggle it back.
+    expect(JSON.stringify(seen[0])).not.toContain('planted-secret-that-must-never-be-sent');
   });
 
   it('sends no Authorization header when VITE_API_KEY is unset', async () => {

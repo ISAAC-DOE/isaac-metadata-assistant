@@ -71,9 +71,14 @@ portal. Consequences:
 > method here confers no authorization: `attribution.contributors[].orcid` is scientific-credit
 > metadata and must never be used as an authorization principal.
 
-- `ISAAC_UI_API_KEY` / `VITE_API_KEY` are unset in this deployment; the
-  bearer-key seam still exists in code for other environments but is redundant
-  behind SSO.
+- `ISAAC_UI_API_KEY` is unset in this deployment and the bearer-key seam still
+  exists in the BACKEND for other environments, though it is redundant behind
+  SSO. **`VITE_API_KEY` no longer exists in the frontend at all** (removed
+  2026-08-08): a `VITE_*` value is compiled into the bundle served to every
+  visitor, so it could never have been a secret. Consequence worth knowing
+  before you set the server key: the browser client sends no credential, so a
+  deployment that sets `ISAAC_UI_API_KEY` will 401 the UI. It is now a control
+  for non-browser callers.
 - You need an account in the researcher group to see the deployed app — ask
   the ISAAC team if you don't have one.
 - Scripted access (curl) to the deployed URL won't work without a browser
