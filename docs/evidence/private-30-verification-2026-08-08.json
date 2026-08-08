@@ -40,7 +40,6 @@
   },
 
   "transaction_read_only": "verified",
-  "parameterized_queries_only": "verified",
   "dml_statements": 0,
   "ddl_statements": 0,
   "source_records_modified": "verified",

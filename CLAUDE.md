@@ -279,6 +279,12 @@ calls +5.7% and total tokens +4.2% **against** Graphify; correctness tied in 7 o
 Across 16 Graphify-arm runs the agents' own `graphify_helped` rating was **never "yes"** (13
 "partly", 3 "no"), and every answer they found was found with `rg`.
 
+*Wall-clock also ran against Graphify (median 154.9 s → 218.4 s) but is **deliberately excluded
+from every verdict**, and from the figures above, because run 1 launched 16 agents concurrently
+and the measurements are contaminated by CPU contention — one agent detected the contention
+itself. The quoted figures are the ones contention cannot move. Omitting the larger unfavourable
+number is not a kindness to the tool; it is the methodology applied consistently.*
+
 | Route | Rule |
 |---|---|
 | **First choice** | *(none)* — no category showed a gain surviving its own error bars. |

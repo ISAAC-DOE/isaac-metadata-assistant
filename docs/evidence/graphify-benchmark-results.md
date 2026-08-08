@@ -30,8 +30,20 @@ Token cost is level to within 0.5%. Nothing here is a material efficiency gain.
 own self-assessment `graphify_helped` was never once "yes"** — 13 × "partly", 3 × "no". In every
 run where Arm B reached the answer, its own notes credit `rg`/`grep`, not the graph.
 
-Correctness: **7 ties and 1 consistent Arm B advantage** (task T3). Graphify never reduced
-correctness, so it passes the §5.1 gate — but it was not demonstrated to raise it either.
+Correctness after both runs: **7 ties and 1 consistent Arm B advantage** (task T3).
+
+**One correction, because an earlier draft of this document overstated it.** That draft said
+"Graphify never reduced correctness". That is contradicted by data shipped in this same
+package: on T5 run 1, Arm B named the wrong "unprotectable shape" and is recorded as
+`possible_wrong_answer` in `graphify-run-results.json`, with the run-2 entry stating verbatim
+that "run1 ArmB got this WRONG". Arm A was correct on that item in **both** runs.
+
+The accurate statement is narrower: **Arm B produced one wrong answer that Arm A did not, and
+Arm A produced one wrong answer that Arm B did not** (T3's missed `export.py:23`, missed in
+both Arm A runs). Arm B's T5 miss did not repeat in run 2 and is best read as within-arm
+variance — the same reading applied to Arm A's T6 run-1 errors, which also did not repeat.
+Under the §5.1 gate Graphify still passes, because no category shows a *sustained* correctness
+decline. It was not demonstrated to raise correctness either.
 
 ---
 
@@ -63,13 +75,20 @@ distributions **do not overlap**, in either direction:
 
 Every Arm B run cost more than every Arm A run — +26% tool calls, +19% tokens — for **equal
 correctness**. That satisfies the pre-registered `GRAPHIFY_HARMFUL` condition ("effort increases
-without a compensating quality gain") and, unlike the four categories below, it does not rest on a
+without a compensating quality gain") and, unlike the three categories below, it does not rest on a
 single divergent run.
 
 This is the result the negative control existed to produce. It is also the only category where
-both Arm B agents rated Graphify **"no"** rather than "partly", and the only one where an Arm B
-agent lowered its own confidence to *medium*. The mechanism is in §3: the graph answered a
-completeness question with a **documentation table that omits ~12 of the required variables**.
+an Arm B agent lowered its own confidence to *medium*. The mechanism is in §3: the graph
+answered a completeness question with a **documentation table that omits ~12 of the required
+variables**.
+
+*(An earlier draft claimed this was "the only category where both Arm B agents rated Graphify
+'no'". That is wrong and the raw data in this package contradicts it: T6's ratings were
+"partly" then "no". The three "no" ratings across the whole benchmark fall in **three
+different** tasks — T4, T5, T6 — one each. No category has two. The error made the
+negative-control finding look stronger than it is; the finding stands on the non-overlapping
+effort figures above, which do not depend on it.)*
 
 Three categories land on `INSUFFICIENT_EVIDENCE` because their effort difference rests on a
 **single divergent run** — exactly the condition §6 of the pre-registration says must be reported
@@ -163,7 +182,7 @@ this repository, not a typical-day estimate.
 
 - **Wall-clock is contaminated and was excluded from every verdict.** Run 1 launched 16 agents
   concurrently; an Arm B agent independently detected the contention (found a competing process in
-  `ps aux`) and honestly reported its measured 165 s rather than "correcting" it. Run 2 used
+  `ps aux`) and honestly reported the elevated time it measured rather than "correcting" it. Run 2 used
   8-agent waves and times dropped sharply (T1 Arm B: 186 s → 89 s) — confirming the effect. Tool
   calls, files opened, tokens and dead ends are unaffected by CPU contention and carry the verdicts.
 - **Agent variance exceeds the tool effect** (§2). This is the dominant limitation. Two runs per
@@ -198,7 +217,7 @@ from the controlled results above, per §7 of the methodology):
 
 **Claimed but not demonstrated:**
 - **No commit, plan document, or report in this repository's history cites a Graphify query as the
-  means by which something was discovered.** ~45 Graphify-related commits are maintenance and
+  means by which something was discovered.** 52 Graphify-related commits (measured: `git log --all -i --grep=graphify`) are maintenance and
   infrastructure. `docs/query-demo.md` and `docs/query-cookbook.md` contain worked transcripts, but
   they read as illustrative documentation, not "we ran this and learned something we didn't know."
 - The long-standing "dangling/collapsed semantic edges from AST/semantic ID mismatch" caveat in

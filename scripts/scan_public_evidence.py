@@ -37,7 +37,6 @@ ALLOWED_KEYS: frozenset[str] = frozenset({
     "transaction_read_only", "dml_statements", "ddl_statements",
     "source_records_modified", "private_values_exposed",
     "official_validator_unchanged", "export_gating_unchanged",
-    "parameterized_queries_only",
     "schema_version",
     "approximate_duration_seconds",
     "deterministic_rerun",
@@ -57,6 +56,13 @@ DELIBERATELY_EXCLUDED = (
     "cache_age_seconds",    # internal operational detail
     "verification_mode",    # internal mode token; corpus_type says it in prose
     "report_format_version",  # internal contract version
+    # Served by the endpoint as an eighth safeguard, and NOT on the approved
+    # list, which enumerates seven. It shipped in the first draft of the
+    # artifact and an independent review caught it before the PR. Removed here
+    # rather than argued for: the allowlist must EQUAL the approval, because
+    # "it was in the payload" is exactly the reasoning that put five
+    # unapproved aggregates into v0.0.32.
+    "parameterized_queries_only",
 )
 
 # --------------------------------------------------------------------------

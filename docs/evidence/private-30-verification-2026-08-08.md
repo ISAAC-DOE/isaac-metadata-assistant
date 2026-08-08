@@ -61,22 +61,36 @@ That is a fact about this corpus, not a property of the mechanism. The suppressi
 machinery (minimum cell size, plus an absorption step that prevents identifying a withheld
 category by elimination) was armed throughout and simply had no input.
 
-## 3. Safeguards — all measured, none assumed
+## 3. Safeguards — six measured at runtime, one asserted
 
-| Safeguard | Result |
-|---|---|
-| Transaction read-only | **verified** |
-| Parameterized queries only | **verified** |
-| DML statements | **0** |
-| DDL statements | **0** |
-| Source records modified | **verified** (none were) |
-| Private values exposed | **verified** (none were) |
-| Official validator unchanged | **verified** |
-| Export gating unchanged | **verified** |
+| Safeguard | Result | Measured at runtime? |
+|---|---|---|
+| Transaction read-only | **verified** | yes — declared twice, then re-read back from the server |
+| DML statements | **0** | yes — counted |
+| DDL statements | **0** | yes — counted |
+| Source records modified | **verified** (none were) | yes — independent structural snapshot before and after each record |
+| Private values exposed | **verified** (none were) | yes — scan of the assembled payload |
+| Official validator unchanged | **verified** | yes — runtime probe of the loaded validator |
+| Export gating unchanged | **verified** | **no — see below** |
 
-`verified` is a measurement, not an assertion. Read-only status was **declared twice and
-then re-read back from the server**, and the source-record check compares an independent
-structural snapshot taken before and after each record is processed.
+**One row is asserted, not measured, and saying so is the point of this table.**
+`export_gating_unchanged` is a fixed literal in the report builder
+(`apps/api/isaac_api/verification.py:1149`). Its backing is real but static: this module
+imports nothing from the export path and writes nothing, and a test asserts that
+import-absence mechanically. That is a good guarantee — but it is a property of the code,
+established in CI, **not a measurement taken during this run**, and it would not notice a
+change made after the test last ran.
+
+Contrast `official_validator_unchanged` immediately above it, which *is* a runtime probe
+(`verification.py:1143`, calling `_official_validator_is_unchanged`): it loads the official
+validator on the running deployment and checks it is still format-blind, so it would flip to
+`unverified` in production rather than only failing a test.
+
+An earlier draft of this document headed this section "all measured, none assumed" and said
+"`verified` is a measurement, not an assertion". That was **false for this one row**, and an
+independent review caught it before publication. The claim is corrected rather than removed,
+because the distinction between a measured guarantee and an asserted one is exactly what a
+reader of this artifact needs in order to weigh it.
 
 ## 4. Deterministic rerun
 
@@ -104,8 +118,10 @@ Every figure in §2 and §3 is identical across both runs.
   record**, and no per-record outcome was computed into this artifact.
 - **The format shadow is advisory.** Its 30/30 result is not a second validity verdict; it
   cannot make a record valid or invalid and gates nothing.
-- **`verified` means a check ran and held on this run.** It is not a claim about other runs,
-  other corpora, or the deployment in general.
+- **For six of the seven safeguards, `verified` means a check ran and held on this run.** It
+  is not a claim about other runs, other corpora, or the deployment in general. For the
+  seventh — `export_gating_unchanged` — it is a static assertion backed by a CI test, not a
+  runtime measurement; §3 says which is which and why the difference matters.
 - **Zero unexpected outcomes is a statement about the mutation catalogue**, which is derived
   from the schema. A defect no operator in that catalogue expresses would not appear here.
 - **Passing official validation is not a claim of scientific correctness.** It says the
