@@ -81,7 +81,7 @@ Sign in to `https://isaac.slac.stanford.edu/krish` first, so the session cookie 
 > **Two things about the image chain that are honestly unknown from this repository**, so that
 > "`commit` is not what I expected" does not get misdiagnosed:
 >
-> * Every push to `main` publishes an image — `.github/workflows/build-push.yaml` has **no path
+> * Every push to `main` publishes an image **once its CI run concludes successfully** (the publish is ordered after CI; see `docs/release-gating.md`) — `.github/workflows/build-push.yaml` has **no path
 >   filters**, so even a docs-only merge builds and tags one. Images `v0.0.33` through `v0.0.39`
 >   were all built and pushed by successful CI runs. Those digests are **CI's record of what it
 >   pushed**, read out of the workflow logs; **no registry-side confirmation was possible** from the

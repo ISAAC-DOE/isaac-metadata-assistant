@@ -16,7 +16,13 @@ same deterministic core in a container.
   `apps/api/isaac_api/data/memory-snapshot.json` (P24.9, metadata/provenance
   only, no file contents), which powers hosted Project Memory.
 - **CI/CD** — pushing to `main` on `ISAAC-DOE/isaac-metadata-assistant` runs
-  `.github/workflows/build-push.yaml`: it builds the image, pushes
+  `.github/workflows/ci.yml`, and **only when that run concludes successfully**
+  does `.github/workflows/build-push.yaml` follow (a `workflow_run` trigger plus
+  a gate job that re-checks the Actions API for that exact commit — see
+  [`release-gating.md`](release-gating.md)). Until 2026-08-08 the two triggered
+  independently on the same push and raced, so a commit whose tests failed still
+  shipped an image. Once gated, build-push
+  builds the image, pushes
   `ghcr.io/isaac-doe/isaac-metadata-assistant:<semver>` (auto-incremented
   patch, e.g. v0.0.1 -> v0.0.2) plus `:latest`, and tags the repo. Flux image
   automation in the `isaac-k8` repo detects the new semver tag and bumps the
