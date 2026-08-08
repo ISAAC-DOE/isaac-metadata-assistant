@@ -1,9 +1,40 @@
 name: Build and Push to GHCR
 
+# This workflow no longer triggers on `push: main`, and that is the entire point.
+#
+# It used to. So did `ci.yml`. They are separate workflow files, so `needs:` —
+# which orders jobs inside ONE workflow — could not connect them, and the two ran
+# concurrently on every commit. The publish decision consulted CI not at all.
+# On 23ce90f the image finished publishing at 08:19:17 and CI attempt 1 concluded
+# `failure` at 08:52:37: the image was public for 33 minutes before the red result
+# existed.
+#
+# The fix is `workflow_run`, which is the GitHub-supported way to order one
+# workflow after another across files. CI finishes -> this fires -> the gate job
+# re-checks the Actions API for the exact commit -> only then does anything build.
+#
+# Two things about `workflow_run` that are easy to get wrong and are handled below:
+#
+#   1. `github.sha` in a workflow_run context is the DEFAULT BRANCH TIP at trigger
+#      time, not the commit CI actually ran on. Baking that into the image would
+#      make `/api/health`'s `commit` lie. Everything here uses
+#      `github.event.workflow_run.head_sha` instead.
+#   2. A workflow_run-triggered workflow is read from the DEFAULT BRANCH. Edits to
+#      this file therefore take effect only after they land on main; a PR cannot
+#      exercise this trigger. The gate's *decision logic* is deliberately in
+#      `scripts/ci_release_gate.py` so that PR CI can still test it directly —
+#      see `apps/api/tests/test_release_gate.py` for the negative and positive
+#      controls.
+
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  # A human pushing a release tag still goes through the same gate below; the tag
+  # path is not a bypass. Note that tags pushed by this workflow's own final step
+  # use GITHUB_TOKEN and so do not re-trigger workflows.
   push:
-    branches:
-      - main
     tags:
       - 'v*'
 
@@ -16,7 +47,56 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/isaac-metadata-assistant
 
 jobs:
+  gate:
+    name: required CI gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Resolve the commit actually under release
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            SHA="$WORKFLOW_RUN_SHA"
+          else
+            SHA="$PUSH_SHA"
+          fi
+          if [ -z "$SHA" ]; then
+            echo "could not resolve a commit to release; refusing" >&2
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "commit under release: $SHA"
+
+      - name: Check out the gate script at the released commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.sha }}
+
+      # This is the enforcement point. It exits non-zero unless the required CI
+      # workflow CONCLUDED SUCCESS for exactly this commit, on main, from a push
+      # event. Every other state — still running, not found, failed, cancelled,
+      # a pull_request run, an unreachable API — is a refusal. When it exits
+      # non-zero this job fails, and `build-and-push` (which `needs:` it) is
+      # never dispatched, so no `docker/build-push-action` with `push: true` can
+      # execute.
+      - name: Require a successful CI run for this exact commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/ci_release_gate.py --sha "${{ steps.resolve.outputs.sha }}"
+
   build-and-push:
+    name: build and publish the deployable image
+    needs: gate
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -27,6 +107,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # The gate-approved commit, never the branch tip, which may have moved.
+          ref: ${{ needs.gate.outputs.sha }}
 
       - name: Get version
         id: version
@@ -64,7 +146,7 @@ jobs:
           context: .
           push: true
           build-args: |
-            ISAAC_BUILD_COMMIT=${{ github.sha }}
+            ISAAC_BUILD_COMMIT=${{ needs.gate.outputs.sha }}
           tags: |
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
