@@ -95,6 +95,10 @@ inspection, `rg`, `git`, and test execution. For each task the gold record holds
 files, relevant symbols, required relationships, the expected conclusion, and known false
 leads. **Gold answers are never shown to benchmark agents.**
 
+> **Post-run correction to what this section implies.** Gold records were built and used,
+> but **were never committed to this package** — see §5.2a. Nothing here should be read as
+> a promise that a third party can inspect them.
+
 Grading is on *evidence*, not prose similarity: did the agent reach the right conclusion,
 and did it cite the files that actually establish it?
 
@@ -134,17 +138,52 @@ category cannot be classified better than `GRAPHIFY_HARMFUL` regardless of speed
 
 ### 5.2 Metrics
 
-**Quality** (graded against gold, blind to arm where practical): conclusion correctness;
-required-file recall; evidence completeness; count of false-positive leads pursued;
-unsupported claims; missed relationships.
+> **Annotated after the benchmark ran — declarations unchanged, collection status added.**
+> The status column below was appended once the runs were complete. **No metric was added,
+> removed, or reworded**, and no decision rule in §5.1/§5.3/§5.4 was touched. The column
+> exists because seven of the metrics declared here were never collected, and a
+> pre-registration that silently reports only the favourable subset defeats its own purpose.
+> The full accounting — why each was dropped, and whether its absence could have changed a
+> category verdict — is in the results document under **"Declared but not measured"**.
 
-**Efficiency:** elapsed wall-clock; tool calls; files opened; irrelevant files opened;
-Graphify query count; downstream verification calls; tokens where measurable.
+**Quality** (graded against gold, blind to arm where practical):
+
+| Declared metric | Collected? |
+|---|---|
+| conclusion correctness | **yes** — per-run, but recorded on only 17 of 32 runs; see the results doc |
+| required-file recall | **no** |
+| evidence completeness | **no** |
+| count of false-positive leads pursued | **partly** — boolean lead flags and a `dead_ends` count, never a count graded against gold |
+| unsupported claims | **no** |
+| missed relationships | **no** |
+
+**Efficiency:**
+
+| Declared metric | Collected? |
+|---|---|
+| elapsed wall-clock | **yes** (`duration_ms`) — but excluded from every verdict as CPU-contended |
+| tool calls | **yes** — this is the effort measure every verdict is computed from |
+| files opened | **yes** — reported as a headline count; not a verdict input |
+| irrelevant files opened | **no** |
+| Graphify query count | **yes** |
+| downstream verification calls | **no** |
+| tokens where measurable | **yes** |
 
 **Operational overhead** — measured and reported *separately*, never netted silently
-against per-task gains: index build/refresh time, query latency, storage, staleness risk,
-maintenance burden. Both figures are reported: per-task interactive efficiency, and total
-cost including indexing.
+against per-task gains: index build/refresh time (**collected**), query latency
+(**collected**), storage (**not collected** — node and edge counts are reported in its
+place; bytes on disk were never measured), staleness risk (**collected**), maintenance
+burden (**reported qualitatively**). Both figures are reported: per-task interactive
+efficiency, and total cost including indexing.
+
+### 5.2a Gold answers were used for grading but never committed
+
+Recorded here, at the point of declaration, so a reader of §4.2 is not misled: the gold
+records described in §4.2 were built and were used to grade every run, but **they are not
+part of this evidence package**. `graphify-task-set.json` holds the prompts, not the
+answers. Correctness grading is therefore **not independently auditable**. See the results
+document's threats-to-validity section for exactly which correctness claims a reader can
+still check against committed artifacts, and which they cannot.
 
 ### 5.3 Category classification
 
@@ -209,3 +248,4 @@ benchmark's measured outcome disagree, that disagreement is reported explicitly.
 | Date | Change |
 |---|---|
 | 2026-08-07 | Pre-registered. No arm had run; no result observed. |
+| 2026-08-08 | **Disclosure only — no decision rule changed.** §5.2 annotated with per-metric collection status (seven declared metrics were never collected); §4.2 corrected to state that gold records exist but were not committed; §5.2a added. The declared metric list, §5.1, §5.3 and §5.4 are byte-unchanged, and no verdict was recomputed. |
