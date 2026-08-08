@@ -20,9 +20,11 @@
  * sixth Playwright project multiplies EVERY `@responsive` spec — structure,
  * states, long-strings, layout-responsive, charts, tabs, the axe sweep — not
  * just the scan that wanted the width, and it perturbs the count ratchet in
- * `e2e/a11y-baseline.ts` for 26 surfaces in one go. This file adds 26 surfaces ×
- * 2 widths of axe scanning and nothing else, inside one project, by moving the
- * viewport itself with `page.setViewportSize`.
+ * `e2e/a11y-baseline.ts` for all 21 surfaces in one go. This file adds 21 surfaces
+ * × 2 widths of axe scanning and nothing else, inside one project, by moving the
+ * viewport itself with `page.setViewportSize`. (21 = `SURFACES.length`, measured:
+ * `npx playwright test e2e/specs/a11y-narrow.spec.ts --list` reports 43 tests —
+ * 42 scans plus the browserless shape test at the foot of this file.)
  *
  * The cost of that choice, stated rather than buried: DPR stays at the host
  * project's 1. That is the right call here — `color-contrast`, `button-name`,
@@ -65,6 +67,7 @@ import {
   platformCount,
 } from '../a11y-baseline';
 import { auditScan, scan } from '../helpers/axe';
+import { openUnreachableDisclosures } from '../helpers/disclosures';
 import { expect, test } from '../fixtures';
 import { SURFACES } from '../surfaces';
 
@@ -77,7 +80,7 @@ import { SURFACES } from '../surfaces';
  * which is the point: the restriction is stated, not hidden.
  *
  * `desktop-1280x800` rather than `mobile-375x812` on purpose — the phone project
- * also carries the `@interaction` specs, and hanging 52 axe scans off the same
+ * also carries the `@interaction` specs, and hanging 42 axe scans off the same
  * project would lengthen the slowest one.
  */
 const HOST_PROJECT = 'desktop-1280x800';
@@ -106,6 +109,14 @@ test.describe('narrow-width a11y sweep', () => {
         // measures on mount would otherwise be scanned in a state no reader gets.
         await page.setViewportSize({ width, height: SWEEP_HEIGHT });
         await app.open(surface);
+        // THE SAME DOM THE FIVE-PROJECT SWEEP SCANS. `specs/a11y-axe.spec.ts`
+        // opens the `<details>` regions no `SURFACES` path can reach; without
+        // this call the two sweeps scan different pages on `statistics` and
+        // `statistics-example` (five disclosures open there, five closed here),
+        // and their counts could not be compared to each other — which is
+        // exactly what a reader does when a width-320 number sits beside a
+        // mobile-375x812 one. See `helpers/disclosures.ts`.
+        await openUnreachableDisclosures(page, surface.id);
 
         // Guard against the key vocabulary drifting away from the baseline file's.
         expect(

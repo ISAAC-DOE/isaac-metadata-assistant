@@ -108,7 +108,7 @@ export type ProjectId = (typeof PROJECT_IDS)[number];
  * `specs/layout-widths.spec.ts` already answered this question for layout and
  * the answer has not changed: a project multiplies the WHOLE suite — every
  * `@responsive` spec, not just the scan that wanted it — and it perturbs the
- * count ratchet in this file for 26 surfaces at once. `specs/a11y-narrow.spec.ts`
+ * count ratchet in this file for all 21 surfaces at once. `specs/a11y-narrow.spec.ts`
  * therefore runs inside ONE project and moves the viewport itself, exactly as the
  * layout sweep does, and its pairs are namespaced `surfaceId@width-<n>` so they
  * can never collide with a real project's.
