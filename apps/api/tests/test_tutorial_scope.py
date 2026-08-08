@@ -942,8 +942,15 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
         "rev",
         "updated_utc",
         "generation",
+        # ``runs`` was added with the Run domain model. A Run is authoritative
+        # scientific state (one Run exports to one ISAAC record), so it belongs in
+        # the persisted document — and it carries NO scope key of its own either,
+        # which is the property this test exists to defend. See
+        # ``test_run_domain_model.py::test_a_run_carries_no_session_id``.
+        "runs",
     }
     assert "session_id" not in state and "scope" not in state and "root" not in state
+    assert all("session_id" not in r and "scope" not in r for r in state["runs"])
     # A round trip defaults to the ordinary scope unless the reader says otherwise.
     assert ws.Experiment.from_state(state).session_id is None
     assert ws.Experiment.from_state(state, session_id="b" * 22).session_id == "b" * 22

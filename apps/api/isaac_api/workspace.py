@@ -15,6 +15,18 @@ Layout::
 Status is DERIVED on read (never stored stale) from the current draft via an
 in-memory dry-run of ``export_draft`` — nothing is written to derive status.
 
+Runs
+----
+
+An experiment carries zero or more :class:`Run` objects — one measurement
+*condition* each. One Run exports to exactly one ISAAC record; an ``Experiment``
+is an application-level grouping with no schema counterpart. That mapping is
+decided by the official schema rather than by preference and is settled in
+``docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`` §1.
+Experiment-level fields are inherited BY REFERENCE and never copied down (§2 D2);
+see :func:`resolve_inherited_fields`. Runs currently live inside the experiment's
+own state document; §8 D7 moves them to relational rows in a later migration.
+
 Scopes
 ------
 
@@ -347,22 +359,437 @@ def _existing_generation(rid: str, *, session_id: str | None = None) -> str | No
         return None
 
 
+# --- the Run: one condition, one record ---------------------------------------
+#
+# WHY A RUN EXISTS AT ALL, decided by the official schema and not by preference.
+# The reasoning is settled in
+# ``docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`` §1 and
+# must not be re-derived here: ``context.required = ["environment",
+# "temperature_K"]`` and ``temperature_K`` is a SCALAR, so one ISAAC record cannot
+# express two temperatures. ``timestamps.split_operation`` exists precisely to note
+# a multi-condition split, ``tags`` is the schema's designated campaign grouping,
+# and ``links[]`` (``replica_of`` / ``replicate_preparation``) is how sibling runs
+# are re-associated.
+#
+# DECISION D1 (contract §1): **one Run produces exactly one ISAAC record.** An
+# ``Experiment`` is an application-level grouping with NO schema counterpart; it
+# exports to N records, one per Run.
+#
+# WHAT THIS MODULE DOES NOT DO, deliberately. Export still mints exactly one
+# record per draft (``src/isaac_records/export.py``) and ``Experiment.record_id``
+# is still the singular field the current 1:1 path writes. Export fan-out is a
+# LATER slice. This slice makes the Run exist, persist and round-trip; it changes
+# no export behaviour, no route, no migration and nothing under
+# ``src/isaac_records/`` or ``schema/``.
+
+#: Draft-field path prefixes that are ENTERED ONCE ON THE EXPERIMENT and inherited
+#: by every Run. Taken verbatim from contract §2, which derives them from the
+#: schema's own structure. A draft field key is a dotted schema path
+#: (``sample.material.name``, ``system.facility.beamline``, ...), so membership is
+#: a prefix test — see :func:`field_level`.
+EXPERIMENT_LEVEL_PATHS: tuple[str, ...] = (
+    "sample",
+    "system.domain",
+    "system.technique",
+    "system.facility",
+    "system.instrument",
+    "attribution.contributors",
+    "tags",
+)
+
+#: Draft-field path prefixes that are PER-RUN. These are the fields that must vary
+#: between runs, and their variation is exactly what forces the record split
+#: (contract §2).
+RUN_LEVEL_PATHS: tuple[str, ...] = (
+    "context",
+    "measurement.series",
+    "measurement.qc",
+    "assets",
+    "descriptors.outputs",
+    "timestamps.acquired_start_utc",
+    "timestamps.acquired_end_utc",
+)
+
+#: The three values :func:`field_level` can return.
+LEVEL_EXPERIMENT = "experiment"
+LEVEL_RUN = "run"
+LEVEL_UNCLASSIFIED = "unclassified"
+
+#: The two values a resolution's ``provenance`` can take.
+PROVENANCE_INHERITED = "inherited"
+PROVENANCE_OVERRIDDEN = "overridden"
+
+
+def _path_matches(path: str, prefix: str) -> bool:
+    """Whether a dotted draft-field path falls under ``prefix``.
+
+    Segment-aware on purpose: ``sample`` matches ``sample.material.name`` but
+    ``system.domain`` must NOT match a hypothetical ``system.domain_notes``. A bare
+    ``str.startswith`` would match both.
+    """
+    return path == prefix or path.startswith(prefix + ".")
+
+
+def field_level(path: str) -> str:
+    """Classify one dotted draft-field path as experiment-level, run-level, or neither.
+
+    ``LEVEL_UNCLASSIFIED`` IS A REAL ANSWER AND IS NOT AN OVERSIGHT. The contract's
+    two lists are not a partition of every path the deterministic extractor emits —
+    ``system.configuration.*`` (detector model, monochromator crystal, ``n_scans``,
+    proposal/session ids) and ``timestamps.created_utc`` appear in a real draft and
+    are in NEITHER list. Guessing a level for them would be exactly the kind of
+    unevidenced inference ``CLAUDE.md`` §5 forbids: whether two runs of one
+    experiment may legitimately differ in detector model is a scientific question
+    this repository has no answer to. So they are reported as unclassified,
+    inherited by nobody and overridable by nobody, and they stay wherever the draft
+    that carries them already put them.
+    """
+    for prefix in EXPERIMENT_LEVEL_PATHS:
+        if _path_matches(path, prefix):
+            return LEVEL_EXPERIMENT
+    for prefix in RUN_LEVEL_PATHS:
+        if _path_matches(path, prefix):
+            return LEVEL_RUN
+    return LEVEL_UNCLASSIFIED
+
+
+class NotOverridable(ValueError):
+    """An override was attempted on a path that is not experiment-level.
+
+    Only an experiment-level field can be *overridden*, because only an
+    experiment-level field is *inherited* in the first place. A run-level field is
+    simply the run's own draft field — writing one is an ordinary edit, not an
+    override, and routing it through the override map would create a second place
+    the same value could live.
+    """
+
+
+@dataclass(frozen=True)
+class FieldOverride:
+    """One run's explicit override of one inherited experiment-level field.
+
+    ``envelope`` is a draft field envelope (``{"value": ..., "status": ...,
+    "evidence": [...]}``) — the SAME shape ``blank_draft()`` / the deterministic
+    extractor produce — so an override carries its own evidence and is subject to
+    the same no-guessing rules as any other field.
+
+    ``displaced`` is the experiment's envelope AT THE MOMENT THE OVERRIDE WAS
+    RECORDED, or ``None`` when the experiment carried nothing at that path. Contract
+    §2 D2 requires an override to record what it displaced; this is that record. It
+    is a HISTORICAL fact and is never refreshed. Do not read it as "what the
+    experiment says now" — that is ``FieldResolution.inherited_envelope``, and the
+    two legitimately differ once the experiment value is edited afterwards. Making
+    that difference visible is the point of inheritance by reference.
+    """
+
+    envelope: dict
+    recorded_utc: str
+    displaced: dict | None = None
+
+    def to_state(self) -> dict:
+        state: dict = {"envelope": self.envelope, "recorded_utc": self.recorded_utc}
+        # ABSENCE IS THE ENCODING. The key is omitted when the override displaced
+        # nothing, so "displaced no inherited value" and "displaced an inherited
+        # null" stay distinguishable on disk.
+        if self.displaced is not None:
+            state["displaced"] = self.displaced
+        return state
+
+    @classmethod
+    def from_state(cls, state: dict) -> "FieldOverride":
+        return cls(
+            envelope=state.get("envelope") or {},
+            recorded_utc=state.get("recorded_utc") or "",
+            displaced=state.get("displaced"),
+        )
+
+
+@dataclass(frozen=True)
+class FieldResolution:
+    """The resolved view of ONE experiment-level field for ONE run.
+
+    Computed on read, never stored. ``envelope`` is what this run actually has for
+    the path; ``inherited_envelope`` is what the experiment carries RIGHT NOW;
+    ``displaced_envelope`` is what the override displaced when it was recorded.
+    """
+
+    path: str
+    provenance: str
+    envelope: dict | None
+    inherited_envelope: dict | None
+    displaced_envelope: dict | None = None
+
+    @property
+    def value(self):
+        """The resolved scientific value, or ``None`` when neither level carries one.
+
+        ``None`` here is genuinely ambiguous between "absent" and "an explicit
+        null", which is why ``envelope is None`` is the test callers should use when
+        the difference matters.
+        """
+        return None if self.envelope is None else self.envelope.get("value")
+
+
+def resolve_inherited_fields(
+    experiment_fields: dict | None, run: "Run"
+) -> dict[str, FieldResolution]:
+    """Resolve every inherited experiment-level field for one run. Pure; stores nothing.
+
+    THIS IS THE READ HALF OF CONTRACT §2 DECISION D2 — inheritance is BY REFERENCE,
+    NEVER BY COPY. A run stores only the ABSENCE of an override; nothing here writes
+    an experiment value into a run, and nothing anywhere else does either. The
+    consequence that makes the decision worth its cost: editing an experiment-level
+    field flows through to every non-overriding run immediately, with no fan-out
+    write, no reconciliation pass, and no window in which some runs hold the old
+    value.
+
+    The key set is the union of (a) the experiment's own field paths that classify
+    as experiment-level and (b) every path this run overrides — so an override of a
+    path the experiment does not (yet) carry is still reported, with
+    ``inherited_envelope=None``.
+    """
+    fields = experiment_fields or {}
+    paths = {p for p in fields if field_level(p) == LEVEL_EXPERIMENT}
+    paths |= set(run.overrides)
+    out: dict[str, FieldResolution] = {}
+    for path in sorted(paths):
+        inherited = fields.get(path)
+        override = run.overrides.get(path)
+        if override is None:
+            out[path] = FieldResolution(
+                path=path,
+                provenance=PROVENANCE_INHERITED,
+                envelope=inherited,
+                inherited_envelope=inherited,
+            )
+        else:
+            out[path] = FieldResolution(
+                path=path,
+                provenance=PROVENANCE_OVERRIDDEN,
+                envelope=override.envelope,
+                inherited_envelope=inherited,
+                displaced_envelope=override.displaced,
+            )
+    return out
+
+
+@dataclass
+class Run:
+    """One measurement condition of an experiment. Exports to exactly ONE record.
+
+    A Run is a first-class domain object with its own draft, its own evidence and
+    its own version — but it is NOT its own storage unit in this slice: runs are
+    carried inside the experiment's state document (``Experiment.to_state``). That
+    is a deliberate, temporary shape. Contract §8 DECISION D7 makes runs relational
+    rows (``isaac_runs``) precisely because one jsonb document rewritten on every
+    autosave keystroke, containing N runs, is the "single enormous object" the brief
+    forbids. That change needs migration ``0002``, an approval packet and an
+    explicit approval, none of which this slice has — so the model exists here
+    first, and the storage moves later.
+
+    No ``session_id``. The scope (normal vs. a worked-example session) is a property
+    of WHERE the owning experiment's files live, and ``Experiment`` already carries
+    it. A run of a worked-example session is unpersistable for exactly the reason
+    its experiment is: ``PostgresOrdinaryStore.refuse_if_not_persistable`` refuses
+    the experiment, and the experiment is what carries the runs.
+    """
+
+    id: str
+    experiment_id: str
+    label: str
+    #: THE ORDER KEY, and it is explicit for a reason: the label must never
+    #: determine order. ``"Run 10"`` sorts before ``"Run 2"`` lexically, and a
+    #: scientist may rename a run to anything at all. ``ordinal`` is what
+    #: :meth:`Experiment.sorted_runs` sorts on.
+    ordinal: int
+    created_utc: str
+    #: The run's OWN draft, in the same envelope shape ``blank_draft()`` produces.
+    #: It carries the run-level fields (``context.*``, ``measurement.*``,
+    #: ``assets[]``, ``descriptors.outputs[]``, the acquisition timestamps).
+    draft: dict = field(default_factory=dict)
+    #: Set when THIS RUN is exported. Per contract §1 D1 the record identity is
+    #: per-Run, not per-Experiment. ``Experiment.record_id`` remains the field the
+    #: current 1:1 export path writes and is untouched by this slice.
+    record_id: str | None = None
+    #: path -> :class:`FieldOverride`. THE ABSENCE OF A KEY IS THE INHERITANCE.
+    #: Nothing is copied down from the experiment; see
+    #: :func:`resolve_inherited_fields`.
+    overrides: dict[str, FieldOverride] = field(default_factory=dict)
+    #: Monotonic per-run version, bumped only by
+    #: ``Experiment._bump_changed_runs`` when this run's authoritative signature
+    #: actually changes. Never derived — it is stored.
+    rev: int = 0
+    updated_utc: str = ""
+    #: Per-run opaque nonce, minted at genuine creation and preserved across saves,
+    #: so a delete->recreate of the same run id is distinguishable even at rev 0.
+    generation: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.updated_utc:
+            self.updated_utc = self.created_utc
+        if not self.generation:
+            self.generation = _legacy_generation(self.id)
+
+    def version_token(self) -> str:
+        """The run's opaque concurrency token: ``<generation>.<rev>``.
+
+        Same shape as ``Experiment.version_token``. No route consumes it yet; it
+        exists so a later per-run ``If-Match`` reuses the machinery in
+        ``version_contract`` unchanged rather than inventing a second scheme.
+        """
+        return f"{self.generation}.{self.rev}"
+
+    def to_state(self) -> dict:
+        return {
+            "id": self.id,
+            "experiment_id": self.experiment_id,
+            "label": self.label,
+            "ordinal": self.ordinal,
+            "created_utc": self.created_utc,
+            "draft": self.draft,
+            "record_id": self.record_id,
+            "overrides": {p: o.to_state() for p, o in sorted(self.overrides.items())},
+            "rev": self.rev,
+            "updated_utc": self.updated_utc,
+            "generation": self.generation,
+        }
+
+    @classmethod
+    def from_state(cls, state: dict) -> "Run":
+        """Rehydrate one run. Tolerant of a missing optional key, like ``Experiment``."""
+        overrides = state.get("overrides") or {}
+        return cls(
+            id=state["id"],
+            experiment_id=state["experiment_id"],
+            label=state.get("label") or "",
+            ordinal=int(state.get("ordinal") or 0),
+            created_utc=state.get("created_utc") or "",
+            draft=state.get("draft") or {},
+            record_id=state.get("record_id"),
+            overrides={
+                p: FieldOverride.from_state(o)
+                for p, o in overrides.items()
+                if isinstance(o, dict)
+            },
+            rev=int(state.get("rev") or 0),
+            updated_utc=state.get("updated_utc") or "",
+            generation=state.get("generation") or "",
+        )
+
+
+def _run_signature_payload(run: Run) -> dict:
+    """A run's AUTHORITATIVE content, for hashing. Version metadata is excluded.
+
+    Covers ``{id, experiment_id, label, ordinal, draft, record_id, overrides}``.
+    EXCLUDES ``rev`` / ``updated_utc`` / ``generation`` (version metadata, exactly as
+    ``Experiment`` excludes its own) and ``created_utc`` (immutable identity).
+
+    Excluding ``rev`` is only safe because of an invariant that must not be broken:
+    ``Experiment._bump_changed_runs`` is the ONLY thing that moves a run's ``rev``,
+    it runs solely on the write path, and it moves ``rev`` only when THIS payload
+    changed. So a run's ``rev`` can never move without the experiment's signature
+    moving too, and therefore can never be silently dropped by the byte-stable
+    no-op in ``save_versioned``. If a second writer of ``run.rev`` is ever added,
+    this exclusion becomes unsound.
+
+    ``overrides`` is included WHOLE, ``recorded_utc`` and ``displaced`` included:
+    recording an override is an audited act and its record is authoritative state.
+    That is safe from churn because :meth:`Experiment.override_run_field` is
+    idempotent — re-applying an equal envelope does not restamp ``recorded_utc``.
+    """
+    return {
+        "id": run.id,
+        "experiment_id": run.experiment_id,
+        "label": run.label,
+        "ordinal": run.ordinal,
+        "draft": run.draft,
+        "record_id": run.record_id,
+        "overrides": {p: o.to_state() for p, o in sorted(run.overrides.items())},
+    }
+
+
+def _run_signature(run: Run) -> str:
+    blob = json.dumps(_run_signature_payload(run), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def new_run(
+    experiment_id: str,
+    *,
+    ordinal: int,
+    label: str | None = None,
+    draft: dict | None = None,
+    created_utc: str | None = None,
+    id: str | None = None,
+) -> Run:
+    """Mint a Run. The id is a fresh ULID, minted by the same function record ids use.
+
+    Same alphabet and shape as a record id — but a RUN ID IS NOT A RECORD ID. The
+    record identity lives in ``Run.record_id`` and is set only when this run is
+    exported. Reusing ``new_record_id()`` avoids a second id scheme; it asserts
+    nothing about the run having been exported.
+
+    ``draft`` defaults to an empty dict rather than to ``blank_draft()``: that
+    builder lives in ``experiment_repository`` (which imports this module), and the
+    caller that creates a run is the one that knows whether the blank-draft pending
+    blockers apply. Nothing scientific is invented here.
+    """
+    return Run(
+        id=id or new_record_id(),
+        experiment_id=experiment_id,
+        label=label if label is not None else f"Run {ordinal}",
+        ordinal=ordinal,
+        created_utc=created_utc or _now_iso(),
+        draft=draft if draft is not None else {},
+        generation=_new_generation(),
+    )
+
+
 def _authoritative_signature(exp: "Experiment") -> str:
     """Deterministic hash of the AUTHORITATIVE scientific state of an experiment.
 
-    Covers exactly ``{title, source, draft, record_id}`` — the fields that define
-    the record's scientific content. It EXCLUDES ``answer_log`` (an audit trail,
-    not scientific state), ``generation``/``rev``/``updated_utc`` (version metadata,
-    not scientific content — excluding ``generation`` keeps a byte-stable no-op from
-    churning the token), and ``created_utc`` (immutable identity). Two experiments
-    with an identical scientific state therefore hash identically, so a no-op
-    re-entry is detectable and never bumps ``rev``.
+    Covers exactly ``{title, source, draft, record_id, runs}`` — the fields that
+    define the record's scientific content. It EXCLUDES ``answer_log`` (an audit
+    trail, not scientific state), ``generation``/``rev``/``updated_utc`` (version
+    metadata, not scientific content — excluding ``generation`` keeps a byte-stable
+    no-op from churning the token), and ``created_utc`` (immutable identity). Two
+    experiments with an identical scientific state therefore hash identically, so a
+    no-op re-entry is detectable and never bumps ``rev``.
+
+    ``runs`` WAS ADDED, and the decision is argued rather than assumed. Runs are
+    authoritative scientific state: per contract §1 D1 each one exports to its own
+    ISAAC record, so a run edit changes what this experiment will produce. Leaving
+    runs out would mean adding, editing or deleting a run left ``version_token()``
+    unmoved — and the whole ``If-Match`` contract (428/412 at ``routes.py:507-539``)
+    is built on that token. A second client holding the pre-edit ETag would pass its
+    precondition and silently overwrite the run edit, which is the exact class of
+    loss the precondition exists to prevent. So a run edit DOES bump the
+    experiment's ``rev``.
+
+    Byte-stable no-op still holds, in both directions:
+
+    * runs are hashed through :func:`_run_signature_payload`, which excludes each
+      run's ``rev``/``updated_utc``/``generation``/``created_utc`` — so the version
+      metadata this save is about to write cannot feed back into the signature that
+      decides whether to write;
+    * the list is taken in :meth:`Experiment.sorted_runs` order, so a re-ordering of
+      the in-memory list that does not change any ``ordinal`` is correctly not an
+      authoritative change;
+    * ``answer_log``-style non-authoritative data stays out — a run has no
+      ``answer_log``, and if one is added later it belongs outside this payload for
+      the same reason the experiment's is.
+
+    An experiment written before runs existed hashes with ``"runs": []``, and so
+    does the same experiment re-read from disk (``from_state`` yields zero runs), so
+    the added key does NOT cause a spurious rev bump on legacy state. That is pinned
+    by ``test_run_domain_model.py``.
     """
     payload = {
         "title": exp.title,
         "source": exp.source,
         "draft": exp.draft,
         "record_id": exp.record_id,
+        "runs": [_run_signature_payload(r) for r in exp.sorted_runs()],
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -396,6 +823,20 @@ class Experiment:
     #: state, so the same content in two sessions hashes identically and a state
     #: file carries nothing that would go stale if the directory moved.
     session_id: str | None = None
+    #: The experiment's runs — one measurement condition each, one exported ISAAC
+    #: record each (contract §1 D1). Ordered by :meth:`sorted_runs`, NOT by list
+    #: position and NOT by label.
+    #:
+    #: NO MAXIMUM IS IMPOSED, and none is imposed anywhere else either. The brief's
+    #: §5 forbids a product-level cap, and no defensive cap is added because there
+    #: is no number this repository can justify: a defensive bound is only honest
+    #: when it is derived from a measured resource limit, and nothing here has been
+    #: measured. The real resource pressure is named and located rather than papered
+    #: over with an arbitrary constant — runs currently live inside ONE state
+    #: document that is rewritten whole on every save, which is exactly why contract
+    #: §8 D7 moves them to relational rows in migration ``0002``. That is the fix;
+    #: a magic number would only hide the need for it.
+    runs: list["Run"] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -451,6 +892,7 @@ class Experiment:
             "rev": self.rev,
             "updated_utc": self.updated_utc,
             "generation": self.generation,
+            "runs": [r.to_state() for r in self.sorted_runs()],
         }
 
     def save(self) -> None:
@@ -494,6 +936,151 @@ class Experiment:
             # state" so a real save still proceeds rather than crashing.
             return None, 0
 
+    # -- runs ------------------------------------------------------------------
+
+    def sorted_runs(self) -> list["Run"]:
+        """This experiment's runs in their canonical order.
+
+        Sorted on ``(ordinal, created_utc, id)``. THE LABEL IS NOT IN THE KEY, by
+        requirement: ``"Run 10"`` sorts before ``"Run 2"`` lexically, and a run may
+        be renamed to anything. The two tie-breakers make the order total even when
+        two runs share an ordinal, so the authoritative signature is deterministic
+        for any input rather than only for well-formed input.
+        """
+        return sorted(self.runs, key=lambda r: (r.ordinal, r.created_utc, r.id))
+
+    def next_ordinal(self) -> int:
+        """The ordinal a newly-added run should take: one past the current maximum.
+
+        Deliberately max+1 rather than ``len(runs)+1`` — after a run is deleted,
+        ``len``-based numbering would re-issue an ordinal that an existing run's
+        earlier sibling once had, silently reordering history.
+        """
+        return max((r.ordinal for r in self.runs), default=0) + 1
+
+    def get_run(self, run_id: str) -> "Run | None":
+        for r in self.runs:
+            if r.id == run_id:
+                return r
+        return None
+
+    def add_run(
+        self,
+        *,
+        label: str | None = None,
+        draft: dict | None = None,
+        created_utc: str | None = None,
+        id: str | None = None,
+    ) -> "Run":
+        """Append a run to this experiment IN MEMORY. Does not save.
+
+        Saving is the caller's, so a route can add a run and persist once inside the
+        same ``record_lock`` critical section every other mutation already uses.
+        """
+        run = new_run(
+            self.id,
+            ordinal=self.next_ordinal(),
+            label=label,
+            draft=draft,
+            created_utc=created_utc,
+            id=id,
+        )
+        if self.get_run(run.id) is not None:  # pragma: no cover - ULID collision
+            raise ValueError(f"run id {run.id!r} already exists on this experiment")
+        self.runs.append(run)
+        return run
+
+    def resolve_run(self, run: "Run") -> dict[str, "FieldResolution"]:
+        """Every inherited experiment-level field, resolved for ``run``. Read-only.
+
+        Thin wrapper over :func:`resolve_inherited_fields` so callers never have to
+        know that the experiment's inheritable fields live in ``draft["fields"]``.
+        """
+        return resolve_inherited_fields(self.draft.get("fields") or {}, run)
+
+    def override_run_field(self, run: "Run", path: str, envelope: dict) -> "FieldOverride":
+        """Record an explicit run-level override of one inherited field. Does not save.
+
+        Refuses any path that is not experiment-level (:class:`NotOverridable`):
+        only an inherited field can be overridden, and a run-level field is just an
+        ordinary edit to the run's own draft.
+
+        IDEMPOTENT. Re-applying an equal envelope returns the existing override
+        unchanged and does NOT restamp ``recorded_utc`` — which is what lets
+        ``_run_signature_payload`` include the whole override record without a no-op
+        save churning the version. The displaced value is captured from the
+        experiment's CURRENT fields at the moment of the first override and is never
+        refreshed afterwards.
+        """
+        if field_level(path) != LEVEL_EXPERIMENT:
+            raise NotOverridable(
+                f"{path!r} is not an experiment-level field, so it cannot be overridden"
+            )
+        existing = run.overrides.get(path)
+        if existing is not None and existing.envelope == envelope:
+            return existing
+        override = FieldOverride(
+            envelope=envelope,
+            recorded_utc=_now_iso(),
+            displaced=(self.draft.get("fields") or {}).get(path),
+        )
+        run.overrides[path] = override
+        return override
+
+    def clear_run_override(self, run: "Run", path: str) -> bool:
+        """Drop an override so the run inherits again. Returns whether one was removed.
+
+        Removal restores inheritance BY REFERENCE — the run goes back to carrying no
+        value at that path at all, rather than to carrying a copy of whatever the
+        experiment currently says.
+        """
+        return run.overrides.pop(path, None) is not None
+
+    def _persisted_run_state(self) -> dict[str, tuple[str, int]]:
+        """``{run_id: (authoritative signature, rev)}`` of the CURRENTLY on-disk runs.
+
+        ``{}`` when the state file is absent or unreadable — the same fail-open
+        reading ``_persisted_sig_and_rev`` applies, so a corrupt file makes a real
+        save proceed rather than crash.
+        """
+        if not self.state_path.exists():
+            return {}
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            out: dict[str, tuple[str, int]] = {}
+            for raw in state.get("runs") or []:
+                if not isinstance(raw, dict):
+                    continue
+                run = Run.from_state(raw)
+                out[run.id] = (_run_signature(run), run.rev)
+            return out
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return {}
+
+    def _bump_changed_runs(self) -> list[str]:
+        """Bump ``rev``/``updated_utc`` on each run whose authoritative state changed.
+
+        Returns the ids bumped (a MEASURED list, not an assertion). Called only from
+        the write branch of :meth:`save_versioned`, and it is the ONLY writer of
+        ``Run.rev`` — which is the invariant that makes excluding ``rev`` from
+        :func:`_run_signature_payload` sound. A run absent from disk is new and
+        bumps to 1; a run whose signature matches disk is untouched, so an
+        experiment-only edit (a title change, say) never disturbs a run's version.
+
+        ``max(run.rev, disk_rev) + 1`` mirrors ``save_versioned``: a stale in-memory
+        run can never regress the persisted rev.
+        """
+        on_disk = self._persisted_run_state()
+        bumped: list[str] = []
+        for run in self.runs:
+            prior = on_disk.get(run.id)
+            if prior is not None and prior[0] == _run_signature(run):
+                continue
+            run.rev = max(run.rev, prior[1] if prior is not None else 0) + 1
+            run.updated_utc = _now_iso()
+            bumped.append(run.id)
+        return bumped
+
     def save_versioned(self) -> bool:
         """Persist atomically ONLY if the authoritative scientific state changed.
 
@@ -509,11 +1096,29 @@ class Experiment:
         The bump is taken from ``max(self.rev, on-disk rev) + 1`` so a stale
         in-memory instance can never *regress* the persisted ``rev`` (defence in
         depth; the API rejects stale writes via ``If-Match`` in P27.3).
+
+        RUNS. The no-op decision is made BEFORE any run version is touched, and
+        that ordering is load-bearing: ``_bump_changed_runs`` mutates
+        ``Run.rev``/``Run.updated_utc`` in memory, and doing it first would leave a
+        rejected no-op having silently advanced a run's version that was never
+        written. So the signature is compared, and only on the write branch are the
+        changed runs bumped. Run version metadata is excluded from the signature
+        (see ``_run_signature_payload``), so the bump cannot feed back into the
+        decision that authorised it.
+
+        Failure handling is UNCHANGED by the run work: ``self.save()`` still raises
+        ``StorageUnavailable`` straight through when the durable write is refused,
+        and the file is still not rewritten. As before that bump, the in-memory
+        ``rev`` — and now also the bumped run revs — are ahead of disk on that path;
+        that is the pre-existing behaviour of this method, deliberately not altered
+        here, because the durable write path is being changed concurrently on
+        another branch.
         """
         old_sig, disk_rev = self._persisted_sig_and_rev()
         new_sig = _authoritative_signature(self)
         if old_sig is not None and old_sig == new_sig:
             return False
+        self._bump_changed_runs()
         self.rev = max(self.rev, disk_rev) + 1
         self.updated_utc = _now_iso()
         self.save()
@@ -539,6 +1144,17 @@ class Experiment:
             rev=int(state.get("rev") or 0),  # missing/legacy -> 0
             updated_utc=state.get("updated_utc") or "",  # __post_init__ -> created_utc
             generation=state.get("generation") or "",  # missing/legacy -> deterministic fallback
+            # NO MIGRATION IS REQUIRED FOR RUNS, and this line is why. ``from_state``
+            # is legacy-tolerant by construction — every optional key is read with
+            # ``.get`` and a default — so a state document written before runs
+            # existed hydrates to an experiment with ZERO runs rather than raising.
+            # That property was verified before this change (a row lacking ``rev``,
+            # ``updated_utc`` and ``generation`` hydrates to rev 0 and a
+            # deterministic fallback generation) and is preserved here; it is pinned
+            # against a hand-written legacy dict by ``test_run_domain_model.py``.
+            runs=[
+                Run.from_state(r) for r in (state.get("runs") or []) if isinstance(r, dict)
+            ],
         )
 
     # -- derived views --
