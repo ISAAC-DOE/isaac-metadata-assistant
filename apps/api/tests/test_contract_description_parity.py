@@ -122,3 +122,42 @@ def test_every_documented_operation_is_transcribed(spec):
         "are absent from REAL_CONTRACT_DESCRIPTIONS in apiFixtures.ts, so the "
         f"Endpoint Explorer assertions do not cover them: {missing}"
     )
+
+
+def test_no_operation_is_transcribed_twice(spec):
+    """The direction BOTH parity checks above are structurally blind to.
+
+    `test_every_transcribed_description_matches_the_generated_spec` iterates the
+    ENTRIES and looks each one up in the spec, so a duplicated row simply matches
+    twice and passes. `test_every_documented_operation_is_transcribed` compares
+    SETS, so a duplicate collapses before the comparison. A merge resolved by
+    "keep both sides" therefore put `GET /api/runtime/verification` and
+    `GET /api/health` in the array twice each — 42 entries describing 40
+    operations — and every check in this file stayed green.
+
+    That is not a cosmetic problem: `settings-api.test.tsx` sums character and
+    paragraph totals over the array and pins them, so two whole descriptions were
+    counted twice and the pinned numbers were then RAISED to match, each honestly
+    measured from a corrupt input.
+
+    The count is compared to the SERVED operation count rather than to a literal,
+    so a new endpoint moves both sides together and this test never needs editing.
+    """
+    entries = _entries()
+    ops = [op for op, _ in entries]
+    duplicated = sorted({op for op in ops if ops.count(op) > 1})
+    assert not duplicated, (
+        "REAL_CONTRACT_DESCRIPTIONS lists these operations more than once, which "
+        "double-counts their descriptions in the frontend's character and "
+        f"paragraph totals: {duplicated}"
+    )
+    served = {
+        f"{method.upper()} {path}"
+        for path, methods in spec["paths"].items()
+        for method, operation in methods.items()
+        if isinstance(operation, dict) and operation.get("description")
+    }
+    assert len(entries) == len(served), (
+        f"{len(entries)} transcribed entries for {len(served)} documented "
+        "operations"
+    )

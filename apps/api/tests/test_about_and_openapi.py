@@ -309,7 +309,9 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
             f"{auto!r} (from `{function_name}`)"
         )
         checked += 1
-    assert checked == 39, f"expected 39 documented operations, found {checked}"
+    # 39 -> 40: `POST /api/experiments`, the durable Create Experiment path. It is
+    # the first record-creation operation this API has ever published.
+    assert checked == 40, f"expected 40 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -473,6 +475,18 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ],
     ("/api/demo/run", "post"): ["200", "401", "404", "409", "422"],
     ("/api/experiments", "get"): ["200", "401", "404", "422"],
+    # 201 rather than 200: the response describes a resource that did not exist
+    # before the request. 409 is the ORDINARY-SCOPE requirement — the mirror image
+    # of `/api/demo/run`'s `tutorial_scope_required`: this operation refuses when a
+    # worked-example session header IS present, because a session is discarded on a
+    # timer and a record a person created must not inherit that.
+    # `503` is the durable-storage outage: this deployment stores experiments in
+    # its own database and that database did not take the write. It is documented
+    # rather than left as an undeclared failure because it is REACHABLE on the
+    # deployed pod — `PGHOST` is set there and the migration is applied by an
+    # operator, so there is a window in which the table does not exist yet. The
+    # create fails; it is never quietly degraded to an ephemeral write.
+    ("/api/experiments", "post"): ["201", "401", "404", "409", "422", "503"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422"],
     ("/api/experiments/{experiment_id}/answers", "post"): [
         "200", "400", "401", "404", "412", "422", "428",
@@ -572,6 +586,14 @@ EXPECTED_COMPONENT_SCHEMAS: dict[str, dict] = {
     "DemoResetRequest": {
         "properties": ["confirmation", "mode", "plan_digest"],
         "required": ["mode"],
+    },
+    # `extra="forbid"` is what makes "no client-supplied record id" a property of
+    # the contract rather than of the handler remembering not to read one, so the
+    # SHORTNESS of this property list is the assertion that matters: two fields, one
+    # required, and anything else is a 422.
+    "CreateExperimentRequest": {
+        "properties": ["description", "title"],
+        "required": ["title"],
     },
     "HTTPValidationError": {"properties": ["detail"], "required": []},
     "ValidationError": {

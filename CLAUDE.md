@@ -688,7 +688,41 @@ Out of scope unless explicitly approved:
   personal repo or the Vercel/Railway projects, and any `isaac-k8` change.
   *Narrowed 2026-07-31:* deployment-mediated **read-only** in-cluster Postgres access that returns
   sanitized **aggregate** output is authorized (Slice 2A, see the readiness table below). Reads from a
-  laptop or from CI, writes of any kind, and per-record hosted display remain out of scope.
+  laptop or from CI, ~~writes of any kind~~, and per-record hosted display remain out of scope.
+
+  ***Narrowed again 2026-08-07 — "any database write" is NO LONGER a blanket prohibition.*** The
+  project owner lifted it **narrowly**, for one bounded feature: **durable Create Experiment
+  persistence in the existing app-owned PostgreSQL database**, plus the minimum supporting persistence
+  architecture that feature requires. The strikethrough above is deliberate — the old wording is kept
+  visible so a future session can see that this is a recorded change of scope and not a drift.
+
+  **What the lift covers:** app-owned tables for experiments and their normal application state
+  (`isaac_experiments`, `isaac_schema_migrations`); a swappable repository seam
+  (`apps/api/isaac_api/experiment_repository.py`) with a filesystem fallback whenever `PGHOST` is
+  unset; a separate write path (`db_write.py`) with parameterized SQL, explicit transactions and
+  deterministic rollback; and forward-only, idempotent migrations
+  (`apps/api/isaac_api/migrations/`, runner `db_migrate.py`, operator CLI `scripts/db_migrate.py`).
+
+  **What it does NOT cover, and each of these is still out of scope:** modifying the
+  production-derived 30-record `records` table (the write path's statement policy refuses any
+  statement naming it); the verification truth plane; official validator/export behaviour;
+  Dean-owned infrastructure; destructive migrations, `DROP`/`TRUNCATE`/`ALTER` of anything, or broad
+  schema cleanup; per-record hosted display (still **closed by default**, gate **G2**); and any
+  weakening of the read-only guarantees on `db_provider`/`db_recon`, which are unchanged.
+
+  **The hard stop:** implementation and local/CI testing are authorized; **applying any migration to
+  the hosted environment is NOT.** The owner reviews the migration text before it is applied. Do not
+  request a kubeconfig, a port-forward, or a Secret, and do not connect to the SLAC database — the
+  rule at `2026-07-24-phase-37-readiness-plan.md:48-52` is untouched by this lift. CI proves the
+  migration against a `postgres:18` service container (`.github/workflows/ci.yml` →
+  `postgres-migration`), which is **not** the same as proving it against the hosted database with its
+  real data; see `docs/create-experiment-persistence.md`.
+
+  **Tutorial isolation is unchanged and is the invariant this feature must not break:** a
+  worked-example session is temporary and synthetic and is NEVER persisted as a normal experiment.
+  Enforced three times — the save hook skips any non-`None` `session_id`,
+  `PostgresOrdinaryStore.refuse_if_not_persistable` raises on one, and it raises on a canonical
+  example id in any scope.
 
 **Pre-Phase-37 readiness sequence (authorized 2026-07-30; Slice 2A authorized 2026-07-31).** An
 explicitly authorized, sequential readiness sequence runs *before* — and does not start — Phase 37.
@@ -728,7 +762,8 @@ amended §2 for exactly what is and is not permitted.
 | **2 (design artifact)** — a safe, **unexecuted** read-only reconnaissance script (`scripts/db_recon.py`) | **authorized and done.** Satisfied §3's "read-only Postgres reconnaissance design" prerequisite. Superseded in place by Slice 2A: the logic moved into the app and this file is now a thin, still-unexecuted CLI wrapper that is deliberately **absent from the container image**. |
 | **2 (local execution)** — running that script from a laptop against the SLAC database | **NOT authorized.** Do not request a kubeconfig, port-forward, or Secret; do not run recon locally. The prohibition is the project rule at `2026-07-24-phase-37-readiness-plan.md:48-52`. ~~"and architecturally impossible … the DB is unreachable from outside the cluster"~~ — **corrected 2026-08-01**: Dean's guide says the opposite, documenting `kubectl port-forward -n isaac-psql svc/isaac-psql-rw 5432:5432` as a working optional convenience for anyone who already holds a SLAC cluster context (`:8-13`, `:83-96`). The rule binds regardless; it never depended on impossibility. |
 | **2A (deployed execution)** — the deployed pod performs read-only reconnaissance and returns a **sanitized aggregate** report via `GET /api/runtime/database/recon` | **authorized 2026-07-31.** Read-only, one short-lived connection, fail-closed gates, aggregate output only. No record ids, titles, scientific values, evidence, or JSON leave the pod. No writes. **Caveat below:** five shipped aggregates went beyond Dean's enumerated list and have since been withheld from the response — see the G3 note after this table. |
-| **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. |
+| **3+** — PostgreSQL record repository, record loading, upload writes | **NOT authorized.** Later sequential slices, each independently reviewed. Gated on the Slice 2A hosted report. **Do not read this row as covering the 2026-08-07 lift**: that authorizes storing experiments THIS APPLICATION CREATES in its own new tables. It authorizes no repository over `records`, no record loading, and no upload write. |
+| **Create Experiment durable persistence** (`isaac_experiments`) | **authorized 2026-08-07**, narrowly — see the scope note above. Implementation and local/CI testing only; **applying the migration to the hosted database is the owner's act, not the agent's.** |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
 Two separate **questions**, which Dean's guide is explicit about not conflating: **writing** to this

@@ -41,6 +41,42 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,api]"
 
+      # THE FILESYSTEM FALLBACK IS COVERED BY THIS JOB, AND ONLY BECAUSE THIS JOB
+      # HAS NO DATABASE. That is currently true by omission — nothing here sets
+      # `PGHOST` — and a property held by omission is one a later edit can remove
+      # without anyone noticing. `experiment_repository.repository()` selects the
+      # filesystem backend precisely when `PGHOST` is unset, so if a future change
+      # added a service container to this job "for convenience", every test in it
+      # would silently start exercising the Postgres path and the fallback that
+      # every developer machine actually runs would stop being tested anywhere.
+      #
+      # Asserting it costs one line and turns the omission into a stated contract.
+      # The dedicated `postgres-migration` job below is where the durable path is
+      # exercised, deliberately separately.
+      - name: Assert this job has NO database, so the filesystem fallback is exercised
+        run: |
+          set -euo pipefail
+          if [ -n "${PGHOST:-}" ]; then
+            echo "::error::PGHOST is set in the default test job (\"${PGHOST}\"). This job must"
+            echo "::error::run without a database so the filesystem repository stays covered."
+            exit 1
+          fi
+          python - <<'PY'
+          import os, sys
+          sys.path.insert(0, "apps/api")
+          from isaac_api import experiment_repository as repo
+          selected = repo.repository()
+          assert selected.backend == repo.BACKEND_FILESYSTEM, selected.backend
+          assert selected.durable is False
+          assert repo.storage_status() == {
+              "configured": False,
+              "backend": "filesystem",
+              "durable": False,
+              "state": repo.STORAGE_STATE_EPHEMERAL,
+          }, repo.storage_status()
+          print("no database configured: filesystem repository selected, durability NOT claimed")
+          PY
+
       - name: Run tests
         run: pytest -q
 
@@ -55,6 +91,396 @@ jobs:
 
       - name: Audit generated record evidence
         run: isaac audit --records-dir /tmp/isaac-demo
+
+  postgres-migration:
+    name: migration and durable repository against a real PostgreSQL
+    runs-on: ubuntu-latest
+
+    # A NEW, ADDITIVE job. It does not modify, gate or depend on `test`, and that
+    # separation is the point rather than a convenience:
+    #
+    #   * `test` keeps running with NO `PGHOST`, so the FILESYSTEM fallback stays
+    #     exercised on every single run. If this job ever became the only place the
+    #     repository is tested, the fallback would silently stop being covered —
+    #     and the fallback is what every developer machine and every other CI job
+    #     actually uses.
+    #   * this job adds the one thing an in-process fake cannot give:
+    #     whether the SQL is valid PostgreSQL, whether the migration is genuinely
+    #     idempotent, and whether it touches anything it does not own.
+    #
+    # WHAT THIS PROVES AND WHAT IT DOES NOT — stated here because the difference is
+    # what the owner is being asked to weigh:
+    #
+    #   PROVEN: the migration applies to an empty database; applying it a second
+    #   time changes nothing; it creates ONLY this application's two tables (a
+    #   before/after diff of `information_schema.tables`); a pre-existing `records`
+    #   table is byte-identical afterwards; the documented rollback returns the
+    #   database to its pre-migration table set with `records` intact; and the
+    #   repository's create / read-back / list / tutorial-refusal behaviour works
+    #   against a real engine.
+    #
+    #   NOT PROVEN: how any of this behaves against the HOSTED database with its
+    #   real 30-row production-derived dataset, its roles, and its existing
+    #   grants. This job removes the "is this even valid SQL / is it idempotent /
+    #   does it touch other tables" class of risk. It does not remove the "does it
+    #   behave correctly against the real data" class. Only the owner applying it,
+    #   deliberately, resolves that.
+    #
+    # VERSION PARITY: `docs/postgres-test-db-guide.md` states the SLAC cluster runs
+    # Postgres 18, so the service container is pinned to 18. That is documented
+    # parity, not measured parity — this environment cannot reach the hosted
+    # server to confirm the running version.
+    #
+    # NOTHING HERE TOUCHES ANY REAL DATABASE. The service container is created and
+    # destroyed by this job. No SLAC credential, kubeconfig or port-forward is used
+    # or requested, and the hosted deployment is not contacted at all.
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: metadata_assistant
+          POSTGRES_PASSWORD: throwaway-ci-password
+          # Must match `db_write.EXPECTED_DATABASE`: the write path gates on the
+          # name and then pins it from a constant, so a differently-named database
+          # would be refused before a connection was attempted — which is the
+          # behaviour under test, not a setup detail to work around.
+          POSTGRES_DB: metadata_assistant
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U metadata_assistant -d metadata_assistant"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: metadata_assistant
+      PGPASSWORD: throwaway-ci-password
+      PGDATABASE: metadata_assistant
+      # The service container speaks plaintext on localhost. The pod's default is
+      # `require`; overridden here because there is no TLS on a loopback container,
+      # and this is the ONLY place that override is acceptable.
+      PGSSLMODE: disable
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,api]"
+
+      - name: Report the engine version actually under test
+        run: |
+          set -euo pipefail
+          psql -Atc "select version()"
+
+      # A STAND-IN for the production-derived sample. Its shape is taken from
+      # `db_provider.Q_RECORD_PAGE` ("SELECT record_id, data FROM records"). Its
+      # CONTENT is obviously synthetic — no production record is used, quoted, or
+      # needed to prove the property, which is that the migration does not touch
+      # this table at all.
+      - name: Seed a stand-in `records` table and capture its exact contents
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE records (record_id char(26) PRIMARY KEY, data jsonb NOT NULL);
+          INSERT INTO records (record_id, data) VALUES
+            ('01SYNTHETICSTANDIN00000001', '{"synthetic": true, "n": 1}'),
+            ('01SYNTHETICSTANDIN00000002', '{"synthetic": true, "n": 2}');
+          SQL
+          psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
+            > /tmp/records-before.txt
+          psql -Atc "select table_name from information_schema.tables where table_schema='public' order by table_name" \
+            > /tmp/tables-before.txt
+          echo "records digest before: $(cat /tmp/records-before.txt)"
+          cat /tmp/tables-before.txt
+
+      # ==================================================================
+      # THE STATE THE DEPLOYED POD IS ACTUALLY IN, and the one this whole job
+      # previously skipped over: a database is CONFIGURED and the migration is
+      # NOT YET APPLIED.
+      #
+      # It is not a hypothetical. `docs/postgres-test-db-guide.md` states that
+      # `PGHOST` is already set in the deployed pod, and `PGDATABASE` there is
+      # exactly `db_write.EXPECTED_DATABASE` — so the durable backend selects
+      # itself on the next image roll, while the migration is deliberately applied
+      # by an operator and not at boot. Every statement against `isaac_experiments`
+      # therefore raises.
+      #
+      # WHAT THAT USED TO DO, measured before the fix: `GET /api/experiments` → 500
+      # (My Experiments, the product's primary screen, rendered "Backend Not
+      # Running"), `GET /api/experiments/<id>` → 500 where it had returned a clean
+      # 404, and `POST /api/experiments` → 500 — while `/api/health` went on
+      # reporting `durable: true` and the UI went on promising durability. The same
+      # three 500s would have returned on any transient outage, permanently, on a
+      # read path that had no database dependency at all before this feature.
+      #
+      # THIS STEP RUNS FIRST, DELIBERATELY. Every step below it applies the
+      # migration, so this is the only point in the job at which the un-migrated
+      # state exists. Putting it here is what makes the omission impossible to
+      # repeat: the job cannot reach "apply" without having proven the state before
+      # it degrades rather than crashes.
+      - name: Prove the app DEGRADES when the migration has not been applied yet
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-unmigrated
+        run: |
+          set -euo pipefail
+          # The table must genuinely not exist, or this step proves nothing.
+          count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_experiments'")
+          [ "$count" = "0" ] || { echo "::error::isaac_experiments already exists; this step must run BEFORE the migration"; exit 1; }
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "apps/api")
+          from fastapi.testclient import TestClient
+          import isaac_api.experiment_repository as repo
+          import isaac_api.workspace as ws
+          from isaac_api.app import create_app
+
+          client = TestClient(create_app(), raise_server_exceptions=False)
+
+          # The durable backend really is selected — otherwise this step would be
+          # asserting the filesystem fallback all over again and would pass for the
+          # wrong reason.
+          assert repo.repository().backend == repo.BACKEND_POSTGRES, repo.repository().backend
+
+          # A record an earlier pod (which had no database) left on disk. The list
+          # must still show it: "degraded" means the filesystem VIEW, not an empty
+          # one, and an empty list would pass a weaker version of this assertion for
+          # entirely the wrong reason.
+          #
+          # The state file is placed DIRECTLY rather than through
+          # `ws.create_experiment`, because that helper writes through the durable
+          # store — which is the very thing that fails here.
+          import json, pathlib
+          rid = "01CIUNMIGRATEDFIXTURE00000"
+          state = {
+              "id": rid,
+              "title": "Written before the roll",
+              "created_utc": "2026-01-01T00:00:00Z",
+              "source": repo.new_experiment_source(),
+              "draft": {},
+              "generation": "ci",
+          }
+          d = pathlib.Path(ws.workspace_root()) / rid
+          d.mkdir(parents=True, exist_ok=True)
+          (d / "experiment.json").write_text(json.dumps(state, indent=2) + "\n")
+
+          # 1. THE LIST DEGRADES. 200, with the filesystem view — never 500.
+          listed = client.get("/api/experiments")
+          assert listed.status_code == 200, (listed.status_code, listed.text[:400])
+          ids = [row["id"] for row in listed.json()["experiments"]]
+          assert ids == [rid], ids
+
+          # 2. A MISS STAYS A 404. It was a clean 404 before durable storage existed
+          #    and it must not have become a server error.
+          missing = client.get("/api/experiments/01ARZ3NDEKTSV4RRFFQ69G5FAV")
+          assert missing.status_code == 404, (missing.status_code, missing.text[:400])
+
+          # 3. A KNOWN ID STILL LOADS, from the filesystem.
+          assert client.get(f"/api/experiments/{rid}").status_code == 200
+
+          # 4. THE WRITE FAILS LOUDLY AND TYPED — 503, not 500, and not a silent
+          #    ephemeral write. The reader was told their work is durable; a create
+          #    that could not keep it must say so rather than look like it worked.
+          created = client.post("/api/experiments", json={"title": "CI unmigrated"})
+          assert created.status_code == 503, (created.status_code, created.text[:400])
+          assert created.json()["error"] == "experiment_storage_unavailable", created.text
+          for leak in ("127.0.0.1", "PGHOST", "PGPASSWORD", "throwaway-ci-password"):
+              assert leak not in created.text, leak
+
+          # 5. THE DURABILITY CLAIM IS GONE. This is what stops the UI promising
+          #    durability on a deployment where creating cannot work.
+          storage = client.get("/api/health").json()["experiment_storage"]
+          assert storage["durable"] is False, storage
+          assert storage["state"] == repo.STORAGE_STATE_UNAVAILABLE, storage
+          assert storage["configured"] is True, storage
+          # `backend` still reports what is SELECTED. The app has not fallen back;
+          # it keeps trying, which is what lets it recover once the operator applies
+          # the migration.
+          assert storage["backend"] == repo.BACKEND_POSTGRES, storage
+
+          # 6. AND NOTHING WAS WRITTEN. The failed create left no directory behind.
+          assert sorted(p.name for p in pathlib.Path(ws.workspace_root()).iterdir()) == [rid]
+          print("un-migrated database: reads degrade, the write fails typed, durability is NOT claimed")
+          PY
+
+      # The un-migrated fixture workspace is thrown away so no later step can read
+      # a record that only existed to prove the degraded path.
+      - name: Discard the un-migrated fixture workspace
+        run: rm -rf /tmp/isaac-pg-unmigrated
+
+      - name: Plan the migration without applying it
+        run: |
+          set -euo pipefail
+          out=$(python scripts/db_migrate.py --plan)
+          echo "$out"
+          [ "$out" = "pending: 0001_experiments" ] || {
+            echo "::error::unexpected plan: $out"; exit 1; }
+          # A plan must apply NOTHING. The bookkeeping table may exist (the plan
+          # creates it to read it); no application table may.
+          count=$(psql -Atc "select count(*) from information_schema.tables where table_schema='public' and table_name='isaac_experiments'")
+          [ "$count" = "0" ] || { echo "::error::--plan created isaac_experiments"; exit 1; }
+
+      - name: Apply the migration
+        run: |
+          set -euo pipefail
+          out=$(python scripts/db_migrate.py --apply)
+          echo "$out"
+          [ "$out" = "applied: 0001_experiments" ] || {
+            echo "::error::unexpected apply result: $out"; exit 1; }
+
+      # THE IDEMPOTENCE CLAIM, PROVEN RATHER THAN ASSERTED IN A COMMENT.
+      - name: Apply it a SECOND time and prove it is a no-op
+        run: |
+          set -euo pipefail
+          before=$(psql -Atc "select md5(string_agg(table_name || '|' || column_name || '|' || data_type, ',' order by table_name, ordinal_position)) from information_schema.columns where table_schema='public'")
+          out=$(python scripts/db_migrate.py --apply)
+          echo "$out"
+          [ "$out" = "nothing to apply (every migration is already recorded)" ] || {
+            echo "::error::a second apply was not a no-op: $out"; exit 1; }
+          after=$(psql -Atc "select md5(string_agg(table_name || '|' || column_name || '|' || data_type, ',' order by table_name, ordinal_position)) from information_schema.columns where table_schema='public'")
+          [ "$before" = "$after" ] || { echo "::error::the schema changed on a re-run"; exit 1; }
+          # And once more with the BOOKKEEPING DELETED, which is the harder half of
+          # the claim: the file's own `CREATE ... IF NOT EXISTS` must carry it even
+          # when the version table has lost the row.
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM isaac_schema_migrations"
+          python scripts/db_migrate.py --apply
+          recovered=$(psql -Atc "select md5(string_agg(table_name || '|' || column_name || '|' || data_type, ',' order by table_name, ordinal_position)) from information_schema.columns where table_schema='public'")
+          [ "$before" = "$recovered" ] || {
+            echo "::error::re-applying after losing the bookkeeping changed the schema"; exit 1; }
+
+      # THE GUARD THE OWNER WILL MOST WANT TO SEE: exactly two new tables, and the
+      # stand-in `records` untouched.
+      - name: Diff the table set and prove `records` is byte-identical
+        run: |
+          set -euo pipefail
+          psql -Atc "select table_name from information_schema.tables where table_schema='public' order by table_name" \
+            > /tmp/tables-after.txt
+          echo "--- before ---"; cat /tmp/tables-before.txt
+          echo "--- after  ---"; cat /tmp/tables-after.txt
+          added=$(comm -13 /tmp/tables-before.txt /tmp/tables-after.txt | tr '\n' ' ' | sed 's/ *$//')
+          removed=$(comm -23 /tmp/tables-before.txt /tmp/tables-after.txt | tr '\n' ' ' | sed 's/ *$//')
+          [ "$added" = "isaac_experiments isaac_schema_migrations" ] || {
+            echo "::error::the migration created tables it should not have: '$added'"; exit 1; }
+          [ -z "$removed" ] || { echo "::error::the migration REMOVED tables: '$removed'"; exit 1; }
+          psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
+            > /tmp/records-after.txt
+          diff /tmp/records-before.txt /tmp/records-after.txt || {
+            echo "::error::the production-derived stand-in table was modified"; exit 1; }
+          echo "records: byte-identical; added exactly the two application-owned tables"
+
+      # The repository, end to end, against the real engine — the half the
+      # in-process fake cannot cover.
+      - name: Exercise the durable repository against the real engine
+        env:
+          ISAAC_UI_WORKSPACE: /tmp/isaac-pg-workspace
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, sys
+          sys.path.insert(0, "apps/api")
+          from fastapi.testclient import TestClient
+          import isaac_api.experiment_repository as repo
+          import isaac_api.workspace as ws
+          from isaac_api.app import create_app
+
+          app = create_app()
+          client = TestClient(app)
+
+          status = client.get("/api/health").json()["experiment_storage"]
+          assert status == {
+              "configured": True,
+              "backend": "postgres",
+              "durable": True,
+              "state": repo.STORAGE_STATE_DURABLE,
+          }, status
+
+          created = client.post("/api/experiments", json={"title": "CI durable"})
+          assert created.status_code == 201, created.text
+          rid = created.json()["id"]
+
+          # It is really in the database, not only on disk.
+          import isaac_api.db_write as dbw
+          with dbw.write_transaction(os.environ) as (cur, pol):
+              cur.execute(pol.check(repo.Q_ALL_EXPERIMENTS))
+              rows = cur.fetchall()
+          assert [r[0] for r in rows] == [rid], rows
+
+          # Simulate a pod restart: throw the workspace directory away and read.
+          import shutil
+          shutil.rmtree(ws.workspace_root())
+          listed = client.get("/api/experiments").json()["experiments"]
+          assert [e["id"] for e in listed] == [rid], listed
+          assert client.get(f"/api/experiments/{rid}").status_code == 200
+
+          # TUTORIAL ISOLATION, against the real engine.
+          session = client.post("/api/tutorial/sessions").json()["session_id"]
+          headers = {"X-Isaac-Tutorial-Session": session}
+          refused = client.post("/api/experiments", json={"title": "no"}, headers=headers)
+          assert refused.status_code == 409, refused.text
+          with dbw.write_transaction(os.environ) as (cur, pol):
+              cur.execute(pol.check(repo.Q_ALL_EXPERIMENTS))
+              after = cur.fetchall()
+          assert [r[0] for r in after] == [rid], "a session write reached the database"
+          # ...and the five examples the session materialised are not in it either.
+          assert set(r[0] for r in after).isdisjoint(ws.CANONICAL_IDS)
+          print("durable repository OK against a real PostgreSQL")
+          PY
+
+      # THE SAME DIGEST, TAKEN AFTER THE APPLICATION HAS ACTUALLY RUN.
+      #
+      # The step above already proved the MIGRATION does not touch `records`. That
+      # is the smaller half of the claim. This one proves the RUNNING APPLICATION
+      # does not either — after it has opened write transactions, created records,
+      # upserted state, hydrated a wiped workspace, and refused a session write.
+      # Without it, "the production-derived sample is untouched" would be a
+      # statement about DDL only, and the thing the owner is actually being asked
+      # to trust is the write path.
+      #
+      # It is checked here rather than only after the rollback so that a failure
+      # names the application as the cause, instead of arriving mixed together with
+      # a rollback failure.
+      - name: Prove the RUNNING APPLICATION left `records` byte-identical
+        run: |
+          set -euo pipefail
+          psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
+            > /tmp/records-after-app.txt
+          diff /tmp/records-before.txt /tmp/records-after-app.txt || {
+            echo "::error::the application modified the production-derived stand-in table"; exit 1; }
+          # ...and it did not quietly add anything of its own beside it either.
+          psql -Atc "select table_name from information_schema.tables where table_schema='public' order by table_name" \
+            > /tmp/tables-after-app.txt
+          diff /tmp/tables-after.txt /tmp/tables-after-app.txt || {
+            echo "::error::running the application changed the table set"; exit 1; }
+          echo "records: byte-identical after the application ran; table set unchanged"
+
+      # THE ROLLBACK, PROVEN. It is an operator action run with psql — the
+      # application cannot run it, because every statement in it is a DROP and the
+      # write path's statement policy refuses those.
+      - name: Prove the documented rollback returns the database to its prior state
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f apps/api/isaac_api/migrations/0001_experiments.rollback.sql
+          psql -Atc "select table_name from information_schema.tables where table_schema='public' order by table_name" \
+            > /tmp/tables-rolled-back.txt
+          diff /tmp/tables-before.txt /tmp/tables-rolled-back.txt || {
+            echo "::error::rollback did not restore the pre-migration table set"; exit 1; }
+          psql -Atc "select md5(string_agg(record_id || data::text, '|' order by record_id)) from records" \
+            > /tmp/records-rolled-back.txt
+          diff /tmp/records-before.txt /tmp/records-rolled-back.txt || {
+            echo "::error::rollback modified the production-derived stand-in table"; exit 1; }
+          echo "rollback OK: pre-migration table set restored, records untouched"
 
   frontend:
     name: frontend tests and build

@@ -476,6 +476,34 @@ export const api = {
     return body.experiments;
   },
 
+  /**
+   * Create an experiment in the ordinary workspace.
+   *
+   * It sends a title and, when there is one, a note — and NOTHING else. There is
+   * deliberately no `id` parameter on this function: the server mints the record
+   * id, and its request model rejects an unrecognised field outright, so a client
+   * that tried to choose one would get a 422 rather than be quietly obeyed. That
+   * is the property `test_create_experiment_has_no_caller_in_the_api_package`
+   * exists to keep, and the shape of this signature is the client-side half of it.
+   *
+   * `description` is omitted from the body when empty rather than sent as `""`:
+   * the two are the same thing to a reader and only one of them is a value.
+   *
+   * The worked-example session header is attached by `request` when a session is
+   * open — and the server then refuses with 409. That is intentional and is not
+   * worked around here: a record a person created must not be written into a
+   * workspace that is discarded on a timer. The UI does not offer this action
+   * inside a session, so the refusal is a backstop rather than a path a reader
+   * meets.
+   */
+  createExperiment(input: { title: string; description?: string }): Promise<ApiExperimentDetail> {
+    const description = (input.description ?? '').trim();
+    return postJson<ApiExperimentDetail>('/experiments', {
+      title: input.title.trim(),
+      ...(description ? { description } : {}),
+    });
+  },
+
   getExperiment(id: string): Promise<ApiExperimentDetail> {
     return getJson<ApiExperimentDetail>(`/experiments/${enc(id)}`);
   },

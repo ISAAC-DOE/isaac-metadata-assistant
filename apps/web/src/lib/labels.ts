@@ -441,6 +441,113 @@ export const LABELS = {
    * `tutorialOfferBody.endsWith(launchGuidedDemoBody)` is asserted, so a change to either
    * string that breaks the quotation fails rather than drifts.
    */
+  /*
+   * CREATE EXPERIMENT — the first record-creation control this product has had.
+   *
+   * The verb is the same one the whole flow uses, start to finish: the button says
+   * "Create Experiment", the form's submit says "Create Experiment", and the screen
+   * it lands on is the record it created. An action keeps its name through the flow.
+   *
+   * WHAT THE COPY MUST NOT DO. It must not describe what the record CONTAINS,
+   * because it contains nothing — a title and a set of open questions. "Start a new
+   * record and fill it in" would promise a filling-in surface for fields that have
+   * no capture form in this build. `createExperimentHint` therefore says what
+   * genuinely happens next: the record opens with its questions already listed.
+   */
+  actionCreateExperiment: 'Create Experiment',
+  createExperimentHint:
+    'Starts an empty record with the questions ISAAC needs already listed, and opens it.',
+
+  /** The form's own heading, distinct from the button that opens it, so a screen
+   *  reader announcing the expanded region is not told "Create Experiment" twice. */
+  createExperimentFormTitle: 'Name your experiment',
+  createExperimentTitleLabel: 'Experiment title',
+  createExperimentDescriptionLabel: 'What is it? (optional)',
+  /*
+   * The one place a create form is allowed to be opinionated: it tells the reader
+   * what this box is NOT for. Without it, "What is it?" invites exactly the
+   * unsourced scientific assertion the no-guessing contract exists to keep out of
+   * a record — someone types "Cu K-edge, 8979 eV" and reasonably expects those to
+   * become fields. They do not; this text is stored as the record's source
+   * description and is never parsed.
+   */
+  createExperimentDescriptionHint:
+    'A note for you. It is stored with the record and is never read as a scientific value.',
+  createExperimentSubmit: 'Create Experiment',
+  createExperimentCancel: 'Cancel',
+  /** Shown when the title is empty. States the fix, not the failure. */
+  createExperimentTitleRequired: 'Give the experiment a title to create it.',
+
+  /*
+   * MY EXPERIMENTS, EMPTY — an invitation to act, not a report of absence.
+   *
+   * THE SENTENCE THIS REPLACES WAS "This deployment cannot yet create or import a
+   * record, so nothing has been added." It was true when it was written and it is
+   * now FALSE: `POST /api/experiments` exists. It is not softened or reworded, it
+   * is gone, and nothing that implies it may come back.
+   *
+   * The title asks for the first action rather than naming the empty set. "No
+   * experiments yet" describes the reader's screen back to them; a person who has
+   * just arrived can see that it is empty.
+   */
+  emptyExperimentsTitle: 'Start your first experiment',
+  emptyExperimentsBody:
+    'Create your first experiment, validate an existing record, or explore ISAAC with the ' +
+    'guided demo.',
+
+  actionOpenValidator: 'Open Validator',
+  openValidatorHint:
+    'Check a record file you already have against the official ISAAC schema.',
+
+  /*
+   * WHERE A NEW EXPERIMENT GOES — one short line, and it is DERIVED, never assumed.
+   *
+   * Both sentences exist because both are true somewhere. The deployed pod stores
+   * experiments in this application's own PostgreSQL database; a developer
+   * checkout and CI store them in a workspace directory, and on the pod that
+   * directory is an `emptyDir` a restart empties. Shipping either sentence alone
+   * would put a false promise on half the deployments.
+   *
+   * THERE IS DELIBERATELY NO THIRD SENTENCE for the unknown case. When
+   * `/api/health` has not been read, or predates the `experiment_storage` block,
+   * `ExperimentsHome` renders NEITHER — because the only honest thing to say about
+   * durability you have not established is nothing. A "storage is being
+   * determined…" line would be a claim about the app's state dressed as a claim
+   * about the reader's data.
+   *
+   * "cleared when the server restarts" rather than "when the pod restarts":
+   * `emptyDir`, pods and deployments are our vocabulary, not the reader's. The
+   * consequence is the same and the consequence is the part they need.
+   */
+  storageDurable:
+    'Experiments you create are saved in this deployment’s database and stay here across ' +
+    'restarts.',
+  storageEphemeral:
+    'Experiments you create live in this server’s workspace and are cleared when the server ' +
+    'restarts.',
+  /*
+   * THE THIRD SENTENCE, AND IT IS NOT A REASSURING ONE ON PURPOSE.
+   *
+   * `unavailable` means a database IS configured for this deployment and
+   * experiments are not going into it. The temptation is to soften that into
+   * "storage is being set up" or to drop it and render nothing. Both would be
+   * worse than saying it: the reader is about to press a button that will fail,
+   * and the honest thing is to tell them before they press it rather than after.
+   *
+   * IT DESCRIBES THE CONSEQUENCE ACCURATELY, which took some care. Creating does
+   * not silently produce a temporary record — `POST /api/experiments` returns 503
+   * and writes nothing at all — so "may be lost" would be wrong in the direction
+   * that matters. "Will not work until it does" is what actually happens.
+   *
+   * The two sentences above deliberately never mention this state, and the note
+   * on `unknown` above still holds for `unknown` — that one renders nothing,
+   * because there the app has established NOTHING. Here it has established
+   * something bad, which is a different thing from knowing nothing.
+   */
+  storageUnavailable:
+    'This deployment saves experiments in its own database, and that database is not ' +
+    'answering. Creating an experiment will not work until it does.',
+
   actionLaunchGuidedDemo: 'Launch Guided Demo',
   launchGuidedDemoBody:
     'Starting it opens a worked example of its own — a temporary workspace holding five example ' +

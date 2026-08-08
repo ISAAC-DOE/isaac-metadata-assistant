@@ -1,5 +1,12 @@
 import './screens.css';
-import { useEffect, useRef, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -7,15 +14,87 @@ import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { Compass, LayoutList, ShieldCheck } from '../components/icons';
+import { Compass, LayoutList, Plus, ShieldCheck } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
 import { startTutorial, useTutorialState } from '../lib/tutorialController';
 import { useFetch } from '../lib/useFetch';
+import { useHealth } from '../lib/useHealth';
 import { useWorkspaceScope } from '../lib/workspaceScope';
 import { subscribeWorkspaceRebuilt } from '../lib/workspaceInvalidation';
 import { queueSubcount, summariesToQueueGroups } from '../lib/adapt';
+
+/**
+ * Where a newly created experiment is stored, as far as this client has
+ * ESTABLISHED it. Four states, and `'unknown'` is a real one rather than a
+ * placeholder: `/api/health` may not have answered yet, and a deployment older
+ * than the `experiment_storage` block carries none.
+ */
+type Durability = 'durable' | 'ephemeral' | 'unavailable' | 'unknown';
+
+/**
+ * THE DURABILITY CLAIM IS DERIVED, NEVER ASSUMED — and `unknown` claims nothing.
+ *
+ * The same product now runs two ways. The deployed pod stores experiments in this
+ * application's own PostgreSQL database, so they survive a restart and a
+ * redeployment. A developer checkout and CI have no database and store them in a
+ * workspace directory, which on the pod is an `emptyDir` that a restart empties.
+ * A hard-coded sentence would therefore be false on one of them, whichever one we
+ * picked.
+ *
+ * `'unavailable'` IS NEW, AND IT IS THE ONE THAT WAS MISSING. This function used
+ * to read `configured && !durable` as EPHEMERAL, on the reasoning that the only
+ * way to reach it was a `PGDATABASE` mismatch, after which the app really does
+ * fall back to the workspace directory. That reasoning no longer covers the state
+ * space: a deployment whose database is configured and NOT ANSWERING also reports
+ * `durable: false`, and there the reader's work is not ephemeral — creating fails
+ * outright with a 503. Telling them "cleared when the server restarts" would be a
+ * different false promise, not a safer one, so the backend now names the state
+ * and this reads the name.
+ *
+ * THE BOOLEAN IS STILL THE FALLBACK, for a deployment serving the first version
+ * of this block (`state` absent). There, `configured && !durable` can only be the
+ * `PGDATABASE` mismatch, so the old reading is still the correct one — it is kept
+ * for exactly the case it was correct for.
+ *
+ * AN UNRECOGNISED `state` IS `'unknown'`, not a guess. A future backend value this
+ * build has never heard of must produce silence rather than the nearest-looking
+ * sentence.
+ */
+function durabilityOf(
+  storage: { configured: boolean; durable: boolean; state?: string } | undefined,
+): Durability {
+  if (storage === undefined) return 'unknown';
+  switch (storage.state) {
+    case 'durable':
+      return 'durable';
+    case 'ephemeral':
+      return 'ephemeral';
+    case 'unavailable':
+      return 'unavailable';
+    case undefined:
+      return storage.durable ? 'durable' : 'ephemeral';
+    default:
+      return 'unknown';
+  }
+}
+
+/** The one short line about where a new experiment goes, or nothing at all. */
+function storageSentence(durability: Durability): string | null {
+  if (durability === 'durable') return LABELS.storageDurable;
+  if (durability === 'ephemeral') return LABELS.storageEphemeral;
+  // NOT SILENCE. `unavailable` is the one bad state, and the reader is about to
+  // press a button that will fail — saying so before they press it is the whole
+  // value of the line. It is deliberately not softened into "storage is being
+  // set up": that would be an invented cause.
+  if (durability === 'unavailable') return LABELS.storageUnavailable;
+  // UNKNOWN SAYS NOTHING. Not "checking…", not a hedge — the only honest thing to
+  // say about durability that has not been established is nothing, and a hedge
+  // reads as a claim about the reader's data rather than about our own state.
+  // This is different from `unavailable`, where something HAS been established.
+  return null;
+}
 
 /**
  * S1 · My Experiments — home queue, live from `GET /api/experiments`. Answers
@@ -50,6 +129,13 @@ export function ExperimentsHome() {
    */
   const scope = useWorkspaceScope();
   const result = useFetch(() => api.listExperiments(), [scope]);
+
+  /*
+   * The shared, cached health read — the same one the mode chip uses, so the two
+   * can never describe the deployment differently. It is read here for exactly one
+   * fact: whether a created experiment is stored durably.
+   */
+  const durability = durabilityOf(useHealth()?.experiment_storage);
 
   /*
    * The node focus returns to when the overlay closes. `startTutorial` stores whatever
@@ -120,6 +206,8 @@ export function ExperimentsHome() {
    */
   let queueIsEmpty = false;
 
+  const openCreated = (id: string) => navigate(ROUTES.record(id));
+
   if (result.status === 'loading') {
     body = <LoadingPanel label="Loading your experiments…" />;
   } else if (result.status === 'error') {
@@ -133,184 +221,32 @@ export function ExperimentsHome() {
       groups.length > 0 ? (
         <ExperimentQueue groups={groups} />
       ) : (
-        /*
-         * THE PERMANENT ORDINARY STATE, not a transient one — so it is written as
-         * a real empty state rather than a one-line placeholder.
-         *
-         * This build has no way to create or import a record: there is no
-         * `POST /api/experiments`, `create_experiment` has no production caller,
-         * and `POST /api/uploads` refuses every upload by design. The five
-         * built-in examples now exist only inside a worked-example session, so
-         * this list is empty until an import capability exists.
-         *
-         * Copy rules this had to satisfy, each because the previous wording broke
-         * one of them: it must not promise creation or import (the earlier "run
-         * the synthetic demo to create your first record" did); it must not point
-         * at the built-in example as if it were in this list (the wording it
-         * replaces, "open the built-in example", did once the examples moved into
-         * a session); and it must not blame the reader for an absence the
-         * deployment caused.
-         *
-         * ── THE POLISH SLICE, AND THE ONE THING IT DELIBERATELY DID NOT BUILD ──
-         *
-         * The brief asked for four things in order: a polished empty state, a
-         * `Create Experiment` action, `Launch Guided Demo` (blue), and a
-         * meaningful `Open Validator`. Three of the four are here. The create
-         * action is NOT, and it was left out on evidence rather than on taste:
-         *
-         *   1. There is no create path to drive it. `routes.py` exposes no
-         *      `POST /api/experiments` (the tutorial tag's own comment says so and
-         *      `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package`
-         *      pins it), and `lib/api.ts` has no create call. A control here would
-         *      have nothing to call.
-         *   2. A disabled one is still a dead control, and this screen has already
-         *      shipped that defect once — see the P1 note further down, where a
-         *      primary "New Record" button navigated to a screen that could not
-         *      create anything.
-         *   3. The repository forbids the LABEL, not merely the behaviour.
-         *      `product-facing-language.test.tsx`'s `FORBIDDEN_CREATION_PROMISE`
-         *      scans every non-comment string under `apps/web/src` for
-         *      /create\s+(a |your )?(new )?(record|experiment)/i, and
-         *      `screens/ExperimentsHome.tsx` is named in its must-be-scanned list.
-         *      So "Create Experiment" cannot be rendered as copy at all without
-         *      weakening a guard written to stop exactly this.
-         *
-         * What stands in its place is the sentence that is true — the list is
-         * empty because the deployment cannot fill it — given first position and
-         * the visual weight the action would have had. When a durable create path
-         * lands, the slot below the lede is where it goes, and the guard above is
-         * the thing that has to be revisited WITH it, not before it.
-         *
-         * WHAT CHANGED VISUALLY. The state used to be bare prose on the screen
-         * background with one primary and one loose secondary. It now borrows the
-         * queue's own idiom — the `.exp-row` card shape, border, radius and
-         * surface — so the screen still reads as experiment UI when the queue it
-         * replaces is absent. No new visual language: same tokens, same card
-         * geometry, same button variants.
-         */
-        <section className="queue-empty-state" aria-labelledby="queue-empty-title">
-          <div className="queue-empty-lede">
-            {/* Decorative only. The heading beside it carries the meaning, so it is
-                hidden from the accessibility tree rather than given a label that
-                would be read out ahead of the heading. */}
-            <span className="queue-empty-mark" aria-hidden="true">
-              <LayoutList size={20} strokeWidth={1.75} />
-            </span>
-            <div className="queue-empty-lede-text">
-              <h2 className="queue-empty-title" id="queue-empty-title">
-                No experiments yet
-              </h2>
-              <p className="queue-empty-body">
-                Experiments you work on will appear here, one row each, grouped by what
-                they still need. This deployment cannot yet create or import a record, so
-                nothing has been added.
-              </p>
-            </div>
-          </div>
-
-          {/* An eyebrow, not a heading: it labels the two cards below without adding
-              an outline level, and the cards carry their own h3 titles. */}
-          <p className="queue-empty-eyebrow">What you can do here now</p>
-
-          <ul className="queue-empty-list">
-            {/*
-              THE PRIMARY, AND IT DOES THE THING IT NAMES.
-
-              What stood here was `actionGoToHelpAndTutorial` — a SECONDARY button whose
-              entire behaviour was `navigate(ROUTES.settingsTab('help'))`. That was an
-              honest control at the time it was written: it named navigation, and it
-              navigated. But it was the last tutorial affordance left on this screen once
-              the first-run offer had been completed or skipped, and `shouldOfferTutorial`
-              retires that offer permanently on completion. So a returning reader met a
-              permanently-empty page whose only remaining route to the walkthrough was a
-              quiet button that took them somewhere else to press a different button.
-
-              This one calls `startTutorial` directly, on exactly the contract
-              `TutorialPromotion` uses: the live node from a ref, so
-              `tutorialReturnFocusTarget` can hand focus back here when the overlay
-              closes, and so a node that has since unmounted is correctly refused.
-
-              It stays blue because on a screen whose queue can never fill, this IS the
-              screen's action — not because a demo deserves emphasis.
-
-              NOT a duplicate of Settings → Help & Tutorial, which keeps `Replay Tutorial`
-              as the walkthrough's permanent home. This is an entry point, not a second
-              home, and it carries a third name so that no label in the app addresses two
-              controls.
-            */}
-            <li className="queue-empty-action queue-empty-action-lead">
-              <span className="queue-empty-action-mark" aria-hidden="true">
-                <Compass size={18} strokeWidth={1.75} />
-              </span>
-              <div className="queue-empty-action-main">
-                <h3 className="queue-empty-action-title">Guided demo</h3>
-                {/* Associated with the button rather than left as adjacent text: a
-                    screen reader announcing the control otherwise reads three words and
-                    none of the disclosure. It is a DESCRIPTION, not a label — the
-                    accessible name stays "Launch Guided Demo". */}
-                <p className="queue-empty-hint" id="queue-empty-launch-hint">
-                  {LABELS.launchGuidedDemoBody}
-                </p>
-              </div>
-              <div className="queue-empty-action-cta">
-                <button
-                  ref={launchRef}
-                  type="button"
-                  className="btn btn-primary queue-empty-cta"
-                  disabled={launchBusy}
-                  aria-describedby="queue-empty-launch-hint"
-                  onClick={() => startTutorial(launchRef.current)}
-                >
-                  {LABELS.actionLaunchGuidedDemo}
-                </button>
-              </div>
-            </li>
-
-            {/*
-              THE SECOND REAL ACTION, and it is second by tone rather than by
-              importance. It used to be a bare secondary button with a one-line
-              caption trailing it in a list; it now gets the same card, the same
-              title-and-description shape and the same cta column as the primary, so
-              the only thing separating the two is the button variant.
-
-              It stays `btn-secondary`: the brief keeps blue for the guided demo, and
-              two blues would put the reader back where the double-CTA note below
-              says they must not be.
-
-              The description is checkable, not promotional. "Never stored" is the
-              route's documented contract — `POST /api/validate/record`: "the body is
-              never written anywhere (no workspace file, no temp file, no record
-              mutation), and nothing about its content is logged". "The same check"
-              is the same docstring's parity claim: it calls the same
-              `validate_official` over the same vendored schema that the
-              per-experiment validation uses.
-            */}
-            <li className="queue-empty-action">
-              <span className="queue-empty-action-mark" aria-hidden="true">
-                <ShieldCheck size={18} strokeWidth={1.75} />
-              </span>
-              <div className="queue-empty-action-main">
-                <h3 className="queue-empty-action-title">Schema validator</h3>
-                <p className="queue-empty-hint">
-                  Check a record file you already have against the official ISAAC schema —
-                  the same deterministic check this app runs on an exported record. It
-                  names every failing path, and the file you check is never stored.
-                </p>
-              </div>
-              <div className="queue-empty-action-cta">
-                <button
-                  type="button"
-                  className="btn btn-secondary queue-empty-cta"
-                  onClick={() => navigate(`${ROUTES.governance}?tab=validator`)}
-                >
-                  Open Validator
-                </button>
-              </div>
-            </li>
-          </ul>
-        </section>
+        <EmptyExperiments
+          launchRef={launchRef}
+          launchBusy={launchBusy}
+          durability={durability}
+          onCreated={openCreated}
+          onOpenValidator={() => navigate(`${ROUTES.governance}?tab=validator`)}
+        />
       );
   }
+
+  /*
+   * THE HEADER CREATE CONTROL, and the conditions on it are the whole design.
+   *
+   * `!queueIsEmpty` — exactly one Create Experiment control is ever on screen. When
+   * the queue is empty the empty state owns it, because the empty state IS the
+   * screen then and a header button above an invitation to create would be the same
+   * action twice. When the queue has rows there is no empty state, and without this
+   * the only way to create a second experiment would be to delete the first — which
+   * there is no control for.
+   *
+   * `scope === null` — never inside a worked-example session. `POST /api/experiments`
+   * refuses a session header with 409 and writes nothing, so this control would be a
+   * button that looks like it acts and does not. That is the exact failure mode the
+   * note below records two other controls being removed for; it is not repeated here.
+   */
+  const showHeaderCreate = result.status === 'data' && !queueIsEmpty && scope === null;
 
   return (
     <AppShell
@@ -340,14 +276,26 @@ export function ExperimentsHome() {
          * example records live only in such a session, so the controls that
          * rebuild them belong there too.
          *
-         * Earlier P1 note, kept because it records why there is no create action:
-         * a "New Record" button used to sit here, styled primary, navigating to
+         * EARLIER P1 NOTE, KEPT AS A RECORD AND NOW PARTLY SUPERSEDED. It read: a
+         * "New Record" button used to sit here, styled primary, navigating to
          * ROUTES.load. It promised a capability the build does not have — `/load`
          * offers the worked example and one permanently 403'd upload seam, and
-         * nothing there accepts anything a user supplies. There is still no
+         * nothing there accepts anything a user supplies. "There is still no
          * record-creation route in this application, so no control here may imply
-         * one.
+         * one" was its conclusion, and that conclusion is now FALSE: `POST
+         * /api/experiments` exists.
+         *
+         * The RULE it stated survives intact and is what `showHeaderCreate`
+         * enforces — a control here may not imply a capability the build does not
+         * have. The difference is that the capability now exists, and the control
+         * below calls it directly rather than navigating somewhere that pretends
+         * to. It is also absent inside a worked-example session, where the
+         * endpoint refuses, which is the same rule applied to the one scope where
+         * the capability still is not there.
          */}
+        {showHeaderCreate && (
+          <CreateExperimentControl variant="header" onCreated={openCreated} />
+        )}
       </div>
 
       {/*
@@ -361,11 +309,19 @@ export function ExperimentsHome() {
 
         AND IT IS NOW ALSO GATED ON THE QUEUE HAVING ROWS, which resolves a
         double-CTA this slice would otherwise have created. The empty state below
-        gained its own `btn btn-primary` that calls `startTutorial`; on a first
-        visit the offer card's `Start Tutorial` is a SECOND primary, ten pixels
-        away, doing the identical thing under a different name. Two primaries for
-        one action is not a styling nit — it makes a reader stop and work out
-        which one is the real one, on the screen where we most need them not to.
+        carries its own Launch Guided Demo control that calls `startTutorial`; on a
+        first visit the offer card's `Start Tutorial` is a SECOND call to action,
+        ten pixels away, doing the identical thing under a different name. Two
+        controls for one action is not a styling nit — it makes a reader stop and
+        work out which one is the real one, on the screen where we most need them
+        not to.
+
+        (That empty-state control was `btn btn-primary` when this note was
+        written, and is now `btn btn-action` — the same action blue, tinted rather
+        than filled. The solid primary moved to Create Experiment when a real
+        `POST /api/experiments` landed. The duplication argument is unaffected: it
+        was never about the variant, it was about two controls starting the same
+        walkthrough.)
 
         The empty state wins the CTA rather than the card, because the empty state
         is the whole screen when the queue is empty and it is what a RETURNING
@@ -376,7 +332,7 @@ export function ExperimentsHome() {
         condition is shared with other callers, and the thing that varies here is
         this screen's layout, not whether the walkthrough is on offer.
 
-        WHERE THIS CARD STILL RENDERS — stated as the two states it is actually
+        WHERE THIS CARD STILL RENDERS — stated as the states it is actually
         reachable in, because the sentence that stood here was FALSE and was
         falsified by review rather than by a test. It read: "in the shipped build
         this card now renders essentially nowhere". It is kept mounted because it
@@ -403,6 +359,12 @@ export function ExperimentsHome() {
         completed the walkthrough, `shouldOfferTutorial` is true and the card
         renders until resume resolves.
 
+        STATE C — NEW, and the ordinary one from now on. A reader who has created
+        an experiment has a non-empty queue in the ordinary scope. State A used to
+        be the only way this list held rows without a session; it is now the
+        legacy way. That is why the sentence above no longer calls the card's
+        reachability marginal.
+
         WHAT IS TRUE, and is the whole justification for the gate: the two CTAs
         cannot both be on screen, because one requires rows and the other
         requires none. That is a statement about the layout, not a claim that
@@ -417,5 +379,402 @@ export function ExperimentsHome() {
 
       {body}
     </AppShell>
+  );
+}
+
+/**
+ * THE EMPTY STATE — the polish slice's card idiom, now carrying the action the
+ * polish slice deliberately could not build.
+ *
+ * WHAT CAME FROM WHICH SIDE, because this is a merge of two designs and a future
+ * reader should not have to reconstruct it from the git history:
+ *
+ *   FROM THE POLISH SLICE (#72) — everything about the SHAPE. The lede with its
+ *   decorative `LayoutList` mark, the eyebrow that labels the actions without
+ *   adding an outline level, and one action per card built on `.exp-row`'s exact
+ *   geometry, so an empty queue and a full queue read as one screen in two
+ *   states. That slice's own note said where a create action would go when one
+ *   existed — "the slot below the lede" — and this is that slot.
+ *
+ *   FROM THE PERSISTENCE SLICE (#69) — the CAPABILITY. `POST /api/experiments`
+ *   is real, so Create Experiment is a real control that calls it, not a
+ *   disabled affordance and not a navigation dressed as an action.
+ *
+ * THE HIERARCHY, AND THE ONE THING THAT MOVED. Three real actions, all in the
+ * action blue, never the `--assist` indigo (reserved for advisory surfaces, and
+ * it would say the wrong thing about a control that creates a record). Create
+ * Experiment is the solid `btn-primary` and holds the lead card's stronger
+ * border; Guided Demo steps down to `btn-action` — same hue, tinted rather than
+ * filled; Open Validator keeps `btn-secondary`. That is one unmistakable primary
+ * and two peers, which is what the polish slice's "two blues" note asked for.
+ *
+ * Guided Demo was the solid primary before this, and it held that only because
+ * the screen had no other action — the polish slice said so in as many words.
+ * It has one now.
+ */
+function EmptyExperiments({
+  launchRef,
+  launchBusy,
+  durability,
+  onCreated,
+  onOpenValidator,
+}: {
+  launchRef: RefObject<HTMLButtonElement>;
+  launchBusy: boolean;
+  durability: Durability;
+  onCreated: (id: string) => void;
+  onOpenValidator: () => void;
+}) {
+  const storage = storageSentence(durability);
+  return (
+    <section className="queue-empty-state" aria-labelledby="queue-empty-title">
+      <div className="queue-empty-lede">
+        {/* Decorative only. The heading beside it carries the meaning, so it is
+            hidden from the accessibility tree rather than given a label that
+            would be read out ahead of the heading. */}
+        <span className="queue-empty-mark" aria-hidden="true">
+          <LayoutList size={20} strokeWidth={1.75} />
+        </span>
+        <div className="queue-empty-lede-text">
+          <h2 className="queue-empty-title" id="queue-empty-title">
+            {LABELS.emptyExperimentsTitle}
+          </h2>
+          {/*
+            THE BODY CHANGED BECAUSE THE OLD ONE BECAME FALSE, not because it read
+            better. It said "This deployment cannot yet create or import a record,
+            so nothing has been added" — true when it was written, and untrue the
+            moment `POST /api/experiments` shipped. Leaving it would have been the
+            one failure this screen's whole comment history is about.
+
+            What it does NOT claim: it does not promise import. There is still no
+            import path — `POST /api/uploads` refuses every upload by design — so
+            the sentence names creating, validating and the demo, which are the
+            three things a reader can actually do from here.
+          */}
+          <p className="queue-empty-body">{LABELS.emptyExperimentsBody}</p>
+        </div>
+      </div>
+
+      {/* An eyebrow, not a heading: it labels the cards below without adding an
+          outline level, and the cards carry their own h3 titles. */}
+      <p className="queue-empty-eyebrow">What you can do here now</p>
+
+      <ul className="queue-empty-list">
+        <CreateExperimentControl variant="card" onCreated={onCreated} />
+
+        {/*
+          LAUNCH GUIDED DEMO — behaviour UNCHANGED, and every part of it is
+          load-bearing.
+
+          It calls `startTutorial` directly, on exactly the contract
+          `TutorialPromotion` uses: the live node from a ref, so
+          `tutorialReturnFocusTarget` can hand focus back here when the overlay
+          closes, and so a node that has since unmounted is correctly refused.
+          `disabled={launchBusy}` is the double-submit guard documented at its
+          definition above. What stood here before either design was
+          `actionGoToHelpAndTutorial`, a secondary button whose entire behaviour
+          was to navigate somewhere else to press a different button; that is not
+          reintroduced.
+
+          NOT a duplicate of Settings → Help & Tutorial, which keeps `Replay
+          Tutorial` as the walkthrough's permanent home. This is an entry point,
+          not a second home, and it carries a third name so that no label in the
+          app addresses two controls.
+
+          WHAT CHANGED IS ONLY THE TREATMENT — `btn-primary` to `btn-action`. See
+          the hierarchy note above.
+        */}
+        <li className="queue-empty-action">
+          <span className="queue-empty-action-mark" aria-hidden="true">
+            <Compass size={18} strokeWidth={1.75} />
+          </span>
+          <div className="queue-empty-action-main">
+            <h3 className="queue-empty-action-title">Guided demo</h3>
+            {/* Associated with the button rather than left as adjacent text: a
+                screen reader announcing the control otherwise reads three words and
+                none of the disclosure. It is a DESCRIPTION, not a label — the
+                accessible name stays "Launch Guided Demo". */}
+            <p className="queue-empty-hint" id="queue-empty-launch-hint">
+              {LABELS.launchGuidedDemoBody}
+            </p>
+          </div>
+          <div className="queue-empty-action-cta">
+            <button
+              ref={launchRef}
+              type="button"
+              className="btn btn-action queue-empty-cta"
+              disabled={launchBusy}
+              aria-describedby="queue-empty-launch-hint"
+              onClick={() => startTutorial(launchRef.current)}
+            >
+              {LABELS.actionLaunchGuidedDemo}
+            </button>
+          </div>
+        </li>
+
+        {/*
+          THE STANDALONE VALIDATOR. It used to be a bare secondary button with a
+          one-line caption trailing it in a list, under a lead-in that literally
+          read "Or, without starting the walkthrough:" — which framed it as a
+          footnote to the real actions. It gets the same card, the same
+          title-and-description shape and the same cta column as the other two, so
+          it is a peer; only the button variant separates them.
+
+          The description is checkable, not promotional. "Never stored" is the
+          route's documented contract — `POST /api/validate/record`: "the body is
+          never written anywhere (no workspace file, no temp file, no record
+          mutation), and nothing about its content is logged". "The same check" is
+          the same docstring's parity claim: it calls the same `validate_official`
+          over the same vendored schema that the per-experiment validation uses.
+        */}
+        <li className="queue-empty-action">
+          <span className="queue-empty-action-mark" aria-hidden="true">
+            <ShieldCheck size={18} strokeWidth={1.75} />
+          </span>
+          <div className="queue-empty-action-main">
+            <h3 className="queue-empty-action-title">Schema validator</h3>
+            <p className="queue-empty-hint">
+              Check a record file you already have against the official ISAAC schema —
+              the same deterministic check this app runs on an exported record. It
+              names every failing path, and the file you check is never stored.
+            </p>
+          </div>
+          <div className="queue-empty-action-cta">
+            <button
+              type="button"
+              className="btn btn-secondary queue-empty-cta"
+              onClick={onOpenValidator}
+            >
+              {LABELS.actionOpenValidator}
+            </button>
+          </div>
+        </li>
+      </ul>
+
+      {/*
+        WHERE A NEW EXPERIMENT GOES. One line, derived from `/api/health`, and
+        absent entirely when the answer is not known — see `storageSentence`. It
+        sits below the cards rather than in the lede because it is a consequence of
+        acting, not a reason to act, and the lede has one job.
+      */}
+      {storage !== null && (
+        <p className="queue-empty-storage" data-durability={durability}>
+          {storage}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * CREATE EXPERIMENT — the button, the form it expands into, and the one call.
+ *
+ * ONE COMPONENT FOR BOTH MOUNTS (the page header when the queue has rows, the
+ * empty state's lead card when it does not), because they are the same action and
+ * an action with two implementations drifts. `variant` changes the wrapper and the
+ * supporting hint; it changes nothing about what happens.
+ *
+ * THE `card` VARIANT RENDERS ITS OWN `<li>`, which is why this is called from
+ * inside `<ul className="queue-empty-list">`. A wrapper element between the list
+ * and the item would be invalid list markup and would break the `.queue-empty-list`
+ * flex gap; returning the `<li>` keeps the DOM exactly as the two sibling cards
+ * expect it.
+ *
+ * AN INLINE EXPANSION, NOT A MODAL. A modal would need a focus trap, a scrim, an
+ * escape contract and a restore-focus contract — four things to get right for a
+ * form with two fields, on a screen that has nothing behind it worth dimming.
+ * Expanding in place keeps the reader in one place and keeps the DOM order and the
+ * reading order the same. In the card variant the form grows inside the card the
+ * reader pressed, so the thing that changed is the thing they touched.
+ *
+ * WHAT IT DOES NOT COLLECT. Nothing scientific. The server's request model forbids
+ * any field but `title` and `description`, and there is nowhere here to type a
+ * technique, a sample or an energy. Those are evidence-bearing values and they are
+ * asked for by the guided completion workflow, where an answer is recorded together
+ * with its confirmation — not typed into a create form where they would arrive as
+ * unsourced assertions.
+ */
+function CreateExperimentControl({
+  variant,
+  onCreated,
+}: {
+  variant: 'header' | 'card';
+  onCreated: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const openRef = useRef<HTMLButtonElement>(null);
+  const formId = useId();
+  const titleId = `${formId}-title`;
+  const descriptionId = `${formId}-description`;
+  const descriptionHintId = `${formId}-description-hint`;
+  const errorId = `${formId}-error`;
+  const hintId = `${formId}-open-hint`;
+
+  /*
+   * FOCUS MOVES WITH THE FORM, IN BOTH DIRECTIONS, AND IT HAS TO BE AN EFFECT.
+   *
+   * Opening: focus lands on the field the reader now has to fill in, or the form
+   * appears while the keyboard is still on a button that is no longer the next
+   * thing to do.
+   *
+   * Closing: focus returns to the control that opened it — the same contract the
+   * tutorial overlay keeps. This was first written as a `.focus()` call inside the
+   * cancel handler and it silently did nothing: the opener button does not exist at
+   * that moment (the form is what is mounted), so the ref was null and focus fell to
+   * `<body>`. It has to run AFTER the re-render that puts the button back, which is
+   * what an effect keyed on `open` is.
+   *
+   * `returning` distinguishes "closed by Cancel" from "never opened", so a first
+   * render does not steal focus to a button nobody pressed.
+   */
+  const returning = useRef(false);
+  useEffect(() => {
+    if (open) {
+      titleRef.current?.focus();
+    } else if (returning.current) {
+      returning.current = false;
+      openRef.current?.focus();
+    }
+  }, [open]);
+
+  const close = () => {
+    returning.current = true;
+    setOpen(false);
+    setError(null);
+  };
+
+  const submit = async (event: { preventDefault: () => void }) => {
+    event.preventDefault();
+    const trimmed = title.trim();
+    if (!trimmed) {
+      // Checked here as well as at the server, because the server's answer would
+      // arrive as a network round trip for a condition the form can already see.
+      // It is not INSTEAD of the server's check: `POST /api/experiments` refuses a
+      // whitespace-only title with a typed 422 of its own.
+      setError(LABELS.createExperimentTitleRequired);
+      titleRef.current?.focus();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await api.createExperiment({ title: trimmed, description });
+      onCreated(created.id);
+    } catch (err) {
+      // The message is whatever the API layer could establish. It is not
+      // reinterpreted into a friendlier cause here: a create that failed for an
+      // unknown reason must not be reported as one that failed for a known one.
+      setBusy(false);
+      setError(err instanceof Error ? err.message : 'The experiment could not be created.');
+    }
+  };
+
+  const form = (
+    <form className="create-experiment" onSubmit={submit} aria-labelledby={`${formId}-heading`}>
+      <h3 className="create-experiment-title" id={`${formId}-heading`}>
+        {LABELS.createExperimentFormTitle}
+      </h3>
+
+      <div className="create-experiment-field">
+        <label className="create-experiment-label" htmlFor={titleId}>
+          {LABELS.createExperimentTitleLabel}
+        </label>
+        <input
+          ref={titleRef}
+          id={titleId}
+          className="create-experiment-input"
+          type="text"
+          value={title}
+          maxLength={200}
+          required
+          aria-invalid={error !== null || undefined}
+          aria-describedby={error !== null ? errorId : undefined}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            if (error !== null) setError(null);
+          }}
+        />
+      </div>
+
+      <div className="create-experiment-field">
+        <label className="create-experiment-label" htmlFor={descriptionId}>
+          {LABELS.createExperimentDescriptionLabel}
+        </label>
+        <textarea
+          id={descriptionId}
+          className="create-experiment-input create-experiment-textarea"
+          value={description}
+          maxLength={1000}
+          rows={2}
+          aria-describedby={descriptionHintId}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <span className="create-experiment-hint" id={descriptionHintId}>
+          {LABELS.createExperimentDescriptionHint}
+        </span>
+      </div>
+
+      {/* `role="alert"` rather than a bare paragraph: the message appears after a
+          submit the reader already made, so it has to be announced rather than
+          waited to be found. */}
+      {error !== null && (
+        <p className="create-experiment-error" id={errorId} role="alert">
+          {error}
+        </p>
+      )}
+
+      <div className="create-experiment-actions">
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {LABELS.createExperimentSubmit}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={close} disabled={busy}>
+          {LABELS.createExperimentCancel}
+        </button>
+      </div>
+    </form>
+  );
+
+  const opener = (
+    <button
+      ref={openRef}
+      type="button"
+      className={variant === 'header' ? 'btn btn-primary' : 'btn btn-primary queue-empty-cta'}
+      onClick={() => setOpen(true)}
+      {...(variant === 'card' ? { 'aria-describedby': hintId } : {})}
+    >
+      {LABELS.actionCreateExperiment}
+    </button>
+  );
+
+  if (variant === 'header') return open ? form : opener;
+
+  return (
+    <li
+      className={`queue-empty-action queue-empty-action-lead${
+        open ? ' queue-empty-action-form' : ''
+      }`}
+    >
+      {open ? (
+        form
+      ) : (
+        <>
+          <span className="queue-empty-action-mark" aria-hidden="true">
+            <Plus size={18} strokeWidth={1.75} />
+          </span>
+          <div className="queue-empty-action-main">
+            <h3 className="queue-empty-action-title">New experiment</h3>
+            <p className="queue-empty-hint" id={hintId}>
+              {LABELS.createExperimentHint}
+            </p>
+          </div>
+          <div className="queue-empty-action-cta">{opener}</div>
+        </>
+      )}
+    </li>
   );
 }

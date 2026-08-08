@@ -151,6 +151,51 @@ a:hover {
   box-shadow: none;
   transform: none;
 }
+/*
+ * ACTION-TINTED — a real action in the action blue, one step below the solid
+ * primary.
+ *
+ * WHY IT EXISTS. The button scale was binary: solid blue, or grey. That forces a
+ * screen with three real actions to either shout three times or demote two of
+ * them to the grey treatment, which reads as "not really an action" — it is what
+ * made Open Validator look forgotten on My Experiments. This is the missing rung.
+ *
+ * EVERY VALUE IS AN EXISTING TOKEN. `--action-tint` is the same fill nav-active
+ * and info panels use; `--action-hover` is documented in `tokens.css` as "also
+ * text-on-tint", so the pairing is the sanctioned one rather than a new contrast
+ * judgement; `--action-selected-border` is the existing tinted border.
+ *
+ * NOT the `--assist` indigo, which `tokens.css` labels advisory-only. A control
+ * that creates or opens a record is not advisory.
+ */
+.btn-action {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+  color: var(--action-hover);
+  font-weight: 600;
+}
+.btn-action:hover {
+  border-color: var(--action);
+  color: var(--action-pressed);
+  box-shadow: var(--shadow-emphasis);
+  transform: translateY(-1px);
+}
+.btn-action:active {
+  background: var(--action-selected-border);
+  border-color: var(--action);
+  color: var(--action-pressed);
+  box-shadow: none;
+  transform: translateY(0);
+}
+.btn-action:disabled {
+  background: var(--border-faint);
+  border-color: var(--border);
+  color: var(--text-quaternary);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
 .btn-secondary {
   background: var(--surface);
   border-color: var(--border-strong);

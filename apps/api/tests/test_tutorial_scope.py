@@ -164,35 +164,66 @@ def test_the_seeding_functions_still_take_no_default_session_id():
         )
 
 
+#: The ONE place in the API package allowed to call ``ws.create_experiment``.
+#:
+#: It is a constant rather than a literal in the assertion so that moving the seam
+#: is a one-line, obviously-deliberate edit, and so the failure message can name
+#: what the expected caller IS rather than only that the actual set is wrong.
+_AUTHORIZED_CREATE_CALLER = "isaac_api/experiment_repository.py"
+
+
 def test_create_experiment_has_no_caller_in_the_api_package():
-    """SOURCE-LEVEL. The refusals above do NOT close ``create_experiment``, and what
-    keeps it shut is the absence of a caller — a property no behavioural test can see.
+    """SOURCE-LEVEL. ``create_experiment`` is not closed by the refusals above, and
+    what constrains it is WHO CALLS IT AND HOW — a property no behavioural test can
+    see.
 
     ``create_experiment(title, source, draft, id=SEED_READY_ID, session_id=None)``
     writes a canonical record into the ORDINARY root: ``rid = id or new_record_id()``
     (``workspace.py``), so a fresh ULID is minted only when no explicit id is given,
     and then ``exp.save()`` lands under ``scope_root(None)`` == ``workspace_root()``.
     It is not one of the three seeding functions, so ``InvalidTutorialSession`` never
-    fires for it. That path is reachable in-process today.
+    fires for it. That path is reachable in-process.
 
-    So the product claim carried on three surfaces — nothing in this build adds a
-    built-in example record to the ordinary workspace (the mode chip's accessible name,
-    the OpenAPI ``tutorial`` tag description, and the WORKSPACE CLAUSE of the Statistics
-    lead sentence: "this workspace" against "the open worked-example workspace",
-    ``StatisticsPage.tsx::leadSentence``) — does not rest on the ULID default, which was
-    the reason two of those comments gave and it was wrong.
+    THE NAME OF THIS TEST IS NOW WRONG, AND IS KEPT ANYWAY. There IS a caller. The
+    name is the string a future reader greps for when they touch this area, and the
+    docstring below is the thing they need to find; renaming it would break that
+    trail for no gain. What the test asserts has changed, and it has been
+    strengthened rather than relaxed.
 
-    The clause is named rather than the whole sentence because the sentence was
-    rewritten by the visual-first reorganisation, which moved Record Verification to the
-    top of the page and made the lead open by naming it. That rewrite did not touch the
-    scope branch, and this guard is about the branch. It rests on something stronger: this build exposes no record-creation
-    surface at all. There is no ``POST /api/experiments``, and nothing under
-    ``apps/api/isaac_api/`` calls ``create_experiment``.
+    WHAT CHANGED, AND WHAT DID NOT. ``POST /api/experiments`` now exists — the first
+    record-creation surface this application has ever had. The product claim carried
+    on three surfaces is that nothing in this build adds a **built-in EXAMPLE
+    record** to the ordinary workspace: the mode chip's accessible name, the OpenAPI
+    ``tutorial`` tag description, and the WORKSPACE CLAUSE of the Statistics lead
+    sentence — "this workspace" against "the open worked-example workspace",
+    ``StatisticsPage.tsx::leadSentence``. That claim is UNCHANGED and still true;
+    only its justification moved.
 
-    A future route taking a client-supplied id would falsify the claim with the entire
-    suite green, which is exactly the failure mode this file was written to stop. This
-    test makes adding such a caller a deliberate, reviewed act: whoever adds one has to
-    re-derive the three product strings first.
+    THE CLAUSE IS NAMED RATHER THAN THE WHOLE SENTENCE, and that precision arrived
+    from the visual-first reorganisation, which moved Record Verification to the top
+    of the page and made the lead open by naming it. That rewrite did not touch the
+    scope branch, and this guard is about the branch.
+
+    Its previous justification — "this build exposes no record-creation surface at
+    all" — is retired, because that sentence is now false. Three properties carry it
+    instead, and this test pins all three:
+
+      1. EXACTLY ONE CALLER, and it is the persistence seam. Not the route: the route
+         must not be able to reach the workspace layer directly, or the "swappable
+         persistence" property would be decorative.
+      2. THE CALLER PASSES NEITHER ``id=`` NOR ``session_id=``. Without ``id`` the
+         ULID default applies and the five fixed canonical ids are unreachable;
+         without ``session_id`` the ordinary scope is the only scope addressed.
+         Asserted at the AST, so it holds for the call as written rather than for
+         the call as it behaved in whichever test happened to run it.
+      3. NO PATH CAN MATERIALISE AN EXAMPLE INTO THE ORDINARY SCOPE — the runtime
+         half, asserted behaviourally in
+         ``test_the_seeding_functions_refuse_an_unscoped_call`` above and, for the
+         durable store, in
+         ``test_experiment_repository.py::test_a_canonical_id_is_never_persistable``.
+
+    A second caller, or an ``id``/``session_id`` argument appearing on this one,
+    still fails here — which is what keeps adding either a deliberate, reviewed act.
 
     TESTS ARE DELIBERATELY NOT SCANNED. They are the function's legitimate users
     (``test_versioning``, ``test_reset*``, ``test_tutorial_ordinary_preservation`` and
@@ -200,14 +231,15 @@ def test_create_experiment_has_no_caller_in_the_api_package():
     """
     package = Path(ws.__file__).resolve().parent
     sources = sorted(p for p in package.rglob("*.py") if "__pycache__" not in p.parts)
-    # NON-TRIVIAL: a mis-rooted or empty scan would satisfy the assertion below without
-    # having read anything, so the scan proves its own reach first.
+    # NON-TRIVIAL: a mis-rooted or empty scan would satisfy the assertions below
+    # without having read anything, so the scan proves its own reach first.
     assert len(sources) >= 5, f"expected the isaac_api package, scanned {len(sources)} files"
     assert package / "routes.py" in sources
     assert package / "workspace.py" in sources
 
     defined_in: list[str] = []
     callers: list[str] = []
+    call_nodes: list[tuple[str, ast.Call]] = []
     for path in sources:
         rel = f"isaac_api/{path.relative_to(package).as_posix()}"
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -232,22 +264,51 @@ def test_create_experiment_has_no_caller_in_the_api_package():
             )
             if called == "create_experiment":
                 callers.append(f"{rel}:{node.lineno}")
+                call_nodes.append((rel, node))
 
-    # A rename would make every "no caller" assertion vacuously true, so the target of
-    # the guard is asserted to still exist.
+    # A rename would make every assertion here vacuously true, so the target of the
+    # guard is asserted to still exist.
     assert defined_in, (
         "create_experiment is no longer defined in the isaac_api package, so this "
-        "guard is asserting the absence of callers of nothing — re-point it"
+        "guard is asserting facts about calls to nothing — re-point it"
     )
-    assert callers == [], (
-        f"create_experiment is called from the isaac_api package at {callers}. With an "
-        "explicit `id` and `session_id=None` it writes a canonical record into the "
-        "ordinary workspace, which falsifies the claim made on the mode chip, the "
-        "OpenAPI `tutorial` tag description and the workspace clause of the Statistics "
-        "lead sentence (`StatisticsPage.tsx::leadSentence`) that nothing in this build "
-        "adds a built-in example record there. If the caller is intended, re-derive "
+
+    # 1. Exactly one caller, and it is the persistence seam.
+    assert [c.rsplit(":", 1)[0] for c in callers] == [_AUTHORIZED_CREATE_CALLER], (
+        f"create_experiment is called from {callers}. Exactly one caller is "
+        f"authorized — {_AUTHORIZED_CREATE_CALLER}, the persistence seam. A call "
+        "from anywhere else (a route, a service, the app factory) bypasses the "
+        "repository abstraction, and with an explicit `id` and `session_id=None` it "
+        "writes a canonical record into the ordinary workspace — which falsifies the "
+        "claim made on the mode chip, the OpenAPI `tutorial` tag description and the "
+        "workspace clause of the Statistics lead sentence "
+        "(`StatisticsPage.tsx::leadSentence`) that nothing in this build adds a "
+        "built-in example record there. If a second caller is intended, re-derive "
         "those three strings in the same change."
     )
+
+    # 2. That caller may not choose the id, and may not choose the scope.
+    for rel, node in call_nodes:
+        keywords = {kw.arg for kw in node.keywords}
+        positional = len(node.args)
+        assert "id" not in keywords, (
+            f"{rel} passes an explicit `id` to create_experiment. That makes the "
+            "five fixed canonical ids reachable from a creation path, which is "
+            "exactly the shape the three product strings deny. Let the ULID default "
+            "apply."
+        )
+        assert "session_id" not in keywords, (
+            f"{rel} passes an explicit `session_id` to create_experiment. The "
+            "repository addresses the ordinary scope and only the ordinary scope; a "
+            "worked-example session is temporary and must never receive a record a "
+            "person created."
+        )
+        # `id` is keyword-only in the signature, but a positional flood would still be
+        # a smell worth catching: title/source/draft are the only three.
+        assert positional <= 3, (
+            f"{rel} passes {positional} positional arguments to create_experiment; "
+            "only title, source and draft are positional"
+        )
 
 
 # =============================================================================

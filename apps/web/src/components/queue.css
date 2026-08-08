@@ -336,9 +336,14 @@
   box-shadow: var(--shadow-card);
 }
 
-/* The blue action's card is the only one with a stronger resting border, so the
-   hierarchy survives even before the button is read. No fill and no coloured left
-   edge: rows in this app never carry one. */
+/* The lead card is the only one with a stronger resting border, so the hierarchy
+   survives even before the button is read. No fill and no coloured left edge: rows
+   in this app never carry one.
+
+   IT MOVED, AND THE MOVE IS THE POINT. This marked the guided demo while the demo
+   was the screen's strongest action — which it was only because there was nothing
+   to create. `POST /api/experiments` exists now, so the lead treatment sits on
+   Create Experiment and the demo keeps the same card with the ordinary border. */
 .queue-empty-action-lead {
   border-color: var(--action-selected-border);
 }
@@ -397,7 +402,7 @@
   min-width: 172px;
 }
 
-/* Slightly larger than a row-level `.btn`, because these are the screen's only
+/* Slightly larger than a row-level `.btn`, because these are the screen's own
    controls and the default control size is tuned for dense toolbars. */
 .queue-empty-cta {
   font-size: 13px;
@@ -409,4 +414,121 @@
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--text-secondary);
+}
+
+/*
+ * THE CREATE CARD WHILE ITS FORM IS OPEN.
+ *
+ * The card keeps its box — same border, same padding, same radius — and only
+ * changes direction, so the form grows out of the card the reader pressed rather
+ * than replacing it with an unrelated panel. `flex-wrap` is cleared because a
+ * column that wraps is a column that silently becomes two.
+ *
+ * The hover lift is removed while the form is open: it is a control affordance,
+ * and a card the reader is typing into is no longer a control.
+ */
+.queue-empty-action-form {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+}
+
+.queue-empty-action-form:hover {
+  border-color: var(--action-selected-border);
+  box-shadow: none;
+}
+
+/*
+ * WHERE A NEW EXPERIMENT GOES. One line, below the cards, separated by the same
+ * faint rule the rest of the screen uses for a footnote that is not an action.
+ *
+ * `--text-secondary`, NOT `--text-tertiary`. The first version used tertiary and
+ * the axe scan caught it the same day as a fourth `color-contrast` node on
+ * `experiments@*`; it was fixed at the surface rather than ratcheted into the
+ * baseline, which is why the five `experiments@*` entries are unchanged. It
+ * matches its sibling `.queue-empty-hint` exactly.
+ */
+.queue-empty-storage {
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-faint);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/*
+ * THE CREATE FORM — two fields, inline, no modal.
+ *
+ * `max-width` on the form rather than on the inputs: the fields are 100% of the
+ * form so they stay flush with each other at every width, and the measure is set
+ * once. 42ch is a title field, not a paragraph field.
+ */
+.create-experiment {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 42ch;
+}
+
+.create-experiment-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.create-experiment-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.create-experiment-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.create-experiment-input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  color: var(--text-strong);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+}
+
+.create-experiment-input:focus-visible {
+  border-color: var(--action);
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.create-experiment-textarea {
+  resize: vertical;
+  min-height: 44px;
+}
+
+.create-experiment-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.create-experiment-error {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fail-text);
+}
+
+.create-experiment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
 }

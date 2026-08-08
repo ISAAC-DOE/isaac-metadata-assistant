@@ -454,6 +454,26 @@ class Experiment:
         }
 
     def save(self) -> None:
+        """Persist this experiment's state, durably when the deployment has a database.
+
+        THE DURABLE WRITE GOES FIRST, and the order is load-bearing rather than
+        arbitrary. If the database write fails, this raises and the workspace file
+        is NOT rewritten, so the reader is told their change did not stick instead
+        of seeing it applied locally and losing it at the next pod restart. If the
+        database write succeeds and the file write then fails, the durable copy is
+        ahead of the working copy — which the next ordinary-scope read repairs by
+        itself, because hydration writes back any stored record whose directory is
+        missing. Only one of the two orderings is self-healing.
+
+        SCOPE IS THE GATE. ``_ordinary_store`` returns ``None`` for any record that
+        belongs to a worked-example session, so a session's records never reach the
+        database. This is the first of the three guards described in
+        ``experiment_repository``; the store itself raises on the same condition,
+        so the guard does not depend on this one line being right.
+        """
+        store = _ordinary_store(self.session_id)
+        if store is not None:
+            store.persist(self)
         atomic_write_text(self.state_path, json.dumps(self.to_state(), indent=2) + "\n")
 
     def _persisted_sig_and_rev(self) -> tuple[str | None, int]:
@@ -933,12 +953,84 @@ def ensure_tutorial_seeded(session_id: str) -> None:
                 _materialise_seed(spec, session_id=session_id)
 
 
+# --- the durable-store seam ---------------------------------------------------
+#
+# ``experiment_repository`` imports THIS module (it builds ``Experiment`` objects),
+# so the import below is deliberately lazy and inside the function: a module-level
+# import would be a cycle. It is also re-resolved on every call rather than cached,
+# which is what makes the environment the single source of truth for which backend
+# is active — including in a test that monkeypatches ``PGHOST`` per case.
+
+
+def _ordinary_store(session_id: str | None):
+    """The durable store for this scope, or ``None``.
+
+    ``None`` for EVERY worked-example session, unconditionally and before anything
+    else is consulted — a session is temporary and synthetic and must never be
+    persisted. ``None`` also whenever the deployment has no database configured,
+    which is every developer machine and every CI job except the dedicated
+    Postgres one.
+    """
+    if session_id is not None:
+        return None
+    from .experiment_repository import ordinary_store  # noqa: PLC0415 - cycle
+
+    return ordinary_store()
+
+
+def _hydrate_ordinary_scope() -> int:
+    """Restore any durably-stored ordinary record whose directory is missing.
+
+    Returns the number of directories written (0 when there is no database).
+
+    WHY ON EVERY ORDINARY READ rather than once at boot. A pod restart is not the
+    only way the workspace and the database diverge — an ``emptyDir`` is per-pod,
+    so a second replica starts empty while the first is serving, and a boot-time
+    hydration would leave that replica permanently blind to everything created
+    before it started. Hydrating on read is one bounded ``SELECT`` on a table this
+    application owns, and it writes only what is genuinely absent.
+
+    A FAILED HYDRATION DEGRADES TO THE FILESYSTEM VIEW AND RETURNS 0. It does not
+    raise, and this is the single most consequential line in the durable-storage
+    work. ``PGHOST`` and ``PGDATABASE`` are already set in the deployed pod and the
+    migration is deliberately not applied at boot, so on the next image roll this
+    ``SELECT`` hits a table that does not exist. With the exception propagating,
+    ``GET /api/experiments`` returned 500 and My Experiments — the product's
+    primary screen — rendered "Backend Not Running"; ``GET /api/experiments/<id>``
+    turned a clean 404 into a 500. Both are READS that had no database dependency
+    at all before this feature, and an optimisation must not be able to take a read
+    path down.
+
+    Degrading is not silent. ``PostgresOrdinaryStore.hydrate`` records the failure
+    before raising, so ``/api/health`` reports ``experiment_storage.state:
+    "unavailable"`` and the UI stops claiming durability. WRITES still fail loudly
+    (``Experiment.save`` re-raises ``StorageUnavailable``, rendered as a typed
+    503) — a read that shows less than everything is a degraded read, while a write
+    that quietly lands somewhere temporary is a broken promise.
+
+    ``Exception`` and not ``BaseException``: a cancellation or a ``KeyboardInterrupt``
+    is not a storage outage and must not be swallowed as one.
+    """
+    store = _ordinary_store(None)
+    if store is None:
+        return 0
+    try:
+        return store.hydrate()
+    except Exception:  # noqa: BLE001 - see the docstring; reads must never 500 on this
+        return 0
+
+
 def list_experiments(session_id: str | None = None) -> list[Experiment]:
     """Every experiment in one scope, ordered by ``created_utc``.
 
-    NEVER seeds. On a fresh normal scope this returns ``[]`` — an empty workspace is
-    the truthful answer, and it stays empty however many times it is read.
+    NEVER seeds — and hydration is not seeding. On a fresh normal scope with no
+    database this returns ``[]``, and it stays empty however many times it is read.
+    With a database configured it first restores records THIS APPLICATION ALREADY
+    CREATED whose directory a pod restart threw away; it never materialises a
+    built-in example, which the store refuses outright.
     """
+    if session_id is None:
+        _hydrate_ordinary_scope()
     out: list[Experiment] = []
     for d in _experiment_dirs(scope_root(session_id)):
         try:
@@ -959,7 +1051,22 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
     """
     state_path = scope_root(session_id) / experiment_id / "experiment.json"
     if not state_path.exists():
-        return None
+        # A MISS IN THE ORDINARY SCOPE IS RETRIED ONCE AFTER HYDRATION, and only
+        # then. A record created before a pod restart has a durable row and no
+        # directory, so a deep link to it would otherwise 404 until something else
+        # happened to list. Hydration cannot invent a record: it writes back only
+        # rows this application stored, and never a canonical example id.
+        #
+        # AND A MISS STAYS A 404 WHEN THE DATABASE IS DOWN. `_hydrate_ordinary_scope`
+        # returns 0 rather than raising on a failed read, so this returns `None` and
+        # the route answers "not found" — which is what it answered before durable
+        # storage existed. It must not become a 500: "we could not check" and "it is
+        # not here" look identical to a client holding a stale link, and only one of
+        # them is a server error.
+        if session_id is not None or _hydrate_ordinary_scope() == 0:
+            return None
+        if not state_path.exists():
+            return None
     return Experiment.from_state(
         json.loads(state_path.read_text(encoding="utf-8")), session_id=session_id
     )
