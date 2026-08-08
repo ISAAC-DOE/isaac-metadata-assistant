@@ -32,12 +32,24 @@
  *
  * ── THE HONESTY RULE, WHICH IS THE POINT OF THIS FILE ───────────────────────
  *
- * This screen reports on TWO corpora that carry very different weight, and one
- * of them has never been read. The authorized 30-record private sample is an
- * approved capability that HAS NOT RUN — no scan of it has ever executed, here
- * or anywhere. A screenshot captioned in a way that implies otherwise would be a
- * false record of a measurement, which is the exact defect class CLAUDE.md §15
- * catalogues this project shipping and correcting repeatedly.
+ * This screen reports on TWO corpora that carry very different weight, and this
+ * suite has only ever read one of them.
+ *
+ * CORRECTED 2026-08-08, and the old wording is kept so the correction is
+ * visible. This header used to say the authorized 30-record private sample "HAS
+ * NOT RUN — no scan of it has ever executed, here or anywhere". That was true
+ * when written and is FALSE now: the authorized private verification mode HAS
+ * run, twice, on 2026-08-08, on the deployed application.
+ *
+ * What has NOT happened is the part every caption in this file depends on:
+ * **no run of that mode has ever been observed by this suite, and NO FIGURE
+ * ANYWHERE IN THIS SUITE CAME FROM ONE.** Every private-corpus number below is
+ * fabricated by this spec or by `src/test/verificationFixtures.ts`. A screenshot
+ * captioned in a way that implies otherwise would be a false record of a
+ * measurement, which is the exact defect class CLAUDE.md §15 catalogues this
+ * project shipping and correcting repeatedly — and the correction above is
+ * itself an instance of it, since the stale wording would have had this file
+ * asserting as fact something the repository had already retracted.
  *
  * So every state id — and therefore every attachment name, which embeds it —
  * ends in exactly ONE of four provenance classifiers, and
@@ -62,7 +74,10 @@
  *                             nothing failed.
  *
  * State 4 — the authorized-private aggregate — is a SHAPE ONLY, and its label
- * says so in words: "shape only — no private run has occurred". It exists to
+ * says so in words: "shape only — no private run produced this capture". (That
+ * wording read "no private run has occurred" until 2026-08-08, when it became
+ * false; the claim the caption needs is about the PROVENANCE OF THE CAPTURE,
+ * which is unchanged, so it is stated that way now.) It exists to
  * prove the section can render that corpus's disclosure without ever mixing it
  * up with the public one, and for nothing else.
  *
@@ -621,9 +636,10 @@ const STATES: readonly VerificationState[] = [
   {
     id: 'private-sample-disclosure-synthetic-fixture',
     what:
-      'The authorized-private-sample corpus disclosure — shape only — no private run has ' +
-      'occurred. Every number in this capture was fabricated by the test suite; it exists ' +
-      'only to prove the section names that corpus without ever borrowing the public one’s label.',
+      'The authorized-private-sample corpus disclosure — shape only — no private run ' +
+      'produced this capture. Every number in this capture was fabricated by the test ' +
+      'suite; it exists only to prove the section names that corpus without ever ' +
+      'borrowing the public one’s label.',
     rendersReport: true,
     corpus: 'private',
     longPaths: true,
@@ -1524,8 +1540,10 @@ test.describe('statistics · record verification runtime states', () => {
     expect(privateState!.id).toContain('synthetic-fixture');
     expect(
       privateState!.what,
-      'the private-sample capture must say in words that no private run has occurred'
-    ).toContain('shape only — no private run has occurred');
+      'the private-sample capture must say in words that no private run produced it. The ' +
+        'mode HAS now run (2026-08-08, on the deployment) — so the caption may only claim ' +
+        'the provenance of THIS capture, never that no run exists.'
+    ).toContain('shape only — no private run produced this capture');
   });
 
   for (const width of WIDTHS) {

@@ -2014,6 +2014,22 @@ describe('Record Schema (inside Technical Details)', () => {
     });
   });
 
+  /*
+   * THIS ASSERTION USED TO PIN THE RAW PROPERTY NAMES — `isaac_record_version`,
+   * `record_id`, `record_type` — as the visible chart labels, and so it pinned
+   * the defect rather than the intent. Those tokens rendered in the PROSE face,
+   * under a column headed "Section", and were read out verbatim in the chart's
+   * `sr-only` summary sentence.
+   *
+   * `SCHEMA_SECTION_LABELS` maps them for display only. The wire/model value is
+   * unchanged: `SchemaSectionCount.section` still carries the property name
+   * verbatim, it is still the row `key`, the Schema Reference browser still
+   * shows the exact token in the mono face, and an unmapped property still falls
+   * back to its own name rather than to an invented phrase.
+   *
+   * THE ORDER IS THE POINT OF THIS TEST AND IS UNCHANGED — declaration order,
+   * not alphabetical, not by count.
+   */
   it('breaks the fields down by section, in the document\'s own order', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
@@ -2021,12 +2037,12 @@ describe('Record Schema (inside Technical Details)', () => {
     expect(
       chartRows('Record Schema', "Fields by top-level section, in the schema's own declaration order"),
     ).toEqual([
-      ['isaac_record_version', '1'],
-      ['record_id', '1'],
-      ['record_type', '1'],
-      ['descriptors', '4'],
-      ['sample', '4'],
-      ['tags', '1'],
+      ['ISAAC Record Version', '1'],
+      ['Record Identifier', '1'],
+      ['Record Type', '1'],
+      ['Descriptors', '4'],
+      ['Sample', '4'],
+      ['Tags', '1'],
     ]);
   });
 
