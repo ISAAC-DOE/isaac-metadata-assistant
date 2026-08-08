@@ -37,8 +37,16 @@
  * R1 — THE PRECONDITION, and why the UI part of it matters. This dialog is exactly
  * the gap the `plan_digest` closes: the operator reads a classification, thinks, and
  * presses the button some seconds later. The preview's digest is carried into the
- * execute, so if anything changed in between the server refuses (412/428) and writes
- * nothing.
+ * execute, so if anything changed in between the server refuses (412/428) rather than
+ * act on the classification the operator approved.
+ *
+ * C2 — WHY THIS FILE NO LONGER SAYS "WRITES NOTHING". The precondition is now also
+ * re-checked per record, immediately before that record is touched, so a write that
+ * lands mid-reset is refused rather than destroyed — and the reset stops there,
+ * leaving records restored before that point restored. A `412` therefore usually, but
+ * not always, mutated nothing, and no field on `DemoResetResponse` tells the two
+ * apart. This component must not claim the difference it cannot see; see
+ * `LABELS.resetStaleTitle` for the full reasoning.
  *
  * What this component must therefore NEVER do is present a retry as a formality. A
  * stale refusal RE-PREVIEWS (read-only), shows the refreshed figures, and CLEARS the
@@ -65,8 +73,10 @@ type Preview =
   | { status: 'data'; data: ApiDemoResetResult }
   | { status: 'error' };
 
-/** `stale` is the R1 precondition refusal (412/428): nothing was written, and the
- *  remedy is to re-read refreshed figures — NOT to press the same button again. */
+/** `stale` is the R1 precondition refusal (412/428): the reset did not run against the
+ *  figures the operator approved, and the remedy is to re-read the refreshed figures —
+ *  NOT to press the same button again. It does NOT mean "nothing was written": see the
+ *  C2 note in this file's header. */
 type ExecuteState = 'idle' | 'pending' | 'done' | 'refused' | 'stale' | 'error';
 
 /**
@@ -188,10 +198,13 @@ export function ResetDemoDialog() {
           res.refusal_reason === 'plan_digest_stale' ||
           res.refusal_reason === 'plan_digest_required'
         ) {
-          // R1 — the precondition refused and NOTHING was written. Re-preview so the
-          // operator sees the current figures, and clear the typed gate so they must
-          // arm the action again deliberately. Do NOT retry: the approval they gave
-          // was for figures that no longer apply.
+          // R1 — the precondition refused, so the reset did not run against the
+          // approved figures. Re-preview so the operator sees the current ones, and
+          // clear the typed gate so they must arm the action again deliberately. Do
+          // NOT retry: the approval they gave was for figures that no longer apply.
+          // The re-preview is what makes this honest under C2 — it re-measures the
+          // workspace, so whatever the refusal did or did not leave behind is on
+          // screen as a number rather than asserted in a sentence.
           setExecuteState('stale');
           setConfirmText('');
           firedRef.current = false; // a NEW, re-armed attempt is allowed
@@ -414,9 +427,10 @@ export function ResetDemoDialog() {
 
               {/*
                 * R1 — the precondition refusal. It is NOT an error and NOT the
-                * ambiguous refusal: nothing was written, the operator did nothing
-                * wrong, and the way forward is to read the refreshed figures above
-                * and confirm again. There is deliberately no "Try again" button —
+                * ambiguous refusal: the operator did nothing wrong, and the way
+                * forward is to read the refreshed figures above and confirm again.
+                * It deliberately makes no claim about what was or was not written
+                * (C2 — see this file's header). There is no "Try again" button —
                 * the destructive action below is the only way forward, and it is
                 * disarmed until the gate is re-typed.
                 */}

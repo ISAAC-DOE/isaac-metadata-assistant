@@ -1367,7 +1367,14 @@ def _canonical_state_counts(session_id: str | None = None) -> dict:
 # derived from that stale classification. ``plan_digest`` closes that: ``preview``
 # returns an opaque digest of the classified workspace, and ``execute`` must present
 # it back. A missing digest and a stale digest are refused SEPARATELY (the route maps
-# them to 428 / 412, mirroring the ``If-Match`` convention) and neither mutates.
+# them to 428 / 412, mirroring the ``If-Match`` convention).
+#
+# THIS PARAGRAPH USED TO END "and neither mutates". C2 made that false for one case
+# and the sentence is corrected rather than deleted: a MISSING digest still mutates
+# nothing, and so does a stale digest caught by the workspace-wide check below. But
+# the digest is ALSO re-checked per record inside that record's own lock, and an abort
+# there refuses after restoring the records the loop had already reached. See
+# ``_reset_lock`` for why that trade is the right one.
 
 #: Serialises the whole classify -> verify-digest -> mutate -> measure sequence, so
 #: two concurrent resets cannot interleave and a digest verified here cannot be
@@ -1569,12 +1576,17 @@ def reset_to_canonical_seed(
 ) -> dict:
     """Classify ONE TUTORIAL SESSION and (unless ``dry_run``) restore the canonical seed.
 
-    Refuses (makes NO changes) if ANY ambiguous record exists, and — when
+    Refuses, MAKING NO CHANGES, if ANY ambiguous record exists, and — when
     ``expected_plan_digest`` is supplied — if it does not match the digest of the
-    session as classified here, or if any single record changes between that
-    classification and the moment this reset is about to touch it (see the
-    per-record precondition below, which is the one refusal that can leave earlier
-    ids already reset). Otherwise, on execute, removes ONLY the
+    session as classified here.
+
+    It ALSO refuses, and this one is the exception to "no changes", if any single
+    record changes between that classification and the moment this reset is about to
+    touch it: the ids already reached are already reset. That is the per-record
+    precondition described below; it is the only refusal that mutates anything, and
+    the counts it reports are measured rather than assumed.
+
+    Otherwise, on execute, removes ONLY the
     managed_legacy directories via ``remove_experiment`` (path-safe, each under that
     record's own ``record_lock``), then re-materialises EVERY canonical scenario to
     its deterministic seed baseline — a present-but-drifted canonical record (partial

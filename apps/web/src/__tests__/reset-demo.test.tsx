@@ -840,7 +840,25 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     expect(execute.confirmation).toBe(RESET_CONFIRMATION);
   });
 
-  it('a stale refusal says nothing was reset, in plain language and not in HTTP', async () => {
+  /**
+   * C2 — THIS TEST USED TO PIN A FALSE CLAIM, AND IT WAS GREEN THE WHOLE TIME.
+   *
+   * It asserted `toContain('nothing was reset')` and `toContain('no records were
+   * changed')`. Both became false when the reset gained a PER-RECORD precondition
+   * check: a write landing mid-reset is now refused rather than destroyed, the reset
+   * stops at that record, and records restored before it stay restored. That refusal
+   * arrives as the same `plan_digest_stale` this alert renders.
+   *
+   * WHY A CONDITIONAL MESSAGE WAS NOT THE FIX. Nothing on `DemoResetResponse`
+   * separates the two cases — `removed_count` is 0 for a canonical-only abort, and
+   * `previous_count` and `final_count` are both 5 — so any detector built here would
+   * itself be a guess. The copy stops making the categorical claim instead.
+   *
+   * So this test now pins BOTH DIRECTIONS, and the negative half is the load-bearing
+   * one: the same shape `upload-claim-parity.test.tsx` exists to enforce. A future
+   * "let's reassure the user" edit that restores either phrase fails here.
+   */
+  it('a stale refusal explains itself in plain language, claiming nothing it cannot see', async () => {
     const view = await renderInSession(
       resetDemoRoutes({ executeStatus: 412, execute: demoResetExecuteStale }).routes,
     );
@@ -851,9 +869,15 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
 
     const alert = await view.findByRole('alert');
     const text = (alert.textContent ?? '').toLowerCase();
-    expect(text).toContain('nothing was reset');
-    expect(text).toContain('no records were changed');
+    // What is TRUE in every case: it was refused, why, and what to do next.
+    expect(text).toContain('refused');
+    expect(text).toContain('this workspace changed');
     expect(text).toContain('confirm again');
+    // What must NEVER be claimed again, because a partial abort makes it false and
+    // the response gives this component no way to tell a partial abort apart.
+    expect(text).not.toContain('nothing was reset');
+    expect(text).not.toContain('no records were changed');
+    expect(text).not.toMatch(/nothing was (reset|written|changed|removed)/);
     // never HTTP jargon, never a suggestion that something broke
     expect(text).not.toMatch(/\b412\b|\b428\b|precondition|digest|http|error|failed/);
   });
@@ -929,7 +953,14 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     fireEvent.change(d.getByRole('textbox'), { target: { value: 'RESET' } });
     fireEvent.click(d.getByRole('button', { name: CONFIRM_ACTION }));
     const alert = await view.findByRole('alert');
-    expect((alert.textContent ?? '').toLowerCase()).toContain('nothing was reset');
+    // The same alert as a 412, so it moves with the same copy (C2 — see the stale
+    // refusal test above for why "nothing was reset" is no longer asserted anywhere).
+    // A 428 genuinely never mutates, but this branch renders ONE shared message for
+    // both codes, so it can only claim what is true of both.
+    const text = (alert.textContent ?? '').toLowerCase();
+    expect(text).toContain('refused');
+    expect(text).toContain('this workspace changed');
+    expect(text).not.toContain('nothing was reset');
     expect(view.queryByText(/could not be completed/i)).toBeNull();
   });
 });

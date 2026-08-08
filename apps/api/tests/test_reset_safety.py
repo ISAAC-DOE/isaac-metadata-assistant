@@ -7,7 +7,14 @@ RED; the observed failures are quoted in the slice report. The three defects:
   ``confirmation``. A client that ran ``preview``, showed the operator a dialog and
   executed thirty seconds later destroyed anything committed in between: the operator
   approved a CLASSIFICATION that no longer held. The fix is a ``plan_digest``
-  precondition — absent -> 428, stale -> 412, and neither mutates.
+  precondition — absent -> 428, stale -> 412.
+
+  This line used to end "and neither mutates", and §7 below is the reason it no
+  longer does. An absent digest still mutates nothing, and neither does a stale one
+  caught by the workspace-wide check. A stale one caught by the PER-RECORD check
+  (C2) refuses after restoring the records the loop had already reached — which is
+  the price of never destroying a write that returned 200, and is stated here
+  because a false claim in a docstring is not cheaper for sitting in a test file.
 * **D2 — lock asymmetry.** Managed-legacy removal took NO per-record lock while
   canonical re-materialisation took one, so a concurrent writer to a managed-legacy
   record raced an unlocked ``rmtree`` of its directory.
@@ -454,10 +461,23 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
     while any other caller held two, a lock-ordering cycle would be possible, so the
     reset must take them strictly one at a time. That is what is asserted below, and
     it is asserted about the reset alone.
+
+    C2 — ARMED WITH A DIGEST, AND THAT IS NOT COSMETIC. This test used to call
+    ``reset_to_canonical_seed(dry_run=False)`` with no ``expected_plan_digest``, which
+    leaves ``check_rows`` False, so the per-record precondition added by C2 never ran
+    and the deadlock claim was made about a path the product does not take (the HTTP
+    route ALWAYS supplies a digest for an execute). It now previews first and passes
+    the real token, so the locks counted here are the locks the shipped path takes —
+    including the ``_current_plan_row`` re-read that now happens INSIDE each one. If
+    that re-read ever started taking a lock of its own, ``max(high_water)`` would
+    become 2 and this test would say so.
     """
     tutorial_ws().ensure_tutorial_seeded()
     _make_managed_legacy()
     _make_managed_legacy()
+    # Taken BEFORE the spy is installed: a preview takes no record lock, and a token
+    # captured after the spy would pollute the counts it exists to measure.
+    token = _plan_digest(client)
 
     held: set[str] = set()
     entered: list[str] = []
@@ -478,8 +498,14 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
 
     monkeypatch.setattr(ws, "record_lock", spy)
     with _record_lock_keys(monkeypatch, keys):
-        tutorial_ws().reset_to_canonical_seed(dry_run=False)
+        data = tutorial_ws().reset_to_canonical_seed(
+            dry_run=False, expected_plan_digest=token
+        )
 
+    # The armed path must actually have RUN. Without this a future refactor that made
+    # the reset refuse early would leave the lock assertions below vacuously true.
+    assert data["refused"] is False, data["refusal"]
+    assert data["removed_count"] == 2
     assert high_water, "the reset took no record lock at all"
     assert max(high_water) == 1, f"the reset held {max(high_water)} record locks at once"
     # "At most one at a time" is only the property that matters if the ONE is the
@@ -786,7 +812,17 @@ def test_the_synthetic_only_gate_precedes_every_precondition(client, monkeypatch
 # the reset instead re-checks THAT ONE RECORD's plan-digest row inside the same
 # ``record_lock`` it is about to mutate under. Deadlock-freedom is therefore
 # unchanged, and ``test_d2_the_reset_holds_at_most_one_record_lock_at_a_time`` above
-# still pins it.
+# pins it — but only because that test was ARMED WITH A DIGEST in this same slice.
+# Unarmed it ran with ``check_rows`` False, so it never entered the guarded path and
+# the sentence it was cited for was not yet true of the shipped code.
+#
+# ONE D2 TEST IS DELIBERATELY LEFT UNARMED:
+# ``test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub``. Its
+# writer changes the record's title, so an armed run would refuse at that id instead
+# of removing it, and the resurrected-stub property it exists to pin would no longer
+# be reachable. It therefore documents the ``expected_plan_digest=None`` contract —
+# no precondition, no per-record check — and the armed equivalent of its scenario is
+# ``test_c2_a_write_to_a_managed_legacy_record_in_the_window_is_not_removed`` below.
 
 
 def test_c2_a_write_landing_after_the_digest_check_survives_or_the_reset_refuses(
@@ -990,3 +1026,57 @@ def test_c2_the_per_record_check_never_refuses_an_untouched_workspace(client):
         assert r.status_code == 200, r.text
         assert r.json()["refusal_reason"] is None
         assert _dirs_on_disk() == CANONICAL_IDS
+
+
+def test_c2_a_canonical_id_absent_at_classification_is_healed_not_refused(client):
+    """ABSENT-then-ABSENT must compare EQUAL, or the reset stops healing gaps.
+
+    ``planned_rows`` has no entry for a canonical id that was missing when the
+    workspace was classified, and ``_current_plan_row`` returns ``None`` for a record
+    that is still missing when the loop reaches it. The comparison is
+    ``None != planned_rows.get(id)`` — correct only because ``.get`` returns ``None``
+    rather than raising or defaulting to something truthy. Correct by inspection was
+    not enough: healing a missing canonical is the reset's whole job, and a
+    ``KeyError`` or a spurious refusal here would break it silently for the one input
+    nobody constructs by accident.
+    """
+    import shutil
+
+    tutorial_ws().ensure_tutorial_seeded()
+    shutil.rmtree(tutorial_ws().workspace_root() / ws.SEED_REVIEW_ID)
+    assert ws.SEED_REVIEW_ID not in _dirs_on_disk()
+
+    # The digest is taken WITH the gap present, so the gap is part of the approved plan.
+    r = _execute(client, token=_plan_digest(client))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["refusal_reason"] is None
+    assert r.json()["final_count"] == 5
+    assert _dirs_on_disk() == CANONICAL_IDS
+
+
+def test_c2_a_legacy_record_with_no_stored_generation_is_still_removed(client):
+    """A row whose version token comes from the DERIVED generation must be stable.
+
+    A pre-P27.3 state file carries no ``generation``, so ``Experiment.__post_init__``
+    substitutes ``_legacy_generation(id)`` — a hash of the id. The plan row embeds
+    ``version_token()`` = ``<generation>.<rev>``, so the per-record re-check compares
+    two INDEPENDENTLY DERIVED generations. If that fallback were random (as
+    ``_new_generation`` is) rather than deterministic, every legacy record would
+    produce a different token on the second read and the reset would refuse to remove
+    any of them. Nothing pinned that coupling before; this does.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    legacy = _make_managed_legacy()
+    state_path = tutorial_ws().workspace_root() / legacy.id / "experiment.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state.pop("generation", None), "the fixture must have had one to remove"
+    ws.atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
+
+    r = _execute(client, token=_plan_digest(client))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["refusal_reason"] is None
+    assert r.json()["removed_count"] == 1
+    assert legacy.id not in _dirs_on_disk()
+    assert _dirs_on_disk() == CANONICAL_IDS
