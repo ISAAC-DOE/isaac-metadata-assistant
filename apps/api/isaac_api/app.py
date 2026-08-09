@@ -23,10 +23,11 @@ from . import __version__
 from . import runtime_mode
 from .auth import ApiKeyAuthMiddleware
 from .config import base_path
-from .experiment_repository import StorageUnavailable
+from .experiment_repository import DurableWriteConflict, StorageUnavailable
 from .routes import (
     OPENAPI_TAGS,
     TutorialScopeError,
+    durable_write_conflict_handler,
     router,
     storage_unavailable_handler,
     tutorial_scope_error_handler,
@@ -166,6 +167,14 @@ def create_app() -> FastAPI:
     # It renders 503, never 500, and never a silent fall back to the filesystem —
     # see the handler's own docstring for why each of those is deliberate.
     app.add_exception_handler(StorageUnavailable, storage_unavailable_handler)
+    # A refused durable write (the compare-and-swap declined it) that reached the
+    # app without a handler of its own. The three mutation routes render their own
+    # 412 with the full body; this catches `POST /api/experiments`, whose create
+    # persists directly. Registered for the same reason as the line above: a new
+    # exception class with an unguarded call site surfaces as a 500, and a
+    # concurrency refusal is the one failure of the three that is not a server
+    # error at all.
+    app.add_exception_handler(DurableWriteConflict, durable_write_conflict_handler)
     # ISAAC_BASE_PATH prefixes every route (the router keeps its own /api
     # prefix, so routes land at {base}/api/*). Unset, prefix="" is byte-identical
     # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR

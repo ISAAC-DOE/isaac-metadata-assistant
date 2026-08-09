@@ -435,6 +435,139 @@ jobs:
           assert [r[0] for r in after] == [rid], "a session write reached the database"
           # ...and the five examples the session materialised are not in it either.
           assert set(r[0] for r in after).isdisjoint(ws.CANONICAL_IDS)
+
+          # ── THE DURABLE COMPARE-AND-SWAP (defect C1) ─────────────────────────
+          # THE HALF THAT CANNOT BE PROVEN ANYWHERE ELSE. The in-process fake in
+          # `test_experiment_repository.py` reports the server's DECISION, so it
+          # proves the application handles a refusal; only a real engine can say
+          # whether the PREDICATE decides correctly. Before this predicate existed
+          # the conflict clause was a bare `DO UPDATE SET state = EXCLUDED.state`,
+          # so case 2 below silently overwrote — with both writers told they had
+          # succeeded.
+          import json as _json
+
+          def upsert(state):
+              with dbw.write_transaction(os.environ) as (cur, pol):
+                  cur.execute(
+                      pol.check(repo.Q_UPSERT_EXPERIMENT),
+                      (state["id"], _json.dumps(state, sort_keys=True)),
+                  )
+                  return cur.rowcount
+
+          def stored_state():
+              with dbw.write_transaction(os.environ) as (cur, pol):
+                  cur.execute(pol.check(repo.Q_ONE_EXPERIMENT), (rid,))
+                  value = cur.fetchone()[0]
+              return _json.loads(value) if isinstance(value, (str, bytes)) else value
+
+          base = ws.load_experiment(rid).to_state()
+          assert base["rev"] == 0, base["rev"]
+
+          # 1. STRICTLY AHEAD -> applied. The ordinary case.
+          assert upsert(dict(base, rev=1, title="rev 1 wins")) == 1
+          assert stored_state()["title"] == "rev 1 wins"
+
+          # 2. A STALE WRITE IS REFUSED. THIS IS THE DEFECT. A second replica whose
+          #    copy is behind must not win, and must be told it did not.
+          assert upsert(dict(base, rev=1, title="stale writer overwrites")) == 0, \
+              "a stale write was applied"
+          assert stored_state()["title"] == "rev 1 wins", "the stale write landed anyway"
+
+          # 3. BEHIND -> refused, for the same reason.
+          assert upsert(dict(base, rev=0, title="behind")) == 0
+          assert stored_state()["title"] == "rev 1 wins"
+
+          # 4. A BYTE-IDENTICAL DOCUMENT AT AN EQUAL REV -> admitted. This is
+          #    clause 3, and it is NOT the retry-after-a-partial-failure case the
+          #    comment here used to claim: `save_versioned` re-stamps `updated_utc`
+          #    (one-second resolution) INSIDE the compared document, so a real retry
+          #    matches only within the same wall-clock second. What is proven here
+          #    is exactly what the clause says — an identical document is admitted,
+          #    and `rev` being inside the document makes applying it a no-op in
+          #    every field. The partial-failure wedge is closed by the application
+          #    (case 7), not by this clause.
+          assert upsert(dict(base, rev=1, title="rev 1 wins")) == 1
+          assert stored_state()["title"] == "rev 1 wins"
+
+          # 5. A FRESH GENERATION -> admitted even though its rev restarts at 0. A
+          #    re-creation is a new object, and a random nonce cannot be ordered.
+          reborn = dict(base, rev=0, generation="ffffffffffffffff", title="recreated")
+          assert upsert(reborn) == 1
+          assert stored_state()["title"] == "recreated"
+
+          # 6. THE STATED LIMIT OF (5), asserted rather than glossed: because two
+          #    generations cannot be ordered, the OLD generation is admitted over
+          #    the new one too. Within a generation the swap is strict; across one
+          #    it is last-writer-wins. Not reachable in this build — nothing deletes
+          #    and re-creates an ordinary-scope record — and documented at
+          #    `Q_UPSERT_EXPERIMENT` so it is a known property, not a surprise.
+          #
+          #    CLAUSE 1 IS ISOLATED HERE, AND IT WAS NOT BEFORE. The offer used to
+          #    carry `rev=99` against a row holding `rev=0`, which clause 2 admits
+          #    on its own — the assertion would have passed with clause 1 deleted,
+          #    which is the "asserts more than it observes" defect in the one place
+          #    meant to be the real-engine proof. It now offers a rev that is NOT
+          #    ahead and a document that is NOT identical, so clause 1 is the only
+          #    clause that can admit it.
+          assert stored_state()["rev"] == 0, stored_state()["rev"]
+          assert upsert(dict(base, rev=0, title="old generation")) == 1
+          assert stored_state()["title"] == "old generation"
+
+          # 6b. THE CONTROL that gives (6) its meaning: the same not-ahead,
+          #     not-identical offer carrying the row's OWN generation is REFUSED. So
+          #     what admitted (6) was the differing generation and nothing else.
+          assert upsert(dict(base, rev=0, title="same generation, not ahead")) == 0
+          assert stored_state()["title"] == "old generation"
+
+          # 7. THE WEDGE, AND ITS RECOVERY — the reason clause 2 is safe to ship.
+          #    A strict compare-and-swap over storage that can drift AHEAD of the
+          #    local workspace file is a permanent 412 unless something reconciles
+          #    them: every later mutation offers `max(self.rev, disk_rev) + 1`,
+          #    which is the rev the row already holds. The row gets ahead of the
+          #    file two ordinary ways — a fault between `save()`'s two writes, and a
+          #    replica that hydrated the record earlier (`hydrate` skips a record
+          #    whose `experiment.json` is already present, so it never refreshes
+          #    one). Simulated by moving the ROW forward and leaving the FILE alone.
+          on_disk = ws.load_experiment(rid)
+          wedged_rev = on_disk.rev + 7
+          assert upsert(dict(on_disk.to_state(), rev=wedged_rev, title="a replica won")) == 1
+          assert ws.load_experiment(rid).rev == on_disk.rev, "the file moved; no wedge to test"
+
+          answers = ws.load_demo_answers()
+          payload = {
+              "confirmed_by_user": True,
+              "answers": {
+                  "series": answers.get("series"),
+                  "descriptor": answers.get("descriptor"),
+              },
+          }
+          etag = client.get(f"/api/experiments/{rid}").headers["ETag"]
+          refused_write = client.post(
+              f"/api/experiments/{rid}/answers", json=payload, headers={"If-Match": etag}
+          )
+          assert refused_write.status_code == 412, refused_write.text
+          assert refused_write.json()["current_rev"] == wedged_rev, refused_write.text
+
+          #    THE RECOVERY. The refusal adopted the winner's document into the
+          #    workspace file on its way out, so a re-read returns the winner rather
+          #    than the same stale copy...
+          refreshed = client.get(f"/api/experiments/{rid}")
+          assert refreshed.json()["rev"] == wedged_rev, refreshed.text
+          #    ...and the retry, now strictly ahead, is APPLIED. Before the local
+          #    adoption this second call was another 412, and so was every one after
+          #    it.
+          retried = client.post(
+              f"/api/experiments/{rid}/answers",
+              json=payload,
+              headers={"If-Match": refreshed.headers["ETag"]},
+          )
+          assert retried.status_code == 200, retried.text
+          assert stored_state()["rev"] == wedged_rev + 1, stored_state()["rev"]
+
+          # The row is left holding whatever case 7 last wrote through the API. No
+          # later step reads it — the digests that follow are taken over `records`
+          # and over the table SET, never over this application's own rows.
+          print("durable compare-and-swap OK against a real PostgreSQL")
           print("durable repository OK against a real PostgreSQL")
           PY
 
