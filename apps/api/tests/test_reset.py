@@ -15,10 +15,16 @@ demo workspace to EXACTLY the five canonical P26.0a scenarios, safely:
 All fixtures are synthetic. Truth core is never bypassed.
 
 R1 (2026-08-02) added a PRECONDITION on top of all of the above: an `execute` must
-carry the `plan_digest` its own `preview` returned, or it is refused without mutating
-(428 omitted / 412 stale). This file keeps testing the classification contract; the
-precondition itself, the lock symmetry, and the measured `final_count` are covered by
-`test_reset_safety.py`. R1 also renamed the confirmation phrase, which is DISPLAYED to
+carry the `plan_digest` its own `preview` returned, or it is refused (428 omitted /
+412 stale). This file keeps testing the classification contract; the precondition
+itself, the lock symmetry, and the measured `final_count` are covered by
+`test_reset_safety.py`.
+
+This paragraph used to say "refused without mutating". C2 (see `test_reset_safety.py`
+§7) re-checks the digest PER RECORD, inside that record's own lock, so a stale
+precondition detected there refuses AFTER restoring the records the loop had already
+reached. The 428 case, and a stale digest caught by the workspace-wide check, still
+mutate nothing. R1 also renamed the confirmation phrase, which is DISPLAYED to
 the operator, from harness jargon to `RESET EXAMPLE WORKSPACE`.
 """
 

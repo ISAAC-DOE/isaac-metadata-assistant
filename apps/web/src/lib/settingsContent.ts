@@ -453,7 +453,17 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       // P2 — DELETION, which no settings surface described at all.
       //
       // Every clause is checked against the code, and nothing stronger is
-      // claimed than it enforces:
+      // claimed than it enforces.
+      //
+      // THAT SENTENCE WAS ONCE FALSE, AND RECORDING IT HERE IS THE POINT. The
+      // reset clause below said the server "writes nothing" when the plan is
+      // stale, and the detail text repeated it to the reader. C2 made the
+      // `plan_digest` precondition PER RECORD — re-checked inside each record's
+      // own lock, immediately before that record is touched — so a write landing
+      // mid-reset is refused rather than destroyed, and the reset stops there
+      // with earlier records already restored. A self-certifying comment cannot
+      // check itself, and nothing else pinned this string;
+      // `__tests__/reset-claim-parity.test.tsx` now does.
       //
       //  · CONFINED TO A WALKTHROUGH. `POST /api/demo/reset` requires the
       //    worked-example session header and refuses without it, so the control
@@ -461,8 +471,13 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       //    a directory namespace that contains nothing else.
       //  · PREVIEW IS READ-ONLY, and execution carries the preview's own
       //    `plan_digest` — 428 when absent, 412 when stale — so a reset
-      //    authorised against figures that have since moved writes nothing
-      //    (`components/ResetDemoDialog.tsx`'s `doExecute`).
+      //    authorised against figures that have since moved is REFUSED rather
+      //    than run (`components/ResetDemoDialog.tsx`'s `doExecute`). It does
+      //    NOT say "writes nothing": an absent digest, and a stale one caught by
+      //    the workspace-wide check, write nothing; a stale plan caught by the
+      //    per-record check refuses after restoring the records the loop had
+      //    already reached, and no field on `DemoResetResponse` tells a reader
+      //    which of the two happened.
       //  · THE TYPED PHRASE IS NOT NAMED HERE ON PURPOSE. The dialog's own
       //    field states it (`TYPED_GATE`); the backend phrase is different and
       //    is deliberately never surfaced. Printing either here would put a
@@ -483,7 +498,7 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       summary:
         'Deliberate removal reaches only a walkthrough — nothing here deletes the workspace, a record, or an exported file.',
       detail:
-        "Deliberate removal is narrow in this build, and everything it can reach sits inside a worked-example walkthrough. Reset Worked Example rebuilds that walkthrough's own copies of the built-in example records: it previews the effect without changing anything, requires a typed confirmation, and is checked against the figures you were shown — if the walkthrough moved in between, the server refuses and writes nothing. When it does run it permanently discards the confirmed answers, the progress, and the exported artifacts inside that walkthrough, and it also clears the assistant conversations this browser tab is holding. Ending a walkthrough discards its whole temporary directory along with everything in it. Nothing in this build deletes the workspace itself, an individual record, or a single exported artifact — no operation offers it.",
+        "Deliberate removal is narrow in this build, and everything it can reach sits inside a worked-example walkthrough. Reset Worked Example rebuilds that walkthrough's own copies of the built-in example records: it previews the effect without changing anything, requires a typed confirmation, and is checked against the figures you were shown — if the walkthrough moved in between, the server refuses rather than act on figures that no longer describe it, and shows you the refreshed ones. When it does run it permanently discards the confirmed answers, the progress, and the exported artifacts inside that walkthrough, and it also clears the assistant conversations this browser tab is holding. Ending a walkthrough discards its whole temporary directory along with everything in it. Nothing in this build deletes the workspace itself, an individual record, or a single exported artifact — no operation offers it.",
     },
     {
       // P2 — EXPORT, which was named only inside `what-is-stored`'s collapsed

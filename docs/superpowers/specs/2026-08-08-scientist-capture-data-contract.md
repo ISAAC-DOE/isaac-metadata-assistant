@@ -97,6 +97,57 @@ Derived from the schema's own structure, not from intuition.
 `assets[]` (:1164); `descriptors.outputs[]` (:1244);
 `timestamps.acquired_start_utc` / `acquired_end_utc` (:192, :196).
 
+### CORRECTION 2026-08-08 — the two lists above are in SCHEMA space, and half of them do not exist in DRAFT space
+
+The lists are kept exactly as written, because they are correct *about the official
+record* and the line citations are to `schema/isaac_record_v1.json`. **They are not a
+usable specification of where a draft keeps things, and the first implementation of the
+Run model read them as if they were.** The error is this document's, not that slice's:
+nothing above says which namespace it is describing, and every entry looks like a
+dotted path.
+
+A draft (`schema/isaac_draft.schema.json`) has **two** namespaces:
+
+1. **`draft["fields"]`** — a map of dotted official path → evidence envelope, **scalars
+   only**. `sample.material.name`, `context.temperature_K`, `system.facility.beamline`,
+   `timestamps.acquired_start_utc` live here.
+2. **Top-level draft blocks**, siblings of `fields`, which are arrays/objects and are
+   **not dotted paths at all**: `series`, `qc`, `assets`, `descriptors_outputs`,
+   `attribution`, `tags`, `links`, `implicit`.
+
+**7 of the 14 entries above are blocks, not field keys** (enumerated against
+`extract/structured.FIELD_MAP` and `extract/draft_builder`):
+
+| §2 entry (schema space) | Where a draft actually keeps it | Level |
+|---|---|---|
+| `measurement.series[]` | block `series` | run |
+| `measurement.qc` | block `qc` | run |
+| `assets[]` | block `assets` | run |
+| `descriptors.outputs[]` | block `descriptors_outputs` | run |
+| `attribution.contributors` | block `attribution` (`draft_builder.py:269`) | experiment |
+| `tags` | block `tags` (emitted by nothing today) | experiment |
+| `system.instrument.*` | field-map path — **valid**, simply never emitted | experiment |
+
+Only `system.instrument.*` is a false alarm: it is a legitimate field-map path
+(`system.properties` = `{configuration, domain, facility, instrument, technique}`) that
+the current extractor has no `FIELD_MAP` entry for. The other six matched **nothing** —
+`field_level("qc")`, `field_level("series")` and `field_level("descriptors_outputs")` all
+returned `unclassified`, and the experiment-level `attribution` and `tags` inherited
+nothing at all. Zero consequence while no code consumed them; a live trap for the export
+fan-out slice, which is the one that has to know where run data lives.
+
+**The code is now namespace-explicit** (`apps/api/isaac_api/workspace.py`):
+`EXPERIMENT_LEVEL_FIELD_PATHS` / `RUN_LEVEL_FIELD_PATHS` (segment-aware prefix tests over
+field-map keys) and `EXPERIMENT_LEVEL_BLOCKS` / `RUN_LEVEL_BLOCKS` (exact match over block
+keys), addressed through namespaced addresses `field:<path>` / `block:<key>` — because
+`tags` is both a legal official path and a block name, so a bare name is ambiguous.
+
+Two families remain **deliberately unclassified**, and that is an answer rather than a
+gap: `system.configuration.*` and `timestamps.created_utc` (real extractor output that
+neither list assigns), and the draft-only blocks `meta` / `pending` / `implicit` /
+`block_evidence` / `links`. Assigning a level to any of them would be an unevidenced
+scientific inference of the kind `CLAUDE.md` §5 forbids.
+
 ### DECISION D2 — inheritance is by reference, never by copy
 
 A Run stores *the absence of an override*, not a duplicated value. The resolved value is computed
