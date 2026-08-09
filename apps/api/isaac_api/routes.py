@@ -408,6 +408,52 @@ async def storage_unavailable_handler(request, exc) -> JSONResponse:
     )
 
 
+async def durable_write_conflict_handler(request, exc) -> JSONResponse:
+    """The LAST RESORT for a refused durable write: still a 412, never a 500.
+
+    The three mutation handlers render this themselves (``_save_versioned``),
+    because only they hold the experiment and the client's ``If-Match`` and can
+    therefore fill the whole body. This handler exists for the one call site that
+    persists WITHOUT going through them — ``POST /api/experiments``, whose create
+    reaches ``Experiment.save`` directly. Reaching it requires a ULID collision
+    with a row carrying the same generation, which is not a case this application
+    can produce; an unguarded call site for a new exception class is the defect,
+    not the likelihood.
+
+    SAME DISCRIMINATOR, SAME KEYS, HONEST NULLS. A client must not have to learn a
+    second shape for one condition, so the body is ``_stale_write``'s key set
+    exactly. ``expected_*`` are ``null`` because this path carries no client
+    validator to echo — the honest answer, not a fabricated one — and the
+    ``current_*`` pair is filled only from the winner's row when it can be read,
+    never from the losing write.
+
+    ``experiment_id`` COMES FROM THE EXCEPTION, NOT FROM THE ROW. It is known at
+    every raise site, while the read-back can return nothing — and reading it out
+    of ``stored_state`` alone emitted ``experiment_id: null`` in exactly the case
+    a client most needs it named. ``_stale_write`` always carries a string; so
+    does this.
+    """
+    state = exc.stored_state if isinstance(exc.stored_state, dict) else {}
+    rev = state.get("rev")
+    rev = rev if isinstance(rev, int) and not isinstance(rev, bool) else None
+    generation = state.get("generation")
+    version = f"{generation}.{rev}" if generation and rev is not None else None
+    resp = JSONResponse(
+        status_code=412,
+        content={
+            "error": "stale_write",
+            "experiment_id": getattr(exc, "experiment_id", None) or state.get("id"),
+            "expected_rev": None,
+            "current_rev": rev,
+            "expected_version": None,
+            "current_version": version,
+        },
+    )
+    if version is not None:
+        resp.headers["ETag"] = f'"{version}"'
+    return resp
+
+
 def tutorial_scope(
     x_isaac_tutorial_session: Annotated[
         str | None,
@@ -537,6 +583,83 @@ def _stale_write(exp, expected_token: str | None) -> JSONResponse:
     # Echo the CURRENT strong validator so the client can refresh in one hop.
     resp.headers["ETag"] = exp.etag()
     return resp
+
+
+def _first_client_token(if_match: str | None) -> str | None:
+    """The client's first strong validator, UNQUOTED — or ``None``.
+
+    Exists so the durable-conflict 412 echoes ``expected_version`` /
+    ``expected_rev`` in exactly the form ``_check_if_match`` echoes them (it passes
+    ``tags[0][1:-1]``). Passing the RAW header instead silently produced
+    ``expected_rev: null``, because the trailing quote makes the integer parse fail
+    — two bodies for one condition, differing only where a client would look.
+
+    No re-validation: by the time this is reachable the header has already been
+    accepted. ``*`` carries no version and yields ``None``, which is the honest
+    answer rather than a fabricated one.
+    """
+    if not if_match:
+        return None
+    first = next((t for t in (part.strip() for part in if_match.split(",")) if t), None)
+    if not first or not _STRONG_TAG_RE.match(first):
+        return None
+    return first[1:-1]
+
+
+def _save_versioned(exp, if_match: str | None) -> tuple[bool, JSONResponse | None]:
+    """``exp.save_versioned()``, with a refused DURABLE write rendered as the 412.
+
+    Returns ``(changed, None)`` normally, or ``(False, <412 response>)`` when the
+    application's own database refused the write because the stored document had
+    moved on.
+
+    WHY THE SAME 412 AND NOT A NEW STATUS. ``_check_if_match`` above and this are
+    the same contract enforced at two different distances. The header check asks
+    "does the version this client holds match the copy THIS PROCESS just read"; the
+    durable compare-and-swap asks "…and is that copy still the current one for
+    every process". A client cannot act on the difference — the remedy is identical
+    (re-read, re-apply, retry) — so inventing a second status code would only make
+    two names for one condition. The response body and the echoed ETag are
+    unchanged.
+
+    THAT "THE REMEDY IS IDENTICAL" IS A CLAIM ABOUT THE STORE, NOT A TURN OF
+    PHRASE, and it is only true because ``Experiment.save`` makes it true. A
+    refused durable write adopts the winner's document into the workspace file
+    before it re-raises; without that, a re-read would return the SAME stale local
+    copy, the retry would offer the SAME already-taken rev, and the 412 would
+    repeat forever. Re-read → re-apply → retry converges in one extra round trip
+    because of that adoption. See ``ws.Experiment._adopt_winner_locally``.
+
+    THE ECHOED VERSION COMES FROM THE WINNER, NOT FROM US.
+    ``conflict.current_experiment`` prefers the document the database actually
+    holds, read back inside the transaction that refused the write. Passing ``exp``
+    would echo the losing write's own version, which exists nowhere and which a
+    client re-reading would never see.
+
+    WHAT WAS AND WAS NOT WRITTEN, STATED PER LAYER — this used to say "NOTHING WAS
+    WRITTEN", unconditionally, and it was wrong at one of the three call sites.
+
+    * The DATABASE took nothing: the durable write is what was refused.
+    * This experiment's STATE was not applied. The durable write goes before the
+      workspace file (``Experiment.save``), so the client's version never lands;
+      ``save_versioned`` rolls its in-memory rev/``updated_utc`` bump back, and the
+      handler's other in-memory mutations to ``exp`` are discarded with the
+      request. The workspace file IS rewritten whenever the winner's row could be
+      read and loaded — with the WINNER's document, which is the adoption above
+      and never this client's change.
+    * SIDE EFFECTS EARLIER IN THE HANDLER STAND. ``post_export`` writes the
+      official record and its evidence sidecar (``_write_record``) BEFORE calling
+      this, and those two files remain on disk. That is the half-written shape a
+      fault between the two writes already produces, and the one the export
+      handler's own reconciliation branch repairs on the next export — see the
+      comment at that call site, which is the authority on this path.
+    """
+    try:
+        return exp.save_versioned(), None
+    except experiment_repository.DurableWriteConflict as conflict:
+        return False, _stale_write(
+            conflict.current_experiment(exp), _first_client_token(if_match)
+        )
 
 
 def _check_if_match(if_match: str | None, exp) -> JSONResponse | None:
@@ -1598,6 +1721,18 @@ class CreateExperimentRequest(BaseModel):
                 "created."
             )
         },
+        412: {
+            "description": (
+                "This deployment stores experiments in its own database, and that "
+                "database already holds a different record under the id this "
+                "request would have used. Nothing was created. The body is the "
+                "same `stale_write` shape the record write operations return, "
+                "with `expected_rev` and `expected_version` null because a create "
+                "carries no `If-Match`. Reaching this requires an id collision, "
+                "which this application does not produce — it is documented "
+                "because the response is declared, not because it is expected."
+            )
+        },
         503: {
             "description": (
                 "This deployment stores experiments in its own database, and that "
@@ -1885,7 +2020,9 @@ def post_answers(
         # logged nor rewritten (byte-stable) and never bumps rev. save_versioned decides
         # by comparing the on-disk authoritative signature.
         exp.answer_log.append({"applied": apply_shape, "at": timestamp})
-        changed = exp.save_versioned()
+        changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another replica won the race; this change was not applied
         if not changed:
             exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
         # Derived downstream invalidation (P28.2) at the post-mutation revision. A
@@ -2015,7 +2152,9 @@ def post_edit(
         # invents a value (a malformed sha256 / off-enum qc leaves the value as-is).
         exp.draft = apply_corrections(exp.draft, apply_shape)
         exp.answer_log.append({"edited": apply_shape, "at": timestamp})
-        changed = exp.save_versioned()
+        changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another replica won the race; this change was not applied
         if not changed:
             exp.answer_log.pop()  # byte-stable no-op: discard the speculative log append
         changed_fields = submitted_fields if changed else []
@@ -2073,6 +2212,27 @@ def _write_record(exp: Experiment, result) -> None:
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
+        # OVERRIDES the shared `_R_PRECONDITION` 412, which says "nothing was
+        # written" — true of every other operation and NOT true of this one. Export
+        # writes its two artifacts before it saves the state, so the second of the
+        # two 412 arms leaves them on disk. Same defect class as the shared save
+        # helper's docstring, one surface further out: this is the description a
+        # client actually reads.
+        412: {
+            "description": (
+                "The write was refused because another writer got there first, so "
+                "your change was not applied and the response echoes the current "
+                "`ETag` so a client can refresh in one further request.\n\n"
+                "Two arms, and they differ in what is left on disk. If `If-Match` "
+                "did not match the revision this server read, nothing at all was "
+                "written. If the record's stored copy moved on between that check "
+                "and the durable write, the official record and its evidence "
+                "sidecar had ALREADY been written and they remain — the record's "
+                "own state was not updated, so it still reports as not exported. "
+                "That is a state this API repairs by itself: retry the export and "
+                "it republishes from the current draft."
+            )
+        },
         409: {
             "description": (
                 "This record has already been exported. Records are immutable, so "
@@ -2207,7 +2367,15 @@ def post_export(
         # the self-heal path contradicted the same response's own `rev` (unchanged),
         # its ETag (unchanged) and this handler's own failure-branch rule ("never
         # fabricate a mutation that did not occur").
-        changed = exp.save_versioned()
+        changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            # The artifact PAIR was already written to disk above and the state was
+            # not — the same half-written shape a fault between the two produces,
+            # and the one this handler's own reconciliation branch repairs on the
+            # next export (`not exp.exported()` + an orphan artifact -> republish
+            # from the current draft). So this degrades into a state the app already
+            # handles rather than into a new one.
+            return stale
         payload["record_id"] = exp.record_id
         # P30.6 — SAFE basename only (see _detail); never the absolute path.
         payload["artifact_refs"] = {

@@ -47,6 +47,7 @@ import contextlib
 import copy
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -62,6 +63,12 @@ from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
 from isaac_records.ids import is_record_id, new_record_id
+
+#: PATH-FREE BY RULE, like every other log line this application emits: a record
+#: id and an exception CLASS NAME, never a message, a filesystem path, a host or a
+#: credential. A log line is an exfiltration surface too (P30.6), and an ``OSError``
+#: message in particular carries the filename it failed on.
+_log = logging.getLogger("isaac_api.workspace")
 
 # --- repo + fixture locations -------------------------------------------------
 
@@ -457,24 +464,175 @@ class Experiment:
         """Persist this experiment's state, durably when the deployment has a database.
 
         THE DURABLE WRITE GOES FIRST, and the order is load-bearing rather than
-        arbitrary. If the database write fails, this raises and the workspace file
-        is NOT rewritten, so the reader is told their change did not stick instead
-        of seeing it applied locally and losing it at the next pod restart. If the
-        database write succeeds and the file write then fails, the durable copy is
-        ahead of the working copy — which the next ordinary-scope read repairs by
-        itself, because hydration writes back any stored record whose directory is
-        missing. Only one of the two orderings is self-healing.
+        arbitrary. If the database is UNAVAILABLE, this raises and the workspace
+        file is NOT rewritten, so the reader is told their change did not stick
+        instead of seeing it applied locally and losing it at the next pod restart.
+        If the database write succeeds and the file write then fails, the durable
+        copy is ahead of the working copy — recoverable, where the other ordering
+        loses the write outright.
+
+        THAT PARAGRAPH IS TRUE OF AN OUTAGE AND FALSE OF A REFUSAL, and it used to
+        be written as though it covered both. On a :class:`DurableWriteConflict`
+        this experiment's OWN state is still never written anywhere — but the
+        workspace file IS rewritten, with the WINNER's document. "Nothing is
+        written" and "this client's change is not written" are different claims,
+        and only the second one holds for all three failure types.
+
+        BUT "HYDRATION REPAIRS IT" IS TOO STRONG, and this line used to say it.
+        ``PostgresOrdinaryStore.hydrate`` writes back only a record whose
+        ``experiment.json`` is ABSENT; a present-but-stale one is skipped and never
+        refreshed. So a row that is ahead of an existing file stays ahead until a
+        write refuses — which is why the refusal below adopts the winner rather
+        than leaving the skew for a reader that will not fix it.
 
         SCOPE IS THE GATE. ``_ordinary_store`` returns ``None`` for any record that
         belongs to a worked-example session, so a session's records never reach the
         database. This is the first of the three guards described in
         ``experiment_repository``; the store itself raises on the same condition,
         so the guard does not depend on this one line being right.
+
+        A REFUSED DURABLE WRITE ADOPTS THE WINNER'S DOCUMENT LOCALLY BEFORE IT
+        RE-RAISES, and that is not a nicety — without it the compare-and-swap
+        introduces a wedge it can never leave. Both orderings above can leave the
+        row AHEAD of the file: a fault between the two writes does it in one
+        process, and a second replica that hydrated earlier does it without any
+        fault at all (``PostgresOrdinaryStore.hydrate`` skips a record whose
+        ``experiment.json`` is already present, so it never refreshes one). From
+        there every mutation computes ``max(self.rev, disk_rev) + 1``, which is the rev
+        the row ALREADY holds — the predicate refuses it, and refuses the next one,
+        and the next: a permanent ``412`` over reads that keep serving the stale
+        local file. Copying the winner's state into the file makes the advertised
+        remedy true — the client re-reads, gets the winner, and its next write is
+        strictly ahead. It is the LOCAL file only: the database already holds this
+        document, and ``rev`` is deliberately not bumped, because nothing new
+        happened.
+
+        THIS IS THE ONLY CALL TO ``PostgresOrdinaryStore.persist`` IN THE
+        CODEBASE, which is why the adoption lives here and not in the route helper
+        that renders the 412. Not "it covers four call sites instead of three" —
+        it covers every caller by construction, and a caller added later inherits
+        it without knowing it exists.
         """
         store = _ordinary_store(self.session_id)
         if store is not None:
-            store.persist(self)
+            from .experiment_repository import DurableWriteConflict  # noqa: PLC0415 - cycle
+
+            try:
+                store.persist(self)
+            except DurableWriteConflict as conflict:
+                # A FAILURE TO HEAL MUST NOT ESCALATE A CLEAN 412 INTO A 500. The
+                # refusal is already the correct answer; adopting the winner only
+                # shortens how long the client stays behind. So every failure of the
+                # adoption is caught, including the scope assertion inside it.
+                #
+                # BUT DEGRADING IS NOT SILENT — this module says so itself, at
+                # `_hydrate_ordinary_scope`, and `experiment_repository` says it
+                # again. An earlier revision of this block swallowed the failure
+                # with `contextlib.suppress` and emitted NOTHING: no log record, and
+                # correctly no `storage_failure` bit, because a refusal is not an
+                # outage. The consequence was that a deployment where the adoption
+                # ALWAYS fails — read-only filesystem, permission change, full disk
+                # — presents as EXACTLY the permanent wedge this whole change exists
+                # to remove, with no signal anywhere. The catch stays this broad;
+                # only the silence was the defect.
+                #
+                # `_log.warning`, not `.error`: the request is answered correctly
+                # and the client's remedy is unchanged. What an operator needs to
+                # know is that the remedy will not converge until the workspace is
+                # writable again.
+                try:
+                    self._adopt_winner_locally(conflict)
+                except Exception as heal_failure:  # noqa: BLE001 - see above
+                    _log.warning(
+                        "durable conflict: could not adopt the stored document for "
+                        "record %s (%s). The local copy is still behind the row, so "
+                        "writes to this record will keep being refused until it can "
+                        "be refreshed.",
+                        self.id,
+                        type(heal_failure).__name__,
+                    )
+                raise
         atomic_write_text(self.state_path, json.dumps(self.to_state(), indent=2) + "\n")
+
+    def _adopt_winner_locally(self, conflict) -> None:
+        """Write the WINNER's stored document into this scope's workspace file.
+
+        Called only from :meth:`save` after the database refused a write, with the
+        document the refusing transaction read back. It writes the winner's state
+        verbatim — it does not merge, does not bump ``rev``, and does not touch the
+        in-memory instance, which ``save_versioned`` is about to roll back anyway.
+
+        SCOPE IS ASSERTED, NOT ASSUMED. A worked-example record can never reach
+        this method — ``_ordinary_store`` returns ``None`` for any non-``None``
+        ``session_id``, so ``persist`` is never called and no conflict can be
+        raised — but "cannot happen" is exactly the kind of claim that stops being
+        true when the seam moves, and this method writes files. It raises rather
+        than writing into a session directory. ``save`` catches that raise, so the
+        failure mode is "no heal", never "a session record written from a row".
+
+        FOUR CONDITIONS ARE CHECKED, AND THE FOURTH IS THE ONE THAT MAKES THE
+        WRITE SAFE. A stored document that is missing, filed under a different id,
+        not loadable as an ``Experiment``, or NOT AHEAD OF THE LOCAL COPY is
+        SKIPPED, and the record stays wedged — which is the honest outcome.
+
+        The first two are the reason :meth:`PostgresOrdinaryStore.hydrate` skips
+        them: a row naming another record describes another record. The third is
+        this method's own — it is the only writer that puts a database row into
+        the workspace on an ERROR path, and a state file no later read can parse
+        is worse than a stale one.
+
+        The FOURTH was missing, and it was the one holding the other three up.
+        Nothing here stopped an OLDER document being written over a newer local
+        copy; a winner at ``rev 1`` really was written over a local file at
+        ``rev 5`` when probed directly. That is safe today ONLY by a cross-module
+        invariant this method neither stated nor checked — a refusal means
+        ``Q_UPSERT_EXPERIMENT``'s clause 2 was false, so the stored rev is at
+        least the offered rev, which is already past the local one. Leaving the
+        single safety property implicit while carefully guarding three lesser ones
+        is the shape of defect this method's own docstring warns about. It is
+        checked now, against the file that would be overwritten:
+
+        * a DIFFERING ``generation`` -> skip. Two generations cannot be ordered
+          (the nonce is random), so "newer" is not defined across them, and a
+          refusal implies clause 1 was false, i.e. they matched. A differing one
+          here means an assumption has already broken; do not write on top of it.
+        * a LOWER ``rev`` -> skip. Never move the local copy backwards.
+
+        An absent or unreadable local file has no claim, so the winner is written.
+        That is the ordinary create-time shape, and it is what ``hydrate`` would
+        do with the same row.
+        """
+        if self.session_id is not None:
+            raise AssertionError(
+                "a worked-example record has no durable row and must never be "
+                "healed from one"
+            )
+        state = conflict.stored_state
+        if not isinstance(state, dict) or state.get("id") != self.id:
+            return
+        try:
+            winner = Experiment.from_state(state, session_id=None)
+        except (KeyError, TypeError, ValueError):
+            return
+        local = self._local_state_or_none()
+        if local is not None and (
+            local.generation != winner.generation or winner.rev < local.rev
+        ):
+            return
+        atomic_write_text(self.state_path, json.dumps(state, indent=2) + "\n")
+
+    def _local_state_or_none(self) -> "Experiment | None":
+        """This record as the workspace file currently holds it, or ``None``.
+
+        ``None`` for absent, unreadable, or unparseable — the same tolerance
+        :meth:`_persisted_sig_and_rev` applies, and for the same reason: a missing
+        or corrupt local file is "no prior state", not an error.
+        """
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            return Experiment.from_state(state, session_id=self.session_id)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return None
 
     def _persisted_sig_and_rev(self) -> tuple[str | None, int]:
         """``(authoritative signature, rev)`` of the CURRENTLY on-disk state, or
@@ -509,14 +667,31 @@ class Experiment:
         The bump is taken from ``max(self.rev, on-disk rev) + 1`` so a stale
         in-memory instance can never *regress* the persisted ``rev`` (defence in
         depth; the API rejects stale writes via ``If-Match`` in P27.3).
+
+        A BYTE-STABLE NO-OP NEVER REACHES ``save()`` AT ALL — it returns above,
+        before the bump. That matters to the durable compare-and-swap
+        (``experiment_repository.Q_UPSERT_EXPERIMENT``): the only writes that reach
+        the database from here carry a rev strictly ahead of the one this process
+        read, so the predicate refuses exactly the writes that lost a race and
+        nothing else.
+
+        IF THE SAVE FAILS, THE VERSION METADATA IS ROLLED BACK. Without this, an
+        instance whose write was refused (or whose database was unreachable) would
+        go on reporting a ``rev`` and an ``updated_utc`` that exist nowhere — and
+        the 412 built from it would echo a version no client could ever match.
         """
         old_sig, disk_rev = self._persisted_sig_and_rev()
         new_sig = _authoritative_signature(self)
         if old_sig is not None and old_sig == new_sig:
             return False
+        previous = (self.rev, self.updated_utc)
         self.rev = max(self.rev, disk_rev) + 1
         self.updated_utc = _now_iso()
-        self.save()
+        try:
+            self.save()
+        except BaseException:
+            self.rev, self.updated_utc = previous
+            raise
         return True
 
     @classmethod
