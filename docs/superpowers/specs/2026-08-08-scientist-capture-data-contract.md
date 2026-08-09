@@ -138,6 +138,57 @@ Derived from the schema's own structure, not from intuition.
 `assets[]` (:1164); `descriptors.outputs[]` (:1244);
 `timestamps.acquired_start_utc` / `acquired_end_utc` (:192, :196).
 
+### CORRECTION 2026-08-08 — the two lists above are in SCHEMA space, and half of them do not exist in DRAFT space
+
+The lists are kept exactly as written, because they are correct *about the official
+record* and the line citations are to `schema/isaac_record_v1.json`. **They are not a
+usable specification of where a draft keeps things, and the first implementation of the
+Run model read them as if they were.** The error is this document's, not that slice's:
+nothing above says which namespace it is describing, and every entry looks like a
+dotted path.
+
+A draft (`schema/isaac_draft.schema.json`) has **two** namespaces:
+
+1. **`draft["fields"]`** — a map of dotted official path → evidence envelope, **scalars
+   only**. `sample.material.name`, `context.temperature_K`, `system.facility.beamline`,
+   `timestamps.acquired_start_utc` live here.
+2. **Top-level draft blocks**, siblings of `fields`, which are arrays/objects and are
+   **not dotted paths at all**: `series`, `qc`, `assets`, `descriptors_outputs`,
+   `attribution`, `tags`, `links`, `implicit`.
+
+**7 of the 14 entries above are blocks, not field keys** (enumerated against
+`extract/structured.FIELD_MAP` and `extract/draft_builder`):
+
+| §2 entry (schema space) | Where a draft actually keeps it | Level |
+|---|---|---|
+| `measurement.series[]` | block `series` | run |
+| `measurement.qc` | block `qc` | run |
+| `assets[]` | block `assets` | run |
+| `descriptors.outputs[]` | block `descriptors_outputs` | run |
+| `attribution.contributors` | block `attribution` (`draft_builder.py:269`) | experiment |
+| `tags` | block `tags` (emitted by nothing today) | experiment |
+| `system.instrument.*` | field-map path — **valid**, simply never emitted | experiment |
+
+Only `system.instrument.*` is a false alarm: it is a legitimate field-map path
+(`system.properties` = `{configuration, domain, facility, instrument, technique}`) that
+the current extractor has no `FIELD_MAP` entry for. The other six matched **nothing** —
+`field_level("qc")`, `field_level("series")` and `field_level("descriptors_outputs")` all
+returned `unclassified`, and the experiment-level `attribution` and `tags` inherited
+nothing at all. Zero consequence while no code consumed them; a live trap for the export
+fan-out slice, which is the one that has to know where run data lives.
+
+**The code is now namespace-explicit** (`apps/api/isaac_api/workspace.py`):
+`EXPERIMENT_LEVEL_FIELD_PATHS` / `RUN_LEVEL_FIELD_PATHS` (segment-aware prefix tests over
+field-map keys) and `EXPERIMENT_LEVEL_BLOCKS` / `RUN_LEVEL_BLOCKS` (exact match over block
+keys), addressed through namespaced addresses `field:<path>` / `block:<key>` — because
+`tags` is both a legal official path and a block name, so a bare name is ambiguous.
+
+Two families remain **deliberately unclassified**, and that is an answer rather than a
+gap: `system.configuration.*` and `timestamps.created_utc` (real extractor output that
+neither list assigns), and the draft-only blocks `meta` / `pending` / `implicit` /
+`block_evidence` / `links`. Assigning a level to any of them would be an unevidenced
+scientific inference of the kind `CLAUDE.md` §5 forbids.
+
 ### RESOLVED 2026-08-09 — `system.configuration.*` is left UNCLASSIFIED, and that is the answer
 
 An open question was carried forward asking whether `system.configuration.*` can vary per Run, so
@@ -182,16 +233,20 @@ closed. The thing that closes it is a decision about which of the six are per-ru
 question for Angel/Dean (or a slice that asks the user per field), not something this spec may
 settle by inference.
 
-**Where the mechanism actually lives, and it is NOT in this tree.** `field_level()`
-(`apps/api/isaac_api/workspace.py:502`) and the pinning test
+**Where the mechanism lives — RE-CITED AGAINST `main` 2026-08-09, as the previous revision of this
+paragraph asked.** `field_level()` (`apps/api/isaac_api/workspace.py:527`) and the pinning test
 `test_every_field_map_path_the_real_extractor_emits_is_classified_or_knowingly_not`
-(`apps/api/tests/test_run_domain_model.py:349`) are on branch **`feat/run-domain-model`** (PR #92,
-verified at `629f538`). **Neither exists on `main` at `5632300`** — `rg "def field_level" -g '*.py'`
-over this working tree returns nothing. Cite them as PR #92's, and re-cite them against `main` once
-that PR merges. The test pins the exact classified/unclassified set against the **real** extractor,
-so a new `FIELD_MAP` entry cannot silently default — that is the guard that makes "unclassified" a
-recorded decision rather than an omission. `timestamps.created_utc` is unclassified for the same
-reason and is covered by the same test.
+(`apps/api/tests/test_run_domain_model.py:349`) are now **on `main`**, verified at `608f587`; PR #92
+merged as `d0f1028`. The earlier wording — *"it is NOT in this tree … neither exists on `main` at
+`5632300`"* — was accurate when written and is superseded rather than deleted, because it is the
+reason the line number moved: `field_level` was at `:502` on the unmerged branch and is at `:527`
+after the merge. Re-verify before citing; this file has already broken its own citations once by
+growing past them.
+
+The test pins the exact classified/unclassified set against the **real** extractor, so a new
+`FIELD_MAP` entry cannot silently default — that is the guard that makes "unclassified" a recorded
+decision rather than an omission. `timestamps.created_utc` is unclassified for the same reason and is
+covered by the same test.
 
 ### DECISION D2 — inheritance is by reference, never by copy
 

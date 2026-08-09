@@ -51,6 +51,20 @@ import { graphStatusUnavailable, memoryGraphAvailable, stubFetchRoutes } from '.
  * level stays in the low hundreds of elements and the caps actually bite.
  */
 
+/*
+ * THE HARNESS DEADLINE. This file mounts the real 2,612-node artifact three times
+ * and drives it to the deepest zoom, so under parallel-worker contention it ran
+ * past vitest's 5,000 ms default and failed by HARNESS TIMEOUT — measured here on
+ * an untouched tree, and in CI on PR #93, a docs-only diff. That failure says
+ * "Test timed out in 5000ms" and names no bound, so the ELEMENT_BOUND and
+ * MAX_DEEP_NODES assertions below were pre-empted rather than evaluated.
+ *
+ * The bounds themselves are UNCHANGED — only the deadline that was stopping them
+ * from being reached. See `experiment-graph.test.tsx` for the full reasoning and
+ * for why `vi.setConfig` leaves the strict 5 s default intact in every other file.
+ */
+vi.setConfig({ testTimeout: 30000 });
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** src/__tests__ → src → apps/web → apps → repository root. */
 const REPO_ROOT = resolve(HERE, '../../../..');

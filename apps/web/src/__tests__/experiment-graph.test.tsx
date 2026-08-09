@@ -28,6 +28,33 @@ import type { ExperimentGraphBundle } from '../lib/types';
  *  · a graph read in one workspace never renders in another.
  */
 
+/*
+ * THE HARNESS DEADLINE, raised so that the BUDGET is what adjudicates.
+ *
+ * The defect this removes: vitest's default deadline is 5,000 ms and
+ * `vite.config.ts` declares no `testTimeout` of its own, so the 12,000 ms budget
+ * asserted at the foot of this file could never decide anything. Under 5 s it was
+ * satisfied trivially; between 5 s and 12 s the test failed by HARNESS TIMEOUT —
+ * reporting "Test timed out in 5000ms", which names neither the budget nor the
+ * surface — and past 12 s the harness still got there first. A declared budget
+ * that is either vacuous or pre-empted has never tested the property it states.
+ *
+ * The observable symptom was an intermittent failure of this file and its two
+ * neighbours on diffs touching no frontend file at all, which undermines the
+ * exact-SHA CI gate every merge here depends on. In isolation these tests run in
+ * well under 2 s; the 6.8–10.2 s durations that tripped the deadline were measured
+ * under parallel-worker contention, not against a slower product. Nothing under
+ * `screens/`, `components/` or `lib/` is touched by this change.
+ *
+ * 30,000 ms is the value this repository already uses for its other mount-heavy
+ * suites (`tutorial-session-lifecycle`, `workspace-scope-invalidation`). It is a
+ * HARNESS limit, NOT a performance claim: at 2.5× the declared budget, the budget
+ * is now the first thing to fail. `vi.setConfig` is file-scoped — proven rather
+ * than assumed: a file that does not call it still times out at 5,000 ms inside
+ * the same worker — so the strict default stands everywhere else in the suite.
+ */
+vi.setConfig({ testTimeout: 30000 });
+
 function LocationProbe() {
   const loc = useLocation();
   return <div data-testid="href">{`${loc.pathname}${loc.search}`}</div>;

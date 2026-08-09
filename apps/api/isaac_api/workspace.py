@@ -15,6 +15,18 @@ Layout::
 Status is DERIVED on read (never stored stale) from the current draft via an
 in-memory dry-run of ``export_draft`` — nothing is written to derive status.
 
+Runs
+----
+
+An experiment carries zero or more :class:`Run` objects — one measurement
+*condition* each. One Run exports to exactly one ISAAC record; an ``Experiment``
+is an application-level grouping with no schema counterpart. That mapping is
+decided by the official schema rather than by preference and is settled in
+``docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`` §1.
+Experiment-level fields are inherited BY REFERENCE and never copied down (§2 D2);
+see :func:`resolve_inherited`. Runs currently live inside the experiment's
+own state document; §8 D7 moves them to relational rows in a later migration.
+
 Scopes
 ------
 
@@ -354,22 +366,775 @@ def _existing_generation(rid: str, *, session_id: str | None = None) -> str | No
         return None
 
 
+# --- the Run: one condition, one record ---------------------------------------
+#
+# WHY A RUN EXISTS AT ALL, decided by the official schema and not by preference.
+# The reasoning is settled in
+# ``docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`` §1 and
+# must not be re-derived here: ``context.required = ["environment",
+# "temperature_K"]`` and ``temperature_K`` is a SCALAR, so one ISAAC record cannot
+# express two temperatures. ``timestamps.split_operation`` exists precisely to note
+# a multi-condition split, ``tags`` is the schema's designated campaign grouping,
+# and ``links[]`` (``replica_of`` / ``replicate_preparation``) is how sibling runs
+# are re-associated.
+#
+# DECISION D1 (contract §1): **one Run produces exactly one ISAAC record.** An
+# ``Experiment`` is an application-level grouping with NO schema counterpart; it
+# exports to N records, one per Run.
+#
+# WHAT THIS MODULE DOES NOT DO, deliberately. Export still mints exactly one
+# record per draft (``src/isaac_records/export.py``). Export fan-out is a LATER
+# slice. This slice makes the Run exist, persist and round-trip; it changes no
+# export behaviour, no route, no migration and nothing under
+# ``src/isaac_records/`` or ``schema/``.
+#
+# WHAT THE FAN-OUT SLICE MUST CHANGE. This list named only ``record_id`` and was
+# incomplete; the derivations are the larger half of the work:
+#
+# * ``Experiment.record_id`` — the singular field the current 1:1 path writes. Per
+#   contract §1 D1 the record identity is per-Run (``Run.record_id``).
+# * ``Experiment.status`` / ``pending`` / ``export_ready`` — ALL THREE ARE
+#   RUN-BLIND. They derive from ``self.draft`` and ``self.exported()`` alone and
+#   never consult ``self.runs``, so an experiment whose OWN draft is clean reports
+#   ``ready_to_export`` (or ``done``) no matter what its runs contain: a run with
+#   unanswered pending blockers, or one that would fail the export gate, is not
+#   counted anywhere. This is UNREACHABLE TODAY — no route touches runs and nothing
+#   creates one in production — which is why it is recorded here rather than fixed
+#   in this slice. It stops being latent the moment a route can add a run, and
+#   fixing it is part of fan-out, not a follow-up to it: once one Experiment exports
+#   to N records, "is this ready?" is a question about N drafts and has no
+#   single-draft answer. Whether the aggregate is "all runs ready" or "any run
+#   ready", and how a zero-run experiment answers, is a product decision that slice
+#   must make explicitly rather than inherit from the 1:1 shape.
+
+# A DRAFT IS NOT SHAPED LIKE A RECORD, AND THE CONTRACT'S §2 LISTS WERE WRITTEN AS
+# IF IT WERE. This is a correction, recorded rather than quietly applied.
+#
+# Contract §2 enumerates the experiment/run split in OFFICIAL SCHEMA-PATH space —
+# it cites ``schema/isaac_record_v1.json`` line numbers for every entry. The first
+# implementation of this module applied those lists directly to DRAFT FIELD KEYS,
+# on the stated assumption that "a draft field key is a dotted schema path, so
+# membership is a prefix test". That assumption is false for 7 of the 14 entries,
+# and independent review measured which ones. A draft (``schema/isaac_draft.schema.json``)
+# has TWO namespaces, not one:
+#
+# 1. ``draft["fields"]`` — a map of dotted official path -> evidence envelope,
+#    SCALARS ONLY. ``sample.material.name``, ``context.temperature_K``,
+#    ``system.facility.beamline``, ``timestamps.acquired_start_utc`` live here.
+# 2. TOP-LEVEL DRAFT BLOCKS, siblings of ``fields``, which are arrays/objects and
+#    are NOT dotted paths at all: ``series``, ``qc``, ``assets``,
+#    ``descriptors_outputs``, ``attribution``, ``tags``, ``links``, ``implicit``.
+#
+# So the schema-space entry ``measurement.series[]`` is the draft block ``series``;
+# ``measurement.qc`` is ``qc``; ``descriptors.outputs[]`` is ``descriptors_outputs``;
+# ``attribution.contributors`` is inside the ``attribution`` block
+# (``extract/draft_builder.py:269``); and ``tags`` is a block, not a field key.
+# Applied to field keys, those prefixes match NOTHING — ``field_level("qc")`` and
+# ``field_level("series")`` returned ``unclassified``, and the experiment-level
+# ``attribution``/``tags`` inherited nothing at all.
+#
+# The lists below are therefore split by NAMESPACE. The contract itself is
+# corrected in the same commit (§2, "Correction 2026-08-08").
+
+#: Draft FIELD-MAP path prefixes (keys of ``draft["fields"]``) that are entered once
+#: on the experiment and inherited by every Run. Segment-aware prefixes.
+#:
+#: ``system.instrument`` is a real official schema path (``system.properties`` =
+#: ``{configuration, domain, facility, instrument, technique}``) that the current
+#: deterministic extractor never emits — ``extract/structured.FIELD_MAP`` has no
+#: entry for it. It is retained because it is correct for the namespace and costs
+#: nothing; it is simply unexercised today, which is a different thing from wrong.
+EXPERIMENT_LEVEL_FIELD_PATHS: tuple[str, ...] = (
+    "sample",
+    "system.domain",
+    "system.technique",
+    "system.facility",
+    "system.instrument",
+)
+
+#: Draft FIELD-MAP path prefixes that are per-Run. ``context.*`` is the one that
+#: forces the record split (``context.temperature_K`` is a required scalar).
+RUN_LEVEL_FIELD_PATHS: tuple[str, ...] = (
+    "context",
+    "timestamps.acquired_start_utc",
+    "timestamps.acquired_end_utc",
+)
+
+#: TOP-LEVEL DRAFT BLOCK keys that are experiment-level. ``attribution`` holds
+#: ``contributors`` (contract §2's ``attribution.contributors``); ``tags`` is the
+#: schema's campaign grouping. Neither is a ``fields`` key.
+EXPERIMENT_LEVEL_BLOCKS: tuple[str, ...] = ("attribution", "tags")
+
+#: TOP-LEVEL DRAFT BLOCK keys that are per-Run — the draft-space names for contract
+#: §2's ``measurement.series[]``, ``measurement.qc``, ``assets[]`` and
+#: ``descriptors.outputs[]``.
+RUN_LEVEL_BLOCKS: tuple[str, ...] = ("series", "qc", "assets", "descriptors_outputs")
+
+#: The three values a level classification can take.
+LEVEL_EXPERIMENT = "experiment"
+LEVEL_RUN = "run"
+LEVEL_UNCLASSIFIED = "unclassified"
+
+#: The two values a resolution's ``provenance`` can take.
+PROVENANCE_INHERITED = "inherited"
+PROVENANCE_OVERRIDDEN = "overridden"
+
+#: The two namespaces an :func:`address` can point into.
+ADDRESS_FIELD = "field"
+ADDRESS_BLOCK = "block"
+
+_ADDRESS_SEP = ":"
+
+
+def field_address(path: str) -> str:
+    """The address of one key inside ``draft["fields"]`` (e.g. ``field:sample.sample_form``)."""
+    return f"{ADDRESS_FIELD}{_ADDRESS_SEP}{path}"
+
+
+def block_address(key: str) -> str:
+    """The address of one top-level draft block (e.g. ``block:tags``)."""
+    return f"{ADDRESS_BLOCK}{_ADDRESS_SEP}{key}"
+
+
+def parse_address(address: str) -> tuple[str, str]:
+    """``"field:sample.sample_form"`` -> ``("field", "sample.sample_form")``.
+
+    Addresses are EXPLICITLY NAMESPACED rather than bare names, because the two
+    namespaces are not disjoint in principle: ``tags`` is both a top-level draft
+    block and a legal official schema path, so a bare ``"tags"`` would be ambiguous
+    the moment anything put ``tags`` in the field map. The prefix also makes a
+    persisted override document self-describing, which matters when runs move to
+    their own table.
+
+    Raises :class:`ValueError` on anything that is not a well-formed address.
+    """
+    kind, sep, name = address.partition(_ADDRESS_SEP)
+    if not sep or kind not in (ADDRESS_FIELD, ADDRESS_BLOCK) or not name:
+        raise ValueError(f"malformed draft address: {address!r}")
+    return kind, name
+
+
+def _path_matches(path: str, prefix: str) -> bool:
+    """Whether a dotted draft-field path falls under ``prefix``.
+
+    Segment-aware on purpose: ``sample`` matches ``sample.material.name`` but
+    ``system.domain`` must NOT match a hypothetical ``system.domain_notes``. A bare
+    ``str.startswith`` would match both.
+    """
+    return path == prefix or path.startswith(prefix + ".")
+
+
+def field_level(path: str) -> str:
+    """Classify one key of ``draft["fields"]``. FIELD-MAP SPACE ONLY.
+
+    This function does NOT classify a top-level draft block — see :func:`block_level`
+    — and calling it with one returns ``LEVEL_UNCLASSIFIED``, which is the honest
+    answer for a field-map key that does not exist rather than a judgement about the
+    block of that name. Use :func:`address_level` when the caller may hold either.
+
+    ``LEVEL_UNCLASSIFIED`` IS A REAL ANSWER AND IS NOT AN OVERSIGHT. Two families of
+    field-map key are in neither list, for two different reasons:
+
+    * ``system.configuration.*`` (``detector_model``, ``monochromator_crystal``,
+      ``n_scans``, ``proposal_id``, ``session_id``) and ``timestamps.created_utc``
+      are emitted by the real extractor (``extract/structured.FIELD_MAP``) and the
+      contract assigns them to neither level. Guessing would be the unevidenced
+      inference ``CLAUDE.md`` §5 forbids: whether two runs of one experiment may
+      legitimately differ in detector model is a scientific question this repository
+      has no answer to.
+    * anything else a future extractor emits, which defaults to unclassified rather
+      than to a level — fail-closed, so a new field is inherited by nobody until
+      somebody decides.
+    """
+    for prefix in EXPERIMENT_LEVEL_FIELD_PATHS:
+        if _path_matches(path, prefix):
+            return LEVEL_EXPERIMENT
+    for prefix in RUN_LEVEL_FIELD_PATHS:
+        if _path_matches(path, prefix):
+            return LEVEL_RUN
+    return LEVEL_UNCLASSIFIED
+
+
+def block_level(key: str) -> str:
+    """Classify one TOP-LEVEL draft block key. BLOCK SPACE ONLY.
+
+    Exact match, not a prefix test: block keys are single tokens, not paths.
+    ``meta``, ``pending``, ``implicit``, ``links`` and ``block_evidence`` are
+    deliberately unclassified — ``pending``/``implicit``/``block_evidence`` are
+    draft-only bookkeeping that never becomes a record field, ``meta`` is the
+    record-type stamp that is the same for every run by construction, and ``links``
+    is how sibling runs are re-associated at export (contract §1), which is the
+    fan-out slice's business and not an inherited value.
+    """
+    if key in EXPERIMENT_LEVEL_BLOCKS:
+        return LEVEL_EXPERIMENT
+    if key in RUN_LEVEL_BLOCKS:
+        return LEVEL_RUN
+    return LEVEL_UNCLASSIFIED
+
+
+def address_level(address: str) -> str:
+    """Classify a namespaced draft address. Raises ``ValueError`` on a malformed one."""
+    kind, name = parse_address(address)
+    return field_level(name) if kind == ADDRESS_FIELD else block_level(name)
+
+
+class NotOverridable(ValueError):
+    """An override was attempted at an address that is not experiment-level.
+
+    Only an experiment-level address can be *overridden*, because only an
+    experiment-level address is *inherited* in the first place. A run-level field or
+    block is simply the run's own draft content — writing one is an ordinary edit,
+    not an override, and routing it through the override map would create a second
+    place the same value could live.
+    """
+
+
+@dataclass(frozen=True)
+class Override:
+    """One run's explicit override of one inherited experiment-level address.
+
+    ``payload`` is whatever that address holds. For a ``field:`` address it is a
+    draft field envelope (``{"value": ..., "status": ..., "evidence": [...]}``) —
+    the same shape ``blank_draft()`` and the deterministic extractor produce, so an
+    override carries its own evidence and is subject to the same no-guessing rules
+    as any other field. For a ``block:`` address it is the block itself (a list for
+    ``tags``, an object for ``attribution``).
+
+    ``displaced`` is the experiment's payload AT THE MOMENT THE OVERRIDE WAS
+    RECORDED, or ``None`` when the experiment carried nothing there. Contract §2 D2
+    requires an override to record what it displaced; this is that record. It is a
+    HISTORICAL fact and is never refreshed — it is a DEEP COPY taken at capture, so
+    a later in-place edit of the experiment's own draft cannot rewrite history
+    through a shared reference. Do not read it as "what the experiment says now":
+    that is ``Resolution.inherited_payload``, and the two legitimately differ once
+    the experiment value is edited afterwards. Making that difference visible is the
+    point of inheritance by reference.
+    """
+
+    payload: object
+    recorded_utc: str
+    displaced: object | None = None
+
+    def to_state(self) -> dict:
+        state: dict = {"payload": self.payload, "recorded_utc": self.recorded_utc}
+        # ABSENCE IS THE ENCODING. The key is omitted when the override displaced
+        # nothing, so "displaced no inherited value" and "displaced an inherited
+        # null" stay distinguishable on disk.
+        if self.displaced is not None:
+            state["displaced"] = self.displaced
+        return state
+
+    @classmethod
+    def from_state(cls, state: dict) -> "Override":
+        return cls(
+            payload=state.get("payload"),
+            recorded_utc=state.get("recorded_utc") or "",
+            displaced=state.get("displaced"),
+        )
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """The resolved view of ONE inherited experiment-level address for ONE run.
+
+    Computed on read, never stored. ``payload`` is what this run actually has at the
+    address; ``inherited_payload`` is what the experiment carried WHEN THIS WAS
+    RESOLVED; ``displaced_payload`` is what the override displaced when it was
+    recorded.
+
+    EVERY PAYLOAD IS A DEEP COPY, so this is a snapshot and not a window. Mutating
+    one cannot reach the experiment's draft or a stored :class:`Override` — it used
+    to, and ``frozen=True`` did not prevent it, because freezing the dataclass only
+    stops the ATTRIBUTES being rebound and says nothing about the mutable objects
+    they point at. To see a later experiment-level edit, resolve again; that is the
+    inheritance-by-reference of contract §2 D2 working, not a staleness bug.
+    """
+
+    address: str
+    kind: str
+    name: str
+    provenance: str
+    payload: object | None
+    inherited_payload: object | None
+    displaced_payload: object | None = None
+
+    @property
+    def value(self):
+        """The resolved scientific value.
+
+        A ``field:`` address unwraps the envelope's ``value``; a ``block:`` address
+        IS its own value and is returned whole. ``None`` is genuinely ambiguous
+        between "absent" and "an explicit null", so callers that care about the
+        difference should test ``payload is None``.
+        """
+        if self.payload is None:
+            return None
+        if self.kind == ADDRESS_FIELD:
+            return self.payload.get("value") if isinstance(self.payload, dict) else None
+        return self.payload
+
+
+def _experiment_payload_at(draft: dict | None, kind: str, name: str):
+    """What the experiment's draft carries at one address, or ``None``."""
+    draft = draft or {}
+    if kind == ADDRESS_FIELD:
+        return (draft.get("fields") or {}).get(name)
+    return draft.get(name)
+
+
+def resolve_inherited(experiment_draft: dict | None, run: "Run") -> dict[str, Resolution]:
+    """Resolve every inherited experiment-level address for one run.
+
+    PURE, AND ITS OUTPUT CANNOT MUTATE ANYTHING EITHER. The docstring used to say
+    only "Pure; stores nothing", which was true of the FUNCTION and false of what it
+    HANDED BACK: every payload was a live reference into ``experiment_draft`` (or
+    into a stored :class:`Override`), so ``res.payload["value"] = ...`` rewrote the
+    experiment's draft — measured — through a call that reads. :class:`Resolution`
+    being a frozen dataclass made that worse rather than better: freezing the record
+    while its payload stays a live mutable alias reads as a guarantee and is not one.
+    Every payload is therefore DEEP-COPIED on the way out.
+
+    That does not weaken contract §2 D2, and the distinction is worth stating exactly
+    because it looks like a contradiction. D2 governs STORAGE: a run stores only the
+    ABSENCE of an override, and nothing copies an experiment value down into a run.
+    A Resolution is not storage — it is a read handout, computed and discarded — so
+    it is a SNAPSHOT taken at call time. Editing an experiment-level field still
+    flows through to every non-overriding run on the next resolve, with no fan-out
+    write, no reconciliation pass and no window of disagreement. What the copy
+    removes is only the ability to write through a read.
+
+    THIS IS THE READ HALF OF CONTRACT §2 DECISION D2 — inheritance is BY REFERENCE,
+    NEVER BY COPY. A run stores only the ABSENCE of an override; nothing here writes
+    an experiment value into a run, and nothing anywhere else does either. The
+    consequence that makes the decision worth its cost: editing an experiment-level
+    field flows through to every non-overriding run immediately, with no fan-out
+    write, no reconciliation pass, and no window in which some runs hold the old
+    value.
+
+    Takes the WHOLE experiment draft, not just ``draft["fields"]``, because
+    experiment-level content lives in both namespaces — ``attribution`` and ``tags``
+    are top-level blocks, and an earlier version of this function took only the field
+    map and therefore inherited neither.
+
+    The key set is the union of (a) every address in the experiment's own draft that
+    classifies as experiment-level and (b) every address this run overrides — so an
+    override of an address the experiment does not (yet) carry is still reported,
+    with ``inherited_payload=None``.
+
+    A STORED OVERRIDE IS REPORTED EVEN IF ITS ADDRESS NO LONGER CLASSIFIES AS
+    EXPERIMENT-LEVEL, and that is deliberate. ``set_run_override`` refuses a
+    non-experiment-level address at write time, so this can only arise if the lists
+    above change under data that already exists. Silently dropping it would hide
+    user-entered content with evidence attached; reporting it keeps it visible and
+    deletable. A malformed address is skipped, because it cannot be classified at
+    all.
+    """
+    draft = experiment_draft or {}
+    addresses: set[str] = set()
+    for path in (draft.get("fields") or {}):
+        if field_level(path) == LEVEL_EXPERIMENT:
+            addresses.add(field_address(path))
+    for key in draft:
+        if key != "fields" and block_level(key) == LEVEL_EXPERIMENT:
+            addresses.add(block_address(key))
+    addresses |= set(run.overrides)
+
+    out: dict[str, Resolution] = {}
+    for address in sorted(addresses):
+        try:
+            kind, name = parse_address(address)
+        except ValueError:
+            continue  # unclassifiable garbage in a persisted document
+        inherited = copy.deepcopy(_experiment_payload_at(draft, kind, name))
+        override = run.overrides.get(address)
+        if override is None:
+            # ``payload`` and ``inherited_payload`` are separate copies rather than
+            # the same object twice: a caller mutating one must not appear to move
+            # the other, which is the very confusion this copy exists to remove.
+            out[address] = Resolution(
+                address=address,
+                kind=kind,
+                name=name,
+                provenance=PROVENANCE_INHERITED,
+                payload=copy.deepcopy(inherited),
+                inherited_payload=inherited,
+            )
+        else:
+            out[address] = Resolution(
+                address=address,
+                kind=kind,
+                name=name,
+                provenance=PROVENANCE_OVERRIDDEN,
+                payload=copy.deepcopy(override.payload),
+                inherited_payload=inherited,
+                displaced_payload=copy.deepcopy(override.displaced),
+            )
+    return out
+
+
+def _as_int(raw: object) -> int:
+    """``int(raw)`` or ``0``. Never raises — a persisted document is untrusted input.
+
+    ``int(state.get("rev") or 0)`` still raises on ``"seven"`` or ``[]``, which on
+    the read path is the same HTTP 500 the hard subscripts were.
+    """
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_str(raw: object) -> str:
+    """The value if it IS a string, else ``""``. Never raises, and never coerces.
+
+    The companion to :func:`_as_int` for the string-typed keys, and the asymmetry
+    between the two is deliberate rather than an oversight. ``_as_int`` coerces
+    (``int("7") == 7``) because ``int()`` can fail and therefore only accepts what
+    is genuinely integral. ``str()`` CANNOT fail — it is total — so a coercing
+    ``_as_str`` would silently manufacture a value out of anything: ``5`` would
+    become the run id ``"5"``, ``{"a": 1}`` would become the timestamp
+    ``"{'a': 1}"``. That is guessing, and a wrong-typed key on disk is not evidence
+    for any particular string. Falling back to ``""`` instead puts the entry in
+    exactly the bucket a MISSING key was already in, where the existing policy
+    applies unchanged — :func:`_hydrate_runs` drops an id-less run, and an empty
+    ``created_utc``/``label`` is the same legacy default a pre-runs document gets.
+
+    ``or ""`` is what this replaces, and it was not a type guard: it catches
+    ``None`` but every wrong type here is TRUTHY. A ``{"id": 5}`` entry therefore
+    survived hydration and raised ``TypeError`` in ``Run.__post_init__`` ->
+    ``_legacy_generation`` (``"gen:" + rid``) — a measured HTTP 500 on BOTH
+    ``GET /api/experiments/<id>`` and the whole-workspace ``GET /api/experiments``.
+
+    ``isinstance(raw, str)`` is the right test and a truthiness or numeric one is
+    not: ``True`` is an ``int`` in Python and would pass a numeric guard.
+    """
+    return raw if isinstance(raw, str) else ""
+
+
+@dataclass
+class Run:
+    """One measurement condition of an experiment. Exports to exactly ONE record.
+
+    A Run is a first-class domain object with its own draft, its own evidence and
+    its own version — but it is NOT its own storage unit in this slice: runs are
+    carried inside the experiment's state document (``Experiment.to_state``). That
+    is a deliberate, temporary shape. Contract §8 DECISION D7 makes runs relational
+    rows (``isaac_runs``) precisely because one jsonb document rewritten on every
+    autosave keystroke, containing N runs, is the "single enormous object" the brief
+    forbids. That change needs migration ``0002``, an approval packet and an
+    explicit approval, none of which this slice has — so the model exists here
+    first, and the storage moves later.
+
+    No ``session_id``. The scope (normal vs. a worked-example session) is a property
+    of WHERE the owning experiment's files live, and ``Experiment`` already carries
+    it. A run of a worked-example session is unpersistable for exactly the reason
+    its experiment is: ``PostgresOrdinaryStore.refuse_if_not_persistable`` refuses
+    the experiment, and the experiment is what carries the runs.
+    """
+
+    id: str
+    experiment_id: str
+    label: str
+    #: THE ORDER KEY, and it is explicit for a reason: the label must never
+    #: determine order. ``"Run 10"`` sorts before ``"Run 2"`` lexically, and a
+    #: scientist may rename a run to anything at all. ``ordinal`` is what
+    #: :meth:`Experiment.sorted_runs` sorts on.
+    ordinal: int
+    created_utc: str
+    #: The run's OWN draft, in the same shape ``blank_draft()`` produces. It carries
+    #: the run-level content in BOTH draft namespaces: the run-level ``fields`` keys
+    #: (``context.*``, ``timestamps.acquired_*``) and the run-level top-level blocks
+    #: (``series``, ``qc``, ``assets``, ``descriptors_outputs``).
+    draft: dict = field(default_factory=dict)
+    #: Set when THIS RUN is exported. Per contract §1 D1 the record identity is
+    #: per-Run, not per-Experiment. ``Experiment.record_id`` remains the field the
+    #: current 1:1 export path writes and is untouched by this slice.
+    record_id: str | None = None
+    #: namespaced draft address (``field:sample.sample_form``, ``block:tags``) ->
+    #: :class:`Override`. THE ABSENCE OF A KEY IS THE INHERITANCE. Nothing is copied
+    #: down from the experiment; see :func:`resolve_inherited`.
+    overrides: dict[str, Override] = field(default_factory=dict)
+    #: Monotonic per-run version, bumped only by
+    #: ``Experiment._bump_changed_runs`` when this run's authoritative signature
+    #: actually changes. Never derived — it is stored.
+    rev: int = 0
+    updated_utc: str = ""
+    #: Per-run opaque nonce, minted at genuine creation and preserved across saves,
+    #: so a delete->recreate of the same run id is distinguishable even at rev 0.
+    generation: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.updated_utc:
+            self.updated_utc = self.created_utc
+        if not self.generation:
+            self.generation = _legacy_generation(self.id)
+
+    def version_token(self) -> str:
+        """The run's opaque concurrency token: ``<generation>.<rev>``.
+
+        Same shape as ``Experiment.version_token``. No route consumes it yet; it
+        exists so a later per-run ``If-Match`` reuses the machinery in
+        ``version_contract`` unchanged rather than inventing a second scheme.
+        """
+        return f"{self.generation}.{self.rev}"
+
+    def to_state(self) -> dict:
+        return {
+            "id": self.id,
+            "experiment_id": self.experiment_id,
+            "label": self.label,
+            "ordinal": self.ordinal,
+            "created_utc": self.created_utc,
+            "draft": self.draft,
+            "record_id": self.record_id,
+            "overrides": {p: o.to_state() for p, o in sorted(self.overrides.items())},
+            "rev": self.rev,
+            "updated_utc": self.updated_utc,
+            "generation": self.generation,
+        }
+
+    @classmethod
+    def from_state(cls, state: dict) -> "Run":
+        """Rehydrate one run. NEVER RAISES on a malformed document.
+
+        EVERY key is read with ``.get`` and a default, ``id`` and ``experiment_id``
+        included. They used to be hard subscripts, and the asymmetry was a measured
+        HTTP 500: ``Experiment.from_state`` hydrates runs in an unguarded
+        comprehension and ``list_experiments`` catches only ``FileNotFoundError``, so
+        ONE run entry missing ``id`` took out ``GET /api/experiments/<id>`` *and*
+        ``GET /api/experiments`` for the entire workspace. Worse, this module's own
+        fail-open handlers (``_persisted_sig_and_rev``, ``_persisted_run_state``)
+        both catch ``KeyError`` — a tolerance that could never fire, because the read
+        path raised first.
+
+        Producing a run rather than raising is only half the fix; a run with no id is
+        unaddressable and is dropped by :func:`_hydrate_runs`, which owns that policy
+        so it lives in one place.
+
+        EVERY KEY IS ALSO TYPE-GUARDED, and ``.get`` with a default was NOT enough —
+        that is the second half of the same defect, measured after the first. ``or
+        ""`` catches ``None`` and nothing else, and every wrong type is truthy, so a
+        persisted ``{"id": 5}`` survived hydration and then raised ``TypeError`` in
+        ``__post_init__`` -> ``_legacy_generation`` (``"gen:" + rid``): the SAME 500
+        on the single record and the whole-workspace list that the hard subscripts
+        caused, reached by a different route. ``{"created_utc": 5}`` was worse,
+        because it did not fail on read at all — it returned 200 and then wedged the
+        WRITE path, since ``sorted_runs`` orders on ``(ordinal, created_utc, id)``
+        and is used by both ``to_state`` and ``_authoritative_signature``. Once two
+        runs' ordinals tie (which every pre-``ordinal`` document does, all defaulting
+        to ``0``) the mixed types are compared and every subsequent save raises,
+        leaving the experiment permanently unsavable with no in-product repair path.
+
+        So the string keys go through :func:`_as_str` exactly as the integer keys go
+        through :func:`_as_int`. ``ordinal``/``rev`` were guarded from the start and
+        their string-typed neighbours were not; that asymmetry is what this closes,
+        rather than closing only the two keys that were observed to break.
+
+        ``draft`` and ``overrides`` keep their own guards (``or {}`` / ``isinstance``).
+        ``record_id`` is passed through UNGUARDED and that is a known remaining gap,
+        stated rather than papered over: its declared type is ``str | None`` and
+        ``None`` is a meaningful value there (not-yet-exported) rather than a
+        fallback, so ``_as_str`` would erase the distinction. No code path in this
+        slice builds a filesystem path from ``Run.record_id`` — the 1:1 export path
+        uses ``Experiment.record_id`` — so it is inert here; the export fan-out slice
+        that starts writing it must guard it at the same time.
+        """
+        raw_overrides = state.get("overrides")
+        # ``or {}`` is not a type guard: a persisted ``"overrides": "nope"`` is
+        # truthy and reached ``.items()``. Found by this module's own
+        # never-raises-on-garbage test, which is the same defect class as the hard
+        # subscripts above.
+        overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
+        return cls(
+            id=_as_str(state.get("id")),
+            experiment_id=_as_str(state.get("experiment_id")),
+            label=_as_str(state.get("label")),
+            ordinal=_as_int(state.get("ordinal")),
+            created_utc=_as_str(state.get("created_utc")),
+            draft=state.get("draft") or {},
+            record_id=state.get("record_id"),
+            overrides={
+                addr: Override.from_state(o)
+                for addr, o in overrides.items()
+                if isinstance(addr, str) and isinstance(o, dict)
+            },
+            rev=_as_int(state.get("rev")),
+            updated_utc=_as_str(state.get("updated_utc")),
+            generation=_as_str(state.get("generation")),
+        )
+
+
+def _hydrate_runs(raw: object) -> list[Run]:
+    """Hydrate a persisted ``runs`` array, skipping what cannot be a run. Never raises.
+
+    THE ONE PLACE THAT DECIDES WHAT A MALFORMED RUN ENTRY IS, so hydration and
+    ``_persisted_run_state`` cannot disagree about which runs a document contains.
+    Two things are skipped, both fail-closed-on-read-garbage in the same style as
+    ``_experiment_dirs`` and ``_persisted_sig_and_rev``:
+
+    * an entry that is not an object, or that carries no ``id``. A run with no id is
+      unaddressable — nothing can render, version, override or export it — so there
+      is no meaningful way to keep it. Dropping one entry is a real loss and is the
+      lesser of two: the alternative, measured, was a 500 on ``GET /api/experiments``
+      that hid EVERY experiment in the workspace behind one bad entry.
+    * a DUPLICATE id, first occurrence wins. Duplicate ids would break the total
+      order :meth:`Experiment.sorted_runs` promises and would let
+      ``_persisted_run_state`` silently lose one run's on-disk ``rev``.
+
+    ``experiment_id`` is deliberately NOT repaired from the owning experiment even
+    though it could be. Backfilling it would change the run's authoritative
+    signature on read, so merely LISTING a workspace would mark records as changed
+    and bump their ``rev`` at the next save.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[Run] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        run = Run.from_state(entry)
+        if not run.id or run.id in seen:
+            continue
+        seen.add(run.id)
+        out.append(run)
+    return out
+
+
+def _run_signature_payload(run: Run) -> dict:
+    """A run's AUTHORITATIVE content, for hashing. Version metadata is excluded.
+
+    Covers ``{id, experiment_id, label, ordinal, draft, record_id, overrides}``.
+    EXCLUDES ``rev`` / ``updated_utc`` / ``generation`` (version metadata, exactly as
+    ``Experiment`` excludes its own) and ``created_utc`` (immutable identity).
+
+    Excluding ``rev`` is only safe because of an invariant that must not be broken:
+    ``Experiment._bump_changed_runs`` is the ONLY thing that moves a run's ``rev``,
+    it runs solely on the write path, and it moves ``rev`` only when THIS payload
+    changed. So a run's ``rev`` can never move without the experiment's signature
+    moving too, and therefore can never be silently dropped by the byte-stable
+    no-op in ``save_versioned``. If a second writer of ``run.rev`` is ever added,
+    this exclusion becomes unsound.
+
+    ``overrides`` is included WHOLE, ``recorded_utc`` and ``displaced`` included:
+    recording an override is an audited act and its record is authoritative state.
+    That is safe from churn because :meth:`Experiment.set_run_override` is
+    idempotent — re-applying an equal envelope does not restamp ``recorded_utc``.
+    """
+    return {
+        "id": run.id,
+        "experiment_id": run.experiment_id,
+        "label": run.label,
+        "ordinal": run.ordinal,
+        "draft": run.draft,
+        "record_id": run.record_id,
+        "overrides": {p: o.to_state() for p, o in sorted(run.overrides.items())},
+    }
+
+
+def _run_signature(run: Run) -> str:
+    blob = json.dumps(_run_signature_payload(run), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def new_run(
+    experiment_id: str,
+    *,
+    ordinal: int,
+    label: str | None = None,
+    draft: dict | None = None,
+    created_utc: str | None = None,
+    id: str | None = None,
+) -> Run:
+    """Mint a Run. The id is a fresh ULID, minted by the same function record ids use.
+
+    Same alphabet and shape as a record id — but a RUN ID IS NOT A RECORD ID. The
+    record identity lives in ``Run.record_id`` and is set only when this run is
+    exported. Reusing ``new_record_id()`` avoids a second id scheme; it asserts
+    nothing about the run having been exported.
+
+    ``draft`` defaults to an empty dict rather than to ``blank_draft()``: that
+    builder lives in ``experiment_repository`` (which imports this module), and the
+    caller that creates a run is the one that knows whether the blank-draft pending
+    blockers apply. Nothing scientific is invented here.
+
+    ``draft`` IS DEEP-COPIED, so the run owns its draft outright. The previous
+    ``draft if draft is not None else {}`` stored the caller's dict itself, which
+    made ``run.draft is exp.draft`` true when a run was seeded from its experiment
+    and ``a.draft is b.draft`` true for two runs seeded from one template — a run
+    silently tracking another object is the same defect as an override doing it
+    (:meth:`Experiment.set_run_override`), and it contradicts the whole reason a Run
+    has its OWN draft: contract §1 D1 makes each run a separate ISAAC record.
+
+    It is deliberately fixed NOW even though NO caller passes ``draft`` today. That
+    is what makes it worth doing rather than what makes it safe to defer: the next
+    slice is the one that seeds runs from a template or from the experiment, and the
+    sharing would not announce itself when it arrived. ``_run_signature`` covers
+    ``draft``, so two aliased runs move their ``rev`` in lockstep — the versioning
+    machinery would report the shared state as though both runs had genuinely been
+    edited, MASKING the aliasing instead of exposing it.
+
+    A shallow ``dict(draft)`` would not be enough: a draft's ``fields`` is a map of
+    envelope dicts, so the envelopes — the things carrying evidence — would stay
+    shared one level down.
+    """
+    return Run(
+        id=id or new_record_id(),
+        experiment_id=experiment_id,
+        label=label if label is not None else f"Run {ordinal}",
+        ordinal=ordinal,
+        created_utc=created_utc or _now_iso(),
+        draft=copy.deepcopy(draft) if draft is not None else {},
+        generation=_new_generation(),
+    )
+
+
 def _authoritative_signature(exp: "Experiment") -> str:
     """Deterministic hash of the AUTHORITATIVE scientific state of an experiment.
 
-    Covers exactly ``{title, source, draft, record_id}`` — the fields that define
-    the record's scientific content. It EXCLUDES ``answer_log`` (an audit trail,
-    not scientific state), ``generation``/``rev``/``updated_utc`` (version metadata,
-    not scientific content — excluding ``generation`` keeps a byte-stable no-op from
-    churning the token), and ``created_utc`` (immutable identity). Two experiments
-    with an identical scientific state therefore hash identically, so a no-op
-    re-entry is detectable and never bumps ``rev``.
+    Covers exactly ``{title, source, draft, record_id, runs}`` — the fields that
+    define the record's scientific content. It EXCLUDES ``answer_log`` (an audit
+    trail, not scientific state), ``generation``/``rev``/``updated_utc`` (version
+    metadata, not scientific content — excluding ``generation`` keeps a byte-stable
+    no-op from churning the token), and ``created_utc`` (immutable identity). Two
+    experiments with an identical scientific state therefore hash identically, so a
+    no-op re-entry is detectable and never bumps ``rev``.
+
+    ``runs`` WAS ADDED, and the decision is argued rather than assumed. Runs are
+    authoritative scientific state: per contract §1 D1 each one exports to its own
+    ISAAC record, so a run edit changes what this experiment will produce. Leaving
+    runs out would mean adding, editing or deleting a run left ``version_token()``
+    unmoved — and the whole ``If-Match`` contract (428/412 at ``routes.py:507-539``)
+    is built on that token. A second client holding the pre-edit ETag would pass its
+    precondition and silently overwrite the run edit, which is the exact class of
+    loss the precondition exists to prevent. So a run edit DOES bump the
+    experiment's ``rev``.
+
+    Byte-stable no-op still holds, in both directions:
+
+    * runs are hashed through :func:`_run_signature_payload`, which excludes each
+      run's ``rev``/``updated_utc``/``generation``/``created_utc`` — so the version
+      metadata this save is about to write cannot feed back into the signature that
+      decides whether to write;
+    * the list is taken in :meth:`Experiment.sorted_runs` order, so a re-ordering of
+      the in-memory list that does not change any ``ordinal`` is correctly not an
+      authoritative change;
+    * ``answer_log``-style non-authoritative data stays out — a run has no
+      ``answer_log``, and if one is added later it belongs outside this payload for
+      the same reason the experiment's is.
+
+    An experiment written before runs existed hashes with ``"runs": []``, and so
+    does the same experiment re-read from disk (``from_state`` yields zero runs), so
+    the added key does NOT cause a spurious rev bump on legacy state. That is pinned
+    by ``test_run_domain_model.py``.
     """
     payload = {
         "title": exp.title,
         "source": exp.source,
         "draft": exp.draft,
         "record_id": exp.record_id,
+        "runs": [_run_signature_payload(r) for r in exp.sorted_runs()],
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -403,6 +1168,20 @@ class Experiment:
     #: state, so the same content in two sessions hashes identically and a state
     #: file carries nothing that would go stale if the directory moved.
     session_id: str | None = None
+    #: The experiment's runs — one measurement condition each, one exported ISAAC
+    #: record each (contract §1 D1). Ordered by :meth:`sorted_runs`, NOT by list
+    #: position and NOT by label.
+    #:
+    #: NO MAXIMUM IS IMPOSED, and none is imposed anywhere else either. The brief's
+    #: §5 forbids a product-level cap, and no defensive cap is added because there
+    #: is no number this repository can justify: a defensive bound is only honest
+    #: when it is derived from a measured resource limit, and nothing here has been
+    #: measured. The real resource pressure is named and located rather than papered
+    #: over with an arbitrary constant — runs currently live inside ONE state
+    #: document that is rewritten whole on every save, which is exactly why contract
+    #: §8 D7 moves them to relational rows in migration ``0002``. That is the fix;
+    #: a magic number would only hide the need for it.
+    runs: list["Run"] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -458,6 +1237,7 @@ class Experiment:
             "rev": self.rev,
             "updated_utc": self.updated_utc,
             "generation": self.generation,
+            "runs": [r.to_state() for r in self.sorted_runs()],
         }
 
     def save(self) -> None:
@@ -652,6 +1432,213 @@ class Experiment:
             # state" so a real save still proceeds rather than crashing.
             return None, 0
 
+    # -- runs ------------------------------------------------------------------
+
+    def sorted_runs(self) -> list["Run"]:
+        """This experiment's runs in their canonical order.
+
+        Sorted on ``(ordinal, created_utc, id)``. THE LABEL IS NOT IN THE KEY, by
+        requirement: ``"Run 10"`` sorts before ``"Run 2"`` lexically, and a run may
+        be renamed to anything.
+
+        THE ORDER IS TOTAL BECAUSE RUN IDS ARE UNIQUE, and that uniqueness is
+        enforced rather than assumed — :meth:`add_run` refuses a duplicate id and
+        :func:`_hydrate_runs` drops one. An earlier version of this docstring claimed
+        the two tie-breakers alone made the order total "for any input rather than
+        only for well-formed input", which was FALSE and was measured false: two runs
+        sharing ``(ordinal, created_utc, id)`` produce an identical key, ``sorted`` is
+        merely stable, and reversing the list flipped the result — which would have
+        made ``_authoritative_signature`` order-dependent. Uniqueness of the third
+        key component is what closes it, so the claim now rests on the invariant that
+        is actually enforced.
+        """
+        return sorted(self.runs, key=lambda r: (r.ordinal, r.created_utc, r.id))
+
+    def next_ordinal(self) -> int:
+        """The ordinal a newly-added run should take: one past the current maximum.
+
+        Deliberately max+1 rather than ``len(runs)+1`` — after a run is deleted,
+        ``len``-based numbering would re-issue an ordinal that an existing run's
+        earlier sibling once had, silently reordering history.
+        """
+        return max((r.ordinal for r in self.runs), default=0) + 1
+
+    def get_run(self, run_id: str) -> "Run | None":
+        for r in self.runs:
+            if r.id == run_id:
+                return r
+        return None
+
+    def add_run(
+        self,
+        *,
+        label: str | None = None,
+        draft: dict | None = None,
+        created_utc: str | None = None,
+        id: str | None = None,
+    ) -> "Run":
+        """Append a run to this experiment IN MEMORY. Does not save.
+
+        Saving is the caller's, so a route can add a run and persist once inside the
+        same ``record_lock`` critical section every other mutation already uses.
+        """
+        run = new_run(
+            self.id,
+            ordinal=self.next_ordinal(),
+            label=label,
+            draft=draft,
+            created_utc=created_utc,
+            id=id,
+        )
+        if self.get_run(run.id) is not None:  # pragma: no cover - ULID collision
+            raise ValueError(f"run id {run.id!r} already exists on this experiment")
+        self.runs.append(run)
+        return run
+
+    def resolve_run(self, run: "Run") -> dict[str, "Resolution"]:
+        """Every inherited experiment-level address, resolved for ``run``. Read-only.
+
+        Thin wrapper over :func:`resolve_inherited`. Passes the WHOLE draft, because
+        experiment-level content lives in both draft namespaces — the ``fields`` map
+        AND the top-level ``attribution`` / ``tags`` blocks.
+        """
+        return resolve_inherited(self.draft, run)
+
+    def set_run_override(self, run: "Run", address: str, payload: object) -> "Override":
+        """Record an explicit run-level override at one inherited address. Does not save.
+
+        ``address`` is namespaced — build it with :func:`field_address` or
+        :func:`block_address`. Refuses any address that is not experiment-level
+        (:class:`NotOverridable`): only an inherited address can be overridden, and
+        run-level content is just an ordinary edit to the run's own draft. A
+        malformed address raises ``ValueError`` from :func:`parse_address`.
+
+        IDEMPOTENT. Re-applying an equal payload returns the existing override
+        unchanged and does NOT restamp ``recorded_utc`` — which is what lets
+        ``_run_signature_payload`` include the whole override record without a no-op
+        save churning the version.
+
+        BOTH PAYLOADS ARE DEEP-COPIED AT CAPTURE. Storing a live reference was safe
+        only by accident: both current write paths replace ``exp.draft`` wholesale,
+        so nothing mutated the captured object in place — but the docstring on
+        :class:`Override` promises history that "is never refreshed", and one
+        ``exp.draft["fields"][path]["value"] = ...`` would have rewritten it through
+        the shared reference. The copy makes the promise true by construction instead
+        of by the coincidence of how callers happen to write.
+
+        That argument was originally applied to ``displaced`` ONLY, and it is
+        STRONGER for ``payload``. An override that silently tracks the object it was
+        built from is the exact INVERSE of contract §2 D2: inheritance is by
+        reference *on purpose*, and an override is the captured, audited displacement
+        of it. A caller overriding "with what the experiment says now, then edited"
+        naturally passes the live envelope — measured, ``override.payload`` WAS
+        ``exp.draft["fields"][path]``, so a later in-place edit moved the override
+        too and ``value`` could never diverge from ``inherited_payload``, which is
+        the entire observable point of recording one. It also silently rewrites
+        content that carries its own evidence, which the no-guessing rules do not
+        allow to change without an act.
+        """
+        if address_level(address) != LEVEL_EXPERIMENT:
+            raise NotOverridable(
+                f"{address!r} is not an experiment-level address, so it cannot be overridden"
+            )
+        existing = run.overrides.get(address)
+        if existing is not None and existing.payload == payload:
+            return existing
+        kind, name = parse_address(address)
+        override = Override(
+            payload=copy.deepcopy(payload),
+            recorded_utc=_now_iso(),
+            displaced=copy.deepcopy(_experiment_payload_at(self.draft, kind, name)),
+        )
+        run.overrides[address] = override
+        return override
+
+    def clear_run_override(self, run: "Run", address: str) -> bool:
+        """Drop an override so the run inherits again. Returns whether one was removed.
+
+        Removal restores inheritance BY REFERENCE — the run goes back to carrying no
+        value at that address at all, rather than to carrying a copy of whatever the
+        experiment currently says.
+        """
+        return run.overrides.pop(address, None) is not None
+
+    def _persisted_run_state(self) -> dict[str, tuple[str, int]]:
+        """``{run_id: (authoritative signature, rev)}`` of the CURRENTLY on-disk runs.
+
+        ``{}`` when the state file is absent or unreadable — the same fail-open
+        reading ``_persisted_sig_and_rev`` applies, so a corrupt file makes a real
+        save proceed rather than crash.
+
+        Hydrates through :func:`_hydrate_runs` rather than looping over the raw
+        array, so this and ``Experiment.from_state`` cannot disagree about which
+        entries are runs. Building the map by hand skipped a different set and
+        collapsed duplicate ids onto one key, which would have silently discarded a
+        run's on-disk ``rev`` and let a stale in-memory copy regress it.
+        """
+        if not self.state_path.exists():
+            return {}
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            return {
+                run.id: (_run_signature(run), run.rev)
+                for run in _hydrate_runs(state.get("runs"))
+            }
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return {}
+
+    def _bump_changed_runs(self) -> list[str]:
+        """Bump ``rev``/``updated_utc`` on each run whose authoritative state changed.
+
+        Returns the ids bumped (a MEASURED list, not an assertion). Called only from
+        the write branch of :meth:`save_versioned`, and it is the ONLY writer of
+        ``Run.rev`` — which is the invariant that makes excluding ``rev`` from
+        :func:`_run_signature_payload` sound. A run whose signature matches disk is
+        untouched, so an experiment-only edit (a title change, say) never disturbs a
+        run's version.
+
+        A RUN NOT FOUND ON DISK BUMPS TO 1 — and the earlier phrasing of that,
+        "a run absent from disk is NEW and bumps to 1", was wrong in a way worth
+        recording rather than quietly deleting. It equated "absent from disk" with
+        "new", and those differ: ``save()`` is the UNVERSIONED persistence primitive
+        and writes runs without bumping anything, so a run first persisted that way
+        is already on disk with a matching signature. The next ``save_versioned()``
+        therefore skips it — correctly — and it sits at rev 0 rather than at 1.
+        Measured; pinned by ``test_a_run_first_persisted_by_a_plain_save_stays_at_rev_0``.
+
+        THAT BEHAVIOUR IS ACCEPTABLE AND IS NOT TO BE "REPAIRED" INTO MATCHING THE
+        OLD SENTENCE, for three reasons:
+
+        * it is exactly what the experiment itself does. A plain ``save()`` leaves
+          ``Experiment.rev`` at 0 too. Runs are not anomalous; the unversioned
+          primitive is simply unversioned, for runs and their experiment alike.
+        * rev 0 is a designed, safe value, not a broken one. ``version_token()``
+          returns ``"<generation>.0"``, which is unique and non-empty, and it is
+          ``generation`` — minted at genuine creation — that defeats a
+          delete->recreate ABA at rev 0. Nothing depends on rev being >= 1.
+        * the only available repair is worse than the defect. Reaching rev 1 here
+          would mean bumping a run whose on-disk signature MATCHES, which breaks the
+          byte-stable no-op guarantee and directly contradicts the promise two
+          sentences above that an experiment-only edit never disturbs a run's
+          version. Trading a real invariant for a cosmetic one is not a fix.
+
+        Monotonicity is untouched either way: a run that is genuinely edited versions
+        normally from wherever it sits.
+
+        ``max(run.rev, disk_rev) + 1`` mirrors ``save_versioned``: a stale in-memory
+        run can never regress the persisted rev.
+        """
+        on_disk = self._persisted_run_state()
+        bumped: list[str] = []
+        for run in self.runs:
+            prior = on_disk.get(run.id)
+            if prior is not None and prior[0] == _run_signature(run):
+                continue
+            run.rev = max(run.rev, prior[1] if prior is not None else 0) + 1
+            run.updated_utc = _now_iso()
+            bumped.append(run.id)
+        return bumped
+
     def save_versioned(self) -> bool:
         """Persist atomically ONLY if the authoritative scientific state changed.
 
@@ -675,22 +1662,57 @@ class Experiment:
         read, so the predicate refuses exactly the writes that lost a race and
         nothing else.
 
-        IF THE SAVE FAILS, THE VERSION METADATA IS ROLLED BACK. Without this, an
-        instance whose write was refused (or whose database was unreachable) would
-        go on reporting a ``rev`` and an ``updated_utc`` that exist nowhere — and
-        the 412 built from it would echo a version no client could ever match.
+        RUNS. The no-op decision is made BEFORE any run version is touched, and
+        that ordering is load-bearing: ``_bump_changed_runs`` mutates
+        ``Run.rev``/``Run.updated_utc`` in memory, and doing it first would leave a
+        rejected no-op having silently advanced a run's version that was never
+        written. So the signature is compared, and only on the write branch are the
+        changed runs bumped. Run version metadata is excluded from the signature
+        (see ``_run_signature_payload``), so the bump cannot feed back into the
+        decision that authorised it.
+
+        IF THE SAVE FAILS, THE VERSION METADATA IS ROLLED BACK — THE EXPERIMENT'S
+        AND EVERY RUN'S. Without this, an instance whose write was refused (or
+        whose database was unreachable) would go on reporting a ``rev`` and an
+        ``updated_utc`` that exist nowhere — and the 412 built from it would echo a
+        version no client could ever match.
+
+        THE RUN HALF OF THAT ROLLBACK EXISTS ONLY BECAUSE OF THIS MERGE, and it is
+        worth saying why, because nothing on either side was wrong. The run work
+        bumped run revs and stated plainly that leaving them ahead of disk on a
+        failed write was "the pre-existing behaviour of this method, deliberately
+        not altered here, because the durable write path is being changed
+        concurrently on another branch". That other branch was adding exactly the
+        rollback this defers to. Both halves were correct in isolation; taken
+        together WITHOUT this loop they reintroduce, at run granularity, the very
+        defect the rollback was written to close — and no test on either branch
+        could have failed, because neither branch could see the other's half.
+
+        Restoring ``self.rev`` while leaving ``Run.rev`` advanced would also break
+        the invariant that ``_bump_changed_runs`` is the ONLY writer of ``Run.rev``,
+        which is what makes excluding ``rev`` from the run signature sound: the next
+        successful save would compute ``max(run.rev, disk_rev) + 1`` from a value
+        that was never persisted, permanently offsetting that run's version series
+        from disk. ``test_a_refused_write_rolls_back_run_versions_too`` pins it, and
+        goes RED if the loop is removed.
         """
         old_sig, disk_rev = self._persisted_sig_and_rev()
         new_sig = _authoritative_signature(self)
         if old_sig is not None and old_sig == new_sig:
             return False
         previous = (self.rev, self.updated_utc)
+        previous_runs = {run.id: (run.rev, run.updated_utc) for run in self.runs}
+        self._bump_changed_runs()
         self.rev = max(self.rev, disk_rev) + 1
         self.updated_utc = _now_iso()
         try:
             self.save()
         except BaseException:
             self.rev, self.updated_utc = previous
+            for run in self.runs:
+                prior = previous_runs.get(run.id)
+                if prior is not None:
+                    run.rev, run.updated_utc = prior
             raise
         return True
 
@@ -714,6 +1736,19 @@ class Experiment:
             rev=int(state.get("rev") or 0),  # missing/legacy -> 0
             updated_utc=state.get("updated_utc") or "",  # __post_init__ -> created_utc
             generation=state.get("generation") or "",  # missing/legacy -> deterministic fallback
+            # NO MIGRATION IS REQUIRED FOR RUNS, and this line is why. ``from_state``
+            # is legacy-tolerant by construction — every optional key is read with
+            # ``.get`` and a default — so a state document written before runs
+            # existed hydrates to an experiment with ZERO runs rather than raising.
+            # That property was verified before this change (a row lacking ``rev``,
+            # ``updated_utc`` and ``generation`` hydrates to rev 0 and a
+            # deterministic fallback generation) and is preserved here; it is pinned
+            # against a hand-written legacy dict by ``test_run_domain_model.py``.
+            #
+            # ``_hydrate_runs`` also makes this call TOTAL: it never raises, so one
+            # malformed run entry can no longer take down the read of the whole
+            # workspace.
+            runs=_hydrate_runs(state.get("runs")),
         )
 
     # -- derived views --
@@ -1542,7 +2577,14 @@ def _canonical_state_counts(session_id: str | None = None) -> dict:
 # derived from that stale classification. ``plan_digest`` closes that: ``preview``
 # returns an opaque digest of the classified workspace, and ``execute`` must present
 # it back. A missing digest and a stale digest are refused SEPARATELY (the route maps
-# them to 428 / 412, mirroring the ``If-Match`` convention) and neither mutates.
+# them to 428 / 412, mirroring the ``If-Match`` convention).
+#
+# THIS PARAGRAPH USED TO END "and neither mutates". C2 made that false for one case
+# and the sentence is corrected rather than deleted: a MISSING digest still mutates
+# nothing, and so does a stale digest caught by the workspace-wide check below. But
+# the digest is ALSO re-checked per record inside that record's own lock, and an abort
+# there refuses after restoring the records the loop had already reached. See
+# ``_reset_lock`` for why that trade is the right one.
 
 #: Serialises the whole classify -> verify-digest -> mutate -> measure sequence, so
 #: two concurrent resets cannot interleave and a digest verified here cannot be
@@ -1554,12 +2596,37 @@ def _canonical_state_counts(session_id: str | None = None) -> dict:
 #: ever waits for it, so the classic two-lock cycle cannot form.
 #:
 #: WHAT IT DOES NOT COVER, stated plainly: a per-record writer (``/answers``,
-#: ``/edit``, ``/export``) does NOT take this lock, so a write can still land in the
-#: window between the digest check and the per-id mutation. That window is
-#: sub-millisecond and in-process; the defect the digest exists to fix is the
-#: human-scale one (a dialog left open). Each individual record's mutation IS
-#: serialised against that writer by ``record_lock``, which is what keeps the
-#: filesystem consistent.
+#: ``/edit``, ``/export``) does NOT take this lock. It deliberately never will —
+#: putting a workspace-wide lock on the hot mutation path would invert the ordering
+#: documented above (a ``record_lock`` holder would then wait for this lock, which is
+#: exactly the two-lock cycle the paragraph above rules out).
+#:
+#: So a write CAN still land in the window between the workspace-wide digest check
+#: and the per-id mutation. That window used to be an unguarded hole: the write
+#: returned 200 and was then destroyed, and the response's ``at_risk`` summary —
+#: computed from the pre-write snapshot — under-reported by exactly what it had
+#: destroyed. **C2 closes it by making the precondition PER-RECORD as well**: inside
+#: each id's own ``record_lock``, and before that id is touched, the reset re-reads
+#: that one record and rebuilds its digest row (:func:`_plan_digest_row`). A row that
+#: no longer matches the one classified at the top of this function means a write
+#: landed in the window, so the reset ABORTS that id unmutated and refuses with the
+#: existing ``plan_digest_stale`` reason. The write therefore either SURVIVES or the
+#: reset REFUSES — never neither. ``record_lock`` still keeps the filesystem
+#: consistent; the row re-check is what keeps the outcome honest.
+#:
+#: **WHAT COUNTS AS "A WRITE" HERE, stated because the first version got it wrong.**
+#: The row was built entirely from ``experiment.json``, so it covered every write
+#: that changes a record's STATE and nothing else. That is not the same set: the
+#: export self-heal (``routes._write_record`` on an already-exported record whose
+#: artifact file is missing) durably republishes the record and its sidecar and then
+#: ``save_versioned()`` returns False, because ``record_id`` did not move. A 200 that
+#: repaired the filesystem moved no row component at all and was destroyed in
+#: silence. The row now also carries whether each half of the artifact pair is on
+#: disk (:func:`_plan_digest_row`), which closes it: ``_write_record`` is the only
+#: filesystem write in ``routes.py`` outside ``Experiment.save``, and every reachable
+#: path through it either flips a presence flag or bumps the state. Keep that
+#: property in mind before adding another filesystem write to a record's directory —
+#: a write the row cannot see is a write this paragraph's promise does not cover.
 _reset_lock = threading.Lock()
 
 
@@ -1601,21 +2668,125 @@ def _classify_workspace(experiments: list["Experiment"]) -> dict[str, list["Expe
     return buckets
 
 
+def _plan_digest_row(exp: "Experiment", bucket: str) -> list:
+    """ONE record's row in the reset plan — the unit :func:`_plan_digest` hashes.
+
+    Extracted so the per-record precondition in :func:`reset_to_canonical_seed` can
+    re-derive exactly the same row for one id, rather than re-implementing the rule
+    beside it and drifting from it. Anything that would change this row changes the
+    digest, and vice versa, BY CONSTRUCTION — there is only one definition.
+
+    See :func:`_plan_digest` for what each element is and why it is included.
+
+    **The last two elements are not derived from ``experiment.json``**, and that is
+    deliberate. Every other element is, and while that was the whole row an
+    acknowledged write could move nothing in it: ``routes._write_record`` on the
+    export SELF-HEAL path (state says exported, an artifact file is missing) durably
+    rewrites the record and its sidecar and then ``save_versioned()`` returns False,
+    because ``record_id`` never changed. A 200 that repaired the filesystem was
+    therefore invisible here, and the reset destroyed it. Two ``exists()`` calls make
+    the row cover what any reader would call this record's state.
+
+    PRESENCE, not content, and that is sufficient rather than lazy: every reachable
+    path through ``_write_record`` either flips one of these flags or moves the state.
+    With BOTH files present and the state exported, the immutability guard answers 409
+    and never reaches the write; with both present and the state NOT exported, the
+    reconciliation republishes and ``save_versioned`` bumps ``rev``. Hashing the file
+    contents would cost a full read of every artifact on every preview to detect
+    nothing that presence does not already detect.
+    """
+    record_path = exp.record_path()
+    sidecar_path = exp.sidecar_path()
+    return [
+        exp.id,
+        bucket,
+        exp.version_token(),
+        len(exp.answer_log or []),
+        _authoritative_signature(exp),
+        record_path is not None and record_path.exists(),
+        sidecar_path is not None and sidecar_path.exists(),
+    ]
+
+
+#: The row for a record whose state file is PRESENT but cannot be turned into one.
+#:
+#: A distinct third answer, and it has to be distinct from BOTH of the other two.
+#: ``None`` is already taken and means ABSENT — and absent-then / absent-now compares
+#: EQUAL, which is what lets the reset heal a canonical gap
+#: (see ``_current_plan_row``). Answering ``None`` for an unreadable record would
+#: therefore silently re-create it from the seed instead of refusing. A real row
+#: always starts with an experiment id, so this sentinel can never collide with one.
+_UNREADABLE_ROW: list = ["\x00unreadable"]
+
+
+def _current_plan_row(experiment_id: str, session_id: str | None) -> list | None:
+    """Re-read ONE record from disk NOW and rebuild its plan row (``None`` if absent).
+
+    Deliberately reads and rehydrates by exactly the same two steps
+    ``_load_all_experiments`` uses (``read_text`` -> ``Experiment.from_state``) and
+    then hands the result to the one shared :func:`_plan_digest_row`, so a record
+    nobody touched produces a row byte-identical to the one classified earlier and
+    the comparison can never refuse spuriously. That the row also stats the artifact
+    pair is therefore automatic here, and is the point: this is the single definition
+    of what "unchanged" means. Absence is a real answer,
+    not an error: a record removed in the window has no row, which differs from the
+    row it had when it was classified — which is the point.
+
+    Callers hold that id's ``record_lock``; the ``FileNotFoundError`` guard mirrors
+    ``_load_all_experiments``'s and exists for the same benign reason.
+
+    **It must not RAISE, and that is a safety property rather than tidiness.** This
+    runs inside the mutation loop with ``_reset_lock`` and a ``record_lock`` held. The
+    locks are context managers, so an exception here deadlocks nothing — but it leaves
+    the reset PART-APPLIED and answers the caller with a 500 carrying no refusal
+    reason and none of the measured counts a partial abort is supposed to disclose.
+    The question this function is asked is "can I prove this record is unchanged?",
+    and a read that cannot be parsed is a no. So anything that is present-but-unusable
+    — a torn write, a bad encoding, a state dict this build cannot rehydrate —
+    answers ``_UNREADABLE_ROW``, which compares unequal to every real row and the
+    reset refuses. Fail-closed: it can cost a spurious refusal (recoverable in one
+    further request), never a destroyed write.
+    """
+    state_path = scope_root(session_id) / experiment_id / "experiment.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        # ValueError covers JSONDecodeError and UnicodeDecodeError; OSError covers a
+        # read that failed for any other reason (FileNotFoundError, an OSError
+        # subclass, is caught above and keeps its own meaning).
+        return _UNREADABLE_ROW
+    try:
+        exp = Experiment.from_state(state, session_id=session_id)
+        return _plan_digest_row(exp, classify_experiment(exp))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        # Rehydration failures for a state file this build cannot read. Deliberately
+        # an explicit tuple rather than a bare ``except``: a fault of some OTHER kind
+        # is a defect in this module and should still be loud, not swallowed into a
+        # refusal that looks like an ordinary concurrent write.
+        return _UNREADABLE_ROW
+
+
 def _plan_digest(buckets: dict[str, list["Experiment"]]) -> str:
     """A deterministic, opaque digest of the CLASSIFIED workspace.
 
     One row per record present: its id, the bucket it classified into, its public
     version token (``<generation>.<rev>``), how many entries its answer log holds,
-    and its authoritative signature. Any edit, answer, confirmation, export,
-    creation or removal anywhere in the workspace changes at least one row, so it
-    changes the digest:
+    its authoritative signature, and whether each half of its exported artifact pair
+    is on disk. Any edit, answer, confirmation, export, creation, removal or artifact
+    repair anywhere in the workspace changes at least one row, so it changes the
+    digest:
 
     * an answer / edit / export bumps ``rev`` -> the version token changes;
     * a creation adds a row; a removal drops one;
     * a delete-then-recreate of the same id mints a fresh ``generation``, so the
       digest differs even though ``rev`` returned to 0 (the ABA the generation nonce
       exists to defeat);
-    * a record whose provenance marker changed moves bucket.
+    * a record whose provenance marker changed moves bucket;
+    * an export self-heal republishes a missing artifact WITHOUT touching the state
+      (``save_versioned`` returns False when ``record_id`` is unchanged), so a
+      presence flag is the only thing that moves — and it does move.
 
     The signature and the answer-log length are included because the preview reports
     numbers DERIVED from them (``at_risk``), and a digest that did not cover them
@@ -1628,13 +2799,7 @@ def _plan_digest(buckets: dict[str, list["Experiment"]]) -> str:
     reduced to one sha256, so nothing is recoverable from the digest itself.
     """
     rows = sorted(
-        [
-            exp.id,
-            bucket,
-            exp.version_token(),
-            len(exp.answer_log or []),
-            _authoritative_signature(exp),
-        ]
+        _plan_digest_row(exp, bucket)
         for bucket, exps in buckets.items()
         for exp in exps
     )
@@ -1698,9 +2863,17 @@ def reset_to_canonical_seed(
 ) -> dict:
     """Classify ONE TUTORIAL SESSION and (unless ``dry_run``) restore the canonical seed.
 
-    Refuses (makes NO changes) if ANY ambiguous record exists, and — when
+    Refuses, MAKING NO CHANGES, if ANY ambiguous record exists, and — when
     ``expected_plan_digest`` is supplied — if it does not match the digest of the
-    session as classified here. Otherwise, on execute, removes ONLY the
+    session as classified here.
+
+    It ALSO refuses, and this one is the exception to "no changes", if any single
+    record changes between that classification and the moment this reset is about to
+    touch it: the ids already reached are already reset. That is the per-record
+    precondition described below; it is the only refusal that mutates anything, and
+    the counts it reports are measured rather than assumed.
+
+    Otherwise, on execute, removes ONLY the
     managed_legacy directories via ``remove_experiment`` (path-safe, each under that
     record's own ``record_lock``), then re-materialises EVERY canonical scenario to
     its deterministic seed baseline — a present-but-drifted canonical record (partial
@@ -1723,6 +2896,29 @@ def reset_to_canonical_seed(
     ALWAYS supplies it for an execute: the precondition is part of the API contract,
     not of this function's contract.
 
+    **The precondition is checked TWICE, and the second check is the point (C2).**
+    Once here, over the whole classification; and then again PER RECORD, inside each
+    id's own ``record_lock`` and before that id is touched, by rebuilding that one
+    record's row (:func:`_current_plan_row`) and comparing it to the row classified
+    above. Without the second check the span from the snapshot to the per-id mutation
+    was open to a writer — ``/answers``, ``/edit`` and ``/export`` take ``record_lock``
+    but not ``_reset_lock`` — so a write could return 200 and then be destroyed by a
+    reset reporting success. It now cannot: the write either lands before that id's
+    check (and the reset aborts) or it cannot land at all (the lock is held).
+
+    That holds for a write to the record's STATE and for one that only repairs its
+    exported ARTIFACT PAIR, which are not the same set and were not both covered at
+    first — see ``_reset_lock`` and :func:`_plan_digest_row`.
+
+    **So a refusal is NOT always "made no changes".** A workspace-wide refusal, and
+    every refusal that existed before C2, still mutates nothing. A per-record abort
+    part-way through leaves the ids BEFORE the aborted one already reset — which is
+    why ``final_count``/``plan_digest``/``at_risk`` are measured from disk in that case
+    rather than echoed from the snapshot, and why it still reports ``refused``. A
+    partial reset is the honest price of never destroying an acknowledged write; the
+    alternative (holding every record's lock at once) would break the one-lock-at-a-time
+    rule that makes this deadlock-free.
+
     ``final_count`` is MEASURED after the mutation, never asserted from
     ``len(CANONICAL_IDS)``. A record created between the classification and the
     mutation is not classified, so it is not removed — it survives, and the reported
@@ -1737,6 +2933,28 @@ def reset_to_canonical_seed(
         canonical = buckets[CANONICAL]
         legacy = buckets[MANAGED_LEGACY]
         ambiguous = buckets[AMBIGUOUS]
+        # The per-id rows the digest below is reduced from, kept so each id can be
+        # re-checked against its own row inside its own lock (C2 — see
+        # ``_reset_lock``). An id that was ABSENT here simply has no entry, and
+        # ``.get`` returning ``None`` is the correct comparison value: "absent then"
+        # must match "absent now".
+        #
+        # THE ORDER OF THESE TWO STATEMENTS IS LOAD-BEARING, and it was the other way
+        # round until the row learned to stat the artifact pair. A row is no longer a
+        # pure function of the in-memory ``Experiment``: two of its elements are read
+        # from the filesystem AT THE MOMENT THE ROW IS BUILT. So the digest and the
+        # rows are two separate observations, and whichever is taken SECOND sees a
+        # write that landed between them. Built second, ``planned_rows`` picked up the
+        # very repair the per-record check exists to notice, matched it, and waved the
+        # reset through — which is exactly how the fix for that defect failed its own
+        # test. Built FIRST, the residual is fail-closed instead: a write landing
+        # between the two makes the DIGEST differ from the token the caller presented,
+        # so the workspace-wide precondition refuses before anything is touched.
+        planned_rows: dict[str, list] = {
+            exp.id: _plan_digest_row(exp, bucket)
+            for bucket, exps in buckets.items()
+            for exp in exps
+        }
         plan_digest = _plan_digest(buckets)
         at_risk = _at_risk_summary(canonical, legacy)
 
@@ -1751,18 +2969,56 @@ def reset_to_canonical_seed(
         refused = refusal is not None
 
         removed = 0
+        #: Has ANY id been removed or re-materialised yet? Only consulted when the
+        #: reset aborts part-way (C2): a refusal that already mutated must MEASURE
+        #: what it left behind rather than report the pre-reset snapshot.
+        mutated = False
+        #: Did the refusal come from the PER-RECORD row check (C2) rather than from
+        #: the workspace-wide precondition? Tracked separately from ``mutated``
+        #: because WHERE the refusal came from — not whether it managed to mutate
+        #: anything first — is what decides whether the snapshot may still be
+        #: reported. A per-record abort is reached only when a write has ALREADY
+        #: landed in the window, so its snapshot is stale BY CONSTRUCTION, even when
+        #: it aborted on the very first id and removed nothing.
+        row_abort = False
         if not dry_run and not refused:
+            # C2 — the PER-RECORD precondition. Armed only when the caller supplied a
+            # precondition at all: ``expected_plan_digest is None`` means "no
+            # precondition" (the documented contract for the direct in-process
+            # callers), and refusing such a call with ``plan_digest_stale`` would
+            # invent a precondition it never presented. The HTTP route ALWAYS supplies
+            # one for an execute, so the production path is always guarded.
+            check_rows = expected_plan_digest is not None
+
+            def _row_changed(experiment_id: str) -> bool:
+                """Did this ONE record change since it was classified above?
+
+                Called inside that id's ``record_lock``, so between this answer and
+                the mutation that follows it no writer can intervene — which is what
+                makes the check a precondition rather than a guess.
+                """
+                return _current_plan_row(experiment_id, session_id) != planned_rows.get(
+                    experiment_id
+                )
+
             # Symmetric locking: BOTH the managed-legacy removal and the canonical
             # re-materialisation hold that record's own ``record_lock``, so a
             # concurrent writer can never race an unlocked directory removal. Taken
             # one at a time and released before the next (never two at once), which
-            # is what keeps this deadlock-free. Every lock key is scope-qualified with
+            # is what keeps this deadlock-free — and the row re-check adds no lock, so
+            # that argument is unchanged. Every lock key is scope-qualified with
             # this session, so a reset in one session never blocks — and is never
             # blocked by — a mutation in another.
             for exp in legacy:
                 with record_lock(exp.id, session_id=session_id):
+                    if check_rows and _row_changed(exp.id):
+                        refusal = "plan_digest_stale"
+                        refused = True
+                        row_abort = True
+                        break
                     remove_experiment(exp)
                 removed += 1
+                mutated = True
             # Restore canonical CONTENT to the deterministic seed baseline (not just
             # fill missing). Each canonical id is removed and re-materialised, so
             # drifted content, partial answers, and wrongly-exported artifacts are
@@ -1770,18 +3026,46 @@ def reset_to_canonical_seed(
             # ETag). Targeted to the fixed canonical id set — NOT a broad filesystem
             # wipe.
             for spec in _seed_specs():
+                if refused:
+                    break
                 with record_lock(spec.id, session_id=session_id):
+                    if check_rows and _row_changed(spec.id):
+                        refusal = "plan_digest_stale"
+                        refused = True
+                        row_abort = True
+                        break
                     target = scope_root(session_id) / spec.id
                     if target.exists():
                         # path-safe (direct-child-of-THIS-scope guard)
                         _remove_experiment_dir(target, session_id=session_id)
                     # baseline content + fresh generation + DONE artifact
                     _materialise_seed(spec, session_id=session_id)
+                    mutated = True
 
-        # ``final_count`` — three cases, and the difference between them is the point
+        # ``final_count`` — four cases, and the difference between them is the point
         # of D3. Keep them distinct; collapsing any two makes the number dishonest.
         #
-        #  * REFUSED: nothing changed, so the classification snapshot IS the truth.
+        #  * REFUSED WITHOUT MUTATING, by the WORKSPACE-WIDE check (or the ambiguity
+        #    verdict): nothing changed, so the classification snapshot IS the truth.
+        #    Every pre-C2 refusal was decided before the mutation block, so this
+        #    stayed exactly the case it always was.
+        #  * REFUSED AFTER MUTATING (C2, a per-record abort part-way through): the
+        #    snapshot is NOT the truth any more — ids before the aborted one were
+        #    already removed / re-materialised. It falls through to the MEASURED arm
+        #    below, so a partial abort reports what it actually left behind. It still
+        #    reports ``refused``, so it can never read as success.
+        #  * REFUSED WITHOUT MUTATING, by the PER-RECORD check (C2 — an abort on the
+        #    very first id the reset would have touched): ``mutated`` is False, and
+        #    that is exactly why this case needs naming rather than folding into the
+        #    first. A per-record abort is REACHABLE ONLY when a write has already
+        #    landed in the window, so the snapshot is known-stale BY CONSTRUCTION —
+        #    its count, its digest and its ``at_risk`` all predate that write. Echoing
+        #    it here was measured returning the digest the client had just presented
+        #    (so the documented "recoverable in one further request" was false, the
+        #    retry 412'd again), an ``at_risk`` of zeroes over work that existed, and
+        #    a count of 4 with 5 records on disk. ``row_abort`` is therefore what this
+        #    branch tests, not ``mutated``: WHERE the refusal came from, not whether
+        #    it got as far as changing something.
         #  * PREVIEW that would proceed: nothing has happened yet, so this is
         #    necessarily a PROJECTION — and the projection is exactly the canonical
         #    five, because a non-refused reset removes the legacy set and rebuilds the
@@ -1799,7 +3083,7 @@ def reset_to_canonical_seed(
         #    ``len(CANONICAL_IDS)``, which was the D3 defect — a record created between
         #    the classification and the mutation is not classified, so it is not
         #    removed, so it survives, and the response must say so.
-        if refused:
+        if refused and not mutated and not row_abort:
             final_count = previous_count
             final_digest = plan_digest
             final_at_risk = at_risk

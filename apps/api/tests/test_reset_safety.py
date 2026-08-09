@@ -7,7 +7,14 @@ RED; the observed failures are quoted in the slice report. The three defects:
   ``confirmation``. A client that ran ``preview``, showed the operator a dialog and
   executed thirty seconds later destroyed anything committed in between: the operator
   approved a CLASSIFICATION that no longer held. The fix is a ``plan_digest``
-  precondition — absent -> 428, stale -> 412, and neither mutates.
+  precondition — absent -> 428, stale -> 412.
+
+  This line used to end "and neither mutates", and §7 below is the reason it no
+  longer does. An absent digest still mutates nothing, and neither does a stale one
+  caught by the workspace-wide check. A stale one caught by the PER-RECORD check
+  (C2) refuses after restoring the records the loop had already reached — which is
+  the price of never destroying a write that returned 200, and is stated here
+  because a false claim in a docstring is not cheaper for sitting in a test file.
 * **D2 — lock asymmetry.** Managed-legacy removal took NO per-record lock while
   canonical re-materialisation took one, so a concurrent writer to a managed-legacy
   record raced an unlocked ``rmtree`` of its directory.
@@ -454,10 +461,23 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
     while any other caller held two, a lock-ordering cycle would be possible, so the
     reset must take them strictly one at a time. That is what is asserted below, and
     it is asserted about the reset alone.
+
+    C2 — ARMED WITH A DIGEST, AND THAT IS NOT COSMETIC. This test used to call
+    ``reset_to_canonical_seed(dry_run=False)`` with no ``expected_plan_digest``, which
+    leaves ``check_rows`` False, so the per-record precondition added by C2 never ran
+    and the deadlock claim was made about a path the product does not take (the HTTP
+    route ALWAYS supplies a digest for an execute). It now previews first and passes
+    the real token, so the locks counted here are the locks the shipped path takes —
+    including the ``_current_plan_row`` re-read that now happens INSIDE each one. If
+    that re-read ever started taking a lock of its own, ``max(high_water)`` would
+    become 2 and this test would say so.
     """
     tutorial_ws().ensure_tutorial_seeded()
     _make_managed_legacy()
     _make_managed_legacy()
+    # Taken BEFORE the spy is installed: a preview takes no record lock, and a token
+    # captured after the spy would pollute the counts it exists to measure.
+    token = _plan_digest(client)
 
     held: set[str] = set()
     entered: list[str] = []
@@ -478,8 +498,14 @@ def test_d2_the_reset_holds_at_most_one_record_lock_at_a_time(client, monkeypatc
 
     monkeypatch.setattr(ws, "record_lock", spy)
     with _record_lock_keys(monkeypatch, keys):
-        tutorial_ws().reset_to_canonical_seed(dry_run=False)
+        data = tutorial_ws().reset_to_canonical_seed(
+            dry_run=False, expected_plan_digest=token
+        )
 
+    # The armed path must actually have RUN. Without this a future refactor that made
+    # the reset refuse early would leave the lock assertions below vacuously true.
+    assert data["refused"] is False, data["refusal"]
+    assert data["removed_count"] == 2
     assert high_water, "the reset took no record lock at all"
     assert max(high_water) == 1, f"the reset held {max(high_water)} record locks at once"
     # "At most one at a time" is only the property that matters if the ONE is the
@@ -761,3 +787,663 @@ def test_the_synthetic_only_gate_precedes_every_precondition(client, monkeypatch
         assert r.status_code == 403, (body, r.status_code)
         assert r.json()["refusal_reason"] == "not_synthetic_only"
     assert _dirs_on_disk() == CANONICAL_IDS
+
+
+# --- 7. C2 — a write inside the check->mutate window ------------------------
+#
+# THE DEFECT, and it was documented in the code that carried it
+# (``workspace.py`` on ``_reset_lock``): the reset held ``_reset_lock`` across the
+# whole operation and took ``record_lock(id)`` only at the moment it mutated that id,
+# while a per-record writer (``/answers``, ``/edit``, ``/export``) took ONLY
+# ``record_lock``. So the span from the classification snapshot to the per-id mutation
+# was open. A write that landed there returned 200 to its caller and was then
+# destroyed by a reset that reported success — and the ``at_risk`` summary in that
+# success body, computed from the pre-write snapshot, under-reported by exactly what
+# had just been destroyed.
+#
+# THE PROPERTY these two tests assert, and that no test above asserts: a write in that
+# window either SURVIVES or the reset REFUSES. Never both false. It is deliberately
+# written as a disjunction first — the disjunction is the contract, and a future
+# implementation may legitimately satisfy it the other way round — and only then
+# narrowed to what this implementation actually does.
+#
+# THE FIX IS NOT A NEW LOCK. Adding ``_reset_lock`` to the writers would put a
+# workspace-wide lock on the hot mutation path and invert the documented ordering, so
+# the reset instead re-checks THAT ONE RECORD's plan-digest row inside the same
+# ``record_lock`` it is about to mutate under. Deadlock-freedom is therefore
+# unchanged, and ``test_d2_the_reset_holds_at_most_one_record_lock_at_a_time`` above
+# pins it — but only because that test was ARMED WITH A DIGEST in this same slice.
+# Unarmed it ran with ``check_rows`` False, so it never entered the guarded path and
+# the sentence it was cited for was not yet true of the shipped code.
+#
+# ONE D2 TEST IS DELIBERATELY LEFT UNARMED:
+# ``test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub``. Its
+# writer changes the record's title, so an armed run would refuse at that id instead
+# of removing it, and the resurrected-stub property it exists to pin would no longer
+# be reachable. It therefore documents the ``expected_plan_digest=None`` contract —
+# no precondition, no per-record check — and the armed equivalent of its scenario is
+# ``test_c2_a_write_to_a_managed_legacy_record_in_the_window_is_not_removed`` below.
+
+
+def test_c2_a_write_landing_after_the_digest_check_survives_or_the_reset_refuses(
+    client, monkeypatch
+):
+    """The C2 interleaving, forced deterministically with events.
+
+    Modelled on ``test_d2_a_concurrent_managed_legacy_write_is_not_lost_and_leaves_no_stub``
+    but with the ordering INVERTED. There, the writer went first and the reset waited.
+    Here the RESET goes first: it is held inside ``_plan_digest`` — after the
+    classification snapshot has been taken and while the digest is being computed from
+    it, which is the top of the window — and only then does the writer commit, through
+    the real ``/answers`` route, ``If-Match`` and all. The reset is released only once
+    that write has fully returned.
+
+    So the reset resumes holding a digest that matches the token it was given (both
+    were computed from the same pre-write snapshot), walks past the workspace-wide
+    precondition, and arrives at the mutation with a record on disk that nobody told
+    it about. That is the whole defect, reproduced without a sleep anywhere.
+
+    PRE-FIX: the reset returns ``refused: False`` and the confirmed answer is gone.
+    FIXED: the per-record row for that id no longer matches, so the reset aborts it
+    unmutated and refuses ``plan_digest_stale``; the answer is byte-identical after.
+
+    The reset is driven DIRECTLY (not over HTTP) for the same reason
+    ``test_concurrent_execute_is_safe`` gives: the ``TestClient`` portal serialises
+    HTTP requests, so two concurrent requests would not interleave at all. Exactly one
+    of the two actors here uses HTTP, and it is the writer — the one whose 200 the
+    property is about.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    # A managed-legacy record makes the partial abort MEASURABLE: it is removed before
+    # the canonical loop reaches the written-to example, so `previous_count` (6) and
+    # the true post-abort count (5) differ, and a `final_count` copied from the
+    # snapshot rather than measured would say 6.
+    legacy = _make_managed_legacy()
+    token = _plan_digest(client)  # the classification the operator approved
+    session_id = tutorial_ws().session_id
+
+    reset_is_in_the_window = threading.Event()
+    write_has_returned = threading.Event()
+    errors: list[BaseException] = []
+    result: list[dict] = []
+
+    real_plan_digest = ws._plan_digest
+
+    def holding_plan_digest(buckets):
+        """Compute the digest exactly as production does, then hold — ONCE.
+
+        One-shot: ``reset_to_canonical_seed`` also calls ``_plan_digest`` again at the
+        end to report the CURRENT digest, and holding there would deadlock the test
+        against a writer that has already finished.
+        """
+        out = real_plan_digest(buckets)
+        if not reset_is_in_the_window.is_set():
+            reset_is_in_the_window.set()
+            assert write_has_returned.wait(timeout=HANDOFF_TIMEOUT), (
+                "the writer never reported completing — the window was never entered"
+            )
+        return out
+
+    def resetter():
+        try:
+            result.append(
+                ws.reset_to_canonical_seed(
+                    dry_run=False, expected_plan_digest=token, session_id=session_id
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - any raise is a failure
+            errors.append(exc)
+
+    monkeypatch.setattr(ws, "_plan_digest", holding_plan_digest)
+    r = threading.Thread(target=resetter, name="resetter")
+    r.start()
+    try:
+        assert reset_is_in_the_window.wait(timeout=JOIN_TIMEOUT), (
+            "the reset never reached its digest computation"
+        )
+        # The write lands INSIDE the window, through the real route, and returns 200.
+        _confirm_an_answer(client, ws.SEED_PARTIAL_ID)
+        committed = client.get(f"/api/experiments/{ws.SEED_PARTIAL_ID}").json()
+        assert committed["rev"] > 0, "the write must really have been persisted"
+    finally:
+        write_has_returned.set()
+        r.join(timeout=JOIN_TIMEOUT)
+    assert not r.is_alive(), "the reset thread never finished"
+    assert errors == [], f"the reset raised: {errors!r}"
+
+    data = result[0]
+    after = client.get(f"/api/experiments/{ws.SEED_PARTIAL_ID}").json()
+    write_survived = after == committed
+    reset_refused = data["refused"] is True
+
+    # THE CONTRACT. Stated as the disjunction, because either outcome is honest and
+    # only "neither" is the defect: a write that returned 200, was destroyed, and was
+    # never mentioned.
+    assert write_survived or reset_refused, (
+        "C2: a write that landed between the reset's digest check and its per-id "
+        "mutation was DESTROYED while the reset reported success — the operator's "
+        "confirmed answer is gone and no response ever said so"
+    )
+
+    # ...and now what this implementation actually does, so a regression that trades
+    # one arm of the disjunction for the other is still visible in the diff.
+    assert reset_refused, "the reset must abort rather than mutate against a stale row"
+    assert data["refusal"] == "plan_digest_stale", data["refusal"]
+    assert write_survived, "the aborted id must be left exactly as the writer left it"
+    assert after["rev"] == committed["rev"] > 0
+
+    # A PARTIAL ABORT MUST NEVER REPORT SUCCESS, AND MUST NOT LIE ABOUT WHAT IT LEFT.
+    # `final_count` is measured, not copied from the pre-reset snapshot, so it matches
+    # the disk even though ids before the aborted one were already mutated.
+    assert data["final_count"] == len(_dirs_on_disk()), (
+        "a partial abort must MEASURE what it left behind"
+    )
+    assert data["previous_count"] == 6
+    assert legacy.id not in _dirs_on_disk(), "the abort happened after the legacy removal"
+    assert data["removed_count"] == 1
+
+    # The refusal echoes the CURRENT digest, so the operator recovers in one hop —
+    # exactly as every other stale refusal on this endpoint does.
+    assert data["plan_digest"] != token
+    assert _execute(client, token=_plan_digest(client)).status_code == 200
+    assert _dirs_on_disk() == CANONICAL_IDS
+
+
+def test_c2_a_write_to_a_managed_legacy_record_in_the_window_is_not_removed(
+    client, monkeypatch
+):
+    """The same property on the OTHER mutation loop, proven without threads.
+
+    ``record_lock`` is the seam: the spy commits the write immediately BEFORE the
+    reset acquires that record's lock, which is precisely the last instant of the
+    window. Single-threaded and event-free, so it cannot flake — and the store is
+    driven directly rather than over HTTP because the reset is running on this very
+    thread and the ``TestClient`` portal is not re-entrant.
+
+    PRE-FIX: the record is rmtree'd and the reset reports success.
+
+    It also pins the CROSS-LOOP guard (``if refused: break`` at the top of the
+    canonical loop), which nothing pinned before: replacing it with ``if False:``
+    left the whole reset suite green while the reset went on to re-materialise every
+    canonical id — wiping the very drift the refusal claims to have left alone. So a
+    canonical record is deliberately drifted here BEFORE the digest is taken, and its
+    revision is asserted unchanged after the abort. Under the mutant it is 0.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    legacy = _make_managed_legacy()
+    # Drift a canonical record so the canonical loop has something to destroy. The
+    # digest is taken AFTER it, so this is part of the approved plan and the
+    # workspace-wide check still passes — the abort must come from the legacy row.
+    _confirm_an_answer(client, ws.SEED_PARTIAL_ID)
+    drifted = client.get(f"/api/experiments/{ws.SEED_PARTIAL_ID}").json()
+    assert drifted["rev"] > 0, "the drift must really have been persisted"
+    token = _plan_digest(client)
+    session_id = tutorial_ws().session_id
+
+    injected: list[str] = []
+    real_lock = ws.record_lock
+
+    @contextlib.contextmanager
+    def write_then_lock(experiment_id: str, *, session_id: str | None = None):
+        if experiment_id == legacy.id and not injected:
+            injected.append(experiment_id)
+            exp = ws.load_experiment(legacy.id, session_id)
+            exp.title = "written by a concurrent operator"
+            assert exp.save_versioned(), "the injected write must really persist"
+        with real_lock(experiment_id, session_id=session_id):
+            yield
+
+    monkeypatch.setattr(ws, "record_lock", write_then_lock)
+    data = ws.reset_to_canonical_seed(
+        dry_run=False, expected_plan_digest=token, session_id=session_id
+    )
+
+    assert injected == [legacy.id], "the write was never injected into the window"
+    survived = legacy.id in _dirs_on_disk()
+    assert survived or data["refused"], (
+        "C2: a write to a managed-legacy record inside the window was destroyed by a "
+        "reset that reported success"
+    )
+    assert data["refused"] is True
+    assert data["refusal"] == "plan_digest_stale"
+    assert survived
+    assert ws.load_experiment(legacy.id, session_id).title == (
+        "written by a concurrent operator"
+    )
+    # THE CROSS-LOOP GUARD. The refusal came from the LEGACY loop, so the canonical
+    # loop must not run at all: a record the operator had worked on is still exactly
+    # as they left it. Without the `if refused: break` this is 0 — every canonical id
+    # re-materialised by a reset that reported itself as having refused.
+    assert client.get(f"/api/experiments/{ws.SEED_PARTIAL_ID}").json() == drifted, (
+        "a refusal in the legacy loop went on to re-materialise the canonical records"
+    )
+
+    # Nothing was removed or re-materialised — but the figures are still MEASURED,
+    # not echoed: a per-record abort is reachable only after a write landed in the
+    # window, so the snapshot is stale even when the abort came first (see the
+    # ``row_abort`` case in ``reset_to_canonical_seed``).
+    assert data["removed_count"] == 0
+    assert data["final_count"] == len(_dirs_on_disk()) == 6
+
+
+def test_c2_the_per_record_check_never_refuses_an_untouched_workspace(client):
+    """The row re-check must be a precondition, not a source of spurious 412s.
+
+    Re-derived from disk under the lock, an untouched record's row has to be
+    byte-identical to the one classified moments earlier — otherwise every reset in
+    production would refuse. Driven repeatedly, and over the real HTTP contract, with
+    every kind of record the two loops walk.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    for _ in range(3):
+        _make_managed_legacy()
+        _confirm_an_answer(client, ws.SEED_PARTIAL_ID)
+        detail = client.get(f"/api/experiments/{ws.SEED_READY_ID}")
+        assert (
+            client.post(
+                f"/api/experiments/{ws.SEED_READY_ID}/export",
+                headers={"If-Match": detail.headers["ETag"]},
+            ).status_code
+            == 200
+        )
+        r = _execute(client, token=_plan_digest(client))
+        assert r.status_code == 200, r.text
+        assert r.json()["refusal_reason"] is None
+        assert _dirs_on_disk() == CANONICAL_IDS
+
+
+def test_c2_a_canonical_id_absent_at_classification_is_healed_not_refused(client):
+    """ABSENT-then-ABSENT must compare EQUAL, or the reset stops healing gaps.
+
+    ``planned_rows`` has no entry for a canonical id that was missing when the
+    workspace was classified, and ``_current_plan_row`` returns ``None`` for a record
+    that is still missing when the loop reaches it. The comparison is
+    ``None != planned_rows.get(id)`` — correct only because ``.get`` returns ``None``
+    rather than raising or defaulting to something truthy. Correct by inspection was
+    not enough: healing a missing canonical is the reset's whole job, and a
+    ``KeyError`` or a spurious refusal here would break it silently for the one input
+    nobody constructs by accident.
+    """
+    import shutil
+
+    tutorial_ws().ensure_tutorial_seeded()
+    shutil.rmtree(tutorial_ws().workspace_root() / ws.SEED_REVIEW_ID)
+    assert ws.SEED_REVIEW_ID not in _dirs_on_disk()
+
+    # The digest is taken WITH the gap present, so the gap is part of the approved plan.
+    r = _execute(client, token=_plan_digest(client))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["refusal_reason"] is None
+    assert r.json()["final_count"] == 5
+    assert _dirs_on_disk() == CANONICAL_IDS
+
+
+def test_c2_a_legacy_record_with_no_stored_generation_is_still_removed(client):
+    """A row whose version token comes from the DERIVED generation must be stable.
+
+    A pre-P27.3 state file carries no ``generation``, so ``Experiment.__post_init__``
+    substitutes ``_legacy_generation(id)`` — a hash of the id. The plan row embeds
+    ``version_token()`` = ``<generation>.<rev>``, so EVERY read of such a record
+    re-derives its generation. If that fallback were random (as ``_new_generation``
+    is) rather than deterministic, no two reads would agree and the reset could never
+    remove a legacy record. Nothing pinned that coupling before; this does.
+
+    WHICH CHECK ACTUALLY CATCHES IT — stated precisely, because the obvious guess is
+    wrong. Under the mutation (``_legacy_generation`` made random) the observed
+    refusal is ``plan_digest_stale`` with ``removed_count: 0`` and
+    ``final_count: 6``: the token differs between the PREVIEW's read and the
+    execute's classification read, so the **workspace-wide** check refuses before the
+    mutation block is entered and the per-record path never runs. This test therefore
+    pins the coupling, not the per-record check — ``_current_plan_row``'s own
+    behaviour is pinned by the two C2 interleaving tests above and by
+    ``test_c2_a_canonical_id_absent_at_classification_is_healed_not_refused``.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    legacy = _make_managed_legacy()
+    state_path = tutorial_ws().workspace_root() / legacy.id / "experiment.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state.pop("generation", None), "the fixture must have had one to remove"
+    ws.atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
+
+    r = _execute(client, token=_plan_digest(client))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["refusal_reason"] is None
+    assert r.json()["removed_count"] == 1
+    assert legacy.id not in _dirs_on_disk()
+    assert _dirs_on_disk() == CANONICAL_IDS
+
+
+def test_c2_a_per_record_abort_that_mutated_nothing_still_measures_what_it_left(
+    client, monkeypatch
+):
+    """A per-record abort must MEASURE, even when it removed and rebuilt nothing.
+
+    The two C2 tests above both abort at a point that happens to be safe to report
+    from the snapshot, or after a removal that made ``mutated`` true. This is the
+    third shape and it is the one the ``if refused and not mutated`` branch got
+    WRONG: the abort happens on the FIRST id the reset would have touched, so
+    nothing was removed or re-materialised — and yet the snapshot is known-stale
+    BY CONSTRUCTION, because the only way to reach a per-record abort is for a
+    write to have landed in the window. Reporting the snapshot there is not a
+    conservative choice, it is the one case where the snapshot is guaranteed wrong.
+
+    Three shipped sentences depend on getting this right, and all three were false:
+
+    * ``routes.py`` 412 — "``removed_count`` and ``final_count`` are MEASURED, so
+      they describe what is actually on disk either way";
+    * ``routes.py`` endpoint description, and the byte-identical served copy in
+      ``apps/web/src/test/apiFixtures.ts`` — "Every response carries the CURRENT
+      digest, so a ``412`` can be recovered from in one further request".
+
+    The window write here therefore does three separately observable things: it
+    changes the row of the first canonical spec (which is what forces the abort),
+    it CREATES a record (so the count on disk moves away from the snapshot), and it
+    confirms an answer (so ``at_risk`` moves too). The recovery hop is asserted by
+    actually performing it.
+
+    Same one-shot ``_plan_digest`` hold as
+    ``test_c2_a_write_landing_after_the_digest_check_survives_or_the_reset_refuses``;
+    see that docstring for why the reset is driven directly and the writer over HTTP.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    # NO managed-legacy record: the legacy loop must run zero times, so the abort in
+    # the canonical loop is reached with `mutated` still False.
+    token = _plan_digest(client)
+    session_id = tutorial_ws().session_id
+
+    reset_is_in_the_window = threading.Event()
+    write_has_returned = threading.Event()
+    errors: list[BaseException] = []
+    result: list[dict] = []
+
+    real_plan_digest = ws._plan_digest
+
+    def holding_plan_digest(buckets):
+        out = real_plan_digest(buckets)
+        if not reset_is_in_the_window.is_set():
+            reset_is_in_the_window.set()
+            assert write_has_returned.wait(timeout=HANDOFF_TIMEOUT), (
+                "the writer never reported completing — the window was never entered"
+            )
+        return out
+
+    def resetter():
+        try:
+            result.append(
+                ws.reset_to_canonical_seed(
+                    dry_run=False, expected_plan_digest=token, session_id=session_id
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - any raise is a failure
+            errors.append(exc)
+
+    monkeypatch.setattr(ws, "_plan_digest", holding_plan_digest)
+    r = threading.Thread(target=resetter, name="resetter")
+    r.start()
+    try:
+        assert reset_is_in_the_window.wait(timeout=JOIN_TIMEOUT), (
+            "the reset never reached its digest computation"
+        )
+        # The FIRST spec the canonical loop walks, so the abort precedes every
+        # mutation. Pinned rather than assumed: if the seed order ever changes this
+        # fails here, naming the reason, instead of silently testing the other shape.
+        assert ws._seed_specs()[0].id == ws.SEED_NEW_DRAFT_ID
+        _confirm_an_answer(client, ws.SEED_NEW_DRAFT_ID)
+        committed = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json()
+        assert committed["rev"] > 0, "the write must really have been persisted"
+        extra = _make_managed_legacy("Created inside the window (example run)")
+    finally:
+        write_has_returned.set()
+        r.join(timeout=JOIN_TIMEOUT)
+    assert not r.is_alive(), "the reset thread never finished"
+    assert errors == [], f"the reset raised: {errors!r}"
+
+    data = result[0]
+    assert data["refused"] is True
+    assert data["refusal"] == "plan_digest_stale"
+
+    # Nothing was mutated — that is the premise of the test, not the property.
+    assert data["removed_count"] == 0
+    assert client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json() == committed
+    on_disk = _dirs_on_disk()
+    assert on_disk == CANONICAL_IDS | {extra.id}
+
+    # THE PROPERTY. `previous_count` is the snapshot and stays the snapshot; every
+    # figure that claims to describe the workspace NOW must be re-read from disk.
+    assert data["previous_count"] == 5
+    assert data["final_count"] == len(on_disk) == 6, (
+        "an unmutated per-record abort echoed the pre-write snapshot count"
+    )
+    assert data["at_risk"] == {
+        "confirmed_answers": 1,
+        "examples_with_progress": 1,
+        "exported_artifacts": 0,
+    }, "the at-risk summary was computed from a snapshot taken before the write"
+
+    # ...and the recovery claim, proven by performing the hop rather than asserting it.
+    assert data["plan_digest"] != token
+    assert _execute(client, token=data["plan_digest"]).status_code == 200
+    assert _dirs_on_disk() == CANONICAL_IDS
+
+
+# --- 8. C2 — an UNREADABLE row must refuse, not raise -----------------------
+#
+# ``_current_plan_row`` re-reads one record from disk while ``_reset_lock`` and that
+# record's ``record_lock`` are both held. It guarded only ``FileNotFoundError``, so a
+# state file that was present but could not be parsed (a torn write, a bad encoding, a
+# state dict missing a key) raised straight out of the mutation loop. The locks are
+# context managers, so nothing deadlocks — but the reset is left PARTIALLY APPLIED
+# with a 500 and no response body at all: no refusal reason, no measured counts,
+# nothing for the operator to act on. The safe answer to "can I prove this record is
+# unchanged?" is no, so an unreadable row must compare as CHANGED and refuse.
+
+
+def test_c2_an_unreadable_row_compares_as_changed_instead_of_raising(client):
+    """The unit contract, over each way a state file can be present but unusable.
+
+    Two properties, and the second is the one that is easy to get wrong: the row must
+    not be ``None`` either. ``None`` is already taken — it means ABSENT, and it
+    compares EQUAL to the planned row of a canonical id that was absent at
+    classification (that is what makes gap-healing work, see
+    ``test_c2_a_canonical_id_absent_at_classification_is_healed_not_refused``). An
+    unreadable record answered with ``None`` would therefore be silently re-created
+    from the seed rather than refused.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    session_id = tutorial_ws().session_id
+    exp = ws.load_experiment(ws.SEED_NEW_DRAFT_ID, session_id)
+    planned = ws._plan_digest_row(exp, ws.classify_experiment(exp))
+    state_path = tutorial_ws().workspace_root() / ws.SEED_NEW_DRAFT_ID / "experiment.json"
+
+    for broken in (
+        b'{"id": "01SYNTHXANESSEED00000000',  # a torn write -> JSONDecodeError
+        b"{}",  # parses, but rehydration has nothing to work with -> KeyError
+        b"\xff\xfe not utf-8",  # UnicodeDecodeError
+    ):
+        state_path.write_bytes(broken)
+        row = ws._current_plan_row(ws.SEED_NEW_DRAFT_ID, session_id)
+        assert row is not None, f"an unreadable row read as ABSENT: {broken!r}"
+        assert row != planned, f"an unreadable row read as UNCHANGED: {broken!r}"
+
+
+def test_c2_a_torn_read_in_the_window_refuses_with_a_body_instead_of_raising(
+    client, monkeypatch
+):
+    """End to end: the reset REFUSES, and still returns everything a caller needs.
+
+    The corruption is injected exactly where a real one would sit — after the reset
+    takes that record's lock and before it reads the row — and is undone when the
+    lock is released, which is what a torn write looks like once the writer's rename
+    lands. So the response's MEASURED figures are computed over a readable workspace,
+    and the only thing under test is what the row check does with a read it cannot
+    trust.
+
+    PRE-FIX: ``json.JSONDecodeError`` propagates out of ``reset_to_canonical_seed``
+    (over HTTP: a 500 with no refusal reason and no counts), with the reset already
+    part-applied in the general case.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    token = _plan_digest(client)
+    session_id = tutorial_ws().session_id
+    target = ws._seed_specs()[0].id  # first id the reset touches -> nothing mutated
+    state_path = tutorial_ws().workspace_root() / target / "experiment.json"
+
+    injected: list[str] = []
+    real_lock = ws.record_lock
+
+    @contextlib.contextmanager
+    def corrupt_then_lock(experiment_id: str, *, session_id: str | None = None):
+        if experiment_id == target and not injected:
+            injected.append(experiment_id)
+            original = state_path.read_bytes()
+            state_path.write_bytes(b'{"id": "01SYNTHXANESSEED00000000')
+            with real_lock(experiment_id, session_id=session_id):
+                try:
+                    yield
+                finally:
+                    state_path.write_bytes(original)
+        else:
+            with real_lock(experiment_id, session_id=session_id):
+                yield
+
+    monkeypatch.setattr(ws, "record_lock", corrupt_then_lock)
+    data = ws.reset_to_canonical_seed(
+        dry_run=False, expected_plan_digest=token, session_id=session_id
+    )
+
+    assert injected == [target], "the torn read was never injected into the window"
+    assert data["refused"] is True
+    assert data["refusal"] == "plan_digest_stale"
+    assert data["removed_count"] == 0
+    assert data["final_count"] == len(_dirs_on_disk()) == 5
+    assert _dirs_on_disk() == CANONICAL_IDS
+
+
+# --- 9. C2 — the acknowledged write need not be a STATE change --------------
+#
+# The plan row was derived ENTIRELY from ``experiment.json`` (id, bucket, version
+# token, answer-log length, authoritative signature). ``routes._write_record`` is the
+# only filesystem write in ``routes.py`` outside ``Experiment.save``, and on the
+# export SELF-HEAL path — state says exported, one artifact is missing — it durably
+# writes ``<id>.json`` and ``<id>.evidence.json`` and then ``save_versioned()``
+# returns False, because ``record_id`` is unchanged. So a 200 ``ok: true`` moved no
+# component of the row at all, the per-record check saw nothing, and the reset
+# destroyed the repair it had just acknowledged. Measured: ``row identical: True``,
+# ``refused: False``, ``artifact still on disk: False``.
+#
+# The row therefore covers the record's ARTIFACT PAIR as well, which is what any
+# reader would call part of "this record's state". Presence is enough to cover every
+# reachable path through ``_write_record``: if BOTH files already exist and the state
+# says exported, the immutability guard refuses with 409 and never reaches it; if they
+# exist and the state says NOT exported, the reconciliation republishes and
+# ``save_versioned`` bumps ``rev``. There is no reachable way to rewrite an existing
+# pair without either flipping a presence flag or moving the state.
+
+
+def test_c2_an_export_self_heal_in_the_window_is_not_destroyed(client, monkeypatch):
+    """A write that repairs a MISSING ARTIFACT changes no state — and must survive.
+
+    Same one-shot ``_plan_digest`` hold as the two interleaving tests above; the
+    self-heal is driven over the real export route, ``If-Match`` and all, so the 200
+    the property is about is a real one.
+
+    PRE-FIX: the reset proceeds, re-materialises the canonical id from the seed spec
+    (which is ``exported=False``), and both repaired files are gone — with the
+    response reporting success.
+
+    It also pins the ORDER of the two observations at the top of
+    ``reset_to_canonical_seed``. A row that stats the filesystem is no longer a pure
+    function of the in-memory ``Experiment``, so ``planned_rows`` and ``plan_digest``
+    are separate readings and the one taken SECOND sees a write that landed between
+    them. Because this test holds the reset inside ``_plan_digest``, it fails outright
+    if ``planned_rows`` is built after the digest: the planned row picks up the very
+    repair it is supposed to notice. That is not a hypothetical — it is how the first
+    version of this fix failed.
+    """
+    tutorial_ws().ensure_tutorial_seeded()
+    session_id = tutorial_ws().session_id
+
+    detail = client.get(f"/api/experiments/{ws.SEED_READY_ID}")
+    r = client.post(
+        f"/api/experiments/{ws.SEED_READY_ID}/export",
+        headers={"If-Match": detail.headers["ETag"]},
+    )
+    assert r.status_code == 200 and r.json()["ok"] is True, r.text
+    exported = ws.load_experiment(ws.SEED_READY_ID, session_id)
+    record_path = exported.record_path()
+    sidecar_path = exported.sidecar_path()
+    assert record_path.exists() and sidecar_path.exists()
+
+    # THE FAULT the self-heal exists to repair: the artifact is gone while the state
+    # still says the export happened. (`test_export_recovery.py` pins the repair
+    # itself; this test is only about what the reset then does to it.)
+    record_path.unlink()
+
+    token = _plan_digest(client)  # the classification the operator approved
+
+    reset_is_in_the_window = threading.Event()
+    write_has_returned = threading.Event()
+    errors: list[BaseException] = []
+    result: list[dict] = []
+
+    real_plan_digest = ws._plan_digest
+
+    def holding_plan_digest(buckets):
+        out = real_plan_digest(buckets)
+        if not reset_is_in_the_window.is_set():
+            reset_is_in_the_window.set()
+            assert write_has_returned.wait(timeout=HANDOFF_TIMEOUT), (
+                "the writer never reported completing — the window was never entered"
+            )
+        return out
+
+    def resetter():
+        try:
+            result.append(
+                ws.reset_to_canonical_seed(
+                    dry_run=False, expected_plan_digest=token, session_id=session_id
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - any raise is a failure
+            errors.append(exc)
+
+    monkeypatch.setattr(ws, "_plan_digest", holding_plan_digest)
+    r = threading.Thread(target=resetter, name="resetter")
+    r.start()
+    try:
+        assert reset_is_in_the_window.wait(timeout=JOIN_TIMEOUT), (
+            "the reset never reached its digest computation"
+        )
+        before_res = client.get(f"/api/experiments/{ws.SEED_READY_ID}")
+        before = before_res.json()
+        heal = client.post(
+            f"/api/experiments/{ws.SEED_READY_ID}/export",
+            headers={"If-Match": before_res.headers["ETag"]},
+        )
+        assert heal.status_code == 200 and heal.json()["ok"] is True, heal.text
+        # THE PREMISE. The repair is durable and acknowledged, and it moved NO
+        # component the row was built from: no rev, no answer log, no signature.
+        assert heal.json()["invalidation"]["changed"] is False
+        assert heal.json()["rev"] == before["rev"]
+        assert record_path.exists() and sidecar_path.exists()
+    finally:
+        write_has_returned.set()
+        r.join(timeout=JOIN_TIMEOUT)
+    assert not r.is_alive(), "the reset thread never finished"
+    assert errors == [], f"the reset raised: {errors!r}"
+
+    data = result[0]
+    repair_survived = record_path.exists() and sidecar_path.exists()
+
+    # THE CONTRACT, as the disjunction — the same one §7 states, extended to a write
+    # that repairs the filesystem rather than changing the record's state.
+    assert repair_survived or data["refused"], (
+        "C2: an export self-heal that returned 200 was destroyed by a reset that "
+        "reported success — no response ever said so"
+    )
+    # ...and what this implementation does.
+    assert data["refused"] is True
+    assert data["refusal"] == "plan_digest_stale"
+    assert repair_survived
