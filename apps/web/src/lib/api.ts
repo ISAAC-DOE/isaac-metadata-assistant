@@ -889,7 +889,16 @@ export const api = {
   //   403  not in synthetic-only mode
   //   409  wrong confirmation phrase, or an ambiguous record is present
   //   428  `plan_digest` omitted        (R1 precondition, nothing was written)
-  //   412  `plan_digest` stale          (R1 precondition, nothing was written)
+  //   412  `plan_digest` stale          (R1 precondition; see below — a 412 does
+  //                                      NOT guarantee that nothing was written)
+  //
+  // C2 — WHY THE 412 LINE NO LONGER SAYS "nothing was written". The precondition is
+  // also re-checked per record, inside that record's own lock, immediately before
+  // that record is touched, so a write landing mid-reset is refused instead of
+  // destroyed and the reset stops there with earlier records already restored. The
+  // 428 line above is still exactly right: an omitted digest is rejected before any
+  // mutation. No field on the body separates the two 412 cases, so no caller of this
+  // module can tell them apart — which is why the dialog's copy claims neither.
   //
   // 412/428 are refusals, not failures: the body carries the CURRENT `plan_digest`
   // and refreshed counts, which is exactly what the caller needs to show the

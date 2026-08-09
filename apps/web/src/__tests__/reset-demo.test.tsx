@@ -957,9 +957,15 @@ describe('R1 · Reset Worked Example — the plan-digest precondition', () => {
     // refusal test above for why "nothing was reset" is no longer asserted anywhere).
     // A 428 genuinely never mutates, but this branch renders ONE shared message for
     // both codes, so it can only claim what is true of both.
+    //
+    // WHICH IS WHY "this workspace changed" IS NOT ASSERTED HERE, though it was in
+    // the first version of this edit — three lines under the rule it breaks. A 428
+    // means the CLIENT omitted the digest; nothing about the workspace need have
+    // moved. Only the refusal itself is true of both codes. (The copy is not split,
+    // because `plan_digest_required` is unreachable from this dialog: `doExecute`
+    // always sends `preview.data.plan_digest`. This test drives the branch directly.)
     const text = (alert.textContent ?? '').toLowerCase();
     expect(text).toContain('refused');
-    expect(text).toContain('this workspace changed');
     expect(text).not.toContain('nothing was reset');
     expect(view.queryByText(/could not be completed/i)).toBeNull();
   });

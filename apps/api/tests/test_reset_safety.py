@@ -1060,11 +1060,20 @@ def test_c2_a_legacy_record_with_no_stored_generation_is_still_removed(client):
 
     A pre-P27.3 state file carries no ``generation``, so ``Experiment.__post_init__``
     substitutes ``_legacy_generation(id)`` — a hash of the id. The plan row embeds
-    ``version_token()`` = ``<generation>.<rev>``, so the per-record re-check compares
-    two INDEPENDENTLY DERIVED generations. If that fallback were random (as
-    ``_new_generation`` is) rather than deterministic, every legacy record would
-    produce a different token on the second read and the reset would refuse to remove
-    any of them. Nothing pinned that coupling before; this does.
+    ``version_token()`` = ``<generation>.<rev>``, so EVERY read of such a record
+    re-derives its generation. If that fallback were random (as ``_new_generation``
+    is) rather than deterministic, no two reads would agree and the reset could never
+    remove a legacy record. Nothing pinned that coupling before; this does.
+
+    WHICH CHECK ACTUALLY CATCHES IT — stated precisely, because the obvious guess is
+    wrong. Under the mutation (``_legacy_generation`` made random) the observed
+    refusal is ``plan_digest_stale`` with ``removed_count: 0`` and
+    ``final_count: 6``: the token differs between the PREVIEW's read and the
+    execute's classification read, so the **workspace-wide** check refuses before the
+    mutation block is entered and the per-record path never runs. This test therefore
+    pins the coupling, not the per-record check — ``_current_plan_row``'s own
+    behaviour is pinned by the two C2 interleaving tests above and by
+    ``test_c2_a_canonical_id_absent_at_classification_is_healed_not_refused``.
     """
     tutorial_ws().ensure_tutorial_seeded()
     legacy = _make_managed_legacy()
