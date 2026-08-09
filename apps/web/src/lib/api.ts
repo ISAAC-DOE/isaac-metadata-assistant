@@ -898,7 +898,9 @@ export const api = {
   // destroyed and the reset stops there with earlier records already restored. The
   // 428 line above is still exactly right: an omitted digest is rejected before any
   // mutation. No field on the body separates the two 412 cases, so no caller of this
-  // module can tell them apart — which is why the dialog's copy claims neither.
+  // module can tell them apart — which is why the dialog's copy claims neither. That
+  // absence is a CHOICE, not a limit: the server computes the boolean and does not
+  // serialize it. The reasoning is recorded in `__tests__/reset-claim-parity.test.tsx`.
   //
   // 412/428 are refusals, not failures: the body carries the CURRENT `plan_digest`
   // and refreshed counts, which is exactly what the caller needs to show the

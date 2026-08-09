@@ -17,11 +17,28 @@
  * `plan_digest` PER RECORD, inside that record's own `record_lock`, immediately
  * before touching it. That is what stops a write that returned 200 from being
  * destroyed — but it means a stale plan detected mid-reset refuses AFTER the loop
- * has already restored the records it had reached. `DemoResetResponse` carries no
- * field that separates that case from a refusal that changed nothing
- * (`removed_count` is 0 for a canonical-only abort; `previous_count` and
- * `final_count` are both 5), so no reader-facing surface can honestly claim the
- * difference. The fix was to stop claiming it, not to guess it.
+ * has already restored the records it had reached.
+ *
+ * WHY THE CLAIM IS BANNED RATHER THAN QUALIFIED — A CHOICE, NOT A CONSTRAINT. This
+ * comment used to say `DemoResetResponse` "carries no field that separates that
+ * case", which reads as a fact about the contract and is not one: the server
+ * computes exactly that boolean and simply does not serialize it. It is `mutated`
+ * in `reset_to_canonical_seed` — set the moment an id is removed or
+ * re-materialised, and already consulted there to decide whether the reported
+ * figures may be echoed from the snapshot or must be measured from disk. THE
+ * ALTERNATIVE WAS: add one field to `DemoResetResponse` and to `ApiDemoResetResult`,
+ * serialize `mutated`, and let the dialog say "nothing was reset" only when the
+ * server says so. That was not done — a destructive-path API field is a contract
+ * this project would then have to keep true forever, and no screen needs it: the
+ * stale branch RE-PREVIEWS, so the operator is shown re-measured figures rather than
+ * a sentence about them. So the claim was dropped, not guessed. If a later slice
+ * does add the field, this ban is the thing to revisit.
+ *
+ * (An earlier revision of this comment also offered "`previous_count` and
+ * `final_count` are both 5" as evidence. That is no longer true and was the shallower
+ * half of a real defect: a per-record abort now MEASURES both, including when it
+ * aborted before mutating anything, because a per-record abort is reachable only
+ * once a write has landed and the snapshot is therefore stale by construction.)
  *
  * WHAT IT ASSERTS, and why in this order:
  *
@@ -37,15 +54,23 @@
  *     pattern narrowed until it detects nothing fails here rather than going
  *     quiet. This is the control `upload-claim-parity.test.tsx` added after a
  *     guard shipped with its polarity inverted.
+ *  §5 the dialog's RENDERED generic-error branch — a third site, written inline in
+ *     JSX rather than in `LABELS`, which is exactly why §1–§4 could not see it and
+ *     it kept the retired claim for a whole further slice.
  *
  * WHAT IT DELIBERATELY DOES NOT COVER.
  *
- *  · The AMBIGUOUS refusal and the generic-error branch in
- *    `ResetDemoDialog.tsx` also say "No records were changed". The first is TRUE
- *    (an ambiguous record is refused before the mutation block). The second is
- *    pre-existing and already false after a failure mid-reset, and is out of this
- *    slice's scope — it is named here so a future reader knows it was seen and
- *    left, not missed.
+ *  · The AMBIGUOUS refusal in `ResetDemoDialog.tsx` also says "No records were
+ *    changed", and it STAYS: an ambiguous record is refused before the mutation
+ *    block, as is every other typed non-precondition refusal that reaches the
+ *    `'refused'` branch (wrong confirmation phrase, not synthetic-only). The claim
+ *    is true there. §5 covers the branch where it was NOT true.
+ *  · Source COMMENTS in `ResetDemoDialog.tsx` made the same retired claim in two
+ *    places (the pre-`resetDemo` comment and the `.catch`); both are corrected, and
+ *    deliberately NOT pinned here. A comment guard would not be a user-facing
+ *    guarantee and should not be presented as one — the header of this file quotes
+ *    the banned phrase itself, which is exactly why a naive file scan cannot tell a
+ *    claim from a prohibition against it.
  *  · The dialog's alert is checked through `LABELS`, the module it renders
  *    verbatim (`<strong>{LABELS.resetStaleTitle}.</strong> {LABELS.resetStaleBody}`).
  *    That the alert really renders those two strings is pinned by
@@ -118,14 +143,23 @@ describe('C2 §1 · a refusal really can follow a mutation, so the absolute clai
   it('and consults it inside the mutation loops, refusing with the existing reason', () => {
     // Both loops, so a slice that guards only one is caught.
     expect(workspaceSrc.match(/if check_rows and _row_changed\(/g) ?? []).toHaveLength(2);
-    expect(workspaceSrc).toMatch(/refusal = "plan_digest_stale"\n\s+refused = True\n\s+break/);
+    // Both loops also record WHERE the refusal came from. See the next assertion.
+    expect(
+      workspaceSrc.match(
+        /refusal = "plan_digest_stale"\n\s+refused = True\n\s+row_abort = True\n\s+break/g,
+      ) ?? [],
+    ).toHaveLength(2);
   });
 
   it('so a refusal can arrive with records already mutated — which is the whole point', () => {
-    // THE line that makes the categorical claim false. `mutated` exists only
-    // because a refusal reached this far has already changed the workspace, and
-    // must therefore MEASURE what it left rather than echo the pre-reset snapshot.
-    expect(workspaceSrc).toMatch(/if refused and not mutated:/);
+    // THE line that makes the categorical claim false, and it keys on the ORIGIN of
+    // the refusal rather than on whether it managed to mutate anything first. It
+    // read `if refused and not mutated:` for a slice, which was wrong in a way that
+    // looked conservative: an abort on the FIRST id has mutated nothing, and yet its
+    // snapshot is stale BY CONSTRUCTION, because the only way to reach a per-record
+    // abort at all is for a write to have already landed in the window. `row_abort`
+    // is what sends that case to the measured arm.
+    expect(workspaceSrc).toMatch(/if refused and not mutated and not row_abort:/);
   });
 });
 
@@ -253,5 +287,57 @@ describe('C2 §4 · the ban really detects the copy it retired', () => {
       const alsoShipped = RETIRED.some(([, retired]) => pattern.test(retired));
       expect(alsoShipped, `${what} shipped after all — move it to RETIRED_FORMS`).toBe(false);
     }
+  });
+});
+
+// --- §5 the RENDERED generic-error branch -------------------------------------
+
+/**
+ * The third reader-facing surface, and the one §1–§4 could not see: they read
+ * `LABELS` and `settingsContent`, and this sentence is written inline in the
+ * component's JSX. It shipped as "The reset could not be completed. No records were
+ * changed." — which the dialog cannot know. That branch is reached from `.catch`,
+ * so it covers a network failure AND any status this client does not model,
+ * including a 500 raised inside the mutation loop with records already restored.
+ *
+ * Read from source rather than by rendering, for the reason the header gives: this
+ * file is about the WORDS. `reset-demo.test.tsx` drives the component. The extractor
+ * is proven on the retired sentence below, so a regex narrowed until it selects
+ * nothing fails here instead of going quiet — the same control as §4.
+ */
+const DIALOG_SRC = readFileSync(
+  join(SRC_DIR, 'components', 'ResetDemoDialog.tsx'),
+  'utf8',
+);
+
+/** The JSX body of one `{executeState === '<state>' && ( … )}` branch. */
+function executeStateBranch(state: string): string {
+  const pattern = new RegExp(
+    `\\{executeState === '${state}' && \\(([\\s\\S]*?)\\n\\s*\\)\\}`,
+  );
+  const found = DIALOG_SRC.match(pattern);
+  if (found === null) throw new Error(`no rendered branch for executeState '${state}'`);
+  return found[1];
+}
+
+describe('C2 §5 · the dialog’s generic-error branch claims no outcome it cannot see', () => {
+  it('the branch is really located, and really carries prose', () => {
+    // The control. Without it, a regex that stopped matching would leave the ban
+    // below scanning an empty string and passing forever.
+    expect(executeStateBranch('error')).toMatch(/The reset could not be completed/);
+  });
+
+  it('and states no categorical no-mutation claim', () => {
+    const body = executeStateBranch('error');
+    for (const [what, pattern] of BANNED) {
+      expect(body, `states the banned claim: ${what}`).not.toMatch(pattern);
+    }
+  });
+
+  it('while the TYPED refusal branch keeps it, because there it is true', () => {
+    // Not an oversight and not inconsistency: `'refused'` is only ever set for a
+    // typed refusal that is decided BEFORE the mutation block. Asserted so that a
+    // future sweep does not "fix" a true sentence into a vaguer one.
+    expect(executeStateBranch('refused')).toMatch(/No records were changed/);
   });
 });

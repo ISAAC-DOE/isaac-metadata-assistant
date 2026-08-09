@@ -44,9 +44,15 @@
  * re-checked per record, immediately before that record is touched, so a write that
  * lands mid-reset is refused rather than destroyed — and the reset stops there,
  * leaving records restored before that point restored. A `412` therefore usually, but
- * not always, mutated nothing, and no field on `DemoResetResponse` tells the two
- * apart. This component must not claim the difference it cannot see; see
- * `LABELS.resetStaleTitle` for the full reasoning.
+ * not always, mutated nothing, and `DemoResetResponse` carries no field that tells
+ * the two apart. That last clause used to read as though the contract made the
+ * distinction unavailable; it does not. The server computes the boolean (`mutated`,
+ * in `reset_to_canonical_seed`) and this project CHOSE not to serialize it, because
+ * the stale branch re-previews and shows re-measured figures instead of asserting a
+ * sentence about them. So: this component must not claim a difference it cannot see —
+ * and the reason it cannot see it is a decision, recorded in
+ * `__tests__/reset-claim-parity.test.tsx`, not a limit. See `LABELS.resetStaleTitle`
+ * for the full reasoning.
  *
  * What this component must therefore NEVER do is present a retry as a formality. A
  * stale refusal RE-PREVIEWS (read-only), shows the refreshed figures, and CLEARS the
@@ -177,7 +183,10 @@ export function ResetDemoDialog() {
     setExecuteState('pending');
     // The digest comes from THIS dialog's own preview — never from a constant, a
     // cache, or a value the client made up. If the workspace has moved, the server
-    // refuses and nothing is written.
+    // refuses rather than act on figures the operator never saw. It does NOT follow
+    // that nothing was written: the same refusal can arrive from the PER-RECORD
+    // check with earlier records already restored (C2 — see this file's header).
+    // That sentence stood here for a whole slice after the header declared it false.
     api
       .resetDemo('execute', RESET_CONFIRMATION, preview.data.plan_digest)
       .then((res) => {
@@ -215,7 +224,10 @@ export function ResetDemoDialog() {
         }
       })
       .catch(() => {
-        // Network / unexpected status. Nothing was written; show a safe message.
+        // A network failure, or a status this client does not model. NOT a typed
+        // refusal, so nothing here knows whether the reset ran: a 500 raised inside
+        // the mutation loop arrives this way with records already restored. Show a
+        // message that claims neither outcome — see the rendered copy below.
         setExecuteState('error');
       });
   };
@@ -440,14 +452,29 @@ export function ResetDemoDialog() {
                 </p>
               )}
 
+              {/*
+                * A TYPED refusal that is not the precondition: an ambiguous record,
+                * a wrong confirmation phrase, or a deployment not in synthetic-only
+                * mode. Every one of those is decided BEFORE the mutation block, so
+                * "No records were changed" is true here and stays.
+                */}
               {executeState === 'refused' && (
                 <p className="reset-refused" role="note">
                   The backend refused the reset for safety. No records were changed.
                 </p>
               )}
+              {/*
+                * NOT a typed refusal — a network failure or a status this client does
+                * not model. It used to end "No records were changed", which this
+                * screen cannot know: a fault raised inside the mutation loop reaches
+                * here with records already restored. It now claims neither outcome
+                * and points at the only thing that can answer the question, which is
+                * a fresh reading of the figures.
+                */}
               {executeState === 'error' && (
                 <p className="reset-refused" role="note">
-                  The reset could not be completed. No records were changed.
+                  The reset could not be completed, and this screen cannot tell whether any of
+                  it ran. Close this and open it again to read the current figures.
                 </p>
               )}
 
