@@ -2013,3 +2013,47 @@ def test_a_conflict_on_create_is_a_412_and_not_an_unhandled_500(app, monkeypatch
     # have materialised from the same row on the next read.
     on_disk = ws.workspace_root() / body["experiment_id"] / "experiment.json"
     assert json.loads(on_disk.read_text()) == captured["winner"]
+
+
+def test_a_refused_write_rolls_back_run_versions_too(app, monkeypatch):
+    """A refused durable write must not leave a RUN claiming a rev that is nowhere.
+
+    THE MERGE DEFECT THIS PINS, and it is a merge defect specifically. Two branches
+    changed `save_versioned` without being able to see each other: the durable
+    compare-and-swap added a rollback of the experiment's `rev`/`updated_utc` on a
+    failed save, and the run work added `_bump_changed_runs()` just above it, noting
+    that it left bumped run revs ahead of disk "because the durable write path is
+    being changed concurrently on another branch". Git merges the two cleanly. The
+    RESULT is wrong: the experiment heals and every run stays advanced, which is the
+    same defect the rollback was written to close, one level down.
+
+    It is not cosmetic. `_bump_changed_runs` is documented as the ONLY writer of
+    `Run.rev`, and that is what makes excluding `rev` from the run signature sound.
+    A phantom bump breaks it — the next successful save computes
+    `max(run.rev, disk_rev) + 1` from a value that was never persisted, so a single
+    refused write permanently offsets that run's version series from disk.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Runs"}).json()["id"]
+
+    exp = ws.load_experiment(rid)
+    run = exp.add_run(label="Cold")
+    exp.save_versioned()
+    persisted = ws.load_experiment(rid).runs[0]
+    persisted_run_rev, persisted_run_stamp = persisted.rev, persisted.updated_utc
+
+    # Refuse the next write, with a winner the loser must not overwrite.
+    exp = ws.load_experiment(rid)
+    exp.runs[0].label = "Warm"
+    conn.refuse_upsert.add(rid)
+    conn.stored[rid] = dict(ws.load_experiment(rid).to_state(), rev=9, title="The winner")
+
+    with pytest.raises(repo.DurableWriteConflict):
+        exp.save_versioned()
+
+    assert exp.runs[0].rev == persisted_run_rev, (
+        "the refused write left a run claiming a rev that was never persisted"
+    )
+    assert exp.runs[0].updated_utc == persisted_run_stamp
+    assert exp.runs[0].id == run.id
