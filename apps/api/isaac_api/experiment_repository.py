@@ -63,11 +63,11 @@ Guard 3 is also what keeps a claim three product surfaces make true — see
 
 WHAT HAPPENS WHEN THE DATABASE IS CONFIGURED AND DOES NOT ANSWER
 ================================================================
-This is the state the deployed pod is in RIGHT NOW, and it is why this section
-exists rather than being left to "it will be fine". ``PGHOST`` and ``PGDATABASE``
-are already set in the pod, so the durable backend selects itself on the next
-image roll — and the migration is deliberately NOT applied at boot, so
-``isaac_experiments`` does not exist. Every statement against it raises.
+RE-DATED 2026-08-09. This said "the state the deployed pod is in RIGHT NOW" —
+true then, false since Dean applied ``0001_experiments``; see
+``docs/evidence/hosted-0001-verification-2026-08-09.md``. It is still the state
+of a fresh or rolled-back deployment and of the window before ``0002``, where
+``PGHOST`` is set, no migration runs at boot, and a missing table raises.
 
 Before this was handled, that turned three previously database-free operations
 into unhandled 500s: ``GET /api/experiments`` (My Experiments rendered "Backend
