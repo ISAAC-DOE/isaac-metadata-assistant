@@ -220,15 +220,27 @@ class DurableWriteConflict(RuntimeError):
     SAME transaction that refused the write. The route uses it to report the true
     current rev and ETag — reporting the losing write's own (already bumped) rev
     would echo a version that exists nowhere.
+
+    ``experiment_id`` is carried SEPARATELY from ``stored_state`` on purpose. It
+    is always known at the raise site, whereas the read-back can fail — and the
+    handler of last resort (``routes.durable_write_conflict_handler``) has no
+    experiment of its own to fall back on. Without it that handler emitted
+    ``experiment_id: null`` where every other ``stale_write`` body carries a
+    string, which is a body a client would have to special-case.
     """
 
-    def __init__(self, stored_state: dict | None = None) -> None:
+    def __init__(
+        self, stored_state: dict | None = None, *, experiment_id: str | None = None
+    ) -> None:
         super().__init__(
             "the stored experiment has moved on since this copy was read; "
-            "nothing was written"
+            "this write was not applied"
         )
         #: The winner's state document, or ``None`` if it could not be read back.
         self.stored_state = stored_state
+        #: The id of the record whose write was refused. Known at the raise site
+        #: even when the read-back returns nothing.
+        self.experiment_id = experiment_id
 
     def current_experiment(self, fallback: "ws.Experiment") -> "ws.Experiment":
         """The experiment as the DATABASE holds it, or ``fallback`` unchanged.
@@ -614,8 +626,8 @@ class PostgresOrdinaryStore:
     def persist(self, exp: "ws.Experiment") -> None:
         """COMPARE-AND-SWAP one ordinary-scope experiment's authoritative state.
 
-        RAISES :class:`StorageUnavailable` if the database does not take the write,
-        and deliberately does NOT fall back to the filesystem. The caller
+        RAISES :class:`StorageUnavailable` if the database is not REACHABLE, and
+        deliberately does NOT fall back to the filesystem. The caller
         (``workspace.Experiment.save``) has already been told, through
         ``storage_status``, that this deployment stores experiments durably; a
         quiet ephemeral write would withdraw that promise without saying so, and
@@ -628,6 +640,13 @@ class PostgresOrdinaryStore:
         outage and is not recorded as one; see the exception's own docstring for
         why all three failure types are kept apart, and :data:`Q_UPSERT_EXPERIMENT`
         for the predicate itself.
+
+        THE "SO THE WORKSPACE FILE IS NOT REWRITTEN" CLAUSE ABOVE BELONGS TO THE
+        OUTAGE AND NOT TO THE REFUSAL, and it used to be phrased as though it
+        covered both. This client's state is never written locally in either case
+        — but on a refusal the caller rewrites the workspace file with the
+        WINNER's document before re-raising, which is what stops a strict
+        compare-and-swap wedging (``ws.Experiment._adopt_winner_locally``).
 
         THE TWO REFUSALS ARE RAISED IN DIFFERENT PLACES, AND BOTH PLACEMENTS ARE
         LOAD-BEARING. :class:`NotPersistable` is raised before the try, because it
@@ -662,7 +681,7 @@ class PostgresOrdinaryStore:
         # writers raced.
         _note_storage_success()
         if not accepted:
-            raise DurableWriteConflict(stored)
+            raise DurableWriteConflict(stored, experiment_id=exp.id)
 
     # -- restore ---------------------------------------------------------------
 

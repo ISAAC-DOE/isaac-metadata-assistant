@@ -426,6 +426,12 @@ async def durable_write_conflict_handler(request, exc) -> JSONResponse:
     validator to echo — the honest answer, not a fabricated one — and the
     ``current_*`` pair is filled only from the winner's row when it can be read,
     never from the losing write.
+
+    ``experiment_id`` COMES FROM THE EXCEPTION, NOT FROM THE ROW. It is known at
+    every raise site, while the read-back can return nothing — and reading it out
+    of ``stored_state`` alone emitted ``experiment_id: null`` in exactly the case
+    a client most needs it named. ``_stale_write`` always carries a string; so
+    does this.
     """
     state = exc.stored_state if isinstance(exc.stored_state, dict) else {}
     rev = state.get("rev")
@@ -436,7 +442,7 @@ async def durable_write_conflict_handler(request, exc) -> JSONResponse:
         status_code=412,
         content={
             "error": "stale_write",
-            "experiment_id": state.get("id"),
+            "experiment_id": getattr(exc, "experiment_id", None) or state.get("id"),
             "expected_rev": None,
             "current_rev": rev,
             "expected_version": None,
@@ -1715,6 +1721,18 @@ class CreateExperimentRequest(BaseModel):
                 "created."
             )
         },
+        412: {
+            "description": (
+                "This deployment stores experiments in its own database, and that "
+                "database already holds a different record under the id this "
+                "request would have used. Nothing was created. The body is the "
+                "same `stale_write` shape the record write operations return, "
+                "with `expected_rev` and `expected_version` null because a create "
+                "carries no `If-Match`. Reaching this requires an id collision, "
+                "which this application does not produce — it is documented "
+                "because the response is declared, not because it is expected."
+            )
+        },
         503: {
             "description": (
                 "This deployment stores experiments in its own database, and that "
@@ -2004,7 +2022,7 @@ def post_answers(
         exp.answer_log.append({"applied": apply_shape, "at": timestamp})
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
-            return stale  # another replica won the race; nothing was written
+            return stale  # another replica won the race; this change was not applied
         if not changed:
             exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
         # Derived downstream invalidation (P28.2) at the post-mutation revision. A
@@ -2136,7 +2154,7 @@ def post_edit(
         exp.answer_log.append({"edited": apply_shape, "at": timestamp})
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
-            return stale  # another replica won the race; nothing was written
+            return stale  # another replica won the race; this change was not applied
         if not changed:
             exp.answer_log.pop()  # byte-stable no-op: discard the speculative log append
         changed_fields = submitted_fields if changed else []
@@ -2194,6 +2212,27 @@ def _write_record(exp: Experiment, result) -> None:
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
+        # OVERRIDES the shared `_R_PRECONDITION` 412, which says "nothing was
+        # written" — true of every other operation and NOT true of this one. Export
+        # writes its two artifacts before it saves the state, so the second of the
+        # two 412 arms leaves them on disk. Same defect class as the shared save
+        # helper's docstring, one surface further out: this is the description a
+        # client actually reads.
+        412: {
+            "description": (
+                "The write was refused because another writer got there first, so "
+                "your change was not applied and the response echoes the current "
+                "`ETag` so a client can refresh in one further request.\n\n"
+                "Two arms, and they differ in what is left on disk. If `If-Match` "
+                "did not match the revision this server read, nothing at all was "
+                "written. If the record's stored copy moved on between that check "
+                "and the durable write, the official record and its evidence "
+                "sidecar had ALREADY been written and they remain — the record's "
+                "own state was not updated, so it still reports as not exported. "
+                "That is a state this API repairs by itself: retry the export and "
+                "it republishes from the current draft."
+            )
+        },
         409: {
             "description": (
                 "This record has already been exported. Records are immutable, so "

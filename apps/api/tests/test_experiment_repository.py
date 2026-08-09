@@ -24,6 +24,7 @@ never dialled.
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 import pytest
@@ -1739,11 +1740,20 @@ def test_an_unusable_winner_leaves_the_local_file_alone_and_still_412s(
     assert json.loads(ws.load_experiment(rid).state_path.read_text()) == before
 
 
-def test_a_failing_adoption_degrades_and_never_turns_the_412_into_a_500(app, monkeypatch):
-    """The adoption is a convenience on an error path; it may not own the outcome.
+def test_a_failing_adoption_degrades_and_never_turns_the_412_into_a_500(
+    app, monkeypatch, caplog
+):
+    """The adoption is a convenience on an error path; it may not own the outcome —
+    AND IT MAY NOT BE SILENT ABOUT FAILING.
 
-    A read-only filesystem, a full disk, a permission change — none of them make a
-    concurrency refusal into a server error.
+    A read-only filesystem, a full disk, a permission change: none of them make a
+    concurrency refusal into a server error, and all of them make this record
+    behave EXACTLY like the permanent wedge the adoption exists to remove. This
+    test used to assert only the 412, so a deployment in which the adoption always
+    failed would have looked identical to one in which it always worked — no log
+    record, and correctly no `storage_failure` bit, because a refusal is not an
+    outage. "Degrading is not silent" is this codebase's own rule, stated at
+    `workspace._hydrate_ordinary_scope` and again in `experiment_repository`.
     """
     conn = FakeConnection()
     client = _durable_client(app, monkeypatch, conn)
@@ -1753,14 +1763,82 @@ def test_a_failing_adoption_degrades_and_never_turns_the_412_into_a_500(app, mon
     conn.stored[rid] = dict(ws.load_experiment(rid).to_state(), rev=9)
 
     def _boom(self, conflict):
-        raise OSError("read-only file system")
+        raise OSError("read-only file system: /srv/isaac/workspace/experiment.json")
 
     monkeypatch.setattr(ws.Experiment, "_adopt_winner_locally", _boom)
-    r = client.post(
-        f"/api/experiments/{rid}/answers", json=_answers_payload(), headers={"If-Match": etag}
-    )
+    with caplog.at_level(logging.WARNING, logger="isaac_api.workspace"):
+        r = client.post(
+            f"/api/experiments/{rid}/answers",
+            json=_answers_payload(),
+            headers={"If-Match": etag},
+        )
     assert r.status_code == 412, r.text
     assert r.json()["error"] == "stale_write"
+
+    warnings = [rec for rec in caplog.records if rec.levelno == logging.WARNING]
+    assert len(warnings) == 1, [rec.getMessage() for rec in caplog.records]
+    message = warnings[0].getMessage()
+    # It NAMES THE RECORD and the failure CLASS, so an operator can tell this
+    # record apart from a healthy refusal...
+    assert rid in message
+    assert "OSError" in message
+    # ...and it carries NO PATH. `OSError`'s own message would have leaked the
+    # absolute workspace path into the log, which is an exfiltration surface like
+    # any other (P30.6); only `type(exc).__name__` is interpolated.
+    assert "/srv/isaac" not in message
+    assert "read-only file system" not in message
+    # A refusal is still not an outage: health must not start reporting one.
+    assert client.get("/api/health").json()["experiment_storage"]["durable"] is True
+
+
+def test_the_adoption_never_moves_the_local_copy_BACKWARDS(app, monkeypatch):
+    """REVIEW M-1. The one condition that makes this write safe was the one
+    condition not checked.
+
+    A refusal implies `Q_UPSERT_EXPERIMENT`'s clause 2 was false, so the stored rev
+    is at least the offered rev and therefore already past the local one — but that
+    is an invariant in ANOTHER MODULE, and `_adopt_winner_locally` neither stated
+    nor checked it while carefully guarding three lesser conditions. Probed
+    directly, a winner at rev 1 really was written over a local file at rev 5.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Ahead"}).json()["id"]
+
+    # Move the LOCAL copy to rev 5 the ordinary way, through the store.
+    exp = ws.load_experiment(rid)
+    exp.rev = 4
+    exp.draft = ws._full_draft()
+    assert exp.save_versioned() is True and exp.rev == 5
+    local_before = json.loads(exp.state_path.read_text())
+
+    # A stale winner: same record, same generation, an OLDER revision.
+    behind = dict(local_before, rev=1, title="an older document")
+    exp._adopt_winner_locally(repo.DurableWriteConflict(behind, experiment_id=rid))
+    assert json.loads(exp.state_path.read_text()) == local_before, "the copy went backwards"
+
+    # A winner at an EQUAL rev is still adopted — that is the identical-document /
+    # same-second case the predicate's clause 3 admits, and it is not a regression.
+    equal = dict(local_before, title="an equal-rev document")
+    exp._adopt_winner_locally(repo.DurableWriteConflict(equal, experiment_id=rid))
+    assert json.loads(exp.state_path.read_text())["title"] == "an equal-rev document"
+
+
+def test_the_adoption_refuses_a_winner_from_a_different_generation(app, monkeypatch):
+    """Two generations cannot be ORDERED — the nonce is random — so "newer" is not
+    defined across them, and a refusal implies clause 1 was false, i.e. that they
+    matched. A differing generation here means an assumption has already broken;
+    the local copy is left alone rather than written on top of.
+    """
+    conn = FakeConnection()
+    client = _durable_client(app, monkeypatch, conn)
+    rid = client.post("/api/experiments", json={"title": "Reborn"}).json()["id"]
+    exp = ws.load_experiment(rid)
+    local_before = json.loads(exp.state_path.read_text())
+
+    reborn = dict(local_before, rev=99, generation="ffffffffffffffff", title="recreated")
+    exp._adopt_winner_locally(repo.DurableWriteConflict(reborn, experiment_id=rid))
+    assert json.loads(exp.state_path.read_text()) == local_before
 
 
 def test_a_worked_example_record_can_never_be_healed_from_a_row():
@@ -1880,18 +1958,29 @@ def test_a_conflict_on_create_is_a_412_and_not_an_unhandled_500(app, monkeypatch
     `StorageUnavailable` only — so a `DurableWriteConflict` escaping there was an
     unhandled 500 for a condition that is not a server error.
 
-    Reaching it needs a ULID collision with a row of the same generation, which
-    this application cannot produce; the defect is the unguarded call site, not the
-    likelihood. Forced here by refusing every upsert.
+    Reaching it needs an id collision with a row carrying the same generation,
+    which this application cannot produce; the defect is the unguarded call site,
+    not the likelihood.
+
+    THE INJECTED CONFLICT MATCHES THE GENERATION, and that is the point of this
+    revision. The fixture used to raise with `generation: "gwin"` against a record
+    whose generation was freshly minted — describing a refusal the predicate cannot
+    produce, because a differing generation is ADMITTED by clause 1. A test fixture
+    that models an impossible server answer proves the handler works on input the
+    server never sends.
     """
     conn = FakeConnection()
     client = _durable_client(app, monkeypatch, conn)
+    captured: dict = {}
 
     # The fake refuses by id, and a created id is minted INSIDE the request, so it
     # cannot be named in advance. Refused at the seam instead — the store's own
     # method — which is exactly the shape a real collision presents to the route.
+    # The winner is built FROM the record being written, so it shares its id and
+    # its generation and differs only in `rev`: the one shape a real refusal has.
     def _always_conflict(self, exp):
-        raise repo.DurableWriteConflict({"id": exp.id, "rev": 4, "generation": "gwin"})
+        captured["winner"] = dict(exp.to_state(), rev=4, title="the row's own record")
+        raise repo.DurableWriteConflict(captured["winner"], experiment_id=exp.id)
 
     monkeypatch.setattr(repo.PostgresOrdinaryStore, "persist", _always_conflict)
     created = client.post("/api/experiments", json={"title": "Colliding"})
@@ -1906,12 +1995,21 @@ def test_a_conflict_on_create_is_a_412_and_not_an_unhandled_500(app, monkeypatch
         "expected_version",
         "current_version",
     }
-    assert body["current_rev"] == 4 and body["current_version"] == "gwin.4"
+    generation = captured["winner"]["generation"]
+    # `experiment_id` is a STRING, as it is on every other `stale_write` body. It
+    # comes from the exception, which knows it at every raise site, and not from
+    # the read-back, which can return nothing.
+    assert body["experiment_id"] == captured["winner"]["id"]
+    assert isinstance(body["experiment_id"], str)
+    assert body["current_rev"] == 4
+    assert body["current_version"] == f"{generation}.4"
     # No client validator exists on a create, so the echoed expectation is null
     # rather than invented.
     assert body["expected_rev"] is None and body["expected_version"] is None
-    assert created.headers["ETag"] == '"gwin.4"'
-    # The refusal created nothing on disk either: the durable write goes first, and
-    # the winner's document here is not loadable as an Experiment, so the adoption
-    # declines to write it rather than leaving an unreadable state file behind.
-    assert not (ws.workspace_root() / body["experiment_id"]).exists()
+    assert created.headers["ETag"] == f'"{generation}.4"'
+    # Nothing of the CLIENT's was created: the durable write goes first, so the new
+    # record's own state never reached disk. What the directory holds is the
+    # WINNER's document — which is correct, and is exactly what `hydrate` would
+    # have materialised from the same row on the next read.
+    on_disk = ws.workspace_root() / body["experiment_id"] / "experiment.json"
+    assert json.loads(on_disk.read_text()) == captured["winner"]
