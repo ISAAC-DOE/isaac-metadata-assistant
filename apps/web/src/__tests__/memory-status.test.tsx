@@ -24,6 +24,17 @@ import {
  * stubbed GET /api/graph/status response (no-fake-data invariant).
  */
 
+/*
+ * THE HARNESS DEADLINE. This file was NOT on the list of known-flaky graph
+ * suites; it was found by measurement, failing `renders exactly the three
+ * approved chips in order` by HARNESS TIMEOUT on an untouched tree in the same
+ * run that took down the two graph files, and passing on the next identical run.
+ * It mounts the same Project Memory screen, so it is the same contention, not a
+ * second defect. No time budget is declared here either. See
+ * `experiment-graph.test.tsx` for the full reasoning.
+ */
+vi.setConfig({ testTimeout: 30000 });
+
 function renderScreen() {
   return render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
