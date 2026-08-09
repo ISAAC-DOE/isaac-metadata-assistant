@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "9cace659fb77afb63cfd9dc1bf1133dc2a8b28cc7cedeb5d679af6b86eda72d2"
+        "sha256": "dc3000a8f8673e678d4406601b2586c55c798ef4efe50030af93a7f895b8328f"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "4e91bc55557a581451c939fa3c5f44bbbff88baa2e12edf0fee3fc3ce18cd31f"
+    "served_manifest_fingerprint": "5498be7af763e37025b86d4074468936537c08b3dbf2064560f6836c96180cfc"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

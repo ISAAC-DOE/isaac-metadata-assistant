@@ -376,11 +376,29 @@ def _existing_generation(rid: str, *, session_id: str | None = None) -> str | No
 # exports to N records, one per Run.
 #
 # WHAT THIS MODULE DOES NOT DO, deliberately. Export still mints exactly one
-# record per draft (``src/isaac_records/export.py``) and ``Experiment.record_id``
-# is still the singular field the current 1:1 path writes. Export fan-out is a
-# LATER slice. This slice makes the Run exist, persist and round-trip; it changes
-# no export behaviour, no route, no migration and nothing under
+# record per draft (``src/isaac_records/export.py``). Export fan-out is a LATER
+# slice. This slice makes the Run exist, persist and round-trip; it changes no
+# export behaviour, no route, no migration and nothing under
 # ``src/isaac_records/`` or ``schema/``.
+#
+# WHAT THE FAN-OUT SLICE MUST CHANGE. This list named only ``record_id`` and was
+# incomplete; the derivations are the larger half of the work:
+#
+# * ``Experiment.record_id`` — the singular field the current 1:1 path writes. Per
+#   contract §1 D1 the record identity is per-Run (``Run.record_id``).
+# * ``Experiment.status`` / ``pending`` / ``export_ready`` — ALL THREE ARE
+#   RUN-BLIND. They derive from ``self.draft`` and ``self.exported()`` alone and
+#   never consult ``self.runs``, so an experiment whose OWN draft is clean reports
+#   ``ready_to_export`` (or ``done``) no matter what its runs contain: a run with
+#   unanswered pending blockers, or one that would fail the export gate, is not
+#   counted anywhere. This is UNREACHABLE TODAY — no route touches runs and nothing
+#   creates one in production — which is why it is recorded here rather than fixed
+#   in this slice. It stops being latent the moment a route can add a run, and
+#   fixing it is part of fan-out, not a follow-up to it: once one Experiment exports
+#   to N records, "is this ready?" is a question about N drafts and has no
+#   single-draft answer. Whether the aggregate is "all runs ready" or "any run
+#   ready", and how a zero-run experiment answers, is a product decision that slice
+#   must make explicitly rather than inherit from the 1:1 shape.
 
 # A DRAFT IS NOT SHAPED LIKE A RECORD, AND THE CONTRACT'S §2 LISTS WERE WRITTEN AS
 # IF IT WERE. This is a correction, recorded rather than quietly applied.
@@ -614,8 +632,16 @@ class Resolution:
     """The resolved view of ONE inherited experiment-level address for ONE run.
 
     Computed on read, never stored. ``payload`` is what this run actually has at the
-    address; ``inherited_payload`` is what the experiment carries RIGHT NOW;
-    ``displaced_payload`` is what the override displaced when it was recorded.
+    address; ``inherited_payload`` is what the experiment carried WHEN THIS WAS
+    RESOLVED; ``displaced_payload`` is what the override displaced when it was
+    recorded.
+
+    EVERY PAYLOAD IS A DEEP COPY, so this is a snapshot and not a window. Mutating
+    one cannot reach the experiment's draft or a stored :class:`Override` — it used
+    to, and ``frozen=True`` did not prevent it, because freezing the dataclass only
+    stops the ATTRIBUTES being rebound and says nothing about the mutable objects
+    they point at. To see a later experiment-level edit, resolve again; that is the
+    inheritance-by-reference of contract §2 D2 working, not a staleness bug.
     """
 
     address: str
@@ -651,7 +677,25 @@ def _experiment_payload_at(draft: dict | None, kind: str, name: str):
 
 
 def resolve_inherited(experiment_draft: dict | None, run: "Run") -> dict[str, Resolution]:
-    """Resolve every inherited experiment-level address for one run. Pure; stores nothing.
+    """Resolve every inherited experiment-level address for one run.
+
+    PURE, AND ITS OUTPUT CANNOT MUTATE ANYTHING EITHER. The docstring used to say
+    only "Pure; stores nothing", which was true of the FUNCTION and false of what it
+    HANDED BACK: every payload was a live reference into ``experiment_draft`` (or
+    into a stored :class:`Override`), so ``res.payload["value"] = ...`` rewrote the
+    experiment's draft — measured — through a call that reads. :class:`Resolution`
+    being a frozen dataclass made that worse rather than better: freezing the record
+    while its payload stays a live mutable alias reads as a guarantee and is not one.
+    Every payload is therefore DEEP-COPIED on the way out.
+
+    That does not weaken contract §2 D2, and the distinction is worth stating exactly
+    because it looks like a contradiction. D2 governs STORAGE: a run stores only the
+    ABSENCE of an override, and nothing copies an experiment value down into a run.
+    A Resolution is not storage — it is a read handout, computed and discarded — so
+    it is a SNAPSHOT taken at call time. Editing an experiment-level field still
+    flows through to every non-overriding run on the next resolve, with no fan-out
+    write, no reconciliation pass and no window of disagreement. What the copy
+    removes is only the ability to write through a read.
 
     THIS IS THE READ HALF OF CONTRACT §2 DECISION D2 — inheritance is BY REFERENCE,
     NEVER BY COPY. A run stores only the ABSENCE of an override; nothing here writes
@@ -695,15 +739,18 @@ def resolve_inherited(experiment_draft: dict | None, run: "Run") -> dict[str, Re
             kind, name = parse_address(address)
         except ValueError:
             continue  # unclassifiable garbage in a persisted document
-        inherited = _experiment_payload_at(draft, kind, name)
+        inherited = copy.deepcopy(_experiment_payload_at(draft, kind, name))
         override = run.overrides.get(address)
         if override is None:
+            # ``payload`` and ``inherited_payload`` are separate copies rather than
+            # the same object twice: a caller mutating one must not appear to move
+            # the other, which is the very confusion this copy exists to remove.
             out[address] = Resolution(
                 address=address,
                 kind=kind,
                 name=name,
                 provenance=PROVENANCE_INHERITED,
-                payload=inherited,
+                payload=copy.deepcopy(inherited),
                 inherited_payload=inherited,
             )
         else:
@@ -712,9 +759,9 @@ def resolve_inherited(experiment_draft: dict | None, run: "Run") -> dict[str, Re
                 kind=kind,
                 name=name,
                 provenance=PROVENANCE_OVERRIDDEN,
-                payload=override.payload,
+                payload=copy.deepcopy(override.payload),
                 inherited_payload=inherited,
-                displaced_payload=override.displaced,
+                displaced_payload=copy.deepcopy(override.displaced),
             )
     return out
 
@@ -729,6 +776,33 @@ def _as_int(raw: object) -> int:
         return int(raw)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return 0
+
+
+def _as_str(raw: object) -> str:
+    """The value if it IS a string, else ``""``. Never raises, and never coerces.
+
+    The companion to :func:`_as_int` for the string-typed keys, and the asymmetry
+    between the two is deliberate rather than an oversight. ``_as_int`` coerces
+    (``int("7") == 7``) because ``int()`` can fail and therefore only accepts what
+    is genuinely integral. ``str()`` CANNOT fail — it is total — so a coercing
+    ``_as_str`` would silently manufacture a value out of anything: ``5`` would
+    become the run id ``"5"``, ``{"a": 1}`` would become the timestamp
+    ``"{'a': 1}"``. That is guessing, and a wrong-typed key on disk is not evidence
+    for any particular string. Falling back to ``""`` instead puts the entry in
+    exactly the bucket a MISSING key was already in, where the existing policy
+    applies unchanged — :func:`_hydrate_runs` drops an id-less run, and an empty
+    ``created_utc``/``label`` is the same legacy default a pre-runs document gets.
+
+    ``or ""`` is what this replaces, and it was not a type guard: it catches
+    ``None`` but every wrong type here is TRUTHY. A ``{"id": 5}`` entry therefore
+    survived hydration and raised ``TypeError`` in ``Run.__post_init__`` ->
+    ``_legacy_generation`` (``"gen:" + rid``) — a measured HTTP 500 on BOTH
+    ``GET /api/experiments/<id>`` and the whole-workspace ``GET /api/experiments``.
+
+    ``isinstance(raw, str)`` is the right test and a truthiness or numeric one is
+    not: ``True`` is an ``int`` in Python and would pass a numeric guard.
+    """
+    return raw if isinstance(raw, str) else ""
 
 
 @dataclass
@@ -830,6 +904,34 @@ class Run:
         Producing a run rather than raising is only half the fix; a run with no id is
         unaddressable and is dropped by :func:`_hydrate_runs`, which owns that policy
         so it lives in one place.
+
+        EVERY KEY IS ALSO TYPE-GUARDED, and ``.get`` with a default was NOT enough —
+        that is the second half of the same defect, measured after the first. ``or
+        ""`` catches ``None`` and nothing else, and every wrong type is truthy, so a
+        persisted ``{"id": 5}`` survived hydration and then raised ``TypeError`` in
+        ``__post_init__`` -> ``_legacy_generation`` (``"gen:" + rid``): the SAME 500
+        on the single record and the whole-workspace list that the hard subscripts
+        caused, reached by a different route. ``{"created_utc": 5}`` was worse,
+        because it did not fail on read at all — it returned 200 and then wedged the
+        WRITE path, since ``sorted_runs`` orders on ``(ordinal, created_utc, id)``
+        and is used by both ``to_state`` and ``_authoritative_signature``. Once two
+        runs' ordinals tie (which every pre-``ordinal`` document does, all defaulting
+        to ``0``) the mixed types are compared and every subsequent save raises,
+        leaving the experiment permanently unsavable with no in-product repair path.
+
+        So the string keys go through :func:`_as_str` exactly as the integer keys go
+        through :func:`_as_int`. ``ordinal``/``rev`` were guarded from the start and
+        their string-typed neighbours were not; that asymmetry is what this closes,
+        rather than closing only the two keys that were observed to break.
+
+        ``draft`` and ``overrides`` keep their own guards (``or {}`` / ``isinstance``).
+        ``record_id`` is passed through UNGUARDED and that is a known remaining gap,
+        stated rather than papered over: its declared type is ``str | None`` and
+        ``None`` is a meaningful value there (not-yet-exported) rather than a
+        fallback, so ``_as_str`` would erase the distinction. No code path in this
+        slice builds a filesystem path from ``Run.record_id`` — the 1:1 export path
+        uses ``Experiment.record_id`` — so it is inert here; the export fan-out slice
+        that starts writing it must guard it at the same time.
         """
         raw_overrides = state.get("overrides")
         # ``or {}`` is not a type guard: a persisted ``"overrides": "nope"`` is
@@ -838,11 +940,11 @@ class Run:
         # subscripts above.
         overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
         return cls(
-            id=state.get("id") or "",
-            experiment_id=state.get("experiment_id") or "",
-            label=state.get("label") or "",
+            id=_as_str(state.get("id")),
+            experiment_id=_as_str(state.get("experiment_id")),
+            label=_as_str(state.get("label")),
             ordinal=_as_int(state.get("ordinal")),
-            created_utc=state.get("created_utc") or "",
+            created_utc=_as_str(state.get("created_utc")),
             draft=state.get("draft") or {},
             record_id=state.get("record_id"),
             overrides={
@@ -851,8 +953,8 @@ class Run:
                 if isinstance(addr, str) and isinstance(o, dict)
             },
             rev=_as_int(state.get("rev")),
-            updated_utc=state.get("updated_utc") or "",
-            generation=state.get("generation") or "",
+            updated_utc=_as_str(state.get("updated_utc")),
+            generation=_as_str(state.get("generation")),
         )
 
 
@@ -949,6 +1051,26 @@ def new_run(
     builder lives in ``experiment_repository`` (which imports this module), and the
     caller that creates a run is the one that knows whether the blank-draft pending
     blockers apply. Nothing scientific is invented here.
+
+    ``draft`` IS DEEP-COPIED, so the run owns its draft outright. The previous
+    ``draft if draft is not None else {}`` stored the caller's dict itself, which
+    made ``run.draft is exp.draft`` true when a run was seeded from its experiment
+    and ``a.draft is b.draft`` true for two runs seeded from one template — a run
+    silently tracking another object is the same defect as an override doing it
+    (:meth:`Experiment.set_run_override`), and it contradicts the whole reason a Run
+    has its OWN draft: contract §1 D1 makes each run a separate ISAAC record.
+
+    It is deliberately fixed NOW even though NO caller passes ``draft`` today. That
+    is what makes it worth doing rather than what makes it safe to defer: the next
+    slice is the one that seeds runs from a template or from the experiment, and the
+    sharing would not announce itself when it arrived. ``_run_signature`` covers
+    ``draft``, so two aliased runs move their ``rev`` in lockstep — the versioning
+    machinery would report the shared state as though both runs had genuinely been
+    edited, MASKING the aliasing instead of exposing it.
+
+    A shallow ``dict(draft)`` would not be enough: a draft's ``fields`` is a map of
+    envelope dicts, so the envelopes — the things carrying evidence — would stay
+    shared one level down.
     """
     return Run(
         id=id or new_record_id(),
@@ -956,7 +1078,7 @@ def new_run(
         label=label if label is not None else f"Run {ordinal}",
         ordinal=ordinal,
         created_utc=created_utc or _now_iso(),
-        draft=draft if draft is not None else {},
+        draft=copy.deepcopy(draft) if draft is not None else {},
         generation=_new_generation(),
     )
 
@@ -1238,13 +1360,25 @@ class Experiment:
         ``_run_signature_payload`` include the whole override record without a no-op
         save churning the version.
 
-        THE DISPLACED PAYLOAD IS DEEP-COPIED AT CAPTURE. Storing the live reference
-        was safe only by accident: both current write paths replace ``exp.draft``
-        wholesale, so nothing mutated the captured object in place — but the
-        docstring on :class:`Override` promises history that "is never refreshed",
-        and one ``exp.draft["fields"][path]["value"] = ...`` would have rewritten it
-        through the shared reference. The copy makes the promise true by
-        construction instead of by the coincidence of how callers happen to write.
+        BOTH PAYLOADS ARE DEEP-COPIED AT CAPTURE. Storing a live reference was safe
+        only by accident: both current write paths replace ``exp.draft`` wholesale,
+        so nothing mutated the captured object in place — but the docstring on
+        :class:`Override` promises history that "is never refreshed", and one
+        ``exp.draft["fields"][path]["value"] = ...`` would have rewritten it through
+        the shared reference. The copy makes the promise true by construction instead
+        of by the coincidence of how callers happen to write.
+
+        That argument was originally applied to ``displaced`` ONLY, and it is
+        STRONGER for ``payload``. An override that silently tracks the object it was
+        built from is the exact INVERSE of contract §2 D2: inheritance is by
+        reference *on purpose*, and an override is the captured, audited displacement
+        of it. A caller overriding "with what the experiment says now, then edited"
+        naturally passes the live envelope — measured, ``override.payload`` WAS
+        ``exp.draft["fields"][path]``, so a later in-place edit moved the override
+        too and ``value`` could never diverge from ``inherited_payload``, which is
+        the entire observable point of recording one. It also silently rewrites
+        content that carries its own evidence, which the no-guessing rules do not
+        allow to change without an act.
         """
         if address_level(address) != LEVEL_EXPERIMENT:
             raise NotOverridable(
@@ -1255,7 +1389,7 @@ class Experiment:
             return existing
         kind, name = parse_address(address)
         override = Override(
-            payload=payload,
+            payload=copy.deepcopy(payload),
             recorded_utc=_now_iso(),
             displaced=copy.deepcopy(_experiment_payload_at(self.draft, kind, name)),
         )
@@ -1301,9 +1435,37 @@ class Experiment:
         Returns the ids bumped (a MEASURED list, not an assertion). Called only from
         the write branch of :meth:`save_versioned`, and it is the ONLY writer of
         ``Run.rev`` — which is the invariant that makes excluding ``rev`` from
-        :func:`_run_signature_payload` sound. A run absent from disk is new and
-        bumps to 1; a run whose signature matches disk is untouched, so an
-        experiment-only edit (a title change, say) never disturbs a run's version.
+        :func:`_run_signature_payload` sound. A run whose signature matches disk is
+        untouched, so an experiment-only edit (a title change, say) never disturbs a
+        run's version.
+
+        A RUN NOT FOUND ON DISK BUMPS TO 1 — and the earlier phrasing of that,
+        "a run absent from disk is NEW and bumps to 1", was wrong in a way worth
+        recording rather than quietly deleting. It equated "absent from disk" with
+        "new", and those differ: ``save()`` is the UNVERSIONED persistence primitive
+        and writes runs without bumping anything, so a run first persisted that way
+        is already on disk with a matching signature. The next ``save_versioned()``
+        therefore skips it — correctly — and it sits at rev 0 rather than at 1.
+        Measured; pinned by ``test_a_run_first_persisted_by_a_plain_save_stays_at_rev_0``.
+
+        THAT BEHAVIOUR IS ACCEPTABLE AND IS NOT TO BE "REPAIRED" INTO MATCHING THE
+        OLD SENTENCE, for three reasons:
+
+        * it is exactly what the experiment itself does. A plain ``save()`` leaves
+          ``Experiment.rev`` at 0 too. Runs are not anomalous; the unversioned
+          primitive is simply unversioned, for runs and their experiment alike.
+        * rev 0 is a designed, safe value, not a broken one. ``version_token()``
+          returns ``"<generation>.0"``, which is unique and non-empty, and it is
+          ``generation`` — minted at genuine creation — that defeats a
+          delete->recreate ABA at rev 0. Nothing depends on rev being >= 1.
+        * the only available repair is worse than the defect. Reaching rev 1 here
+          would mean bumping a run whose on-disk signature MATCHES, which breaks the
+          byte-stable no-op guarantee and directly contradicts the promise two
+          sentences above that an experiment-only edit never disturbs a run's
+          version. Trading a real invariant for a cosmetic one is not a fix.
+
+        Monotonicity is untouched either way: a run that is genuinely edited versions
+        normally from wherever it sits.
 
         ``max(run.rev, disk_rev) + 1`` mirrors ``save_versioned``: a stale in-memory
         run can never regress the persisted rev.

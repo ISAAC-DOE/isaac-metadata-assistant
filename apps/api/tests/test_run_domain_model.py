@@ -589,6 +589,115 @@ def test_the_displaced_payload_is_deep_copied_at_capture():
     assert r.inherited_payload["value"] == "MUTATED IN PLACE"  # live view moved
 
 
+def test_a_resolution_cannot_be_used_to_rewrite_the_experiment_draft():
+    """``resolve_inherited`` is documented "Pure; stores nothing" — that was true of
+    the FUNCTION and false of its OUTPUT.
+
+    ``Resolution`` is a frozen dataclass, which reads as "a value, not a view", but
+    freezing the dataclass while its ``payload`` is a live reference into
+    ``exp.draft`` is precisely the false-safety this repository keeps finding.
+    Measured: ``res.payload["value"] = ...`` rewrote the experiment's draft through a
+    READ. A read handing out a mutation channel into the authoritative draft is worse
+    than the docstring being imprecise — it silently edits evidence-bearing content.
+    """
+    exp = _experiment(draft={"fields": {"sample.material.name": _env("Copper(II) Oxide")}})
+    run = exp.add_run()
+
+    res = exp.resolve_run(run)[ws.field_address("sample.material.name")]
+    res.payload["value"] = "REWRITTEN THROUGH A READ"
+    res.inherited_payload["status"] = "REWRITTEN THROUGH A READ"
+
+    assert exp.draft["fields"]["sample.material.name"] == _env("Copper(II) Oxide")
+
+
+def test_a_resolution_cannot_be_used_to_rewrite_stored_override_history():
+    exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
+    run = exp.add_run()
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
+    address = ws.field_address("sample.sample_form")
+
+    res = exp.resolve_run(run)[address]
+    res.payload["value"] = "REWRITTEN THROUGH A READ"
+    res.displaced_payload["value"] = "REWRITTEN THROUGH A READ"
+
+    assert run.overrides[address].payload == _env("powder")
+    assert run.overrides[address].displaced == _env("pellet")
+
+
+def test_resolution_is_a_snapshot_and_re_reading_is_how_you_see_the_current_value():
+    """The copy does NOT weaken inheritance-by-reference (§2 D2).
+
+    D2 is about STORAGE — the run stores nothing and copies nothing down. A resolved
+    view is a read handout, and each fresh call still reports what the experiment
+    carries right now, with no fan-out write and no reconciliation pass.
+    """
+    exp = _experiment(draft={"fields": {"sample.material.name": _env("Copper(II) Oxide")}})
+    run = exp.add_run()
+    stale = exp.resolve_run(run)[ws.field_address("sample.material.name")]
+
+    exp.draft["fields"]["sample.material.name"]["value"] = "Copper(I) Oxide"
+
+    assert stale.value == "Copper(II) Oxide"  # a snapshot, taken when it was taken
+    fresh = exp.resolve_run(run)[ws.field_address("sample.material.name")]
+    assert fresh.value == "Copper(I) Oxide"  # still by reference, still no copy down
+    assert run.draft == {} and run.overrides == {}
+
+
+def test_the_override_payload_is_deep_copied_at_capture():
+    """The same argument as ``displaced``, applied where it is STRONGER.
+
+    ``Override.displaced`` was deep-copied at capture with the reasoning that storing
+    a live reference is "safe only by accident". ``payload`` — the override's own
+    value — kept the live reference, and an override that silently tracks the object
+    it was built from is the INVERSE of contract §2 D2: inheritance is by reference,
+    an override is a captured, audited DISPLACEMENT of it.
+    """
+    exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
+    run = exp.add_run()
+    caller_owned = _env("powder")
+
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), caller_owned)
+    assert run.overrides[ws.field_address("sample.sample_form")].payload is not caller_owned
+
+    caller_owned["value"] = "MUTATED AFTER CAPTURE"
+
+    assert exp.resolve_run(run)[ws.field_address("sample.sample_form")].value == "powder"
+
+
+def test_an_override_built_from_the_live_experiment_value_does_not_track_it():
+    """The measured case: the override's payload WAS the experiment's own envelope.
+
+    A caller that overrides "with what the experiment says now, then edits it"
+    naturally reaches for the live envelope. Without the copy, editing the experiment
+    afterwards rewrote the run's override through the shared reference — so the
+    override displaced nothing at all, and ``value`` and ``inherited_payload`` could
+    never diverge, which is the entire observable point of an override.
+    """
+    exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
+    run = exp.add_run()
+    live = exp.draft["fields"]["sample.sample_form"]
+
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), live)
+    exp.draft["fields"]["sample.sample_form"]["value"] = "MUTATED IN PLACE"
+
+    r = exp.resolve_run(run)[ws.field_address("sample.sample_form")]
+    assert r.value == "pellet"  # the override is a CAPTURE, not a live alias
+    assert r.inherited_payload["value"] == "MUTATED IN PLACE"  # the experiment moved
+    assert r.displaced_payload["value"] == "pellet"  # history, already deep-copied
+
+
+def test_a_block_override_payload_is_also_deep_copied():
+    """``block:`` payloads are lists/objects, so aliasing bites there too."""
+    exp = _experiment(draft={"tags": ["campaign-a"]})
+    run = exp.add_run()
+    caller_owned = ["campaign-b"]
+
+    exp.set_run_override(run, ws.block_address("tags"), caller_owned)
+    caller_owned.append("appended after capture")
+
+    assert exp.resolve_run(run)[ws.block_address("tags")].value == ["campaign-b"]
+
+
 # =============================================================================
 # 6. versioning
 # =============================================================================
@@ -702,6 +811,52 @@ def test_an_override_bumps_the_run_and_is_idempotent(wsroot):
     assert run.rev == base_rev + 1
 
 
+def test_a_run_first_persisted_by_a_plain_save_stays_at_rev_0(wsroot):
+    """CHARACTERIZATION. This pins the behaviour a docstring used to misdescribe.
+
+    ``_bump_changed_runs`` said "a run absent from disk is new and bumps to 1". That
+    sentence is true only of a run that reaches disk THROUGH ``save_versioned``. A run
+    first written by the unversioned ``save()`` primitive is already on disk with a
+    matching signature, so the next ``save_versioned()`` correctly skips it and it
+    sits at rev 0 indefinitely.
+
+    THE BEHAVIOUR IS DELIBERATE AND MUST NOT BE "FIXED" TO MATCH THE OLD SENTENCE.
+    Bumping it would mean bumping a run whose on-disk signature MATCHES, which is
+    exactly what ``test_an_experiment_only_edit_does_not_disturb_a_run_version``
+    forbids one line later. This test exists so that attempt fails loudly.
+    """
+    exp = _experiment()
+    run = exp.add_run(id="01PLAINSAVEDRUNAAAAAAAAAAA", created_utc="2026-08-08T00:00:00Z")
+
+    exp.save()  # the UNVERSIONED primitive: bumps nothing, by design
+    assert run.rev == 0
+    assert exp.rev == 0  # the experiment does exactly the same thing
+
+    exp.title = "an experiment-only edit"
+    assert exp.save_versioned() is True
+    assert run.rev == 0  # unchanged: its signature matched disk
+    assert ws.load_experiment(exp.id).get_run(run.id).rev == 0
+
+    # rev 0 is a SAFE value, not a broken one: ``generation`` is what makes the
+    # version token unique and defeats a delete->recreate ABA at rev 0.
+    assert run.generation
+    assert run.version_token() == f"{run.generation}.0"
+
+    # And it is not stuck — a real content edit versions it normally.
+    run.label = "renamed"
+    assert exp.save_versioned() is True
+    assert run.rev == 1
+
+
+def test_a_run_first_persisted_by_save_versioned_does_bump_to_1(wsroot):
+    """The half of the old sentence that WAS true, kept explicit beside the half
+    that was not."""
+    exp = _experiment()
+    run = exp.add_run(id="01VERSIONEDSAVEDRUNAAAAAAA", created_utc="2026-08-08T00:00:00Z")
+    assert exp.save_versioned() is True
+    assert run.rev == 1
+
+
 def test_a_stale_in_memory_run_cannot_regress_the_persisted_rev(wsroot):
     exp = _experiment()
     run = exp.add_run(id="01RUNIDFORREGRESSIONTEST01", created_utc="2026-08-08T00:00:00Z")
@@ -759,6 +914,17 @@ def _write_runs(exp: ws.Experiment, runs: list) -> None:
         {"id": "01BADREVRUNIDAAAAAAAAAAAAA", "rev": []},
         "not even an object",
         None,
+        # A WRONG-TYPED ``id``. ``or ""`` catches ``None`` but not a wrong type: each
+        # of these is TRUTHY, so it survived hydration and exploded downstream in
+        # ``__post_init__`` -> ``_legacy_generation`` (``"gen:" + rid``) with a
+        # TypeError. ``True`` is included on purpose — it is an ``int`` in Python, so
+        # a truthiness or numeric guard would let it through where ``isinstance(raw,
+        # str)`` does not.
+        {"id": 5},
+        {"id": True},
+        {"id": ["01AAAAAAAAAAAAAAAAAAAAAAAA"]},
+        {"id": {"a": 1}},
+        {"id": 1.5},
     ],
 )
 def test_one_malformed_run_entry_does_not_500_the_read_path(api, malformed):
@@ -796,8 +962,113 @@ def test_a_good_run_beside_a_malformed_one_survives(api):
     assert [r.id for r in reloaded.runs] == ["01SURVIVINGRUNIDAAAAAAAAAA"]
 
 
+@pytest.mark.parametrize("bad_id", [5, True, ["01AAAAAAAAAAAAAAAAAAAAAAAA"], {"a": 1}, 1.5])
+def test_a_wrong_typed_run_id_does_not_hide_a_second_healthy_experiment(api, bad_id):
+    """THE BLAST RADIUS is the point, not the one bad record.
+
+    ``list_experiments`` enumerates the whole scope, so one unhydratable run entry
+    took ``GET /api/experiments`` to 500 and hid every OTHER experiment in the
+    workspace behind it — including experiments that have no runs at all.
+    """
+    bad_id_exp = api.post("/api/experiments", json={"title": "Has a wrong-typed run id"})
+    healthy = api.post("/api/experiments", json={"title": "Perfectly healthy"})
+    bad_exp_id = bad_id_exp.json()["id"]
+    healthy_id = healthy.json()["id"]
+
+    _write_runs(ws.load_experiment(bad_exp_id), [{"id": bad_id, "experiment_id": bad_exp_id}])
+
+    listing = api.get("/api/experiments")
+    assert listing.status_code == 200, listing.text
+    assert healthy_id in [e["id"] for e in listing.json()["experiments"]]
+    # The unaddressable run is DROPPED, not kept with a coerced id.
+    assert ws.load_experiment(bad_exp_id).runs == []
+
+
+def _corrupt_run_key(exp: ws.Experiment, run_id: str, key: str, value) -> None:
+    """Put a wrong-typed value on ONE persisted run's key, bypassing ``to_state``."""
+    state = json.loads(exp.state_path.read_text())
+    for entry in state["runs"]:
+        if entry["id"] == run_id:
+            entry[key] = value
+    ws.atomic_write_text(exp.state_path, json.dumps(state, indent=2) + "\n")
+
+
+def test_a_wrong_typed_created_utc_does_not_wedge_the_write_path(wsroot):
+    """A read that merely SURVIVES is not enough — the record must stay savable.
+
+    ``created_utc`` is the second component of :meth:`Experiment.sorted_runs`'s key,
+    and ``sorted_runs`` is used by BOTH ``to_state`` and ``_authoritative_signature``.
+    With two runs whose ``created_utc`` types differ, the read returned 200 (so the
+    id fix does not cover this) and then EVERY subsequent save raised
+    ``TypeError: '<' not supported between instances of 'str' and 'int'`` — the
+    experiment became permanently unsavable with no in-product repair path.
+
+    THE TWO ORDINALS MUST TIE for the wrong type to be reached at all, and that is
+    a real document rather than a contrived one: ``ordinal`` is absent from any run
+    entry written before it existed, so ``_as_int`` gives every such run ``0`` and
+    the key falls through to ``created_utc`` on the very first comparison. A first
+    version of this test gave the two runs distinct ordinals, never compared the
+    second component, and passed against the unfixed code.
+    """
+    exp = _experiment()
+    exp.add_run(id="01WELLTYPEDCREATEDUTCRUN01", created_utc="2026-08-08T00:00:00Z")
+    exp.add_run(id="01WRONGTYPEDCREATEDUTCRUN2", created_utc="2026-08-08T00:00:01Z")
+    exp.save()
+    for run_id in ("01WELLTYPEDCREATEDUTCRUN01", "01WRONGTYPEDCREATEDUTCRUN2"):
+        _corrupt_run_key(exp, run_id, "ordinal", 0)  # a pre-``ordinal`` document
+    _corrupt_run_key(exp, "01WRONGTYPEDCREATEDUTCRUN2", "created_utc", 5)
+
+    reloaded = ws.load_experiment(exp.id)  # the read is fine, and always was
+    assert len(reloaded.runs) == 2
+
+    reloaded.sorted_runs()  # used to raise TypeError
+    reloaded.title = "an ordinary edit that must be persistable"
+    assert reloaded.save_versioned() is True
+
+    # Fail-closed to the same value a MISSING created_utc already produced, rather
+    # than coerced to the invented timestamp "5".
+    bad = ws.load_experiment(exp.id).get_run("01WRONGTYPEDCREATEDUTCRUN2")
+    assert bad.created_utc == ""
+
+
+@pytest.mark.parametrize("bad", [5, True, 1.5, ["x"], {"a": 1}])
+def test_a_wrong_typed_label_is_not_kept_as_a_non_string(wsroot, bad):
+    """``label`` was unguarded while ``ordinal`` beside it was guarded by ``_as_int``.
+
+    A label is rendered and is inside ``_run_signature_payload``; keeping a dict or a
+    list there propagates a wrong type into hashing and display instead of failing
+    closed at the boundary where the untrusted document is read.
+    """
+    exp = _experiment()
+    exp.add_run(id="01WRONGTYPEDLABELRUNAAAAAA", created_utc="2026-08-08T00:00:00Z")
+    exp.save()
+    _corrupt_run_key(exp, "01WRONGTYPEDLABELRUNAAAAAA", "label", bad)
+
+    run = ws.load_experiment(exp.id).get_run("01WRONGTYPEDLABELRUNAAAAAA")
+    assert run.label == ""
+
+
+def test_a_wrong_typed_experiment_id_is_not_kept_as_a_non_string(wsroot):
+    """Same defect class as ``label``: ``or ""`` guards ``None`` and nothing else."""
+    exp = _experiment()
+    exp.add_run(id="01WRONGTYPEDEXPIDRUNAAAAAA", created_utc="2026-08-08T00:00:00Z")
+    exp.save()
+    _corrupt_run_key(exp, "01WRONGTYPEDEXPIDRUNAAAAAA", "experiment_id", 5)
+
+    run = ws.load_experiment(exp.id).get_run("01WRONGTYPEDEXPIDRUNAAAAAA")
+    assert run.experiment_id == ""
+
+
 def test_run_from_state_never_raises_on_garbage():
-    for garbage in ({}, {"id": None}, {"ordinal": {}}, {"overrides": "nope"}):
+    for garbage in (
+        {},
+        {"id": None},
+        {"ordinal": {}},
+        {"overrides": "nope"},
+        {"id": 5},
+        {"id": True},
+        {"id": {"a": 1}},
+    ):
         assert isinstance(ws.Run.from_state(garbage), ws.Run)
 
 
@@ -824,6 +1095,46 @@ def test_add_run_refuses_a_duplicate_id():
     exp.add_run(id="01EXPLICITRUNIDAAAAAAAAAAA")
     with pytest.raises(ValueError):
         exp.add_run(id="01EXPLICITRUNIDAAAAAAAAAAA")
+
+
+def test_a_seeded_run_draft_is_not_aliased_to_the_callers_dict():
+    """``draft=draft if draft is not None else {}`` stored the caller's dict itself.
+
+    No caller passes ``draft`` today, so this is a trap laid for the next slice
+    rather than a live bug — and the next slice is precisely the one that seeds runs
+    from a template or from the experiment. ``_run_signature`` would move both runs'
+    revs together, which MASKS the sharing instead of surfacing it.
+    """
+    exp = _experiment(draft={"fields": {"sample.material.name": _env("Copper(II) Oxide")}})
+    run = exp.add_run(draft=exp.draft)
+
+    assert run.draft is not exp.draft
+    exp.draft["fields"]["context.temperature_K"] = _env(77)
+    assert "context.temperature_K" not in run.draft["fields"]
+
+
+def test_two_runs_seeded_from_one_template_do_not_share_state():
+    template = {"fields": {"context.environment": _env("He")}}
+    exp = _experiment()
+    a = exp.add_run(draft=template)
+    b = exp.add_run(draft=template)
+
+    assert a.draft is not b.draft
+    a.draft["fields"]["context.temperature_K"] = _env(77)
+
+    assert "context.temperature_K" not in b.draft["fields"]
+    assert "context.temperature_K" not in template["fields"]  # the caller's dict, intact
+
+
+def test_new_run_deep_copies_rather_than_shallow_copies():
+    """A shallow copy would leave the NESTED envelopes shared, which is the shape
+    a real draft actually has — ``fields`` is a map of dicts."""
+    template = {"fields": {"context.environment": _env("He")}}
+    run = ws.new_run("01RUNDOMAINMODELTEST000001", ordinal=1, draft=template)
+
+    run.draft["fields"]["context.environment"]["value"] = "N2"
+
+    assert template["fields"]["context.environment"]["value"] == "He"
 
 
 def test_unique_ids_make_the_signature_order_independent():
