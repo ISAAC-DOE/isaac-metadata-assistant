@@ -291,17 +291,35 @@ export const LABELS = {
     'Nothing. None of the built-in examples has been changed since it was set up.',
 
   // R1 — the workspace moved between opening this window and pressing the button, so
-  // the server refused and wrote nothing. This copy has three jobs and does all
-  // three: say plainly that no records changed, say WHY the refusal happened in
-  // terms of the workspace rather than of HTTP, and send the operator back to the
-  // refreshed numbers. It must NEVER offer a one-click retry: the figures the
-  // operator approved are no longer the figures that apply, so re-approving is the
+  // the server refused. This copy has two jobs and does both: say WHY the refusal
+  // happened in terms of the workspace rather than of HTTP, and send the operator
+  // back to the refreshed numbers. It must NEVER offer a one-click retry: the figures
+  // the operator approved are no longer the figures that apply, so re-approving is the
   // whole point rather than a formality.
-  resetStaleTitle: 'Nothing was reset — this workspace changed',
+  //
+  // IT USED TO HAVE A THIRD JOB, AND THAT JOB WAS TO STATE SOMETHING THAT CAN BE
+  // FALSE. The title read "Nothing was reset" and the body "…and no records were
+  // changed". C2 made the reset re-check its precondition PER RECORD, inside each
+  // record's own lock, immediately before touching it — so a write that lands
+  // mid-reset is refused instead of destroyed, and the reset stops at that record.
+  // Records restored before that point stay restored. That refusal arrives as the
+  // same `plan_digest_stale` this copy renders, and NOTHING in `DemoResetResponse`
+  // distinguishes it: `removed_count` is 0 for a canonical-only abort, and
+  // `previous_count` and `final_count` are both 5. So a CONDITIONAL message cannot be
+  // built honestly from what the server sends.
+  //
+  // The fix is not a detector. It is to stop making the categorical claim at all and
+  // keep only what is true in every case: the reset was refused, why, and what to do
+  // next. The operator loses no information they can act on — the refreshed figures
+  // below state the actual current workspace, measured, which is strictly better than
+  // a sentence asserting a state nobody checked. `__tests__/reset-demo.test.tsx` pins
+  // BOTH the new wording and the ABSENCE of the two old claims, so a well-meaning
+  // "reassuring" rewrite cannot quietly restore them.
+  resetStaleTitle: 'Reset refused — this workspace changed',
   resetStaleBody:
-    'Something in this workspace changed after this window opened, so the reset was ' +
-    'refused and no records were changed. The figures below have been refreshed. ' +
-    'Please read them again and confirm again if you still want to reset.',
+    'Something in this workspace changed after this window opened, so the server ' +
+    'refused to act on the figures you approved. The figures below have been ' +
+    'refreshed. Please read them again and confirm again if you still want to reset.',
 
   // The worked example refused to re-run because its target record has been
   // edited (POST /api/demo/run → 409 `demo_target_drifted`). The server protected

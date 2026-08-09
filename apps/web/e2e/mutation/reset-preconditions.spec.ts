@@ -148,10 +148,17 @@ test.describe('R4 · reset preconditions', () => {
 
     // REFUSED, in the operator's terms — and the refusal must not read as an error or
     // as an ambiguity, because neither is what happened.
+    // C2: the copy no longer claims "Nothing was reset". A per-record precondition
+    // abort refuses with this same `plan_digest_stale` after restoring earlier
+    // records, and nothing on the response tells the two apart — so the message says
+    // what is true in every case and the refreshed figures carry the rest. THIS
+    // scenario really did mutate nothing, which the assertions below MEASURE rather
+    // than read off a sentence.
     const refusal = dialog.locator('.reset-refused[role="alert"]');
-    await expect(refusal).toContainText('Nothing was reset');
+    await expect(refusal).toContainText('Reset refused');
     await expect(refusal).toContainText('this workspace changed');
     await expect(refusal).toContainText('read them again and confirm again');
+    await expect(refusal).not.toContainText('Nothing was reset');
 
     // NOTHING WAS DESTROYED: both the work read in the preview and the work committed
     // in the gap are intact.
@@ -234,8 +241,10 @@ test.describe('R4 · reset preconditions', () => {
       .poll(() => calls.executes().map((e) => e.status), { message: 'no execute was observed' })
       .toEqual([428]);
 
-    // The same honest refusal, and the same disarm.
-    await expect(dialog.locator('.reset-refused[role="alert"]')).toContainText('Nothing was reset');
+    // The same honest refusal, and the same disarm. (C2: "Nothing was reset" is gone
+    // from this copy — see the 412 case above. The no-mutation claim for THIS scenario
+    // is made by the measurement at the end of the test, which is where it belongs.)
+    await expect(dialog.locator('.reset-refused[role="alert"]')).toContainText('Reset refused');
     await expect(confirmBox).toHaveValue('');
     await expect(dialog.getByRole('button', { name: 'Reset Example Records' })).toBeDisabled();
 

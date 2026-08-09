@@ -37,8 +37,22 @@
  * R1 — THE PRECONDITION, and why the UI part of it matters. This dialog is exactly
  * the gap the `plan_digest` closes: the operator reads a classification, thinks, and
  * presses the button some seconds later. The preview's digest is carried into the
- * execute, so if anything changed in between the server refuses (412/428) and writes
- * nothing.
+ * execute, so if anything changed in between the server refuses (412/428) rather than
+ * act on the classification the operator approved.
+ *
+ * C2 — WHY THIS FILE NO LONGER SAYS "WRITES NOTHING". The precondition is now also
+ * re-checked per record, immediately before that record is touched, so a write that
+ * lands mid-reset is refused rather than destroyed — and the reset stops there,
+ * leaving records restored before that point restored. A `412` therefore usually, but
+ * not always, mutated nothing, and `DemoResetResponse` carries no field that tells
+ * the two apart. That last clause used to read as though the contract made the
+ * distinction unavailable; it does not. The server computes the boolean (`mutated`,
+ * in `reset_to_canonical_seed`) and this project CHOSE not to serialize it, because
+ * the stale branch re-previews and shows re-measured figures instead of asserting a
+ * sentence about them. So: this component must not claim a difference it cannot see —
+ * and the reason it cannot see it is a decision, recorded in
+ * `__tests__/reset-claim-parity.test.tsx`, not a limit. See `LABELS.resetStaleTitle`
+ * for the full reasoning.
  *
  * What this component must therefore NEVER do is present a retry as a formality. A
  * stale refusal RE-PREVIEWS (read-only), shows the refreshed figures, and CLEARS the
@@ -65,8 +79,10 @@ type Preview =
   | { status: 'data'; data: ApiDemoResetResult }
   | { status: 'error' };
 
-/** `stale` is the R1 precondition refusal (412/428): nothing was written, and the
- *  remedy is to re-read refreshed figures — NOT to press the same button again. */
+/** `stale` is the R1 precondition refusal (412/428): the reset did not run against the
+ *  figures the operator approved, and the remedy is to re-read the refreshed figures —
+ *  NOT to press the same button again. It does NOT mean "nothing was written": see the
+ *  C2 note in this file's header. */
 type ExecuteState = 'idle' | 'pending' | 'done' | 'refused' | 'stale' | 'error';
 
 /**
@@ -167,7 +183,10 @@ export function ResetDemoDialog() {
     setExecuteState('pending');
     // The digest comes from THIS dialog's own preview — never from a constant, a
     // cache, or a value the client made up. If the workspace has moved, the server
-    // refuses and nothing is written.
+    // refuses rather than act on figures the operator never saw. It does NOT follow
+    // that nothing was written: the same refusal can arrive from the PER-RECORD
+    // check with earlier records already restored (C2 — see this file's header).
+    // That sentence stood here for a whole slice after the header declared it false.
     api
       .resetDemo('execute', RESET_CONFIRMATION, preview.data.plan_digest)
       .then((res) => {
@@ -188,10 +207,13 @@ export function ResetDemoDialog() {
           res.refusal_reason === 'plan_digest_stale' ||
           res.refusal_reason === 'plan_digest_required'
         ) {
-          // R1 — the precondition refused and NOTHING was written. Re-preview so the
-          // operator sees the current figures, and clear the typed gate so they must
-          // arm the action again deliberately. Do NOT retry: the approval they gave
-          // was for figures that no longer apply.
+          // R1 — the precondition refused, so the reset did not run against the
+          // approved figures. Re-preview so the operator sees the current ones, and
+          // clear the typed gate so they must arm the action again deliberately. Do
+          // NOT retry: the approval they gave was for figures that no longer apply.
+          // The re-preview is what makes this honest under C2 — it re-measures the
+          // workspace, so whatever the refusal did or did not leave behind is on
+          // screen as a number rather than asserted in a sentence.
           setExecuteState('stale');
           setConfirmText('');
           firedRef.current = false; // a NEW, re-armed attempt is allowed
@@ -202,7 +224,10 @@ export function ResetDemoDialog() {
         }
       })
       .catch(() => {
-        // Network / unexpected status. Nothing was written; show a safe message.
+        // A network failure, or a status this client does not model. NOT a typed
+        // refusal, so nothing here knows whether the reset ran: a 500 raised inside
+        // the mutation loop arrives this way with records already restored. Show a
+        // message that claims neither outcome — see the rendered copy below.
         setExecuteState('error');
       });
   };
@@ -414,9 +439,10 @@ export function ResetDemoDialog() {
 
               {/*
                 * R1 — the precondition refusal. It is NOT an error and NOT the
-                * ambiguous refusal: nothing was written, the operator did nothing
-                * wrong, and the way forward is to read the refreshed figures above
-                * and confirm again. There is deliberately no "Try again" button —
+                * ambiguous refusal: the operator did nothing wrong, and the way
+                * forward is to read the refreshed figures above and confirm again.
+                * It deliberately makes no claim about what was or was not written
+                * (C2 — see this file's header). There is no "Try again" button —
                 * the destructive action below is the only way forward, and it is
                 * disarmed until the gate is re-typed.
                 */}
@@ -426,14 +452,29 @@ export function ResetDemoDialog() {
                 </p>
               )}
 
+              {/*
+                * A TYPED refusal that is not the precondition: an ambiguous record,
+                * a wrong confirmation phrase, or a deployment not in synthetic-only
+                * mode. Every one of those is decided BEFORE the mutation block, so
+                * "No records were changed" is true here and stays.
+                */}
               {executeState === 'refused' && (
                 <p className="reset-refused" role="note">
                   The backend refused the reset for safety. No records were changed.
                 </p>
               )}
+              {/*
+                * NOT a typed refusal — a network failure or a status this client does
+                * not model. It used to end "No records were changed", which this
+                * screen cannot know: a fault raised inside the mutation loop reaches
+                * here with records already restored. It now claims neither outcome
+                * and points at the only thing that can answer the question, which is
+                * a fresh reading of the figures.
+                */}
               {executeState === 'error' && (
                 <p className="reset-refused" role="note">
-                  The reset could not be completed. No records were changed.
+                  The reset could not be completed, and this screen cannot tell whether any of
+                  it ran. Close this and open it again to read the current figures.
                 </p>
               )}
 
