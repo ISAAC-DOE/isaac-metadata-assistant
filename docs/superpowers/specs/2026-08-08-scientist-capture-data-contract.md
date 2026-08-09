@@ -16,14 +16,48 @@ observation. Where something is inferred, it says so.
 |---|---|---|
 | `main` | `a5601e9`, clean | `git status -sb` |
 | Hosted commit | `a5601e9` | `GET /krish/api/health` in an authenticated browser session, 2026-08-08 |
-| Hosted experiment storage | `{configured: true, backend: "postgres", durable: false, state: "unavailable"}` | same response |
+| Hosted experiment storage | `{configured: true, backend: "postgres", durable: false, state: "unavailable"}` — **SUPERSEDED 2026-08-09, see the addendum below; the value is kept because it is what was measured on 2026-08-08** | same response |
 | Backend tests | 2900 collected | `.venv/bin/pytest --collect-only` |
 | Branch protection on `main` | absent (HTTP 404) | `gh api .../branches/main/protection` |
 
-**`durable: false` is the load-bearing one.** Migration `0001_experiments` is not applied, so
-`isaac_experiments` does not exist in the hosted database and a created experiment is not durable
-there. Any demo that claims durability before that migration is applied is claiming something
-untrue — `docs/migration-approval-packet-0001.md:282-289` already says so.
+**`durable: false` was the load-bearing one, at the 2026-08-08 snapshot this whole document is
+pinned to.** *(The paragraph that follows is preserved as written on 2026-08-08. It is no longer
+current — read the addendum immediately after it. It is kept rather than rewritten because every
+other claim in this document is cited "at `a5601e9`", and silently overwriting one dated
+measurement would make the rest of that provenance untrustworthy.)*
+
+> Migration `0001_experiments` is not applied, so `isaac_experiments` does not exist in the hosted
+> database and a created experiment is not durable there. Any demo that claims durability before
+> that migration is applied is claiming something untrue —
+> `docs/migration-approval-packet-0001.md:282-289` already says so.
+
+### ADDENDUM — 2026-08-09: the migration has been applied, and the row above no longer holds
+
+**Dean applied `0001_experiments` to the hosted database on 2026-08-09.** Measured the same day in
+an authenticated browser session, at hosted commit `5632300`:
+
+`experiment_storage` now reads `{configured: true, backend: "postgres", durable: true,
+state: "durable"}`, and an experiment created through the hosted UI
+(`01KZM7HYJVQY1C0X3KFV805YT2`) was returned by a subsequent `GET /api/experiments` — so it
+survived a fresh HTTP request. A recon run taken *after* that create still reported 30/30 records,
+`rows_modified: 0`, `dml_statements_issued: 0`, `ddl_statements_issued: 0`.
+
+**Three limits travel with that, and this spec must not be quoted without them:**
+
+- **Pod-restart durability was NOT measured — nobody restarted the pod.** That the row is
+  physically in PostgreSQL is a *structural inference* from the app's own storage-selection logic
+  (the filesystem fallback engages only when `PGHOST` is unset —
+  `apps/api/isaac_api/db_write.py:339-352`, `experiment_repository.py:821-860`) plus the rule that
+  a failed durable write raises rather than degrading (`experiment_repository.py:84-88`). Do not
+  write "verified durable across restart".
+- **Migration `0002` remains unapplied and unauthorized for hosted application.** §8's requirement
+  that it get its own packet and its own approval is untouched.
+- **Gate G2 (hosted per-record display) remains CLOSED**; `/api/health` still reports
+  `record_display: "closed"`. "0001 is applied" is not "display is open". **Gate G3** (the five
+  withheld aggregates) remains OPEN.
+
+Full evidence, with every qualification attached:
+[`docs/evidence/hosted-0001-verification-2026-08-09.md`](../../evidence/hosted-0001-verification-2026-08-09.md).
 
 ---
 
@@ -96,6 +130,61 @@ Derived from the schema's own structure, not from intuition.
 `thermodynamics.*`; `measurement.series[]` (:959) and `measurement.qc` (:1076);
 `assets[]` (:1164); `descriptors.outputs[]` (:1244);
 `timestamps.acquired_start_utc` / `acquired_end_utc` (:192, :196).
+
+### RESOLVED 2026-08-09 — `system.configuration.*` is left UNCLASSIFIED, and that is the answer
+
+An open question was carried forward asking whether `system.configuration.*` can vary per Run, so
+that it could be assigned to one of the two lists above. **The question's premise was wrong, and it
+is recorded here as resolved by evidence rather than left open.**
+
+**Measured against `schema/isaac_record_v1.json` at this commit.** `system.properties.configuration`
+declares **no fields at all** — the node is exactly `{"type": "object", "description": …}`, with no
+`properties`, no `required`, and no `additionalProperties` restriction. *(One precision, because the
+prompt that raised this described the node as declaring `properties: {}`: there is no `properties`
+key in it whatsoever. Same consequence — zero declared fields — but the accurate form is "declares
+none", not "declares an empty set", and the difference is the kind that quietly becomes a citation
+somebody later cannot reproduce.)* Its description reads:
+
+> *"THE designated open extension namespace: instrument/station/beamline-specific configuration that
+> does not generalize across facilities (slits, pass energies, GC columns, channel IDs, logbook
+> fields...). Anything that DOES generalize belongs in a schema field — request one."*
+
+So **there is nothing in the schema to classify field-by-field.** The six paths that exist in
+practice are conventions of this repository's extractor, not schema fields, and they live only in
+`src/isaac_records/extract/structured.py` `FIELD_MAP` — `proposal_id` and `session_id` at **:66-67**,
+`monochromator_crystal`, `spectrometer_geometry`, `detector_model` and `n_scans` at **:86-89**
+(verified at this commit).
+
+**The resolution: unclassified — fail-closed, inherited by nobody.** That is the `CLAUDE.md` §5
+no-guessing answer, not a deferral. Whether two Runs of one experiment may legitimately differ in
+detector model is a *scientific* question, and scientific judgement is not an inference unless it is
+evidenced or user-confirmed.
+
+**It is NOT hard-coded to either scope.** Classification is per full dotted path with a
+segment-aware prefix test (`sample` matches `sample.material.name`; `system.domain` must not match a
+hypothetical `system.domain_notes`), so a future per-field decision — "`proposal_id` is
+Experiment-level, `n_scans` is Run-level" — needs a list entry and no mechanism change.
+
+**Do not restate this as "the schema says configuration is Experiment-level" or "…Run-level".** It
+says neither. The mechanism stays neutral, and that neutrality is the decision.
+
+**The consequence, stated as the cost it is rather than as a neutral outcome.** `proposal_id` is
+obviously campaign-level to any reader, and under this resolution a Run inherits nothing from it —
+the scientist re-enters it, or it is absent. That is a real product gap and a known price of failing
+closed. The thing that closes it is a decision about which of the six are per-run, which is a
+question for Angel/Dean (or a slice that asks the user per field), not something this spec may
+settle by inference.
+
+**Where the mechanism actually lives, and it is NOT in this tree.** `field_level()`
+(`apps/api/isaac_api/workspace.py:502`) and the pinning test
+`test_every_field_map_path_the_real_extractor_emits_is_classified_or_knowingly_not`
+(`apps/api/tests/test_run_domain_model.py:349`) are on branch **`feat/run-domain-model`** (PR #92,
+verified at `629f538`). **Neither exists on `main` at `5632300`** — `rg "def field_level" -g '*.py'`
+over this working tree returns nothing. Cite them as PR #92's, and re-cite them against `main` once
+that PR merges. The test pins the exact classified/unclassified set against the **real** extractor,
+so a new `FIELD_MAP` entry cannot silently default — that is the guard that makes "unclassified" a
+recorded decision rather than an omission. `timestamps.created_utc` is unclassified for the same
+reason and is covered by the same test.
 
 ### DECISION D2 — inheritance is by reference, never by copy
 
@@ -352,7 +441,7 @@ applied to the hosted database by an agent.
 
 | Gate | Owner | Blocks |
 |---|---|---|
-| Apply `0001_experiments` | Krish / an operator with a SLAC cluster context | **all hosted durability**; the §61 hosted proof sequence steps 26-28 |
+| ~~Apply `0001_experiments`~~ — **RESOLVED 2026-08-09, applied by Dean** (evidence: [`hosted-0001-verification-2026-08-09.md`](../../evidence/hosted-0001-verification-2026-08-09.md)). The row is kept, not deleted, so a reader can see this gate existed and how it closed. | was: Krish / an operator with a SLAC cluster context — in the event, **Dean**, by a route this repository does not record | **nothing now.** It formerly blocked all hosted durability and the §61 hosted proof sequence steps 26-28. The **pod-restart** step of that sequence is still unrun. |
 | Apply `0002` (runs/revisions) | Krish, after a packet | hosted Runs |
 | Byte store for files/audio | Dean (`isaac-k8`) + lifting `CLAUDE.md:775` | durable file upload, raw-audio retention |
 | Transcription provider | Dean / Angel | any voice capture at all |
