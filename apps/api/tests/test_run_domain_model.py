@@ -235,11 +235,9 @@ def test_next_ordinal_is_max_plus_one_not_length_plus_one():
         "system.technique",
         "system.facility.beamline",
         "system.instrument.model",
-        "attribution.contributors",
-        "tags",
     ],
 )
-def test_contract_experiment_level_paths_classify_as_experiment_level(path):
+def test_contract_experiment_level_field_paths_classify_as_experiment_level(path):
     assert ws.field_level(path) == ws.LEVEL_EXPERIMENT
 
 
@@ -249,15 +247,11 @@ def test_contract_experiment_level_paths_classify_as_experiment_level(path):
         "context.environment",
         "context.temperature_K",
         "context.electrochemistry.control_mode",
-        "measurement.series",
-        "measurement.qc",
-        "assets",
-        "descriptors.outputs",
         "timestamps.acquired_start_utc",
         "timestamps.acquired_end_utc",
     ],
 )
-def test_contract_run_level_paths_classify_as_run_level(path):
+def test_contract_run_level_field_paths_classify_as_run_level(path):
     assert ws.field_level(path) == ws.LEVEL_RUN
 
 
@@ -285,6 +279,116 @@ def test_classification_is_segment_aware():
     assert ws.field_level("system.domainish") == ws.LEVEL_UNCLASSIFIED
 
 
+# --- the draft has TWO namespaces, and 7 of the contract's 14 entries are blocks ---
+
+
+@pytest.mark.parametrize("key", ["attribution", "tags"])
+def test_contract_experiment_level_blocks_classify_as_experiment_level(key):
+    assert ws.block_level(key) == ws.LEVEL_EXPERIMENT
+
+
+@pytest.mark.parametrize("key", ["series", "qc", "assets", "descriptors_outputs"])
+def test_contract_run_level_blocks_classify_as_run_level(key):
+    assert ws.block_level(key) == ws.LEVEL_RUN
+
+
+@pytest.mark.parametrize(
+    "schema_path,block_key",
+    [
+        ("measurement.series", "series"),
+        ("measurement.qc", "qc"),
+        ("assets", "assets"),
+        ("descriptors.outputs", "descriptors_outputs"),
+        ("attribution.contributors", "attribution"),
+        ("tags", "tags"),
+    ],
+)
+def test_the_seven_schema_space_entries_are_blocks_and_never_field_keys(schema_path, block_key):
+    """THE BUG THIS FILE ONCE ENCODED, pinned so it cannot come back.
+
+    Contract §2 was written in official SCHEMA-PATH space and the first version of
+    this module applied it to DRAFT FIELD KEYS. Six of the seven entries below (plus
+    ``system.instrument``, which is a legitimate field path the extractor merely
+    never emits) do not exist in the field map at all — a draft carries them as
+    top-level blocks with different names. So the schema-space spelling classifies
+    as unclassified in field space, and the block spelling is where the data is.
+    """
+    assert ws.field_level(schema_path) == ws.LEVEL_UNCLASSIFIED
+    assert ws.block_level(block_key) != ws.LEVEL_UNCLASSIFIED
+
+
+@pytest.mark.parametrize("key", ["meta", "pending", "implicit", "links", "block_evidence"])
+def test_draft_only_and_undecided_blocks_are_unclassified(key):
+    assert ws.block_level(key) == ws.LEVEL_UNCLASSIFIED
+
+
+def test_block_classification_is_exact_not_a_prefix_test():
+    assert ws.block_level("tags") == ws.LEVEL_EXPERIMENT
+    assert ws.block_level("tags.extra") == ws.LEVEL_UNCLASSIFIED
+
+
+def test_the_field_and_block_namespaces_are_addressed_explicitly():
+    """``tags`` is both a top-level draft block and a legal official schema path, so
+    a bare name would be ambiguous. The address prefix removes the ambiguity."""
+    assert ws.field_address("tags") != ws.block_address("tags")
+    assert ws.parse_address(ws.field_address("sample.material.name")) == (
+        ws.ADDRESS_FIELD,
+        "sample.material.name",
+    )
+    assert ws.parse_address(ws.block_address("tags")) == (ws.ADDRESS_BLOCK, "tags")
+    assert ws.address_level(ws.block_address("tags")) == ws.LEVEL_EXPERIMENT
+    assert ws.address_level(ws.field_address("tags")) == ws.LEVEL_UNCLASSIFIED
+
+
+@pytest.mark.parametrize("bad", ["", "tags", "field:", ":tags", "nonsense:tags"])
+def test_a_malformed_address_is_refused(bad):
+    with pytest.raises(ValueError):
+        ws.parse_address(bad)
+
+
+def test_every_field_map_path_the_real_extractor_emits_is_classified_or_knowingly_not():
+    """Run the DETERMINISTIC EXTRACTOR and classify what it actually produces.
+
+    A hand-written parametrize list can only test the paths its author thought of.
+    This asserts against the real committed fixtures, so a future FIELD_MAP entry
+    that nobody classified shows up here rather than silently defaulting.
+    """
+    from isaac_records.extract.draft_builder import build_draft
+
+    draft = build_draft(ws.CSV_PATH, ws.LISTING_PATH)
+    levels = {p: ws.field_level(p) for p in draft["fields"]}
+    unclassified = sorted(p for p, lvl in levels.items() if lvl == ws.LEVEL_UNCLASSIFIED)
+
+    # Exactly the two families the docstring names, and nothing else.
+    assert unclassified == [
+        "system.configuration.detector_model",
+        "system.configuration.monochromator_crystal",
+        "system.configuration.n_scans",
+        "system.configuration.proposal_id",
+        "system.configuration.session_id",
+        "system.configuration.spectrometer_geometry",
+        "timestamps.created_utc",
+    ]
+    assert levels["context.temperature_K"] == ws.LEVEL_RUN
+    assert levels["sample.material.name"] == ws.LEVEL_EXPERIMENT
+
+
+def test_the_real_extractors_top_level_blocks_are_classified():
+    """The draft blocks a real extraction produces, classified in block space."""
+    from isaac_records.extract.draft_builder import build_draft
+
+    draft = build_draft(ws.CSV_PATH, ws.LISTING_PATH)
+    blocks = {k: ws.block_level(k) for k in draft if k != "fields"}
+
+    assert blocks["attribution"] == ws.LEVEL_EXPERIMENT
+    assert blocks["assets"] == ws.LEVEL_RUN
+    assert blocks["qc"] == ws.LEVEL_RUN
+    # Draft-only bookkeeping stays out of the inheritance model entirely.
+    assert blocks["meta"] == ws.LEVEL_UNCLASSIFIED
+    assert blocks["pending"] == ws.LEVEL_UNCLASSIFIED
+    assert blocks["implicit"] == ws.LEVEL_UNCLASSIFIED
+
+
 # =============================================================================
 # 5. inheritance BY REFERENCE (contract §2 D2)
 # =============================================================================
@@ -295,8 +399,8 @@ def test_an_experiment_level_field_is_inherited_without_being_copied(wsroot):
     run = exp.add_run()
 
     resolved = exp.resolve_run(run)
-    assert resolved["sample.material.name"].provenance == ws.PROVENANCE_INHERITED
-    assert resolved["sample.material.name"].value == "Copper(II) Oxide"
+    assert resolved[ws.field_address("sample.material.name")].provenance == ws.PROVENANCE_INHERITED
+    assert resolved[ws.field_address("sample.material.name")].value == "Copper(II) Oxide"
 
     # THE RUN STORES NOTHING. Not in its draft, not in its overrides, not on disk.
     assert run.draft == {}
@@ -309,66 +413,66 @@ def test_editing_the_experiment_value_flows_through_to_a_non_overriding_run():
     """The property that inheritance-by-copy would lose."""
     exp = _experiment(draft={"fields": {"sample.material.name": _env("Copper(II) Oxide")}})
     run = exp.add_run()
-    assert exp.resolve_run(run)["sample.material.name"].value == "Copper(II) Oxide"
+    assert exp.resolve_run(run)[ws.field_address("sample.material.name")].value == "Copper(II) Oxide"
 
     exp.draft["fields"]["sample.material.name"] = _env("Copper(I) Oxide")
 
-    assert exp.resolve_run(run)["sample.material.name"].value == "Copper(I) Oxide"
+    assert exp.resolve_run(run)[ws.field_address("sample.material.name")].value == "Copper(I) Oxide"
 
 
 def test_an_override_records_the_inherited_value_it_displaced():
     exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
     run = exp.add_run()
 
-    exp.override_run_field(run, "sample.sample_form", _env("powder"))
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
 
-    r = exp.resolve_run(run)["sample.sample_form"]
+    r = exp.resolve_run(run)[ws.field_address("sample.sample_form")]
     assert r.provenance == ws.PROVENANCE_OVERRIDDEN
     assert r.value == "powder"
-    assert r.inherited_envelope == _env("pellet")
-    assert r.displaced_envelope == _env("pellet")
+    assert r.inherited_payload == _env("pellet")
+    assert r.displaced_payload == _env("pellet")
 
 
 def test_the_displaced_value_is_historical_and_the_inherited_value_is_live():
     """These two legitimately diverge, and the divergence is the point.
 
-    ``displaced_envelope`` is what the override displaced WHEN IT WAS RECORDED and
-    is never refreshed; ``inherited_envelope`` is what the experiment says now.
+    ``displaced_payload`` is what the override displaced WHEN IT WAS RECORDED and
+    is never refreshed; ``inherited_payload`` is what the experiment says now.
     """
     exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
     run = exp.add_run()
-    exp.override_run_field(run, "sample.sample_form", _env("powder"))
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
 
     exp.draft["fields"]["sample.sample_form"] = _env("thin film")
 
-    r = exp.resolve_run(run)["sample.sample_form"]
-    assert r.displaced_envelope == _env("pellet")  # history, unchanged
-    assert r.inherited_envelope == _env("thin film")  # live
+    r = exp.resolve_run(run)[ws.field_address("sample.sample_form")]
+    assert r.displaced_payload == _env("pellet")  # history, unchanged
+    assert r.inherited_payload == _env("thin film")  # live
     assert r.value == "powder"  # the override still wins
 
 
 def test_an_override_of_a_path_the_experiment_does_not_carry_displaces_nothing():
     exp = _experiment(draft={"fields": {}})
     run = exp.add_run()
-    exp.override_run_field(run, "sample.sample_form", _env("powder"))
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
 
-    r = exp.resolve_run(run)["sample.sample_form"]
-    assert r.inherited_envelope is None
-    assert r.displaced_envelope is None
+    r = exp.resolve_run(run)[ws.field_address("sample.sample_form")]
+    assert r.inherited_payload is None
+    assert r.displaced_payload is None
     # Absence is the encoding on disk, so "displaced nothing" stays distinguishable
     # from "displaced an explicit null".
-    assert "displaced" not in run.overrides["sample.sample_form"].to_state()
+    assert "displaced" not in run.overrides[ws.field_address("sample.sample_form")].to_state()
 
 
 def test_clearing_an_override_restores_inheritance_by_reference():
     exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
     run = exp.add_run()
-    exp.override_run_field(run, "sample.sample_form", _env("powder"))
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
 
-    assert exp.clear_run_override(run, "sample.sample_form") is True
-    assert exp.clear_run_override(run, "sample.sample_form") is False
+    assert exp.clear_run_override(run, ws.field_address("sample.sample_form")) is True
+    assert exp.clear_run_override(run, ws.field_address("sample.sample_form")) is False
 
-    r = exp.resolve_run(run)["sample.sample_form"]
+    r = exp.resolve_run(run)[ws.field_address("sample.sample_form")]
     assert r.provenance == ws.PROVENANCE_INHERITED
     assert r.value == "pellet"
     assert run.overrides == {}  # no copy left behind
@@ -378,9 +482,11 @@ def test_a_run_level_field_cannot_be_overridden():
     exp = _experiment()
     run = exp.add_run()
     with pytest.raises(ws.NotOverridable):
-        exp.override_run_field(run, "context.temperature_K", _env(77))
+        exp.set_run_override(run, ws.field_address("context.temperature_K"), _env(77))
     with pytest.raises(ws.NotOverridable):
-        exp.override_run_field(run, "system.configuration.n_scans", _env(6))
+        exp.set_run_override(run, ws.field_address("system.configuration.n_scans"), _env(6))
+    with pytest.raises(ws.NotOverridable):
+        exp.set_run_override(run, ws.block_address("qc"), {"status": "valid"})
     assert run.overrides == {}
 
 
@@ -395,20 +501,92 @@ def test_resolution_only_reports_experiment_level_fields():
         }
     )
     run = exp.add_run()
-    assert set(exp.resolve_run(run)) == {"sample.material.name"}
+    assert set(exp.resolve_run(run)) == {ws.field_address("sample.material.name")}
 
 
 def test_overrides_survive_a_round_trip(wsroot):
     exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
     run = exp.add_run()
-    exp.override_run_field(run, "sample.sample_form", _env("powder"))
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
     exp.save()
 
     reloaded = ws.load_experiment(exp.id)
-    r = reloaded.resolve_run(reloaded.runs[0])["sample.sample_form"]
+    r = reloaded.resolve_run(reloaded.runs[0])[ws.field_address("sample.sample_form")]
     assert r.provenance == ws.PROVENANCE_OVERRIDDEN
     assert r.value == "powder"
-    assert r.displaced_envelope == _env("pellet")
+    assert r.displaced_payload == _env("pellet")
+
+
+# --- experiment-level BLOCKS inherit too (the gap the schema-space lists left) ---
+
+
+def test_the_attribution_block_is_inherited_by_reference():
+    """``attribution.contributors`` is contract §2 experiment-level, and a draft
+    keeps it in a top-level block. Before the draft-space fix this inherited
+    NOTHING — the resolution key set was empty for it."""
+    contributors = {"contributors": [{"name": "Ada Lovelace", "role": "curated_record"}]}
+    exp = _experiment(draft={"fields": {}, "attribution": contributors})
+    run = exp.add_run()
+
+    r = exp.resolve_run(run)[ws.block_address("attribution")]
+    assert r.provenance == ws.PROVENANCE_INHERITED
+    assert r.value == contributors
+    assert run.overrides == {}  # nothing copied down
+
+    exp.draft["attribution"] = {"contributors": [{"name": "Grace Hopper", "role": "curated_record"}]}
+    assert exp.resolve_run(run)[ws.block_address("attribution")].value["contributors"][0][
+        "name"
+    ] == "Grace Hopper"
+
+
+def test_the_tags_block_is_inherited_and_overridable():
+    exp = _experiment(draft={"fields": {}, "tags": ["campaign-a"]})
+    run = exp.add_run()
+    assert exp.resolve_run(run)[ws.block_address("tags")].value == ["campaign-a"]
+
+    exp.set_run_override(run, ws.block_address("tags"), ["campaign-a", "rerun"])
+
+    r = exp.resolve_run(run)[ws.block_address("tags")]
+    assert r.provenance == ws.PROVENANCE_OVERRIDDEN
+    assert r.value == ["campaign-a", "rerun"]
+    assert r.displaced_payload == ["campaign-a"]
+
+
+def test_run_level_blocks_are_not_inherited():
+    exp = _experiment(draft={"fields": {}, "qc": {"status": "valid"}, "series": [1, 2]})
+    run = exp.add_run()
+    assert set(exp.resolve_run(run)) == set()
+
+
+def test_a_block_override_round_trips(wsroot):
+    exp = _experiment(draft={"fields": {}, "tags": ["campaign-a"]})
+    run = exp.add_run()
+    exp.set_run_override(run, ws.block_address("tags"), ["rerun"])
+    exp.save()
+
+    reloaded = ws.load_experiment(exp.id)
+    r = reloaded.resolve_run(reloaded.runs[0])[ws.block_address("tags")]
+    assert r.value == ["rerun"]
+    assert r.displaced_payload == ["campaign-a"]
+
+
+def test_the_displaced_payload_is_deep_copied_at_capture():
+    """The promise in ``Override``'s docstring — history is never refreshed — made
+    true by construction rather than by how callers happen to write.
+
+    An IN-PLACE edit of the experiment's own draft (rather than the wholesale
+    replacement both current write paths use) must not rewrite the displaced record
+    through a shared reference.
+    """
+    exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
+    run = exp.add_run()
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
+
+    exp.draft["fields"]["sample.sample_form"]["value"] = "MUTATED IN PLACE"
+
+    r = exp.resolve_run(run)[ws.field_address("sample.sample_form")]
+    assert r.displaced_payload["value"] == "pellet"  # history intact
+    assert r.inherited_payload["value"] == "MUTATED IN PLACE"  # live view moved
 
 
 # =============================================================================
@@ -512,14 +690,14 @@ def test_an_override_bumps_the_run_and_is_idempotent(wsroot):
     exp.save_versioned()
     base_rev = run.rev
 
-    exp.override_run_field(run, "sample.sample_form", _env("powder"))
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
     assert exp.save_versioned() is True
     assert run.rev == base_rev + 1
-    recorded = run.overrides["sample.sample_form"].recorded_utc
+    recorded = run.overrides[ws.field_address("sample.sample_form")].recorded_utc
 
     # Re-applying an equal envelope must not restamp, so it must not churn a version.
-    exp.override_run_field(run, "sample.sample_form", _env("powder"))
-    assert run.overrides["sample.sample_form"].recorded_utc == recorded
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
+    assert run.overrides[ws.field_address("sample.sample_form")].recorded_utc == recorded
     assert exp.save_versioned() is False
     assert run.rev == base_rev + 1
 
@@ -546,6 +724,123 @@ def test_deleting_a_run_bumps_the_experiment(wsroot):
     exp.runs.remove(run)
     assert exp.save_versioned() is True
     assert ws.load_experiment(exp.id).runs == []
+
+
+# =============================================================================
+# 6b. a malformed run entry must never take down a read
+# =============================================================================
+
+
+@pytest.fixture()
+def api(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    monkeypatch.delenv("PGHOST", raising=False)
+    from fastapi.testclient import TestClient
+
+    from isaac_api.app import create_app
+
+    return TestClient(create_app())
+
+
+def _write_runs(exp: ws.Experiment, runs: list) -> None:
+    """Put a raw ``runs`` array on disk, bypassing ``to_state``."""
+    state = json.loads(exp.state_path.read_text())
+    state["runs"] = runs
+    ws.atomic_write_text(exp.state_path, json.dumps(state, indent=2) + "\n")
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        {"experiment_id": "x", "label": "no id"},  # the measured 500
+        {"id": "01GOODRUNIDBUTNOEXPERIMENT", "label": "no experiment_id"},
+        {"id": "01BADORDINALRUNIDAAAAAAAAA", "ordinal": "seven"},
+        {"id": "01BADREVRUNIDAAAAAAAAAAAAA", "rev": []},
+        "not even an object",
+        None,
+    ],
+)
+def test_one_malformed_run_entry_does_not_500_the_read_path(api, malformed):
+    """Measured against the REAL HTTP surface, not just the dataclass.
+
+    ``Run.from_state`` used to hard-subscript ``id``/``experiment_id`` while every
+    other key used ``.get``. ``Experiment.from_state`` hydrates runs in an unguarded
+    comprehension and ``list_experiments`` catches only ``FileNotFoundError``, so one
+    bad entry returned 500 for the single record AND for the entire workspace list.
+    """
+    created = api.post("/api/experiments", json={"title": "Has a bad run"})
+    assert created.status_code in (200, 201), created.text
+    exp_id = created.json()["id"]
+
+    exp = ws.load_experiment(exp_id)
+    _write_runs(exp, [malformed])
+
+    listing = api.get("/api/experiments")
+    assert listing.status_code == 200, listing.text
+    assert [e["id"] for e in listing.json()["experiments"]] == [exp_id]
+
+    detail = api.get(f"/api/experiments/{exp_id}")
+    assert detail.status_code == 200, detail.text
+
+
+def test_a_good_run_beside_a_malformed_one_survives(api):
+    created = api.post("/api/experiments", json={"title": "Mixed"})
+    exp_id = created.json()["id"]
+    exp = ws.load_experiment(exp_id)
+    good = ws.new_run(exp_id, ordinal=1, label="Keep me", id="01SURVIVINGRUNIDAAAAAAAAAA")
+    _write_runs(exp, [{"label": "drop me, no id"}, good.to_state()])
+
+    assert api.get("/api/experiments").status_code == 200
+    reloaded = ws.load_experiment(exp_id)
+    assert [r.id for r in reloaded.runs] == ["01SURVIVINGRUNIDAAAAAAAAAA"]
+
+
+def test_run_from_state_never_raises_on_garbage():
+    for garbage in ({}, {"id": None}, {"ordinal": {}}, {"overrides": "nope"}):
+        assert isinstance(ws.Run.from_state(garbage), ws.Run)
+
+
+# =============================================================================
+# 6c. run ids are unique, which is what makes the order total
+# =============================================================================
+
+
+def test_a_duplicate_run_id_is_dropped_on_hydration(wsroot):
+    """Uniqueness is ENFORCED, not assumed — it is what makes ``sorted_runs`` total
+    and keeps ``_persisted_run_state`` from collapsing two runs onto one key."""
+    exp = _experiment()
+    exp.save()
+    dup = {"id": "01DUPLICATERUNIDAAAAAAAAAA", "experiment_id": exp.id, "ordinal": 1}
+    _write_runs(exp, [dict(dup, label="first"), dict(dup, label="second")])
+
+    reloaded = ws.load_experiment(exp.id)
+    assert len(reloaded.runs) == 1
+    assert reloaded.runs[0].label == "first"  # first occurrence wins
+
+
+def test_add_run_refuses_a_duplicate_id():
+    exp = _experiment()
+    exp.add_run(id="01EXPLICITRUNIDAAAAAAAAAAA")
+    with pytest.raises(ValueError):
+        exp.add_run(id="01EXPLICITRUNIDAAAAAAAAAAA")
+
+
+def test_unique_ids_make_the_signature_order_independent():
+    """The property the old ``sorted_runs`` docstring claimed on the wrong grounds.
+
+    Two runs sharing ordinal AND created_utc still sort deterministically, because
+    the id breaks the tie and ids are unique.
+    """
+    exp = _experiment()
+    exp.runs = [
+        ws.new_run(exp.id, ordinal=1, created_utc="2026-08-08T00:00:00Z", id="01A" + "A" * 23),
+        ws.new_run(exp.id, ordinal=1, created_utc="2026-08-08T00:00:00Z", id="01B" + "B" * 23),
+    ]
+    before = ws._authoritative_signature(exp)
+    exp.runs.reverse()
+    assert ws._authoritative_signature(exp) == before
+    assert [r.id for r in exp.sorted_runs()] == ["01A" + "A" * 23, "01B" + "B" * 23]
 
 
 # =============================================================================

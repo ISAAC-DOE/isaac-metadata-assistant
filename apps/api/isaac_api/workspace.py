@@ -24,7 +24,7 @@ is an application-level grouping with no schema counterpart. That mapping is
 decided by the official schema rather than by preference and is settled in
 ``docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`` §1.
 Experiment-level fields are inherited BY REFERENCE and never copied down (§2 D2);
-see :func:`resolve_inherited_fields`. Runs currently live inside the experiment's
+see :func:`resolve_inherited`. Runs currently live inside the experiment's
 own state document; §8 D7 moves them to relational rows in a later migration.
 
 Scopes
@@ -382,35 +382,70 @@ def _existing_generation(rid: str, *, session_id: str | None = None) -> str | No
 # no export behaviour, no route, no migration and nothing under
 # ``src/isaac_records/`` or ``schema/``.
 
-#: Draft-field path prefixes that are ENTERED ONCE ON THE EXPERIMENT and inherited
-#: by every Run. Taken verbatim from contract §2, which derives them from the
-#: schema's own structure. A draft field key is a dotted schema path
-#: (``sample.material.name``, ``system.facility.beamline``, ...), so membership is
-#: a prefix test — see :func:`field_level`.
-EXPERIMENT_LEVEL_PATHS: tuple[str, ...] = (
+# A DRAFT IS NOT SHAPED LIKE A RECORD, AND THE CONTRACT'S §2 LISTS WERE WRITTEN AS
+# IF IT WERE. This is a correction, recorded rather than quietly applied.
+#
+# Contract §2 enumerates the experiment/run split in OFFICIAL SCHEMA-PATH space —
+# it cites ``schema/isaac_record_v1.json`` line numbers for every entry. The first
+# implementation of this module applied those lists directly to DRAFT FIELD KEYS,
+# on the stated assumption that "a draft field key is a dotted schema path, so
+# membership is a prefix test". That assumption is false for 7 of the 14 entries,
+# and independent review measured which ones. A draft (``schema/isaac_draft.schema.json``)
+# has TWO namespaces, not one:
+#
+# 1. ``draft["fields"]`` — a map of dotted official path -> evidence envelope,
+#    SCALARS ONLY. ``sample.material.name``, ``context.temperature_K``,
+#    ``system.facility.beamline``, ``timestamps.acquired_start_utc`` live here.
+# 2. TOP-LEVEL DRAFT BLOCKS, siblings of ``fields``, which are arrays/objects and
+#    are NOT dotted paths at all: ``series``, ``qc``, ``assets``,
+#    ``descriptors_outputs``, ``attribution``, ``tags``, ``links``, ``implicit``.
+#
+# So the schema-space entry ``measurement.series[]`` is the draft block ``series``;
+# ``measurement.qc`` is ``qc``; ``descriptors.outputs[]`` is ``descriptors_outputs``;
+# ``attribution.contributors`` is inside the ``attribution`` block
+# (``extract/draft_builder.py:269``); and ``tags`` is a block, not a field key.
+# Applied to field keys, those prefixes match NOTHING — ``field_level("qc")`` and
+# ``field_level("series")`` returned ``unclassified``, and the experiment-level
+# ``attribution``/``tags`` inherited nothing at all.
+#
+# The lists below are therefore split by NAMESPACE. The contract itself is
+# corrected in the same commit (§2, "Correction 2026-08-08").
+
+#: Draft FIELD-MAP path prefixes (keys of ``draft["fields"]``) that are entered once
+#: on the experiment and inherited by every Run. Segment-aware prefixes.
+#:
+#: ``system.instrument`` is a real official schema path (``system.properties`` =
+#: ``{configuration, domain, facility, instrument, technique}``) that the current
+#: deterministic extractor never emits — ``extract/structured.FIELD_MAP`` has no
+#: entry for it. It is retained because it is correct for the namespace and costs
+#: nothing; it is simply unexercised today, which is a different thing from wrong.
+EXPERIMENT_LEVEL_FIELD_PATHS: tuple[str, ...] = (
     "sample",
     "system.domain",
     "system.technique",
     "system.facility",
     "system.instrument",
-    "attribution.contributors",
-    "tags",
 )
 
-#: Draft-field path prefixes that are PER-RUN. These are the fields that must vary
-#: between runs, and their variation is exactly what forces the record split
-#: (contract §2).
-RUN_LEVEL_PATHS: tuple[str, ...] = (
+#: Draft FIELD-MAP path prefixes that are per-Run. ``context.*`` is the one that
+#: forces the record split (``context.temperature_K`` is a required scalar).
+RUN_LEVEL_FIELD_PATHS: tuple[str, ...] = (
     "context",
-    "measurement.series",
-    "measurement.qc",
-    "assets",
-    "descriptors.outputs",
     "timestamps.acquired_start_utc",
     "timestamps.acquired_end_utc",
 )
 
-#: The three values :func:`field_level` can return.
+#: TOP-LEVEL DRAFT BLOCK keys that are experiment-level. ``attribution`` holds
+#: ``contributors`` (contract §2's ``attribution.contributors``); ``tags`` is the
+#: schema's campaign grouping. Neither is a ``fields`` key.
+EXPERIMENT_LEVEL_BLOCKS: tuple[str, ...] = ("attribution", "tags")
+
+#: TOP-LEVEL DRAFT BLOCK keys that are per-Run — the draft-space names for contract
+#: §2's ``measurement.series[]``, ``measurement.qc``, ``assets[]`` and
+#: ``descriptors.outputs[]``.
+RUN_LEVEL_BLOCKS: tuple[str, ...] = ("series", "qc", "assets", "descriptors_outputs")
+
+#: The three values a level classification can take.
 LEVEL_EXPERIMENT = "experiment"
 LEVEL_RUN = "run"
 LEVEL_UNCLASSIFIED = "unclassified"
@@ -418,6 +453,40 @@ LEVEL_UNCLASSIFIED = "unclassified"
 #: The two values a resolution's ``provenance`` can take.
 PROVENANCE_INHERITED = "inherited"
 PROVENANCE_OVERRIDDEN = "overridden"
+
+#: The two namespaces an :func:`address` can point into.
+ADDRESS_FIELD = "field"
+ADDRESS_BLOCK = "block"
+
+_ADDRESS_SEP = ":"
+
+
+def field_address(path: str) -> str:
+    """The address of one key inside ``draft["fields"]`` (e.g. ``field:sample.sample_form``)."""
+    return f"{ADDRESS_FIELD}{_ADDRESS_SEP}{path}"
+
+
+def block_address(key: str) -> str:
+    """The address of one top-level draft block (e.g. ``block:tags``)."""
+    return f"{ADDRESS_BLOCK}{_ADDRESS_SEP}{key}"
+
+
+def parse_address(address: str) -> tuple[str, str]:
+    """``"field:sample.sample_form"`` -> ``("field", "sample.sample_form")``.
+
+    Addresses are EXPLICITLY NAMESPACED rather than bare names, because the two
+    namespaces are not disjoint in principle: ``tags`` is both a top-level draft
+    block and a legal official schema path, so a bare ``"tags"`` would be ambiguous
+    the moment anything put ``tags`` in the field map. The prefix also makes a
+    persisted override document self-describing, which matters when runs move to
+    their own table.
+
+    Raises :class:`ValueError` on anything that is not a well-formed address.
+    """
+    kind, sep, name = address.partition(_ADDRESS_SEP)
+    if not sep or kind not in (ADDRESS_FIELD, ADDRESS_BLOCK) or not name:
+        raise ValueError(f"malformed draft address: {address!r}")
+    return kind, name
 
 
 def _path_matches(path: str, prefix: str) -> bool:
@@ -431,63 +500,99 @@ def _path_matches(path: str, prefix: str) -> bool:
 
 
 def field_level(path: str) -> str:
-    """Classify one dotted draft-field path as experiment-level, run-level, or neither.
+    """Classify one key of ``draft["fields"]``. FIELD-MAP SPACE ONLY.
 
-    ``LEVEL_UNCLASSIFIED`` IS A REAL ANSWER AND IS NOT AN OVERSIGHT. The contract's
-    two lists are not a partition of every path the deterministic extractor emits —
-    ``system.configuration.*`` (detector model, monochromator crystal, ``n_scans``,
-    proposal/session ids) and ``timestamps.created_utc`` appear in a real draft and
-    are in NEITHER list. Guessing a level for them would be exactly the kind of
-    unevidenced inference ``CLAUDE.md`` §5 forbids: whether two runs of one
-    experiment may legitimately differ in detector model is a scientific question
-    this repository has no answer to. So they are reported as unclassified,
-    inherited by nobody and overridable by nobody, and they stay wherever the draft
-    that carries them already put them.
+    This function does NOT classify a top-level draft block — see :func:`block_level`
+    — and calling it with one returns ``LEVEL_UNCLASSIFIED``, which is the honest
+    answer for a field-map key that does not exist rather than a judgement about the
+    block of that name. Use :func:`address_level` when the caller may hold either.
+
+    ``LEVEL_UNCLASSIFIED`` IS A REAL ANSWER AND IS NOT AN OVERSIGHT. Two families of
+    field-map key are in neither list, for two different reasons:
+
+    * ``system.configuration.*`` (``detector_model``, ``monochromator_crystal``,
+      ``n_scans``, ``proposal_id``, ``session_id``) and ``timestamps.created_utc``
+      are emitted by the real extractor (``extract/structured.FIELD_MAP``) and the
+      contract assigns them to neither level. Guessing would be the unevidenced
+      inference ``CLAUDE.md`` §5 forbids: whether two runs of one experiment may
+      legitimately differ in detector model is a scientific question this repository
+      has no answer to.
+    * anything else a future extractor emits, which defaults to unclassified rather
+      than to a level — fail-closed, so a new field is inherited by nobody until
+      somebody decides.
     """
-    for prefix in EXPERIMENT_LEVEL_PATHS:
+    for prefix in EXPERIMENT_LEVEL_FIELD_PATHS:
         if _path_matches(path, prefix):
             return LEVEL_EXPERIMENT
-    for prefix in RUN_LEVEL_PATHS:
+    for prefix in RUN_LEVEL_FIELD_PATHS:
         if _path_matches(path, prefix):
             return LEVEL_RUN
     return LEVEL_UNCLASSIFIED
 
 
-class NotOverridable(ValueError):
-    """An override was attempted on a path that is not experiment-level.
+def block_level(key: str) -> str:
+    """Classify one TOP-LEVEL draft block key. BLOCK SPACE ONLY.
 
-    Only an experiment-level field can be *overridden*, because only an
-    experiment-level field is *inherited* in the first place. A run-level field is
-    simply the run's own draft field — writing one is an ordinary edit, not an
-    override, and routing it through the override map would create a second place
-    the same value could live.
+    Exact match, not a prefix test: block keys are single tokens, not paths.
+    ``meta``, ``pending``, ``implicit``, ``links`` and ``block_evidence`` are
+    deliberately unclassified — ``pending``/``implicit``/``block_evidence`` are
+    draft-only bookkeeping that never becomes a record field, ``meta`` is the
+    record-type stamp that is the same for every run by construction, and ``links``
+    is how sibling runs are re-associated at export (contract §1), which is the
+    fan-out slice's business and not an inherited value.
+    """
+    if key in EXPERIMENT_LEVEL_BLOCKS:
+        return LEVEL_EXPERIMENT
+    if key in RUN_LEVEL_BLOCKS:
+        return LEVEL_RUN
+    return LEVEL_UNCLASSIFIED
+
+
+def address_level(address: str) -> str:
+    """Classify a namespaced draft address. Raises ``ValueError`` on a malformed one."""
+    kind, name = parse_address(address)
+    return field_level(name) if kind == ADDRESS_FIELD else block_level(name)
+
+
+class NotOverridable(ValueError):
+    """An override was attempted at an address that is not experiment-level.
+
+    Only an experiment-level address can be *overridden*, because only an
+    experiment-level address is *inherited* in the first place. A run-level field or
+    block is simply the run's own draft content — writing one is an ordinary edit,
+    not an override, and routing it through the override map would create a second
+    place the same value could live.
     """
 
 
 @dataclass(frozen=True)
-class FieldOverride:
-    """One run's explicit override of one inherited experiment-level field.
+class Override:
+    """One run's explicit override of one inherited experiment-level address.
 
-    ``envelope`` is a draft field envelope (``{"value": ..., "status": ...,
-    "evidence": [...]}``) — the SAME shape ``blank_draft()`` / the deterministic
-    extractor produce — so an override carries its own evidence and is subject to
-    the same no-guessing rules as any other field.
+    ``payload`` is whatever that address holds. For a ``field:`` address it is a
+    draft field envelope (``{"value": ..., "status": ..., "evidence": [...]}``) —
+    the same shape ``blank_draft()`` and the deterministic extractor produce, so an
+    override carries its own evidence and is subject to the same no-guessing rules
+    as any other field. For a ``block:`` address it is the block itself (a list for
+    ``tags``, an object for ``attribution``).
 
-    ``displaced`` is the experiment's envelope AT THE MOMENT THE OVERRIDE WAS
-    RECORDED, or ``None`` when the experiment carried nothing at that path. Contract
-    §2 D2 requires an override to record what it displaced; this is that record. It
-    is a HISTORICAL fact and is never refreshed. Do not read it as "what the
-    experiment says now" — that is ``FieldResolution.inherited_envelope``, and the
-    two legitimately differ once the experiment value is edited afterwards. Making
-    that difference visible is the point of inheritance by reference.
+    ``displaced`` is the experiment's payload AT THE MOMENT THE OVERRIDE WAS
+    RECORDED, or ``None`` when the experiment carried nothing there. Contract §2 D2
+    requires an override to record what it displaced; this is that record. It is a
+    HISTORICAL fact and is never refreshed — it is a DEEP COPY taken at capture, so
+    a later in-place edit of the experiment's own draft cannot rewrite history
+    through a shared reference. Do not read it as "what the experiment says now":
+    that is ``Resolution.inherited_payload``, and the two legitimately differ once
+    the experiment value is edited afterwards. Making that difference visible is the
+    point of inheritance by reference.
     """
 
-    envelope: dict
+    payload: object
     recorded_utc: str
-    displaced: dict | None = None
+    displaced: object | None = None
 
     def to_state(self) -> dict:
-        state: dict = {"envelope": self.envelope, "recorded_utc": self.recorded_utc}
+        state: dict = {"payload": self.payload, "recorded_utc": self.recorded_utc}
         # ABSENCE IS THE ENCODING. The key is omitted when the override displaced
         # nothing, so "displaced no inherited value" and "displaced an inherited
         # null" stay distinguishable on disk.
@@ -496,44 +601,57 @@ class FieldOverride:
         return state
 
     @classmethod
-    def from_state(cls, state: dict) -> "FieldOverride":
+    def from_state(cls, state: dict) -> "Override":
         return cls(
-            envelope=state.get("envelope") or {},
+            payload=state.get("payload"),
             recorded_utc=state.get("recorded_utc") or "",
             displaced=state.get("displaced"),
         )
 
 
 @dataclass(frozen=True)
-class FieldResolution:
-    """The resolved view of ONE experiment-level field for ONE run.
+class Resolution:
+    """The resolved view of ONE inherited experiment-level address for ONE run.
 
-    Computed on read, never stored. ``envelope`` is what this run actually has for
-    the path; ``inherited_envelope`` is what the experiment carries RIGHT NOW;
-    ``displaced_envelope`` is what the override displaced when it was recorded.
+    Computed on read, never stored. ``payload`` is what this run actually has at the
+    address; ``inherited_payload`` is what the experiment carries RIGHT NOW;
+    ``displaced_payload`` is what the override displaced when it was recorded.
     """
 
-    path: str
+    address: str
+    kind: str
+    name: str
     provenance: str
-    envelope: dict | None
-    inherited_envelope: dict | None
-    displaced_envelope: dict | None = None
+    payload: object | None
+    inherited_payload: object | None
+    displaced_payload: object | None = None
 
     @property
     def value(self):
-        """The resolved scientific value, or ``None`` when neither level carries one.
+        """The resolved scientific value.
 
-        ``None`` here is genuinely ambiguous between "absent" and "an explicit
-        null", which is why ``envelope is None`` is the test callers should use when
-        the difference matters.
+        A ``field:`` address unwraps the envelope's ``value``; a ``block:`` address
+        IS its own value and is returned whole. ``None`` is genuinely ambiguous
+        between "absent" and "an explicit null", so callers that care about the
+        difference should test ``payload is None``.
         """
-        return None if self.envelope is None else self.envelope.get("value")
+        if self.payload is None:
+            return None
+        if self.kind == ADDRESS_FIELD:
+            return self.payload.get("value") if isinstance(self.payload, dict) else None
+        return self.payload
 
 
-def resolve_inherited_fields(
-    experiment_fields: dict | None, run: "Run"
-) -> dict[str, FieldResolution]:
-    """Resolve every inherited experiment-level field for one run. Pure; stores nothing.
+def _experiment_payload_at(draft: dict | None, kind: str, name: str):
+    """What the experiment's draft carries at one address, or ``None``."""
+    draft = draft or {}
+    if kind == ADDRESS_FIELD:
+        return (draft.get("fields") or {}).get(name)
+    return draft.get(name)
+
+
+def resolve_inherited(experiment_draft: dict | None, run: "Run") -> dict[str, Resolution]:
+    """Resolve every inherited experiment-level address for one run. Pure; stores nothing.
 
     THIS IS THE READ HALF OF CONTRACT §2 DECISION D2 — inheritance is BY REFERENCE,
     NEVER BY COPY. A run stores only the ABSENCE of an override; nothing here writes
@@ -543,34 +661,74 @@ def resolve_inherited_fields(
     write, no reconciliation pass, and no window in which some runs hold the old
     value.
 
-    The key set is the union of (a) the experiment's own field paths that classify
-    as experiment-level and (b) every path this run overrides — so an override of a
-    path the experiment does not (yet) carry is still reported, with
-    ``inherited_envelope=None``.
+    Takes the WHOLE experiment draft, not just ``draft["fields"]``, because
+    experiment-level content lives in both namespaces — ``attribution`` and ``tags``
+    are top-level blocks, and an earlier version of this function took only the field
+    map and therefore inherited neither.
+
+    The key set is the union of (a) every address in the experiment's own draft that
+    classifies as experiment-level and (b) every address this run overrides — so an
+    override of an address the experiment does not (yet) carry is still reported,
+    with ``inherited_payload=None``.
+
+    A STORED OVERRIDE IS REPORTED EVEN IF ITS ADDRESS NO LONGER CLASSIFIES AS
+    EXPERIMENT-LEVEL, and that is deliberate. ``set_run_override`` refuses a
+    non-experiment-level address at write time, so this can only arise if the lists
+    above change under data that already exists. Silently dropping it would hide
+    user-entered content with evidence attached; reporting it keeps it visible and
+    deletable. A malformed address is skipped, because it cannot be classified at
+    all.
     """
-    fields = experiment_fields or {}
-    paths = {p for p in fields if field_level(p) == LEVEL_EXPERIMENT}
-    paths |= set(run.overrides)
-    out: dict[str, FieldResolution] = {}
-    for path in sorted(paths):
-        inherited = fields.get(path)
-        override = run.overrides.get(path)
+    draft = experiment_draft or {}
+    addresses: set[str] = set()
+    for path in (draft.get("fields") or {}):
+        if field_level(path) == LEVEL_EXPERIMENT:
+            addresses.add(field_address(path))
+    for key in draft:
+        if key != "fields" and block_level(key) == LEVEL_EXPERIMENT:
+            addresses.add(block_address(key))
+    addresses |= set(run.overrides)
+
+    out: dict[str, Resolution] = {}
+    for address in sorted(addresses):
+        try:
+            kind, name = parse_address(address)
+        except ValueError:
+            continue  # unclassifiable garbage in a persisted document
+        inherited = _experiment_payload_at(draft, kind, name)
+        override = run.overrides.get(address)
         if override is None:
-            out[path] = FieldResolution(
-                path=path,
+            out[address] = Resolution(
+                address=address,
+                kind=kind,
+                name=name,
                 provenance=PROVENANCE_INHERITED,
-                envelope=inherited,
-                inherited_envelope=inherited,
+                payload=inherited,
+                inherited_payload=inherited,
             )
         else:
-            out[path] = FieldResolution(
-                path=path,
+            out[address] = Resolution(
+                address=address,
+                kind=kind,
+                name=name,
                 provenance=PROVENANCE_OVERRIDDEN,
-                envelope=override.envelope,
-                inherited_envelope=inherited,
-                displaced_envelope=override.displaced,
+                payload=override.payload,
+                inherited_payload=inherited,
+                displaced_payload=override.displaced,
             )
     return out
+
+
+def _as_int(raw: object) -> int:
+    """``int(raw)`` or ``0``. Never raises — a persisted document is untrusted input.
+
+    ``int(state.get("rev") or 0)`` still raises on ``"seven"`` or ``[]``, which on
+    the read path is the same HTTP 500 the hard subscripts were.
+    """
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
 
 
 @dataclass
@@ -603,18 +761,19 @@ class Run:
     #: :meth:`Experiment.sorted_runs` sorts on.
     ordinal: int
     created_utc: str
-    #: The run's OWN draft, in the same envelope shape ``blank_draft()`` produces.
-    #: It carries the run-level fields (``context.*``, ``measurement.*``,
-    #: ``assets[]``, ``descriptors.outputs[]``, the acquisition timestamps).
+    #: The run's OWN draft, in the same shape ``blank_draft()`` produces. It carries
+    #: the run-level content in BOTH draft namespaces: the run-level ``fields`` keys
+    #: (``context.*``, ``timestamps.acquired_*``) and the run-level top-level blocks
+    #: (``series``, ``qc``, ``assets``, ``descriptors_outputs``).
     draft: dict = field(default_factory=dict)
     #: Set when THIS RUN is exported. Per contract §1 D1 the record identity is
     #: per-Run, not per-Experiment. ``Experiment.record_id`` remains the field the
     #: current 1:1 export path writes and is untouched by this slice.
     record_id: str | None = None
-    #: path -> :class:`FieldOverride`. THE ABSENCE OF A KEY IS THE INHERITANCE.
-    #: Nothing is copied down from the experiment; see
-    #: :func:`resolve_inherited_fields`.
-    overrides: dict[str, FieldOverride] = field(default_factory=dict)
+    #: namespaced draft address (``field:sample.sample_form``, ``block:tags``) ->
+    #: :class:`Override`. THE ABSENCE OF A KEY IS THE INHERITANCE. Nothing is copied
+    #: down from the experiment; see :func:`resolve_inherited`.
+    overrides: dict[str, Override] = field(default_factory=dict)
     #: Monotonic per-run version, bumped only by
     #: ``Experiment._bump_changed_runs`` when this run's authoritative signature
     #: actually changes. Never derived — it is stored.
@@ -656,25 +815,82 @@ class Run:
 
     @classmethod
     def from_state(cls, state: dict) -> "Run":
-        """Rehydrate one run. Tolerant of a missing optional key, like ``Experiment``."""
-        overrides = state.get("overrides") or {}
+        """Rehydrate one run. NEVER RAISES on a malformed document.
+
+        EVERY key is read with ``.get`` and a default, ``id`` and ``experiment_id``
+        included. They used to be hard subscripts, and the asymmetry was a measured
+        HTTP 500: ``Experiment.from_state`` hydrates runs in an unguarded
+        comprehension and ``list_experiments`` catches only ``FileNotFoundError``, so
+        ONE run entry missing ``id`` took out ``GET /api/experiments/<id>`` *and*
+        ``GET /api/experiments`` for the entire workspace. Worse, this module's own
+        fail-open handlers (``_persisted_sig_and_rev``, ``_persisted_run_state``)
+        both catch ``KeyError`` — a tolerance that could never fire, because the read
+        path raised first.
+
+        Producing a run rather than raising is only half the fix; a run with no id is
+        unaddressable and is dropped by :func:`_hydrate_runs`, which owns that policy
+        so it lives in one place.
+        """
+        raw_overrides = state.get("overrides")
+        # ``or {}`` is not a type guard: a persisted ``"overrides": "nope"`` is
+        # truthy and reached ``.items()``. Found by this module's own
+        # never-raises-on-garbage test, which is the same defect class as the hard
+        # subscripts above.
+        overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
         return cls(
-            id=state["id"],
-            experiment_id=state["experiment_id"],
+            id=state.get("id") or "",
+            experiment_id=state.get("experiment_id") or "",
             label=state.get("label") or "",
-            ordinal=int(state.get("ordinal") or 0),
+            ordinal=_as_int(state.get("ordinal")),
             created_utc=state.get("created_utc") or "",
             draft=state.get("draft") or {},
             record_id=state.get("record_id"),
             overrides={
-                p: FieldOverride.from_state(o)
-                for p, o in overrides.items()
-                if isinstance(o, dict)
+                addr: Override.from_state(o)
+                for addr, o in overrides.items()
+                if isinstance(addr, str) and isinstance(o, dict)
             },
-            rev=int(state.get("rev") or 0),
+            rev=_as_int(state.get("rev")),
             updated_utc=state.get("updated_utc") or "",
             generation=state.get("generation") or "",
         )
+
+
+def _hydrate_runs(raw: object) -> list[Run]:
+    """Hydrate a persisted ``runs`` array, skipping what cannot be a run. Never raises.
+
+    THE ONE PLACE THAT DECIDES WHAT A MALFORMED RUN ENTRY IS, so hydration and
+    ``_persisted_run_state`` cannot disagree about which runs a document contains.
+    Two things are skipped, both fail-closed-on-read-garbage in the same style as
+    ``_experiment_dirs`` and ``_persisted_sig_and_rev``:
+
+    * an entry that is not an object, or that carries no ``id``. A run with no id is
+      unaddressable — nothing can render, version, override or export it — so there
+      is no meaningful way to keep it. Dropping one entry is a real loss and is the
+      lesser of two: the alternative, measured, was a 500 on ``GET /api/experiments``
+      that hid EVERY experiment in the workspace behind one bad entry.
+    * a DUPLICATE id, first occurrence wins. Duplicate ids would break the total
+      order :meth:`Experiment.sorted_runs` promises and would let
+      ``_persisted_run_state`` silently lose one run's on-disk ``rev``.
+
+    ``experiment_id`` is deliberately NOT repaired from the owning experiment even
+    though it could be. Backfilling it would change the run's authoritative
+    signature on read, so merely LISTING a workspace would mark records as changed
+    and bump their ``rev`` at the next save.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[Run] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        run = Run.from_state(entry)
+        if not run.id or run.id in seen:
+            continue
+        seen.add(run.id)
+        out.append(run)
+    return out
 
 
 def _run_signature_payload(run: Run) -> dict:
@@ -694,7 +910,7 @@ def _run_signature_payload(run: Run) -> dict:
 
     ``overrides`` is included WHOLE, ``recorded_utc`` and ``displaced`` included:
     recording an override is an audited act and its record is authoritative state.
-    That is safe from churn because :meth:`Experiment.override_run_field` is
+    That is safe from churn because :meth:`Experiment.set_run_override` is
     idempotent — re-applying an equal envelope does not restamp ``recorded_utc``.
     """
     return {
@@ -943,9 +1159,18 @@ class Experiment:
 
         Sorted on ``(ordinal, created_utc, id)``. THE LABEL IS NOT IN THE KEY, by
         requirement: ``"Run 10"`` sorts before ``"Run 2"`` lexically, and a run may
-        be renamed to anything. The two tie-breakers make the order total even when
-        two runs share an ordinal, so the authoritative signature is deterministic
-        for any input rather than only for well-formed input.
+        be renamed to anything.
+
+        THE ORDER IS TOTAL BECAUSE RUN IDS ARE UNIQUE, and that uniqueness is
+        enforced rather than assumed — :meth:`add_run` refuses a duplicate id and
+        :func:`_hydrate_runs` drops one. An earlier version of this docstring claimed
+        the two tie-breakers alone made the order total "for any input rather than
+        only for well-formed input", which was FALSE and was measured false: two runs
+        sharing ``(ordinal, created_utc, id)`` produce an identical key, ``sorted`` is
+        merely stable, and reversing the list flipped the result — which would have
+        made ``_authoritative_signature`` order-dependent. Uniqueness of the third
+        key component is what closes it, so the claim now rests on the invariant that
+        is actually enforced.
         """
         return sorted(self.runs, key=lambda r: (r.ordinal, r.created_utc, r.id))
 
@@ -990,51 +1215,61 @@ class Experiment:
         self.runs.append(run)
         return run
 
-    def resolve_run(self, run: "Run") -> dict[str, "FieldResolution"]:
-        """Every inherited experiment-level field, resolved for ``run``. Read-only.
+    def resolve_run(self, run: "Run") -> dict[str, "Resolution"]:
+        """Every inherited experiment-level address, resolved for ``run``. Read-only.
 
-        Thin wrapper over :func:`resolve_inherited_fields` so callers never have to
-        know that the experiment's inheritable fields live in ``draft["fields"]``.
+        Thin wrapper over :func:`resolve_inherited`. Passes the WHOLE draft, because
+        experiment-level content lives in both draft namespaces — the ``fields`` map
+        AND the top-level ``attribution`` / ``tags`` blocks.
         """
-        return resolve_inherited_fields(self.draft.get("fields") or {}, run)
+        return resolve_inherited(self.draft, run)
 
-    def override_run_field(self, run: "Run", path: str, envelope: dict) -> "FieldOverride":
-        """Record an explicit run-level override of one inherited field. Does not save.
+    def set_run_override(self, run: "Run", address: str, payload: object) -> "Override":
+        """Record an explicit run-level override at one inherited address. Does not save.
 
-        Refuses any path that is not experiment-level (:class:`NotOverridable`):
-        only an inherited field can be overridden, and a run-level field is just an
-        ordinary edit to the run's own draft.
+        ``address`` is namespaced — build it with :func:`field_address` or
+        :func:`block_address`. Refuses any address that is not experiment-level
+        (:class:`NotOverridable`): only an inherited address can be overridden, and
+        run-level content is just an ordinary edit to the run's own draft. A
+        malformed address raises ``ValueError`` from :func:`parse_address`.
 
-        IDEMPOTENT. Re-applying an equal envelope returns the existing override
+        IDEMPOTENT. Re-applying an equal payload returns the existing override
         unchanged and does NOT restamp ``recorded_utc`` — which is what lets
         ``_run_signature_payload`` include the whole override record without a no-op
-        save churning the version. The displaced value is captured from the
-        experiment's CURRENT fields at the moment of the first override and is never
-        refreshed afterwards.
+        save churning the version.
+
+        THE DISPLACED PAYLOAD IS DEEP-COPIED AT CAPTURE. Storing the live reference
+        was safe only by accident: both current write paths replace ``exp.draft``
+        wholesale, so nothing mutated the captured object in place — but the
+        docstring on :class:`Override` promises history that "is never refreshed",
+        and one ``exp.draft["fields"][path]["value"] = ...`` would have rewritten it
+        through the shared reference. The copy makes the promise true by
+        construction instead of by the coincidence of how callers happen to write.
         """
-        if field_level(path) != LEVEL_EXPERIMENT:
+        if address_level(address) != LEVEL_EXPERIMENT:
             raise NotOverridable(
-                f"{path!r} is not an experiment-level field, so it cannot be overridden"
+                f"{address!r} is not an experiment-level address, so it cannot be overridden"
             )
-        existing = run.overrides.get(path)
-        if existing is not None and existing.envelope == envelope:
+        existing = run.overrides.get(address)
+        if existing is not None and existing.payload == payload:
             return existing
-        override = FieldOverride(
-            envelope=envelope,
+        kind, name = parse_address(address)
+        override = Override(
+            payload=payload,
             recorded_utc=_now_iso(),
-            displaced=(self.draft.get("fields") or {}).get(path),
+            displaced=copy.deepcopy(_experiment_payload_at(self.draft, kind, name)),
         )
-        run.overrides[path] = override
+        run.overrides[address] = override
         return override
 
-    def clear_run_override(self, run: "Run", path: str) -> bool:
+    def clear_run_override(self, run: "Run", address: str) -> bool:
         """Drop an override so the run inherits again. Returns whether one was removed.
 
         Removal restores inheritance BY REFERENCE — the run goes back to carrying no
-        value at that path at all, rather than to carrying a copy of whatever the
+        value at that address at all, rather than to carrying a copy of whatever the
         experiment currently says.
         """
-        return run.overrides.pop(path, None) is not None
+        return run.overrides.pop(address, None) is not None
 
     def _persisted_run_state(self) -> dict[str, tuple[str, int]]:
         """``{run_id: (authoritative signature, rev)}`` of the CURRENTLY on-disk runs.
@@ -1042,18 +1277,21 @@ class Experiment:
         ``{}`` when the state file is absent or unreadable — the same fail-open
         reading ``_persisted_sig_and_rev`` applies, so a corrupt file makes a real
         save proceed rather than crash.
+
+        Hydrates through :func:`_hydrate_runs` rather than looping over the raw
+        array, so this and ``Experiment.from_state`` cannot disagree about which
+        entries are runs. Building the map by hand skipped a different set and
+        collapsed duplicate ids onto one key, which would have silently discarded a
+        run's on-disk ``rev`` and let a stale in-memory copy regress it.
         """
         if not self.state_path.exists():
             return {}
         try:
             state = json.loads(self.state_path.read_text(encoding="utf-8"))
-            out: dict[str, tuple[str, int]] = {}
-            for raw in state.get("runs") or []:
-                if not isinstance(raw, dict):
-                    continue
-                run = Run.from_state(raw)
-                out[run.id] = (_run_signature(run), run.rev)
-            return out
+            return {
+                run.id: (_run_signature(run), run.rev)
+                for run in _hydrate_runs(state.get("runs"))
+            }
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return {}
 
@@ -1152,9 +1390,11 @@ class Experiment:
             # ``updated_utc`` and ``generation`` hydrates to rev 0 and a
             # deterministic fallback generation) and is preserved here; it is pinned
             # against a hand-written legacy dict by ``test_run_domain_model.py``.
-            runs=[
-                Run.from_state(r) for r in (state.get("runs") or []) if isinstance(r, dict)
-            ],
+            #
+            # ``_hydrate_runs`` also makes this call TOTAL: it never raises, so one
+            # malformed run entry can no longer take down the read of the whole
+            # workspace.
+            runs=_hydrate_runs(state.get("runs")),
         )
 
     # -- derived views --
