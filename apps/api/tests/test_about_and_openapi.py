@@ -486,7 +486,14 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # deployed pod — `PGHOST` is set there and the migration is applied by an
     # operator, so there is a window in which the table does not exist yet. The
     # create fails; it is never quietly degraded to an ephemeral write.
-    ("/api/experiments", "post"): ["201", "401", "404", "409", "422", "503"],
+    # `412` is the durable compare-and-swap REFUSING the write — a different
+    # condition from `503` and deliberately not folded into it: the database
+    # answered, and declined. On this route it needs an id collision, so it is
+    # documented because the response is declared and reachable through the app's
+    # `DurableWriteConflict` handler, not because it is expected. It carries no
+    # `400`/`428` companions, unlike the record write operations, because a create
+    # has no `If-Match` to be malformed or omitted.
+    ("/api/experiments", "post"): ["201", "401", "404", "409", "412", "422", "503"],
     ("/api/experiments/{experiment_id}", "get"): ["200", "304", "401", "404", "422"],
     ("/api/experiments/{experiment_id}/answers", "post"): [
         "200", "400", "401", "404", "412", "422", "428",
