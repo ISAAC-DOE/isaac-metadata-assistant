@@ -287,8 +287,13 @@ version.
    workspace view, an unknown id returns **404**, a known id returns **200**, the
    create returns a typed **503** having written nothing, and
    `/api/health.experiment_storage` reports `durable: false`,
-   `state: "unavailable"`. This is the deployed pod's state on the next image roll
-   (§0), and the job previously stepped straight over it.
+   `state: "unavailable"`. *(Re-dated 2026-08-09, and the step is unchanged. This
+   line read "This is the deployed pod's state on the next image roll (§0)" —
+   true when written, false since `0001_experiments` was applied to the hosted
+   database. What the step proves is still a live property: this is the state of
+   a **fresh** environment, of a **rolled-back** one, and of the window before
+   any future migration such as `0002`. Only the justification needed re-dating.)*
+   The job previously stepped straight over it.
 1. `--plan` reports `0001_experiments` and creates no application table.
 2. Apply. Assert `applied: 0001_experiments`.
 3. Apply again. Assert it is a no-op, and that `information_schema.columns` is

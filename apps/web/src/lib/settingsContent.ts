@@ -408,16 +408,37 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       //    Same split `what-resets` has held since Slice 2A.
       //  · EXPERIMENTS ARE DEPLOYMENT-DEPENDENT, AND DURABILITY IS NOT CLAIMED.
       //    `GET /api/health` reports `experiment_storage.state`
-      //    (`routes.py:787`), and `screens/ExperimentsHome.tsx` renders the
-      //    matching sentence from `lib/labels.ts:524-549` — including the
-      //    `unavailable` one, which is the state the deployed pod is in today:
-      //    `docs/create-experiment-persistence.md:8` records that the migration
-      //    has not been applied anywhere, and §0/`:73` that the write returns
-      //    `503` with nothing written. So this card states the DEPENDENCE and
-      //    names the surface that resolves it, rather than promising rows that
-      //    persist. It could not do otherwise even if it wanted to: `SettingsFacts`
-      //    carries `/api/about` values and `experiment_storage` is on
-      //    `/api/health`, so this module has never been told which state is live.
+      //    (`routes.py:910`), and `screens/ExperimentsHome.tsx` renders the
+      //    matching sentence from `lib/labels.ts:522-549` — one of three,
+      //    including the `unavailable` one.
+      //
+      //    CORRECTED 2026-08-09, and the correction is to this comment only; no
+      //    copy and no condition below it changed. This block used to say that
+      //    `unavailable` is "the state the deployed pod is in today" and that the
+      //    migration "has not been applied anywhere". Both were true when written
+      //    and are false now: Dean applied `0001_experiments` to the hosted
+      //    database on 2026-08-09, and `/api/health` on `/krish` reports
+      //    `{backend: "postgres", durable: true, state: "durable"}` — measured, see
+      //    `docs/evidence/hosted-0001-verification-2026-08-09.md`.
+      //
+      //    WHAT DOES NOT CHANGE IS THE DEPENDENCE, which is the only thing this
+      //    card ever asserted. `unavailable` is still a reachable live state — of a
+      //    fresh environment, of a rolled-back one, and of the window before any
+      //    future migration — and in it the create still returns `503` having
+      //    written nothing: `docs/create-experiment-persistence.md` §0.1, "What the
+      //    app does when the migration has NOT been applied", is the table that
+      //    says so, and the `postgres-migration` CI job proves it on every PR. So
+      //    this card states the DEPENDENCE and names the surface that resolves it,
+      //    rather than promising rows that persist. It could not do otherwise even
+      //    if it wanted to: `SettingsFacts` carries `/api/about` values and
+      //    `experiment_storage` is on `/api/health`, so this module has never been
+      //    told which state is live — which is exactly why a stale belief about
+      //    the hosted deployment could sit in this comment without ever reaching a
+      //    reader. The `detail` sentence below is phrased as a CONDITION —
+      //    "where a database is configured but is not accepting the work" — so it
+      //    stays true whichever state is live. The sentence that does assert a
+      //    state lives in `lib/labels.ts` and is chosen from
+      //    `experiment_storage.state` alone.
       //  · "NOTHING IS KEPT FOR A WHILE AND THEN LOST" is the precise consequence
       //    of that 503 and is worth the words: a create that fails writes nothing
       //    at all, rather than quietly leaving something temporary behind.

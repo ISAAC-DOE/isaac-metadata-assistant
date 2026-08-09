@@ -34,20 +34,34 @@ weakened. Applying the migration was likewise **not** an agent action.
 sets out five options (A–E) and this document cannot say which was taken. That is an open
 question, not an omission being glossed: the *effect* is measured, the *method* is not.
 
-### 0.1 One evidentiary status genuinely changed
+### 0.1 One evidentiary status changed slightly — and it is NOT the masking claim
 
 Every previous hosted recon run left **operator testimony and no artifact**, because the endpoint
 keeps its result in process memory only (see
 [`private-30-verification-2026-08-08.md`](private-30-verification-2026-08-08.md) §0.2, and
 `docs/where-the-30-records-are.md:204`). This run is the first for which a **response body was
-inspected** rather than read off a rendered screen.
+inspected** rather than read off a rendered screen. That is the whole of the change, and it is a
+small one: it improves how the *fields listed in §1.2* were read. It does not widen what was read.
 
-The consequence, stated exactly and no further: the claim that `db_recon.safe_key_segment` masks
-what it is supposed to mask was previously backed by **code review alone**. It is now backed by
-**code review plus one inspected response body**. That is a real improvement and a small one.
-**One inspected body is not proof of masking under all inputs** — it is one sample of one dataset
-at one moment, and it says nothing about a record whose content differs from the thirty that were
-scanned.
+**CORRECTED 2026-08-09. An earlier revision of this section claimed more than was done**, and the
+correction is recorded rather than silently swapped, because overstating an evidentiary status in
+an evidence file is the one failure this file exists to avoid. It said that the claim that
+`db_recon.safe_key_segment` masks what it is supposed to mask *"is now backed by code review plus
+one inspected response body"*. **It is not. That claim remains backed by code review alone**, which
+is exactly the position `CLAUDE.md` §15 states — the masking *"holds under static review; note this
+is code review, **not** a runtime observation"* — and nothing here revises it.
+
+Two reasons, either of which is sufficient on its own:
+
+- **No leak scan was performed on that body.** Nobody looked for unmasked content. Reading a field
+  and checking a field for leakage are different acts, and only the first happened.
+- **The fields where masking operates were not among those inspected.** `safe_key_segment` masks
+  the *key segments* of `by_rule_family` and `by_schema_path`. §1.2 enumerates scalar counts, two
+  booleans, and one list of literal constant field names — none of which passes through that
+  function at all. Reading eleven integers observes nothing about masking.
+
+The narrower thing that a reader may take from this run is only this: for the enumerated fields,
+the values in §1.2 were read from a response body rather than off a screen.
 
 Two further precisions about *this* page, so it is not read as more than it is:
 
@@ -74,11 +88,18 @@ Three things in that body are worth reading deliberately:
 - **`record_display` is still `closed`.** Gate **G2** is untouched.
 - **`commit` is `5632300`**, which is the local `main` head this document was written against. So
   the code the measurements ran against is the code in this repository, not an older image.
+- **`last_recon` is `null`, and that is correct rather than puzzling.** It does not contradict the
+  two recon runs in §1.2, and it is not a hint of a second replica answering the health read.
+  **This health read came FIRST**, before either scan; the two scans then ran at 21:40:25Z and
+  21:41:42Z. `last_recon` is process-local state written by `_db_recon_cache_put`
+  (`apps/api/isaac_api/routes.py:5106`) and read back at `routes.py:901`, so at the moment this
+  body was returned no recon had yet run in that process and `null` is the only correct answer.
 
 ### 1.2 `GET .../krish/api/runtime/database/recon` — run twice
 
-Run 1 at **21:40:25Z**, run 2 at **21:41:42Z**. Run 2 was taken **after** the experiment in §1.3
-was created. Both runs returned:
+Run 1 at **21:40:25Z**, run 2 at **21:41:42Z** — both **after** the `/api/health` read in §1.1,
+which is why that body reports `last_recon: null`. Run 2 was taken **after** the experiment in
+§1.3 was created. Both runs returned:
 
 | Field | Value |
 |---|---|

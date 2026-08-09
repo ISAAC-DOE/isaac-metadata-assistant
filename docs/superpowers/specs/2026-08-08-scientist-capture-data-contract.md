@@ -31,6 +31,13 @@ measurement would make the rest of that provenance untrustworthy.)*
 > that migration is applied is claiming something untrue —
 > `docs/migration-approval-packet-0001.md:282-289` already says so.
 
+*(Line reference as written on 2026-08-08, left standing inside the quote because the quote is a
+pinned snapshot. The packet has since grown and `:282-289` no longer lands on that passage. It is
+now at `docs/migration-approval-packet-0001.md:320-330`, under the heading "Why it was unapplied as
+of 2026-08-08: no *authorized* path from **here** to that database" — the list of "the three real
+reasons it was unapplied", whose lead-in has itself been re-dated to the past tense. Prefer the
+heading over the line numbers; a heading does not drift when the file grows.)*
+
 ### ADDENDUM — 2026-08-09: the migration has been applied, and the row above no longer holds
 
 **Dean applied `0001_experiments` to the hosted database on 2026-08-09.** Measured the same day in
