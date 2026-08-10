@@ -29,6 +29,7 @@ from isaac_records.complete import apply_answers, apply_corrections
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
+from isaac_records.extract.structured import FIELD_MAP as EXTRACTOR_FIELD_MAP
 from isaac_records.ids import is_record_id
 from isaac_records.models import user_confirmation
 from isaac_records.official import EXPECTED_VERSION, schema_path, validate_official
@@ -2433,7 +2434,9 @@ def _run_view(exp: Experiment, run: "ws.Run") -> dict:
     }
 
 
-def _clean_label(raw: object) -> tuple[str | None, JSONResponse | None]:
+def _clean_label(
+    raw: object, *, blank_is_a_choice: bool = True
+) -> tuple[str | None, JSONResponse | None]:
     """``(label, None)`` or ``(None, <422>)``. A blank label is NOT a label.
 
     Absent or blank yields ``None``, which is how the caller says "you choose" —
@@ -2441,6 +2444,15 @@ def _clean_label(raw: object) -> tuple[str | None, JSONResponse | None]:
     rather than coerced: ``str(5)`` would manufacture the label ``"5"`` out of a
     request that named none, which is the same guessing ``workspace._as_str``
     refuses on the read path.
+
+    ``blank_is_a_choice`` IS THE DIFFERENCE BETWEEN CREATE AND EDIT, and it exists
+    because collapsing them produced a measured silent no-op. On CREATE, blank
+    genuinely means "server, you choose", and ``Run <ordinal>`` is a real answer.
+    On EDIT there is nothing to choose: a rename to ``"   "`` used to return 200
+    having renamed nothing and having said nothing, which is exactly the silent
+    ignoring the edit route's own contract says never happens. Callers that edit
+    pass ``blank_is_a_choice=False`` and get the same typed ``invalid_label``
+    refusal a non-string already gets.
     """
     if raw is None:
         return None, None
@@ -2453,6 +2465,17 @@ def _clean_label(raw: object) -> tuple[str | None, JSONResponse | None]:
             },
         )
     cleaned = raw.strip()
+    if not cleaned and not blank_is_a_choice:
+        return None, JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_label",
+                "message": (
+                    "label must not be blank. Omit it to leave the current name "
+                    "unchanged; a blank one names nothing and is not applied."
+                ),
+            },
+        )
     return (cleaned or None), None
 
 
@@ -2480,6 +2503,45 @@ def _confirmation_answer(value) -> str:
 def _run_field_question(path: str) -> str:
     """The question a run-level field write records itself as answering."""
     return f"Value for {path} on this run?"
+
+
+#: THE COMPLETE SET OF ``draft["fields"]`` KEYS THE RUN EDIT ROUTE MAY WRITE.
+#:
+#: TWO GATES, AND ONLY ONE OF THEM USED TO BE APPLIED. ``workspace.field_level``
+#: answers "whose is this?" and it is a segment-aware PREFIX test — by design, so
+#: that a new leaf under ``context.`` inherits its parent's classification. It is
+#: NOT, and was never meant to be, an answer to "does this path exist?". Applied
+#: alone it accepted ``context.typo_K``, ``context.``, ``context``,
+#: ``context.<script>alert(1)</script>`` and ``timestamps.acquired_start_utc.evil``,
+#: wrote each one with a fabricated ``user_confirmation`` evidence entry, and left
+#: the run permanently unexportable: the official schema closes ``context``, so the
+#: next check reported ``Additional properties are not allowed`` — with no way to
+#: clear it from a UI that offers three fixed paths.
+#:
+#: SO THE SET IS DERIVED FROM ``extract.structured.FIELD_MAP``, filtered by
+#: ``field_level``. FIELD_MAP is the deterministic extractor's own map of official
+#: dotted paths and is therefore the vocabulary the rest of the draft pipeline
+#: already speaks: every key ``draft["fields"]`` legitimately carries was put there
+#: from it. Allowing exactly what the extractor can produce means this route can
+#: never write a key the rest of the application cannot read, validate or export.
+#:
+#: WHY NOT THE OFFICIAL SCHEMA DIRECTLY, since it is the truth plane. Because it
+#: cannot enumerate a closed set of dotted paths: ``sample.composition.*``,
+#: ``sample.geometry.*`` and ``system.configuration.*`` are OPEN namespaces that
+#: declare no ``properties`` at all, so a schema walk would either admit any
+#: invented key under them or need a second, per-subtree policy — a second
+#: definition of "which fields exist". It remains the authority on SHAPE, and the
+#: two agree: ``test_every_run_writable_path_resolves_to_a_typed_node_in_the_official_schema``
+#: measures that every path below resolves to a typed schema node, rather than
+#: trusting FIELD_MAP's comment that says so.
+#:
+#: FAIL-CLOSED. A field a future extractor emits is not writable here until
+#: somebody classifies it, which is the same default ``field_level`` already takes.
+RUN_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
+    path
+    for path, _coercer in EXTRACTOR_FIELD_MAP.values()
+    if ws.field_level(path) == ws.LEVEL_RUN
+)
 
 
 def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
@@ -2690,14 +2752,19 @@ def get_run(
         "Requires `confirmed_by_user: true` and THE RUN's current `ETag` in "
         "`If-Match` — not the record's. Omitted is `428`, malformed is `400`, and "
         "stale is `412` with nothing written and the run's current `ETag` echoed.\n\n"
-        "Each key in `fields` is a dotted official path that must classify as "
-        "run-level. A key that does not — a record-level path such as "
-        "`sample.material.name`, or one the contract assigns to neither level — is "
-        "rejected with `422` naming it, and NOTHING in the request is written. It "
-        "is never silently ignored, and the classification is never guessed. A "
+        "Each key in `fields` must be a real official field path that is "
+        "run-level. A key that is not — an invented or misspelt path such as "
+        "`context.typo_K`, a record-level path such as `sample.material.name`, or "
+        "one the contract assigns to neither level — is rejected with `422` naming "
+        "it, and NOTHING in the request is written. It is never silently ignored, "
+        "the classification is never guessed, and a path with no home in the "
+        "official schema is never stored: doing so would record a confirmation for "
+        "a value the schema cannot hold and would block this run's export. A "
         "`null` value clears that field by removing it; no value is ever invented, "
         "and a body that names no run-level field and no new label is rejected with "
-        "`422` rather than silently doing nothing.\n\n"
+        "`422` rather than silently doing nothing. A `label` that is blank or only "
+        "whitespace is rejected the same way — omit it to leave the name "
+        "unchanged.\n\n"
         "Re-submitting a value the run already records is a no-op: it rewrites "
         "nothing and does not advance the run's revision."
     ),
@@ -2757,17 +2824,22 @@ def patch_run(
                     "message": "fields must be an object of dotted official paths.",
                 },
             )
-        label, err = _clean_label(body.get("label"))
+        label, err = _clean_label(body.get("label"), blank_is_a_choice=False)
         if err is not None:
             return err
 
-        # CLASSIFY EVERYTHING BEFORE WRITING ANYTHING. A request naming one
-        # unclassified path is refused whole, so a caller can never be left with a
+        # RESOLVE EVERY KEY BEFORE WRITING ANYTHING. A request naming one key this
+        # route may not write is refused whole, so a caller can never be left with a
         # partial write it was told was rejected.
+        #
+        # MEMBERSHIP, NOT CLASSIFICATION. `RUN_WRITABLE_FIELD_PATHS` is the derived
+        # set of real official field-map paths that are the run's to write; see its
+        # own comment for why a `field_level` prefix test alone admitted invented
+        # paths and wedged the run's export.
         refused = [
             key
             for key in raw_fields
-            if not isinstance(key, str) or ws.field_level(key) != ws.LEVEL_RUN
+            if not isinstance(key, str) or key not in RUN_WRITABLE_FIELD_PATHS
         ]
         if refused:
             return JSONResponse(
@@ -2777,9 +2849,13 @@ def patch_run(
                     "key": str(refused[0]),
                     "keys": [str(k) for k in refused],
                     "message": (
-                        "These paths are not run-level, so they cannot be written on "
-                        "a run. Record-level values are edited on the record and "
-                        "inherited; a path the contract classifies as neither is not "
+                        "These paths are not run-level official fields, so they "
+                        "cannot be written on a run. A path that is not an official "
+                        "field at all is refused rather than stored: writing one "
+                        "would record a confirmation for a value with no home in the "
+                        "schema, and would then block this run's export. "
+                        "Record-level values are edited on the record and inherited; "
+                        "a path the contract classifies as neither level is not "
                         "guessed into one."
                     ),
                 },
@@ -2797,13 +2873,22 @@ def patch_run(
 
         draft = run.draft if isinstance(run.draft, dict) else {}
         run.draft = draft
-        fields = draft.get("fields")
-        if not isinstance(fields, dict):
-            fields = {}
-            draft["fields"] = fields
+        # THE EMPTY MAP IS NOT ATTACHED UNTIL SOMETHING IS ACTUALLY WRITTEN.
+        # `draft["fields"]` is part of the run's authoritative signature, so
+        # creating it unconditionally made a request that wrote NOTHING — a `null`
+        # clear of a field this run does not have — still advance the run's `rev`.
+        # Nothing lied about it (the response reported the new version honestly)
+        # and it was reachable once per run; it is fixed because a revision means
+        # "your edit landed" and that one had not.
+        existing_fields = draft.get("fields")
+        fields = existing_fields if isinstance(existing_fields, dict) else {}
         timestamp = _now_iso()
+        wrote = False
         for path, value in raw_fields.items():
-            _apply_run_field(fields, path, value, timestamp)
+            if _apply_run_field(fields, path, value, timestamp):
+                wrote = True
+        if wrote and not isinstance(existing_fields, dict):
+            draft["fields"] = fields
         if label is not None:
             run.label = label
 

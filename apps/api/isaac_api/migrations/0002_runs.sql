@@ -8,6 +8,18 @@
 -- that makes a Run the unit of write. It does NOT move any data and does NOT
 -- change any application behaviour — see "WHAT THIS MIGRATION IS NOT" below.
 --
+-- THIS FILE WAS EDITED IN PLACE AFTER REVIEW, AND THAT IS ONLY LEGITIMATE
+-- BECAUSE IT HAS NEVER BEEN APPLIED ANYWHERE. The hosted database is migrated to
+-- `0001_experiments` only (applied by the owner on 2026-08-09); `0002` is pending
+-- everywhere. The edit is the `isaac_runs_document_identity` CHECK, described in
+-- full below. Editing a PENDING migration is the only way to change it at all:
+-- `ALTER` is a forbidden verb in `db_write._FORBIDDEN_KEYWORDS`, and
+-- `CREATE TABLE IF NOT EXISTS` is a silent no-op against a table that already
+-- exists — so once this file is applied to an environment, its constraints are
+-- fixed there and a correction would need a new table. Any future change to this
+-- file must first establish, for every environment, that `0002_runs` is absent
+-- from `isaac_schema_migrations`.
+--
 -- FORWARD-ONLY, ADDITIVE AND IDEMPOTENT. Both statements are
 -- `CREATE ... IF NOT EXISTS`, so re-running this file is a no-op even if the
 -- bookkeeping row were lost. There is no DROP, no TRUNCATE and no ALTER anywhere
@@ -120,14 +132,50 @@
 --
 --   isaac_runs_document_identity  A table-level CHECK that the two identity keys
 --               agree with the document they project: `state ->> 'id' = run_id`
---               and `state ->> 'experiment_id' = experiment_id`. Promoting a field
+--               and, for `experiment_id`, agreement OR silence. Promoting a field
 --               out of a document creates exactly one new failure mode — the two
 --               copies disagreeing — and this closes it for the two keys where a
 --               disagreement would mean the row names a different run.
---               IT IS LEGACY-TOLERANT BY CONSTRUCTION: `->>` yields NULL for an
---               absent key, a comparison against NULL is NULL, and a CHECK passes
---               unless it is FALSE. So a document missing `id` is admitted while a
---               document carrying the WRONG `id` is refused.
+--
+--               A CORRECTION, RECORDED RATHER THAN QUIETLY APPLIED. This comment
+--               used to read "IT IS LEGACY-TOLERANT BY CONSTRUCTION: `->>` yields
+--               NULL for an absent key, a comparison against NULL is NULL, and a
+--               CHECK passes unless it is FALSE." Every clause of that is true,
+--               and the conclusion drawn from it was FALSE for the only legacy
+--               shape this application can actually produce. `Run.to_state()`
+--               emits every key unconditionally, and `Run.from_state` reads each
+--               string through `_as_str`, which returns `''` for an absent one —
+--               so a legacy run document carries `"experiment_id": ""`, not a
+--               missing key. `'' = experiment_id` is FALSE, not NULL, and the row
+--               was REFUSED. The NULL argument only ever described a bare `'{}'`
+--               document, which is what the CI fixture happened to insert; that is
+--               why nothing caught it. The shape is reachable and permanent:
+--               `workspace._hydrate_runs` documents that `experiment_id` is
+--               deliberately NOT repaired from the owning experiment, because
+--               repairing it on READ would change the run's authoritative
+--               signature and bump every record's `rev` on a mere listing.
+--
+--               SO `experiment_id` NOW TREATS `''` EXACTLY AS IT TREATS AN ABSENT
+--               KEY: `coalesce(nullif(state ->> 'experiment_id', ''),
+--               experiment_id) = experiment_id`. This is not a weakening of the
+--               constraint's intent. What it exists to refuse is a row whose
+--               document names a DIFFERENT experiment, and `''` names none — it is
+--               this codebase's canonical encoding of "absent" for every string
+--               field of a run. Every non-empty disagreeing value is still
+--               refused, and the row's own `experiment_id` column is still NOT
+--               NULL and still a real foreign key, so the parent is never in
+--               doubt. The alternative — repairing the document at hydration —
+--               was rejected because it changes documented read behaviour and
+--               rewrites `rev` across the workspace irreversibly, to fix a
+--               constraint that has never been applied anywhere.
+--
+--               `id` IS DELIBERATELY NOT RELAXED THE SAME WAY, and the asymmetry
+--               is a decision. `_hydrate_runs` DROPS a run whose id is empty, so
+--               no document this application persists can carry `id: ''`; a
+--               document that identifies no run at all is exactly what this
+--               constraint should refuse. Its NULL tolerance for a genuinely
+--               absent `id` is unchanged.
+--
 --               `ordinal`, `rev` and `generation` are deliberately NOT constrained
 --               this way. Each would need a cast (`(state ->> 'rev')::bigint`), and
 --               a cast inside a CHECK raises on malformed text instead of
@@ -159,7 +207,9 @@ CREATE TABLE IF NOT EXISTS isaac_runs (
     created_utc    timestamptz NOT NULL DEFAULT now(),
     updated_utc    timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT isaac_runs_document_identity
-    CHECK (state ->> 'id' = run_id AND state ->> 'experiment_id' = experiment_id)
+    CHECK (state ->> 'id' = run_id
+           AND coalesce(nullif(state ->> 'experiment_id', ''), experiment_id)
+               = experiment_id)
 )
 --;
 -- ONE INDEX, DOING THREE JOBS, and no second index is created because no second

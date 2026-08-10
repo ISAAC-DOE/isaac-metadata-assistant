@@ -21,7 +21,8 @@
  *     button. Not a div with an onClick, and not `aria-selected`.
  *   * The autosave status lives in ONE `role="status"` region per card, so two
  *     runs saving at once announce as two runs rather than one contradictory
- *     stream.
+ *     stream. It is OUTSIDE the collapsible panel, with Retry Save, so a write
+ *     the server refuses is reported and recoverable in either state.
  *   * Every state is a glyph plus words. `Conflict` is not "the amber one".
  *   * A field that will not be sent is marked `aria-invalid` AND says why in
  *     text associated by `aria-describedby`.
@@ -169,9 +170,53 @@ export function RunCard({
             {filled} of {RUN_FIELDS.length} set
           </span>
           <CheckSummaryChip check={check} />
+          {/*
+            A REFUSED WRITE IS A HEADER FACT, not a panel one. `failed` used to
+            be rendered only inside the expanded panel, so a save that was
+            refused after the reader collapsed the card was announced nowhere
+            and recoverable nowhere — the card read exactly as if nothing had
+            happened. It sits beside `conflict` because they are the same kind
+            of claim: this run holds an edit the server has not taken. Inside
+            the header button on purpose — that puts the words into the
+            header's accessible name, so reaching the collapsed card by
+            keyboard alone says what is wrong with it.
+          */}
+          {autosave.status === 'failed' && <StatusChip kind="fail" label="Save failed" />}
           {autosave.status === 'conflict' && <StatusChip kind="needsYou" label="Conflict" />}
         </button>
       </h3>
+
+      {/*
+        THE AUTOSAVE READOUT — one live region per card, OUTSIDE the collapsible
+        panel so it exists in both states and in the accessibility tree before
+        it has anything to say. (A region added to the DOM at the same moment it
+        is populated is not reliably announced.) It is empty until this card has
+        something to report, so a reader is not told "Saved" about a run they
+        have not touched, and it takes no vertical space while empty.
+
+        RETRY SAVE LIVES HERE TOO, rather than in the panel's action row. The
+        state it belongs to is exactly the state in which the reader may not be
+        able to see the panel: requiring them to expand a card to reach the only
+        control that re-sends a refused edit puts a step between the problem and
+        its remedy for no benefit. It cannot be a second control inside the
+        header — that button already owns the whole row, and a button inside a
+        button is not valid.
+      */}
+      <div className="run-card-save" data-save-status={autosave.status}>
+        <p className="run-save-status" role="status" data-save-status={autosave.status}>
+          {autosave.label && SaveIcon && (
+            <>
+              <SaveIcon className="run-save-icon" size={14} strokeWidth={2.2} aria-hidden="true" />
+              {autosave.label}
+            </>
+          )}
+        </p>
+        {autosave.status === 'failed' && (
+          <button type="button" className="btn btn-secondary" onClick={autosave.retryNow}>
+            Retry Save
+          </button>
+        )}
+      </div>
 
       {expanded && (
         <div id={panelId} className="run-card-body" role="region" aria-labelledby={headerId}>
@@ -291,26 +336,11 @@ export function RunCard({
             >
               {check.status === 'busy' ? 'Checking…' : 'Check Run'}
             </button>
-
-            {autosave.status === 'failed' && (
-              <button type="button" className="btn btn-secondary" onClick={autosave.retryNow}>
-                Retry Save
-              </button>
-            )}
-
             {/*
-              THE AUTOSAVE READOUT. One live region per card. It is empty until
-              this card has something to report, so a reader is not told "Saved"
-              about a run they have not touched.
+              The save readout and Retry Save used to live here. They are at
+              card level now — see the note above the header — because both of
+              them have to work on a card the reader has collapsed.
             */}
-            <p className="run-save-status" role="status" data-save-status={autosave.status}>
-              {autosave.label && SaveIcon && (
-                <>
-                  <SaveIcon className="run-save-icon" size={14} strokeWidth={2.2} aria-hidden="true" />
-                  {autosave.label}
-                </>
-              )}
-            </p>
           </div>
 
           <CheckResult check={check} />

@@ -357,6 +357,30 @@
   border-top: 1px solid var(--border-hair);
 }
 
+/*
+ * THE SAVE READOUT + RETRY, at card level rather than inside the panel — a
+ * refused write has to be visible on a card the reader has collapsed.
+ */
+.run-card-save {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 16px 10px;
+}
+
+/*
+ * Idle: nothing to say, and no footprint on a collapsed card. Clipped to zero
+ * height rather than `display: none` — that would take the live region out of
+ * the accessibility tree, and a region first inserted at the moment it is
+ * populated is not reliably announced.
+ */
+.run-card-save[data-save-status='idle'] {
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 .run-save-status {
   margin: 0 0 0 auto;
   display: inline-flex;
@@ -483,6 +507,10 @@
   }
   .run-card-actions {
     flex-wrap: wrap;
+  }
+  .run-card-save {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
   .run-save-status {
     margin-left: 0;

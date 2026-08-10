@@ -67,7 +67,9 @@ CREATE TABLE IF NOT EXISTS isaac_runs (
     created_utc    timestamptz NOT NULL DEFAULT now(),
     updated_utc    timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT isaac_runs_document_identity
-    CHECK (state ->> 'id' = run_id AND state ->> 'experiment_id' = experiment_id)
+    CHECK (state ->> 'id' = run_id
+           AND coalesce(nullif(state ->> 'experiment_id', ''), experiment_id)
+               = experiment_id)
 );
 
 CREATE INDEX IF NOT EXISTS isaac_runs_experiment_order_idx
@@ -90,7 +92,7 @@ CREATE INDEX IF NOT EXISTS isaac_runs_experiment_order_idx
 | `rev bigint NOT NULL DEFAULT 0`, `CHECK >= 0` | The run's monotonic version, written only by `Experiment._bump_changed_runs`. Promoted so a later per-run compare-and-swap compares a typed column instead of `(state ->> 'rev')::bigint`, which is what 0001's experiment-level predicate has to do. |
 | `generation text NOT NULL`, **no default** | The per-run opaque nonce that makes a delete→recreate distinguishable at rev 0. No default on purpose: an empty generation is meaningless and `Run.__post_init__` guarantees a non-empty one, so a writer that omits it has a bug and should be told. |
 | `created_utc` / `updated_utc timestamptz NOT NULL DEFAULT now()` | Server-side **row** timestamps, exactly as in 0001. They are **not** the document's own `created_utc`/`updated_utc` strings, which stay inside `state`. Easy to conflate; stated so nobody has to guess. |
-| `CHECK isaac_runs_document_identity` | Promoting a field out of a document creates exactly one new failure mode — the two copies disagreeing. This closes it for the two identity keys. **Legacy-tolerant by construction**: `->>` yields NULL for an absent key and a CHECK passes unless it is FALSE, so a document *missing* `id` is admitted while a document carrying the *wrong* `id` is refused. |
+| `CHECK isaac_runs_document_identity` | Promoting a field out of a document creates exactly one new failure mode — the two copies disagreeing. This closes it for the two identity keys. **Legacy tolerance is explicit, not incidental** — and the earlier revision of this row got that wrong, which is why the wording is spelled out rather than summarised. It claimed the constraint was *"legacy-tolerant by construction"* because `->>` yields NULL for an absent key and a CHECK passes unless it is FALSE. That argument is sound only for a bare `'{}'` document, which is what CI happened to insert; **it is false for the only legacy shape the application can actually produce.** `Run.to_state()` always emits both keys and `_as_str(None)` yields `""`, so a pre-`experiment_id` document hydrates to `"experiment_id": ""` — present, not absent — and `'' = experiment_id` is FALSE, refusing the row. `experiment_id` therefore treats an empty string and an absent key alike, via `coalesce(nullif(…, ''), experiment_id)`, because `""` is this codebase's canonical encoding of absent and the constraint exists to refuse a document naming a *different* experiment, which `""` does not. Every non-empty disagreement is still refused, and the column remains `NOT NULL` and a real foreign key. `id` is deliberately **stricter** and is *not* relaxed: `_hydrate_runs` drops an id-less run, so no persisted document can carry `id: ""`. CI now builds the legacy document from `Run.to_state()` itself rather than from a hand-written approximation — the approximation is what let the false claim stand. |
 | `INDEX (experiment_id, ordinal, run_id)` | One index doing three jobs: the experiment-scoped list; the ordinal sort within it; and the parent-side check the foreign key performs on every delete of an experiment row (an unindexed referencing column makes that a sequential scan of every run in the deployment). |
 
 ### Why any column is promoted out of the document at all

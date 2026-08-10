@@ -402,7 +402,12 @@ describe('autosave', () => {
       fireEvent.change(within(card).getByLabelText('Temperature (K)'), { target: { value: '305' } });
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
-    expect(within(card).getByText('Save failed')).toBeInTheDocument();
+    // Two places say it, exactly as `Conflict` does: the collapsed-header
+    // indicator and the live region. The count is the assertion, not
+    // uniqueness — the header one is what a reader who has collapsed the card
+    // sees, and it is required to be there.
+    expect(within(card).getAllByText('Save failed')).toHaveLength(2);
+    expect(within(card).getByRole('status').textContent).toBe('Save failed');
     expect(within(card).queryByText('Saved')).toBeNull();
     expect(patches).toBe(1);
 
@@ -427,7 +432,7 @@ describe('autosave', () => {
       await vi.advanceTimersByTimeAsync(600_000);
     });
     expect(patches).toBe(4);
-    expect(within(card).getByText('Save failed')).toBeInTheDocument();
+    expect(within(card).getAllByText('Save failed')).toHaveLength(2);
   });
 
   it('does not retry a refusal that is not a 412', async () => {
@@ -448,7 +453,7 @@ describe('autosave', () => {
       fireEvent.change(within(card).getByLabelText('Temperature (K)'), { target: { value: '305' } });
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
-    expect(within(card).getByText('Save failed')).toBeInTheDocument();
+    expect(within(card).getAllByText('Save failed')).toHaveLength(2);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(600_000);
     });
@@ -648,6 +653,300 @@ describe('leaving the screen mid-save', () => {
     // fire, which is the point — a flush replaces a warning).
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  /*
+   * THE CASE THE CONTROL ABOVE CANNOT REACH, and the reason it needs its own
+   * test rather than an extra assertion on that one.
+   *
+   * The control unmounts with NOTHING in flight, so a teardown that flushes
+   * only when the socket is idle passes it. The edit that gets destroyed is the
+   * one typed AFTER a request has already left: `send` empties the pending map
+   * before dispatching, so that edit is not in the open request's body, and the
+   * resolve handler bails out on `!mounted` before it can schedule a second
+   * one. Unmounting mid-flight is one click away — the Runs section lives in
+   * the `fields` tabpanel, so switching to Graph unmounts every card.
+   *
+   * ONE CLICK REACHES IT, and it is silent: no message, no status, no request.
+   */
+  it('sends an edit typed WHILE a save was in flight, carrying the token that save returned', async () => {
+    const log = patchLog();
+    const g = gate<void>();
+    stubFetchRoutes({
+      ...bundleRoutes(ID),
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: async (init) => {
+        log.record('RUNAAA', init);
+        // The FIRST request is held open; later ones answer immediately.
+        if (log.seen.length === 1) await g.promise;
+        return { body: { run: { ...RUN_A, version: `ra.${log.seen.length}` } } };
+      },
+    });
+    const view = render(
+      <MemoryRouter
+        initialEntries={[`/record/${ID}`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    const card = cardFor('RUNAAA');
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    vi.useFakeTimers();
+    // Edit one leaves and is held open.
+    await act(async () => {
+      fireEvent.change(within(card).getByLabelText('Temperature (K)'), { target: { value: '305' } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(log.seen).toHaveLength(1);
+    expect(log.seen[0].body).toEqual({
+      confirmed_by_user: true,
+      fields: { 'context.temperature_K': 305 },
+    });
+    expect(log.seen[0].ifMatch).toBe('"ra.0"');
+
+    // Edit two is typed while that request is still open, so it is NOT in it.
+    await act(async () => {
+      fireEvent.change(within(card).getByLabelText('Environment'), { target: { value: 'operando' } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(within(card).getByRole('status').textContent).toBe('Saving…');
+    expect(log.seen).toHaveLength(1);
+
+    // The reader switches tab / leaves the screen.
+    await act(async () => {
+      view.unmount();
+    });
+
+    // Nothing can be sent YET: the token edit two must carry is the one the
+    // open response is about to establish. Sending now would be a 412.
+    expect(log.seen).toHaveLength(1);
+
+    await act(async () => {
+      g.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // It was sent, exactly once, with the NEW token — a flush that reused
+    // `ra.0` would earn a 412 and lose the edit just as silently.
+    expect(log.seen).toHaveLength(2);
+    expect(log.seen[1].body).toEqual({
+      confirmed_by_user: true,
+      fields: { 'context.environment': 'operando' },
+    });
+    expect(log.seen[1].ifMatch).toBe('"ra.1"');
+
+    // No further traffic and no timer left behind.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600_000);
+    });
+    expect(log.seen).toHaveLength(2);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('sends the edits an in-flight save FAILED with, rather than stranding them', async () => {
+    const log = patchLog();
+    const g = gate<void>();
+    stubFetchRoutes({
+      ...bundleRoutes(ID),
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: async (init) => {
+        log.record('RUNAAA', init);
+        if (log.seen.length === 1) {
+          await g.promise;
+          return { status: 500, body: { error: 'boom' } };
+        }
+        return { body: { run: { ...RUN_A, version: 'ra.1' } } };
+      },
+    });
+    const view = render(
+      <MemoryRouter
+        initialEntries={[`/record/${ID}`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    const card = cardFor('RUNAAA');
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(card).getByLabelText('Temperature (K)'), { target: { value: '305' } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    await act(async () => {
+      fireEvent.change(within(card).getByLabelText('Environment'), { target: { value: 'operando' } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(log.seen).toHaveLength(1);
+
+    await act(async () => {
+      view.unmount();
+    });
+    await act(async () => {
+      g.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // BOTH edits go: the failed request's fields go back into the pending map
+    // under anything newer, and the whole map is handed to the network once.
+    // The token is unchanged — a 500 established no new version.
+    expect(log.seen).toHaveLength(2);
+    expect(log.seen[1].body).toEqual({
+      confirmed_by_user: true,
+      fields: { 'context.temperature_K': 305, 'context.environment': 'operando' },
+    });
+    expect(log.seen[1].ifMatch).toBe('"ra.0"');
+  });
+
+  it('sends NOTHING more after a 412, because every send would carry the refused token', async () => {
+    const log = patchLog();
+    const g = gate<void>();
+    stubFetchRoutes({
+      ...bundleRoutes(ID),
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: async (init) => {
+        log.record('RUNAAA', init);
+        if (log.seen.length === 1) await g.promise;
+        return { status: 412, body: { error: 'stale_write', current_version: 'ra.9' } };
+      },
+    });
+    const view = render(
+      <MemoryRouter
+        initialEntries={[`/record/${ID}`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    const card = cardFor('RUNAAA');
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(card).getByLabelText('Temperature (K)'), { target: { value: '305' } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    await act(async () => {
+      fireEvent.change(within(card).getByLabelText('Environment'), { target: { value: 'operando' } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    await act(async () => {
+      view.unmount();
+    });
+    await act(async () => {
+      g.resolve();
+      await vi.advanceTimersByTimeAsync(600_000);
+    });
+
+    // The run moved on somewhere else. Replaying the held edits over the top of
+    // whatever moved it is the silent overwrite this state exists to prevent.
+    expect(log.seen).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5b — a refused save on a COLLAPSED card
+// ---------------------------------------------------------------------------
+
+/*
+ * THE SECOND RUN IS THE ONE THAT FAILS, for the same reason section 4 edits the
+ * second run: a card-level indicator hung off the wrong card, or off the list
+ * rather than the card, is indistinguishable from a correct one when only one
+ * card exists or when the edited card is at index 0.
+ */
+describe('a save refused while the card is collapsed', () => {
+  async function failWhileCollapsed() {
+    let patches = 0;
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A, RUN_B]) },
+      [`PATCH ${BASE}/runs/RUNBBB`]: () => {
+        patches += 1;
+        // A considered refusal: not retried, so the state settles on `failed`.
+        return { status: 422, body: { error: 'not_run_level' } };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNBBB');
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNBBB')).getByLabelText('Temperature (K)'), {
+        target: { value: '78' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    // Collapse it, the way a reader who has finished typing would.
+    await act(async () => {
+      fireEvent.click(headerOf('RUNBBB'));
+    });
+    expect(headerOf('RUNBBB')).toHaveAttribute('aria-expanded', 'false');
+    return { patches: () => patches };
+  }
+
+  it('says so on the collapsed card, in words, on the right card', async () => {
+    await failWhileCollapsed();
+    const b = cardFor('RUNBBB');
+    const a = cardFor('RUNAAA');
+
+    // The refusal is on the card, in words, with the card collapsed. Both the
+    // header indicator and the live region carry it — the same pairing the
+    // `conflict` state already had.
+    expect(within(b).getAllByText('Save failed')).toHaveLength(2);
+    expect(within(b).getByRole('status').textContent).toBe('Save failed');
+    expect(b.textContent ?? '').toMatch(/Save failed/);
+
+    // Reaching the collapsed header by keyboard alone announces it: the words
+    // are part of the header's accessible name, not a colour on a chip.
+    expect(headerOf('RUNBBB')).toHaveAccessibleName(/Save failed/);
+    // Both indicators are a glyph PLUS words, and the glyph is decorative — the
+    // failure is never carried by colour or by a shape alone.
+    for (const el of within(b).getAllByText('Save failed')) {
+      const indicator = el.closest('.chip, .run-save-status') as HTMLElement;
+      expect(indicator).not.toBeNull();
+      expect(indicator.querySelectorAll('svg[aria-hidden="true"]').length).toBeGreaterThan(0);
+      expect(indicator.textContent).toContain('Save failed');
+    }
+
+    // And the run that was NOT edited claims nothing.
+    expect(within(a).queryByText('Save failed')).toBeNull();
+    expect(within(a).getByRole('status').textContent).toBe('');
+    expect(headerOf('RUNAAA')).not.toHaveAccessibleName(/Save failed/);
+  });
+
+  it('keeps Retry Save reachable without expanding the card first', async () => {
+    const { patches } = await failWhileCollapsed();
+    expect(patches()).toBe(1);
+    const b = cardFor('RUNBBB');
+
+    const retry = within(b).getByRole('button', { name: 'Retry Save' });
+    await act(async () => {
+      fireEvent.click(retry);
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    // It re-sent the held edit — the card is still collapsed.
+    expect(patches()).toBe(2);
+    expect(headerOf('RUNBBB')).toHaveAttribute('aria-expanded', 'false');
+    // Run 1 was never written to.
+    expect(within(cardFor('RUNAAA')).queryByRole('button', { name: 'Retry Save' })).toBeNull();
+  });
+
+  it('offers no Retry Save when there is nothing refused to retry', async () => {
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A, RUN_B]) } });
+    await screen.findByRole('button', { name: /Add Run/ });
+    for (const id of ['RUNAAA', 'RUNBBB']) {
+      expect(within(cardFor(id)).queryByRole('button', { name: 'Retry Save' })).toBeNull();
+      // The live region exists before it has anything to say — a region added
+      // to the DOM at the same moment it is populated is not reliably read.
+      expect(within(cardFor(id)).getByRole('status').textContent).toBe('');
+    }
   });
 });
 

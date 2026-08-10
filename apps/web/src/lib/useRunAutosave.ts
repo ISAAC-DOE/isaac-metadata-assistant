@@ -37,11 +37,33 @@
  * same stale token and earn the same 412. The refresh adopts the SERVER's run —
  * it never merges, and it never posts the local values over the top.
  *
- * TEARDOWN. Timers are cleared and no state is set after unmount. An in-flight
- * PATCH is deliberately NOT aborted: it is the reader's confirmed edit, already
- * on its way, and cancelling it would be the "warn then lose" this hook exists
- * to avoid. A debounced edit that has not left yet is FLUSHED on unmount, once,
- * fire-and-forget — see the note at the flush.
+ * TEARDOWN — and what is guaranteed here is narrower than "nothing is lost", so
+ * it is written out rather than summarised.
+ *
+ * GUARANTEED: every edit this hook has accepted is handed to the network
+ * exactly once. If nothing is in flight at unmount, the held edits are sent
+ * during the unmount itself. If a PATCH *is* in flight they cannot be sent yet
+ * — `send` empties the pending map BEFORE dispatching, so an edit typed after
+ * that point is not in the open request's body, and the token it must carry is
+ * the one that request's response is about to establish. So they are sent when
+ * it settles: on a 200 with the new token, on any other failure with the
+ * unchanged one. Timers are cleared and no state is set after unmount. An
+ * in-flight PATCH is never aborted — it is the reader's confirmed edit, already
+ * on its way.
+ *
+ * NOT GUARANTEED, and this is the honest limit: ACCEPTANCE. The component is
+ * gone, so there is no live region left to report an outcome on and the
+ * detached send's rejection is swallowed rather than becoming an unhandled
+ * rejection. If the server refuses that last write — or the tab closes before
+ * it leaves the browser — the edit is lost and nobody is told. Reporting it
+ * would need edit state that outlives the card's mount, which this hook does
+ * not have and which is a larger change than the loss warrants.
+ *
+ * ONE DELIBERATE EXCEPTION: in `conflict`, nothing is sent at all, at unmount
+ * or after. Every send would carry the token the server already refused, and
+ * replaying held edits over whatever moved the run is the silent overwrite that
+ * state exists to prevent. The reader was told, in those words, that nothing
+ * they typed was written.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -136,6 +158,27 @@ export function useRunAutosave(args: {
   }, []);
 
   /*
+   * THE DETACHED SEND — the only write this hook makes once its component is
+   * gone. It sets no state, schedules no retry, and swallows its own rejection,
+   * because there is no surface left to report an outcome on. It is called from
+   * exactly two kinds of place: the unmount itself, and the settle handlers of
+   * a request that was still open at unmount.
+   *
+   * It clears the pending map first, so the "exactly once" in the header comment
+   * is enforced by construction rather than by the callers agreeing not to
+   * double-send.
+   */
+  const flushDetached = useCallback(() => {
+    if (haltedRef.current) return;
+    const fields = pendingRef.current;
+    pendingRef.current = {};
+    if (Object.keys(fields).length === 0) return;
+    void api
+      .updateRun(experimentIdRef.current, runIdRef.current, { fields }, versionRef.current)
+      .catch(() => undefined);
+  }, []);
+
+  /*
    * `send` and `schedule` call each other — a debounce fires a send, and a send
    * that finds newer edits schedules another. They are reached through refs so
    * neither has to be defined before the other, and so neither depends on the
@@ -160,7 +203,13 @@ export function useRunAutosave(args: {
         // Adopt the new token even if this component has gone: a late resolve
         // must not leave the ref pointing at a token the server superseded.
         versionRef.current = res.run.version;
-        if (!mountedRef.current) return;
+        if (!mountedRef.current) {
+          // The card went away while this was open. Anything typed after this
+          // request left is still held here and this is its only chance to be
+          // sent — now, with the token this response just established.
+          flushDetached();
+          return;
+        }
         onRunRef.current(res.run);
         if (Object.keys(pendingRef.current).length > 0) {
           // More was typed while this was in flight. The reader still has an
@@ -177,9 +226,22 @@ export function useRunAutosave(args: {
         inFlightRef.current = false;
         // Newer edits win; nothing typed is lost.
         pendingRef.current = { ...fields, ...pendingRef.current };
-        if (!mountedRef.current) return;
 
         const httpStatus = err instanceof ApiError ? err.status : undefined;
+        if (!mountedRef.current) {
+          // The card went away while this was open. A 412 is the one refusal
+          // that must not be replayed — the run moved on somewhere else, and
+          // there is nobody left to be shown the conflict and choose. Every
+          // other failure gets one detached attempt, carrying the fields this
+          // request failed with UNDER anything typed since.
+          if (httpStatus === 412) {
+            haltedRef.current = true;
+            return;
+          }
+          flushDetached();
+          return;
+        }
+
         if (httpStatus === 412) {
           clearTimers();
           haltedRef.current = true;
@@ -202,7 +264,7 @@ export function useRunAutosave(args: {
           }, delay);
         }
       });
-  }, [clearTimers]);
+  }, [clearTimers, flushDetached]);
   sendRef.current = send;
 
   const schedule = useCallback(() => {
@@ -272,20 +334,19 @@ export function useRunAutosave(args: {
        * cannot fire on an in-app route change at all, and blocking navigation
        * on an unsaved field is a modal in disguise.
        *
-       * Best-effort by construction, and stated as such: there is no surface
-       * left to report the outcome on, so the rejection is swallowed rather
-       * than becoming an unhandled rejection. An in-flight request is left
-       * alone — it is already carrying the same edits.
+       * WHEN A REQUEST IS IN FLIGHT THE HELD EDITS ARE NOT DROPPED HERE, and
+       * that is the whole of the difference from the version of this teardown
+       * that lost them. They are deliberately not sent yet either: the token
+       * they must carry is the one the open response is about to establish, so
+       * sending now would earn a 412 and lose them just as quietly. The settle
+       * handlers of that request flush them instead. This is one click away —
+       * the Runs section lives inside the `fields` tabpanel, so switching to
+       * the Graph tab unmounts every card.
        */
-      const pending = pendingRef.current;
-      pendingRef.current = {};
-      if (haltedRef.current || inFlightRef.current) return;
-      if (Object.keys(pending).length === 0) return;
-      void api
-        .updateRun(experimentIdRef.current, runIdRef.current, { fields: pending }, versionRef.current)
-        .catch(() => undefined);
+      if (inFlightRef.current) return;
+      flushDetached();
     };
-  }, [clearTimers]);
+  }, [clearTimers, flushDetached]);
 
   return {
     status,

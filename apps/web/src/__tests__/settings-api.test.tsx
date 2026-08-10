@@ -1353,10 +1353,27 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `message`, derived from what the blocking question already records, and the
     // contract says so.
     //
-    // Cross-checked in Python from the file rather than transcribed from the
-    // assertion that reported it: 45 operations, 45 unique, raw sum 37,004, 79
-    // separators, 37,004 - 158 = 36,846.
-    expect(total).toBe(36846);
+    // A third pass moved it 36,846 -> 37,168, again with the operation and
+    // paragraph counts UNCHANGED. An independent adversarial review found that
+    // `PATCH .../runs/{run_id}` accepted arbitrary invented field paths —
+    // `context.typo_K`, `context.`, `timestamps.acquired_start_utc.evil` — because
+    // `field_level()` is a segment-aware PREFIX test and never checked the key was
+    // a real path, so one typo permanently blocked that run's official export. The
+    // route's description already PROMISED the strict behaviour, so the code was
+    // brought to the documentation rather than the other way round, and the
+    // description now names the closed writable set it actually enforces.
+    //
+    // Cross-checked in Python from the generated contract rather than transcribed
+    // from the assertion that reported it: 45 operations, raw sum 37,326, 79
+    // separators, 37,326 - 158 = 37,168.
+    //
+    // NOT 45 unique — 44. `GET` and `POST /api/experiments/{id}/warnings`
+    // deliberately share one description, and they did so before this slice
+    // existed. An earlier revision of this comment asserted "45 unique"; that was
+    // never true and is corrected here rather than left to be re-derived by
+    // whoever next changes this number. Nothing asserts uniqueness, which is why
+    // the false count survived being written down.
+    expect(total).toBe(37168);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(79);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {

@@ -1081,11 +1081,56 @@ def test_0002_declares_the_primary_key_foreign_key_and_named_constraints():
     ):
         assert f"constraint {named}" in sql, named
     # The two identity keys are tied to the document they project, so a row cannot
-    # claim to be a run the document does not describe.
+    # claim to be a run the document does not describe. `experiment_id` treats an
+    # EMPTY string as "the document makes no claim", for the reason measured in
+    # `test_0002_identity_check_admits_the_only_legacy_shape_this_application_produces`.
     assert (
-        "check (state ->> 'id' = run_id and state ->> 'experiment_id' = experiment_id)"
-        in sql
+        "check (state ->> 'id' = run_id "
+        "and coalesce(nullif(state ->> 'experiment_id', ''), experiment_id) "
+        "= experiment_id)" in sql
     )
+
+
+def test_0002_identity_check_admits_the_only_legacy_shape_this_application_produces():
+    """LEGACY TOLERANCE, MEASURED RATHER THAN CLAIMED.
+
+    The migration's own comment used to justify the identity CHECK as
+    "legacy-tolerant by construction": `->>` yields NULL for an absent key, a
+    comparison against NULL is NULL, and a CHECK passes unless it is FALSE.
+
+    THAT IS TRUE OF A BARE `'{}'` DOCUMENT — which is what CI inserted, so nothing
+    caught it — AND FALSE OF EVERYTHING THIS APPLICATION CAN ACTUALLY PRODUCE.
+    `Run.to_state()` emits every key unconditionally and `Run.from_state` reads
+    each string through `_as_str`, which returns `""` for an absent one. So the
+    legacy run document this application writes carries
+    `"experiment_id": ""` — not a missing key — `'' = experiment_id` is FALSE, not
+    NULL, and the row is REFUSED.
+
+    That shape is reachable and permanent: `_hydrate_runs` documents that
+    `experiment_id` is deliberately NOT repaired from the owning experiment,
+    because repairing it on read would change the run's authoritative signature
+    and bump every record's `rev` on a mere listing.
+
+    The premise is asserted here, so the constraint and the model cannot drift
+    apart silently. That the relaxed CHECK actually ADMITS this row, and still
+    refuses a document naming a DIFFERENT experiment, is proven against a real
+    engine by the `postgres-migration` job — this file has no PostgreSQL.
+    """
+    state = ws.Run.from_state(
+        {"id": "01CILEGACYRUN00000000000AA", "label": "old", "draft": {}}
+    ).to_state()
+    assert "experiment_id" in state, "the premise moved: to_state now omits the key"
+    assert state["experiment_id"] == "", state["experiment_id"]
+
+    sql = _runs_table_statement()
+    # The bare equality — the form that refused the row above — is gone.
+    assert "state ->> 'experiment_id' = experiment_id" not in sql
+    # `id` is deliberately NOT relaxed the same way, and that asymmetry is a
+    # decision: `_hydrate_runs` DROPS a run whose id is empty, so no document this
+    # application persists can carry `id: ""`, and a document that identifies no
+    # run at all is exactly what this constraint should refuse.
+    assert "state ->> 'id' = run_id" in sql
+    assert "nullif(state ->> 'id'" not in sql
 
 
 def test_0002_declares_no_on_delete_action_so_the_default_RESTRICT_applies():

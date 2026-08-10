@@ -546,6 +546,286 @@ def test_a_non_object_fields_value_is_refused(client, experiment_id):
     assert response.json()["error"] == "invalid_fields"
 
 
+# --- 4A. patch: the key must be a REAL field path, not merely a run-level prefix --
+#
+# THE DEFECT THIS SECTION CLOSES, measured against a running server before it was
+# fixed: `field_level()` is a segment-aware PREFIX test, so every one of
+# `context.typo_K`, `context.`, `context..`, `context`, `context. `,
+# `context.<script>alert(1)</script>` and `timestamps.acquired_start_utc.evil`
+# classified as run-level, returned 200, and was PERSISTED with a fabricated
+# `user_confirmation` evidence entry. The consequence was not cosmetic: the run's
+# own `check` then reported `context: Additional properties are not allowed` and
+# `timestamps.acquired_start_utc: {'evil': 300} is not of type 'string'`, so ONE
+# typo permanently blocked that run's official export — and the UI, which offers
+# three fixed paths, had no way to clear it.
+#
+# It also recorded a `user_confirmation` for a path with no schema home, which is
+# the invented evidence `CLAUDE.md` §5 forbids.
+#
+# The route's own OpenAPI description already promised the stricter behaviour
+# ("A key that does not ... is rejected with 422 naming it"); the code now matches
+# what it documents.
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # 1. INVENTED LEAVES UNDER A RUN-LEVEL PREFIX. Every one of these was
+        #    accepted and written before the fix.
+        "context.typo_K",
+        "context.temperature",
+        "context.",
+        "context..",
+        "context",
+        "context. ",
+        "context.<script>alert(1)</script>",
+        "timestamps.acquired_start_utc.evil",
+        # 2. ALREADY REFUSED BEFORE THE FIX, AND MUST STAY REFUSED. The fix
+        #    narrows what is writable; it must not widen it anywhere.
+        "Context.temperature_K",  # case is not normalised
+        "CONTEXT",
+        "contextual.foo",  # `_path_matches` is segment-aware, and stays so
+        "qc",  # a top-level draft BLOCK, never a `fields` key
+        "series",
+        "tags",
+        "sample.material.name",  # record-level: entered once and inherited
+        "",
+        " ",
+        "timestamps",  # the bare block is not one of the two acquired timestamps
+    ],
+)
+def test_a_path_that_is_not_a_real_run_writable_field_is_refused_and_not_written(
+    client, experiment_id, path
+):
+    run = _create_run(client, experiment_id)
+    before = _stored_run(client, experiment_id, run["id"])
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {path: "anything"}},
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "unrecognized_field"
+    assert body["key"] == path
+    assert body["keys"] == [path]
+    # NOT silently ignored, NOT written, and the run did not move at all — a
+    # refused request must not advance a revision either.
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert path not in (stored.draft.get("fields") or {})
+    assert stored.rev == before.rev
+    assert stored.version_token() == before.version_token()
+
+
+def test_an_invented_path_cannot_wedge_the_run_it_was_addressed_to(
+    client, experiment_id
+):
+    """THE CONSEQUENCE, end to end.
+
+    Before the fix, `context.typo_K` was persisted and the run's own check then
+    reported `Additional properties are not allowed ('typo_K' ...)` against
+    `context` — an official-schema failure with no in-product repair path, because
+    the UI offers three fixed paths and none of them is the typo.
+    """
+    run = _create_run(client, experiment_id)
+    refused = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.typo_K": 300.0}},
+    )
+    assert refused.status_code == 422, refused.text
+
+    check = client.post(f"/api/experiments/{experiment_id}/runs/{run['id']}/check")
+    assert check.status_code == 200, check.text
+    findings = json.dumps(check.json())
+    assert "typo_K" not in findings
+    assert "Additional properties are not allowed" not in findings
+
+
+def test_the_three_paths_the_run_workspace_offers_are_all_still_writable(
+    client, experiment_id
+):
+    """THE POSITIVE CONTROL for the refusal above.
+
+    These three are `RUN_FIELDS` in `apps/web/src/lib/runFields.ts`, which is the
+    only surface that writes a run field. A tightening that broke any of them
+    would take the whole Run workspace with it, and a refusal-only test suite
+    would not notice.
+    """
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {
+            "confirmed_by_user": True,
+            "fields": {
+                "context.environment": "in_situ",
+                "context.temperature_K": 300.0,
+                "timestamps.acquired_start_utc": "2026-01-01T00:00:00Z",
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    stored = _stored_run(client, experiment_id, run["id"]).draft["fields"]
+    assert stored["context.environment"]["value"] == "in_situ"
+    assert stored["context.temperature_K"]["value"] == 300.0
+    assert stored["timestamps.acquired_start_utc"]["value"] == "2026-01-01T00:00:00Z"
+
+
+def test_the_run_writable_paths_are_derived_from_the_extractor_field_map():
+    """WHERE THE ALLOWLIST COMES FROM, pinned so it cannot become a hand-copied list.
+
+    `routes.RUN_WRITABLE_FIELD_PATHS` is DERIVED at import time from
+    `extract.structured.FIELD_MAP` — the deterministic extractor's own map of
+    official dotted paths — filtered by `workspace.field_level`. Both gates are
+    load-bearing: FIELD_MAP decides that the path EXISTS, `field_level` decides
+    that it is the RUN's to write. Neither alone is sufficient, and the defect
+    this closes was applying only the second.
+    """
+    from isaac_records.extract.structured import FIELD_MAP
+
+    expected = {
+        path for path, _coercer in FIELD_MAP.values() if ws.field_level(path) == ws.LEVEL_RUN
+    }
+    assert routes.RUN_WRITABLE_FIELD_PATHS == expected
+    # The measured set at this commit. Stated literally as well as derived,
+    # because a derivation that silently emptied itself would satisfy the
+    # comparison above and refuse everything.
+    assert expected == {
+        "context.environment",
+        "context.temperature_K",
+        "context.thermodynamics.atmosphere",
+        "timestamps.acquired_start_utc",
+        "timestamps.acquired_end_utc",
+    }
+
+
+def test_every_run_writable_path_resolves_to_a_typed_node_in_the_official_schema():
+    """WHY FIELD_MAP IS THE RIGHT SOURCE, asserted rather than asserted-in-a-comment.
+
+    `FIELD_MAP`'s own header claims each path was "verified against
+    schema/isaac_record_v1.json". A claim in a comment is what drifts, so it is
+    measured here: every path this route will write resolves through
+    `properties` to a node with a declared `type`.
+
+    NOTE the asymmetry that decided the source of truth. The same walk does NOT
+    resolve `sample.composition.*`, `sample.geometry.*` or
+    `system.configuration.*` — the schema's OPEN namespaces, which declare no
+    properties at all. So the official schema alone cannot enumerate a closed set
+    of legal dotted paths; it would either admit anything under an open namespace
+    or need a second, per-subtree policy. None of those namespaces is run-level,
+    which is why the intersection used here is both closed and schema-backed.
+    """
+    schema = json.loads(
+        (ws.REPO_ROOT / "schema" / "isaac_record_v1.json").read_text(encoding="utf-8")
+    )
+    for path in sorted(routes.RUN_WRITABLE_FIELD_PATHS):
+        node = schema
+        for segment in path.split("."):
+            properties = node.get("properties")
+            assert isinstance(properties, dict), path
+            assert segment in properties, path
+            node = properties[segment]
+        assert "type" in node, path
+
+
+# --- 4B. patch: a blank label is a refusal, not a silent no-op ------------------
+
+
+@pytest.mark.parametrize("label", ["   ", "\t", "\n", " "])
+def test_a_whitespace_only_label_is_refused_rather_than_silently_dropped(
+    client, experiment_id, label
+):
+    """A rename to whitespace used to return 200 having renamed nothing.
+
+    That contradicts this route's own stated doctrine — a request is never
+    silently ignored — and it is the one place where "blank is not a label"
+    (correct on CREATE, where blank means "server, you choose") produces a lie on
+    EDIT, where there is no name for the server to choose and the caller was told
+    the rename happened.
+    """
+    run = _create_run(client, experiment_id, label="Cold")
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "label": label},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_label"
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.label == "Cold"
+    assert stored.rev == 1  # created, never edited
+
+
+def test_a_whitespace_label_refuses_the_whole_request_including_its_valid_fields(
+    client, experiment_id
+):
+    """Same whole-request refusal the path classification already gives."""
+    run = _create_run(client, experiment_id, label="Cold")
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {
+            "confirmed_by_user": True,
+            "label": "  ",
+            "fields": {"context.temperature_K": 300.0},
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_label"
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.draft.get("fields") in (None, {})
+    assert stored.label == "Cold"
+
+
+def test_a_blank_label_on_CREATE_is_still_the_server_choosing(client, experiment_id):
+    """THE BOUNDARY of the fix above, pinned in the same file.
+
+    On CREATE a blank label means "server, assign one", is documented as such and
+    is covered by `test_an_omitted_or_blank_label_is_assigned_run_n_by_the_server`.
+    The refusal added for EDIT must not have leaked into it.
+    """
+    run = _create_run(client, experiment_id, label="   ")
+    assert run["label"] == "Run 1"
+
+
+# --- 4C. patch: a clear of a field the run does not have writes nothing ---------
+
+
+def test_clearing_a_field_the_run_does_not_have_does_not_move_the_run(
+    client, experiment_id
+):
+    """A `null` for an absent field is a no-op, and used to be a no-op that still
+    changed the document: the write path created `draft["fields"] = {}`
+    unconditionally, which is part of the run's authoritative signature, so the
+    run's `rev` advanced while nothing was written.
+
+    Nothing LIED — the response reported the new version honestly — and it was
+    reachable only once per run. It is fixed because a revision that means "your
+    edit landed" should not be spent on an edit that did not.
+    """
+    run = _create_run(client, experiment_id)
+    before = _stored_run(client, experiment_id, run["id"])
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": None}},
+    )
+    assert response.status_code == 200, response.text
+    after = _stored_run(client, experiment_id, run["id"])
+    assert after.rev == before.rev
+    assert after.version_token() == before.version_token()
+    assert response.json()["run"]["version"] == before.version_token()
+    # And no empty `fields` map was manufactured on the way through.
+    assert after.draft.get("fields") in (None, {})
+
+
 # --- 5. patch: what it writes --------------------------------------------------
 
 
