@@ -478,6 +478,110 @@ def test_clearing_an_override_restores_inheritance_by_reference():
     assert run.overrides == {}  # no copy left behind
 
 
+# --- clearing REFUSES what setting refuses ------------------------------------
+#
+# `clear_run_override` used to be `run.overrides.pop(address, None) is not None` and
+# nothing else, so it accepted any string at all and reported `False` — "there was no
+# override there" — for an address that could never have held one. That was survivable
+# while its only callers were the tests in this file; it is not survivable now that an
+# HTTP operation drives it with client input, so the guard was added BEFORE the route
+# existed rather than after.
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "field:context.temperature_K",  # run-level field
+        "field:timestamps.acquired_start_utc",  # run-level field
+        "block:qc",  # run-level block
+        "block:series",  # run-level block
+        "field:system.configuration.n_scans",  # deliberately unclassified
+        "field:timestamps.created_utc",  # deliberately unclassified
+        "block:meta",  # draft-only bookkeeping
+        "block:pending",  # draft-only bookkeeping
+    ],
+)
+def test_clearing_an_address_that_could_never_hold_an_override_is_refused(address):
+    """Mirrors :func:`test_a_run_level_field_cannot_be_overridden` on the clear side.
+
+    ``False`` would be a false statement about every address here: it reads as "no
+    override was stored", when the truth is "this address is not one an override can
+    live at". A route returning 200 for it would tell a client that a misspelling
+    succeeded.
+    """
+    exp = _experiment()
+    run = exp.add_run()
+    with pytest.raises(ws.NotOverridable):
+        exp.clear_run_override(run, address)
+
+
+@pytest.mark.parametrize("bad", ["", "garbage", "sample.sample_form", "field:", ":tags", "field"])
+def test_clearing_a_malformed_address_raises_exactly_as_setting_one_does(bad):
+    """``ValueError`` from ``parse_address``, the same failure ``set_run_override`` has.
+
+    Asserted as a PAIR rather than separately: the two methods agreeing is the actual
+    property, and two tests each pinning one half could drift apart silently.
+    """
+    exp = _experiment()
+    run = exp.add_run()
+    with pytest.raises(ValueError):
+        exp.set_run_override(run, bad, _env("x"))
+    with pytest.raises(ValueError):
+        exp.clear_run_override(run, bad)
+    assert run.overrides == {}
+
+
+def test_the_guard_does_not_cost_the_idempotence_that_makes_a_clear_repeatable():
+    """A VALID address holding no override is still ``False``, never an error.
+
+    This is the property the HTTP operation's repeatability rests on — a client that
+    clears twice, or retries after a dropped response, must get a successful no-op —
+    so the guard above is asserted NOT to have turned it into a refusal. This is the
+    test the third negative control breaks in the opposite direction from the refusal
+    test: removing the guard leaves this one green.
+    """
+    exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
+    run = exp.add_run()
+
+    # Never overridden at all.
+    assert exp.clear_run_override(run, ws.field_address("sample.sample_form")) is False
+    assert exp.clear_run_override(run, ws.block_address("tags")) is False
+    # A well-formed, experiment-LEVEL address that is not a real field path is also a
+    # no-op rather than an error: `field_level`'s prefix test classifies it, and the
+    # route's own derived membership set is what refuses it to a client.
+    assert exp.clear_run_override(run, ws.field_address("sample.material.typo")) is False
+
+    # Set, then cleared, then cleared again.
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
+    assert exp.clear_run_override(run, ws.field_address("sample.sample_form")) is True
+    assert exp.clear_run_override(run, ws.field_address("sample.sample_form")) is False
+    assert run.overrides == {}
+
+
+def test_a_stored_override_is_removable_even_at_an_address_the_guard_would_refuse():
+    """The guard must not be able to make stored state unremovable.
+
+    ``set_run_override`` cannot create such a key, so this shape arrives only from a
+    document written outside the module or from a future reclassification that moves
+    an address off the experiment-level list while runs still carry overrides at it.
+    In both cases this method is the only repair path, and refusing would leave an
+    override visible in every run view with nothing able to delete it.
+    """
+    exp = _experiment()
+    run = exp.add_run()
+    # Written the way a hand-edited document would arrive: straight into the map.
+    run.overrides["block:qc"] = ws.Override(payload={"status": "valid"}, recorded_utc="Z")
+    run.overrides["garbage"] = ws.Override(payload=1, recorded_utc="Z")
+
+    assert exp.clear_run_override(run, "block:qc") is True
+    assert exp.clear_run_override(run, "garbage") is True
+    assert run.overrides == {}
+    # And the refusal is back the moment the key is gone, so the escape hatch removes
+    # only what is already there and can never be used to probe or to write.
+    with pytest.raises(ws.NotOverridable):
+        exp.clear_run_override(run, "block:qc")
+
+
 def test_a_run_level_field_cannot_be_overridden():
     exp = _experiment()
     run = exp.add_run()
@@ -556,6 +660,98 @@ def test_run_level_blocks_are_not_inherited():
     exp = _experiment(draft={"fields": {}, "qc": {"status": "valid"}, "series": [1, 2]})
     run = exp.add_run()
     assert set(exp.resolve_run(run)) == set()
+
+
+# --- `resolved_run_draft` layer 2 beats layer 1, and it was ASSERTED BY DOCSTRING ONLY
+#
+# ``resolved_run_draft`` composes four layers and its docstring states the rule: layer
+# 2 (the resolution) is applied ON TOP of layer 1 (the run's own draft), so "if a run's
+# own draft somehow carries an experiment-level field directly, the resolution wins".
+# Nothing measured it. The reason it went unmeasured is the reason it is easy to break:
+# the shape cannot be produced through the API at all — ``set_run_override`` refuses to
+# put an experiment-level address anywhere but the override map, and the run edit route
+# refuses an experiment-level path — so a test has to FORCE the document, which reads
+# like testing an impossible state until you notice that a hand-edited document, a
+# reclassification, or a future importer produces exactly it. Without this test the
+# layer order could be inverted and every other test in this repository would pass.
+
+
+def test_a_forced_experiment_level_field_in_a_runs_own_draft_loses_to_the_resolution():
+    """Layer 2 over layer 1. The RESOLUTION is the definition of what the run holds."""
+    exp = _experiment(draft={"fields": {"sample.material.name": _env("Copper(II) Oxide")}})
+    run = exp.add_run()
+    # Forced, exactly as a document written outside this module would arrive. Nothing
+    # in the application can put this key here.
+    run.draft = {"fields": {"sample.material.name": _env("SMUGGLED IN VIA THE RUN DRAFT")}}
+
+    resolved = exp.resolved_run_draft(run)
+
+    assert resolved["fields"]["sample.material.name"] == _env("Copper(II) Oxide")
+    # And it is the EXPERIMENT's value, not merely "not the run's" — an implementation
+    # that dropped the key entirely would also satisfy an inequality assertion.
+    assert resolved["fields"]["sample.material.name"]["value"] == "Copper(II) Oxide"
+
+
+def test_the_resolution_that_wins_may_be_the_runs_OVERRIDE_not_the_experiments_value():
+    """The same layer, exercised through the branch that actually gets used.
+
+    Layer 2 contributes the OVERRIDE for an overridden address and the experiment's
+    current value otherwise, so a forced field must lose to both. Pinning only the
+    inherited case would leave an implementation that consults ``run.draft`` before
+    ``run.overrides`` green.
+    """
+    exp = _experiment(draft={"fields": {"sample.sample_form": _env("pellet")}})
+    run = exp.add_run()
+    exp.set_run_override(run, ws.field_address("sample.sample_form"), _env("powder"))
+    run.draft = {"fields": {"sample.sample_form": _env("SMUGGLED IN VIA THE RUN DRAFT")}}
+
+    assert exp.resolved_run_draft(run)["fields"]["sample.sample_form"] == _env("powder")
+
+
+def test_a_forced_experiment_level_BLOCK_in_a_runs_own_draft_also_loses():
+    """The block half of layer 2, which writes a TOP-LEVEL key rather than a field."""
+    exp = _experiment(draft={"fields": {}, "tags": ["campaign-a"]})
+    run = exp.add_run()
+    run.draft = {"fields": {}, "tags": ["smuggled"]}
+
+    assert exp.resolved_run_draft(run)["tags"] == ["campaign-a"]
+
+
+def test_a_RUN_level_field_in_the_runs_own_draft_is_kept_not_displaced():
+    """The control that stops the three tests above from proving too much.
+
+    Layer 2 only covers experiment-level addresses. If it displaced everything, the
+    assertions above would pass while the run's own scientific content was being
+    thrown away — which is the failure that would matter most.
+    """
+    exp = _experiment(draft={"fields": {"sample.material.name": _env("Copper(II) Oxide")}})
+    run = exp.add_run()
+    run.draft = {"fields": {"context.temperature_K": _env(298)}}
+
+    resolved = exp.resolved_run_draft(run)
+    assert resolved["fields"]["context.temperature_K"] == _env(298)
+    assert resolved["fields"]["sample.material.name"] == _env("Copper(II) Oxide")
+
+
+def test_composing_a_runs_draft_never_writes_into_either_stored_document():
+    """``resolved_run_draft`` is a read. Asserted over BOTH documents, byte for byte.
+
+    The composed dict is built fresh and discarded, and the forced-field case above is
+    the one most likely to tempt an implementation into "repairing" the run's document
+    while it is there.
+    """
+    exp = _experiment(draft={"fields": {"sample.material.name": _env("Copper(II) Oxide")}})
+    run = exp.add_run()
+    run.draft = {"fields": {"sample.material.name": _env("SMUGGLED"), "context.temperature_K": _env(298)}}
+    before_exp = json.dumps(exp.draft, sort_keys=True)
+    before_run = json.dumps(run.draft, sort_keys=True)
+
+    composed = exp.resolved_run_draft(run)
+    composed["fields"]["sample.material.name"]["value"] = "MUTATED THROUGH THE COMPOSITION"
+    composed["fields"]["context.temperature_K"]["value"] = -1
+
+    assert json.dumps(exp.draft, sort_keys=True) == before_exp
+    assert json.dumps(run.draft, sort_keys=True) == before_run
 
 
 def test_a_block_override_round_trips(wsroot):
