@@ -36,6 +36,7 @@ Every fixture is built from the committed synthetic seed drafts. The truth core
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import pathlib
 
@@ -1414,7 +1415,9 @@ def test_the_assistant_validate_thunk_is_unchanged_for_a_zero_run_experiment(cli
 
 
 def test_every_workflow_call_site_agrees_on_a_fully_exported_fan_out(client):
-    """F2 — the C5 fix named THREE ``derive_workflow`` sites. There are five.
+    """F2 — the C5 fix named THREE ``derive_workflow`` sites. There are FOUR call
+    sites, plus the definition. ("Five" was this file's own correction of "three",
+    and it counted the definition as a call.)
 
     ``runtime_records._project_one`` — the cross-record runtime projection served by
     ``GET /api/runtime/records`` — still passed ``exported=exp.exported()``. Measured
@@ -1423,11 +1426,19 @@ def test_every_workflow_call_site_agrees_on_a_fully_exported_fan_out(client):
         runtime_records._project_one(exp)["exported"] -> False
         GET /api/experiments/{id} ["exported"]        -> True
 
-    This test enumerates EVERY site that derives a workflow for a real experiment, so
-    the count is established here rather than remembered. The fifth site,
-    ``corpus_mutation._workflow_consistent``, takes no experiment at all — it calls
-    ``derive_workflow`` with literal arguments as a pure-function regression check —
-    and is asserted to be exactly that, so it cannot quietly become a sixth answer.
+    THIS TEST DOES NOT ESTABLISH THE COUNT, AND IT USED TO SAY IT DID. It asserted
+    agreement across four HARD-CODED sites under the sentence *"the count is
+    established here rather than remembered"* — so a fifth site, added anywhere,
+    passed it untouched, which is the failure mode the sentence promised to prevent.
+    The count is established by
+    ``test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair``,
+    which finds every ``derive_workflow`` caller in the package by AST search and
+    pins the resulting set. What THIS test establishes is different and still worth
+    having: that the sites, whatever their number, AGREE on one fully-exported
+    fan-out. The fourth site, ``corpus_mutation._workflow_consistent``, takes no
+    experiment at all — it calls ``derive_workflow`` with literal arguments as a
+    pure-function regression check — and is asserted to be exactly that, so it cannot
+    quietly become a fifth answer.
     """
     from isaac_api import corpus_mutation, dependencies, runtime_records
 
@@ -1608,6 +1619,188 @@ def test_warnings_are_unchanged_for_a_zero_run_experiment(client):
     assert after["dry_run"] is False
 
 
+#: Every attribute whose value depends on the SINGULAR exported pair, or which
+#: derives the workflow from it. Read by :func:`_singular_state_callers`.
+#:
+#: ``all_units_exported``/``any_unit_exported`` are here even though they are the
+#: fan-out-AWARE aggregates: a surface that calls one is a surface that had to
+#: choose between them, and the choice is exactly what the block records. Leaving
+#: them out is how ``derive_workflow`` came to have a caller nobody had to name.
+_SINGULAR_STATE_ATTRS = frozenset(
+    {
+        "exported",
+        "record_path",
+        "sidecar_path",
+        "all_units_exported",
+        "any_unit_exported",
+    }
+)
+
+#: Called as a bare name (``derive_workflow(...)``) or through a module
+#: (``workflow.derive_workflow(...)``); both forms count.
+_WORKFLOW_DERIVERS = frozenset({"derive_workflow"})
+
+
+def _export_unit_bindings(func: "ast.AST") -> tuple[set[str], set[str]]:
+    """Names inside ``func`` that provably hold an ``ExportUnit`` / a list of them.
+
+    PROVABLY is the whole point, and it is why this is a binding pass and not a
+    list of variable names. The version this replaced excluded every receiver
+    except two literal identifiers, ``exp`` and ``post_exp``, so renaming the
+    parameter was enough to leave the guard — and ``experiment`` was ALREADY the
+    parameter name at two sites in ``workspace.py``.
+
+    An ``ExportUnit`` is proved by one of four mechanical facts, never by what a
+    variable is called:
+
+      * a parameter annotated ``ExportUnit`` (bare, dotted, or stringified);
+      * iteration over something that yields units — ``export_units()`` or a name
+        already proved to hold a unit list;
+      * a subscript of such a list (``units[0]``);
+      * a comprehension over either of those.
+
+    Anything not proved is INCLUDED in the caller set. That direction is
+    deliberate: an unproved receiver produces one extra name the disclosure must
+    account for, which is a sentence to write; the opposite default produces a
+    silent hole, which is the defect this guard exists to prevent.
+    """
+    import ast
+
+    def _is_unit_annotation(node) -> bool:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value.strip().strip('"\'').split(".")[-1] == "ExportUnit"
+        if isinstance(node, ast.Name):
+            return node.id == "ExportUnit"
+        if isinstance(node, ast.Attribute):
+            return node.attr == "ExportUnit"
+        return False
+
+    def _is_unit_list_annotation(node) -> bool:
+        # `list[ExportUnit]`, `Sequence["ExportUnit"]`, `list[ws.ExportUnit]`.
+        return isinstance(node, ast.Subscript) and _is_unit_annotation(node.slice)
+
+    unit_names: set[str] = set()
+    list_names: set[str] = set()
+
+    args = getattr(func, "args", None)
+    if args is not None:
+        every = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+        if args.vararg:
+            every.append(args.vararg)
+        if args.kwarg:
+            every.append(args.kwarg)
+        for arg in every:
+            if arg.annotation is None:
+                continue
+            if _is_unit_annotation(arg.annotation):
+                unit_names.add(arg.arg)
+            elif _is_unit_list_annotation(arg.annotation):
+                list_names.add(arg.arg)
+
+    def _yields_units(node) -> bool:
+        """``expr`` iterates over ``ExportUnit``s."""
+        if isinstance(node, ast.Name):
+            return node.id in list_names
+        if isinstance(node, ast.Call):
+            callee = node.func
+            name = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
+            return name == "export_units"
+        return False
+
+    def _is_unit_expr(node) -> bool:
+        """``expr`` evaluates to ONE ``ExportUnit``."""
+        if isinstance(node, ast.Name):
+            return node.id in unit_names
+        if isinstance(node, ast.Subscript):
+            return _yields_units(node.value)
+        return False
+
+    # Two passes, because a binding can be established after a use in source order
+    # (`for unit in units` where `units` is assigned earlier is the common shape,
+    # but a comprehension can precede its own list assignment textually).
+    for _ in range(2):
+        for node in ast.walk(func):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                value = node.value
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if value is None:
+                    continue
+                bucket = None
+                if _yields_units(value) or (
+                    isinstance(value, ast.ListComp) and _yields_units(value.generators[0].iter)
+                ):
+                    bucket = list_names
+                elif _is_unit_expr(value):
+                    bucket = unit_names
+                if bucket is not None:
+                    for target in targets:
+                        if isinstance(target, ast.Name):
+                            bucket.add(target.id)
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                if _yields_units(node.iter) and isinstance(node.target, ast.Name):
+                    unit_names.add(node.target.id)
+            elif isinstance(node, ast.comprehension):
+                if _yields_units(node.iter) and isinstance(node.target, ast.Name):
+                    unit_names.add(node.target.id)
+    return unit_names, list_names
+
+
+def _singular_state_callers(package: "pathlib.Path") -> dict[str, str]:
+    """``{function name: module}`` for every caller the disclosure must name.
+
+    Scans ``package.glob("*.py")`` — EVERY module, not an allowlist. The allowlist
+    it replaced held four modules, so the same body of code moved into
+    ``assistant_query.py`` was invisible.
+    """
+    import ast
+
+    found: dict[str, str] = {}
+    for path in sorted(package.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # Which class, if any, encloses each function — so `self` inside
+        # `ExportUnit` (and only there) can be excluded.
+        enclosing: dict[int, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                for child in ast.walk(node):
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        enclosing.setdefault(id(child), node.name)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            unit_names, list_names = _export_unit_bindings(node)
+            in_export_unit = enclosing.get(id(node)) == "ExportUnit"
+            for inner in ast.walk(node):
+                if not isinstance(inner, ast.Call):
+                    continue
+                callee = inner.func
+                # (a) `derive_workflow(...)` / `workflow.derive_workflow(...)`.
+                bare = getattr(callee, "id", None) or getattr(callee, "attr", None)
+                if bare in _WORKFLOW_DERIVERS:
+                    found.setdefault(node.name, path.name)
+                    continue
+                # (b) the singular pair / the aggregates, on a receiver.
+                if not isinstance(callee, ast.Attribute) or callee.attr not in _SINGULAR_STATE_ATTRS:
+                    continue
+                receiver = callee.value
+                if isinstance(receiver, ast.Name):
+                    if receiver.id in unit_names or receiver.id in list_names:
+                        continue
+                    if receiver.id == "self" and in_export_unit:
+                        continue
+                elif isinstance(receiver, ast.Subscript):
+                    if isinstance(receiver.value, ast.Name) and receiver.value.id in list_names:
+                        continue
+                elif isinstance(receiver, ast.Call):
+                    # Resolve a chained receiver by its CALLEE name. Nothing in this
+                    # package returns an `ExportUnit` from a call, so every chained
+                    # receiver counts — `ws.load_experiment(id).exported()` is the
+                    # shape that walked straight past the old `ast.Name`-only test.
+                    pass
+                found.setdefault(node.name, path.name)
+    return found
+
+
 def test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair(client):
     """F5 — the disclosure claimed completeness (*"each is now either fixed or
     stated"*) over four routes, while six more surfaces read the same None-backed
@@ -1615,45 +1808,145 @@ def test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair
 
     THE LIST IS ESTABLISHED BY SEARCH, HERE, AT TEST TIME — not transcribed from a
     reviewer's message and not remembered. Every function in the API package that
-    reads ``exp.exported()``, ``exp.record_path()`` or ``exp.sidecar_path()`` on an
-    EXPERIMENT (as opposed to an ``ExportUnit``, which is fan-out-native by
-    construction) must be named in the disclosure block. A new such caller fails this
-    test until its disposition is written down, which is the only mechanism that can
-    keep an enumeration honest as the code moves.
-    """
-    import ast
+    reads ``exported()``, ``record_path()``, ``sidecar_path()``,
+    ``all_units_exported()`` or ``any_unit_exported()`` on anything that is not a
+    provable ``ExportUnit``, or that calls ``derive_workflow``, must be named in the
+    disclosure block.
 
+    THE SEARCH ITSELF WAS THE DEFECT ONCE, WHICH IS WHY IT IS NOW PROBED. The
+    version this replaced advertised exactly what is written above and enforced
+    something much narrower, so four separate one-line additions each left the suite
+    GREEN: a parameter named ``experiment`` rather than ``exp`` (and ``experiment``
+    is already the parameter name at ``workspace._apply_sibling_grouping`` and
+    ``workspace._run_artifact_presence``); a chained receiver
+    (``ws.load_experiment(id).exported()``); the same body in ``assistant_query.py``,
+    outside a four-module allowlist; and a brand-new ``derive_workflow`` call site,
+    which the searched attribute set did not contain at all despite the block's own
+    sentence promising *"plus every ``derive_workflow`` call site"*.
+
+    :func:`test_a_new_caller_cannot_slip_past_the_disclosure_guard` re-runs all four
+    against this implementation, so the guard's REACH is measured rather than
+    described.
+    """
     package = pathlib.Path(routes.__file__).parent
     disclosure = (package / "workspace.py").read_text(encoding="utf-8")
     start = disclosure.index("# --- WHAT EVERY OTHER SURFACE DOES FOR A FAN-OUT")
     end = disclosure.index("SIBLING_REL = ")
     block = disclosure[start:end]
 
-    #: Reads the SINGULAR pair through a receiver that is not an `ExportUnit`.
-    singular = {"exported", "record_path", "sidecar_path"}
-    callers: set[str] = set()
-    for module in ("routes.py", "dependencies.py", "runtime_records.py", "workspace.py"):
-        tree = ast.parse((package / module).read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for inner in ast.walk(node):
-                if not isinstance(inner, ast.Call) or not isinstance(inner.func, ast.Attribute):
-                    continue
-                if inner.func.attr not in singular or inner.args:
-                    continue
-                receiver = inner.func.value
-                if isinstance(receiver, ast.Name) and receiver.id in ("exp", "post_exp"):
-                    callers.add(node.name)
+    callers = _singular_state_callers(package)
     assert callers, "the search itself found nothing — it has stopped measuring"
-    missing = sorted(name for name in callers if name not in block)
+    missing = sorted(f"{module}::{name}" for name, module in callers.items() if name not in block)
     assert missing == [], (
-        "these read the experiment's singular exported state and the fan-out "
-        f"disclosure names none of them: {missing}"
+        "these read the experiment's singular exported state, or derive the "
+        f"workflow, and the fan-out disclosure names none of them: {missing}"
     )
     # And the claim itself must match what it lists: the old block said "each is now
     # either fixed or stated" over an enumeration that was not complete.
     assert "each is now either fixed or stated" not in block
+    # The block states a `derive_workflow` COUNT. Establish it here rather than
+    # trusting the sentence: the sentence used to say FIVE call sites when there are
+    # four call sites and one definition.
+    call_sites = sorted(
+        name
+        for name, module in callers.items()
+        if _derives_workflow(package / module, name)
+    )
+    assert call_sites == [
+        "_post_workflow",
+        "_project_one",
+        "_workflow_consistent",
+        "_workflow_for",
+    ], call_sites
+    assert "FIVE ``derive_workflow`` call sites" not in block
+
+
+def _derives_workflow(path: "pathlib.Path", func_name: str) -> bool:
+    """Whether the named function in ``path`` calls ``derive_workflow``."""
+    import ast
+
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name != func_name:
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Call):
+                bare = getattr(inner.func, "id", None) or getattr(inner.func, "attr", None)
+                if bare in _WORKFLOW_DERIVERS:
+                    return True
+    return False
+
+
+def test_a_new_caller_cannot_slip_past_the_disclosure_guard(tmp_path):
+    """F-A — the FOUR measured bypasses, re-run against the guard that closed them.
+
+    Each probe is one function appended to a COPY of the API package; the guard is
+    then re-run over the copy. A probe that leaves ``missing`` empty is a bypass.
+    The fifth row is the positive control that always worked, kept so a guard that
+    stops measuring altogether cannot pass this test by finding nothing.
+
+    Measured on ``74509c4`` (before the fix), with the same five bodies::
+
+        param named `exp`            -> RED   (caught)
+        param named `experiment`     -> GREEN (bypassed)
+        chained `Call` receiver      -> GREEN (bypassed)
+        same body, assistant_query   -> GREEN (bypassed)
+        new `derive_workflow` site   -> GREEN (bypassed)
+    """
+    import shutil
+
+    package = pathlib.Path(routes.__file__).parent
+    probes = {
+        "control_param_named_exp": (
+            "routes.py",
+            "def _probe_control(exp):\n    return exp.exported()\n",
+        ),
+        "param_named_experiment": (
+            "routes.py",
+            "def _probe_renamed(experiment):\n    return experiment.exported()\n",
+        ),
+        "chained_call_receiver": (
+            "routes.py",
+            'def _probe_chained():\n    return ws.load_experiment("x").exported()\n',
+        ),
+        "module_outside_the_old_allowlist": (
+            "assistant_query.py",
+            "def _probe_elsewhere(exp):\n    return exp.exported()\n",
+        ),
+        "a_new_derive_workflow_call_site": (
+            "routes.py",
+            "def _probe_workflow(exp):\n    return derive_workflow(\n"
+            "        pending_count=0, draft_ok=True, ready=True, exported=False, rev=1\n    )\n",
+        ),
+    }
+    for label, (module, body) in probes.items():
+        copy_dir = tmp_path / label
+        shutil.copytree(package, copy_dir, ignore=shutil.ignore_patterns("__pycache__", "data"))
+        target = copy_dir / module
+        target.write_text(target.read_text(encoding="utf-8") + "\n\n" + body, encoding="utf-8")
+        caught = _singular_state_callers(copy_dir)
+        assert any(name.startswith("_probe") for name in caught), (
+            f"{label}: the probe caller was not found — this bypass is still open"
+        )
+
+    # …and the guard is not simply naming everything: a genuine `ExportUnit`
+    # receiver, by every one of the four proof shapes, is still excluded.
+    clean = tmp_path / "clean"
+    shutil.copytree(package, clean, ignore=shutil.ignore_patterns("__pycache__", "data"))
+    (clean / "routes.py").write_text(
+        (clean / "routes.py").read_text(encoding="utf-8")
+        + "\n\n"
+        + "def _probe_annotated(unit: ws.ExportUnit):\n    return unit.record_path()\n\n\n"
+        + "def _probe_iterated(exp):\n    for u in exp.export_units():\n"
+        + "        if u.record_path():\n            return u\n    return None\n\n\n"
+        + "def _probe_subscript(exp):\n    units = exp.export_units()\n"
+        + "    return units[0].sidecar_path()\n\n\n"
+        + "def _probe_comprehension(exp):\n"
+        + "    return [u.record_path() for u in exp.export_units()]\n",
+        encoding="utf-8",
+    )
+    assert [name for name in _singular_state_callers(clean) if name.startswith("_probe")] == []
 
 
 # --- F3: the C4 fix disables pruning in the NORMAL fan-out case ----------------
@@ -1973,6 +2266,71 @@ def test_a_self_heal_that_falsifies_nothing_still_republishes(client):
     assert rewritten["sample"]["sample_id"] == "SYN-A"
 
 
+def test_the_conflict_409_offers_only_the_remedy_that_leaves_both_records_true(client):
+    """F-B — the 409's SECOND remedy permanently dangles a link, silently.
+
+    The message advised *"Restore the sample id, or remove the run."* Remedy 1 works.
+    Remedy 2 was measured, end to end, on ``74509c4``::
+
+        409 sibling_link_conflict -> remove the run -> export = 409 record_exists
+        SURVIVOR TARGETS: ['01KZMQ…9H']  STEMS ON DISK: ['01KZMQ…9J']
+        DANGLING:         ['01KZMQ…9H']
+
+    The surviving record is immutable, so its ``same_sample_as`` link keeps naming a
+    record that will never exist — one instance of exactly the
+    ``dangling_link_count`` that ``_link_targets_of_surviving_records`` and
+    ``protected_record_ids`` exist to prevent — and NOTHING reports it. The prune
+    protects a target it can see; a run removed before the record was ever written
+    leaves a target it cannot.
+
+    So the advice is withdrawn rather than annotated. Advice that manufactures the
+    defect the neighbouring code is built to prevent is not advice with a caveat.
+
+    This test asserts BOTH halves: the message no longer offers it, and the reason it
+    no longer offers it is reproduced here so the removal cannot be undone by someone
+    who thinks it was merely terse.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTREMEDYCOST001"
+    exp = _fan_out_experiment(
+        store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"), sample_id="SYN-A"
+    )
+    first, second = exp.sorted_runs()
+    assert _export(client, experiment_id).status_code == 200
+
+    exported = store.load_experiment(experiment_id)
+    for suffix in (".json", ".evidence.json"):
+        (exported.records_dir / f"{first.id}{suffix}").unlink()
+    changed = store.load_experiment(experiment_id)
+    changed.draft["fields"]["sample.sample_id"] = _sample_id_envelope("SYN-CHANGED")
+    changed.save_versioned()
+
+    refused = _export(client, experiment_id)
+    assert refused.status_code == 409
+    message = refused.json()["message"]
+    assert "Restore the sample id" in message, message
+    assert "remove the run" not in message, message
+
+    # --- and here is what following it used to do, reproduced ------------------
+    trimmed = store.load_experiment(experiment_id)
+    trimmed.runs = [run for run in trimmed.runs if run.id != first.id]
+    trimmed.save_versioned()
+
+    after = _export(client, experiment_id)
+    assert after.status_code == 409
+    assert after.json()["error"] == "record_exists"
+
+    final = store.load_experiment(experiment_id)
+    stems = _artifact_stems(final)
+    survivor = json.loads((final.records_dir / f"{second.id}.json").read_text())
+    targets = [link["target"] for link in survivor.get("links") or []]
+    assert targets == [first.id]
+    assert first.id not in stems
+    # The immutable survivor now asserts a relation to a record that does not exist,
+    # and no surface reports it. THAT is the cost the removed clause was hiding.
+    assert [t for t in targets if t not in stems] == [first.id]
+
+
 # --- F8: a NO-OP override stripped all inherited `implicit` --------------------
 
 
@@ -2011,3 +2369,177 @@ def test_a_no_op_override_does_not_strip_inherited_implicit_provenance(client):
         (final.records_dir / f"{final.sorted_runs()[0].record_id}.evidence.json").read_text()
     )
     assert [k for k in sidecar["evidence"] if k.startswith("implicit:")] != []
+
+
+def test_the_no_op_test_is_envelope_equality_and_the_docstring_says_so(client):
+    """F-D — the headline claims VALUES; the code compares the whole envelope.
+
+    ``_diverges_from_experiment`` compares ``resolution.payload`` — the envelope —
+    against ``resolution.inherited_payload``. ``Resolution.value`` exists for exactly
+    the comparison the headline describes and is not used by it. The F8 test above
+    passes because it re-records a BYTE-IDENTICAL envelope, so the two comparisons
+    cannot be told apart there.
+
+    Here they can. This run records the SAME scientific value with a re-stamped
+    ``user_confirmation`` — a different envelope, an identical value — and every
+    inherited ``implicit`` entry is still stripped. Measured, and asserted as the
+    behaviour rather than as a defect: it is the fail-closed side, and the fix is to
+    the CLAIM. See the docstring for why re-recording a value on the run's own
+    authority is treated as divergence.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTENVELOPEDIVERG"
+    exp = _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1",))
+    run = exp.sorted_runs()[0]
+    inherited = copy.deepcopy(exp.draft["fields"]["sample.material.formula"])
+
+    restamped = copy.deepcopy(inherited)
+    restamped["status"] = "verified"
+    restamped["user_confirmation"] = {
+        "confirmed_by": "synthetic-operator",
+        "confirmed_utc": "2026-01-01T00:00:00Z",
+    }
+    assert restamped != inherited
+    assert restamped["value"] == inherited["value"], "the VALUE must be identical"
+
+    exp.set_run_override(run, ws.field_address("sample.material.formula"), restamped)
+    exp.save_versioned()
+
+    resolved = exp.resolved_run_draft(run)
+    assert resolved["fields"]["sample.material.formula"]["value"] == inherited["value"]
+    abouts = {entry["about"] for entry in resolved.get("implicit") or []}
+    assert "absorbing_element" not in abouts, (
+        "the comparison is envelope-based: same value, different envelope, entries "
+        f"dropped — {resolved.get('implicit')}"
+    )
+
+    # …and the docstring must not claim otherwise.
+    source = inspect.getsource(ws._merge_implicit) + inspect.getsource(
+        ws._diverges_from_experiment
+    )
+    assert "THAT TEST IS ABOUT VALUES" not in source
+    assert "ENVELOPE" in source, "the corrected headline must name what is compared"
+
+
+def test_the_evidence_fallback_does_not_cite_a_stale_marker_a_fan_out_never_gets(client):
+    """F-G — the justification names a compensating signal that does not exist.
+
+    ``get_evidence`` serves no marker when it degrades to the draft trail, and the
+    comment justified that by saying the one honest thing a marker would add is
+    *"already published by ``/artifacts`` as ``artifact.state: 'stale'``, which this
+    endpoint's only caller fetches in the same ``Promise.all``"*.
+
+    For a fan-out ``/artifacts`` reports ``current`` — measured below. The two are not
+    even describing the same thing: ``/artifacts`` is answering about the experiment's
+    own pair (correctly absent, and it says why via ``reason``), while ``get_evidence``
+    has silently fallen back to a DIFFERENT document. So the justification is
+    corrected to the signal that is actually served, and the sentence that named a
+    ``stale`` marker is gone.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTEVIDENCEMARKER"
+    _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"))
+    assert _export(client, experiment_id).status_code == 200
+
+    artifacts = client.get(f"/api/experiments/{experiment_id}/artifacts").json()
+    assert artifacts["artifact"]["state"] == "current", artifacts["artifact"]
+    assert artifacts["record"] is None and artifacts["sidecar"] is None
+    assert artifacts["reason"] == routes.FAN_OUT_ARTIFACT_REASON
+
+    # The evidence trail degraded, and nothing in it says which document it is.
+    evidence = client.get(f"/api/experiments/{experiment_id}/evidence").json()
+    assert set(evidence) == {"evidence"}
+
+    source = inspect.getsource(routes.get_evidence)
+    assert 'artifact.state: "stale"' not in source, (
+        "the justification still cites a marker a fan-out never receives"
+    )
+
+
+# --- F-E / F-F: measured limits, RECORDED and deliberately not fixed -----------
+
+
+def test_the_sibling_link_filter_is_blind_to_who_authored_the_link(client):
+    """F-E — ``without_sibling_links`` filters on ``(rel, basis)``, not provenance.
+
+    Its docstring used to describe the blind spot as "a change to a
+    ``same_sample_as`` link on a materialised record — which is exactly the change
+    that record can never receive", which reads as though the filter and the links
+    this module emits were the same set. Nothing in it asks who wrote the link.
+    """
+    emitted = {"rel": ws.SIBLING_REL, "target": "01JQZ0TARGET00000000000001", "basis": ws.SIBLING_BASIS}
+    other_rel = {**emitted, "rel": "derived_from"}
+
+    # Dropped whatever wrote it — there is no provenance for this to consult.
+    assert "links" not in ws.without_sibling_links({"record_id": "R", "links": [emitted]})
+    control = {"record_id": "R", "links": [other_rel]}
+    assert ws.without_sibling_links(control) == control
+
+    # THE CONSEQUENCE, which is what the docstring understated: a record that gains
+    # such a link after export compares EQUAL to the one on disk, so nothing stales.
+    on_disk = {"record_id": "R"}
+    gained_sibling = {"record_id": "R", "links": [emitted]}
+    gained_other = {"record_id": "R", "links": [other_rel]}
+    assert ws.without_sibling_links(on_disk) == ws.without_sibling_links(gained_sibling)
+    assert ws.without_sibling_links(on_disk) != ws.without_sibling_links(gained_other)
+
+    source = inspect.getsource(ws.without_sibling_links)
+    assert "NOT ON PROVENANCE" in source
+
+
+def test_an_orphan_is_reported_only_by_an_export_that_notices_it(client):
+    """F-F — orphan accumulation has no standing signal. Recorded, not fixed.
+
+    ``pruned_record_ids`` / ``protected_record_ids`` / ``prune_declined`` are fields
+    of an EXPORT response. Delete a run from a fully-exported fan-out and never
+    export again, and every read surface is silent: measured below, including
+    ``/audit``, which globs the records directory and therefore reports the orphan as
+    a PASSING RECORD — the one surface that can see the file describes it as healthy.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTORPHANSILENT01"
+    exp = _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"))
+    first, second = exp.sorted_runs()
+    assert _export(client, experiment_id).status_code == 200
+
+    trimmed = store.load_experiment(experiment_id)
+    trimmed.runs = [run for run in trimmed.runs if run.id != second.id]
+    trimmed.save_versioned()
+
+    # The file is still there…
+    assert _artifact_stems(store.load_experiment(experiment_id)) == {first.id, second.id}
+
+    # …and nothing that reads reports it.
+    detail = client.get(f"/api/experiments/{experiment_id}").json()
+    assert "pruned_record_ids" not in detail and "protected_record_ids" not in detail
+    artifacts = client.get(f"/api/experiments/{experiment_id}/artifacts").json()
+    assert artifacts["artifact"]["state"] == "current", artifacts["artifact"]
+
+    audited = client.post(f"/api/experiments/{experiment_id}/audit").json()
+    rows = {row["name"]: row["ok"] for row in audited["records"]}
+    assert rows == {f"{first.id}.json": True, f"{second.id}.json": True}, rows
+
+
+def test_the_frontend_fixture_quotes_the_reason_the_backend_actually_serves():
+    """F-C — the export screen RENDERS ``artifact_refs.reason``, so it can drift.
+
+    ``apps/web/src/test/apiFixtures.ts`` carries a hand-copied ``FAN_OUT_REASON``
+    because a vitest fixture cannot import from the Python package. A hand-copied
+    string is exactly the thing this repository has watched go stale before, so it is
+    pinned here rather than trusted — the frontend test would keep passing against a
+    sentence the backend no longer sends.
+    """
+    fixture = (
+        pathlib.Path(routes.__file__).parents[3]
+        / "apps"
+        / "web"
+        / "src"
+        / "test"
+        / "apiFixtures.ts"
+    )
+    source = fixture.read_text(encoding="utf-8")
+    marker = "export const FAN_OUT_REASON =\n  "
+    start = source.index(marker) + len(marker)
+    literal = source[start : source.index(";\n", start)].strip()
+    assert literal.startswith('"') and literal.endswith('"'), literal
+    assert json.loads(literal) == routes.FAN_OUT_ARTIFACT_REASON

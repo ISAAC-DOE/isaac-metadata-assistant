@@ -291,8 +291,16 @@ function LoadedWorkbench({
   // residual — see `draftPhaseFromWorkflow` above for the measurement. The DOT
   // beside it comes from the same derivation (`draftPhaseDotFromWorkflow`), so the
   // colour cannot claim what the sentence declines to.
+  // `exported: true` no longer implies a non-null `record_id`. A record whose runs
+  // each export their own official record has NO singular record id — the field is
+  // singular and it has several — so this interpolated the literal string and
+  // rendered `Exported · null`. Measured. Two lines below, the `filename` prop
+  // already guarded with `detail.exported && detail.record_id`; this did not, which
+  // is how an unguarded site survived beside a guarded sibling.
   const phase = detail.exported
-    ? `Exported · ${detail.record_id}`
+    ? detail.record_id
+      ? `Exported · ${detail.record_id}`
+      : 'Exported'
     : pending.length > 0
       ? `Draft assembled · ${pending.length} fields to confirm`
       : draftPhaseFromWorkflow(detail.workflow);

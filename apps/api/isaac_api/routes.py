@@ -765,9 +765,18 @@ def _summary(exp: Experiment) -> dict:
 #: exported" — the same nulls a never-exported record produces. They are null because
 #: the field is SINGULAR and this record has several, which is a different statement
 #: and now says so.
+#:
+#: THE SECOND SENTENCE USED TO READ "Use the artifacts operation for the per-run
+#: files." It is served BY the artifacts operation, which returns four nulls and this
+#: same sentence — so it directed a reader in a circle, and the operation's own
+#: OpenAPI description already said the opposite ("Those per-run files are not listed
+#: here yet"). Found while rendering this string on the export screen, where a false
+#: instruction becomes a visible dead end. The export response's ``records[]`` is the
+#: one place the per-run filenames exist, and the sentence now says only that.
 FAN_OUT_ARTIFACT_REASON = (
     "This record's runs each export their own official record, so there is no "
-    "single record file. Use the artifacts operation for the per-run files."
+    "single record file. The export response lists each run's record and sidecar "
+    "filename; no read operation lists them yet."
 )
 
 
@@ -2502,7 +2511,7 @@ def _unit_result_entry(unit, result) -> dict:
     }
 
 
-def _unit_artifact_entry(unit) -> dict:
+def _unit_artifact_entry(unit: ws.ExportUnit) -> dict:
     """One successfully written unit: which run, which record, which two files.
 
     P30.6 — SAFE basenames only, never a filesystem path. The id is read back from
@@ -2764,6 +2773,19 @@ def post_export(
         #
         # A zero-run experiment has no siblings, so this cannot fire for any
         # experiment this API can currently create.
+        #
+        # ONE REMEDY, NOT TWO (review item F-B). The message used to end "Restore the
+        # sample id, or remove the run." The second clause was measured end to end and
+        # it manufactures the defect the prune exists to prevent:
+        #
+        #     409 sibling_link_conflict -> remove the run -> export = 409 record_exists
+        #     survivor targets ['01…9H']   stems on disk ['01…9J']   DANGLING ['01…9H']
+        #
+        # The survivor is immutable, so its `same_sample_as` link names a record that
+        # will never exist, and nothing reports it. `protected_record_ids` cannot help:
+        # it protects an artifact a link names, and here the artifact was never
+        # written. Restoring the sample id is the only remedy that leaves both records
+        # true, so it is the only one offered.
         if exp.runs:
             conflicts = ws.sibling_link_conflicts(units)
             if conflicts:
@@ -2783,7 +2805,7 @@ def post_export(
                             "a different sample id. Exported records are immutable, "
                             "so the link could not be corrected and one of the two "
                             "records would be false. Nothing was written. Restore the "
-                            "sample id, or remove the run."
+                            "sample id to match the one the exported record names."
                         ),
                         "conflicts": conflicts,
                     },
@@ -2907,6 +2929,17 @@ def post_export(
             # be read, so nothing was even examined" — and the middle case is the
             # NORMAL one for a fan-out whose runs share a sample id. See
             # `_prune_orphan_artifacts`.
+            #
+            # AND ALL THREE ARE VISIBLE ONLY HERE (review item F-F, recorded not
+            # fixed). They are fields of an EXPORT RESPONSE, so the accumulation they
+            # describe is reported only to whoever performed the export that noticed
+            # it. Delete a run from a fully-exported fan-out and never export again
+            # and no surface reports the orphan at all: `/artifacts` serves the
+            # experiment's own pair, `artifact_state` iterates the CURRENT units and
+            # so cannot see a file no unit claims, and `/audit` globs the records dir
+            # and would report the orphan as a passing record rather than as an
+            # orphan. A standing signal belongs on a read surface — the Run-workspace
+            # slice, which is the one with somewhere to put it.
             payload["pruned_record_ids"] = prune["pruned"]
             payload["protected_record_ids"] = prune["protected"]
             payload["prune_declined"] = prune["declined"]
@@ -3111,7 +3144,7 @@ async def post_csv_preview(
     return preview
 
 
-def _validate_unit(unit) -> dict:
+def _validate_unit(unit: ws.ExportUnit) -> dict:
     """One export unit's official-schema verdict, ADDRESSED TO ITS RUN.
 
     ``dry_run`` is per unit and states WHICH document was checked: the written record
@@ -3510,7 +3543,7 @@ def post_audit(scope: TutorialScopeDep, experiment_id: ExperimentId):
 # --- 11. warnings (advisory, non-gating) --------------------------------------
 
 
-def _unit_warnings_entry(unit) -> dict:
+def _unit_warnings_entry(unit: ws.ExportUnit) -> dict:
     """One export unit's advisory warnings, ADDRESSED TO ITS RUN.
 
     Mirrors ``_validate_unit``: ``dry_run`` is per unit and states WHICH document the
@@ -3719,12 +3752,35 @@ def get_evidence(scope: TutorialScopeDep, experiment_id: ExperimentId):
         # the record and support from the sidecar), so one absent file is already
         # enough to make the sidecar trail unbuildable.
         #
-        # Deliberately NO new response field. The one honest thing a marker would add
-        # — that the artifact pair is not readable — is already published by
-        # `/artifacts` as `artifact.state: "stale"`, which this endpoint's only caller
-        # fetches in the same `Promise.all`; and `api.ts::getEvidence` discards every
-        # key except `evidence`, so a marker here would be unreachable weight on the
-        # wire. The description above states the fallback instead.
+        # Deliberately NO new response field, and the reason given here USED TO BE
+        # FALSE FOR A FAN-OUT (review item F-G). It said the one honest thing a marker
+        # would add is "already published by `/artifacts` as `artifact.state:
+        # "stale"`". Measured on `74509c4` for a fully-exported 2-run fan-out:
+        # `/artifacts` reports `state: "current"`, never `stale`, so the named
+        # compensating signal did not exist on the path that most needs it.
+        #
+        # The two branches are not one case, and the old sentence collapsed them:
+        #
+        #   * PAIR PRESENT BUT UNREADABLE (a zero-run experiment marked exported whose
+        #     files will not parse) — `/artifacts` DOES force `stale` here, a few lines
+        #     above, precisely so the block never implies a pair that is not on disk.
+        #     That half of the old claim holds, and it is the half a marker would
+        #     duplicate.
+        #   * NO PAIR AT ALL (a fan-out: `exported()` is permanently False, so the two
+        #     reads never happen). `/artifacts` answers `current` with four nulls and
+        #     `reason: FAN_OUT_ARTIFACT_REASON`, which is correct about the
+        #     EXPERIMENT'S OWN pair. What no surface says is that THIS endpoint then
+        #     served a different document — the experiment-level draft trail, omitting
+        #     every run-level field.
+        #
+        # It is still not fixed by a marker, because a marker is not what is missing:
+        # the fan-out answer needs a `runs[]` array, N sidecar reads and a frontend
+        # that can display more than one trail (`api.ts::getEvidence` discards every
+        # key except `evidence`). That is the Run-workspace slice. See the STATED, NOT
+        # FIXED entry for `get_evidence` in `workspace.py`, which now records this as
+        # deferred for cost rather than blocked on a product question. The description
+        # above states the fallback; this comment states what the description cannot,
+        # which is which of the two branches a reader is in.
         if exp.exported():
             _log.warning(
                 "evidence: record %s is marked exported but its artifact pair could "

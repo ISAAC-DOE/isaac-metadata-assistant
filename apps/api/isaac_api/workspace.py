@@ -1253,19 +1253,49 @@ def _authoritative_signature(exp: "Experiment") -> str:
 # because it stops the next reader looking.
 #
 # So the enumeration below is established BY SEARCH over the API package —
-# every function that calls ``exported()``, ``record_path()`` or ``sidecar_path()`` on
-# an ``Experiment`` (as opposed to an ``ExportUnit``, which is fan-out-native by
-# construction), plus every ``derive_workflow`` call site — and the search is RE-RUN
-# AT TEST TIME by
+# every function that calls ``exported()``, ``record_path()``, ``sidecar_path()``,
+# ``all_units_exported()`` or ``any_unit_exported()`` on anything that is not a
+# PROVABLE ``ExportUnit`` (which is fan-out-native by construction), plus every
+# ``derive_workflow`` call site — and the search is RE-RUN AT TEST TIME by
 # ``test_export_fan_out.test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair``,
-# which fails until any new such caller is named here. The list cannot silently go
-# stale again; it can only go stale loudly.
+# which fails until any new such caller is named here.
 #
-# There are FIVE ``derive_workflow`` call sites, not three as the C5 fix said:
+# THAT SENTENCE WAS FALSE WHEN IT WAS FIRST WRITTEN, AND THE CORRECTION IS THE
+# THIRD TIME THIS BLOCK HAS BEEN WRONG ABOUT ITS OWN COVERAGE — the first two were
+# wrong about a COUNT, this one was wrong about a MECHANISM, which is worse: it
+# named the property a reader could rely on and enforced something much narrower.
+# Four separate one-line additions each left the whole suite GREEN. A caller whose
+# parameter was named ``experiment`` rather than ``exp`` (and ``experiment`` is
+# already the parameter name at ``_apply_sibling_grouping`` and
+# ``_run_artifact_presence``, both in this file); a chained receiver
+# (``ws.load_experiment(id).exported()``); the same body placed in
+# ``assistant_query.py``, outside a hard-coded four-module allowlist; and a new
+# ``derive_workflow`` call site, which the searched attribute set did not contain at
+# all — while this very sentence promised *"plus every ``derive_workflow`` call
+# site"*. The search now globs every module in the package, proves ``ExportUnit``
+# receivers from annotations and bindings instead of from two literal variable
+# names, resolves chained receivers by callee name, and includes
+# ``derive_workflow``. Its REACH is measured, not described:
+# ``test_a_new_caller_cannot_slip_past_the_disclosure_guard`` re-runs all four
+# bypasses against it, plus the positive control and four ``ExportUnit`` shapes that
+# must still be excluded.
+#
+# What remains outside the guard, stated because an unstated limit is how the last
+# three revisions of this block went stale: ``self`` inside ``ExportUnit`` is
+# excluded (it IS a unit), an unannotated parameter that really does hold a unit is
+# reported and must be annotated or named, and NO frontend consumer is scanned at
+# all — the guard cannot cross the language boundary, and the ``exported: true`` /
+# ``record_id: null`` pair reached two React screens that rendered the literal
+# string ``null`` before anyone looked.
+#
+# There are FOUR ``derive_workflow`` CALL SITES, plus the definition — not "five
+# call sites", which is what this block said after correcting the C5 fix's "three",
+# and which counted the definition as a call. The four are
 # ``routes._workflow_for``, ``dependencies._post_workflow``,
-# ``runtime_records._project_one``, ``corpus_mutation._workflow_consistent`` (which
-# takes no experiment at all — it calls the pure function with literal arguments as a
-# regression check, and is correct as written), and the definition itself.
+# ``runtime_records._project_one`` and ``corpus_mutation._workflow_consistent``
+# (which takes no experiment at all — it calls the pure function with literal
+# arguments as a regression check, and is correct as written). The count is
+# established by the guard, not by this sentence.
 #
 # FIXED — these asserted something false about a fan-out and no longer do:
 #
@@ -1329,9 +1359,28 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #   * ``routes.get_evidence`` reads the experiment's own sidecar+record pair, which a
 #     fan-out does not have, so it degrades to the EXPERIMENT-LEVEL draft trail. That
 #     trail is this record's own evidence and nothing is fabricated, but it omits
-#     every run-level field. Merging N sidecars would have to answer "whose evidence
-#     is this" for a field N runs each resolve, and that is the same product question
-#     ``evidenced_field_count`` raises below.
+#     every run-level field.
+#
+#     THE REASON THIS BLOCK USED TO GIVE WAS BORROWED, AND IT DID NOT FIT. It said
+#     merging N sidecars "would have to answer 'whose evidence is this' for a field N
+#     runs each resolve, and that is the same product question
+#     ``evidenced_field_count`` raises below." It is NOT the same question, and this
+#     slice had already answered the version that applies here — twice.
+#     ``_validate_unit`` and ``_unit_warnings_entry`` both key per-unit output by
+#     ``run_id``/``run_label``/``record_id`` in a ``runs[]`` array, which is exactly
+#     "whose is this", and neither had to merge anything to do it. An evidence
+#     response could carry the same shape. What ``evidenced_field_count`` and
+#     ``get_evidence_classification`` raise is a DENOMINATOR question — one number,
+#     or one histogram, over N records, where any aggregate is a choice — and that
+#     genuinely has no default. ``get_evidence`` mostly does not have it.
+#
+#     So the honest status is: DEFERRED FOR COST, not blocked on a product question.
+#     It needs a ``runs[]`` array, N sidecar reads, and a frontend that can display
+#     more than one trail — ``api.ts::getEvidence`` discards every key except
+#     ``evidence`` today — and that frontend is the Run-workspace slice. It is listed
+#     here rather than fixed because widening the wire shape with no consumer would
+#     be shipping a contract nobody reads; it is not listed because we do not know
+#     what it should say.
 #   * ``routes.get_evidence_classification`` classifies ``exp.draft`` alone, so its
 #     five-class histogram counts the experiment-level fields only. Same question,
 #     same answer: it is a display axis, not a verdict, and nothing gates on it.
@@ -1339,6 +1388,14 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #     experiment reports 26, because it reads ``exp.draft`` alone. See the comment at
 #     its call site in ``routes._summary`` for why the honest options are "disclose"
 #     or "redefine", and why redefining is a product decision rather than a bug fix.
+#
+# CORRECT AS WRITTEN — reached by the same search, named here because the search
+# names it and an unexplained entry is how a reader learns to skim this list:
+#
+#   * ``Experiment.status`` calls ``self.all_units_exported()``, the fan-out-aware
+#     aggregate, and its own docstring argues why the aggregate is ALL rather than
+#     ANY. It is in this enumeration because it reads the exported state at all, not
+#     because it reads it wrongly.
 
 #: The ONE ``rel``/``basis`` pair this module will assert between sibling run
 #: records, and the field whose equality justifies it.
@@ -1416,21 +1473,42 @@ def _merge_implicit(
     true of it, and withholding them would silently delete recorded evidence from the
     exported sidecar. Carrying them is correct.
 
-    **THAT TEST IS ABOUT VALUES, NOT ABOUT WHETHER AN OVERRIDE WAS RECORDED (review
-    item F8).** The caller used to pass ``inherit=not run.overrides``, so an override
-    whose value EQUALS the experiment's — a no-op — stripped every inherited entry.
-    Measured. That was consistent with the rule as it was written down and
-    inconsistent with the argument written immediately below it, which reasons
-    entirely from DIVERGENCE (*"That argument was wrong the moment a run diverged"*).
-    A no-op override has not diverged; the run holds what the experiment holds, which
-    is the very premise the paragraph above rests on, so dropping the entries deleted
-    real evidence for no reason.
+    **THAT TEST IS ABOUT THE ENVELOPE, NOT ABOUT WHETHER AN OVERRIDE WAS RECORDED
+    (review item F8, headline corrected by F-D).** The caller used to pass
+    ``inherit=not run.overrides``, so an override that re-recorded the experiment's
+    own envelope — a no-op — stripped every inherited entry. Measured. That was
+    consistent with the rule as it was written down and inconsistent with the argument
+    written immediately below it, which reasons entirely from DIVERGENCE (*"That
+    argument was wrong the moment a run diverged"*). A no-op override has not
+    diverged; the run holds what the experiment holds, which is the very premise the
+    paragraph above rests on, so dropping the entries deleted real evidence for no
+    reason.
 
-    Comparing values needs no dependency table and invents no relationship: it asks
-    only whether this run's payload at an address equals the experiment's CURRENT
-    payload at that address, which :class:`Resolution` already reports. An override at
-    an address the experiment does not carry counts as divergence — there is no value
-    to agree with, and fail-closed is the right side of that.
+    **THE HEADLINE USED TO SAY "ABOUT VALUES", AND THE CODE HAS NEVER COMPARED
+    VALUES.** :func:`_diverges_from_experiment` compares ``Resolution.payload``
+    against ``Resolution.inherited_payload`` — the whole ENVELOPE, evidence, status
+    and confirmation included. :attr:`Resolution.value` exists for exactly the
+    comparison the old headline described and this does not call it. The F8 test
+    could not tell the two apart, because it re-records a byte-identical envelope.
+    Measured where they differ: a run that records the SAME value with a re-stamped
+    ``user_confirmation`` is treated as divergent and loses every inherited
+    ``implicit`` entry.
+
+    That is kept, and it is the fail-closed side rather than an accident of
+    implementation. An ``implicit`` entry is a derivation over the experiment's
+    recorded state, and the envelope IS that state: a run that re-records the value
+    under its own confirmation is asserting it on its own authority, and the
+    experiment's derivations were not evidenced against that. Widening to
+    value-equality would carry the experiment's provenance onto a value the run has
+    re-sourced, which is the direction ``CLAIMS`` discipline does not allow us to
+    guess in. An override at an address the experiment does not carry counts as
+    divergence for the same reason — there is nothing to agree with.
+
+    What this costs is real and is stated rather than implied: a run whose only change
+    is metadata loses inherited provenance it would have been entitled to under a
+    value comparison. Changing that is a product decision about what an override
+    MEANS, not a bug fix, and it would need its own test for every ``implicit`` entry
+    it starts preserving.
 
     **``inherit=False`` — a run that diverges at ANY address.** An earlier revision
     carried the entries unconditionally, arguing that "merging asserts nothing that
@@ -1469,7 +1547,14 @@ def _merge_implicit(
 
 
 def _diverges_from_experiment(resolutions: dict[str, "Resolution"]) -> bool:
-    """Whether this run holds a DIFFERENT value from the experiment anywhere.
+    """Whether this run holds a DIFFERENT ENVELOPE from the experiment anywhere.
+
+    ENVELOPE, not value, and the distinction is deliberate — see the F-D paragraph in
+    :func:`_merge_implicit`, whose headline used to say "values" while this compared
+    ``payload``. :attr:`Resolution.value` would give the narrower comparison and is
+    deliberately not used: an override that re-records the experiment's value under
+    its own ``user_confirmation`` has re-sourced it, and the experiment's derivations
+    were evidenced against the experiment's envelope, not against that one.
 
     The ``inherit`` input to :func:`_merge_implicit`, inverted. It reads only what
     :func:`resolve_inherited` already computed, so it adds no traversal and no second
@@ -1478,7 +1563,7 @@ def _diverges_from_experiment(resolutions: dict[str, "Resolution"]) -> bool:
     A resolution is divergent when it came from an override AND its payload differs
     from the experiment's CURRENT payload at the same address. ``inherited_payload``
     is ``None`` for an override at an address the experiment does not carry, and that
-    counts as divergence: there is no value for the run to agree with, so the
+    counts as divergence: there is nothing for the run to agree with, so the
     experiment's derivations cannot be shown to be true of it.
 
     ``displaced_payload`` is deliberately NOT consulted. It records what an override
@@ -1848,10 +1933,24 @@ def without_sibling_links(record: dict) -> dict:
     THE NARROWNESS IS THE POINT, and it is stated because it is a real loss. Only
     links matching BOTH :data:`SIBLING_REL` and :data:`SIBLING_BASIS` are dropped, and
     they are dropped from BOTH sides of the comparison, so a link a run carries for
-    any other reason still stales its record when it changes. What this cannot detect
-    is a change to a ``same_sample_as`` link on a materialised record — which is
-    exactly the change that record can never receive, so reporting it would be
-    reporting an unfixable difference rather than a stale artifact.
+    any other reason still stales its record when it changes.
+
+    THE FILTER IS ON ``(rel, basis)``, NOT ON PROVENANCE, AND THE OLD WORDING HID
+    THAT (review item F-E). It said what this cannot detect is "a change to a
+    ``same_sample_as`` link on a materialised record — which is exactly the change
+    that record can never receive", which reads as though the blind spot were exactly
+    co-extensive with the links this module emits. It is not. Nothing here asks WHO
+    wrote the link. A ``same_sample_as``/``same_sample_id`` pair authored by any other
+    means — added to a draft by hand, or by some future route — is dropped by this
+    filter too, and so a record that gains or loses one after export does NOT report
+    ``stale``. Measured, alongside the control: the same edit to a ``derived_from``
+    link stales the record correctly.
+
+    Why it is nonetheless kept as written: no route in this API authors a ``links``
+    block today, so the reachable set is exactly the links this module emits, and for
+    those the blind spot is a difference the record can never receive. If a link-
+    authoring path is ever added, this filter becomes wrong before that path ships
+    — it will need the provenance test the ``(rel, basis)`` pair is standing in for.
 
     ``links`` is DROPPED rather than left empty when nothing survives, because
     ``export.transform`` omits the key entirely for a draft with no links, and an

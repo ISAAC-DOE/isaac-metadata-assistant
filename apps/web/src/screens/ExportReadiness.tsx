@@ -31,6 +31,19 @@ import type {
   ValidationResult,
 } from '../lib/types';
 
+/**
+ * Shown when `exported` is true and the singular `record_id` is null — a record
+ * whose runs each export their own official record.
+ *
+ * A LAST RESORT, NOT THE COPY. `artifact_refs.reason` is authored server-side and
+ * is what renders; this exists only because the contract types `reason` as
+ * optional, and a screen that has already established there is no single pair must
+ * not fall back to silence. It deliberately does not name a place to find the
+ * per-run files, because no read operation lists them yet.
+ */
+const FAN_OUT_NO_SINGLE_PAIR =
+  "This record's runs each export their own official record, so there is no single record file.";
+
 type Load =
   | { name: 'loading' }
   | { name: 'error'; error: ApiError }
@@ -344,17 +357,23 @@ function LoadedExport({
   const coverage = audit.records.length > 0 ? toAuditResult(audit) : 'pending';
   const advisory = toAdvisoryResult(warnings);
 
+  // A record whose runs each export their own official record has NO singular
+  // record id or filename pair — the fields are singular and it has several — while
+  // `exported` is true. Measured: both fallbacks below interpolated the literal
+  // null and rendered `null.json` / `null.evidence.json`, into the TopBar filename
+  // and into both artifact cards, beside a PASS verdict.
+  const fanOut = detail.exported && detail.record_id === null;
   // P30.6 — safe basenames only (never a server path). The API returns null
   // until exported; the fallback below is a locally-constructed filename, not
-  // a server-provided path.
+  // a server-provided path. It is only constructible when there IS an id.
   const recordFilename =
     inSession?.recordFilename ||
     detail.artifact_refs.record_filename ||
-    `${detail.record_id}.json`;
+    (detail.record_id ? `${detail.record_id}.json` : '');
   const sidecarFilename =
     inSession?.sidecarFilename ||
     detail.artifact_refs.sidecar_filename ||
-    `${detail.record_id}.evidence.json`;
+    (detail.record_id ? `${detail.record_id}.evidence.json` : '');
   // Never invent a coverage total: while audit data hasn't arrived yet, the
   // sidecar card simply omits the path-count badge (ArtifactCard renders
   // nothing when pathCount is undefined) rather than guessing a number.
@@ -483,22 +502,32 @@ function LoadedExport({
                 </span>
               </div>
 
-              <div className="artifact-row">
-                <ArtifactCard
-                  artifact={{ kind: 'record', path: recordFilename, verdict: 'pass' }}
-                  onView={viewArtifacts ? (e) => openViewer('record', e.currentTarget) : undefined}
-                  onDownload={
-                    viewArtifacts ? () => download(viewArtifacts.record, recordFilename) : undefined
-                  }
-                />
-                <ArtifactCard
-                  artifact={{ kind: 'sidecar', path: sidecarFilename, pathCount: coverageTotal }}
-                  onView={viewArtifacts ? (e) => openViewer('sidecar', e.currentTarget) : undefined}
-                  onDownload={
-                    viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarFilename) : undefined
-                  }
-                />
-              </div>
+              {/* No singular pair to card. The reason is authored server-side
+                  (`artifact_refs.reason`) so this screen states the backend's own
+                  account rather than inventing one; the fallback exists only
+                  because the field is optional in the contract. */}
+              {fanOut ? (
+                <p className="artifact-hint" role="note">
+                  {detail.artifact_refs.reason ?? FAN_OUT_NO_SINGLE_PAIR}
+                </p>
+              ) : (
+                <div className="artifact-row">
+                  <ArtifactCard
+                    artifact={{ kind: 'record', path: recordFilename, verdict: 'pass' }}
+                    onView={viewArtifacts ? (e) => openViewer('record', e.currentTarget) : undefined}
+                    onDownload={
+                      viewArtifacts ? () => download(viewArtifacts.record, recordFilename) : undefined
+                    }
+                  />
+                  <ArtifactCard
+                    artifact={{ kind: 'sidecar', path: sidecarFilename, pathCount: coverageTotal }}
+                    onView={viewArtifacts ? (e) => openViewer('sidecar', e.currentTarget) : undefined}
+                    onDownload={
+                      viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarFilename) : undefined
+                    }
+                  />
+                </div>
+              )}
 
               <div className="sidecar-note" role="note">
                 <Shield
@@ -521,7 +550,11 @@ function LoadedExport({
                   Download show the exact written content.
                 </p>
               )}
-              {!viewArtifacts && (
+              {/* `!fanOut` — there are no "paths above" for a fan-out, and nothing
+                  failed to read. `viewArtifacts` is null there simply because the
+                  singular pair does not exist, so this sentence was a second false
+                  claim stacked on the first. */}
+              {!viewArtifacts && !fanOut && (
                 <p className="artifact-hint">
                   The artifact content could not be read from the workspace — open the files at the
                   paths above.

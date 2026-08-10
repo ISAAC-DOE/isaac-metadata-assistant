@@ -1846,6 +1846,67 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, Stubbed
   };
 }
 
+/**
+ * The FAN-OUT shape: `exported: true` beside a null singular `record_id` and a null
+ * `artifact_refs` pair, which every other `exported: true` fixture pairs with a
+ * non-null id.
+ *
+ * That gap is why two screens shipped rendering the literal string `null`
+ * (`Exported · null`, `null.json`, `null.evidence.json`) with a full green suite: no
+ * fixture in this file could produce the combination, so no test could see it. The
+ * backend produces it for a record whose runs each export their own official record.
+ *
+ * `reason` is the server-authored explanation the screens render in place of the two
+ * artifact cards; it is what `routes.FAN_OUT_ARTIFACT_REASON` serves.
+ */
+export const FAN_OUT_REASON =
+  "This record's runs each export their own official record, so there is no single record file. The export response lists each run's record and sidecar filename; no read operation lists them yet.";
+
+export function fanOutExportedRoutes(id: string = EXP_ID): Record<string, StubbedRoute> {
+  const base = `/api/experiments/${encodeURIComponent(id)}`;
+  return {
+    ...bundleRoutes(id),
+    [`GET ${base}`]: {
+      body: {
+        ...experimentDetail,
+        id,
+        status: 'done',
+        pending_count: 0,
+        exported: true,
+        // SINGULAR fields, and this record has several of each.
+        record_id: null,
+        artifact_refs: {
+          record_filename: null,
+          sidecar_filename: null,
+          reason: FAN_OUT_REASON,
+        },
+        workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
+        artifact: { state: 'current' as const, reason: null },
+      },
+    },
+    [`GET ${base}/pending`]: { body: { pending: [] } },
+    [`POST ${base}/validate`]: { body: validateExported },
+    [`POST ${base}/audit`]: { body: auditExported },
+    [`GET ${base}/warnings`]: { body: warningsDryRun },
+    [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
+    [`GET ${base}/evidence`]: { body: evidenceResponse },
+    [`GET ${base}/draft`]: { body: draftResponse },
+    // The experiment's OWN pair does not exist; `/artifacts` says so rather than
+    // reporting `none`, and its `artifact.state` is `current` (measured backend-side).
+    [`GET ${base}/artifacts`]: {
+      body: {
+        record: null,
+        sidecar: null,
+        record_filename: null,
+        sidecar_filename: null,
+        artifact: { state: 'current' as const, reason: null },
+        reason: FAN_OUT_REASON,
+      },
+    },
+    'GET /api/graph/status': { body: graphStatusUnavailable },
+  };
+}
+
 // --- P27.6 conditional-GET (revision-aware live-sync) fixtures ---------------
 //
 // The backend now honours `If-None-Match` on GET /api/experiments/{id}: 304 (no
