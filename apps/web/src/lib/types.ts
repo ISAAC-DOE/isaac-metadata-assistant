@@ -1360,9 +1360,14 @@ export interface ApiExportResponse extends VersionFields {
   record?: Record<string, unknown>;
   sidecar?: Record<string, unknown>;
   errors?: { path: string; message: string }[];
-  record_id?: string;
+  // NULL, not absent, for a fan-out: both are SINGULAR by name and a record whose
+  // runs each export their own official record has several. The type said `?:
+  // string` and the wire says `null`, which is how a screen came to test
+  // `resp.record && resp.sidecar` and route a successful fan-out export to its
+  // `failed` phase.
+  record_id?: string | null;
   // P30.6 — safe basenames only, never an absolute server/mount path.
-  artifact_refs?: { record_filename: string; sidecar_filename: string };
+  artifact_refs?: { record_filename: string; sidecar_filename: string } | null;
   // P28.2 — the post-export workflow + downstream-invalidation summary (present
   // on both the success and the gated-failure paths).
   workflow?: ApiWorkflow;

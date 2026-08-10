@@ -123,7 +123,17 @@ function LoadedEvidence({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selected = entries.find((e) => e.key === selectedKey) ?? entries[0];
 
-  const exported = artifacts.sidecar !== null;
+  // TWO DIFFERENT FACTS, AND THIS SCREEN USED TO HOLD ONLY ONE OF THEM.
+  // `exported` was `artifacts.sidecar !== null` — a DERIVED proxy that never reads
+  // `detail.exported`. A record whose runs each export their own official record
+  // has no EXPERIMENT-LEVEL sidecar, so the proxy said false for a record that has
+  // been exported N times, and the screen rendered `draft · <id>` in the TopBar and
+  // a **Draft** state chip. `:202` was quoted as a guarded sibling; the guard
+  // stopped a printed null and produced a false claim in its place, which is the
+  // category this branch itself created.
+  // Whether this record has an experiment-level sidecar OF ITS OWN is a separate
+  // question, and it is asked below where it belongs — of `artifacts.sidecar`.
+  const exported = detail.exported;
   const directTotal = entries.filter((e) => !e.namespaced).length;
 
   const sidecar = artifacts.sidecar;
@@ -132,7 +142,13 @@ function LoadedEvidence({
         schema_version: String(sidecar.schema_version ?? '1.05'),
         generated_utc: String(sidecar.generated_utc ?? ''),
       }
-    : { schema_version: '1.05 · target', generated_utc: 'not exported yet' };
+    : exported
+      ? // Exported, but with no sidecar of its OWN. Saying "not exported yet" here
+        // was simply false; the honest statement is that the sidecars belong to the
+        // runs, and this screen does not list them (see `get_evidence` in the
+        // fan-out disclosure — deferred for cost, not blocked on a question).
+        { schema_version: '1.05', generated_utc: 'one sidecar per run — not listed here' }
+      : { schema_version: '1.05 · target', generated_utc: 'not exported yet' };
 
   const recordJson = artifacts.record ? JSON.stringify(artifacts.record, null, 2) : null;
   const sidecarJson = sidecar ? JSON.stringify(sidecar, null, 2) : null;
@@ -198,9 +214,15 @@ function LoadedEvidence({
         <TopBar
           variant="record"
           title={detail.title}
+          /* Three states, not two. There IS a sidecar filename; there is an
+             exported record with no singular sidecar (a fan-out), where the id is
+             the only true thing to show; and there is a draft. Collapsing the
+             middle one into `draft · <id>` called an exported record a draft. */
           filename={
-            exported && detail.record_id
-              ? `${detail.record_id}.evidence.json`
+            exported
+              ? detail.record_id
+                ? `${detail.record_id}.evidence.json`
+                : detail.id
               : `draft · ${detail.id}`
           }
           stateChip={exported ? 'exported' : 'draft'}

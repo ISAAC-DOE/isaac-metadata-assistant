@@ -59,10 +59,16 @@ interface ExportedArtifacts {
   validation: ValidationResult;
 }
 
+/** One written run record, as `POST /export` reports it for a fan-out. */
+type FanOutRecord = NonNullable<ApiExportResponse['records']>[number];
+
 type ExportPhase =
   | { name: 'idle' }
   | { name: 'exporting' }
   | { name: 'done'; artifacts: ExportedArtifacts }
+  // A record whose runs each exported their own official record. There is no
+  // singular pair to card, so this phase carries the LIST that was written.
+  | { name: 'fanout'; records: FanOutRecord[] }
   | { name: 'conflict'; message: string }
   | { name: 'stale'; message: string }
   | { name: 'failed'; errors: { path: string; message: string }[] }
@@ -274,7 +280,7 @@ function LoadedExport({
   // Pre-export: `validate` is a DRY-RUN (validate.dry_run true). Its `ok` tells us
   // whether export WILL pass — a gate input, never rendered as the reserved verdict.
   const dryRunOk = validate.dry_run && validate.ok;
-  const exported = phase.name === 'done' || detail.exported;
+  const exported = phase.name === 'done' || phase.name === 'fanout' || detail.exported;
   const canExport = pendingZero && validate.ok && !exported;
 
   const doExport = () => {
@@ -300,6 +306,21 @@ function LoadedExport({
             },
           });
           onRefresh(); // refresh coverage/advisory to post-export truth
+        } else if (resp.ok && resp.records) {
+          // A FAN-OUT SUCCESS, AND IT USED TO LAND IN `failed`. `post_export` pops
+          // `record`/`sidecar` for a record whose runs each export their own
+          // official record — they are singular and it has several — so the test
+          // above is false while `ok` is true. The screen then rendered, in a
+          // `role="alert"`: "Export was refused by the gated validation — nothing
+          // was written. 0 schema errors." It was not refused, N immutable official
+          // ISAAC records HAD been written, and `onRefresh()` was never reached, so
+          // the screen could not recover — the retry returned 409 "This record
+          // already exists on disk", contradicting "nothing was written" seconds
+          // earlier. A durability claim about immutable artifacts is the same
+          // category of falsehood as `_plan_digest_row`'s, which was fixed.
+          setCurrentVersion(resp.version);
+          setPhase({ name: 'fanout', records: resp.records });
+          onRefresh();
         } else {
           setPhase({ name: 'failed', errors: resp.errors ?? [] });
         }
@@ -659,6 +680,35 @@ function LoadedExport({
             />
           </div>
         </>
+      )}
+
+      {/* The fan-out success report. It names what was WRITTEN — the export
+          response is the only place those filenames exist; no read operation lists
+          them yet — and claims nothing about a singular pair this record does not
+          have. `role="status"`, not `alert`: it is good news. */}
+      {phase.name === 'fanout' && (
+        <section className="preexport-ready" role="status">
+          <div className="preexport-ready-head">
+            <span className="dot dot-ready" aria-hidden="true" />
+            <span className="preexport-ready-title">
+              Exported {phase.records.length} official record
+              {phase.records.length === 1 ? '' : 's'} — one per run
+            </span>
+          </div>
+          <p className="preexport-text">
+            Each run exported its own official ISAAC record and evidence sidecar, so this
+            record has no single record file. These are the files that were written.
+            Official records are immutable: written once, never overwritten.
+          </p>
+          <ul className="preexport-errors mono">
+            {phase.records.map((entry) => (
+              <li key={entry.record_id ?? entry.run_id ?? entry.run_label}>
+                <span className="preexport-error-path">{entry.run_label ?? 'Run'}</span> —{' '}
+                {entry.record_filename} · {entry.sidecar_filename}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {phase.name === 'conflict' && (

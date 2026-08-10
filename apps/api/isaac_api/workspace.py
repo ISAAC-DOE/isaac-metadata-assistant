@@ -1280,13 +1280,81 @@ def _authoritative_signature(exp: "Experiment") -> str:
 # bypasses against it, plus the positive control and four ``ExportUnit`` shapes that
 # must still be excluded.
 #
-# What remains outside the guard, stated because an unstated limit is how the last
-# three revisions of this block went stale: ``self`` inside ``ExportUnit`` is
-# excluded (it IS a unit), an unannotated parameter that really does hold a unit is
-# reported and must be annotated or named, and NO frontend consumer is scanned at
-# all — the guard cannot cross the language boundary, and the ``exported: true`` /
-# ``record_id: null`` pair reached two React screens that rendered the literal
-# string ``null`` before anyone looked.
+# AND IT WAS WRONG A FOURTH TIME, in the two ways a name-based test is always wrong.
+# Both were measured on ``0337d19``:
+#
+#   * B1 — the verdict keyed on the FUNCTION NAME, not on ``module::name``. The
+#     module appeared only in the failure message. This package has 19 duplicated
+#     function names across modules; ``def _summary(exp): return exp.exported()``
+#     added to ``assistant_query.py`` left the suite GREEN, because ``routes._summary``
+#     is already disclosed. That is this branch's own defect class, not a
+#     hypothetical: ``_assistant_validate_dryrun`` was a sibling copy of
+#     ``post_validate``, in another module, asserting a falsehood. Worse still,
+#     ``status`` is BOTH a disclosed caller here (``Experiment.status``) and an
+#     existing function in ``memory.py``.
+#   * B2 — membership was ``name not in block``: a substring test against this
+#     English. A new caller named ``state``, ``status``, ``reason``, ``audit`` or
+#     ``_detail`` was authorised by a SENTENCE. All five measured GREEN.
+#
+# Both are closed by the enumeration below, which is a parsed list of qualified
+# ``module.py::function`` tokens. Prose can no longer authorise a function, and a
+# sibling copy in another module is a different token. The test also fails on a
+# STALE entry — a name the list authorises that no function answers to — because a
+# pre-authorised name is the one way a structured list can re-open the hole.
+#
+# THE ENUMERATION. Every line below is machine-read by the guard test; the
+# discussion that follows is for humans and authorises nothing.
+#
+#   [caller] corpus_mutation.py::_workflow_consistent
+#   [caller] dependencies.py::_post_workflow
+#   [caller] dependencies.py::artifact_state
+#   [caller] routes.py::_assistant_validate_dryrun
+#   [caller] routes.py::_detail
+#   [caller] routes.py::_summary
+#   [caller] routes.py::_warnings_payload
+#   [caller] routes.py::_workflow_for
+#   [caller] routes.py::get_artifacts
+#   [caller] routes.py::get_evidence
+#   [caller] routes.py::post_audit
+#   [caller] routes.py::post_export
+#   [caller] routes.py::post_validate
+#   [caller] runtime_records.py::_project_one
+#   [caller] workspace.py::_plan_digest_row
+#   [caller] workspace.py::status
+#
+# WHAT REMAINS OUTSIDE THE GUARD — AT LEAST THESE. The qualifier is deliberate and
+# is the correction this paragraph most needed: this is the FOURTH consecutive
+# revision of this block whose self-description outran its reach, and each of the
+# first three read as exhaustive. It is not claimed to be exhaustive. It is claimed
+# to name every limit known on 2026-08-09, and each of the eight below was
+# demonstrated, not imagined.
+#
+#   1. ``self`` inside ``ExportUnit`` is excluded — it IS a unit. Deliberate.
+#   2. An unannotated parameter that really does hold a unit is REPORTED, and must
+#      be annotated or named. Deliberate: an unproved receiver costs a sentence,
+#      the opposite default costs a silent hole.
+#   3. NO frontend consumer is scanned at all. The guard cannot cross the language
+#      boundary, and the ``exported: true`` / ``record_id: null`` pair reached two
+#      React screens that rendered the literal string ``null``, and two more that
+#      called an exported record a Draft, before anyone looked.
+#   4. B3 — ``package.glob("*.py")`` is NOT recursive. A caller in a subpackage is
+#      invisible. Latent today: the only subdirectories are ``data/`` and
+#      ``migrations/``, and ``migrations/`` holds ``.sql`` files only.
+#   5. B4 — only calls lexically inside a ``def`` are considered. A call at module
+#      level, or in a class body, is not walked.
+#   6. B5 — ``getattr(exp, "exported")()`` is a string, not an ``ast.Attribute``,
+#      and is not matched. Nor is any other dynamic dispatch.
+#   7. B6/B7 — the ``ExportUnit`` proof is SYNTACTIC. A parameter falsely annotated
+#      ``: ws.ExportUnit``, or a decoy class named ``ExportUnit`` in any module,
+#      excludes a receiver that is not a unit. The guard trusts the annotation.
+#   8. B8 — the key is ``module.py::function``, so two functions of the same name in
+#      ONE module collapse to a single entry: a method ``Foo.status`` and a
+#      module-level ``status`` in the same file are one token. Qualifying by class
+#      as well would close it; it is not closed today.
+#
+# B3–B8 are RECORDED AND NOT FIXED, by decision. None is reachable by code in this
+# package today, and each would widen the guard's own surface — which is itself a
+# thing that can be wrong.
 #
 # There are FOUR ``derive_workflow`` CALL SITES, plus the definition — not "five
 # call sites", which is what this block said after correcting the C5 fix's "three",

@@ -1,8 +1,16 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { FAN_OUT_REASON, fanOutExportedRoutes, stubFetchRoutes } from '../test/apiFixtures';
+import {
+  FAN_OUT_REASON,
+  FAN_OUT_RUN_IDS,
+  evidenceBundleRoutes,
+  exportReadyRoutes,
+  fanOutExportSuccess,
+  fanOutExportedRoutes,
+  stubFetchRoutes,
+} from '../test/apiFixtures';
 
 /**
  * F-C — `exported: true` beside a NULL `record_id` reached two screens as the
@@ -61,6 +69,46 @@ function assertNoNullText(root: HTMLElement) {
   }
 }
 
+/**
+ * The Evidence screen's bundle in one of two states, differing ONLY in whether the
+ * record was exported and whether it has an experiment-level sidecar.
+ *
+ * `fanOut: true` is `exported: true` with a null singular id, null artifact refs and
+ * a null `/artifacts` pair — the state the screen derived `exported` from the WRONG
+ * one of those.
+ */
+function evidenceRoutesFor(id: string, opts: { exported: boolean; fanOut: boolean }) {
+  const base = `/api/experiments/${id}`;
+  const routes = evidenceBundleRoutes(id);
+  const detail = (routes[`GET ${base}`] as { body: Record<string, unknown> }).body;
+  return {
+    ...routes,
+    [`GET ${base}`]: {
+      body: {
+        ...detail,
+        exported: opts.exported,
+        status: opts.exported ? 'done' : 'in_review',
+        record_id: null,
+        artifact_refs: {
+          record_filename: null,
+          sidecar_filename: null,
+          ...(opts.fanOut ? { reason: FAN_OUT_REASON } : {}),
+        },
+      },
+    },
+    [`GET ${base}/artifacts`]: {
+      body: {
+        record: null,
+        sidecar: null,
+        record_filename: null,
+        sidecar_filename: null,
+        artifact: { state: opts.exported ? ('current' as const) : ('none' as const), reason: null },
+        ...(opts.fanOut ? { reason: FAN_OUT_REASON } : {}),
+      },
+    },
+  };
+}
+
 describe('a fan-out record never renders the string "null"', () => {
   it('Export Readiness shows the server-authored reason, not null.json', async () => {
     stubFetchRoutes(fanOutExportedRoutes('demo'));
@@ -93,5 +141,110 @@ describe('a fan-out record never renders the string "null"', () => {
     const { findByText } = renderAt('/record/demo');
 
     expect(await findByText('Exported · demo')).toBeInTheDocument();
+  });
+});
+
+/**
+ * B4/B5 — a fan-out never says something FALSE either.
+ *
+ * The sweep that produced the tests above classified sites by whether they printed
+ * a null. That was the wrong axis, and this branch's own standard says so: a guard
+ * that avoids the null and substitutes a claim that is false for an exported record
+ * is not GUARDED, it is BROKEN. Two of them were quoted as guarded siblings.
+ *
+ * A RE-SWEEP with `rg --text` — plain `rg` reports `apps/web/src/lib/experimentGraph.ts`
+ * as "binary file matches" because it contains a NUL byte, and SILENTLY DROPS all 20
+ * hits in it, which is how the first sweep lost that file entirely — finds
+ * 67 consumers: 14 BROKEN, 15 GUARDED, 38 NOT-AFFECTED (previously reported as
+ * 41 / 8 / 8 / 25). Part of the +26 is finer granularity; the part that is not is
+ * `experimentGraph.ts`, the two `POST /export` response sites, and the whole
+ * `EvidenceExplorer -> EvidenceTrailPanel / SourcePreview` derivation chain.
+ *
+ * The two fixed here are the two that ALARM. The rest are recorded in the commit
+ * message and are passive.
+ */
+describe('a fan-out never states something false', () => {
+  it('a SUCCESSFUL fan-out export is not reported as a refusal that wrote nothing', async () => {
+    // `post_export` pops `record`/`sidecar` for a fan-out while `ok` stays true, and
+    // `doExport` tested `resp.ok && resp.record && resp.sidecar`. Measured: the
+    // screen rendered, in a `role="alert"`, "Export was refused by the gated
+    // validation — nothing was written. 0 schema errors." — three falsehoods and a
+    // nonsense count, over N immutable official ISAAC records that HAD been written.
+    // `onRefresh()` was never called either, so the screen could not recover; the
+    // user's retry then got a 409 "This record already exists on disk", flatly
+    // contradicting "nothing was written" seconds earlier.
+    const calls = stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      'POST /api/experiments/demo/export': { body: fanOutExportSuccess },
+    });
+    const { findByText, queryByText, getByText } = renderAt('/record/demo/export');
+
+    const exportBtn = (await findByText('Export Official Record + Sidecar')).closest('button')!;
+    const before = calls.filter((c) => c === 'GET /api/experiments/demo').length;
+    fireEvent.click(exportBtn);
+
+    // What it must SAY: two records were written, named.
+    expect(await findByText(/2 official records/i)).toBeInTheDocument();
+    for (const runId of FAN_OUT_RUN_IDS) {
+      expect(getByText(new RegExp(`${runId}\\.json`))).toBeInTheDocument();
+    }
+    // …and what it must not say.
+    expect(queryByText(/refused by the gated validation/i)).toBeNull();
+    expect(queryByText(/nothing was written/i)).toBeNull();
+    expect(queryByText(/schema error/i)).toBeNull();
+
+    // …and it must RECOVER: the export response is adopted and the bundle refetched.
+    await waitFor(() => {
+      expect(calls.filter((c) => c === 'GET /api/experiments/demo').length).toBeGreaterThan(before);
+    });
+  });
+
+  it('CONTROL — a zero-run export still reaches the ordinary success path', async () => {
+    // The branch above must not have been bought by weakening the common case, which
+    // is every record this API can currently create.
+    const { exportSuccess } = await import('../test/apiFixtures');
+    stubFetchRoutes({
+      ...exportReadyRoutes('demo'),
+      'POST /api/experiments/demo/export': { body: exportSuccess },
+    });
+    const { findByText, queryByText } = renderAt('/record/demo/export');
+    fireEvent.click((await findByText('Export Official Record + Sidecar')).closest('button')!);
+
+    expect(await findByText('Official Record')).toBeInTheDocument();
+    expect(queryByText(/refused by the gated validation/i)).toBeNull();
+    expect(queryByText(/official records/i)).toBeNull();
+  });
+
+  it('the Evidence screen calls an exported fan-out exported, not a Draft', async () => {
+    // `const exported = artifacts.sidecar !== null` (EvidenceExplorer.tsx) is a
+    // DERIVED `exported` that never reads `detail.exported`. A fan-out has no
+    // experiment-level sidecar, so the derivation says false for a record that has
+    // been exported N times. Measured by rendering:
+    //
+    //   "Evidence & File PreviewDraftdraft · demo … generated_utc not exported yet"
+    //
+    // `:202` was quoted in `0337d19`'s message as a GUARDED sibling. It is not: the
+    // guard prevents a printed null and produces a false claim instead.
+    stubFetchRoutes(evidenceRoutesFor('demo', { exported: true, fanOut: true }));
+    const { container, findByText, queryByText } = renderAt('/record/demo/evidence');
+
+    await findByText('Evidence Support');
+    const text = (container as HTMLElement).textContent ?? '';
+
+    expect(queryByText('Draft')).toBeNull();
+    expect(text).not.toContain('draft · demo');
+    expect(text).not.toContain('not exported yet');
+    // The positive half: the screen says what IS true of this record.
+    expect(text).toContain('Exported');
+  });
+
+  it('CONTROL — an unexported record is still called a draft on the Evidence screen', async () => {
+    stubFetchRoutes(evidenceRoutesFor('demo', { exported: false, fanOut: false }));
+    const { container, findByText } = renderAt('/record/demo/evidence');
+
+    await findByText('Evidence Support');
+    const text = (container as HTMLElement).textContent ?? '';
+    expect(text).toContain('draft · demo');
+    expect(text).toContain('not exported yet');
   });
 });

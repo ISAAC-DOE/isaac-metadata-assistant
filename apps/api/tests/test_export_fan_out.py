@@ -39,6 +39,7 @@ import copy
 import inspect
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -1745,16 +1746,25 @@ def _export_unit_bindings(func: "ast.AST") -> tuple[set[str], set[str]]:
     return unit_names, list_names
 
 
-def _singular_state_callers(package: "pathlib.Path") -> dict[str, str]:
-    """``{function name: module}`` for every caller the disclosure must name.
+def _singular_state_callers(package: "pathlib.Path") -> set[str]:
+    """``{"module.py::function"}`` for every caller the disclosure must name.
 
     Scans ``package.glob("*.py")`` — EVERY module, not an allowlist. The allowlist
     it replaced held four modules, so the same body of code moved into
     ``assistant_query.py`` was invisible.
+
+    THE KEY IS QUALIFIED, and that is a fix rather than a decoration (B1). It used
+    to be the bare function name, with the module carried only in the error message
+    — so a caller was identified by a name that 19 pairs of functions in this
+    package already share. ``def _summary(exp): return exp.exported()`` added to
+    ``assistant_query.py`` passed the whole suite, because ``routes._summary`` is
+    already disclosed. That is not a hypothetical shape: this branch's
+    ``_assistant_validate_dryrun`` WAS a sibling copy of ``post_validate``, in a
+    different module, and it asserted a falsehood for eleven days.
     """
     import ast
 
-    found: dict[str, str] = {}
+    found: set[str] = set()
     for path in sorted(package.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         # Which class, if any, encloses each function — so `self` inside
@@ -1777,7 +1787,7 @@ def _singular_state_callers(package: "pathlib.Path") -> dict[str, str]:
                 # (a) `derive_workflow(...)` / `workflow.derive_workflow(...)`.
                 bare = getattr(callee, "id", None) or getattr(callee, "attr", None)
                 if bare in _WORKFLOW_DERIVERS:
-                    found.setdefault(node.name, path.name)
+                    found.add(f"{path.name}::{node.name}")
                     continue
                 # (b) the singular pair / the aggregates, on a receiver.
                 if not isinstance(callee, ast.Attribute) or callee.attr not in _SINGULAR_STATE_ATTRS:
@@ -1797,8 +1807,52 @@ def _singular_state_callers(package: "pathlib.Path") -> dict[str, str]:
                     # receiver counts — `ws.load_experiment(id).exported()` is the
                     # shape that walked straight past the old `ast.Name`-only test.
                     pass
-                found.setdefault(node.name, path.name)
+                found.add(f"{path.name}::{node.name}")
     return found
+
+
+#: How the disclosure block NAMES a caller: one ``[caller] module.py::function`` per
+#: comment line, and nothing else on the line.
+#:
+#: THE ENUMERATION IS STRUCTURED BECAUSE THE PREVIOUS ONE WAS PROSE (B2). Membership
+#: was ``name not in block`` — a substring test against ~150 lines of English — so a
+#: new caller named ``state``, ``status``, ``reason``, ``audit`` or ``_detail``
+#: satisfied the guard with a SENTENCE. All five were measured GREEN. An entry is now
+#: a parsed token that has to be typed deliberately, and nothing a paragraph says can
+#: authorise a function.
+_GUARD_ENTRY_RE = re.compile(
+    r"^#\s+\[caller\]\s+([A-Za-z_][A-Za-z0-9_]*\.py::[A-Za-z_][A-Za-z0-9_]*)\s*$"
+)
+
+
+def _disclosure_block(package: "pathlib.Path") -> str:
+    """The fan-out disclosure comment block in that package's ``workspace.py``."""
+    text = (package / "workspace.py").read_text(encoding="utf-8")
+    start = text.index("# --- WHAT EVERY OTHER SURFACE DOES FOR A FAN-OUT")
+    end = text.index("SIBLING_REL = ")
+    return text[start:end]
+
+
+def _disclosure_entries(package: "pathlib.Path") -> set[str]:
+    """The qualified names the block authorises, parsed — never matched as prose."""
+    return {
+        match.group(1)
+        for line in _disclosure_block(package).splitlines()
+        if (match := _GUARD_ENTRY_RE.match(line))
+    }
+
+
+def _disclosure_verdict(package: "pathlib.Path") -> tuple[list[str], list[str]]:
+    """``(missing, stale)`` — the guard's VERDICT, which is the thing to assert on.
+
+    ``missing`` is a caller the block does not name: the hole. ``stale`` is a name
+    the block authorises that no function answers to: a pre-authorisation waiting
+    for a body, and the one way the structured list could be abused to re-open the
+    hole it closes.
+    """
+    callers = _singular_state_callers(package)
+    entries = _disclosure_entries(package)
+    return sorted(callers - entries), sorted(entries - callers)
 
 
 def test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair(client):
@@ -1824,22 +1878,50 @@ def test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair
     which the searched attribute set did not contain at all despite the block's own
     sentence promising *"plus every ``derive_workflow`` call site"*.
 
-    :func:`test_a_new_caller_cannot_slip_past_the_disclosure_guard` re-runs all four
-    against this implementation, so the guard's REACH is measured rather than
-    described.
+    AND THE IDENTIFIER WAS THE NEXT DEFECT. The verdict keyed on the bare function
+    NAME and tested membership by SUBSTRING against the whole block — so a sibling
+    copy under a name another module already discloses passed (B1: ``_summary`` in
+    ``assistant_query.py``), and so did five new callers whose names the block's
+    PROSE happens to contain (B2: ``state``, ``status``, ``reason``, ``audit``,
+    ``_detail``). Callers are now qualified ``module.py::function`` and membership is
+    tested against a PARSED list of ``[caller]`` entries; a ``stale`` entry — an
+    authorised name no function answers to — fails too.
+
+    :func:`test_a_new_caller_cannot_slip_past_the_disclosure_guard` re-runs all
+    eleven against this implementation and reads the guard's VERDICT, not the
+    search's reach — which is the distinction that let B1 and B2 through the version
+    of that test which claimed to measure it.
     """
     package = pathlib.Path(routes.__file__).parent
-    disclosure = (package / "workspace.py").read_text(encoding="utf-8")
-    start = disclosure.index("# --- WHAT EVERY OTHER SURFACE DOES FOR A FAN-OUT")
-    end = disclosure.index("SIBLING_REL = ")
-    block = disclosure[start:end]
+    block = _disclosure_block(package)
+
+    # THE SEARCHED NAMES ARE ANCHORED TO REAL ATTRIBUTES, and this is not a
+    # formality. `_WORKFLOW_DERIVERS` has an anchor — the pinned `call_sites` list
+    # below is non-empty, so renaming `derive_workflow` empties it and fails here.
+    # `_SINGULAR_STATE_ATTRS` had none: rename `exported()` and the search would
+    # simply stop finding those callers, `assert callers` would still pass on the
+    # `derive_workflow` half alone, and coverage would shrink in silence.
+    for attr in _SINGULAR_STATE_ATTRS:
+        assert callable(getattr(ws.Experiment, attr, None)), (
+            f"`{attr}` is no longer a method of `Experiment` — the guard is now "
+            "searching for a name nothing answers to, and its coverage has shrunk "
+            "without a single test failing"
+        )
+    from isaac_api import workflow as workflow_module
+
+    for name in _WORKFLOW_DERIVERS:
+        assert callable(getattr(workflow_module, name, None)), name
 
     callers = _singular_state_callers(package)
     assert callers, "the search itself found nothing — it has stopped measuring"
-    missing = sorted(f"{module}::{name}" for name, module in callers.items() if name not in block)
+    missing, stale = _disclosure_verdict(package)
     assert missing == [], (
         "these read the experiment's singular exported state, or derive the "
         f"workflow, and the fan-out disclosure names none of them: {missing}"
+    )
+    assert stale == [], (
+        "the disclosure names these as callers and the search finds no such "
+        f"function — a pre-authorised name is a hole waiting for a body: {stale}"
     )
     # And the claim itself must match what it lists: the old block said "each is now
     # either fixed or stated" over an enumeration that was not complete.
@@ -1848,15 +1930,15 @@ def test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair
     # trusting the sentence: the sentence used to say FIVE call sites when there are
     # four call sites and one definition.
     call_sites = sorted(
-        name
-        for name, module in callers.items()
-        if _derives_workflow(package / module, name)
+        qualified
+        for qualified in callers
+        if _derives_workflow(package / qualified.split("::")[0], qualified.split("::")[1])
     )
     assert call_sites == [
-        "_post_workflow",
-        "_project_one",
-        "_workflow_consistent",
-        "_workflow_for",
+        "corpus_mutation.py::_workflow_consistent",
+        "dependencies.py::_post_workflow",
+        "routes.py::_workflow_for",
+        "runtime_records.py::_project_one",
     ], call_sites
     assert "FIVE ``derive_workflow`` call sites" not in block
 
@@ -1879,20 +1961,40 @@ def _derives_workflow(path: "pathlib.Path", func_name: str) -> bool:
 
 
 def test_a_new_caller_cannot_slip_past_the_disclosure_guard(tmp_path):
-    """F-A — the FOUR measured bypasses, re-run against the guard that closed them.
+    """F-A — the TEN measured bypasses, re-run against the guard that closed them.
 
     Each probe is one function appended to a COPY of the API package; the guard is
-    then re-run over the copy. A probe that leaves ``missing`` empty is a bypass.
-    The fifth row is the positive control that always worked, kept so a guard that
-    stops measuring altogether cannot pass this test by finding nothing.
+    then re-run over the copy and its VERDICT is read. A probe absent from
+    ``missing`` is a bypass. The first row is the positive control that always
+    worked, kept so a guard that stops measuring altogether cannot pass this test by
+    finding nothing.
 
-    Measured on ``74509c4`` (before the fix), with the same five bodies::
+    THIS TEST MEASURED THE WRONG THING UNTIL ``0337d19`` WAS REVIEWED. It asserted
+    ``any(name.startswith("_probe") for name in _singular_state_callers(copy))`` —
+    the SEARCH's reach — and never the guard's verdict. B1 and B2 are both found by
+    the search and then waved through by the membership test, so this test could not
+    have caught either, while its own docstring said the reach was "measured, not
+    described". It now reads ``missing``.
+
+    Measured on ``74509c4``, with the first five bodies::
 
         param named `exp`            -> RED   (caught)
         param named `experiment`     -> GREEN (bypassed)
         chained `Call` receiver      -> GREEN (bypassed)
         same body, assistant_query   -> GREEN (bypassed)
         new `derive_workflow` site   -> GREEN (bypassed)
+
+    Measured on ``0337d19`` — the commit whose message called all five closed, and
+    they were; these six are the ones its guard could not see::
+
+        `_summary` in assistant_query.py   -> GREEN (bypassed)   B1
+        `state`    in routes.py            -> GREEN (bypassed)   B2
+        `status`   in memory.py            -> GREEN (bypassed)   B2
+        `reason`   in routes.py            -> GREEN (bypassed)   B2
+        `audit`    in routes.py            -> GREEN (bypassed)   B2
+        `_detail`  in assistant_query.py   -> GREEN (bypassed)   B2
+
+    All eleven are RED here.
     """
     import shutil
 
@@ -1919,15 +2021,44 @@ def test_a_new_caller_cannot_slip_past_the_disclosure_guard(tmp_path):
             "def _probe_workflow(exp):\n    return derive_workflow(\n"
             "        pending_count=0, draft_ok=True, ready=True, exported=False, rev=1\n    )\n",
         ),
+        # B1 — a SIBLING COPY under a name another module already discloses. This is
+        # the defect class the guard exists to close: `_assistant_validate_dryrun`
+        # was a sibling copy of `post_validate`. The package has 19 duplicated
+        # function names across modules, and `_summary` is a disclosed caller in
+        # `routes.py`, so a copy in `assistant_query.py` free-rode on its entry.
+        "same_name_in_another_module": (
+            "assistant_query.py",
+            "def _summary(exp):\n    return exp.exported()\n",
+        ),
+        # B2 — five names the block's PROSE happens to contain. Membership was tested
+        # against the whole block as a STRING, so each of these was satisfied by a
+        # sentence rather than by an entry. `status` is the worst of them: it is both
+        # a disclosed caller (`workspace.Experiment.status`) and an existing function
+        # in `memory.py`.
+        "prose_free_ride_state": ("routes.py", "def state(exp):\n    return exp.exported()\n"),
+        "prose_free_ride_status": ("memory.py", "def status(exp):\n    return exp.exported()\n"),
+        "prose_free_ride_reason": ("routes.py", "def reason(exp):\n    return exp.exported()\n"),
+        "prose_free_ride_audit": ("routes.py", "def audit(exp):\n    return exp.exported()\n"),
+        "prose_free_ride_detail": (
+            "assistant_query.py",
+            "def _detail(exp):\n    return exp.exported()\n",
+        ),
     }
     for label, (module, body) in probes.items():
         copy_dir = tmp_path / label
         shutil.copytree(package, copy_dir, ignore=shutil.ignore_patterns("__pycache__", "data"))
         target = copy_dir / module
         target.write_text(target.read_text(encoding="utf-8") + "\n\n" + body, encoding="utf-8")
-        caught = _singular_state_callers(copy_dir)
-        assert any(name.startswith("_probe") for name in caught), (
-            f"{label}: the probe caller was not found — this bypass is still open"
+        # THE VERDICT, NOT THE REACH. This assertion used to read
+        # `any(name.startswith("_probe") for name in _singular_state_callers(copy_dir))`
+        # — it measured whether the SEARCH found the function and never whether the
+        # GUARD failed. That is precisely why it could not catch B1 or B2, both of
+        # which are found by the search and then waved through by the membership test.
+        probe_name = body.split("def ", 1)[1].split("(", 1)[0]
+        missing, _stale = _disclosure_verdict(copy_dir)
+        assert f"{module}::{probe_name}" in missing, (
+            f"{label}: the guard's verdict is empty of this caller — the bypass is "
+            f"still open. missing={missing}"
         )
 
     # …and the guard is not simply naming everything: a genuine `ExportUnit`
@@ -1946,7 +2077,9 @@ def test_a_new_caller_cannot_slip_past_the_disclosure_guard(tmp_path):
         + "    return [u.record_path() for u in exp.export_units()]\n",
         encoding="utf-8",
     )
-    assert [name for name in _singular_state_callers(clean) if name.startswith("_probe")] == []
+    clean_missing, clean_stale = _disclosure_verdict(clean)
+    assert clean_missing == [], clean_missing
+    assert clean_stale == [], clean_stale
 
 
 # --- F3: the C4 fix disables pruning in the NORMAL fan-out case ----------------

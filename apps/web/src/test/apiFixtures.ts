@@ -1907,6 +1907,40 @@ export function fanOutExportedRoutes(id: string = EXP_ID): Record<string, Stubbe
   };
 }
 
+/** The two run record ids a fan-out export writes, shaped like real ULIDs. */
+export const FAN_OUT_RUN_IDS = ['01JQZ0FIXTURERUNONE000001', '01JQZ0FIXTURERUNTWO000001'];
+
+/**
+ * The FAN-OUT EXPORT RESPONSE — the SUCCESS one, which is the shape no fixture in
+ * this file could produce before.
+ *
+ * `routes.post_export` POPS `record` and `sidecar` for a fan-out and nulls both
+ * singular fields, while `ok` stays true; `records[]` carries what was written. The
+ * screen tested `resp.ok && resp.record && resp.sidecar` and therefore routed a
+ * SUCCESSFUL export — N immutable official ISAAC records on disk — to its `failed`
+ * phase, which says "nothing was written".
+ */
+export const fanOutExportSuccess = {
+  ok: true,
+  draft_report: { ok: true, errors: [], warnings: [] },
+  official_report: { ok: true, errors: [] },
+  record_id: null,
+  artifact_refs: null,
+  records: FAN_OUT_RUN_IDS.map((runId, i) => ({
+    run_id: runId,
+    run_label: `Run ${i + 1}`,
+    record_id: runId,
+    record_filename: `${runId}.json`,
+    sidecar_filename: `${runId}.evidence.json`,
+  })),
+  pruned_record_ids: [],
+  protected_record_ids: [],
+  prune_declined: false,
+  rev: 4,
+  updated_utc: '2099-04-02T09:20:00Z',
+  version: '2.0',
+};
+
 // --- P27.6 conditional-GET (revision-aware live-sync) fixtures ---------------
 //
 // The backend now honours `If-None-Match` on GET /api/experiments/{id}: 304 (no
