@@ -161,12 +161,35 @@ def test_edit_unknown_field_writes_nothing(client):
     assert "made up" not in str(after)
 
 
-def test_edit_malformed_sha256_is_a_no_op_never_written(client):
+def test_edit_malformed_sha256_is_refused_and_never_written(client):
+    """A DELIBERATE BEHAVIOUR CHANGE, and the old expectation is quoted rather than lost.
+
+    This test was `test_edit_malformed_sha256_is_a_no_op_never_written` and asserted
+    ``200`` with ``invalidation.changed is False``. The "never written" half is
+    unchanged and still asserted below — nothing about the stored value moved. What
+    changed is the STATUS, from an unexplained 200 to a typed 422.
+
+    Why: the test directly above it, `test_edit_unknown_field_writes_nothing`, asserts
+    422 for a field this route does not recognise, on the reasoning that answering 200
+    to a request that changed nothing is silent. A recognised field carrying a value the
+    route cannot store is the same case — and the route's own description now says so.
+    Two tests, ten lines apart, under one "no guessing" heading, disagreed about it.
+
+    Measured before the change, on the malformed shas a scientist can actually produce
+    (``"Z" * 64``, ``"abc"``, 63 and 65 hex chars, trailing whitespace, uppercase hex):
+    ``200``, ``rev`` unmoved, nothing written, and no indication anywhere that the
+    correction had not been kept.
+
+    NOT extended to ``POST /answers``, where a malformed sha still leaves the blocker
+    open and the response therefore already says the question was not answered. That
+    asymmetry is pinned in `test_answers_wrong_type.py`.
+    """
     r = _edit(
         client, ws.SEED_READY_ID, {RAW_URI: "not-a-hash"}, headers=_im(client, ws.SEED_READY_ID)
     )
-    assert r.status_code == 200, r.text
-    assert r.json()["invalidation"]["changed"] is False
+    assert r.status_code == 422, r.text
+    assert r.json()["error"] == "invalid_field_value"
+    assert r.json()["key"] == RAW_URI
     raw = next(a for a in tutorial_ws().load_experiment(ws.SEED_READY_ID).draft["assets"] if a["uri"] == RAW_URI)
     assert raw["sha256"] == CURRENT_RAW_SHA
 

@@ -18,6 +18,7 @@ import { Check, CircleHelp, Pencil } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
+import { isUnstorableFieldValue } from '../lib/mutationErrors';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
@@ -521,6 +522,40 @@ function LoadedCompletion({
           >
             Refresh
           </button>
+        </div>
+      ) : isUnstorableFieldValue(editError) ? (
+        /*
+         * A VALUE THE RECORD CANNOT STORE, and the reason this branch exists rather
+         * than falling through to the generic one below.
+         *
+         * The server refuses `POST /edit` with `invalid_field_value` when a recognised
+         * field carries a value it cannot write — a malformed sha256, a `series` that
+         * is not a list of objects. Before that refusal existed, this path answered
+         * 200 and the SCREEN had to interpret it; the copy it used then said the one
+         * thing that actually matters to a scientist, which the generic sentence below
+         * does not: THE VALUE YOU HAD IS STILL THERE. That sentence is kept here.
+         *
+         * Every claim is one the response supports. `Nothing was written` is what the
+         * 422 asserts; `still holds the value it held before` follows from it, because
+         * the route refuses before it mutates. No cause is named beyond the shape,
+         * because the response names none — it does not say WHY the value is wrong, and
+         * inventing a reason would be the defect this whole path exists to avoid.
+         */
+        /*
+         * `data-testid`, and it is not decoration. `e2e/mutation/evidence.spec.ts` used
+         * this notice only as a WAYPOINT — proof the request finished — and matched it by
+         * sentence, so it broke twice for reasons that had nothing to do with the
+         * property that spec exists to test (the evidence trail). A stable hook ends the
+         * recurrence. `edit.spec.ts` still matches the prose, deliberately: there the
+         * sentence IS the thing under test.
+         */
+        <div
+          className="completion-submit-error"
+          role="alert"
+          data-testid="edit-unstorable-notice"
+        >
+          That correction was not applied — this field still holds the value it held before, and
+          nothing was written. Check the value and try again.
         </div>
       ) : (
         <div className="completion-submit-error" role="alert">

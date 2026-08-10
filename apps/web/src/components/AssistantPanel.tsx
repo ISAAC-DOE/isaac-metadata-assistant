@@ -57,6 +57,7 @@ import {
   type Proposal,
 } from '../lib/assistantAgent';
 import { api } from '../lib/api';
+import { isUnstorableFieldValue, statusOf } from '../lib/mutationErrors';
 // P36V.1 Unit B — the CLOSED local action catalog. A free-form answer's wire
 // action is resolved through it, so an unknown kind is dropped and the visible
 // label + client route stay frontend-owned.
@@ -655,6 +656,21 @@ export function AssistantPanel({
   // guarded (one submit), refuses a stale proposal, sends the current version as
   // If-Match. On ok → refresh the shared state + append a confirmed summary. On
   // stale/conflict (incl. a backend 412) → mark stale, explain, NO retry / merge.
+  //
+  // AND ON ANYTHING ELSE → say so, which is what the `catch` below is for.
+  //
+  // This was `try`/`finally` with NO `catch`, wired as `onClick={onConfirm}` typed
+  // `() => void`. `confirmProposal` handles 412 and RETHROWS everything else, so when
+  // `POST /edit` started refusing an unstorable value with 422 the rejection had nowhere
+  // to go: measured as an unhandled promise rejection with no user feedback at all. The
+  // panel is reachable — `stageAnswer` records the reader's value verbatim with no format
+  // validation, and an already-answered field routes to `editField` by design, so a
+  // mistyped hash confirmed here is exactly the 422 case.
+  //
+  // Before the refusal existed the same input produced a 200 and this panel appended
+  // `Confirmed "<field>". Your value was sent to the record…` — a false success. Silence
+  // is strictly better than that, but it is not the fix; it was the fix arriving
+  // half-finished, and this is the other half.
   async function onConfirm() {
     if (!proposal || !agentContext) return;
     if (confirmingRef.current) return; // no double-submit
@@ -684,6 +700,35 @@ export function AssistantPanel({
           agentContext.recordRev,
         );
       }
+    } catch (err) {
+      /*
+       * A FAILURE THAT IS NOT A 412. Two messages, and the difference between them is
+       * exactly the difference in what the response establishes.
+       *
+       * `invalid_field_value` is a refusal the server made BEFORE mutating, and it says
+       * so, so this branch may say the previously confirmed value is intact. It reuses
+       * the shared discriminator rather than string-matching prose — the server's
+       * `message` deliberately names no cause, and it is not a stable interface.
+       *
+       * Anything else — a 500, a transport failure, a status this client has never seen
+       * — establishes only that the request did not succeed. It does NOT establish that
+       * nothing was written, so this branch does not claim it. Saying less is the only
+       * honest option when the outcome is genuinely unknown.
+       *
+       * The proposal is left exactly as it was in both cases: the record did not move, so
+       * it is not stale, and marking it stale would be a claim about the record rather
+       * than about the request. Cancel still discards it, and a corrected value can be
+       * staged and confirmed.
+       */
+      const message = isUnstorableFieldValue(err)
+        ? `That value could not be confirmed — the record cannot store it, so nothing was ` +
+          `written and this field still holds the value it held before. Check the value and ` +
+          `confirm again.`
+        : `That value could not be confirmed — the request failed` +
+          `${typeof statusOf(err) === 'number' ? ` (${statusOf(err)})` : ''}. Whether anything ` +
+          `reached the record is not something this reply can tell you: reload the record and ` +
+          `check its current value before confirming again.`;
+      appendAgentMessage(message, 'workflow', agentContext.recordRev);
     } finally {
       confirmingRef.current = false;
       setConfirming(false);
