@@ -440,7 +440,7 @@ The job ran. What was observed:
 | checkout | GitHub checks out a merge commit, not the branch head: the log reads `HEAD is now at b9b9c78 Merge 758360cc… into b7792c1f…`. `758360c` is a descendant of `b7792c1` (`git merge-base --is-ancestor`), so that tree and the branch head's tree coincide — but the job did not literally check out `758360c`, and the distinction is recorded rather than glossed. |
 
 Almost every line below is a **printed assertion in that job's log** rather than an inference from
-the workflow file — and the four exceptions are marked `[silent]`, because a claim that everything
+the workflow file — and the five exceptions are marked `[silent]`, because a claim that everything
 was printed is exactly the kind of thing a reader cannot check without re-reading 1,400 lines. A
 `[silent]` item is asserted by the shell (`set -euo pipefail` plus a `[ … ] || exit 1`), so the job's
 green conclusion is the evidence, and the value itself never reaches the log:
@@ -483,7 +483,8 @@ green conclusion is the evidence, and the value itself never reaches the log:
    `isaac_runs_document_identity` × 4 (a document naming a different run; naming a different
    experiment; an `experiment_id` naming another experiment; an empty `id`), the `generation`
    NOT NULL, and `isaac_runs_experiment_fk` again for **deleting a parent that still has runs** —
-   after which the child row is re-counted and found to have survived.
+   after which the child row is re-counted and found to have survived (that re-count is
+   **`[silent]`**; the twelve refusal lines themselves are printed).
 9. **The two admissions the relaxed CHECK exists for.** A second run at the same ordinal and a
    document with no `id` column are admitted; so is a document whose `experiment_id` is the empty
    string — the legacy shape `Run.to_state()` actually produces, built in CI *from `to_state()`

@@ -2469,7 +2469,7 @@ def _clean_label(
     # was the hole: a lone surrogate here 500ed BOTH the run PATCH and the create
     # route. Checked before `.strip()` rather than after, so the refusal describes
     # what was sent.
-    if not _is_json_renderable(raw):
+    if not _is_storable_value(raw):
         return None, JSONResponse(
             status_code=422,
             content={
@@ -2553,7 +2553,7 @@ def _run_field_question(path: str) -> str:
 #: (``'hot' is not of type 'number'``); ``NaN`` was not caught anywhere, and it
 #: committed a write, 500ed the response, wedged both run reads and drove an
 #: unparseable "official record" through the export gate with a PASS verdict. The
-#: value-side guard is now in the PATCH route (``_is_json_renderable``), NOT here,
+#: value-side guard is now in the PATCH route (``_is_storable_value``), NOT here,
 #: because this set is a set of paths and should stay one.
 #:
 #: WHY NOT THE OFFICIAL SCHEMA DIRECTLY, since it is the truth plane. Because it
@@ -2598,20 +2598,68 @@ def _render_exactly_as_a_response_would(value) -> bytes:
     ).encode("utf-8")
 
 
-def _is_json_renderable(value) -> bool:
-    """Can this value survive the response serializer and a round trip through disk?
+#: The deepest nesting a stored run-level value may carry.
+#:
+#: MEASURED, not picked. All five members of :data:`RUN_WRITABLE_FIELD_PATHS` are
+#: declared ``string`` or ``number`` scalars by ``schema/isaac_record_v1.json``, and the
+#: deepest WHOLE DOCUMENT anywhere in this repository — every committed record and every
+#: fixture — nests 7 levels. 32 is therefore more than four times the deepest real
+#: document and unreachable by any shape the schema declares at these paths, while
+#: sitting far below the depth at which CPython's recursion limit is reached.
+_MAX_VALUE_DEPTH = 32
 
-    The test is a real render, not an ``isinstance`` walk, and that is deliberate: the
-    property being protected is "the response serializer and the on-disk document can
-    represent this", so the only honest test is to try. A hand-written type check would
-    be a second, drifting definition of "storable" — and this route already derives its
-    key set rather than hand-copying it.
 
-    Non-finite floats are the case that motivated it and lone surrogates are the case
-    that proved the first version incomplete. Both are covered, along with anything
-    else the serializer cannot take, and it recurses into nested lists and objects for
-    free where a shallow check would let ``{"a": NaN}`` through.
+def _value_depth_within(value, limit: int) -> bool:
+    """Is ``value`` nested no deeper than ``limit``?
+
+    ITERATIVE ON PURPOSE. A recursive depth check would hit the same
+    ``RecursionError`` it exists to prevent, on the same input, one frame earlier — a
+    guard that crashes on the attack it guards against is not a guard. It also stops at
+    the first node past ``limit``, so the cost is bounded by ``limit`` and not by the
+    size of a hostile payload.
     """
+    stack = [(value, 0)]
+    while stack:
+        node, level = stack.pop()
+        if level > limit:
+            return False
+        if isinstance(node, dict):
+            stack.extend((child, level + 1) for child in node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend((child, level + 1) for child in node)
+    return True
+
+
+def _is_storable_value(value) -> bool:
+    """Can the application BUILD AND RETURN a view of this value, and store it?
+
+    THE CONTRACT WAS TOO NARROW ONCE AND THE COST WAS A SECOND WEDGED-RECORD DEFECT, so
+    it is stated as broadly as it is actually relied upon. This function used to be
+    ``_is_json_renderable`` and its docstring promised only that the SERIALIZER could
+    render the value. That was true, and insufficient:
+    ``{"context.temperature_K": [[[…800 deep…]]]}`` renders fine — ``json.dumps``
+    handles thousands of levels — and then ``_run_view`` raised ``RecursionError``
+    while CONSTRUCTING the response, after the write had committed. Same four
+    consequences as the ``NaN`` case: a committed write reported as a 500, an ETag that
+    could not be re-read, and every read of that record 500ing permanently, on disk,
+    across a process restart.
+
+    Two conditions, both necessary:
+
+    1. **Depth** (:data:`_MAX_VALUE_DEPTH`) — bounds every recursive walk the value will
+       later be subjected to: ``_run_view``, ``copy.deepcopy``, the signature hash, the
+       draft validator, the exporter. It is the only one of the two that a serializer
+       test cannot express.
+    2. **Renderability** — a real render with the exact kwargs Starlette uses, so
+       ``NaN``, ``Infinity`` and lone surrogates are refused. Deliberately a render
+       rather than an ``isinstance`` walk: a hand-written type check would be a second,
+       drifting definition of "storable".
+
+    Both are checked BEFORE the write. Neither is a schema check: the official schema
+    still decides whether a well-formed value is the right one.
+    """
+    if not _value_depth_within(value, _MAX_VALUE_DEPTH):
+        return False
     try:
         _render_exactly_as_a_response_would(value)
     except (ValueError, TypeError, UnicodeEncodeError):
@@ -2730,7 +2778,8 @@ def list_runs(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Re
         "are never copied down into it, and no scientific value is invented. Its "
         "`label` may be supplied; when "
         "it is omitted or blank the server assigns the next `Run N`, and a label "
-        "that is not a string is rejected with `422` rather than coerced.\n\n"
+        "that is not a string, or one JSON cannot represent (a lone surrogate), is "
+        "rejected with `422` rather than coerced.\n\n"
         "There is no limit on how many runs a record may have."
     ),
     response_description=(
@@ -2981,7 +3030,7 @@ def patch_run(
         unrenderable = [
             key
             for key, value in raw_fields.items()
-            if not _is_json_renderable(value)
+            if not _is_storable_value(value)
         ]
         if unrenderable:
             return JSONResponse(
@@ -2991,10 +3040,11 @@ def patch_run(
                     "key": str(unrenderable[0]),
                     "keys": [str(k) for k in unrenderable],
                     "message": (
-                        "These values cannot be represented in JSON, so they cannot "
-                        "be stored. `NaN`, `Infinity` and `-Infinity` are accepted by "
-                        "some JSON parsers but are not JSON, and a record containing "
-                        "one could not be read back or exported. Nothing was written."
+                        "These values cannot be stored. Either they cannot be "
+                        "represented in JSON — `NaN`, `Infinity` and `-Infinity` are "
+                        "accepted by some parsers but are not JSON, and a record "
+                        "containing one could not be read back or exported — or they "
+                        "nest more deeply than a stored value may. Nothing was written."
                     ),
                 },
             )

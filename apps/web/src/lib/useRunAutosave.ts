@@ -202,6 +202,14 @@ export function useRunAutosave(args: {
    * 412s). And deliberately not set on every send: doing that made a FIRST-attempt 412
    * claim uncertainty it does not have. Cleared by a confirmed 200 or an adopted
    * refresh.
+   *
+   * AND BY A REMOUNT, which is a real limit rather than a design choice: this ref lives
+   * in the hook, so leaving the record screen and coming back gives the new card a
+   * fresh `false`. The detached flush at unmount is precisely the write whose outcome
+   * is guaranteed unknown — it sets no state and swallows its own rejection — so a 412
+   * after a remount will say "Nothing you typed was written" when the honest answer is
+   * "this browser cannot tell". Fixing THAT needs edit state that outlives the card's
+   * mount, which is the Phase-2 ownership refactor and not something to fake here.
    */
   const unresolvedAttemptRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);

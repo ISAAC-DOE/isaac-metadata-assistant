@@ -248,7 +248,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
      * ── 2026-08-10 · 26 COUNTS LOWERED BY A THREE-DECLARATION CSS FIX ─────────
      *
      * `record-detail`, `guided-completion`, `evidence`, `export-readiness` and
-     * `export-readiness-done` each drop 1–3 nodes at every viewport. ONE CAUSE, and
+     * `export-readiness-done` drop 1–3 nodes across 26 of their 35 cells; the other
+     * NINE drop nothing, because at those widths none of the three nodes was inside
+     * axe's measured set to begin with. Only `guided-completion` moves at all seven of
+     * its viewports. ("each drop 1–3 nodes at every viewport" is what this line used to
+     * say, which the per-entry numbers above contradict and which the "0 at BOTH
+     * mobile-375x812 and width-320" note below now contradicts explicitly.) ONE CAUSE, and
      * it is a real fix rather than a measurement artefact: the app-wide StatusBar
      * had three declarations below AA, and they are now above it.
      *
@@ -261,8 +266,10 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
      * rather than eyeballed. AA wants 4.5:1 at these sizes — 11.5px and 10.5px.)
      * The status bar renders on every record screen, which is why five surfaces move
      * together and why no `settings-*` cell moves FOR THIS REASON — the three
-     * `settings-explorer` cells that do change in this same commit change for the
-     * unrelated clipped-scroll reason documented at their own entry, and it is worth
+     * `settings-explorer` cells that do change in this same commit change for two
+     * unrelated reasons documented at their own entry — on linux, this branch's five new
+     * operations shifting `.api-browser-list`'s scroll clip; on darwin, a STALE COLUMN
+     * corrected, since `b7792c1` already measured 48/49/64 there — and it is worth
      * being exact because "does not move at all", which this line used to say, is
      * contradicted by the diff it sits in. Measured, `<StatusBar` is
      * rendered only by `RecordWorkbench`, `GuidedCompletion`, `EvidenceExplorer` and

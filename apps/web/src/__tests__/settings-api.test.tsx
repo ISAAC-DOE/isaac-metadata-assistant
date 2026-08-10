@@ -1364,17 +1364,28 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // description now names the closed writable set it actually enforces.
     //
     // Cross-checked in Python from the generated contract rather than transcribed
-    // from the assertion that reported it: 45 operations, raw sum 37,635, 79
-    // separators, 37,635 - 158 = 37,477.
+    // from the assertion that reported it: 45 operations, raw sum 37,685, 79
+    // separators, 37,685 - 158 = 37,527.
     //
-    // 37,168 -> 37,477 (+309) in the review-fix pass: three descriptions grew, and each
-    // grew because it was WRONG about the wire. `PATCH .../runs/{run_id}` now names the
-    // unrepresentable-value refusal it enforces (`NaN`, `Infinity`, a lone surrogate);
-    // `POST .../runs/{run_id}/check` and `POST .../{id}/validate` now document
-    // `dry_run` and `unavailable`, two flags that were being SERVED while the docs
-    // still said the only signal was a fixed English sentence. The app renders these
-    // strings on its own API Docs screen, so a stale description is a lie shipped to a
-    // reader, not an internal comment.
+    // 37,168 -> 37,527 (+359) across the two review-fix passes, from exactly TWO
+    // operation descriptions: `POST /api/experiments/{id}/validate` 1,141 -> 1,450
+    // (+309), which now documents the `unavailable` flag it was already serving, and
+    // `POST .../runs` +50, which now names the lone-surrogate label refusal it
+    // enforces.
+    //
+    // AN EARLIER REVISION ATTRIBUTED THE +309 TO "three descriptions", WHICH CANNOT BE
+    // TRUE OF THIS NUMBER. `total` sums `op.description` only, and the other two edits
+    // in that pass were a REQUEST BODY description (`PATCH .../runs/{run_id}`, +105)
+    // and a RESPONSE description (`POST .../runs/{run_id}/check`, +287) — neither of
+    // which this figure counts. Three operation descriptions growing by those amounts
+    // would have given +701.
+    //
+    // AND THAT EXPOSES A REAL GAP, recorded rather than quietly left: `ApiDocs.tsx`
+    // renders `requestBody.description` and each response `description`, but NEITHER
+    // this total NOR `test_contract_description_parity.py` covers them. So two of the
+    // three strings edited to stop "a lie shipped to a reader" have no drift guard at
+    // all. Extending the parity fixture to those fields is the fix; it is named here so
+    // the next reader does not have to rediscover the asymmetry.
     //
     // NOT 45 unique — 44. `GET` and `POST /api/experiments/{id}/warnings`
     // deliberately share one description, and they did so before this slice
@@ -1382,7 +1393,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // never true and is corrected here rather than left to be re-derived by
     // whoever next changes this number. Nothing asserts uniqueness, which is why
     // the false count survived being written down.
-    expect(total).toBe(37477);
+    expect(total).toBe(37527);
     expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(79);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {

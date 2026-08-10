@@ -705,6 +705,131 @@ def test_the_run_check_reports_which_document_it_read_and_when_it_has_no_verdict
     assert body["ok"] == bool(body["draft"]["ok"] and official["ok"])
 
 
+def test_the_run_check_says_unavailable_when_no_verdict_can_be_reached(
+    client, experiment_id, monkeypatch
+):
+    """THE POSITIVE ASSERTION, WITHOUT WHICH THE TEST ABOVE PINS NOTHING.
+
+    A reviewer deleted BOTH `"unavailable": True` lines from `_validate_unit` and this
+    file still reported `91 passed`, because the only assertion on the field was
+    `official.get("unavailable") is not True` on the happy path — satisfied by the key
+    being absent. A negative assertion about a flag is not a test of the flag, and the
+    branch the flag exists for was never exercised.
+
+    The no-verdict branch is reached when a unit is materialised and its record file
+    cannot be read. Rather than exporting and then corrupting a file — which would test
+    the filesystem as much as the route — the two conditions are forced directly:
+    `materialised()` true, `_read_artifact_json` returning `None`. That is exactly the
+    state the route's own comment describes as "no verdict, not a schema violation".
+    """
+    run = _create_run(client, experiment_id)
+
+    monkeypatch.setattr(ws.ExportUnit, "materialised", lambda self: True)
+    monkeypatch.setattr(routes, "_read_artifact_json", lambda path: None)
+
+    body = client.post(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}/check"
+    ).json()
+    official = body["official"]
+    assert official["unavailable"] is True
+    # It is a statement about the WRITTEN record, so it is not a dry run...
+    assert official["dry_run"] is False
+    # ...and it FAILS CLOSED: the flag explains the refusal, it does not soften it.
+    assert official["ok"] is False
+    assert body["ok"] is False
+    assert official["errors"] == [
+        {"path": "$", "message": "Validation could not be completed."}
+    ]
+
+
+@pytest.mark.parametrize("depth", [33, 600, 800, 900, 1200], ids=lambda d: f"depth-{d}")
+def test_a_value_nested_deeper_than_the_limit_is_refused_before_the_write(
+    client, experiment_id, depth
+):
+    """THE THIRD ROUND OF THE SAME DEFECT CLASS, and the one that proves why the guard's
+    CONTRACT mattered more than its implementation.
+
+    `_is_json_renderable` — as it was then named and documented — promised only that the
+    response serializer could render the value. That promise was true and insufficient:
+    `json.dumps` handles thousands of levels happily, so an 800-deep array PASSED the
+    guard, the write COMMITTED, and `_run_view` then raised `RecursionError` while
+    CONSTRUCTING the response. Measured consequences, identical to the `NaN` case:
+
+      * `rev` 1 -> 2 and a 1.3 MB `experiment.json` on disk, reported to the caller as
+        HTTP 500 with NO ETag on the response;
+      * `GET .../runs`, `GET .../runs/{id}` and `GET /experiments/{id}` 500ing
+        PERMANENTLY — verified against a FRESH app over the same workspace, so it was
+        on-disk state and not a poisoned cache;
+      * therefore no way to obtain the strong validator needed to repair the run.
+
+    The window was roughly depth 600-950: shallower is safe, and >= ~1000 fails before
+    the write. This test brackets it and also pins the boundary itself, because a limit
+    nobody exercises drifts.
+    """
+    run = _create_run(client, experiment_id)
+    etag = _run_etag(client, experiment_id, run["id"])
+    payload = (
+        '{"confirmed_by_user": true, "fields": {"context.temperature_K": '
+        + "[" * depth
+        + "1"
+        + "]" * depth
+        + "}}"
+    )
+    response = client.patch(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}",
+        content=payload.encode(),
+        headers={"If-Match": etag, "content-type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrepresentable_value"
+
+    # NOTHING WRITTEN, and — the half that made the defect unrecoverable — every read
+    # still answers, so the caller can still get an ETag.
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.rev == 1
+    assert stored.draft.get("fields") in (None, {})
+    assert client.get(f"/api/experiments/{experiment_id}/runs").status_code == 200
+    assert (
+        client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
+    )
+    assert client.get(f"/api/experiments/{experiment_id}").status_code == 200
+
+
+def test_a_value_at_exactly_the_depth_limit_is_accepted(client, experiment_id):
+    """The boundary from the other side. Without this, the fix above could pass by
+    refusing every nested value — and the limit is deliberately far above anything the
+    schema declares at these paths (all five are scalars) or any committed document
+    (deepest is 7)."""
+    run = _create_run(client, experiment_id)
+    etag = _run_etag(client, experiment_id, run["id"])
+    depth = routes._MAX_VALUE_DEPTH
+    payload = (
+        '{"confirmed_by_user": true, "fields": {"context.temperature_K": '
+        + "[" * depth
+        + "1"
+        + "]" * depth
+        + "}}"
+    )
+    response = client.patch(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}",
+        content=payload.encode(),
+        headers={"If-Match": etag, "content-type": "application/json"},
+    )
+    assert response.status_code == 200, response.text
+    assert client.get(f"/api/experiments/{experiment_id}/runs").status_code == 200
+
+
+def test_the_depth_guard_does_not_itself_recurse():
+    """A recursive depth check would raise `RecursionError` on the same input it exists
+    to refuse, one frame earlier. `_value_depth_within` uses an explicit stack, so this
+    call must return `False` rather than raise."""
+    deep = 1
+    for _ in range(5000):
+        deep = [deep]
+    assert routes._value_depth_within(deep, routes._MAX_VALUE_DEPTH) is False
+    assert routes._is_storable_value(deep) is False
+
+
 def test_a_finite_number_at_the_same_path_is_still_accepted(client, experiment_id):
     """The guard is about REPRESENTABILITY, not about numbers. Without this, the fix
     above could pass by refusing every float."""
