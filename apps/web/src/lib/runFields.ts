@@ -5,13 +5,21 @@
  * Three fields, not thirty. Two independent sources had to agree before a path
  * could appear here, and NOTHING is here because it seemed useful:
  *
- *   1. `apps/api/isaac_api/workspace.py::RUN_LEVEL_FIELD_PATHS` decides what is
- *      per-run. It is `("context", "timestamps.acquired_start_utc",
- *      "timestamps.acquired_end_utc")`, matched segment-aware by
- *      `_path_matches`. The Run PATCH route refuses — 422, never a silent
- *      no-op — any key `field_level()` does not classify as `run`, so a field
- *      that is not under one of those prefixes cannot be written from here at
- *      all.
+ *   1. `routes.RUN_WRITABLE_FIELD_PATHS` decides what can be written per run. It is
+ *      `EXTRACTOR_FIELD_MAP`'s paths intersected with `field_level(path) ==
+ *      LEVEL_RUN`, and it resolves to a CLOSED SET OF FIVE: `context.environment`,
+ *      `context.temperature_K`, `context.thermodynamics.atmosphere`,
+ *      `timestamps.acquired_start_utc`, `timestamps.acquired_end_utc`. The PATCH
+ *      route refuses — 422, never a silent no-op — any key not in that set.
+ *
+ *      THIS PARAGRAPH USED TO CREDIT `field_level()` ALONE, and that was the gate
+ *      the backend ABANDONED AS A BUG. `field_level` is a segment-aware PREFIX test:
+ *      applied by itself it accepted `context.typo_K`, stored it with a fabricated
+ *      `user_confirmation` evidence entry, and left the run permanently unexportable
+ *      ("Additional properties are not allowed"). Finding I2 of `90b432d` replaced it
+ *      with membership in the derived set; this file was written in `ef76291` and was
+ *      not updated, so it went on naming the superseded mechanism. `field_level` is
+ *      still how the set is DERIVED — it is no longer what the route checks.
  *   2. `schema/isaac_record_v1.json` decides the SHAPE. `context.environment`
  *      is `{"type": "string", "enum": ["operando","in_situ","ex_situ",
  *      "in_silico"]}` and `context.temperature_K` is `{"type": "number"}` —
@@ -24,10 +32,20 @@
  *     still not here. The brief asked for a small representative set; a second
  *     timestamp demonstrates nothing the first does not, and every field on
  *     this surface is a field a scientist has to read past.
- *   * `context.electrochemistry.*` is run-level by prefix and is a large
- *     schema subtree belonging to a domain this repository's MVP scope
- *     (`CLAUDE.md` §15) does not support. Putting it on screen would advertise
- *     a capability the rest of the app does not have.
+ *   * `context.thermodynamics.atmosphere` IS in the writable set and is not offered.
+ *     It is the one omission with no stronger reason than the first bullet's: three
+ *     fields were asked for, and this is the fourth. It belongs in this list because
+ *     a list headed "why each absence is a decision" that silently omits an
+ *     offerable field is not that list — and it was omitted until a reviewer counted
+ *     the set against the screen.
+ *   * `context.electrochemistry.*` is under a run-level PREFIX but is NOT in the
+ *     writable set — measured, not assumed — so the route would 422 every path in it.
+ *     That puts it in the same category as `system.configuration.*` below rather than
+ *     the category this bullet used to claim: the earlier wording said it "is
+ *     run-level by prefix", which implied it could be offered and was being held back
+ *     for MVP-scope reasons (`CLAUDE.md` §15). Both reasons are true, but only one is
+ *     load-bearing, and the load-bearing one is that a control here would be a
+ *     control whose only outcome is a refusal.
  *   * `system.configuration.*` is UNCLASSIFIED, not run-level.
  *     `field_level()` documents that as a real answer rather than an oversight
  *     — whether two runs may legitimately differ in detector model is a
@@ -105,8 +123,17 @@ export type ParsedRunField =
  * possible, and the only honest encoding of it is the one the server defines.
  *
  * A malformed entry returns `{ok:false}` and is NOT sent. That is a formatting
- * check, not a scientific one: it never rewrites, rounds, coerces or completes
- * what was typed. The alternative — send it and let the 422 come back — turns a
+ * check, not a scientific one: it never completes what was typed, never rounds it and
+ * never applies a scientific judgement to it.
+ *
+ * IT DOES REINTERPRET, THOUGH, AND THE EARLIER WORDING ("never rewrites, rounds,
+ * coerces") DENIED IT. `Number()` accepts more grammars than a decimal literal:
+ * `1e3` becomes `1000`, `0x12C` becomes `300`, `Infinity` is rejected only because
+ * `Number.isFinite` catches it afterwards. So what is STORED can differ in
+ * presentation from what was TYPED. Two things keep that honest rather than hidden:
+ * the value is only ever the one `Number()` produced (nothing is invented), and the
+ * card now drops its local text once the server acknowledges a field, so the box
+ * shows the stored value instead of the typed string. The alternative — send it and let the 422 come back — turns a
  * typo into a red failure state, which reads as the app rejecting the science.
  */
 export function parseRunField(spec: RunFieldSpec, raw: string): ParsedRunField {

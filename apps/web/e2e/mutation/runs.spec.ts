@@ -1,13 +1,22 @@
 /**
  * R5 · THE RUN WORKSPACE, IN A REAL BROWSER AGAINST A REAL BACKEND.
  *
- * WHY THIS FILE EXISTS AT ALL. The Run vertical slice shipped ~7k lines with 1473
- * backend tests and 1023 jsdom tests and NOT ONE browser test — in a repository
- * whose own instructions make the mutation suite mandatory for a user-facing
- * slice, and after a phase in which real browser testing found defects the unit
- * suites had passed. Everything asserted below is a claim the Run workspace makes
- * to a scientist; none of it was previously checked anywhere a scientist could
- * recognise.
+ * WHY THIS FILE EXISTS AT ALL. The Run vertical slice shipped 6,988 inserted lines
+ * with NOT ONE browser test — in a repository whose own instructions make the
+ * mutation suite mandatory for a user-facing slice, and after a phase in which real
+ * browser testing found defects the unit suites had passed. Its unit coverage was
+ * 79 backend tests (`test_run_api.py`, `pytest --collect-only`) and 23 jsdom tests
+ * (`run-workspace.test.tsx`, measured by `vitest run`), and no `apps/web/e2e/` file
+ * was touched at all.
+ *
+ * THOSE TWO NUMBERS WERE FIRST WRITTEN HERE AS "1473 backend tests and 1023 jsdom
+ * tests", AND BOTH WERE LINE COUNTS. They are the insertion columns of
+ * `git diff --stat` for those two files, read off and relabelled as test counts —
+ * inflating the coverage this file argues was insufficient by roughly 19x and 44x,
+ * and in the direction that made the argument sound stronger. `CLAUDE.md` §12 says
+ * "Never report a count you did not just measure. Quote the command." The
+ * correction is left visible because this is the exact failure the repository keeps
+ * finding, and it was found here by a reviewer pointed at this file.
  *
  * WHAT IS UNDER TEST AND WHAT IS ONLY A WITNESS. The action under test is always
  * performed BY THE PAGE — a click, a keystroke. The `request` context is used to
@@ -15,23 +24,26 @@
  * back as an INDEPENDENT check. It never performs the action under test, and no
  * mutation's success is ever mocked: every 200 below comes from FastAPI.
  *
- * THE THREE `page.route` HANDLERS ARE NOT MOCKS EITHER, and the distinction
- * matters because "green browser suite over a faked server" is worse than no
- * suite:
+ * TWO `page.route` HANDLERS AND ONE OBSERVER, none of them a mock — the distinction
+ * matters because "green browser suite over a faked server" is worse than no suite:
  *   · `delayNextPatch` holds a REAL request open so an in-flight window is
  *     observable. The server still answers it.
- *   · `injectUnwritablePathOnce` adds a key to the REQUEST body that this UI
- *     cannot itself produce, and lets the REAL route refuse it. The 422 under
- *     assertion is the server's.
- *   · `countPatches` observes only.
+ *   · `injectUnwritablePathOnce` adds a key to the REQUEST body that this UI cannot
+ *     itself produce, and lets the REAL route refuse it. The refusal under
+ *     assertion is the server's — though note that no spec here asserts a STATUS
+ *     CODE: what is asserted is that the run did not move and the value was not
+ *     stored. The 422 itself is pinned by `apps/api/tests/test_run_api.py`.
+ *   · `countPatches` uses `page.on('request')`, not `page.route`. It observes only
+ *     and cannot alter a request.
  *
- * FOUR OF THESE SPECS ARE REGRESSION GUARDS FOR NAMED REVIEW FINDINGS on this
+ * THREE OF THESE SPECS ARE REGRESSION GUARDS FOR NAMED REVIEW FINDINGS on this
  * branch (`90b432d`), each of which was a real defect that every test then in the
  * repository passed through:
  *   I1 — an edit typed while a save was in flight was destroyed on unmount.
  *   I2 — an invented field path was stored with fabricated evidence.
  *   I3 — a save refused while a card was collapsed was announced nowhere.
- *   plus run-to-run isolation, which nothing exercised with two runs on screen.
+ * A fourth spec covers run-to-run isolation, which is NOT one of the named findings
+ * — nothing had exercised two runs on one screen, so there was no finding to name.
  */
 
 import { type Locator, type Page } from '@playwright/test';
@@ -244,7 +256,10 @@ test.describe('R5 · the Run workspace', () => {
     // Nothing is claimed about a run nobody has touched.
     await expect(saveStatus(nthCard(page, 0))).toHaveText('');
     await expect(conditions(nthCard(page, 0))).toContainText('No conditions recorded yet');
-    await expect(progress(nthCard(page, 0))).toHaveText(`0 of 3 set`);
+    // The scope is part of the figure — "0 of 3" alone was a completion claim the
+    // number is not entitled to make. See the note in RunCard.tsx.
+    await expect(progress(nthCard(page, 0))).toContainText('0 of 3');
+    await expect(progress(nthCard(page, 0))).toContainText('run fields on this screen');
   });
 
   test('a typed value says Saved only AFTER the server acknowledges, and survives a reload', async ({
@@ -261,8 +276,16 @@ test.describe('R5 · the Run workspace', () => {
     await delayNextPatch(page, 1_500);
     await fieldControl(card, 'context.temperature_K').fill('277.15');
 
+    /*
+     * THE LOAD-BEARING ASSERTION IS THE FIRST ONE. If the hook set `Saved` when an
+     * edit was merely QUEUED, `toHaveText('Saving…')` would never resolve and this
+     * line would time out. The `not.toHaveText('Saved')` below is a point-in-time
+     * re-check, not a proof that `Saved` never flashed — the text is already
+     * `Saving…`, so it passes immediately. It is kept because it fails loudly if the
+     * two states are ever made to coexist, and it is described honestly rather than
+     * as "the claim under test", which is what an earlier revision called it.
+     */
     await expect(saveStatus(card)).toHaveText('Saving…');
-    // The claim under test: `Saved` is not on screen while the write is unanswered.
     await expect(saveStatus(card)).not.toHaveText('Saved');
     await expect(saveStatus(card)).toHaveText('Saved', { timeout: 10_000 });
 
@@ -272,7 +295,7 @@ test.describe('R5 · the Run workspace', () => {
     // 2, not 1: creating the run was the first write (see the I2 spec below).
     expect(run.rev, 'a write must advance the run rev').toBe(2);
 
-    await expect(progress(card)).toHaveText('1 of 3 set');
+    await expect(progress(card)).toContainText('1 of 3');
     await expect(conditions(card)).toContainText('277.15 K');
 
     // DURABILITY, through the real read path rather than through React state.
@@ -280,7 +303,7 @@ test.describe('R5 · the Run workspace', () => {
     await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
     const reloaded = nthCard(page, 0);
     await expect(conditions(reloaded)).toContainText('277.15 K');
-    await expect(progress(reloaded)).toHaveText('1 of 3 set');
+    await expect(progress(reloaded)).toContainText('1 of 3');
     // And the value is in the box, not merely in the summary line.
     await header(reloaded).click();
     await expect(fieldControl(reloaded, 'context.temperature_K')).toHaveValue('277.15');
@@ -340,10 +363,23 @@ test.describe('R5 · the Run workspace', () => {
       'aria-invalid',
       'true',
     );
-    // NOT SENT — and the status says nothing, because nothing is pending.
+    // NOT SENT — and the card SAYS SO, at card level, rather than going quiet.
     await page.waitForTimeout(SETTLE_MS);
     expect(patches(), 'a malformed entry must never reach the network').toHaveLength(0);
-    await expect(saveStatus(card)).toHaveText('');
+    await expect(saveStatus(card)).toHaveText('Change not sent');
+
+    /*
+     * AND IT SURVIVES COLLAPSING THE CARD. This is the browser half of a review
+     * finding: the field error lives inside the expanded panel, so before the fix a
+     * reader who typed something unparseable and collapsed the card was left with a
+     * card that said nothing at all — or worse, still said "Saved" from a previous
+     * successful write, while holding an edit that would never be sent.
+     */
+    await header(card).click();
+    await expect(header(card)).toHaveAttribute('aria-expanded', 'false');
+    await expect(saveStatus(card)).toHaveText('Change not sent');
+    await expect(header(card)).toContainText('Change not sent');
+    await header(card).click();
 
     const after = await readRuns(request, session, SEED.fresh);
     expect(after[0].rev).toBe(before[0].rev);
@@ -379,7 +415,10 @@ test.describe('R5 · the Run workspace', () => {
 
     // A REFUSAL, not a retry loop: a 422 is the server having read the request and
     // declined it, so the hook must not resend, and must not say Saved.
-    await expect(saveStatus(card)).toHaveText('Save failed', { timeout: 10_000 });
+    // `toContainText`, because the readout now names the CAUSE beside the state —
+    // "Save failed · <why>". A bare "Save failed" was a state with no reason, whose
+    // only control was a Retry that could loop.
+    await expect(saveStatus(card)).toContainText('Save failed', { timeout: 10_000 });
     await expect(card.getByRole('button', { name: 'Retry Save' })).toBeVisible();
 
     // Nothing was written — neither the invented key nor the legitimate one, and
@@ -414,7 +453,7 @@ test.describe('R5 · the Run workspace', () => {
     await header(card).click();
     await expect(header(card)).toHaveAttribute('aria-expanded', 'false');
 
-    await expect(saveStatus(card)).toHaveText('Save failed', { timeout: 10_000 });
+    await expect(saveStatus(card)).toContainText('Save failed', { timeout: 10_000 });
     // In the header's ACCESSIBLE NAME, so reaching the collapsed card by keyboard
     // alone says what is wrong with it.
     await expect(header(card)).toContainText('Save failed');
@@ -443,6 +482,11 @@ test.describe('R5 · the Run workspace', () => {
      * was written to catch. Proven, not suspected: reinstating the pre-`90b432d`
      * teardown (`if (inFlightRef.current) { pendingRef.current = {}; return; }`)
      * left this spec GREEN.
+     *
+     * (To be unambiguous about which version: it is the FIRST DRAFT of this spec —
+     * without the `waitForRequest` below — that stayed green against the defect. The
+     * spec as committed FAILS against it, with the message in the poll below, and
+     * that was verified by reinstating the old teardown and running it.)
      *
      * The reason is the debounce. `fill` then `expect(…'Saving…')` resolves in a few
      * ms, because the status is set when an edit is QUEUED — long before
@@ -500,7 +544,12 @@ test.describe('R5 · the Run workspace', () => {
     await page.getByRole('tab', { name: 'Record Fields' }).click();
     const remounted = nthCard(page, 0);
     await expect(saveStatus(remounted)).toHaveText('');
+    // BOTH values, and the timestamp is the one this spec is about — an earlier
+    // revision asserted only `301 K`, the ordinary edit, while the comment above
+    // talked about the detached one. The server-side poll proved the timestamp
+    // landed; this proves the re-mounted card actually shows it.
     await expect(conditions(remounted)).toContainText('301 K');
+    await expect(conditions(remounted)).toContainText('2026-01-31T09:00:00Z');
   });
 
   test('a stale run version is refused, writes nothing, and Refresh adopts the SERVER value', async ({

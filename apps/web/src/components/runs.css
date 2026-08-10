@@ -115,8 +115,18 @@
   background: var(--surface-subtle);
 }
 
+/*
+ * NOT `--text-quaternary`. It is #9aa4af — 2.46:1 on the card surface, the ratio
+ * `chrome.css` describes in this same commit as failing AA "at ANY size, large-text
+ * 3.0:1 included" — and this chevron is the card's only visual expand/collapse
+ * affordance, so WCAG 1.4.11 applies to it as a graphical object. `aria-hidden`
+ * exempts it from name computation, not from contrast, and axe's `color-contrast`
+ * rule does not scan SVG, so no baseline in this repository would ever have caught
+ * it. Introducing a new use of a token while documenting it as broken is a
+ * particularly poor look.
+ */
 .run-card-chevron {
-  color: var(--text-quaternary);
+  color: var(--text-slate);
   flex: none;
 }
 
@@ -147,6 +157,19 @@
   flex: none;
   font-size: 12px;
   color: var(--text-slate);
+}
+
+/* The denominator's scope, demoted but never hidden — see the note in RunCard.tsx.
+   `--text-muted` is 5.77:1 on the card surface, so demotion is weight and size, not
+   a contrast shortfall. */
+.run-card-progress-scope {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Why a save failed, beside the words "Save failed". */
+.run-save-cause {
+  color: var(--text-muted);
 }
 
 .run-card-body {

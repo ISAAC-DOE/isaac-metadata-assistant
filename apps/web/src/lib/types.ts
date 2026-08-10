@@ -1653,6 +1653,29 @@ export type ApiRunCheckFinding =
 export interface ApiRunCheckVerdict {
   ok: boolean;
   errors?: ApiRunCheckFinding[];
+  /**
+   * WHICH DOCUMENT WAS CHECKED — present on the `official` verdict only, and it was
+   * MISSING FROM THIS TYPE WHILE THE SCREEN HARD-CODED "(dry run)".
+   *
+   * `_validate_unit` (`apps/api/isaac_api/routes.py:3901`) returns `false` whenever
+   * the unit is materialised: in that branch it validates the record ALREADY WRITTEN
+   * to `records/`, not a candidate. The card said "Official schema (dry run)"
+   * unconditionally, so after an export a scientist read errors about a filed
+   * artifact as errors about a hypothetical one. Dropping the field from this
+   * interface is what made the mislabel invisible to the compiler.
+   */
+  dry_run?: boolean;
+  /**
+   * TRUE when no verdict could be reached — distinct from "the schema rejected it".
+   *
+   * The route's own comment calls this "no verdict, not a schema violation"
+   * (`routes.py:3917`), and it still sets `ok: false` to fail closed. Without this
+   * flag the only signal was a fixed English sentence in `errors[0].message`, so the
+   * card rendered an unreadable artifact as `Check Failed` — a verdict the server
+   * explicitly declined to give. `ok` is deliberately still `false`: this makes the
+   * REASON legible without turning a non-verdict into a pass.
+   */
+  unavailable?: boolean;
 }
 
 export interface ApiRunCheckResponse {

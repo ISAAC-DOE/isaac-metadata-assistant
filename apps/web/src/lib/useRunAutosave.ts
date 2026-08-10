@@ -25,11 +25,21 @@
  * keystroke and a newer value never loses to a replayed older one.
  *
  * RETRY POLICY, and the distinction is the whole of it. A 5xx or an unreachable
- * backend is TRANSIENT: the request never got a verdict, so repeating it can
- * get one. Every other 4xx is a REFUSAL: the server read the request and
+ * backend is TRANSIENT: no verdict REACHED THIS CLIENT, so repeating the request
+ * can get one. Every other 4xx is a REFUSAL: the server read the request and
  * declined it, and repeating an identical request produces an identical
  * refusal — retrying would be a loop that looks like effort. 412 is a refusal
  * too, and it gets its own state because it has its own remedy.
+ *
+ * "NO VERDICT REACHED THIS CLIENT" IS NOT "THE SERVER DID NOTHING", and the earlier
+ * wording ("the request never got a verdict") quietly asserted the stronger thing.
+ * `api.request` throws `unreachable` with NO status for any fetch-level failure and
+ * its own comment says the two are indistinguishable from there — so a response lost
+ * AFTER the server committed lands in this branch. The retry then carries the token
+ * this client still holds (the advance happens in `.then`, which never ran), earns a
+ * 412, and the conflict panel would say "Nothing you typed was written" about a write
+ * that WAS written. `retriedBeforeConflict` exists so the panel can stop saying that;
+ * see it below.
  *
  * ON 412 NOTHING IS SENT AGAIN UNTIL THE READER REFRESHES. `halted` is what
  * enforces that: further typing is still recorded locally (so the boxes keep
@@ -40,8 +50,14 @@
  * TEARDOWN — and what is guaranteed here is narrower than "nothing is lost", so
  * it is written out rather than summarised.
  *
- * GUARANTEED: every edit this hook has accepted is handed to the network
- * exactly once. If nothing is in flight at unmount, the held edits are sent
+ * GUARANTEED: every edit this hook has accepted is handed to the network at least
+ * once, and AT UNMOUNT exactly once. Not "exactly once" unqualified, which is what
+ * this line used to say and which the file's own retry policy contradicts twice: a
+ * transient failure re-sends the same edit up to four times (deliberately — the
+ * server may have received none of them), and an edit accepted by `queue()` while a
+ * `refresh()` is in flight is DROPPED rather than sent, because a refresh adopts the
+ * server's run wholesale. Both are disclosed elsewhere in this header; the summary
+ * sentence was simply stronger than the body. If nothing is in flight at unmount, the held edits are sent
  * during the unmount itself. If a PATCH *is* in flight they cannot be sent yet
  * — `send` empties the pending map BEFORE dispatching, so an edit typed after
  * that point is not in the open request's body, and the token it must carry is
@@ -102,6 +118,20 @@ export interface RunAutosave {
   /** Send the held edits now (the manual retry after a refusal). */
   retryNow(): void;
   /**
+   * Why the last save failed, in the server's or the transport's own words, or
+   * `null`. The card rendered "Save failed" with no cause at all, so a 428, a
+   * 404 after a workspace reset in another tab, and an unreachable backend were
+   * one indistinguishable state whose only control retried forever.
+   */
+  failureMessage: string | null;
+  /**
+   * TRUE when the 412 that produced `conflict` arrived on a RETRY rather than on a
+   * first attempt — which means an earlier attempt may have been committed by the
+   * server with its response lost in transit. The conflict copy must not claim
+   * "nothing you typed was written" in that case, because it may have been.
+   */
+  retriedBeforeConflict: boolean;
+  /**
    * Increments each time a server run is adopted wholesale (a refresh). The
    * card watches it to drop the text it had in its boxes, because after a
    * refresh those boxes are showing values the reader chose NOT to keep.
@@ -114,10 +144,20 @@ export function useRunAutosave(args: {
   run: ApiRunView;
   /** Adopt a run the server returned. Called for every 200 and every refresh. */
   onRun: (run: ApiRunView) => void;
+  /**
+   * The field paths a 200 just acknowledged. The card uses it to drop its local
+   * text for those paths and fall back to rendering the SERVER's value, so the
+   * box and the header cannot disagree about the same field.
+   */
+  onSaved?: (paths: string[]) => void;
 }): RunAutosave {
-  const { experimentId, run, onRun } = args;
+  const { experimentId, run, onRun, onSaved } = args;
 
   const [status, setStatus] = useState<RunSaveStatus>('idle');
+  const [failureMessage, setFailureMessage] = useState<string | null>(null);
+  const [retriedBeforeConflict, setRetriedBeforeConflict] = useState(false);
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
   const [refreshing, setRefreshing] = useState(false);
   const [adoptedNonce, setAdoptedNonce] = useState(0);
 
@@ -211,6 +251,12 @@ export function useRunAutosave(args: {
           return;
         }
         onRunRef.current(res.run);
+        setFailureMessage(null);
+        // The paths this response acknowledged. The card drops its local text for
+        // them so the input renders the server's own value — otherwise typing `1e3`
+        // leaves the box showing "1e3" while the header reads `1000 K`, one screen,
+        // two answers about one field.
+        onSavedRef.current?.(Object.keys(fields));
         if (Object.keys(pendingRef.current).length > 0) {
           // More was typed while this was in flight. The reader still has an
           // unacknowledged edit, so this is NOT `Saved` — it stays `Saving…`
@@ -245,10 +291,20 @@ export function useRunAutosave(args: {
         if (httpStatus === 412) {
           clearTimers();
           haltedRef.current = true;
+          // Was this the FIRST attempt, or a retry? On a retry an earlier attempt
+          // may have been committed with its response lost, so the panel must not
+          // assert that nothing was written. `retriesRef` is reset to 0 on every
+          // success and read here before anything clears it.
+          setRetriedBeforeConflict(retriesRef.current > 0);
           setStatus('conflict');
           return;
         }
 
+        setFailureMessage(
+          err instanceof Error && err.message.trim() !== ''
+            ? err.message
+            : 'The change could not be saved.',
+        );
         setStatus('failed');
 
         // Unreachable (no status) or a server fault: the request never earned a
@@ -311,6 +367,8 @@ export function useRunAutosave(args: {
         onRunRef.current(res.run);
         setRefreshing(false);
         setAdoptedNonce((n) => n + 1);
+        setFailureMessage(null);
+        setRetriedBeforeConflict(false);
         setStatus('idle');
       })
       .catch(() => {
@@ -356,5 +414,7 @@ export function useRunAutosave(args: {
     refreshing,
     retryNow,
     adoptedNonce,
+    failureMessage: status === 'failed' ? failureMessage : null,
+    retriedBeforeConflict,
   };
 }

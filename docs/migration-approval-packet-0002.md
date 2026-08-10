@@ -15,8 +15,16 @@
 > project keeps finding.** This block previously read: *"No database of any kind was contacted while
 > writing this migration … so the SQL below has **never been executed anywhere**."* That was true
 > when written and is **now false**. The forward SQL, the rollback, and every constraint in them
-> have been executed against a real PostgreSQL 18.4 engine in GitHub Actions, at this branch's exact
-> head — see §12, which names the run, the job, the engine version and each printed assertion.
+> have been executed against a real PostgreSQL 18.4 engine in GitHub Actions — see §12, which names
+> the run, the job, the engine version and each observation.
+>
+> **Not "at this branch's exact head", which an earlier revision of this line claimed.** The
+> witnessed run is at `758360c`; the branch has advanced since, and one of those later commits edits
+> the `postgres-migration` job itself (a log message that miscounted three tables as two). The
+> migration's own bytes are unchanged across all of it — the sha256 in the table below is the same at
+> `90b432d`, `758360c` and head — so the SQL that was exercised is the SQL you would apply. But the
+> workflow that exercised it is not byte-identical to the one at head, and that is the kind of
+> precision this packet exists to keep.
 >
 > **The claim that survives is narrower, and it is the one that bears on your decision:** no agent
 > has contacted the SLAC database; this migration is unapplied on every *deployed* environment; and
@@ -422,11 +430,17 @@ The job ran. What was observed:
 |---|---|
 | commit under test | `758360cc8520144db445fd440f0a59e4c12931c2` — PR [#97](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/97) head |
 | forward SQL bytes executed | sha256 `c96e308d7fdfd508ab2c2aeffb08abcb18a88aae84db6f1d08b83f9cba8fda3e` — the file in the table at the top of this packet, unchanged since `90b432d` |
-| workflow run | [31364785191](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31364785191), job `migration and durable repository against a real PostgreSQL` ([93380745818](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31364785191/job/93380745818)), conclusion **success** |
+| workflow run | [31364785191](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31364785191), job `migration and durable repository against a real PostgreSQL` ([93380745818](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31364785191/job/93380745818)) |
+| that job's conclusion | **success** |
+| that RUN's conclusion | **failure** — and you should expect the red mark. A different job in the same run, `browser accessibility and responsive baseline`, was red for an unrelated reason (a colour-contrast baseline). It shares no step, no service container and no database with the migration job. Judge this evidence by the JOB, not the run. |
 | engine | service container image `postgres:18`; the job prints the server's own answer: `PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on x86_64-pc-linux-gnu` |
+| checkout | GitHub checks out a merge commit, not the branch head: the log reads `HEAD is now at b9b9c78 Merge 758360cc… into b7792c1f…`. `758360c` is a descendant of `b7792c1` (`git merge-base --is-ancestor`), so that tree and the branch head's tree coincide — but the job did not literally check out `758360c`, and the distinction is recorded rather than glossed. |
 
-Each line below is a **printed assertion in that job's log**, not an inference from the workflow
-file:
+Almost every line below is a **printed assertion in that job's log** rather than an inference from
+the workflow file — and the three exceptions are marked `[silent]`, because a claim that everything
+was printed is exactly the kind of thing a reader cannot check without re-reading 1,400 lines. A
+`[silent]` item is asserted by the shell (`set -euo pipefail` plus a `[ … ] || exit 1`), so the job's
+green conclusion is the evidence, and the value itself never reaches the log:
 
 1. **Plan order.** `pending: 0001_experiments, 0002_runs` — in FK-dependency order, asserted as a
    string equality rather than a substring.
@@ -438,17 +452,25 @@ file:
 4. **Idempotence, over three schema states.** A second `--apply` prints
    `nothing to apply (every migration is already recorded)`; then every bookkeeping row is deleted
    and `--apply` prints `applied: 0001_experiments, 0002_runs`. An md5 over
-   `information_schema.columns` for the whole `public` schema is identical at all three points.
+   `information_schema.columns` for the whole `public` schema is identical at all three points —
+   **`[silent]`**: the three digests are captured into shell variables and compared, and none is
+   echoed.
 5. **Table-set diff.** Added exactly `isaac_experiments isaac_runs isaac_schema_migrations`; removed
    nothing; and an md5 over every row of the stand-in `records` table is unchanged —
-   `records: byte-identical`.
+   `records: byte-identical`. The before/after table listings ARE printed, so a reader can derive the
+   added set by eye; the equality test against that exact three-name string, and the `records` digest
+   `diff`, are **`[silent]`**.
 6. **The application does not touch the table.** The full durable-repository exercise runs against
    the real engine (`durable repository OK`, `durable compare-and-swap OK`), after which
    `isaac_runs: still empty after the application ran`.
 7. **The index is what §2 claims.** `CREATE INDEX isaac_runs_experiment_order_idx ON
    public.isaac_runs USING btree (experiment_id, ordinal, run_id)`, read back from `pg_indexes`.
-8. **Twelve negative controls, each refused by the *named* constraint** — the job fails if a
-   statement is refused by something other than the constraint under test:
+8. **Twelve negative controls, each refused by the expected named object** — the job fails if a
+   statement is refused by something other than the one under test. **Eleven are matched on a
+   CONSTRAINT name; the twelfth is not.** The `generation` case is matched on the substring
+   `violates not-null constraint`, which names no constraint, because a `NOT NULL` column constraint
+   has no name to print. "Each refused by the *named* constraint" was the earlier wording and it
+   over-counted by one:
    `isaac_runs_experiment_fk` (an orphan run), `isaac_runs_id_shape` (a malformed run id),
    `isaac_runs_pkey` (a duplicate), `isaac_runs_ordinal_non_negative` (`-1`),
    `isaac_runs_rev_non_negative` (`-1`), `isaac_runs_state_is_object` (`'"nope"'`),
@@ -463,8 +485,9 @@ file:
    therefore measured, and its asymmetry with `id` holds.
 10. **Rollback, both orders.** Rolling back `0001` first fails with PostgreSQL's own
     `cannot drop table isaac_experiments because other objects depend on it / constraint
-    isaac_runs_experiment_fk`, and all three tables are re-counted and still present — the safe
-    failure §11 describes. Rolling back `0002` first drops the table, deletes its bookkeeping row,
+    isaac_runs_experiment_fk` (printed), and all three tables are re-counted and still present
+    (**`[silent]`** — a `for t in …` loop that exits non-zero on a missing table). The job then
+    prints `wrong-order rollback: refused, and nothing was dropped` — the safe failure §11 describes. Rolling back `0002` first drops the table, deletes its bookkeeping row,
     and restores `pending: 0002_runs`.
 
 **§2, §3, §6, §9 and §11 are therefore executed-and-witnessed against a real engine.** §5 is not —

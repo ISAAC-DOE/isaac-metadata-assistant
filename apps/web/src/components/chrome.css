@@ -396,9 +396,13 @@
  * declarations in one component, the fix is local and the failure is real, and
  * blessing a real AA failure because it is old is how debt becomes permanent.
  *
- * WHAT IS DELIBERATELY NOT FIXED. `--text-tertiary` has 189 uses and
- * `--text-quaternary` 71 across this app, and most of them fail AA in exactly
- * this way. Darkening the two TOKENS is the systemic fix, and it is a
+ * WHAT IS DELIBERATELY NOT FIXED. Counted at THIS commit, after every change in
+ * it: `var(--text-tertiary)` has 189 uses and `var(--text-quaternary)` 69 under
+ * `apps/web/src`, and most of them fail AA in exactly this way. (An earlier revision
+ * said "189 and 71" — a pair quoted on two different bases: 71 was the count BEFORE
+ * this commit removed one use, and a later fix to `.run-card-chevron` removed
+ * another. Counted with Python over file bytes as well as `rg --text`, because
+ * `CLAUDE.md` §36 records that a plain `rg` silently skips NUL-byte files.) Darkening the two TOKENS is the systemic fix, and it is a
  * design-system change that would move dozens of measured baseline entries at
  * five viewports each; it is not this slice's to make. Both colours therefore
  * remain in `A11Y_BASELINE`'s `foregrounds` set, because both still fail

@@ -260,17 +260,29 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
      * (Ratios against the status bar's own `--surface-subtle` #fbfcfd, computed
      * rather than eyeballed. AA wants 4.5:1 at these sizes — 11.5px and 10.5px.)
      * The status bar renders on every record screen, which is why five surfaces move
-     * together and why `settings-*` does not move at all: measured, that surface
-     * contains zero `.statusbar-*` nodes.
+     * together and why `settings-*` does not move at all: measured, `<StatusBar` is
+     * rendered only by `RecordWorkbench`, `GuidedCompletion`, `EvidenceExplorer` and
+     * `ExportReadiness`, and `.statusbar-{pending,note,right}` exist only in
+     * `StatusBar.tsx`. "Five surfaces" is the surface count, not a claim about every
+     * cell: `record-detail@mobile-375x812` stays at 12, because at that width none of
+     * the three nodes was inside axe's measured set to begin with.
      *
      * HOW IT WAS FOUND, because the route says something about reading this file.
      * Nobody was looking for it. The Run workspace added a section to the record
-     * screen, changing no colour anywhere, and `record-detail@tablet-768x1024` grew
-     * 14 -> 16 on linux. CI's message listed four offending nodes and "… and 9
-     * more"; all four were pre-existing debt, so the delta was invisible. An A/B
-     * against `b7792c1` identified the three newcomers as `.statusbar-right` and two
-     * `.statusbar-pending`. The truncation is now 24 nodes
-     * (`MAX_REPORTED_NODES`, `e2e/helpers/axe.ts`) so the next delta is legible.
+     * screen, changing no colour anywhere, and linux CI reported TWO regressions:
+     * `record-detail@tablet-768x1024` 14 -> 16 (+2) and `record-detail@width-390`
+     * 12 -> 13 (+1). In each message all four printed nodes were pre-existing debt
+     * and the rest were truncated, so the delta was invisible; the truncation is now
+     * 24 nodes (`MAX_REPORTED_NODES`, `e2e/helpers/axe.ts`).
+     *
+     * An A/B against `b7792c1` at `desktop-1280x800` identified the newcomers as
+     * `.statusbar-right` and the two `.statusbar-pending` spans — THREE nodes there,
+     * and the count is viewport-dependent, which the first version of this note got
+     * wrong by narrating the desktop observation as the tablet one. How many
+     * `.statusbar-*` nodes each viewport actually carries is exactly the per-entry
+     * delta recorded above: -3 at desktop and laptop, -2 at tablet and zoom-200,
+     * -1 at width-390 and width-320, and 0 at mobile-375x812. So the tablet +2 is
+     * explained by two of the three, not three.
      *
      * SO THE OPTION TAKEN WAS THE HARDER ONE. Ratcheting `record-detail` upward was
      * available and would have been green; it would also have blessed a 2.46:1
@@ -286,8 +298,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
      * `IMPROVED … on linux` messages, each naming its exact figure. A pair that ends
      * up equal collapses back to a scalar.
      *
-     * WHAT IS NOT FIXED: `--text-tertiary` (189 uses) and `--text-quaternary` (71)
-     * remain too light almost everywhere they appear, which is why both are still in
+     * WHAT IS NOT FIXED: `--text-tertiary` (189 uses) and `--text-quaternary` (69)
+     * — both counted at this commit, after every change in it, over file bytes rather
+     * than with a bare `rg` (`CLAUDE.md` §36) — remain too light almost everywhere, which is why both are still in
      * `foregrounds` below — checked, not assumed. Darkening the TOKENS is the
      * systemic fix and is a design-system change, not a slice's to make.
      */
@@ -349,8 +362,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
     // one. The linux column is transcribed from GitHub Actions run
     // 30668917975; it is the authoritative one.
     counts: {
-      'evidence@desktop-1280x800': { darwin: 69, linux: 71 },
-      'evidence@laptop-1024x768': { darwin: 69, linux: 71 },
+      'evidence@desktop-1280x800': 69,
+      'evidence@laptop-1024x768': 69,
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
       // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
       // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
@@ -361,9 +374,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
       // `.record-file`. The element was always painted; only measurement
       // changed. Linux is the authority and may differ.
-      'evidence@tablet-768x1024': { darwin: 69, linux: 71 },
-      'evidence@mobile-375x812': { darwin: 67, linux: 68 },
-      'evidence@zoom-200': { darwin: 67, linux: 69 },
+      'evidence@tablet-768x1024': 69,
+      'evidence@mobile-375x812': 67,
+      'evidence@zoom-200': 67,
       /*
        * TUTORIAL-SCOPE SLICE (2026-08-04). `experiments` fell 10/10/10/9/9 →
        * 3/3/3/2/2, and the seven/eight nodes that went away did NOT get fixed —
@@ -400,11 +413,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'experiments-example@tablet-768x1024': 10,
       'experiments-example@mobile-375x812': 9,
       'experiments-example@zoom-200': 9,
-      'export-readiness@desktop-1280x800': { darwin: 4, linux: 7 },
-      'export-readiness@laptop-1024x768': { darwin: 3, linux: 6 },
-      'export-readiness@tablet-768x1024': { darwin: 3, linux: 6 },
+      'export-readiness@desktop-1280x800': 4,
+      'export-readiness@laptop-1024x768': 3,
+      'export-readiness@tablet-768x1024': 3,
       'export-readiness@mobile-375x812': 1,
-      'export-readiness@zoom-200': { darwin: 1, linux: 4 },
+      'export-readiness@zoom-200': 1,
       // R1b: the `.verdict-cmd mono` block that rendered
       // `isaac validate --official · exit N` is GONE (a fabricated CLI transcript —
       // no process produced it), and it was a low-contrast node axe counted here.
@@ -459,8 +472,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // interesting part is that linux has now converged ON darwin's number, which
       // is what you would expect if the merge that produced 12 stopped happening.
       // Only the LINUX total moves; darwin's stays.
-      'export-readiness-done@desktop-1280x800': { darwin: 12, linux: 13 },
-      'export-readiness-done@laptop-1024x768': { darwin: 11, linux: 12 },
+      'export-readiness-done@desktop-1280x800': 12,
+      'export-readiness-done@laptop-1024x768': 11,
       // The two pairs where LINUX HAS FEWER nodes: the wider face pushes two
       // fragments onto one line, so axe sees one text node instead of two.
       // Linux 11 -> 12, MEASURED by CI run 30691557697 on `7e9a387`; the split
@@ -469,16 +482,16 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // previously could not, so a pre-existing failure moved from `incomplete`
       // into `violations`. Linux only, because 768 is inside the band the
       // compact treatment moved into and the wider Linux face changes what fits.
-      'export-readiness-done@tablet-768x1024': { darwin: 11, linux: 12 },
+      'export-readiness-done@tablet-768x1024': 11,
       'export-readiness-done@mobile-375x812': 8,
-      'export-readiness-done@zoom-200': { darwin: 9, linux: 10 },
+      'export-readiness-done@zoom-200': 9,
       'governance@desktop-1280x800': 4,
       'governance@laptop-1024x768': 4,
       'governance@tablet-768x1024': 4,
       'governance@mobile-375x812': 3,
       'governance@zoom-200': 3,
-      'guided-completion@desktop-1280x800': { darwin: 10, linux: 12 },
-      'guided-completion@laptop-1024x768': { darwin: 9, linux: 11 },
+      'guided-completion@desktop-1280x800': 10,
+      'guided-completion@laptop-1024x768': 9,
       // Linux 11 -> 10, MEASURED by CI run 30691557697 on `7e9a387`: a genuine
       // IMPROVEMENT on Linux only, lowered rather than left stale. darwin stays
       // 11 (measured locally, unchanged), so the entry splits.
@@ -511,7 +524,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // `.guided-inferability` while Linux did. The two platforms have therefore
       // CONVERGED at 11, which is why the split that existed for the 11/10
       // difference is no longer carrying any information and is removed.
-      'guided-completion@tablet-768x1024': { darwin: 9, linux: 11 },
+      'guided-completion@tablet-768x1024': 9,
       // Was `{ darwin: 7, linux: 8 }`; darwin caught up to Linux on 2026-08-01
       // and the split is no longer needed. `.guided-suggestion-not` moved from
       // axe's `incomplete` bucket into `violations` after the C1/I4 fix removed
@@ -526,8 +539,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // at 3.64:1, the same token as four already-baselined nodes on this
       // surface), not a regression. Fixing the token is a separate, wider
       // change: it would move counts on many surfaces at once.
-      'guided-completion@mobile-375x812': { darwin: 7, linux: 8 },
-      'guided-completion@zoom-200': { darwin: 7, linux: 9 },
+      'guided-completion@mobile-375x812': 7,
+      'guided-completion@zoom-200': 7,
       'load@desktop-1280x800': 3,
       'load@laptop-1024x768': 3,
       'load@tablet-768x1024': 3,
@@ -564,8 +577,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          grew 11 → 12 (+1) but darwin grew 10 → 12 (+2), so the two columns
          CONVERGE and the pair becomes a bare number. Assuming +1 per platform
          would have written `{ darwin: 11, linux: 12 }`, which is wrong. */
-      'record-detail@desktop-1280x800': { darwin: 14, linux: 17 },
-      'record-detail@laptop-1024x768': { darwin: 14, linux: 17 },
+      'record-detail@desktop-1280x800': 14,
+      'record-detail@laptop-1024x768': 14,
       /* linux 15 -> 14: the 320px clipping fix (min-width/overflow-wrap on
          `.fg-summary`, scoped to `.record-view-panel`) let the summary WRAP
          instead of running past its clip, and one contrast node stopped firing
@@ -575,7 +588,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          file has two columns. */
       'record-detail@tablet-768x1024': 14,
       'record-detail@mobile-375x812': 12,
-      'record-detail@zoom-200': { darwin: 12, linux: 14 },
+      'record-detail@zoom-200': 12,
       'schema-reference@desktop-1280x800': 19,
       'schema-reference@laptop-1024x768': 19,
       'schema-reference@tablet-768x1024': 17,
@@ -655,7 +668,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * branch chose. This branch DID fix the same class of defect where it was
        * local — three `.statusbar-*` declarations, see `chrome.css` and the 26
        * entries lowered above and below — and deliberately did not touch the two
-       * tokens, which have 189 and 71 uses.
+       * tokens, which have 189 and 69 uses at this commit.
        */
       'settings-explorer@desktop-1280x800': 48,
       'settings-explorer@laptop-1024x768': { darwin: 49, linux: 48 },
@@ -994,7 +1007,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
          run rather than guessing the other. Nobody retyped a count. */
       'evidence@width-320': 67,
-      'evidence@width-390': { darwin: 67, linux: 68 },
+      'evidence@width-390': 67,
       'experiments-example@width-320': 9,
       'experiments-example@width-390': 9,
       'experiments@width-320': 2,
@@ -1005,8 +1018,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'export-readiness@width-390': 1,
       'governance@width-320': 3,
       'governance@width-390': 3,
-      'guided-completion@width-320': { darwin: 7, linux: 8 },
-      'guided-completion@width-390': { darwin: 7, linux: 8 },
+      'guided-completion@width-320': 7,
+      'guided-completion@width-390': 7,
       'load@width-320': 1,
       'load@width-390': { darwin: 1, linux: 2 },
       'memory-graph@width-320': 14,
@@ -1570,27 +1583,45 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // darwin +3, linux +2.
   // ── 2026-08-10, RUN VERTICAL SLICE ──────────────────────────────────────
   // darwin 2206 -> 2162 (-44). Two causes, and they pull opposite ways:
-  //   -47  the StatusBar contrast fix, across 26 entries on five record surfaces
-  //        (see the long note at the top of the `color-contrast` entry). A real
-  //        reduction in real debt, not a measurement artefact.
-  //   +3   `settings-explorer` at desktop/laptop/tablet — a STALE DARWIN COLUMN
-  //        corrected, A/B-measured as already wrong on `b7792c1`. Nothing on
-  //        darwin got worse.
+  //   -49  the StatusBar contrast fix, summed over the 26 lowered entries on five
+  //        record surfaces (see the long note at the top of the `color-contrast`
+  //        entry). A real reduction in real debt, not a measurement artefact.
+  //   +5   `settings-explorer` at desktop/laptop/tablet (+1/+2/+2) — a STALE DARWIN
+  //        COLUMN corrected, A/B-measured as already 48/49/64 on `b7792c1`. Nothing
+  //        on darwin got worse.
+  // (-49 + 5 = -44. An earlier revision wrote "-47 / +3", where the +3 was the
+  //  entry COUNT used as a node delta and the -47 was then back-computed from it to
+  //  make the arithmetic close. The net was right and the decomposition was not,
+  //  which is the more dangerous of the two ways to be wrong about a number.)
   // Both numbers are CHECKED by the suite (it re-sums the entries per platform and
-  // fails if either constant disagrees), so neither is my arithmetic — 2162 is the
-  // figure the suite itself printed.
+  // fails if either constant disagrees), so neither is my arithmetic. Both figures
+  // came from that test's own failure message, which is only rendered WHEN it fails —
+  // so a later reader cannot reproduce the printout from a green tree, only re-derive
+  // the sum. Re-derive it; do not trust this sentence.
   //
-  // linux 2203 -> 2206 (+3), which is ONLY the explorer ratchet: the five new Run
-  // operations shifting `.api-browser-list`'s scroll clip, measured in CI on
-  // `758360c`. The 26 StatusBar reductions are NOT in this figure, because their
-  // linux per-entry numbers have not been measured yet — this environment cannot
-  // run the Linux face, and the file's rule is that the other column comes from a
-  // CI run. So linux is expected to fall by roughly 40 more in the follow-up
-  // commit that transcribes them. Do not pre-compute it from the darwin deltas:
-  // the note above `export-readiness-done@desktop-1280x800` records a case where
-  // removing a DOM node moved one platform and not the other.
+  // linux 2203 -> 2161, TRANSCRIBED FROM CI (run 31368770283, job 93392836969),
+  // not derived. That job reported 24 `IMPROVED … on linux` messages and ZERO
+  // `GREW`; every linux figure in them equals the darwin figure measured here, and
+  // the two entries it did NOT report (`record-detail@tablet-768x1024` and
+  // `record-detail@width-390`) passed, which is the same agreement stated the other
+  // way. So all 26 collapsed from `{ darwin, linux }` back to scalars.
+  //
+  // THAT AGREEMENT WAS NOT SAFE TO ASSUME AND WAS NOT ASSUMED. The intermediate
+  // commit deliberately carried a linux column it knew was too high rather than
+  // pre-computing one, because the note above `export-readiness-done@desktop-1280x800`
+  // records a case where removing a DOM node moved one platform and not the other.
+  // It happened to agree everywhere this time; that is a measurement, not a rule.
+  //
+  // WHY THE TWO TOTALS STILL DIFFER BY ONE while all 26 changed entries agree: three
+  // entries elsewhere in the file are per-platform and do not cancel —
+  // `settings-explorer@laptop-1024x768` { 49, 48 } and
+  // `settings-explorer@tablet-768x1024` { 64, 63 } put darwin two ahead, and the
+  // pre-existing `memory-graph@zoom-200` { 21, 22 } puts it one behind. Net +1. This
+  // arithmetic is a RECONCILIATION of a number the suite computed, not the source of
+  // it: the first attempt at this constant wrote 2162 for linux and the
+  // well-formedness test rejected it with the correct figure.
   darwin: 2162,
-  linux: 2206,
+  linux: 2161,
 };
 
 /**

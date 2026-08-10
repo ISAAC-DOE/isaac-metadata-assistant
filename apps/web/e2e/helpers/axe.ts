@@ -224,21 +224,34 @@ export function auditScan(
 /**
  * How many offending nodes a failure message lists before truncating.
  *
- * IT WAS 4, AND THAT NUMBER COST A WHOLE INVESTIGATION. When the Run vertical
- * slice grew `record-detail@tablet-768x1024` from 14 to 16 `color-contrast`
- * nodes, CI printed four nodes — all four of them pre-existing debt
- * (`.section-tab`, `.needsyou-about`, `.evidence-trail-link-count`) — and
- * "… and 9 more node(s)". The two NEW nodes, which are the entire point of a
- * regression message, were inside the truncated part, so the only way to find out
- * what had regressed was to re-run the scan locally against two commits. The
- * baseline's whole design is "tell the author exactly what got worse"; a limit
- * that hides the delta defeats it.
+ * IT WAS 4, AND THAT NUMBER COST A WHOLE INVESTIGATION. The Run vertical slice
+ * produced two `record-detail` regressions in one linux run (job 93380745844) —
+ * `tablet-768x1024` 14 -> 16 and `width-390` 12 -> 13 — and in BOTH messages every
+ * one of the four printed nodes was pre-existing debt:
  *
- * 24 is chosen against the actual numbers rather than as a round figure: the
- * largest baselined count in this repository is `settings-explorer@tablet-768x1024`
- * at 62, so this is deliberately NOT "print everything" — a 62-node dump would
- * bury the signal again. It is comfortably above every *delta* the baseline has
- * ever reported, which is the thing a reader needs to see.
+ *   tablet-768x1024:  `.record-file`, `kbd.topbar-search-kbd`,
+ *                     `.evidence-trail-link-count`, `#record-view-tab-graph`
+ *                     … and 12 more   (4 + 12 = 16)
+ *   width-390:        `.evidence-trail-link-count`, `#record-view-tab-graph`,
+ *                     two `.needsyou-about.mono`
+ *                     … and 9 more    (4 + 9 = 13)
+ *
+ * The NEW nodes — the entire point of a regression message — were inside the
+ * truncated part of both, so the only way to learn what had regressed was to re-run
+ * the scan locally against two commits. The baseline's whole design is "tell the
+ * author exactly what got worse"; a limit that hides the delta defeats it.
+ *
+ * (An earlier revision of this comment merged the two messages: it paired the
+ * tablet counts with the width-390 node list and its "… and 9 more". The
+ * conclusion held — all four printed nodes are pre-existing debt in both — but the
+ * evidence cited was not the evidence. Corrected rather than deleted, because a
+ * confidently mis-cited log line is the failure mode this file exists to catch.)
+ *
+ * 24 is chosen against the actual numbers rather than as a round figure. The
+ * largest baselined counts here are `evidence@{desktop,laptop,tablet}` at 69 and
+ * `settings-explorer@tablet-768x1024` at 63-64, so this is deliberately NOT "print
+ * everything" — a 69-node dump would bury the signal again. It is comfortably above
+ * every *delta* the baseline has ever reported, which is the thing a reader needs.
  */
 const MAX_REPORTED_NODES = 24;
 

@@ -2523,7 +2523,20 @@ def _run_field_question(path: str) -> str:
 #: dotted paths and is therefore the vocabulary the rest of the draft pipeline
 #: already speaks: every key ``draft["fields"]`` legitimately carries was put there
 #: from it. Allowing exactly what the extractor can produce means this route can
-#: never write a key the rest of the application cannot read, validate or export.
+#: never write a KEY the rest of the application cannot read, validate or export.
+#:
+#: THAT SENTENCE SAID "a key" WITHOUT THE EMPHASIS, AND THE MISSING WORD WAS A REAL
+#: GAP. Read as a statement about values it is FALSE, and the false reading is what it
+#: invited: the comprehension below iterates ``FIELD_MAP.values()`` and DISCARDS the
+#: coercer, so nothing about the extractor's type discipline survives into this route.
+#: ``context.temperature_K``'s coercer is ``_to_number`` — the extractor could never
+#: emit ``"hot"``, ``{"a": 1}``, ``[1, 2]``, ``true`` or ``NaN`` there — and this route
+#: accepted all five. Four are caught downstream by the official schema
+#: (``'hot' is not of type 'number'``); ``NaN`` was not caught anywhere, and it
+#: committed a write, 500ed the response, wedged both run reads and drove an
+#: unparseable "official record" through the export gate with a PASS verdict. The
+#: value-side guard is now in the PATCH route (``_is_json_renderable``), NOT here,
+#: because this set is a set of paths and should stay one.
 #:
 #: WHY NOT THE OFFICIAL SCHEMA DIRECTLY, since it is the truth plane. Because it
 #: cannot enumerate a closed set of dotted paths: ``sample.composition.*``,
@@ -2542,6 +2555,26 @@ RUN_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
     for path, _coercer in EXTRACTOR_FIELD_MAP.values()
     if ws.field_level(path) == ws.LEVEL_RUN
 )
+
+
+def _is_json_renderable(value) -> bool:
+    """Can this value survive the response serializer and a round trip through disk?
+
+    `json.dumps(..., allow_nan=False)` is the exact test, and it is used rather than
+    an `isinstance` walk on purpose: it is the SAME function Starlette renders
+    responses with, so a value that passes here cannot fail there. A hand-written type
+    check would be a second, drifting definition of "storable".
+
+    Non-finite floats are the case that motivated it (see the caller), but the test is
+    general: it also refuses a value that is not JSON-serialisable at all, and it
+    recurses into nested lists and objects for free, where a shallow check would let
+    `{"a": NaN}` through.
+    """
+    try:
+        json.dumps(value, allow_nan=False)
+    except (ValueError, TypeError):
+        return False
+    return True
 
 
 def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
@@ -2868,6 +2901,58 @@ def patch_run(
                     "key": None,
                     "keys": [],
                     "message": "No run-level field and no new label was named in the request.",
+                },
+            )
+
+        # AND RESOLVE EVERY VALUE, not only every key. The filter above is key-only,
+        # and that was not enough.
+        #
+        # THE DEFECT THIS CLOSES, measured end to end. Starlette parses the body with
+        # the stdlib `json.loads`, which ACCEPTS the JavaScript-only literals `NaN`,
+        # `Infinity` and `-Infinity`; it renders responses with
+        # `json.dumps(..., allow_nan=False)`, which REFUSES them. So a single
+        # `{"fields": {"context.temperature_K": NaN}}` — a legal key, a value no
+        # browser's `JSON.stringify` can emit but `curl` can — produced ALL of:
+        #
+        #   * the write COMMITTED (`rev` 1 -> 2, bare `NaN` in `experiment.json`,
+        #     plus a fabricated confirmation whose answer read "NaN") while the
+        #     response was a 500. A successful write reported as a failure is worse
+        #     than the silent no-op the comment above was written to close.
+        #   * `GET .../runs` and `GET .../runs/{id}` 500ing PERMANENTLY thereafter, so
+        #     a client could not even re-read the ETag it needed to repair the run.
+        #   * a TRUTH-PLANE ESCAPE (`CLAUDE.md` §13): `jsonschema` accepts
+        #     `float('nan')` as `"number"`, so the draft check, the official check,
+        #     the export gate and `isaac validate --official` all reported PASS over a
+        #     record file that no strict RFC-8259 parser will read.
+        #
+        # The ingress is this route and nothing else — `POST /edit` already answers
+        # 422 and `POST /answers` leaves the value untouched, both measured. So the
+        # guard belongs here, before the write, and it uses the SAME typed refusal the
+        # key filter uses rather than inventing a second vocabulary.
+        #
+        # It rejects on RENDERABILITY, not on a hand-written type list: the property
+        # that matters is "the response serializer and the on-disk document can
+        # represent this", and `allow_nan=False` is exactly that test. A type
+        # allowlist would have to be kept in step with the schema by hand, and this
+        # route deliberately derives its key set rather than hand-copying it.
+        unrenderable = [
+            key
+            for key, value in raw_fields.items()
+            if not _is_json_renderable(value)
+        ]
+        if unrenderable:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "unrepresentable_value",
+                    "key": str(unrenderable[0]),
+                    "keys": [str(k) for k in unrenderable],
+                    "message": (
+                        "These values cannot be represented in JSON, so they cannot "
+                        "be stored. `NaN`, `Infinity` and `-Infinity` are accepted by "
+                        "some JSON parsers but are not JSON, and a record containing "
+                        "one could not be read back or exported. Nothing was written."
+                    ),
                 },
             )
 
@@ -3917,11 +4002,19 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
         if record is None:
             # Same fail-closed vocabulary as the single-record path: no verdict, not
             # a schema violation. `dry_run: false` — no dry run happened.
+            #
+            # `unavailable` MAKES THAT DISTINCTION MACHINE-READABLE, and it was added
+            # because a client could not make it. The only signal used to be this
+            # fixed English sentence inside `errors[0].message`, so the Run card
+            # rendered "Check Failed" — a schema verdict — over a case this function
+            # deliberately refuses to give a verdict on. `ok` stays False: the flag
+            # explains the refusal, it does not soften it into a pass.
             return {
                 **entry,
                 "ok": False,
                 "errors": [{"path": "$", "message": "Validation could not be completed."}],
                 "dry_run": False,
+                "unavailable": True,
             }
         report = validate_official(record, REPO_ROOT)
         return {
@@ -3940,6 +4033,7 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
             "ok": False,
             "errors": [{"path": "$", "message": "Validation could not be completed."}],
             "dry_run": True,
+            "unavailable": True,
         }
     if result.official_report is not None:
         errors = [

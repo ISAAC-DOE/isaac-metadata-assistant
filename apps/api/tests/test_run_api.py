@@ -534,6 +534,84 @@ def test_a_body_naming_no_run_level_field_and_no_label_is_422_not_a_silent_no_op
         assert response.json()["error"] == "unrecognized_field"
 
 
+@pytest.mark.parametrize(
+    "literal",
+    ["NaN", "Infinity", "-Infinity", '{"a": [1, NaN]}'],
+    ids=["nan", "inf", "-inf", "nan-nested-in-an-object"],
+)
+def test_a_value_json_cannot_represent_is_refused_before_anything_is_written(
+    client, experiment_id, literal
+):
+    """THE ADVERSARIAL FINDING THIS PINS, because it was none of the things a
+    key-only filter protects against.
+
+    The body is sent as RAW BYTES, not through `json=`, because `json.dumps` cannot
+    produce it and neither can a browser's `JSON.stringify` — which is precisely why
+    it survived: every existing test and the whole frontend go through a serializer
+    that refuses these literals. `curl` does not.
+
+    Starlette parses the request with the stdlib `json.loads`, which ACCEPTS `NaN`,
+    `Infinity` and `-Infinity`, and renders responses with
+    `json.dumps(..., allow_nan=False)`, which REFUSES them. Before the guard, one
+    such request produced all of:
+
+      * a COMMITTED write (`rev` 1 -> 2, bare `NaN` in `experiment.json`, and a
+        fabricated confirmation whose recorded answer read "NaN") reported to the
+        caller as an HTTP 500 — a successful write announced as a failure;
+      * `GET .../runs` and `GET .../runs/{run_id}` 500ing PERMANENTLY afterwards, so
+        the client could not re-read the ETag it needed to repair the run;
+      * `isaac validate --official` reporting PASS on the exported record, because
+        `jsonschema` accepts `float('nan')` as `"number"` — a record file no strict
+        RFC-8259 parser will read, through the export gate, with a green verdict.
+
+    The last of those is a truth-plane escape (`CLAUDE.md` §13) whose ingress was this
+    route alone: `POST /edit` already answered 422 and `POST /answers` left the value
+    untouched. So the assertions below are deliberately about the STORE and the
+    subsequent READS, not only about the status code.
+    """
+    run = _create_run(client, experiment_id)
+    etag = _run_etag(client, experiment_id, run["id"])
+    response = client.patch(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}",
+        content=(
+            '{"confirmed_by_user": true, "fields": {"context.temperature_K": '
+            + literal
+            + "}}"
+        ).encode(),
+        headers={"If-Match": etag, "content-type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "unrepresentable_value"
+    assert body["keys"] == ["context.temperature_K"]
+
+    # NOTHING WAS WRITTEN. `rev == 1` is "created, never edited".
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.rev == 1
+    assert stored.draft.get("fields") in (None, {})
+
+    # AND THE RUN IS STILL READABLE — the half of the defect that made it
+    # unrecoverable rather than merely wrong.
+    assert client.get(f"/api/experiments/{experiment_id}/runs").status_code == 200
+    assert (
+        client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
+    )
+
+
+def test_a_finite_number_at_the_same_path_is_still_accepted(client, experiment_id):
+    """The guard is about REPRESENTABILITY, not about numbers. Without this, the fix
+    above could pass by refusing every float."""
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 277.15}},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["run"]["fields"]["context.temperature_K"]["value"] == 277.15
+
+
 def test_a_non_object_fields_value_is_refused(client, experiment_id):
     run = _create_run(client, experiment_id)
     response = _patch(

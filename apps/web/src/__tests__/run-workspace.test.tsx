@@ -162,7 +162,20 @@ describe('Add Run', () => {
       fireEvent.click(screen.getByRole('button', { name: /Add Run/ }));
     });
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toMatch(/changed somewhere else/i);
+    /*
+     * THE COPY NO LONGER BLAMES AN UNNAMED THIRD PARTY. It used to read "This
+     * experiment changed somewhere else" — but `experimentVersion` is captured once
+     * and ANY experiment write bumps `exp.rev`, including the Assistant panel mounted
+     * on this same screen. "Confirm an Assistant proposal, then click Add Run" is the
+     * ordinary path to this message, so "somewhere else" was usually this screen and
+     * usually this reader, seconds earlier.
+     */
+    expect(alert.textContent).toMatch(/changed since this list was loaded/i);
+    expect(alert.textContent).toMatch(/your own edit elsewhere on this screen/i);
+    // And the remedy is the narrow one: this section owns its own fetch, so it can
+    // re-read itself. It used to say "Reload the page".
+    expect(alert.textContent).not.toMatch(/reload the page/i);
+    expect(within(alert).getByRole('button', { name: 'Reload This Section' })).toBeTruthy();
     expect(document.querySelectorAll('[data-run-id]')).toHaveLength(0);
   });
 });
@@ -407,7 +420,12 @@ describe('autosave', () => {
     // uniqueness — the header one is what a reader who has collapsed the card
     // sees, and it is required to be there.
     expect(within(card).getAllByText('Save failed')).toHaveLength(2);
-    expect(within(card).getByRole('status').textContent).toBe('Save failed');
+    // The live region now names the CAUSE as well as the state. "Save failed" with no
+    // reason made a 428, a 404 after a workspace reset in another tab, and an
+    // unreachable backend one indistinguishable state whose only control retried.
+    expect(within(card).getByRole('status').textContent).toBe(
+      'Save failed · Request failed (500).',
+    );
     expect(within(card).queryByText('Saved')).toBeNull();
     expect(patches).toBe(1);
 
@@ -900,7 +918,9 @@ describe('a save refused while the card is collapsed', () => {
     // header indicator and the live region carry it — the same pairing the
     // `conflict` state already had.
     expect(within(b).getAllByText('Save failed')).toHaveLength(2);
-    expect(within(b).getByRole('status').textContent).toBe('Save failed');
+    expect(within(b).getByRole('status').textContent).toBe(
+      'Save failed · Request failed (422).',
+    );
     expect(b.textContent ?? '').toMatch(/Save failed/);
 
     // Reaching the collapsed header by keyboard alone announces it: the words
@@ -953,6 +973,105 @@ describe('a save refused while the card is collapsed', () => {
 // ---------------------------------------------------------------------------
 // 6 — Check Run
 // ---------------------------------------------------------------------------
+
+describe('a value the client itself refuses (review finding: the client-refusal gap)', () => {
+  /*
+   * THE DEFECT: `onFieldChange` returns before `autosave.queue` when `parseRunField`
+   * refuses the text, so the hook's status was never touched. A card that had just
+   * saved went on reading "Saved" while holding an edit that would never be sent —
+   * and the hook's own definition of that word ends "AND NOTHING HAS BEEN TYPED
+   * SINCE". The field error lived inside the expanded panel, so collapsing removed
+   * the only indication, and nothing clears it outside a refresh.
+   *
+   * It is the same shape as the server-refusal defect the branch had already fixed
+   * one describe block above; client refusals were simply left out of that rule.
+   */
+  async function saveThenTypeGarbage() {
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: {
+        body: {
+          run: runFixture({
+            id: 'RUNAAA',
+            label: 'Run 1',
+            ordinal: 1,
+            version: 'ra.1',
+            fields: { 'context.temperature_K': { value: 311, status: 'verified', evidence: [] } },
+          }),
+        },
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    vi.useFakeTimers();
+    // 311, NOT 300: `runFixture` already seeds `context.temperature_K: 300`, so
+    // firing a change with "300" is a no-op React never dispatches — the first
+    // draft of this test did exactly that and its setup silently never saved.
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '311' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toBe('Saved');
+    // Now type something this build cannot shape. Nothing is sent.
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: 'abc' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+  }
+
+  it('stops claiming Saved, because something HAS been typed since', async () => {
+    await saveThenTypeGarbage();
+    const card = cardFor('RUNAAA');
+    expect(within(card).queryByText('Saved')).toBeNull();
+    expect(within(card).getByRole('status').textContent).toBe('Change not sent');
+  });
+
+  it('says so on the COLLAPSED card, where the field error cannot be seen', async () => {
+    await saveThenTypeGarbage();
+    await act(async () => {
+      fireEvent.click(headerOf('RUNAAA'));
+    });
+    expect(headerOf('RUNAAA')).toHaveAttribute('aria-expanded', 'false');
+    const card = cardFor('RUNAAA');
+    // In the header's accessible name, so keyboard-only reaching the collapsed card
+    // says what is wrong with it — the same rule as the server-refusal case.
+    expect(headerOf('RUNAAA')).toHaveAccessibleName(/Change not sent/);
+    expect(within(card).getByRole('status').textContent).toBe('Change not sent');
+    expect(within(card).queryByText('Saved')).toBeNull();
+  });
+
+  it('goes back to Saved once the value is corrected', async () => {
+    await saveThenTypeGarbage();
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '312' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toBe('Saved');
+  });
+});
+
+describe('the denominator discloses its scope (review finding: invented denominator)', () => {
+  it('says which three fields it is counting, not bare "of 3"', async () => {
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
+    await screen.findByRole('button', { name: /Add Run/ });
+    /*
+     * "1 of 3 set" is a completion claim the number was not entitled to make: three
+     * is what THIS SCREEN offers, the backend accepts five, and a valid ISAAC record
+     * needs far more — so "3 of 3 set" was displayable on a run whose Check Run
+     * fails. This project has a written rule against a denominator that is not
+     * enumerated from the record's own content.
+     */
+    const progress = cardFor('RUNAAA').querySelector('.run-card-progress') as HTMLElement;
+    expect(progress.textContent).toMatch(/run fields on this screen/);
+    expect(progress.textContent).not.toMatch(/^\s*\d+ of \d+ set\s*$/);
+  });
+});
 
 describe('Check Run', () => {
   it('renders the findings, mutates nothing, and claims nothing about export', async () => {

@@ -48,7 +48,12 @@ export function RunsSection({ experimentId }: { experimentId: string }) {
       {listing.status === 'data' && (
         // Keyed on the experiment so switching records rebuilds the list state
         // rather than carrying one record's runs into another's.
-        <RunsList key={experimentId} experimentId={experimentId} initial={listing.data} />
+        <RunsList
+          key={experimentId}
+          experimentId={experimentId}
+          initial={listing.data}
+          onReload={listing.reload}
+        />
       )}
     </section>
   );
@@ -57,9 +62,13 @@ export function RunsSection({ experimentId }: { experimentId: string }) {
 function RunsList({
   experimentId,
   initial,
+  onReload,
 }: {
   experimentId: string;
   initial: ApiRunsResponse;
+  /** Re-run the section's own fetch. `useFetch`'s `reload`, threaded down so the
+   *  stale-version refusal has a remedy narrower than "reload the page". */
+  onReload: () => void;
 }) {
   const [runs, setRuns] = useState<ApiRunView[]>(initial.runs);
   const [experimentVersion, setExperimentVersion] = useState(initial.experiment_version);
@@ -67,6 +76,8 @@ function RunsList({
   const [focusRunId, setFocusRunId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  /** True only for the stale-version refusal, which is the one a reload fixes. */
+  const [addStale, setAddStale] = useState(false);
 
   /*
    * ONE RUN IS REPLACED BY ID, and never by position. Two runs on one screen
@@ -81,6 +92,7 @@ function RunsList({
   const addRun = () => {
     setAdding(true);
     setAddError(null);
+    setAddStale(false);
     api
       .createRun(experimentId, { experimentVersion })
       .then((res) => {
@@ -97,8 +109,27 @@ function RunsList({
         // every other failure: reload, do not retry.
         const status = err instanceof ApiError ? err.status : undefined;
         if (status === 412) {
+          /*
+           * "SOMEWHERE ELSE" WAS OFTEN THIS SCREEN, AND OFTEN THIS READER.
+           *
+           * `experimentVersion` is captured once and advanced only by a successful
+           * create, while ANY experiment mutation bumps `exp.rev` — and the Assistant
+           * panel mounted on this same screen writes through `submitAnswer`/`editField`.
+           * RunsSection is not in the poller's refresh path, so the sequence "confirm
+           * an Assistant proposal, then click Add Run" produced a message blaming an
+           * unnamed third party for a change the reader had just made, seconds earlier,
+           * a few hundred pixels away.
+           *
+           * And the remedy overstated what is needed: this section owns its own fetch,
+           * so re-reading it is enough. `Reload This Section` re-runs `api.listRuns`
+           * and adopts the current `experiment_version` — no page reload, no lost
+           * scroll position, and nothing typed elsewhere on the screen is discarded.
+           */
+          setAddStale(true);
           setAddError(
-            'This experiment changed somewhere else, so the run was not created. Reload the page to pick up the current version.',
+            'The experiment has changed since this list was loaded, so the run was not created — ' +
+              'this can be your own edit elsewhere on this screen. Reload this section to pick up ' +
+              'the current version, then add the run again.',
           );
           return;
         }
@@ -121,9 +152,14 @@ function RunsList({
       </div>
 
       {addError !== null && (
-        <p className="runs-error" role="alert">
-          {addError}
-        </p>
+        <div className="runs-error" role="alert">
+          <p>{addError}</p>
+          {addStale && (
+            <button type="button" className="btn btn-secondary" onClick={onReload}>
+              Reload This Section
+            </button>
+          )}
+        </div>
       )}
 
       {runs.length === 0 ? (
