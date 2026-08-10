@@ -748,6 +748,151 @@ def test_hydrate_restores_a_missing_directory_into_the_ordinary_root_only(app, t
     assert store.hydrate() == 0
 
 
+def _stored_state(rid: str, title: str = "Restored") -> dict:
+    return {
+        "id": rid,
+        "title": title,
+        "created_utc": "2026-01-01T00:00:00Z",
+        "source": {"description": "x", "files": []},
+        "draft": {"fields": {}, "pending": []},
+    }
+
+
+class _SiblingRacesTheSelect(FakeConnection):
+    """A connection whose ``SELECT`` of every experiment lets a SIBLING hydrate win.
+
+    THE FIRST BURST AFTER A POD ROLL IS CONCURRENT, and that is the whole point of
+    this double. The record screen issues SEVEN per-record reads at once
+    (``apps/web/src/lib/api.ts``'s record bundle), the ``emptyDir`` workspace is
+    empty, so every one of them misses and calls ``_hydrate_ordinary_scope``. One
+    of them writes the directories; the rest reach ``hydrate``'s
+    ``state_path.exists()`` skip AFTERWARDS and therefore restore NOTHING.
+
+    Simulated deterministically rather than with threads: the sibling's real
+    ``hydrate()`` — its own store, its own connection, no stubbing of the write —
+    is run once, at the moment this call's ``fetchall`` returns, which is precisely
+    the window between "the rows are in hand" and "the skip is evaluated". Fires
+    once, so the sibling cannot recurse.
+    """
+
+    def __init__(self, *, sibling, **kw) -> None:
+        super().__init__(**kw)
+        self._sibling = sibling
+        self.races = 0
+
+    def cursor(self):
+        cur = super().cursor()
+        outer = self
+        inner_fetchall = cur.fetchall
+
+        def fetchall():
+            rows = inner_fetchall()
+            if rows and outer.races == 0:
+                outer.races += 1
+                outer._sibling()
+            return rows
+
+        cur.fetchall = fetchall  # type: ignore[method-assign]
+        return cur
+
+
+def test_a_record_a_concurrent_read_restored_is_200_and_not_404(app, tmp_path, monkeypatch):
+    """THE RECORD EXISTS, ITS FILE IS ON DISK, AND IT USED TO ANSWER 404.
+
+    Measured on the un-fixed code at 6 of 7 concurrent reads, and observed hosted
+    immediately after a pod replacement: the record screen showed the definitive
+    panel "Record Not Found" while `GET /api/experiments/{id}` and its `/runs`
+    sub-read answered 200 to a client that retried by hand.
+
+    The cause was `load_experiment` deciding whether the record is present from
+    ``_hydrate_ordinary_scope``'s RESTORED COUNT, which is a fact about the scope,
+    not about this record. A sibling read that restored everything first left this
+    one counting 0 — and the count short-circuited before the
+    ``state_path.exists()`` re-check that would have answered correctly.
+
+    A scientist seeing that panel would reasonably believe their work was gone.
+    """
+    rid = "01ABCDEFGHJKMNPQRSTVWXYZ00"
+    rows = [(rid, json.dumps(_stored_state(rid)))]
+
+    # The sibling: a real store on its own connection, doing a real hydrate.
+    sibling = repo.PostgresOrdinaryStore(_env(), connect=_connector(FakeConnection(rows=rows)))
+    racing = _SiblingRacesTheSelect(sibling=sibling.hydrate, rows=rows)
+
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(racing))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    state_path = tmp_path / "ws" / rid / "experiment.json"
+    assert not state_path.exists(), "the roll left the workspace empty; that is the premise"
+
+    response = client.get(f"/api/experiments/{rid}")
+
+    assert racing.races == 1, "the race never happened, so this test proved nothing"
+    assert state_path.is_file(), "the sibling's hydrate should have written the file"
+    assert response.status_code == 200, response.text
+    # The record it returned is the one asked for, not merely "a 200".
+    assert response.json()["id"] == rid
+    assert response.json()["title"] == "Restored"
+
+
+def test_an_unknown_id_is_404_even_when_hydration_restored_other_records(app, tmp_path, monkeypatch):
+    """THE OTHER HALF, and it is what stops the fix from inventing a record.
+
+    A healthy database with rows for OTHER ids: hydration succeeds and restores a
+    non-zero number of directories, so nothing about the count would refuse this
+    read. The file for the id asked about is still absent, and that — not the
+    count — is the answer.
+    """
+    other = "01ABCDEFGHJKMNPQRSTVWXYZ01"
+    conn = FakeConnection(rows=[(other, json.dumps(_stored_state(other, "Someone else's")))])
+
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    unknown = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    response = client.get(f"/api/experiments/{unknown}")
+
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "experiment_not_found"
+    # The premise, asserted: hydration DID restore something, so a count-based
+    # guard would have been satisfied and only the file check can have refused.
+    assert (tmp_path / "ws" / other / "experiment.json").is_file()
+    assert not (tmp_path / "ws" / unknown).exists()
+
+
+def test_a_durable_row_is_still_404_while_the_database_is_unreachable(app, tmp_path, monkeypatch):
+    """THE KNOWN, ACCEPTED DEGRADATION — pinned so that changing it stays deliberate.
+
+    A record with a durable row and no directory answers 404 for as long as the
+    database cannot be read. That is a real limitation: the record exists and the
+    server says it does not. It is accepted on the reasoning at
+    ``workspace._hydrate_ordinary_scope`` — a read that had no database dependency
+    before durable storage existed must not be able to 500 — and it is a SEPARATE
+    decision from the concurrency defect above, which is why the fix for that one
+    deliberately did not touch it.
+
+    If a future slice decides "we could not check" should stop looking like "it is
+    not here", this test is where that decision becomes visible.
+    """
+    rid = "01ABCDEFGHJKMNPQRSTVWXYZ02"
+    conn = _table_missing_connection()
+
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.get(f"/api/experiments/{rid}")
+
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "experiment_not_found"
+    assert not (tmp_path / "ws" / rid).exists(), "a failed hydrate must write nothing"
+
+
 @pytest.mark.parametrize(
     "rid,state_id",
     [
