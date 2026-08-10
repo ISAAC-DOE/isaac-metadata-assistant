@@ -1,12 +1,57 @@
 # Scientist-Friendly Data Capture — the data contract
 
-**Status: contract only. No code in this document has been implemented.**
+~~**Status: contract only. No code in this document has been implemented.**~~
+**SUPERSEDED 2026-08-10 — status: PARTLY IMPLEMENTED.** The strikethrough is deliberate: the
+original line is kept visible because it is the first thing a reader sees and it is now the most
+misleading sentence in the file. Shipped since it was written: the **export fan-out** and the Run
+model (§1), **DEFECT C1's** database-side compare-and-swap and **autosave** (§4), and **DEFECT C2's**
+per-record reset precondition (§4). Still contract-only: submission (D3/D4), voice (§6), the evidence
+graph (§7), and migration `0002` (§8). Per-claim detail is in the re-verification block below.
+
 It exists so that no later slice re-derives the record mapping, and so that the parts of the
 requested feature that have *no legal implementation path today* are named before anyone builds
 a UI that implies otherwise.
 
 Every claim is cited to `file:line` in this repository at `a5601e9`, or to a measured hosted
 observation. Where something is inferred, it says so.
+
+> ### RE-VERIFIED 2026-08-10 at `2209b8e` — read this before quoting anything below
+>
+> Ten claims in this document had gone stale. **Each is left visible with a dated correction block
+> beside it** — the same convention as the "CORRECTION 2026-08-08", "RESOLVED 2026-08-09" and
+> "ADDENDUM — 2026-08-09" blocks already here — so a reader sees the change of state instead of a
+> silently rewritten history. Nothing was deleted.
+>
+> **Two are decision-level, not citation-level, and a plan built on the old text would be wrong:**
+>
+> - **DEFECT C1 (§4) is RESOLVED.** The upsert IS a compare-and-swap in the database. It was written
+>   as "the blocking prerequisite for autosave"; that prerequisite is discharged and autosave ships.
+> - **DEFECT C2 (§4) is RESOLVED.** The reset/save race is closed by a per-record precondition, with
+>   nine `test_c2_*` tests. This document said "No test asserts the property."
+>
+> **One is layer-level:** §1's "the application is currently hard-wired 1 experiment : 1 record" is
+> **superseded at the application layer** — export fan-out ships — while remaining true at the
+> truth-core layer, which is intentional.
+>
+> The other seven are drifted citations (§2, §3 ×3, §4, §5, §6, §8). **§6's is also incomplete**, and
+> that one changes an argument about cost, not just a line number.
+>
+> **Citation style changed, and why.** Almost all of this staleness is line drift — the failure this
+> file already warned about ("this file has already broken its own citations once by growing past
+> them"). Corrections below therefore cite a **`def` name, a heading, or a quoted phrase** wherever
+> the file is likely to keep growing; a line number, where one appears, is stamped with the SHA it
+> was read at. Re-verify before quoting.
+>
+> **That policy justified itself within hours, and this is measured rather than argued.** While this
+> pass was running, PR #106 merged into `main` and added 144 lines to `routes.py`. **Every
+> `routes.py` line number written below is therefore ALREADY STALE against `main`**, by ~124 lines:
+> `def uploads` `:5262` → `:5386`; `_DB_RECON_RECORD_DISPLAY` `:6411` → `:6535`; the *"every record
+> this API can currently create"* phrase `:3631` → `:3755`. **The `def`-name and quoted-phrase
+> citations all still resolve unchanged.** Treat every line number here as *"where it was at
+> `2209b8e`"* — a navigation hint with an expiry date — and the name or phrase as the citation.
+>
+> **What was re-verified as STILL TRUE and left standing** is listed in §10, added for this pass — a
+> correction sweep that only removes claims leaves a reader unable to tell what survived.
 
 ---
 
@@ -119,6 +164,64 @@ The application is currently hard-wired 1 experiment : 1 record.
   re-export (`routes.py:2045`).
 
 Export must fan out. `Experiment.record_id` becomes per-Run, and the experiment carries the set.
+
+### SUPERSEDED 2026-08-10 — the fan-out SHIPPED. "Hard-wired 1:1" is false at the application layer and still true at the truth-core layer
+
+The paragraph and three bullets above are kept because they correctly recorded the starting state and
+because two of the three cited facts are *still true and correct by design*. What has changed is the
+conclusion: **"Export must fan out" is no longer work to be scheduled — it is built.** Verified at
+`2209b8e`.
+
+**What ships (all opened and read, not inferred):**
+
+- `Experiment.export_units()` (`apps/api/isaac_api/workspace.py`, `def export_units` at `:2647` at
+  this SHA) — *"Everything this experiment exports: N records for N runs, else exactly one."* It
+  returns one `ExportUnit` per `sorted_runs()` with `target_id=run.id`, and for a zero-run experiment
+  returns a single unit carrying `self.draft` itself.
+- **Two-phase `post_export`** (`routes.py`, `def post_export`; the phases are labelled in the source
+  as `# PHASE 1:` and `# PHASE 2:`). Phase 1 validates **every** eligible unit writing nothing
+  (`export_draft` is a pure transform plus two validations); a single failure means no artifact is
+  written for any unit — which is D4's rule, enforced rather than merely asserted. Phase 2 writes.
+- `Run.record_id` exists — `record_id: str | None = None` on `Run` at `workspace.py:905`, alongside
+  the `Experiment` one at `:2172`.
+- `Experiment.all_units_exported()` / `any_unit_exported()` — run-aware, deliberately *added beside*
+  `exported()` rather than redefining it, because ~15 call sites pair `exported()` with
+  `record_path()` to read the experiment's own single artifact.
+
+**The three cited proofs, one by one:**
+
+| §1's citation | State at `2209b8e` | Verdict |
+|---|---|---|
+| `export.py:135` — `transform()` mints exactly one `record_id` | `def transform` is at `:129`; the mint is `"record_id": record_id or new_record_id()` at `:135` | **still true, and correct BY DESIGN.** Fan-out calls `transform` N times through `export_draft(..., record_id=unit.target_id)`. The truth core legitimately did not change. |
+| `export.py:267-286` — `export_draft()` returns a single `ExportResult` | `def export_draft` still at `:267`, still `-> ExportResult` | **still true, and correct by design**, for the same reason. |
+| `workspace.py:379` — `record_id: str \| None`, **singular** | `:379` is now a **comment block** (the D1 rationale prose). The field moved to `:2172`, and `Run.record_id` at `:905` now exists beside it | **superseded** — cite the `def`/field, not the line. |
+
+**State the split plainly, because collapsing it is how a wrong plan gets built:** fan-out is
+**superseded at the application layer** (`apps/api/isaac_api/`) and **still 1:1 at the truth-core
+layer** (`src/isaac_records/export.py`), and that split is *intentional* — the application calls a
+one-record transform N times rather than teaching the truth core about experiments, which have no
+schema counterpart (D1).
+
+#### The write phase is NOT atomic — stated here because its absence above is misleading
+
+Phase 1's all-or-nothing **validation** does **not** imply an all-or-nothing **write**, and a reader
+planning a transactional Submit (D4) must not assume it does. The endpoint's own description says so
+verbatim (`routes.py`, export description): *"It is NOT atomic across the individual file writes: a
+fault between them can leave some records on disk with the state still saying they were not
+exported."* The Phase-2 loop is `for unit, unit_result in results: _write_record(exp, unit_result, unit)`
+with **no rollback**; the state is saved **once**, after every file.
+
+The failure shape is self-healing on a clean retry, and it is **tested, not asserted** —
+`test_a_fault_between_two_unit_writes_leaves_a_state_that_reconciles`
+(`apps/api/tests/test_export_fan_out.py:527`) monkeypatches `routes.atomic_write_text` to raise
+`OSError` on exactly the second run's record path, then asserts both halves: the first run's pair is
+on disk while **no** run holds a `record_id` (the state never claims a fan-out it did not complete),
+and a clean retry republishes every not-yet-exported run and converges.
+
+**Consequence for D4.** "Submit commits N records in one transaction" is not inherited from the
+export path — the export path does not provide it. Whoever builds Submit must supply the atomicity
+themselves, or scope the guarantee to what the export path actually gives: all-or-nothing
+*validation*, plus a converging retry.
 
 ---
 
@@ -248,6 +351,31 @@ The test pins the exact classified/unclassified set against the **real** extract
 decision rather than an omission. `timestamps.created_utc` is unclassified for the same reason and is
 covered by the same test.
 
+#### CORRECTION 2026-08-10 — `field_level` drifted again, `:527` → `:528`; cite the `def`, not the line
+
+The paragraph above is left exactly as written, because it is right about everything except the
+number, and because it is the paragraph that predicted this: *"Re-verify before citing; this file has
+already broken its own citations once by growing past them."* It has now done so twice.
+
+**Measured at `2209b8e`:** `field_level` is at `apps/api/isaac_api/workspace.py:528`, not `:527`.
+Command: `grep -n "^def field_level" apps/api/isaac_api/workspace.py` → `528:def field_level(path: str) -> str:`.
+
+**`:527` was CORRECT when written, and the drift is one line — which is the point.** Confirmed
+against the SHA the paragraph above names: `git show 608f587:apps/api/isaac_api/workspace.py | grep -n
+"def field_level"` → `527:def field_level(path: str) -> str:`. Nobody made a mistake; the file grew by
+one line above it. A citation that a single inserted line can invalidate is not a citation worth
+keeping.
+
+**Per that same warning, the citation is hereby switched to a phrase and stays that way.** Cite it as
+**`workspace.py`, `def field_level`, whose docstring opens *"Classify one key of `draft["fields"]`.
+FIELD-MAP SPACE ONLY."*** — findable by `grep -n "def field_level"`, and drift-proof. Its sibling
+`def block_level` has drifted the same way (`:558` at `608f587` → **`:574`** at `2209b8e`) and gets
+the same treatment; cite the `def`.
+
+The line-number citation for the pinning test
+`test_every_field_map_path_the_real_extractor_emits_is_classified_or_knowingly_not` is likewise
+retired in favour of the **test name**, which is unique in `apps/api/tests/` and cannot drift.
+
 ### DECISION D2 — inheritance is by reference, never by copy
 
 A Run stores *the absence of an override*, not a duplicated value. The resolved value is computed
@@ -271,6 +399,48 @@ Two independent, **derived-on-read, never-persisted** axes:
 - `workflow.derive_workflow()` (`workflow.py:39-125`) → the five-step canonical sequence with
   `completed` | `current` | `reopened` | `blocked`.
 
+#### CORRECTION 2026-08-10 — `Experiment.status()` is mis-cited, and its check ORDER is not what the prose above implies
+
+Both bullets are kept. The `derive_workflow` citation still holds; the `status()` one does not, and
+the order matters more than the number.
+
+**The citation.** `workspace.py:569-586` does **not** contain `Experiment.status()`. At `2209b8e`
+that range is the tail of `field_level`'s body (`:569-572`) plus the opening of **`block_level`'s
+docstring** (`:574-586`) — a different function in a different namespace. `Experiment.status()` is at
+**`workspace.py:2995-3020`**. Command:
+`grep -n "    def status" apps/api/isaac_api/workspace.py` → `2995:    def status(self) -> str:`.
+**Cite it as `workspace.py`, `Experiment.status`,** whose docstring opens *"Derive status
+deterministically; never stored, always recomputed."*
+
+**The order, which is the load-bearing part.** The body, read at this SHA, is:
+
+```python
+if self.all_units_exported():
+    return DONE
+if self.pending_count() > 0:
+    return NEEDS_ATTENTION
+return READY_TO_EXPORT if self._all_units_pass_dry_run() else IN_REVIEW
+```
+
+So the real order is **`all_units_exported()` → `DONE` FIRST**, then `pending_count() > 0` →
+`NEEDS_ATTENTION`, then `READY_TO_EXPORT` / `IN_REVIEW`. That is **not** the order §3's prose
+implies, and it is not even the order the method's *own docstring* lists (the docstring leads with
+`pending > 0 -> needs_attention`). Read the body, not the docstring.
+
+**Why it matters to the table below, concretely.** An exported record that has been edited back into
+a pending state returns **`done`**, because the `DONE` short-circuit is evaluated before
+`pending_count()` is ever consulted. The four-bucket table maps `Drafts ← needs_attention`, so such a
+record does **not** appear under Drafts — it appears under the terminal bucket, no matter what it
+contains. (`Experiment.export_ready()`, immediately below `status()` in the source, exists precisely
+because it answers the *current* drafts' readiness *without* that short-circuit; `status()` and
+`export_ready()` are deliberately different questions.)
+
+**And the table does not reconcile `done`/`exported` with a future `submitted`.** Under D3 a
+submission is a new stored axis, and `done` already means "every unit holds a record id". Nothing in
+this document says what an experiment that is `done` but never submitted should display, nor what a
+submitted experiment whose drafts later regress should display. That is an unresolved product
+question, recorded here rather than left to be discovered by whoever builds the bucket.
+
 ### DECISION D3 — `submitted` is the one genuinely new *stored* state
 
 Every existing status is recomputed from `pending_count` / `draft_ok` / `export_ready` /
@@ -281,6 +451,27 @@ reviewer, no approval, no transition endpoint, no `status` column exists anywher
 So submission is stored, and it is the *only* new stored status axis:
 `submitted_utc`, `submitted_by`, `submitted_rev`.
 
+#### RE-VERIFIED 2026-08-10 — D3 STILL HOLDS; only the `workflow.py` line reference is corrected
+
+**D3 is unchanged and was re-measured, not assumed.** There is still no stored submission anywhere:
+`rg --text -n "submitted_utc|submitted_by|submitted_rev|isaac_submissions" apps/api src apps/web/src`
+returns **two hits, both in a test, both naming `isaac_submissions` only as a *prospective* `0002`
+table name** (`apps/api/tests/test_experiment_repository.py:1238`, `:1258`). No field, no column, no
+route, no state key. `submitted` remains the one genuinely new *stored* state.
+
+**The citation inside it is off, and the fix makes the claim stronger rather than weaker.**
+`workflow.py:60-61` is not the categorical statement — at `2209b8e` those lines are inside
+`derive_workflow`'s docstring explaining when a step is `reopened` vs `current`. The categorical
+statement is the **module docstring, `workflow.py:5-7`**:
+
+> *"The workflow is ONE permanent ordered sequence whose per-step state is computed on read from the
+> current signals only — never persisted, never reordered, never recomputed on the client."*
+
+**The claim itself is true and is mechanically tested**, which the original citation did not say:
+`apps/api/tests/test_workflow_order.py` carries `test_workflow_is_not_persisted_in_state` (`:208`) and
+`test_reopened_is_derived_not_persisted` (`:140`). Cite the module docstring, or those test names —
+`workflow.py` is 125 lines and will drift.
+
 My Experiments groups map as:
 
 | Group | Derivation |
@@ -289,6 +480,71 @@ My Experiments groups map as:
 | Needs Review | no submission record, `status() == in_review` |
 | Ready to Submit | no submission record, `status() == ready_to_export` |
 | Submitted | a submission record exists for the current revision |
+
+#### CORRECTION 2026-08-10 — the four group labels in that table DO NOT EXIST in the product
+
+The table is kept because its **derivations** are right — each row's right-hand column is a correct
+statement about `status()`. Its **left-hand column is not a description of anything.** It reads as if
+"Drafts / Needs Review / Ready to Submit / Submitted" were the labels a scientist sees. They are not,
+and they never have been.
+
+**What is actually rendered**, from `apps/web/src/lib/labels.ts` (the single authored-string module),
+read at `2209b8e`:
+
+```
+groupNeedsAttention: 'Needs Attention'      // :127
+groupInReview:       'In Review'            // :128
+groupReady:          'Ready to Export'      // :129
+groupDone:           'Done'                 // :130
+```
+
+`apps/web/src/lib/adapt.ts` maps status → group (`STATUS_TO_GROUP`: `needs_attention → needsAttention`,
+`in_review → inReview`, `ready_to_export → ready`, `done → done`) and `GROUP_ORDER` renders each
+group's heading from `LABELS.group*`. So the product vocabulary is
+**Needs Attention / In Review / Ready to Export / Done**.
+
+**Measured, not assumed — the exact command that establishes the negative.** For each of the four
+words in the table, at the worktree root:
+
+```
+rg --text -n -F "<phrase>" apps/web/src
+```
+
+- `"Needs Review"` — **0 hits.**
+- `"Ready to Submit"` — **0 hits.**
+- `"Submitted"` — **0 hits.**
+- `"Drafts"` — hits exist, but **none is a queue-group label**: every one is the server-authored
+  OpenAPI tag `"Drafts & Answers"` (`apiDocsModel.ts:15`, `test/apiFixtures.ts:2236`/`:2289`,
+  `__tests__/api-docs-model.test.ts`). Different vocabulary, different surface.
+
+*(`-F` is deliberate — the phrases are literals. `--text` is deliberate and not decorative: see the
+§6 correction, where its absence silently hid a whole file from an identical search.)*
+
+**Cost of adopting the table's words, since this section reads as though it were free.** A rename
+touches the four label strings in `labels.ts` **and** the assertions that pin them.
+`labels.test.ts:58` pins `LABELS.groupReady === 'Ready to Export'` verbatim, and the four rendered
+strings appear across many further frontend suites. Measured by
+`rg --text -l -F "<phrase>" apps/web/src/__tests__/ | wc -l`:
+
+| Phrase | Test files containing it |
+|---|---|
+| `Needs Attention` | 5 |
+| `In Review` | 3 |
+| `Ready to Export` | **15** |
+| `Done` | 3 |
+
+*(Honest limit: that is a literal-substring count over test files, so it is an upper bound on
+*files touched* and not a count of *label assertions* — `Done` in particular is a common word, and
+`Ready to Export` is also a screen title (`LABELS.screenExport`, `:124`) and a lifecycle suffix, not
+only a group heading. It is offered as evidence that the rename is broad, not as a precise task
+estimate.)*
+
+**A fifth vocabulary exists and this document never mentions it.** `adapt.ts` also strips a
+server-authored **lifecycle title suffix** — `KNOWN_TITLE_SUFFIXES` = `' · New Draft'`,
+`' · Partially Completed'`, `' · Export Review Required'`, `' · Ready to Export'`,
+`' · Exported Record'` (`stripLifecycleSuffix`). Those five strings are a *third* naming of the same
+lifecycle, after the backend's `status()` enum and the frontend's group labels. Any renaming slice
+that touches only `labels.ts` will leave this one inconsistent.
 
 ### DECISION D4 — `Submit Record` commits *N* records in one transaction
 
@@ -314,6 +570,42 @@ Optimistic concurrency is **fully implemented** and stricter than the brief assu
   bumps `max(self.rev, disk_rev) + 1` — a byte-stable no-op never bumps `rev`.
 
 New Run-level and revision-level routes reuse this machinery. Nothing here needs reinventing.
+
+#### CORRECTION 2026-08-10 — the last two bullets are mis-cited, and `rev` is a CONCURRENCY TOKEN, not a history
+
+The behaviour described in all four bullets still holds. Two of the citations do not, and one of the
+two lands on a **different method of a different class**, which is the kind of error that produces a
+confidently wrong plan.
+
+| §4's citation | State at `2209b8e` | How confirmed |
+|---|---|---|
+| `Experiment.version_token()` at `workspace.py:425-431` | **`:2232-2234`.** `:425-431` is unrelated prose in a module comment block. | `grep -n "    def version_token" apps/api/isaac_api/workspace.py` → `925`, `2232` |
+| `save_versioned()` at `workspace.py:497-520` | **`:2801-2876`** (`def` at `:2801`; the docstring alone now runs to `:2857`). `:497-520` is now `def parse_address`. | `grep -n "    def save_versioned"` → `2801:    def save_versioned(self) -> bool:` |
+
+**The trap in the first row.** `grep` finds **two** `version_token` methods. `workspace.py:925` is
+**`Run.version_token`** — a *different* method on a different class, added by the run-domain work,
+carrying its own `<generation>.<rev>`. Anyone re-deriving §4's citation by searching for the name will
+land on it first. Cite the class: **`Experiment.version_token`** (`:2232`) vs **`Run.version_token`**
+(`:925`). Both return `f"{self.generation}.{self.rev}"`; they are not interchangeable.
+
+##### `rev` / `generation` / `save_versioned` are a CONCURRENCY TOKEN. They are NOT a history.
+
+This document never says so, and §8's talk of `isaac_experiment_revisions` / `isaac_run_revisions`
+makes it easy to read the existing `rev` as one. It is not, and the difference is architectural:
+
+- There is **exactly one row per experiment** — `isaac_experiments` is keyed `(experiment_id)`, and
+  `Q_UPSERT_EXPERIMENT` is an `INSERT ... ON CONFLICT (experiment_id) DO UPDATE SET state =
+  EXCLUDED.state`. The prior document is **overwritten**. No prior revision's bytes survive anywhere.
+- On disk it is the same shape: `save_versioned` rewrites the one `experiment.json`
+  (`Experiment.state_path`, `:2229-2230`).
+- `rev` therefore answers exactly one question — *"has this changed since the token you hold?"* — and
+  it is deliberately built to answer only that: a byte-stable no-op **never bumps `rev`** and never
+  reaches `save()` at all, and the bump is `max(self.rev, disk_rev) + 1` so a stale instance cannot
+  regress the persisted value.
+
+**Consequence for §8/D7.** Revision *history* is entirely unbuilt. `isaac_experiment_revisions` and
+`isaac_run_revisions` are not a normalisation of something that exists; they are net-new retention of
+bytes that are currently discarded on every save. Budget them as such.
 
 ### DEFECT C1 — the compare-and-swap is in application memory, not in the database
 
@@ -347,6 +639,71 @@ conflict that surfaces as the 412 the API contract already promises. The `rev`-e
 care: `save()` is reached on paths that do not bump `rev`, so a naive `<` predicate would refuse
 legitimate writes.
 
+### DEFECT C1 — RESOLVED 2026-08-10. The compare-and-swap IS in the database.
+
+**Everything above is kept, and every sentence of it is now historical.** It is the single most
+consequential stale claim in this document: it is labelled *"the blocking prerequisite for
+autosave"*, and a plan built on it would schedule work that is already done and would treat autosave
+as blocked when it ships. Verified at `2209b8e` by opening each site.
+
+**The statement is no longer blind.** `Q_UPSERT_EXPERIMENT` is at
+`apps/api/isaac_api/experiment_repository.py:540-550` (was cited `:361-365`), and it carries a
+three-clause CAS predicate plus `RETURNING`:
+
+```sql
+INSERT INTO isaac_experiments (experiment_id, state) VALUES (%s, %s::jsonb)
+ ON CONFLICT (experiment_id) DO UPDATE
+ SET state = EXCLUDED.state, updated_utc = now()
+ WHERE COALESCE(isaac_experiments.state ->> 'generation', '')
+    <> COALESCE(EXCLUDED.state ->> 'generation', '')
+    OR COALESCE((isaac_experiments.state ->> 'rev')::bigint, 0)
+     < COALESCE((EXCLUDED.state ->> 'rev')::bigint, 0)
+    OR isaac_experiments.state = EXCLUDED.state
+ RETURNING experiment_id
+```
+
+Read the three clauses as one rule: **accept if the generation differs** (a different record lineage —
+e.g. a reset minted a fresh generation), **or if `rev` strictly advances**, **or if the document is
+byte-identical** (an idempotent retry must not be reported as a conflict). Everything else is refused.
+The `rev`-equal hazard the fix direction warned about is handled by that third clause, not ignored.
+`rev` and `generation` are read out of the stored `jsonb`, which is why **no migration was required** —
+exactly as predicted.
+
+**The refusal is detected, attributed and surfaced, not merely emitted:**
+
+- **No-op detection** — `accepted = cursor.rowcount == 1` (`:671`). A conflict action whose `WHERE`
+  is false updates nothing and raises nothing; `rowcount` over `RETURNING` is what makes that silence
+  observable.
+- **Winner read back in the same transaction** — `Q_ONE_EXPERIMENT` is executed on the not-accepted
+  branch (`:674-675`) so the 412 can report the `rev` that actually exists.
+- **`DurableWriteConflict`** (`experiment_repository.py:195`) is raised *after* the `with` block
+  (`:684`), deliberately outside it, so the blanket `except Exception` cannot relabel a refusal as an
+  outage. `_note_storage_success()` fires either way — a lost race is not evidence of a sick
+  database, and `/api/health` must not start reporting one because two writers raced.
+- **412 fallback** — `routes.py` `_save_versioned` catches it and returns `_stale_write(conflict.current_experiment(exp), ...)`,
+  i.e. the 412 the API contract already promised; `app.py:185` registers
+  `durable_write_conflict_handler` for any that escape.
+- **Local winner adoption, to avoid wedging** — `Experiment._adopt_winner_locally`
+  (`workspace.py:2358`, called at `:2345`) copies the winner's document into the local workspace file
+  before re-raising. Without it a strict CAS introduces a wedge it can never leave: every subsequent
+  mutation computes `max(self.rev, disk_rev) + 1`, which is the rev the row already holds, so the
+  predicate refuses that write and the next one and the next — a permanent 412 over reads still
+  serving the stale local file.
+- **Pinned by test** — `test_the_upsert_predicate_is_a_compare_and_swap_and_not_a_blind_overwrite`
+  (`apps/api/tests/test_experiment_repository.py:1844`), plus a family of lost-race tests asserting
+  the 412 surfaces, that it is *not* a 503, and that it does not mark the deployment unhealthy.
+
+**The prerequisite is discharged. Autosave shipped** — `apps/web/src/lib/useRunAutosave.ts`, consumed
+by `RunCard.tsx` (`useRunAutosave` at `:50`/`:90`), with per-card `saving` / `saved` / `failed` /
+`conflict` states in a `role="status"` region, and covered by `apps/web/src/__tests__/run-workspace.test.tsx`.
+
+**DO NOT UPGRADE THIS INTO A MULTI-REPLICA SAFETY CLAIM.** What is verified is what the predicate
+does and that the refusal path is wired end-to-end. The **replica count is still not discoverable
+from this repository** — the original honest-limits paragraph above stands unchanged on that point,
+and no observation in this pass touched a deployed pod or a database. The correct summary is: *the
+race is now decided by the database rather than by one process's memory*, which is strictly stronger
+than before and is not the same sentence as "multi-replica safe".
+
 ### DEFECT C2 — the reset/save race (the one §4B asked about)
 
 Real, self-documented, and **narrower than C1**. `workspace.py:1381-1387` states it outright: a
@@ -371,6 +728,70 @@ autosaving UI would make Reset nearly un-executable rather than lossy.
 Fix direction: re-check each record's digest row *inside* its own `record_lock` before removing it,
 and abort with the existing `plan_digest_stale` refusal. ~10 lines, no new lock, preserves the
 documented lock ordering.
+
+### DEFECT C2 — RESOLVED 2026-08-10. The fix direction above was implemented, essentially verbatim.
+
+Kept as written, and now historical. **This one is flagged specially because the re-verification
+brief for this pass listed C2 among the claims to confirm as *still true*. It is not.** The check was
+run anyway, which is the point of running it.
+
+**Every line number in the C2 block above is now wrong, by roughly 2,400 lines.** `workspace.py` grew
+from 1,663 lines at `a5601e9` to 4,400+ at `2209b8e`, and the reset machinery moved wholesale. None of
+`:1381-1387`, `:1556`, `:1566`, `:1572-1576`, `:1598`, `:1534` or `:1455-1465` lands on reset code any
+more — `:1381-1387` is now a comment about a *different* defect (C6, fan-out validation), and `:1556`
+and `:1598` are override- and evidence-related prose. **Do not chase them.** Use the names:
+`reset_to_canonical_seed`, `_reset_lock`, `_plan_digest`, `_plan_digest_row`, `_current_plan_row`,
+`_at_risk_summary`, `validate_tutorial_session_id`.
+
+**The window is closed by a second, PER-RECORD precondition.** `reset_to_canonical_seed`
+(`workspace.py:4142`) now checks the precondition **twice** — once workspace-wide over the whole
+classification, and then again per record, inside that id's own `record_lock` and before that id is
+touched, by rebuilding that one record's row via `_current_plan_row` (`:3999`) and comparing it to the
+row classified at the top (`planned_rows`, `:4234`). A mismatch aborts that id unmutated and refuses
+with the existing `plan_digest_stale` reason. The module says it in its own words at `_reset_lock`
+(`:3844-3851`):
+
+> *"**C2 closes it by making the precondition PER-RECORD as well** … The write therefore either
+> SURVIVES or the reset REFUSES — never neither. `record_lock` still keeps the filesystem consistent;
+> the row re-check is what keeps the outcome honest."*
+
+**The architecture the defect rested on is unchanged, deliberately.** A per-record writer
+(`/answers`, `/edit`, `/export`) still does **not** take `_reset_lock`, and never will — putting a
+workspace-wide lock on the hot mutation path would invert the documented lock ordering and create the
+very two-lock cycle the deadlock-freedom argument rules out. So a write can still *land* in the
+window; what changed is that it can no longer be *destroyed in silence*.
+
+**"No test asserts the property" is the sentence that most needs retracting.** There are now **nine**
+`test_c2_*` tests in `apps/api/tests/test_reset_safety.py` (`rg --text -c "^def test_c2" apps/api/tests/test_reset_safety.py`
+→ `9`), including
+`test_c2_a_write_to_a_managed_legacy_record_in_the_window_is_not_removed` (`:952`),
+`test_c2_a_torn_read_in_the_window_refuses_with_a_body_instead_of_raising` (`:1271`) and
+`test_c2_an_export_self_heal_in_the_window_is_not_destroyed` (`:1345`). *(The old citation
+`test_reset.py:356-367` still lands on `test_concurrent_execute_is_safe` at `:361`, and the criticism
+of it stands — it is not the C2 test. The C2 tests live in a different file.)*
+
+**Three consequences a later slice must not re-derive:**
+
+- **The digest row is no longer a pure function of the in-memory `Experiment`.** It also stats whether
+  each half of the artifact pair is on disk, because an export **self-heal** durably republishes a
+  record while `save_versioned()` returns `False` (`record_id` did not move) — a 200 that moved no
+  state component and was previously destroyed in silence. **Before adding any new filesystem write
+  to a record's directory, check the row can see it**; a write the row cannot see is a write this
+  guarantee does not cover.
+- **A refusal is no longer always "made no changes".** A workspace-wide refusal still mutates
+  nothing, but a per-record abort part-way leaves the ids *before* it already reset — which is why
+  `final_count` / `plan_digest` / `at_risk` are **measured from disk** in that case rather than echoed
+  from the snapshot. A partial reset is the deliberate price of never destroying an acknowledged
+  write.
+- **Statement order inside the lock is load-bearing:** `planned_rows` is built **before**
+  `plan_digest`. Built second, it picked up the very repair the per-record check exists to notice,
+  matched it, and waved the reset through — *"which is exactly how the fix for that defect failed its
+  own test"*.
+
+**What this does to the autosave paragraph above.** The predicted data *loss* is gone. The predicted
+**false refusals** are not — autosave still drives `version_token` and the authoritative signature,
+which the plan digest covers, so an autosaving UI can still make Reset hard to execute. That is now
+the honest failure mode: **Reset refuses more often; it no longer destroys.**
 
 ---
 
@@ -406,6 +827,22 @@ many" requirement without any byte store at all.
 | Exported artifacts in the DB | Not persisted; only `state` jsonb is (`experiment_repository.py:37-44`) | later slice |
 | Audio / voice / ASR | **Nothing.** No `MediaRecorder`, no `SpeechRecognition`, no ASR client, no audio `source_type` | see §6 |
 
+#### CORRECTION 2026-08-10 — the uploads citation drifted; the BEHAVIOUR is unchanged
+
+Row 1 cites `routes.py:3151-3157` for the unconditional 403. **The behaviour is exactly as
+described** — re-read at `2209b8e` and still an unconditional 403 taking no parameters, under the
+section banner `# --- 15. uploads (always blocked) ---`, with the handler's own comment *"Governance
+seam: no multipart is declared or parsed; no file is read or stored."*
+
+Only the line numbers moved: `def uploads()` is now at **`routes.py:5262`**, its decorator at
+`:5232-5260`. `grep -n "def uploads" apps/api/isaac_api/routes.py` → `5262:def uploads():`.
+**Cite the section banner or `def uploads`** — `routes.py` is over 6,000 lines and grew ~2,100 lines
+under this citation alone.
+
+*(Unchecked in this pass, and therefore not re-asserted: the `python-multipart` and `write_bytes`/`wb`
+claims in the same row. They were not part of the re-verification brief. Treat them as
+**as-of-`a5601e9`** until someone re-measures them.)*
+
 ---
 
 ## 6. Voice — the part of the brief with no legal path today
@@ -425,6 +862,53 @@ Three independent blockers, all measured:
    enumerates seven source types, none audio-related, and the frontend's `SRC_CLASS` /
    `SOURCE_ICON` are total `Record<SourceType, string>` maps (`EvidenceRow.tsx:5-13`) that break
    on an eighth member.
+
+#### CORRECTION 2026-08-10 — blocker 3's citation is wrong AND incomplete. There are THREE total maps, not two, and this is an argument about cost.
+
+Blocker 3 is kept, and its **conclusion is strengthened, not weakened** — which is why this matters:
+§6 is an argument that adding audio is expensive, and it undercounted.
+
+**What is wrong.** It places `SRC_CLASS` *and* `SOURCE_ICON` together at `EvidenceRow.tsx:5-13`. Only
+the first is there. Verified at `2209b8e`:
+
+| Total map | Location | Value type |
+|---|---|---|
+| `SRC_CLASS` | `apps/web/src/components/EvidenceRow.tsx:5-13` — **correct as cited** | `Record<SourceType, string>` |
+| `SOURCE_ICON` | **`apps/web/src/components/icons.tsx:76-84`** — *not* `EvidenceRow.tsx`, which merely imports it (`:2`) | `Record<SourceType, LucideIcon>` |
+| `SOURCE_TYPE_PHRASE` | **`apps/web/src/lib/experimentGraph.ts:417`** — **missed entirely by this spec** | `Readonly<Record<SourceType, string>>`, `Object.freeze`d |
+
+All three are **total** over `SourceType` (the seven-member union at `apps/web/src/lib/types.ts:17-25`),
+so all three fail `tsc` on an eighth member. Consumers of `SOURCE_ICON` are also wider than one
+component — `EvidenceTrailPanel.tsx` indexes it at `:34` and `:119`.
+
+**A fourth map exists and deliberately does NOT belong on that list:** `_SOURCE_PHRASE` in
+`apps/web/src/lib/adapt.ts:642-647` is `Record<string, string>` with only four entries and a
+fallback (`_SOURCE_PHRASE[st] ?? \`cited from ${st}\``). It is **partial by design** and would *not*
+break — it would silently emit `"cited from audio"`. Which is arguably worse than a compile error,
+and is worth knowing when scoping the change.
+
+##### How this was missed, and the search rule that follows
+
+`apps/web/src/lib/experimentGraph.ts` **contains a NUL byte** — `file` reports it as `data`, not as
+text. Consequently:
+
+```
+rg -n "Record<SourceType" apps/web/src        # → 2 hits.  MISSES experimentGraph.ts. Exit 0.
+rg --text -n "Record<SourceType" apps/web/src # → 3 hits.  Correct.
+```
+
+Plain `grep` is worse: `grep -n "SourceType" apps/web/src/lib/experimentGraph.ts` printed **nothing
+and exited 1** on a file that contains the string on line 417 — indistinguishable from "not present".
+`grep -a` / `rg --text` both find it.
+
+**Rule: any exhaustive inventory over `apps/web/src` must pass `--text`, and a zero-hit result in
+that tree is not evidence of absence until it has been re-run with it.** This trap has bitten this
+project before; this is its first recorded appearance inside this spec.
+
+**Cost restated.** Adding an audio `source_type` touches `src/isaac_records/models.py` (truth core),
+**three** total frontend maps in three files across `components/` and `lib/`, and leaves a fourth,
+partial map emitting an unreviewed fallback string. §6's "two maps in one file" framing understated
+it.
 
 ### DECISION D6 — the honest v1 is transcript-only, provider-abstracted, audio never persisted
 
@@ -497,6 +981,45 @@ Two constraints that shape the migration and are easy to trip:
 `0002` requires its own approval packet and its own explicit approval (brief §51). It must not be
 applied to the hosted database by an agent.
 
+### CORRECTION 2026-08-10 — the first constraint is ALREADY SATISFIED for `isaac_runs`; the second still binds
+
+Both bullets are kept. The first now describes work that is done, and reading it as outstanding would
+schedule a code edit that already exists.
+
+**`db_write.OWNED_TABLES` is no longer the two-member set quoted above.** At `2209b8e`
+(`apps/api/isaac_api/db_write.py:132-138`) it is:
+
+```python
+OWNED_TABLES: frozenset[str] = frozenset(
+    {"isaac_schema_migrations", "isaac_experiments", "isaac_runs"}
+)
+```
+
+`isaac_runs` was added for `0002_runs`, and the module says why in its own comment (`:125-131`):
+listing a table *"grants nothing on its own"* — it is the deliberate, reviewable act that lets a later
+slice write it. **The general rule the bullet states is still correct** (a table must be listed here
+before its own `CREATE` can run; the migration file alone is not enough) — it simply no longer names
+outstanding work for `isaac_runs`. The other five tables §8 proposes
+(`isaac_experiment_revisions`, `isaac_run_revisions`, `isaac_assets`, `isaac_run_assets`,
+`isaac_submissions`) are **not** listed, so for those the bullet stands unchanged.
+
+**The second bullet still binds, and is the one to keep.** `_FORBIDDEN_KEYWORDS`
+(`db_write.py:212`, consulted at `:297`) still includes `alter`, so **`0002` must remain purely
+additive `CREATE ... IF NOT EXISTS` and cannot alter `isaac_experiments`.** Unchanged.
+
+**`0002` is APPLICATION-INERT, which the section does not say and which changes how to reason about
+the risk.** The migration file `apps/api/isaac_api/migrations/0002_runs.sql` exists, but **no
+application code reads or writes `isaac_runs`** — pinned by
+`test_0002_is_inert_for_this_build_no_statement_names_isaac_runs`
+(`apps/api/tests/test_experiment_repository.py:1461`). So applying it would change nothing
+observable in the running application: it creates a table nothing touches. Runs today persist inside
+the experiment's `state` jsonb, not in `isaac_runs`.
+
+**That is an argument about blast radius, NOT an authorization.** Applying `0002` to the hosted
+database remains **NOT authorized** and remains the owner's act, not an agent's — the final sentence
+above is unchanged and unconditional. "Inert" narrows what could go wrong; it does not narrow who may
+do it.
+
 ---
 
 ## 9. Gates — who owns what
@@ -515,3 +1038,63 @@ applied to the hosted database by an agent.
 local/CI Postgres, My Experiments grouping, the Run workspace and schema accordion, inherited
 fields, Check Run, Unmapped Notes, conflict UI, the evidence graph, run comparison, Validate &
 Review, revisions, and the MCP server implementation.
+
+### RE-VERIFIED 2026-08-10 — the gate table STANDS, unchanged
+
+Re-read at `2209b8e`. **No gate changed owner and no gate opened.** Two precisions:
+
+- **Hosted per-record display is still closed by default** — `_DB_RECON_RECORD_DISPLAY = "closed"`
+  (`apps/api/isaac_api/routes.py:6411`), served in the health/recon payloads at `:975` and `:6546`.
+  Gate **G2** is unchanged. This is a *literal constant*, not a computed state: it is closed because
+  the database owner has not decided otherwise, exactly as `docs/postgres-test-db-guide.md` requires.
+- **The "not blocked" list has partly *completed* rather than merely stayed unblocked.** The record
+  fan-out, the Run model, **C1** and **C2** are now built, not pending — see the corrections in §1
+  and §4. The row saying they are unblocked was never wrong; it is simply no longer the interesting
+  fact about them.
+
+---
+
+## 10. What was RE-VERIFIED as still true (added 2026-08-10)
+
+A correction sweep that only deletes risky claims leaves a reader unable to tell what survived. These
+were re-measured this pass and **stand unchanged**:
+
+| Claim | Status | Basis |
+|---|---|---|
+| **DECISION D3** — `submitted` is the only genuinely new *stored* state | **STILL TRUE** | No `submitted_utc` / `submitted_by` / `submitted_rev` / `isaac_submissions` exists in `apps/api`, `src` or `apps/web/src` except two *prospective* mentions in one test. No status column, no transition endpoint, no reviewer. |
+| **`workflow.derive_workflow` is never persisted** | **STILL TRUE, and mechanically tested** | `workflow.py:5-7`; `test_workflow_is_not_persisted_in_state`, `test_reopened_is_derived_not_persisted`. Only the *line reference* in §3 was wrong. |
+| **§9 gate table, incl. hosted per-record display closed by default** | **STILL TRUE** | `_DB_RECON_RECORD_DISPLAY = "closed"`, `routes.py:6411`. |
+| **`0002` must be purely additive** (`alter` is a forbidden keyword) | **STILL TRUE** | `_FORBIDDEN_KEYWORDS`, `db_write.py:212`. |
+| **`POST /api/uploads` is an unconditional 403** | **STILL TRUE** (citation moved) | `routes.py:5262`. |
+| **`export.py` mints one record id per `transform()` call, and `export_draft` returns one `ExportResult`** | **STILL TRUE, and correct by design** | The truth core was legitimately not changed by fan-out. |
+| **D1 / D2 / D5 / D6 / D7, §7's evidence-graph contract, §2's schema-space field lists** | **NOT re-verified this pass** | Out of scope for this sweep. Treat as **as-of-`a5601e9`**. Absence from this table is not a defect claim. |
+
+**DEFECT C2 was on the list to confirm as still true, and it is NOT** — it is resolved. See §4.
+
+### Known-stale CODE COMMENTS, reported not changed (2026-08-10)
+
+Found while verifying the above. **Deliberately left in place** — this was a docs-only pass and each
+file is a code slice's business, some held by concurrent PRs. Recorded here so they are not
+rediscovered from scratch. All verified at `2209b8e`.
+
+1. **`apps/api/isaac_api/workspace.py:392-410`** — the fan-out to-do list asserts
+   `Experiment.status` / `pending` / `export_ready` are **"ALL THREE ARE RUN-BLIND"** and that this is
+   **"UNREACHABLE TODAY — no route touches runs and nothing creates one in production"**. **Both
+   clauses are now false.** `status()` consults `all_units_exported()` and `_all_units_pass_dry_run()`
+   over `export_units()`; and runs are creatable over HTTP —
+   `POST /api/experiments/{experiment_id}/runs` (`routes.py:2916-2917`), `PATCH .../runs/{run_id}`
+   (`:3019-3020`), `POST .../runs/{run_id}/check` (`:3235-3236`).
+2. **`apps/api/isaac_api/routes.py:3631`** — the export description calls a record with no runs
+   *"every record this API can currently create"*. **False**, for the same reason as (1). It is
+   **mirrored verbatim** into `apps/web/src/test/apiFixtures.ts:2495` and referenced by
+   `apps/web/src/__tests__/fan-out-null-render.test.tsx:204`, so **all three must change together** or
+   the fixture-parity assertions break.
+3. **`Run.version_token`'s docstring** (`workspace.py:925-932`) — *"No route consumes it yet."*
+   **Stale.** Routes consume it at `routes.py:2423`, `:2426`, `:2511`, `:3015`, `:3231`, `:3323`, and
+   `PATCH .../runs/{run_id}` takes the run's own `If-Match` (`:2364`).
+4. **`Override.to_state`** (`workspace.py:658-665`) — the comment claims omitting `displaced` keeps
+   *"displaced no inherited value"* and *"displaced an inherited null"* distinguishable on disk.
+   **Measured false:** the guard is `if self.displaced is not None`, so an explicit inherited `null`
+   is omitted exactly like an absent one, and `from_state` reads both back via
+   `state.get("displaced")` → `None`. The encoding cannot represent the second case. The *comment* is
+   wrong; whether the *behaviour* should change is a design question, not a docs one.
