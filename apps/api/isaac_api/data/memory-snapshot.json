@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "2b7f200e425d6aa830312765a7bb6a2e72800cb97b5ef2ebbeaea7b73d5a8621"
+        "sha256": "054653a5a0c55f6e077f2869548a87a5334dc21433dfee044a6ca19d406fb5d1"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "19b4807cfde06426311279416e1fd5ec4c4add770b90d15b289b8c193e4815e1"
+        "sha256": "b23d572b3368131b0896744430bb91a2a8bef12b3355b531383d8612f1c853a4"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "2eee919c11ed6c9b28ac2e75fc3b3e1746d45ed97b1c06f8bf6fb54f56222707"
+        "sha256": "8dcd1efd69704d5c1fd0ecaa1306b6cf0acff63d58dbb34984390537fa799798"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "e2c502b63f6e7c71576fdfde990c689dcb8253a7fdda01f4c1a0d84fe0dbb9f7"
+        "sha256": "eed975e96dce0c8880ccf83f7a090e4c1c08aec7c2131500891086c35a6c0c80"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "32c0ea9a732db7138632f1fd40b85748b517a950f4373d08af22208af1a7266f"
+    "served_manifest_fingerprint": "517fe7c7d96115238993ca9b8ce824643e930d001e49977ba030fc11c16cc536"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -738,34 +738,65 @@ def _summary(exp: Experiment) -> dict:
         "status": exp.status(),
         "created_utc": exp.created_utc,
         "pending_count": exp.pending_count(),
+        # KNOWN LIMIT, disclosed rather than fixed here (review item, and the C9
+        # cost note in this module's export section): `evidenced_field_count` reads
+        # `exp.draft` alone, so for a fan-out it counts the EXPERIMENT-LEVEL fields
+        # only and is therefore lower than for a zero-run experiment holding the
+        # byte-equivalent content (measured: 14 vs 26). It is not made run-aware
+        # here because "how many evidenced fields does an experiment have" has no
+        # single answer once N runs each resolve the same inherited field — summing
+        # would multiply-count inheritance and reporting the maximum would be
+        # arbitrary. It is a summary count, not a verdict, and nothing gates on it.
         "evidenced_field_count": exp.evidenced_field_count(),
-        "exported": exp.exported(),
+        # REVIEW ITEM C5 — `all_units_exported()`, not `exported()`. For an
+        # experiment with no runs these are the same function of the same field, so
+        # the common case does not move. For a fan-out, `Experiment.record_id` stays
+        # None forever, so `exported()` answered a permanent, and false, "no".
+        "exported": exp.all_units_exported(),
+        # …while `record_id` stays exactly what it is: null for a fan-out, because
+        # there is no single record id. `exported` and `record_id` are now answering
+        # two different questions rather than one question twice.
         "record_id": exp.record_id,
     }
+
+
+#: Why a fan-out's singular ``artifact_refs`` are null. REVIEW ITEM C5: they used to
+#: be null because ``exp.exported()`` was False, which reads as "nothing was
+#: exported" — the same nulls a never-exported record produces. They are null because
+#: the field is SINGULAR and this record has several, which is a different statement
+#: and now says so.
+FAN_OUT_ARTIFACT_REASON = (
+    "This record's runs each export their own official record, so there is no "
+    "single record file. Use the artifacts operation for the per-run files."
+)
 
 
 def _detail(exp: Experiment) -> dict:
     detail = _summary(exp)
     record_path = exp.record_path()
     sidecar_path = exp.sidecar_path()
+    # `_workflow_for` is the ONE derivation (review item C5). It used to be inlined
+    # here with `exported=exp.exported()` while `_workflow_for` — used by every
+    # mutation response — passed `all_units_exported()`, so a fully-exported fan-out
+    # got `export: 'completed'` from the export response and `export: 'current'` from
+    # the very next detail GET.
+    workflow = _workflow_for(exp)
+    fan_out = bool(exp.runs)
+    artifact_refs = {
+        "record_filename": record_path.name if exp.exported() and record_path else None,
+        "sidecar_filename": sidecar_path.name if exp.exported() and sidecar_path else None,
+    }
+    if fan_out:
+        artifact_refs["reason"] = FAN_OUT_ARTIFACT_REASON
     detail.update(
         {
             "draft_ok": exp.draft_ok(),
             # P30.6 — SAFE basename only, never the absolute server/mount path
             # (CLAUDE.md path-boundary rules). The client labels + names the
             # download from the filename; JSON content comes from /artifacts.
-            "artifact_refs": {
-                "record_filename": record_path.name if exp.exported() and record_path else None,
-                "sidecar_filename": sidecar_path.name if exp.exported() and sidecar_path else None,
-            },
+            "artifact_refs": artifact_refs,
             "source_files": (exp.source or {}).get("files") or [],
-            "workflow": derive_workflow(
-                pending_count=exp.pending_count(),
-                draft_ok=exp.draft_ok(),
-                ready=exp.export_ready(),
-                exported=exp.exported(),
-                rev=exp.rev,
-            ),
+            "workflow": workflow,
             # Derived exported-artifact freshness (P28.2): none | current | stale.
             "artifact": dependencies.artifact_state(exp),
         }
@@ -2226,16 +2257,96 @@ def _write_record(exp: Experiment, result, unit=None) -> None:
     atomic_write_text(sidecar_path, json.dumps(result.sidecar, indent=2) + "\n")
 
 
+def _artifact_stem(name: str) -> str | None:
+    """``<record-id>`` for one artifact filename, or ``None`` if it is not one.
+
+    ONE definition, shared by the prune's candidate scan and its link-target scan, so
+    the set of files it may delete and the set it reads to protect them cannot drift.
+    """
+    if name.endswith(".evidence.json"):
+        stem = name[: -len(".evidence.json")]
+    elif name.endswith(".json"):
+        stem = name[: -len(".json")]
+    else:
+        return None
+    return stem if is_record_id(stem) else None
+
+
+class _UnreadableSurvivor(Exception):
+    """A record the prune would keep could not be read, so its targets are unknown."""
+
+
+def _link_targets_of_surviving_records(exp: Experiment, keep_ids: set[str]) -> set[str]:
+    """Every ``links[].target`` named by a record this prune is going to KEEP.
+
+    REVIEW ITEM C4. Pruning used to be able to delete a record that a SURVIVING,
+    immutable record still pointed at: delete a Run whose record a sibling links to,
+    export again, and the sibling was left with a ``links[].target`` naming a file
+    that no longer exists. ``dangling_link_count`` is a tracked integrity metric in
+    this project, and this was the application manufacturing one.
+
+    **Of the two available fixes, this is the one chosen.** The alternative — "do not
+    emit links to units that can be pruned" — cannot be implemented honestly, because
+    every run can be deleted later, so it reduces to emitting no links at all and
+    deleting a relation the records support. Reading the survivors costs one JSON
+    parse per kept record on the one path that deletes files, and it makes the
+    protection a fact about what is on disk rather than a prediction about what a
+    user will do next.
+
+    Fail-closed by construction: an unreadable or non-JSON survivor contributes
+    nothing here, but it is a KEPT file, so the only thing at stake is whether its
+    targets are protected — and a survivor we cannot read is exactly when we should
+    not be deleting things it may reference. Its targets are therefore treated as
+    unknown, and :func:`_prune_orphan_artifacts` refuses to prune at all in that case
+    (see ``unreadable``).
+    """
+    targets: set[str] = set()
+    records_dir = exp.records_dir
+    for path in sorted(records_dir.iterdir()):
+        if not path.is_file() or not path.name.endswith(".json"):
+            continue
+        if path.name.endswith(".evidence.json"):
+            continue
+        stem = _artifact_stem(path.name)
+        if stem is None or stem not in keep_ids:
+            continue
+        record = _read_artifact_json(path)
+        if record is None:
+            raise _UnreadableSurvivor(stem)
+        for link in record.get("links") or []:
+            if isinstance(link, dict) and isinstance(link.get("target"), str):
+                targets.add(link["target"])
+    return targets
+
+
 def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> list[str]:
     """Remove artifact pairs in this experiment's records dir that nothing points at.
 
-    WHY THIS EXISTS. A fan-out writes one pair per Run. Delete a Run and export
-    again and its pair is still on disk, named by an id no state references — an
+    WHY THIS EXISTS. A fan-out writes one pair per Run. Delete a Run, then export
+    again *for some other reason* — a newly added run, a run not yet exported — and
+    the deleted run's pair is still on disk, named by an id no state references: an
     orphan that ``get_artifacts`` cannot reach, that no reset bucket classifies, and
-    that would be presented by any future artifact listing as a record of this
-    experiment. Re-export must not accumulate those.
+    that any future artifact listing would present as a record of this experiment.
 
-    FOUR THINGS BOUND WHAT IT CAN DELETE, because this is the only code in the
+    **WHAT IT DOES NOT DO, corrected (review item C8).** An earlier version of this
+    docstring said the cleanup exists so that *"Delete a Run and export again and its
+    pair is still on disk … Re-export must not accumulate those"*. That describes a
+    capability the caller cannot invoke: an export with NO pending unit returns 409
+    from the immutability guard and never reaches this function, so deleting the LAST
+    unexported run — or deleting a run from a fully-exported fan-out — leaves its pair
+    on disk permanently. The prune runs only on the success path of an export that
+    wrote at least one unit.
+
+    **That limit is deliberate rather than merely unfixed.** Reaching the cleanup from
+    the 409 path would make a filesystem DELETION possible on a request that changes
+    no state, and ``workspace``'s reset-precondition note relies on the opposite: the
+    per-record plan-digest row can only miss a filesystem change that happens on a
+    path which also moves the row. A delete on the 409 path would be invisible to the
+    reset precondition, which is the class of defect PR #91 was written to remove. So
+    the orphan is left, and this docstring says so, rather than a comfortable claim
+    being left in place.
+
+    FIVE THINGS BOUND WHAT IT CAN DELETE, because this is the only code in the
     application that removes an exported artifact:
 
     * it only ever looks inside ``exp.records_dir``, which belongs to this one
@@ -2243,12 +2354,19 @@ def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> list[str]:
     * only a regular file named exactly ``<record-id>.json`` or
       ``<record-id>.evidence.json`` is a candidate — ``is_record_id`` on the stem, so
       a file with any other name is never touched;
-    * ``keep_ids`` holds every current unit's target id AND ``exp.record_id`` when the
-      experiment has one, so a legacy 1:1 artifact is preserved even after runs are
-      added to that experiment;
+    * ``keep_ids`` is assembled by the caller and holds every current unit's target
+      id, every current unit's ``record_id``, and ``exp.id`` itself — see the call
+      site for why the last two are there (review items C3 and C7);
+    * a stem named by ``links[].target`` in any record being kept is never pruned
+      (review item C4, :func:`_link_targets_of_surviving_records`);
     * the CALLER only invokes it for an experiment that HAS runs. A zero-run
       experiment's export path is byte-for-byte what it was, pruning included — which
       is to say, not included.
+
+    **Every removal is logged at WARNING (review item C3b).** This is the only
+    destructive operation in the application and it used to be the quietest one: the
+    strictly less consequential export reconciliation, which deletes nothing, logs.
+    Path-free by rule (P30.6) — the record id and the basename only.
 
     Returns the ids removed (MEASURED from the unlinks that succeeded, not asserted
     from what was planned), so the response can disclose them. A failed unlink is
@@ -2259,23 +2377,36 @@ def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> list[str]:
     records_dir = exp.records_dir
     if not records_dir.is_dir():
         return []
+    try:
+        protected = keep_ids | _link_targets_of_surviving_records(exp, keep_ids)
+    except _UnreadableSurvivor as unreadable:
+        # A record we are keeping could not be read, so we do not know what it
+        # points at. Delete nothing: an accumulated orphan is recoverable, a record
+        # deleted out from under a live link is not.
+        _log.warning(
+            "export prune: skipped entirely because kept record %s could not be read, "
+            "so its link targets are unknown",
+            unreadable.args[0],
+        )
+        return []
     removed: set[str] = set()
     for path in sorted(records_dir.iterdir()):
         if not path.is_file():
             continue
-        name = path.name
-        if name.endswith(".evidence.json"):
-            stem = name[: -len(".evidence.json")]
-        elif name.endswith(".json"):
-            stem = name[: -len(".json")]
-        else:
-            continue
-        if not is_record_id(stem) or stem in keep_ids:
+        stem = _artifact_stem(path.name)
+        if stem is None or stem in protected:
             continue
         try:
             path.unlink()
         except OSError:
             continue
+        if stem not in removed:
+            _log.warning(
+                "export prune: removed the artifact pair for record %s from "
+                "experiment %s; no current run claims that id",
+                stem,
+                exp.id,
+            )
         removed.add(stem)
     return sorted(removed)
 
@@ -2475,6 +2606,26 @@ def post_export(
         pending_units = [unit for unit in units if not unit.materialised()]
         if not pending_units:
             # Every unit is already exported AND both halves of its pair are on disk.
+            #
+            # REVIEW ITEM C10. This used to fill the singular `record_id` from
+            # `units[0]` for a fan-out too, which contradicted this endpoint's own
+            # documentation ("`record_id` … `null` — they are singular and a fan-out
+            # has several") and named one arbitrary run's record as though it were
+            # THE record. For a fan-out the id is null and the message counts instead
+            # of naming. For a zero-run experiment — every experiment this API can
+            # create — the body is byte-identical to the one it has always returned.
+            if exp.runs:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "record_exists",
+                        "message": (
+                            f"All {len(units)} records for this record's runs have "
+                            "already been exported; records are immutable."
+                        ),
+                        "record_id": None,
+                    },
+                )
             first = units[0]
             first_record = first.record_path()
             name = first_record.name if first_record is not None else f"{first.target_id}.json"
@@ -2591,7 +2742,29 @@ def post_export(
             # save, so a run removed from the experiment cannot leave its record
             # behind. See `_prune_orphan_artifacts` for the four bounds on what it may
             # delete.
+            # THE KEEP-SET, and both additions to it are review fixes.
+            #
+            # C7 — `unit.target_id` is what the keep-set was built from, but the file
+            # on disk is named by `current_record_id()`. `ExportUnit.mark_exported`
+            # now refuses to let those diverge, so this is belt-and-braces; it costs
+            # nothing and it means the keep-set is expressed in terms of the id that
+            # actually names a file, not only the id we track.
+            #
+            # C3 — `exp.id` unconditionally, NOT `exp.record_id`. The old rule kept
+            # `exp.record_id` "so a legacy 1:1 artifact is preserved even after runs
+            # are added", but `exp.record_id` is None in exactly the half-written
+            # state this handler's own reconciliation branch exists to repair (the
+            # artifact pair was written, the state save faulted). A run added
+            # afterwards therefore DELETED the previously exported record. A stem
+            # equal to the experiment's own id is never a fan-out record — record ids
+            # come from `Run.id` — so keeping it can only protect a legacy pair.
             keep = {unit.target_id for unit in units}
+            keep.update(
+                record_id
+                for record_id in (unit.current_record_id() for unit in units)
+                if record_id is not None
+            )
+            keep.add(exp.id)
             if exp.record_id is not None:
                 keep.add(exp.record_id)
             pruned = _prune_orphan_artifacts(exp, keep)
@@ -2813,6 +2986,60 @@ async def post_csv_preview(
     return preview
 
 
+def _validate_unit(unit) -> dict:
+    """One export unit's official-schema verdict, ADDRESSED TO ITS RUN.
+
+    ``dry_run`` is per unit and states WHICH document was checked: the written record
+    when this unit is materialised, an in-memory candidate otherwise. A flat verdict
+    over N records would not be readable — three runs can produce the same message
+    and a caller could not tell which to open — so this mirrors the export route's
+    ``_unit_result_entry``.
+    """
+    entry = {
+        "run_id": unit.run_id,
+        "run_label": unit.run_label,
+        "record_id": unit.target_id,
+    }
+    if unit.materialised():
+        record = _read_artifact_json(unit.record_path())
+        if record is None:
+            # Same fail-closed vocabulary as the single-record path: no verdict, not
+            # a schema violation. `dry_run: false` — no dry run happened.
+            return {
+                **entry,
+                "ok": False,
+                "errors": [{"path": "$", "message": "Validation could not be completed."}],
+                "dry_run": False,
+            }
+        report = validate_official(record, REPO_ROOT)
+        return {
+            **entry,
+            "ok": report.ok,
+            "errors": [{"path": e.path, "message": e.message} for e in report.errors],
+            "dry_run": False,
+        }
+
+    try:
+        result = export_draft(unit.draft, REPO_ROOT)
+    except Exception:
+        _log.exception("validate dry-run failed run=%s", unit.run_id)
+        return {
+            **entry,
+            "ok": False,
+            "errors": [{"path": "$", "message": "Validation could not be completed."}],
+            "dry_run": True,
+        }
+    if result.official_report is not None:
+        errors = [
+            {"path": e.path, "message": e.message} for e in result.official_report.errors
+        ]
+    elif not result.draft_report.ok:
+        errors = [{"path": w, "message": m} for w, m in result.draft_report.errors]
+    else:
+        errors = []
+    return {**entry, "ok": result.ok, "errors": errors, "dry_run": True}
+
+
 # --- 9. validate --------------------------------------------------------------
 
 
@@ -2829,6 +3056,11 @@ async def post_csv_preview(
         "resulting candidate record is validated without writing anything "
         "(`dry_run: true`). Read-only in both cases. The verdict comes from the "
         "same deterministic core function the command line uses.\n\n"
+        "A record with **runs** exports one official record per run, so it is "
+        "checked per run: `runs[]` carries each run's own verdict, its errors and "
+        "its own `dry_run`, and the top-level `ok` is true only when every run "
+        "passes. The top-level `dry_run` is `true` if any run's verdict came from "
+        "an in-memory candidate rather than a written record.\n\n"
         "If the written record cannot be read at all, no verdict is invented: the "
         "operation reports `ok: false` with the single fixed error `Validation "
         "could not be completed.` and `dry_run: false`. Read that as *no verdict*, "
@@ -2842,6 +3074,38 @@ def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
+
+    if exp.runs:
+        # REVIEW ITEM C6 — this branch used not to exist, and its absence produced a
+        # FALSE NEGATIVE about the official schema. `exp.exported()` is None-backed
+        # for a fan-out, so a fully-exported fan-out fell into the dry-run branch
+        # below and validated `exp.draft` — the EXPERIMENT-LEVEL HALF, which is never
+        # exported and is not a record. Measured on `f7c286c` moments after all N
+        # records passed official validation:
+        #
+        #     {"ok": false, "errors": [{"path": "$",
+        #      "message": "'descriptors' is a required property"}], "dry_run": true}
+        #
+        # It is made fan-out aware rather than made to refuse, because the honest
+        # answer IS computable from the same core function, and "Validation could not
+        # be completed" would be a weaker statement than the truth. The aggregate is
+        # ALL units, matching the export gate (contract §3 D4).
+        #
+        # `dry_run` at the top level is true if ANY unit's verdict came from an
+        # in-memory candidate. `dry_run: false` is the strong claim that the WRITTEN
+        # record was checked, and it must not be made on behalf of a unit that has no
+        # written record; `runs[]` carries the per-unit answer.
+        entries = [_validate_unit(unit) for unit in exp.export_units()]
+        failed = [entry for entry in entries if not entry["ok"]]
+        return {
+            "ok": not failed,
+            # The FIRST FAILING unit's errors, so a caller reading only `errors` is
+            # shown an actual failure; every unit's own verdict is in `runs`.
+            "errors": failed[0]["errors"] if failed else [],
+            "schema": SCHEMA_LABEL,
+            "dry_run": any(entry["dry_run"] for entry in entries),
+            "runs": entries,
+        }
 
     if exp.exported():
         # P4 review FIX C — read DEFENSIVELY. The state can say exported while the
@@ -3346,7 +3610,11 @@ def get_source_preview(
         "server path.\n\n"
         "Both files are resolved from the record id, never from a caller-supplied "
         "path. A record that has not been exported yet returns `200` with null "
-        "payloads rather than an error. Read-only."
+        "payloads rather than an error. Read-only.\n\n"
+        "A record with **runs** exports one official record per run and has no "
+        "single pair of its own, so this operation returns null payloads for it "
+        "together with a `reason` saying why. Those per-run files are not listed "
+        "here yet."
     ),
     response_description=(
         "The record and sidecar JSON with their filenames, or nulls when nothing "
@@ -3379,7 +3647,7 @@ def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
     if exp is None:
         return _not_found(experiment_id)
     if not exp.exported():
-        return {
+        payload = {
             "record": None,
             "sidecar": None,
             "record_filename": None,
@@ -3388,6 +3656,16 @@ def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
             # {"state": "none", "reason": None}.
             "artifact": dependencies.artifact_state(exp),
         }
+        if exp.runs:
+            # A fan-out reaches here with `artifact.state` possibly `current` — the
+            # per-run records ARE on disk and current — beside four nulls, which on
+            # its own reads as "current, but there is nothing". This route still
+            # serves the experiment's OWN pair and a fan-out has none, so the nulls
+            # are correct and the missing piece is the explanation. Listing the
+            # per-run pairs is the Run-workspace slice's job (it is the slice with a
+            # UI for them); saying so is this one's.
+            payload["reason"] = FAN_OUT_ARTIFACT_REASON
+        return payload
     record_path = exp.record_path()
     sidecar_path = exp.sidecar_path()
     record = _read_artifact_json(record_path)

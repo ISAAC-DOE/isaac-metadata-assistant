@@ -52,7 +52,28 @@ def artifact_state(exp) -> dict:
       * exported but artifact missing/unreadable/not JSON -> ``stale`` (defensive)
 
     Never throws — a detail GET must not 500 on a corrupt/absent artifact.
+
+    **FAN-OUT (review item C5).** An experiment with runs exports one record per run
+    and ``Experiment.record_id`` stays ``None``, so the ``exp.exported()`` test above
+    reported ``none`` — "nothing was exported" — for an experiment whose N records
+    were all on disk and current. The same three labels are kept, because they mean
+    the same things about a SET of artifacts as about one, and because inventing a
+    fourth would change a shape every existing reader understands:
+
+      * no run exported yet                                   -> ``none``
+      * every run exported and every record matches           -> ``current``
+      * anything else (a run still unexported, a record that
+        no longer matches, a record that cannot be read)      -> ``stale``
+
+    The middle case is the one worth stating: a PARTIALLY exported fan-out is
+    ``stale``, not ``current`` and not ``none``, because the artifact set on disk is
+    not a faithful projection of the current record. That warns rather than
+    reassures, which is the right direction for a signal about whether exported
+    output can be trusted.
     """
+    if getattr(exp, "runs", None):
+        return _fan_out_artifact_state(exp)
+
     if not exp.exported():
         return {"state": "none", "reason": None}
 
@@ -74,6 +95,50 @@ def artifact_state(exp) -> dict:
     return {"state": "stale", "reason": _STALE_REASON}
 
 
+#: A fan-out whose runs are not all exported yet. Deliberately NOT the "record
+#: changed after export" reason: nothing changed, part of the set was never written.
+_INCOMPLETE_REASON = (
+    "Some of this record's runs have not been exported yet, so the exported "
+    "artifacts do not cover the whole record."
+)
+
+
+def _fan_out_artifact_state(exp) -> dict:
+    """:func:`artifact_state` for an experiment with runs. Same labels, N artifacts.
+
+    Compares each run's WRITTEN record against what exporting that run now would
+    produce, using ``export_units()`` so the comparison sees exactly the composed
+    draft the export path would use — including the shared grouping tag and any
+    sibling links, which are properties of the SET and are invisible to a per-run
+    composition.
+
+    Never throws, for the same reason the single-record path does not.
+    """
+    try:
+        units = exp.export_units()
+    except Exception:  # pragma: no cover - defensive; composition is read-only
+        return {"state": "stale", "reason": MISSING_REASON}
+
+    if not any(unit.current_record_id() is not None for unit in units):
+        return {"state": "none", "reason": None}
+    if not all(unit.current_record_id() is not None for unit in units):
+        return {"state": "stale", "reason": _INCOMPLETE_REASON}
+
+    for unit in units:
+        record_path = unit.record_path()
+        if record_path is None:
+            return {"state": "stale", "reason": MISSING_REASON}
+        try:
+            ondisk = json.loads(record_path.read_text(encoding="utf-8"))
+            now0 = ondisk["timestamps"]["created_utc"]
+            current = transform(unit.draft, record_id=unit.target_id, now=now0)
+        except Exception:
+            return {"state": "stale", "reason": MISSING_REASON}
+        if _canonical(current) != _canonical(ondisk):
+            return {"state": "stale", "reason": _STALE_REASON}
+    return {"state": "current", "reason": None}
+
+
 def reopened_steps(pre_steps: list[dict], post_steps: list[dict]) -> list[str]:
     """Step ids that were ``completed`` before the mutation but are NOT after.
 
@@ -91,12 +156,22 @@ def reopened_steps(pre_steps: list[dict], post_steps: list[dict]) -> list[str]:
 
 
 def _post_workflow(post_exp) -> dict:
-    """Derive the post-mutation workflow from the SAME signals ``_detail`` uses."""
+    """Derive the post-mutation workflow from the SAME signals ``_detail`` uses.
+
+    ``exported`` is ``all_units_exported()`` (review item C5). It used to be
+    ``exported()`` while ``routes._workflow_for`` — which supplies the ``pre_steps``
+    this is compared against — used ``all_units_exported()``, so on a fully-exported
+    fan-out every mutation reported ``reopened_steps: ['export']`` and the sentence
+    *"Updated 1 field(s); reopened: Export."*. The export step had not reopened. A
+    false ``reopened_steps`` is a claim about work the scientist did not have undone.
+
+    For an experiment with no runs the two are the same function of the same field.
+    """
     return derive_workflow(
         pending_count=post_exp.pending_count(),
         draft_ok=post_exp.draft_ok(),
         ready=post_exp.export_ready(),
-        exported=post_exp.exported(),
+        exported=post_exp.all_units_exported(),
         rev=post_exp.rev,
     )
 

@@ -561,7 +561,16 @@ export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields
   draft_ok: boolean;
   // P30.6 — safe basenames only (e.g. "<id>.json"), never an absolute
   // server/mount path. Null when not yet exported.
-  artifact_refs: { record_filename: string | null; sidecar_filename: string | null };
+  //
+  // `reason` is present ONLY for a record whose runs each export their own official
+  // record: the filenames are null there because the field is SINGULAR and such a
+  // record has several, which is a different statement from "nothing was exported"
+  // and now says so rather than being inferred from two nulls.
+  artifact_refs: {
+    record_filename: string | null;
+    sidecar_filename: string | null;
+    reason?: string;
+  };
   source_files: string[];
   workflow: ApiWorkflow;
   artifact: ApiArtifactState;
@@ -611,6 +620,18 @@ export interface ApiValidateResult {
   errors: { path: string; message: string }[];
   schema: string; // "ISAAC v1.05"
   dry_run: boolean; // true until the record is exported
+  // Present ONLY for a record whose runs each export their own official record:
+  // one verdict per run, because a flat list of N records' errors is not
+  // addressable. `ok` above is true only when every entry is; `dry_run` above is
+  // true if ANY entry's verdict came from an in-memory candidate.
+  runs?: {
+    run_id: string | null;
+    run_label: string | null;
+    record_id: string;
+    ok: boolean;
+    errors: { path: string; message: string }[];
+    dry_run: boolean;
+  }[];
 }
 
 // P36.3 — the standalone validator (POST /api/validate/record). No experiment,

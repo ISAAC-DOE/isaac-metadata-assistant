@@ -1207,6 +1207,68 @@ def _authoritative_signature(exp: "Experiment") -> str:
 # ``transform`` and ``build_sidecar`` are already per-record — one draft in, one
 # record out — which is the correct granularity for ONE run. The 1:1 assumption
 # lived entirely in the caller, and it is the caller that is fixed.
+#
+# --- A KNOWN COST, RECORDED RATHER THAN FIXED (review item C9) ----------------
+#
+# The run-blind derivations were fixed by making ``status``/``draft_ok``/
+# ``export_ready`` aggregate over ``export_units()``, and each of those composes N
+# drafts and dry-runs ``export_draft`` over them. Nothing gates on the cost, and no
+# route can create a Run yet, so this is deliberately NOT optimised in this slice —
+# but it is measured, so the Run-workspace slice inherits a number rather than a
+# suspicion. MEASURED on this commit by counting calls through
+# ``isaac_api.workspace.export_draft`` and ``dependencies.transform`` over the real
+# HTTP surface, on one 5-run experiment alongside the five canonical zero-run seeds:
+#
+#                                     export_draft   transform
+#     GET /api/experiments/<id>   before export   10           0
+#                                 fully exported   5           5
+#     GET /api/experiments        before export    7           0
+#                                 fully exported   2           0
+#
+# The 10 is two dry runs per run: ``status()`` and ``export_ready()`` each call
+# ``_all_units_pass_dry_run`` independently. It falls to 5 once every unit is
+# exported, because ``status()`` short-circuits to DONE — so the cost is highest on
+# exactly the experiments a user is still working on. The 5 transforms are
+# ``artifact_state`` comparing each written record with what exporting it now would
+# produce. The 7 on the listing is 5 (this experiment) + 2 (the seeds that reach
+# their dry-run branch).
+#
+# Two amplifiers a future slice should address together rather than separately:
+# ``status()`` and ``export_ready()`` each dry-run every unit independently, and
+# ``export_units()`` itself now reads one JSON file per MATERIALISED unit (the C1
+# sibling-link fix). A per-request memoisation of ``export_units()`` would remove
+# most of both; it is not added here because it introduces a cache into a module
+# whose correctness argument is "recomputed on every read, never stored".
+#
+# --- WHAT THE OTHER ROUTES DO FOR A FAN-OUT, corrected ------------------------
+#
+# An earlier disclosure of this slice said the remaining read-only routes "surface
+# no artifacts" for a fan-out. That was too kind to it, and being too kind to your
+# own slice is the failure this file exists to avoid. They did not merely omit;
+# some of them ASSERTED, and what they asserted was false. Measured, and each is
+# now either fixed or stated:
+#
+#   * ``POST .../validate`` returned ``{"ok": false, "errors": [{"path": "$",
+#     "message": "'descriptors' is a required property"}], "dry_run": true}`` about
+#     a fan-out whose N records had all just passed official validation — because
+#     ``exp.exported()`` is False for a fan-out, so it validated ``exp.draft``, the
+#     experiment-level half, which is never exported and is not a record. FIXED
+#     (C6): checked per run, ``runs[]`` carries each verdict.
+#   * ``GET .../<id>`` reported ``exported: false`` and ``workflow.export:
+#     'current'`` for a fully-exported fan-out, disagreeing with the export
+#     response's own ``completed`` — and any later mutation then reported
+#     ``reopened_steps: ['export']``. FIXED (C5).
+#   * ``evidenced_field_count`` is 14 for a fan-out where the byte-equivalent
+#     zero-run experiment reports 26, because it reads ``exp.draft`` alone. NOT
+#     FIXED — see the comment at its call site in ``routes._summary`` for why the
+#     honest options are "disclose" or "redefine", and why redefining is a product
+#     decision rather than a bug fix.
+#   * ``GET .../artifacts`` still serves the experiment's OWN pair only, so for a
+#     fan-out it returns four nulls — beside an ``artifact.state`` that can now
+#     read ``current``, which together said "current, but there is nothing". The
+#     nulls are correct (there is no such pair); what was missing was the reason,
+#     and it is now served. LISTING the per-run pairs is left to the Run-workspace
+#     slice, which is the slice with a UI for them.
 
 #: The ONE ``rel``/``basis`` pair this module will assert between sibling run
 #: records, and the field whose equality justifies it.
@@ -1270,19 +1332,48 @@ def _exported_field_value(draft: dict, path: str):
     return env.get("value")
 
 
-def _merge_implicit(experiment_draft: dict, run_draft: dict) -> list | None:
-    """Experiment ``implicit`` entries plus the run's, the run winning on ``about``.
+def _merge_implicit(
+    experiment_draft: dict, run_draft: dict, *, inherit: bool = True
+) -> list | None:
+    """The run's ``implicit`` entries, plus the experiment's ONLY when ``inherit``.
 
-    ``implicit`` never becomes a record field — it is sidecar-only provenance — and
-    every entry carries its own evidence, so merging asserts nothing that was not
-    already asserted and evidenced on the experiment. Withholding it would silently
-    delete recorded evidence from every exported sidecar, which is a different and
-    worse failure than refusing to invent one.
+    ``implicit`` never becomes a record field — it is sidecar-only provenance — but
+    each entry is a DERIVATION, and a derivation is only true relative to the values
+    it was derived from. That distinction is the whole of this function.
+
+    **``inherit=True`` — a run that overrides nothing.** It genuinely holds the
+    experiment's values at every experiment-level address, so the experiment's
+    derivations are true of it, and withholding them would silently delete recorded
+    evidence from the exported sidecar. Carrying them is correct.
+
+    **``inherit=False`` — a run that overrides ANY address.** An earlier revision
+    carried the entries unconditionally, arguing that "merging asserts nothing that
+    was not already asserted and evidenced on the experiment". That argument was
+    wrong the moment a run diverged, and the review measured it: a run overriding
+    ``sample.material.formula`` to ``FeO2`` exported a record whose sidecar carried
+    ``implicit:absorbing_element = "Cu"`` with the rule *"absorbing element = sole
+    non-oxygen element in sample.material.formula (CuO2 -> Cu)"*. Applying that rule
+    to this record's own value yields ``Fe``. The entry was evidenced RELATIVE TO THE
+    EXPERIMENT'S value; against the run's it is false.
+
+    **Why ALL the experiment's entries are dropped and not just the dependent ones.**
+    An ``implicit`` entry carries no machine-readable link to the field it derives
+    from — only prose in ``rule``. Keeping the entries that "obviously" do not depend
+    on an overridden field would mean parsing that prose, or hard-coding a dependency
+    table that nothing in the model asserts. That is inventing a dependency we cannot
+    derive, which ``CLAUDE.md`` §5 forbids; dropping is the honest side of the
+    trade — the sidecar loses provenance it can no longer vouch for, rather than
+    keeping provenance that may be false. A run that wants a derivation to survive an
+    override can carry its own entry, which always wins.
 
     ``None`` rather than ``[]`` when there is nothing, so a draft that had no
     ``implicit`` key does not acquire an empty one.
     """
-    exp_items = [e for e in (experiment_draft.get("implicit") or []) if isinstance(e, dict)]
+    exp_items = (
+        [e for e in (experiment_draft.get("implicit") or []) if isinstance(e, dict)]
+        if inherit
+        else []
+    )
     run_items = list(run_draft.get("implicit") or [])
     run_abouts = {e.get("about") for e in run_items if isinstance(e, dict)}
     merged = [copy.deepcopy(e) for e in exp_items if e.get("about") not in run_abouts]
@@ -1344,6 +1435,27 @@ class ExportUnit:
         return self.run.record_id if self.run is not None else self.experiment.record_id
 
     def mark_exported(self, record_id: str) -> None:
+        """Record that this unit's artifact pair was written, under ONE id.
+
+        **The equality is enforced, not assumed (review item C7).** This module named
+        the same concept two ways: ``unit.target_id`` (what the export prune's
+        keep-set is built from) and ``Run.record_id`` (what the artifact file is
+        actually named by). They coincide today because ``routes._write_record``
+        passes ``result.record["record_id"]``, minted by
+        ``export_draft(..., record_id=unit.target_id)`` — so a mismatch is
+        unreachable, which is exactly why it should be stated here, where a future
+        edit would have to break it deliberately rather than silently.
+
+        ``ValueError`` and not ``assert``: an assertion disappears under ``python
+        -O``, and this guards a filesystem-naming invariant that a destructive
+        operation relies on.
+        """
+        if record_id != self.target_id:
+            raise ValueError(
+                "export unit record id does not match its target id "
+                f"({record_id!r} != {self.target_id!r}); the artifact would be "
+                "named by one and tracked by the other"
+            )
         if self.run is not None:
             self.run.record_id = record_id
         else:
@@ -1422,17 +1534,77 @@ def _add_sibling_link(draft: dict, target_id: str, sample_id: str) -> None:
             derivation(
                 rule=(
                     "Both records carry sample.sample_id "
-                    f"{sample_id!r}, resolved from the same experiment-level draft "
-                    "field. The official ISAAC schema states that two records share "
-                    "a sample_id if and only if they measured the same physical "
-                    "object, and names that equality as the basis that gives "
-                    "same_sample_as links their meaning. Derived from stored state "
-                    "at export; no scientific judgement was applied."
+                    f"{sample_id!r}. For a record this export writes, that is the "
+                    "value being written; for a record already on disk, it was read "
+                    "back from that record. The official ISAAC schema states that "
+                    "two records share a sample_id if and only if they measured the "
+                    "same physical object, and names that equality as the basis "
+                    "that gives same_sample_as links their meaning. Derived from "
+                    "record content at export; no scientific judgement was applied."
                 )
             )
         ],
     )
     draft["block_evidence"] = block_evidence
+
+
+def _linkable(unit: ExportUnit) -> tuple[str, str] | None:
+    """``(link target record id, sample_id)`` that is TRUE OF A RECORD, or ``None``.
+
+    THIS FUNCTION IS THE C1 FIX, and the defect it closes was a fabricated scientific
+    relationship in an official ISAAC record. Grouping used to read the CURRENTLY
+    COMPOSED ``sample.sample_id`` for every unit, including units whose record was
+    written long ago. A written record is frozen; the composed draft is not. Change
+    the experiment-level ``sample.sample_id``, add a run, export, and the measured
+    result was::
+
+        OLD record ...817C sample_id: SYN-ORIGINAL
+        NEW record ...JYM5 sample_id: SYN-DIFFERENT
+        NEW record links: [{'rel': 'same_sample_as', 'target': '...817C', ...}]
+
+    plus a sidecar derivation asserting that BOTH records carry ``SYN-DIFFERENT``.
+    The link was disprovable from the two records alone.
+
+    So the value depends on which document will speak for this unit:
+
+    * **materialised** (state exported AND both halves on disk) — its record will not
+      be rewritten by this export, so the only honest source is the record itself.
+      Its own ``record_id`` is the link target, because that is the id of the file
+      that exists, rather than the id we would have minted.
+    * **not materialised** — this export writes it from ``unit.draft``, so the draft
+      is what the record will carry.
+
+    **An unreadable materialised record yields ``None``, and does NOT fall back to
+    the draft.** A fallback would restore exactly the defect for the one case where
+    we have the least evidence. A unit with no linkable id is simply not grouped:
+    no link is a legitimate outcome (``CLAUDE.md`` §5), a false one is not.
+
+    ``is_record_id`` on the target as well, because the schema constrains
+    ``links[].target`` to ``^[0-9A-Z]{26}$``.
+    """
+    if not unit.materialised():
+        sample_id = _exported_field_value(unit.draft, SAMPLE_ID_PATH)
+        if isinstance(sample_id, str) and sample_id.strip() and is_record_id(unit.target_id):
+            return unit.target_id, sample_id
+        return None
+
+    record_path = unit.record_path()
+    if record_path is None:
+        return None
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None  # never guess what a record we could not read says
+    if not isinstance(record, dict):
+        return None
+    target_id = record.get("record_id")
+    sample = record.get("sample")
+    sample_id = sample.get("sample_id") if isinstance(sample, dict) else None
+    if not isinstance(target_id, str) or not is_record_id(target_id):
+        return None
+    if not isinstance(sample_id, str) or not sample_id.strip():
+        return None
+    return target_id, sample_id
 
 
 def _apply_sibling_grouping(experiment: "Experiment", units: list[ExportUnit]) -> None:
@@ -1445,8 +1617,11 @@ def _apply_sibling_grouping(experiment: "Experiment", units: list[ExportUnit]) -
     records". Nothing scientific is claimed by it.
 
     **The links.** Exactly ONE relation is emitted: ``same_sample_as`` with basis
-    ``same_sample_id``, between units whose exported ``sample.sample_id`` is the same
-    non-empty string. Every other member of the vocabulary the fan-out could have
+    ``same_sample_id``, between units whose RECORDS carry the same non-empty
+    ``sample.sample_id`` — read from the written record for a unit this export will
+    not rewrite, and from the composed draft for a unit it will (:func:`_linkable`,
+    which exists because the earlier "currently composed value" rule emitted links
+    that the two records disproved). Every other member of the vocabulary the fan-out could have
     reached is DELIBERATELY NOT EMITTED, and each omission has a reason:
 
     * ``replica_of`` / ``replicate_preparation`` — asserts that two runs are
@@ -1476,6 +1651,13 @@ def _apply_sibling_grouping(experiment: "Experiment", units: list[ExportUnit]) -
     siblings, but those siblings' records were written before it existed and are
     immutable, so they do not gain the reverse link. Rewriting them to add it would
     break record immutability, which is a stronger guarantee than link symmetry.
+
+    **A cost, stated rather than hidden.** Grouping now READS each materialised
+    unit's record from disk, once per :meth:`Experiment.export_units` call — and that
+    method is called by ``draft_ok``/``status``/``export_ready``, so a read-only
+    detail GET pays it. It is bounded by the number of runs and by this experiment's
+    own records dir, and it is the price of the link being checkable. See the
+    performance note in this module's fan-out section header.
     """
     tag = _group_tag(experiment.id)
     if tag is not None:
@@ -1487,22 +1669,22 @@ def _apply_sibling_grouping(experiment: "Experiment", units: list[ExportUnit]) -
                 tags = [*tags, tag]
             unit.draft["tags"] = tags
 
-    by_sample: dict[str, list[ExportUnit]] = {}
+    # `_linkable` decides what each unit's RECORD will say, which is not the same
+    # question as what its draft says — see that function for the measured defect.
+    by_sample: dict[str, list[tuple[ExportUnit, str]]] = {}
     for unit in units:
-        sample_id = _exported_field_value(unit.draft, SAMPLE_ID_PATH)
-        # `is_record_id` on the TARGET too: the schema constrains `links[].target` to
-        # `^[0-9A-Z]{26}$`, so a unit whose id is not one cannot be linked to without
-        # producing a record that fails official validation.
-        if isinstance(sample_id, str) and sample_id.strip() and is_record_id(unit.target_id):
-            by_sample.setdefault(sample_id, []).append(unit)
+        linkable = _linkable(unit)
+        if linkable is not None:
+            target_id, sample_id = linkable
+            by_sample.setdefault(sample_id, []).append((unit, target_id))
 
     for sample_id, group in by_sample.items():
         if len(group) < 2:
             continue  # nothing to relate; emit no link rather than a self-link
-        for unit in group:
-            for other in group:
+        for unit, _ in group:
+            for other, other_target in group:
                 if other is not unit:
-                    _add_sibling_link(unit.draft, other.target_id, sample_id)
+                    _add_sibling_link(unit.draft, other_target, sample_id)
 
 
 def _run_artifact_presence(experiment: "Experiment", run: "Run") -> list:
@@ -1951,7 +2133,11 @@ class Experiment:
            §2 D2's read half and it is reused, not re-implemented;
         3. ``meta``, if the run does not carry its own;
         4. the two evidence maps, merged — see :func:`block_level` for why each of the
-           five unclassified blocks is treated the way it is.
+           five unclassified blocks is treated the way it is. ``implicit`` is the
+           exception, and :func:`_merge_implicit` explains it: the experiment's
+           entries are carried onto a run that overrides NOTHING and withheld from a
+           run that overrides anything, because they are derivations and a derivation
+           can outlive the value it was derived from.
 
         Layer 2 is applied ON TOP of layer 1, so if a run's own draft somehow carries
         an experiment-level field directly, the resolution wins. That is not data
@@ -1985,7 +2171,10 @@ class Experiment:
         if draft.get("meta") is None and experiment_draft.get("meta") is not None:
             draft["meta"] = copy.deepcopy(experiment_draft["meta"])
 
-        implicit = _merge_implicit(experiment_draft, draft)
+        # `inherit` is false for a run that overrides ANYTHING — see `_merge_implicit`
+        # for why the test is "any override" rather than "an override of the field
+        # this entry derives from" (there is no stored link between the two).
+        implicit = _merge_implicit(experiment_draft, draft, inherit=not run.overrides)
         if implicit is not None:
             draft["implicit"] = implicit
         block_evidence = _merge_block_evidence(experiment_draft, draft)
