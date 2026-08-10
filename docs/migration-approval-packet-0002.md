@@ -26,10 +26,20 @@
 > workflow that exercised it is not byte-identical to the one at head, and that is the kind of
 > precision this packet exists to keep.
 >
+> **SUPERSEDED LATER THE SAME DAY, 2026-08-10 — see §12A.2.** The paragraph immediately above says
+> *"Not 'at this branch's exact head' … The witnessed run is at `758360c`; the branch has advanced
+> since, and one of those later commits edits the `postgres-migration` job itself … the workflow that
+> exercised it is not byte-identical to the one at head."* That was accurate while the work sat on a
+> branch. It has since merged (PR #97 → `cf2a8bc`, PR #98 → `f569400`), and the job has now run at
+> `f569400` — **the repository's current `main` HEAD** — on the byte-identical forward SQL. The
+> caveat is kept above rather than deleted, because the *reason* it existed still applies to any
+> future in-flight revision. §12A.2 records the new observation and the commands behind it.
+>
 > **The claim that survives is narrower, and it is the one that bears on your decision:** no agent
 > has contacted the SLAC database; this migration is unapplied on every *deployed* environment; and
 > a green `postgres-migration` job is **not** a hosted rehearsal. §12 keeps those two categories
-> apart on purpose.
+> apart on purpose. **§12A.2 changes nothing about that sentence** — it strengthens *which commit*
+> was exercised, not *which database*.
 
 Prepared against the committed files:
 
@@ -516,6 +526,51 @@ reader to any item, including ones added later.
 
 **§2, §3, §6, §9 and §11 are therefore executed-and-witnessed against a real engine.** §5 is not —
 see below.
+
+### 12A.2. Re-witnessed at the repository's current HEAD (added 2026-08-10, later the same day)
+
+**What changed, and what did not.** §12A above is unaltered and remains correct; this subsection adds
+a second, stronger observation and retires one caveat. **The superseded wording is at the top of this
+packet:** *"Not 'at this branch's exact head' … the workflow that exercised it is not byte-identical
+to the one at head."* It is now false of the *repository* head, and true only of the historical
+branch state it was written about.
+
+| | |
+|---|---|
+| commit under test | `f569400b934a74931b3d57339312acda8b4e1619` — the repository's `main` HEAD (`git rev-parse HEAD`), merge of PR [#98](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/98) |
+| workflow run | [31415886966](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31415886966), `push` on `main`, job `migration and durable repository against a real PostgreSQL` ([93544675229](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31415886966/job/93544675229)) |
+| that job's conclusion | **success** |
+| that **run's** conclusion | **success** — so the "expect the red mark" caveat in §12A no longer applies to *this* evidence. It stays on the record for the run it describes. |
+| checkout | a `push` event, so the ref is fetched and checked out directly: the log reads `fetch … +f569400b934a74931b3d57339312acda8b4e1619:refs/remotes/origin/main` and then `f569400b934a74931b3d57339312acda8b4e1619`. **No merge commit is interposed**, which is the specific gap §12A recorded for the pull-request run. |
+| engine | the job printed `PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on x86_64-pc-linux-gnu` — the same build string §12A observed |
+| forward SQL bytes | unchanged: `shasum -a 256` of `apps/api/isaac_api/migrations/0002_runs.sql` at HEAD equals the forward digest in this packet's table, and `git ls-tree` shows the same blob at `90b432d`, `758360c`, `cf2a8bc` and `f569400` |
+
+**Printed at that job, verified by reading its log rather than the workflow file** (all still subject
+to §12A's `[silent]` rule for the sub-claims it names there): `pending: 0001_experiments, 0002_runs`
+→ `applied: 0002_runs` → `nothing to apply (every migration is already recorded)` →
+`records: byte-identical; added exactly the three application-owned tables` →
+`isaac_runs: still empty after the application ran` →
+`records: byte-identical after the application ran; table set unchanged` → **all twelve**
+`refused as designed by …` lines, including `isaac_runs_experiment_fk: deleting an experiment that
+still has runs` → both `admitted as designed: …` lines →
+`0002 constraints: every one behaves as the approval packet describes` →
+`wrong-order rollback: refused, and nothing was dropped` → `pending: 0002_runs` restored after the
+in-order rollback.
+
+**Breadth, measured rather than estimated.** Eighteen `ci.yml` runs have existed since `0002` was
+first pushed (`gh run list --workflow=ci.yml`, filtered to runs created after `b8f0a1a`). Sixteen of
+them carry the **byte-identical** forward SQL — the two that do not are `3ce946e` and `2ae4ffd`,
+which predate `90b432d`'s in-place CHECK correction. **In all sixteen, the `postgres-migration` job
+concluded `success`** (`gh api …/actions/runs/<id>/jobs`). Two of those sixteen are `push` runs on
+`main` (`cf2a8bc`, `f569400`); the rest are pull-request runs. Some *runs* were red for unrelated
+jobs — judge this evidence by the job, as §12A says.
+
+**None of this is a hosted rehearsal, and the hard stop is unmoved.** No database other than a
+throwaway GitHub Actions service container was contacted; no kubeconfig, port-forward or Secret was
+requested or used; `0002_runs` remains unapplied on the hosted database. Every limitation in §12B
+below stands **exactly** as written — a green job at `main` HEAD removes uncertainty about *which
+bytes* were exercised and *on which commit*, and removes none about the hosted server, its roles, its
+grants, or its real data.
 
 ### 12B. What CI does **not** prove
 
