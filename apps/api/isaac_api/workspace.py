@@ -536,13 +536,25 @@ def field_level(path: str) -> str:
     ``LEVEL_UNCLASSIFIED`` IS A REAL ANSWER AND IS NOT AN OVERSIGHT. Two families of
     field-map key are in neither list, for two different reasons:
 
-    * ``system.configuration.*`` (``detector_model``, ``monochromator_crystal``,
-      ``n_scans``, ``proposal_id``, ``session_id``) and ``timestamps.created_utc``
-      are emitted by the real extractor (``extract/structured.FIELD_MAP``) and the
-      contract assigns them to neither level. Guessing would be the unevidenced
-      inference ``CLAUDE.md`` §5 forbids: whether two runs of one experiment may
-      legitimately differ in detector model is a scientific question this repository
-      has no answer to.
+    * ``system.configuration.*`` — SIX fields, not the five this list used to name:
+      ``detector_model``, ``monochromator_crystal``, ``spectrometer_geometry``,
+      ``n_scans``, ``proposal_id``, ``session_id``. The behaviour was always correct
+      (the prefix test covers the whole namespace); only this prose undercounted, and
+      it was found by enumerating ``extract/structured.FIELD_MAP`` rather than reading
+      it. They are emitted by the real extractor and the contract assigns them to
+      neither level. Guessing would be the unevidenced inference ``CLAUDE.md`` §5
+      forbids: whether two runs of one experiment may legitimately differ in detector
+      model is a scientific question this repository has no answer to. The question is
+      written out per field, with what each answer would unlock, in
+      ``docs/run-scope-decision-packet.md``.
+    * ``timestamps.created_utc`` is also unclassified, and it is the one member of this
+      list that does NOT need a scientific answer — stated here because grouping it
+      with the six made it look as though it did. The official schema REQUIRES it and
+      gives it no description, ``export.py`` already defaults it to the export time via
+      ``setdefault``, and an unclassified field is not inherited — so it is a
+      record-creation stamp, not an inherited scientific value. The consequence, logged
+      rather than fixed here: a creation time recorded in a source sheet is dropped on
+      the fan-out path and replaced by the export time.
     * anything else a future extractor emits, which defaults to unclassified rather
       than to a level — fail-closed, so a new field is inherited by nobody until
       somebody decides.
