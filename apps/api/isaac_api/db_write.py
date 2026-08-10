@@ -121,10 +121,19 @@ APPLICATION_NAME = "isaac_app_write"
 #: ``records`` is deliberately, permanently absent. It holds the production-derived
 #: 30-row sample and is owned by the record-verification read path; this
 #: application must never read it through here, let alone write it.
+#:
+#: ``isaac_runs`` WAS ADDED FOR MIGRATION ``0002_runs`` AND IS NOT YET WRITTEN BY
+#: ANYTHING. This set is what the statement policy consults, so a table must be
+#: listed here before its own CREATE statement can run — the migration file alone
+#: is not enough. Listing it grants nothing on its own: no module-level statement
+#: names ``isaac_runs``, which is pinned by
+#: ``test_0002_is_inert_for_this_build_no_statement_names_isaac_runs``. Adding a
+#: name here is the deliberate, reviewable act that lets a later slice write it.
 OWNED_TABLES: frozenset[str] = frozenset(
     {
         "isaac_schema_migrations",
         "isaac_experiments",
+        "isaac_runs",
     }
 )
 
@@ -190,9 +199,10 @@ class WriteRefused(RuntimeError):
 #: ``SET ROLE`` and is refused by name rather than by hope.
 #:
 #: VERIFIED AGAINST WHAT THE APPLICATION ACTUALLY ISSUES, not assumed: all eight
-#: module-level statements and all three committed migration statements still
-#: pass, pinned by
-#: ``test_every_statement_this_application_actually_issues_passes_the_policy``.
+#: module-level statements and all five committed migration statements (three from
+#: ``0001_experiments``, two from ``0002_runs``) still pass, pinned by
+#: ``test_every_statement_this_application_actually_issues_passes_the_policy`` and
+#: by ``test_the_committed_migrations_load_and_are_create_only``.
 #: The near-misses are worth naming, because they are why this is a token match
 #: and not a substring one: ``current_database`` (in ``Q_CURRENT_DATABASE``) and
 #: ``isaac_schema_migrations`` are each a SINGLE identifier token, so neither

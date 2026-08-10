@@ -23,9 +23,11 @@ never dialled.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -662,7 +664,14 @@ def test_every_statement_this_application_actually_issues_passes_the_policy(sql)
 
 def test_records_is_not_and_never_becomes_an_owned_table():
     assert "records" not in dbw.OWNED_TABLES
-    assert dbw.OWNED_TABLES == {"isaac_schema_migrations", "isaac_experiments"}
+    # THE MEMBERSHIP IS PINNED EXACTLY, so adding a table is a visible, reviewed
+    # edit rather than a side effect. `isaac_runs` was added for migration
+    # `0002_runs`; nothing writes it yet (see the inertness test below).
+    assert dbw.OWNED_TABLES == {
+        "isaac_schema_migrations",
+        "isaac_experiments",
+        "isaac_runs",
+    }
     # ...and it is additionally on the absolute denylist, which does not reason
     # about SQL grammar at all. Both guards are asserted, because the grammar one
     # is the one that was already wrong once.
@@ -822,18 +831,33 @@ def test_a_failed_durable_write_does_not_leave_a_file_behind(app, tmp_path, monk
 # =============================================================================
 
 
-def test_the_committed_migration_loads_and_is_create_only():
+def test_the_committed_migrations_load_and_are_create_only():
+    """EVERY committed migration, not just the first.
+
+    The version list is asserted in ORDER, because `load_migrations` sorts by
+    filename and the runner applies in that order — `0002_runs` declares a foreign
+    key into `isaac_experiments`, so applying it before `0001_experiments` is not a
+    stylistic preference, it is a failure.
+    """
     migrations = dbm.load_migrations()
-    assert [m.version for m in migrations] == ["0001_experiments"]
-    statements = migrations[0].statements
-    assert len(statements) == 3
+    assert [m.version for m in migrations] == ["0001_experiments", "0002_runs"]
+    assert [len(m.statements) for m in migrations] == [3, 2]
     # Every statement is CREATE ... IF NOT EXISTS — the second half of the
     # idempotence claim, and the half that survives the bookkeeping table being lost.
-    for statement in statements:
-        assert statement.lower().startswith("create ")
-        assert "if not exists" in statement.lower()
-        # ...and it passes the owned-tables policy, so it can only name our tables.
-        dbw.WriteStatementPolicy().check(statement)
+    for migration in migrations:
+        for statement in migration.statements:
+            assert statement.lower().startswith("create "), migration.version
+            assert "if not exists" in statement.lower(), migration.version
+            # ...and it passes the owned-tables policy, so it can only name our
+            # tables.
+            dbw.WriteStatementPolicy().check(statement)
+            # ADDITIVE MEANS ADDITIVE: no statement may alter, drop or truncate
+            # anything — including `isaac_experiments`, which 0002 references but
+            # must not modify. The policy above would refuse each of these too;
+            # this is asserted separately because a policy is a property of today's
+            # keyword list and this is a property of the file.
+            tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", statement.lower()))
+            assert tokens.isdisjoint({"alter", "drop", "truncate"}), migration.version
 
 
 def test_the_rollback_file_is_committed_beside_it_and_is_never_loaded():
@@ -857,37 +881,73 @@ def test_the_rollback_file_is_committed_beside_it_and_is_never_loaded():
             dbw.WriteStatementPolicy().check(statement)
 
 
+def _ddl_for(conn, table: str) -> list[str]:
+    prefix = f"create table if not exists {table}"
+    return [sql for sql, _ in conn.statements if sql.lower().startswith(prefix)]
+
+
 def test_migrate_applies_once_and_a_second_run_is_a_no_op():
     conn = FakeConnection()
-    assert dbm.migrate(_env(), connect=_connector(conn)) == ["0001_experiments"]
-    assert conn.applied == {"0001_experiments"}
-    ddl = [sql for sql, _ in conn.statements if sql.lower().startswith("create table if not exists isaac_experiments")]
-    assert len(ddl) == 1
+    assert dbm.migrate(_env(), connect=_connector(conn)) == [
+        "0001_experiments",
+        "0002_runs",
+    ]
+    assert conn.applied == {"0001_experiments", "0002_runs"}
+    assert len(_ddl_for(conn, "isaac_experiments")) == 1
+    assert len(_ddl_for(conn, "isaac_runs")) == 1
 
-    again = FakeConnection(applied={"0001_experiments"})
+    again = FakeConnection(applied={"0001_experiments", "0002_runs"})
     assert dbm.migrate(_env(), connect=_connector(again)) == []
-    assert not [
-        sql for sql, _ in again.statements
-        if sql.lower().startswith("create table if not exists isaac_experiments")
-    ], "a second run re-issued the migration's own DDL"
+    assert not _ddl_for(again, "isaac_experiments"), "a second run re-issued 0001's DDL"
+    assert not _ddl_for(again, "isaac_runs"), "a second run re-issued 0002's DDL"
+
+
+def test_a_partially_applied_database_applies_only_what_is_missing():
+    """THE STATE THE HOSTED DATABASE IS ACTUALLY IN as of 2026-08-09: `0001` applied
+    by the operator, `0002` not.
+
+    The bookkeeping check is per-migration rather than "have we ever migrated", so
+    the pending one applies and the applied one is not re-issued. Asserted because
+    this is the exact transition the `0002` approval packet asks for.
+    """
+    conn = FakeConnection(applied={"0001_experiments"})
+    assert dbm.migrate(_env(), connect=_connector(conn)) == ["0002_runs"]
+    assert not _ddl_for(conn, "isaac_experiments"), "an applied migration was re-issued"
+    assert len(_ddl_for(conn, "isaac_runs")) == 1
 
 
 def test_pending_versions_reports_the_plan_without_applying_it():
     conn = FakeConnection()
-    assert dbm.pending_versions(_env(), connect=_connector(conn)) == ["0001_experiments"]
+    assert dbm.pending_versions(_env(), connect=_connector(conn)) == [
+        "0001_experiments",
+        "0002_runs",
+    ]
     assert conn.applied == set(), "a plan-only call recorded a version as applied"
 
 
 def test_the_bookkeeping_row_is_written_in_the_same_transaction_as_the_ddl():
-    """"Applied" and "recorded" cannot disagree, because they commit together."""
+    """"Applied" and "recorded" cannot disagree, because they commit together.
+
+    ONE TRANSACTION PER MIGRATION, so two committed migrations commit twice — not
+    once. That is the contract `db_migrate` states, and asserting the count rather
+    than `>= 1` is what would catch a future runner that batched them: a batched
+    apply would leave a half-migrated database recorded as fully migrated if the
+    second statement failed.
+    """
     conn = FakeConnection()
     dbm.migrate(_env(), connect=_connector(conn))
-    assert conn.commits == 1, "the migration used more than one transaction"
+    assert conn.commits == 2, "one transaction per migration was not honoured"
     issued = [sql for sql, _ in conn.statements]
     assert dbm.Q_RECORD_VERSION in issued
-    assert issued.index(dbm.Q_RECORD_VERSION) > issued.index(
-        [s for s in issued if s.lower().startswith("create table if not exists isaac_experiments")][0]
-    )
+    for table in ("isaac_experiments", "isaac_runs"):
+        ddl_index = issued.index(_ddl_for(conn, table)[0])
+        # The bookkeeping row for this migration is written AFTER its DDL, in the
+        # same transaction.
+        assert any(
+            index > ddl_index
+            for index, sql in enumerate(issued)
+            if sql == dbm.Q_RECORD_VERSION
+        ), table
 
 
 def test_the_statement_separator_survives_a_semicolon_inside_a_literal():
@@ -935,8 +995,365 @@ def test_the_committed_migrations_regex_literal_is_not_read_as_a_dollar_quote():
     here. Dollar QUOTING needs a pair.
     """
     migrations = dbm.load_migrations()
-    assert [m.version for m in migrations] == ["0001_experiments"]
-    assert len(migrations[0].statements) == 3
+    assert [m.version for m in migrations] == ["0001_experiments", "0002_runs"]
+    assert [len(m.statements) for m in migrations] == [3, 2]
+    # 0002 carries the same `$` inside `CHECK (run_id ~ '^[0-9A-Z]{26}$')`, so the
+    # guard has to stay narrow for it too.
+    assert "$" in "\n".join(migrations[1].statements)
+
+
+# =============================================================================
+# 8A. migration 0002_runs — the run table, its constraints, and its rollback
+# =============================================================================
+#
+# WHAT THESE PROVE AND WHAT THEY CANNOT. Everything here is a property of the
+# committed TEXT and of the runner's behaviour against the in-process fake: the
+# statements load, they are create-only, they pass the write policy, the version
+# ordering is right, and the rollback is unreachable from the application. NONE OF
+# IT PROVES THE SQL IS VALID POSTGRESQL, that the CHECK constraints reject what
+# they are meant to reject, or that the foreign key behaves as described — no
+# PostgreSQL is involved in this file. That half is `.github/workflows/ci.yml`'s
+# `postgres-migration` job, against a real `postgres:18` engine. See this file's
+# own module docstring, and §"What remains unproven" in
+# `docs/migration-approval-packet-0002.md`.
+
+
+def _runs_migration() -> dbm.Migration:
+    (migration,) = [m for m in dbm.load_migrations() if m.version == "0002_runs"]
+    return migration
+
+
+def _runs_table_statement() -> str:
+    return " ".join(_runs_migration().statements[0].split()).lower()
+
+
+def test_0002_creates_only_the_run_table_and_its_one_index():
+    """SCOPE, pinned. Contract §8 D7 names six candidate tables
+    (`isaac_runs`, `isaac_experiment_revisions`, `isaac_run_revisions`,
+    `isaac_assets`, `isaac_run_assets`, `isaac_submissions`). This migration
+    creates exactly ONE of them, deliberately: the other five belong to the slices
+    that need them, and an over-stuffed migration is harder to approve and harder
+    to roll back.
+    """
+    statements = _runs_migration().statements
+    assert len(statements) == 2
+    assert statements[0].lower().startswith("create table if not exists isaac_runs ")
+    assert statements[1].lower().startswith(
+        "create index if not exists isaac_runs_experiment_order_idx"
+    )
+    created = set(
+        re.findall(r"create table if not exists ([a-z_]+)", "\n".join(statements).lower())
+    )
+    assert created == {"isaac_runs"}
+    for deferred in (
+        "isaac_experiment_revisions",
+        "isaac_run_revisions",
+        "isaac_assets",
+        "isaac_run_assets",
+        "isaac_submissions",
+    ):
+        assert deferred not in "\n".join(statements), deferred
+
+
+def test_0002_declares_the_primary_key_foreign_key_and_named_constraints():
+    """Each structural claim the approval packet makes, asserted against the text.
+
+    A text assertion is the right instrument here for the same reason it is at
+    `test_the_upsert_predicate_is_a_compare_and_swap_and_not_a_blind_overwrite`:
+    the property being protected is "this clause exists at all", and the failure
+    being guarded against is a future edit that quietly removes one.
+    """
+    sql = _runs_table_statement()
+    assert "run_id text primary key" in sql
+    assert "constraint isaac_runs_id_shape check (run_id ~ '^[0-9a-z]{26}$')" in sql
+    assert (
+        "constraint isaac_runs_experiment_fk references isaac_experiments (experiment_id)"
+        in sql
+    )
+    assert "experiment_id text not null" in sql
+    assert "state jsonb not null" in sql
+    assert "generation text not null," in sql
+    for column in ("created_utc", "updated_utc"):
+        assert f"{column} timestamptz not null default now()" in sql
+    for named in (
+        "isaac_runs_ordinal_non_negative",
+        "isaac_runs_rev_non_negative",
+        "isaac_runs_state_is_object",
+        "isaac_runs_document_identity",
+    ):
+        assert f"constraint {named}" in sql, named
+    # The two identity keys are tied to the document they project, so a row cannot
+    # claim to be a run the document does not describe. `experiment_id` treats an
+    # EMPTY string as "the document makes no claim", for the reason measured in
+    # `test_0002_identity_check_admits_the_only_legacy_shape_this_application_produces`.
+    assert (
+        "check (state ->> 'id' = run_id "
+        "and coalesce(nullif(state ->> 'experiment_id', ''), experiment_id) "
+        "= experiment_id)" in sql
+    )
+
+
+def test_0002_identity_check_admits_the_only_legacy_shape_this_application_produces():
+    """LEGACY TOLERANCE, MEASURED RATHER THAN CLAIMED.
+
+    The migration's own comment used to justify the identity CHECK as
+    "legacy-tolerant by construction": `->>` yields NULL for an absent key, a
+    comparison against NULL is NULL, and a CHECK passes unless it is FALSE.
+
+    THAT IS TRUE OF A BARE `'{}'` DOCUMENT — which is what CI inserted, so nothing
+    caught it — AND FALSE OF EVERYTHING THIS APPLICATION CAN ACTUALLY PRODUCE.
+    `Run.to_state()` emits every key unconditionally and `Run.from_state` reads
+    each string through `_as_str`, which returns `""` for an absent one. So the
+    legacy run document this application writes carries
+    `"experiment_id": ""` — not a missing key — `'' = experiment_id` is FALSE, not
+    NULL, and the row is REFUSED.
+
+    That shape is reachable and permanent: `_hydrate_runs` documents that
+    `experiment_id` is deliberately NOT repaired from the owning experiment,
+    because repairing it on read would change the run's authoritative signature
+    and bump every record's `rev` on a mere listing.
+
+    The premise is asserted here, so the constraint and the model cannot drift
+    apart silently. That the relaxed CHECK actually ADMITS this row, and still
+    refuses a document naming a DIFFERENT experiment, is proven against a real
+    engine by the `postgres-migration` job — this file has no PostgreSQL.
+    """
+    state = ws.Run.from_state(
+        {"id": "01CILEGACYRUN00000000000AA", "label": "old", "draft": {}}
+    ).to_state()
+    assert "experiment_id" in state, "the premise moved: to_state now omits the key"
+    assert state["experiment_id"] == "", state["experiment_id"]
+
+    sql = _runs_table_statement()
+    # The bare equality — the form that refused the row above — is gone.
+    assert "state ->> 'experiment_id' = experiment_id" not in sql
+    # `id` is deliberately NOT relaxed the same way, and that asymmetry is a
+    # decision: `_hydrate_runs` DROPS a run whose id is empty, so no document this
+    # application persists can carry `id: ""`, and a document that identifies no
+    # run at all is exactly what this constraint should refuse.
+    assert "state ->> 'id' = run_id" in sql
+    assert "nullif(state ->> 'id'" not in sql
+
+
+def test_0002_declares_no_on_delete_action_so_the_default_RESTRICT_applies():
+    """THE FOREIGN KEY REFUSES A PARENT DELETE, and that is a decision.
+
+    No `ON DELETE` clause means NO ACTION, which for a non-deferrable constraint is
+    RESTRICT: deleting an `isaac_experiments` row that still has runs errors rather
+    than silently destroying them. `DELETE FROM isaac_experiments` already passes
+    the write policy, so `ON DELETE CASCADE` would have put an unbounded
+    multi-row destruction one statement away.
+
+    IT IS ALSO UNWRITABLE UNDER THE CURRENT POLICY, and that is asserted here
+    rather than left as a claim in a comment: the tokenizer reads the `delete`
+    after `on` as naming a table it does not own. So the design argument and the
+    mechanical constraint agree — and a future author who reaches for CASCADE will
+    fail this test and read why.
+    """
+    sql = _runs_table_statement()
+    assert "on delete" not in sql
+    assert "cascade" not in sql
+    with pytest.raises(dbw.WriteRefused):
+        dbw.WriteStatementPolicy().check(
+            "CREATE TABLE IF NOT EXISTS isaac_runs (experiment_id text REFERENCES "
+            "isaac_experiments (experiment_id) ON DELETE CASCADE)"
+        )
+
+
+def test_the_approval_packet_quotes_the_migration_it_describes():
+    """THE PACKET IS A RELEASE GATE, SO IT GETS A TEST — because it drifted.
+
+    `docs/migration-approval-packet-0002.md` is the document the owner reads before
+    applying this migration, and it offers exactly one mechanism for checking
+    itself: a table of sha256 digests, introduced with the instruction *"Quote
+    these in any future re-check rather than re-reading the files by eye."*
+
+    THAT TABLE WAS WRONG FOR THE WHOLE LIFE OF THE BRANCH. `b8f0a1a` wrote the
+    packet and the migration together, so the digest matched. `90b432d` then
+    corrected the identity CHECK **in place** — the only legitimate way to change a
+    migration that has never been applied — and updated the SQL quoted in §2 and the
+    prose explaining the constraint, but not the digest. An operator following the
+    packet's own instruction would have computed a mismatch against the very file
+    they were about to apply, and concluded either that the packet was stale or that
+    the migration had been tampered with. Nothing read this document, so nothing
+    caught it; the failure mode is `CLAUDE.md` §35's exactly — correct code
+    surrounded by false documentation.
+
+    Two claims are pinned, deliberately not one. The digest catches an edit to the
+    bytes; the quoted SQL catches an edit that *keeps* the digest honest but lets the
+    human-readable quotation drift, which is what a reviewer actually reads.
+
+    Normalisation is whitespace-only. Comment lines are dropped from the migration
+    because §2 says so in its own text ("Commentary stripped"), and the runner drops
+    them too, so the effective SQL is identical either way.
+    """
+    packet = (
+        Path(__file__).resolve().parents[3] / "docs" / "migration-approval-packet-0002.md"
+    ).read_text(encoding="utf-8")
+
+    # 1. Every digest the packet quotes is the digest of the file it names. Driven
+    #    off the packet's own table rather than a hardcoded list, so adding a row
+    #    for a future file is covered without editing this test.
+    rows = re.findall(
+        r"^\|\s*`(apps/api/isaac_api/migrations/[^`]+)`\s*\|\s*`([0-9a-f]{64})`\s*\|$",
+        packet,
+        re.M,
+    )
+    assert len(rows) == 2, f"expected the two 0002 files in the digest table, got {rows}"
+    root = Path(__file__).resolve().parents[3]
+    for rel, quoted in rows:
+        actual = hashlib.sha256((root / rel).read_bytes()).hexdigest()
+        assert actual == quoted, (
+            f"{rel}: the packet quotes {quoted} but the committed file hashes to "
+            f"{actual}. Update the digest table in "
+            f"docs/migration-approval-packet-0002.md in the SAME commit as the SQL."
+        )
+
+    # 2. The SQL the packet SHOWS is the SQL the runner will execute. §2's fenced
+    #    block is the first ```sql fence in the document.
+    quoted_sql = re.search(r"```sql\n(.*?)```", packet, re.S)
+    assert quoted_sql is not None, "§2's fenced SQL block is gone"
+
+    def _normalise(text: str) -> str:
+        body = "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("--")
+        )
+        return " ".join(body.split())
+
+    expected = _normalise(quoted_sql.group(1))
+    actual = " ".join(
+        _normalise(statement) + ";" for statement in _runs_migration().statements
+    )
+    assert expected == actual, (
+        "§2 of the approval packet no longer quotes the committed migration.\n"
+        f"packet:    {expected}\n"
+        f"migration: {actual}"
+    )
+
+
+def test_0002_declares_no_uniqueness_on_experiment_and_ordinal():
+    """A UNIQUE (experiment_id, ordinal) would refuse data this application already
+    produces: every run in a pre-`ordinal` persisted document hydrates with
+    `ordinal = 0` (`Run.ordinal` defaults to 0 and `_as_int` returns 0 for a
+    missing key), so a single experiment can legitimately hold several runs at
+    ordinal 0. `sorted_runs` tie-breaks instead of forbidding, and the schema
+    matches it."""
+    assert "unique" not in _runs_table_statement()
+    exp = ws.Experiment(
+        id="01ABCDEFGHJKMNPQRSTVWXYZ00",
+        title="t",
+        created_utc="2026-01-01T00:00:00Z",
+        source={},
+        draft={},
+    )
+    legacy = [
+        ws.Run.from_state({"id": "01AAAAAAAAAAAAAAAAAAAAAAAA", "experiment_id": exp.id}),
+        ws.Run.from_state({"id": "01BBBBBBBBBBBBBBBBBBBBBBBB", "experiment_id": exp.id}),
+    ]
+    assert [r.ordinal for r in legacy] == [0, 0], "the premise of this test moved"
+
+
+def test_0002_is_inert_for_this_build_no_statement_names_isaac_runs():
+    """LEGACY COMPATIBILITY, HALF ONE: the application runs unchanged whether 0002
+    is applied or not, because nothing it issues names the table.
+
+    Measured over the complete set of statements this application can issue — the
+    module-level constants in the three modules that hold them — rather than
+    asserted. `isaac_runs` being in `OWNED_TABLES` grants a capability; it does not
+    exercise one.
+    """
+    issued = [
+        dbw.Q_SET_STATEMENT_TIMEOUT,
+        dbw.Q_SET_LOCK_TIMEOUT,
+        dbw.Q_CURRENT_DATABASE,
+        dbm.Q_ENSURE_BOOKKEEPING,
+        dbm.Q_APPLIED_VERSIONS,
+        dbm.Q_RECORD_VERSION,
+        repo.Q_UPSERT_EXPERIMENT,
+        repo.Q_ONE_EXPERIMENT,
+        repo.Q_ALL_EXPERIMENTS,
+    ]
+    # The list above must BE the module-level statement set, not a stale copy of it.
+    for module in (dbw, dbm, repo):
+        for name in dir(module):
+            if name.startswith("Q_"):
+                assert getattr(module, name) in issued, f"{module.__name__}.{name}"
+    for sql in issued:
+        assert "isaac_runs" not in sql.lower(), sql
+
+
+def test_the_app_serves_reads_and_writes_identically_with_0002_pending(app, monkeypatch):
+    """LEGACY COMPATIBILITY, HALF TWO, behaviourally: a deployment whose database is
+    migrated to 0001 ONLY — which is the hosted deployment as of 2026-08-09 — is
+    unaffected by this migration being committed.
+
+    The fake connection answers every statement; what makes this meaningful is the
+    assertion that no statement naming `isaac_runs` was ever issued, so the create
+    and the read cannot have depended on the new table existing.
+    """
+    conn = FakeConnection(applied={"0001_experiments"})
+    client = _durable_client(app, monkeypatch, conn)
+    created = client.post("/api/experiments", json={"title": "0002 pending"})
+    assert created.status_code == 201, created.text
+    listed = client.get("/api/experiments")
+    assert [row["id"] for row in listed.json()["experiments"]] == [created.json()["id"]]
+    assert not [sql for sql, _ in conn.statements if "isaac_runs" in sql.lower()]
+
+
+def test_the_0002_rollback_is_committed_beside_it_and_is_never_loaded():
+    """The rollback exists for the operator and for CI, and the application cannot
+    reach it: `load_migrations` excludes it by suffix and the write policy refuses
+    what it contains.
+
+    ONE DISCLOSURE IS ASSERTED RATHER THAN ONLY WRITTEN DOWN, because the file's
+    own header makes the claim and a claim in a comment is what drifts. Unlike
+    0001's rollback — every statement of which is a DROP and is therefore
+    independently refused — this file also contains a `DELETE` against the
+    bookkeeping table, and that statement WOULD pass the policy on its own. The
+    file as a whole is still refused, and the loader still never reads it.
+    """
+    rollback = dbm.MIGRATIONS_DIR / "0002_runs.rollback.sql"
+    assert rollback.is_file()
+    assert rollback.name not in {m.path.name for m in dbm.load_migrations()}
+    body = rollback.read_text(encoding="utf-8")
+
+    assert "DROP TABLE IF EXISTS isaac_runs;" in body
+    # It removes its own bookkeeping row, or a re-apply would print "nothing to
+    # apply" over a table that no longer exists.
+    assert "DELETE FROM isaac_schema_migrations WHERE version = '0002_runs';" in body
+    # Both statements are in ONE transaction, so "dropped" and "unrecorded" cannot
+    # disagree.
+    assert body.count("BEGIN;") == 1 and body.count("COMMIT;") == 1
+    # It names ONLY what 0002 created: not `isaac_experiments` (0001's), and never
+    # the production-derived table.
+    for statement in dbm.split_statements(body):
+        tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", statement.lower()))
+        assert "records" not in tokens
+        assert "isaac_experiments" not in tokens
+        with pytest.raises(dbw.WriteRefused):
+            dbw.WriteStatementPolicy().check(statement)
+
+    # THE DISCLOSURE, measured: the DELETE line alone is accepted by the policy.
+    # This is NOT a property being sought — it is the one recorded in the file's
+    # header, pinned so the header cannot quietly become false.
+    assert dbw.WriteStatementPolicy().check(
+        "DELETE FROM isaac_schema_migrations WHERE version = '0002_runs'"
+    )
+
+
+def test_the_0001_rollback_was_not_edited_by_this_migration():
+    """0001 IS APPLIED TO THE HOSTED DATABASE and its rollback was reviewed as it
+    stands. 0002 does not touch it — which is precisely why rolling both back has
+    an ORDER: `DROP TABLE IF EXISTS isaac_experiments` has no `CASCADE`, so it
+    fails while `isaac_runs` still references it. That ordering is documented in
+    0002's rollback header and proven against a real engine in CI; here we only
+    assert the file was left alone.
+    """
+    body = (dbm.MIGRATIONS_DIR / "0001_experiments.rollback.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "isaac_runs" not in body
+    assert "CASCADE" not in body.upper()
 
 
 # =============================================================================

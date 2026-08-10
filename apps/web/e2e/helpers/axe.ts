@@ -221,12 +221,49 @@ export function auditScan(
   return failures;
 }
 
+/**
+ * How many offending nodes a failure message lists before truncating.
+ *
+ * IT WAS 4, AND THAT NUMBER COST A WHOLE INVESTIGATION. The Run vertical slice
+ * produced two `record-detail` regressions in one linux run (job 93380745844) —
+ * `tablet-768x1024` 14 -> 16 and `width-390` 12 -> 13 — and in BOTH messages every
+ * one of the four printed nodes was pre-existing debt:
+ *
+ *   tablet-768x1024:  `.record-file`, `kbd.topbar-search-kbd`,
+ *                     `.evidence-trail-link-count`, `#record-view-tab-graph`
+ *                     … and 12 more   (4 + 12 = 16)
+ *   width-390:        `.evidence-trail-link-count`, `#record-view-tab-graph`,
+ *                     two `.needsyou-about.mono`
+ *                     … and 9 more    (4 + 9 = 13)
+ *
+ * The NEW nodes — the entire point of a regression message — were inside the
+ * truncated part of both, so the only way to learn what had regressed was to re-run
+ * the scan locally against two commits. The baseline's whole design is "tell the
+ * author exactly what got worse"; a limit that hides the delta defeats it.
+ *
+ * (An earlier revision of this comment merged the two messages: it paired the
+ * tablet counts with the width-390 node list and its "… and 9 more". The
+ * conclusion held — all four printed nodes are pre-existing debt in both — but the
+ * evidence cited was not the evidence. Corrected rather than deleted, because a
+ * confidently mis-cited log line is the failure mode this file exists to catch.)
+ *
+ * 24 is chosen against the actual numbers rather than as a round figure. The
+ * largest baselined counts here are `settings-explorer@tablet-768x1024` at 63-64 and
+ * the `evidence@*` family at 67-69, so this is deliberately NOT "print everything" —
+ * a 69-node dump would bury the signal again. It is comfortably above
+ * every *delta* the baseline has ever reported, which is the thing a reader needs.
+ */
+const MAX_REPORTED_NODES = 24;
+
 /** A compact, greppable rendering of one violation for failure output. */
 export function formatViolation(v: Result): string {
   const nodes = v.nodes
-    .slice(0, 4)
+    .slice(0, MAX_REPORTED_NODES)
     .map((n) => `      - ${n.target.join(' ')}\n        ${n.html.replace(/\s+/g, ' ').slice(0, 160)}`)
     .join('\n');
-  const more = v.nodes.length > 4 ? `\n      … and ${v.nodes.length - 4} more node(s)` : '';
+  const more =
+    v.nodes.length > MAX_REPORTED_NODES
+      ? `\n      … and ${v.nodes.length - MAX_REPORTED_NODES} more node(s)`
+      : '';
   return `  [${v.impact ?? 'unknown'}] ${v.id} — ${v.help} (${v.nodes.length} node(s))\n    ${v.helpUrl}\n${nodes}${more}`;
 }

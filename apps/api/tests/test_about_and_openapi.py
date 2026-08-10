@@ -311,7 +311,10 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
         checked += 1
     # 39 -> 40: `POST /api/experiments`, the durable Create Experiment path. It is
     # the first record-creation operation this API has ever published.
-    assert checked == 40, f"expected 40 documented operations, found {checked}"
+    # 40 -> 45: the Run HTTP API. The Run domain model already existed in
+    # `workspace` (one run exports one official record); these five operations
+    # expose it — list, add, read, edit, and check one run.
+    assert checked == 45, f"expected 45 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -518,6 +521,24 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
         "200", "400", "401", "403", "404", "412", "413", "422", "428",
     ],
     ("/api/experiments/{experiment_id}/pending", "get"): ["200", "401", "404", "422"],
+    # The Run API. Adding a run REWRITES THE RECORD, so `POST .../runs` carries the
+    # record's `If-Match` and the whole 400/412/428 set with it. `PATCH
+    # .../runs/{run_id}` carries THE RUN's instead — the same three codes, a
+    # different validator. The two read operations and the check take none, because
+    # they write nothing.
+    ("/api/experiments/{experiment_id}/runs", "get"): ["200", "401", "404", "422"],
+    ("/api/experiments/{experiment_id}/runs", "post"): [
+        "201", "400", "401", "404", "412", "422", "428",
+    ],
+    ("/api/experiments/{experiment_id}/runs/{run_id}", "get"): [
+        "200", "401", "404", "422",
+    ],
+    ("/api/experiments/{experiment_id}/runs/{run_id}", "patch"): [
+        "200", "400", "401", "404", "412", "422", "428",
+    ],
+    ("/api/experiments/{experiment_id}/runs/{run_id}/check", "post"): [
+        "200", "401", "404", "422",
+    ],
     ("/api/experiments/{experiment_id}/source-preview", "get"): [
         "200", "400", "401", "404", "422",
     ],

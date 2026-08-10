@@ -29,7 +29,9 @@ from isaac_records.complete import apply_answers, apply_corrections
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
+from isaac_records.extract.structured import FIELD_MAP as EXTRACTOR_FIELD_MAP
 from isaac_records.ids import is_record_id
+from isaac_records.models import user_confirmation
 from isaac_records.official import EXPECTED_VERSION, schema_path, validate_official
 from isaac_records.portal_warnings import portal_warnings
 
@@ -551,10 +553,29 @@ def _expected_rev_from_token(token: str | None) -> int | None:
         return None
 
 
+def _precondition_identity(entity) -> dict:
+    """The id keys a precondition body carries for whatever is being guarded.
+
+    An :class:`Experiment` carries ``{"experiment_id": <its id>}`` — unchanged, and
+    it is the ONLY shape any pre-existing caller produces, because ``Experiment``
+    has no ``precondition_identity`` attribute and never gets one here.
+
+    A RUN is guarded by the same three helpers below (its ``If-Match`` carries the
+    RUN's validator, not its experiment's), and it needs two ids rather than one:
+    filing a run id under the key ``experiment_id`` would be a false statement in
+    the one body a client reads when a write is refused. So the guarded object may
+    supply its own identity mapping and this is the single place that asks for it.
+    Reusing the helpers rather than copying them is deliberate: a 428 and a 412 that
+    are written twice are a 428 and a 412 that eventually disagree.
+    """
+    identity = getattr(entity, "precondition_identity", None)
+    return dict(identity) if identity is not None else {"experiment_id": entity.id}
+
+
 def _precondition_required(exp) -> JSONResponse:
     return JSONResponse(
         status_code=428,
-        content={"error": "precondition_required", "experiment_id": exp.id},
+        content={"error": "precondition_required", **_precondition_identity(exp)},
     )
 
 
@@ -563,7 +584,7 @@ def _malformed_if_match(exp) -> JSONResponse:
         status_code=400,
         content={
             "error": "malformed_if_match",
-            "experiment_id": exp.id,
+            **_precondition_identity(exp),
             "message": "If-Match must be one or more strong quoted validators.",
         },
     )
@@ -574,7 +595,7 @@ def _stale_write(exp, expected_token: str | None) -> JSONResponse:
         status_code=412,
         content={
             "error": "stale_write",
-            "experiment_id": exp.id,
+            **_precondition_identity(exp),
             "expected_rev": _expected_rev_from_token(expected_token),
             "current_rev": exp.rev,
             "expected_version": expected_token,
@@ -2238,6 +2259,975 @@ def post_edit(
         return result
 
 
+# --- 7c. runs ------------------------------------------------------------------
+#
+# The Run DOMAIN MODEL already exists in `workspace` (contract §1 D1: one Run is one
+# official ISAAC record). This section only EXPOSES it. It adds no storage: a run
+# lives inside its experiment's state document, so every write here goes through the
+# same `record_lock` -> load fresh -> precondition -> mutate -> `save_versioned`
+# sequence `post_edit` uses, and therefore inherits the durable compare-and-swap in
+# `experiment_repository.Q_UPSERT_EXPERIMENT` without naming it.
+#
+# TWO DIFFERENT VALIDATORS GUARD TWO DIFFERENT THINGS, and confusing them is the
+# mistake this comment exists to prevent. Creating a run REWRITES THE EXPERIMENT
+# document (the run list is part of it), so `POST .../runs` takes the EXPERIMENT's
+# `If-Match`. Editing one run's own draft is addressed to that run, so
+# `PATCH .../runs/{run_id}` takes the RUN's `If-Match` — `Run.version_token()`,
+# which `workspace` minted for exactly this purpose and which no route consumed
+# until now.
+
+
+#: The path parameter naming a run. One description, so the wording cannot drift.
+RunId = Annotated[
+    str,
+    Path(
+        description=(
+            "The id of a run of this experiment, as returned by "
+            "`GET /api/experiments/{experiment_id}/runs`."
+        )
+    ),
+]
+
+_R_RUN_NOT_FOUND: dict = {
+    404: {
+        "description": (
+            "No experiment in the selected workspace has that id, that experiment "
+            "has no run with that id, or the `X-Isaac-Tutorial-Session` header "
+            "named a worked-example session that does not exist. The request is "
+            "never silently answered from the ordinary workspace instead."
+        )
+    },
+}
+
+#: The three states a run's view of one inherited experiment-level address can be in.
+RUN_INHERITED = "inherited"
+RUN_OVERRIDDEN = "overridden"
+RUN_ABSENT = "absent"
+
+
+class _RunPrecondition:
+    """A run, presented to the ``If-Match`` helpers in the shape they already read.
+
+    `_check_if_match`, `_precondition_required`, `_malformed_if_match` and
+    `_stale_write` read exactly four things — ``.id``, ``.rev``, ``.etag()`` and
+    ``.version_token()`` — plus, now, an optional ``precondition_identity``. A run
+    supplies all five, so the run's precondition is classified by the SAME code that
+    classifies an experiment's, rather than by a second implementation that would be
+    free to drift on the day one of the two is fixed.
+
+    ``precondition_identity`` carries BOTH ids. A refused run write names the run it
+    was addressed to and the experiment it belongs to; filing the run id under
+    ``experiment_id`` would be a false statement in the one body a client reads when
+    its write is refused.
+    """
+
+    def __init__(self, run: "ws.Run", experiment_id: str) -> None:
+        self._run = run
+        self.id = run.id
+        self.precondition_identity = {"experiment_id": experiment_id, "run_id": run.id}
+
+    @property
+    def rev(self) -> int:
+        return self._run.rev
+
+    def version_token(self) -> str:
+        return self._run.version_token()
+
+    def etag(self) -> str:
+        return f'"{self._run.version_token()}"'
+
+
+def _run_not_found(experiment_id: str, run_id: str) -> JSONResponse:
+    """A run this experiment does not have. Distinct from `_not_found`.
+
+    The two 404s are deliberately different bodies: ``experiment_not_found`` means
+    the workspace has no such record, ``run_not_found`` means the record exists and
+    was read successfully and simply holds no run under that id. Collapsing them
+    would tell a client to go looking in the wrong place.
+    """
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "run_not_found",
+            "experiment_id": experiment_id,
+            "id": run_id,
+        },
+    )
+
+
+def _resolution_state(resolution: "ws.Resolution") -> str:
+    """Which of the three states a resolved inherited address is in, for a client.
+
+    ``overridden`` whenever this run recorded an override — INCLUDING an override
+    whose payload is ``None``, because a run that deliberately displaced an
+    inherited value has not merely failed to receive one, and reporting that as
+    ``absent`` would erase an audited act.
+
+    ``absent`` when nothing is overridden and the experiment carries nothing at the
+    address. That is reachable through :func:`workspace.resolve_inherited`'s key set,
+    which is the union of the experiment's experiment-level addresses and the run's
+    override addresses — a stored override at an address the experiment no longer
+    carries resolves with ``inherited_payload=None``.
+    """
+    if resolution.provenance == ws.PROVENANCE_OVERRIDDEN:
+        return RUN_OVERRIDDEN
+    return RUN_INHERITED if resolution.payload is not None else RUN_ABSENT
+
+
+def _blocker_message(entry: dict) -> str:
+    """A human-readable line for ONE blocker. DERIVED, never invented.
+
+    ``serialize.pending_to_list`` already returns the blocker's own
+    ``question`` — the text the deterministic extractor wrote when it recorded
+    that the value was missing. This picks the first of that blocker's own
+    strings that actually says something and hands it back verbatim; it composes
+    no new finding text, and it certainly states nothing about the science.
+
+    The last branch is a DISCLOSURE OF ABSENCE, not a finding: a persisted
+    blocker carrying no question, no ``about`` and no ``kind`` has no text to
+    show, and saying so is the honest alternative to returning an empty string
+    that a caller would render as a blank row. The ``message`` key is guaranteed
+    to be present and non-empty on every element because a client renders a list
+    of them and cannot be asked to invent the missing one itself.
+    """
+    for key in ("question", "about", "kind"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "A blocking question is open on this run, and it records no text."
+
+
+def _run_view(exp: Experiment, run: "ws.Run") -> dict:
+    """One run, as this API presents it.
+
+    ``fields`` is the run's OWN draft field map — the run-level content it carries
+    itself. Inherited experiment-level content is NOT merged into it, because
+    contract §2 D2 makes inheritance a read-time resolution and never a copy; it is
+    reported separately under ``inherited`` so a reader can see which is which.
+
+    ``inherited`` is computed on read by :func:`workspace.resolve_inherited` and is
+    never stored. Every payload it returns is already a deep copy, so nothing here
+    can be written back through the response.
+    """
+    draft = run.draft if isinstance(run.draft, dict) else {}
+    fields = draft.get("fields")
+    return {
+        "id": run.id,
+        "experiment_id": run.experiment_id,
+        "label": run.label,
+        "ordinal": run.ordinal,
+        "created_utc": run.created_utc,
+        "updated_utc": run.updated_utc,
+        "rev": run.rev,
+        "version": run.version_token(),
+        "record_id": run.record_id,
+        "fields": copy.deepcopy(fields) if isinstance(fields, dict) else {},
+        "inherited": {
+            address: {
+                "state": _resolution_state(resolution),
+                "payload": resolution.payload,
+                "inherited_payload": resolution.inherited_payload,
+                "displaced_payload": resolution.displaced_payload,
+            }
+            for address, resolution in exp.resolve_run(run).items()
+        },
+    }
+
+
+def _clean_label(
+    raw: object, *, blank_is_a_choice: bool = True
+) -> tuple[str | None, JSONResponse | None]:
+    """``(label, None)`` or ``(None, <422>)``. A blank label is NOT a label.
+
+    Absent or blank yields ``None``, which is how the caller says "you choose" —
+    ``workspace.new_run`` then assigns ``Run <ordinal>``. A non-string is refused
+    rather than coerced: ``str(5)`` would manufacture the label ``"5"`` out of a
+    request that named none, which is the same guessing ``workspace._as_str``
+    refuses on the read path.
+
+    ``blank_is_a_choice`` IS THE DIFFERENCE BETWEEN CREATE AND EDIT, and it exists
+    because collapsing them produced a measured silent no-op. On CREATE, blank
+    genuinely means "server, you choose", and ``Run <ordinal>`` is a real answer.
+    On EDIT there is nothing to choose: a rename to ``"   "`` used to return 200
+    having renamed nothing and having said nothing, which is exactly the silent
+    ignoring the edit route's own contract says never happens. Callers that edit
+    pass ``blank_is_a_choice=False`` and get the same typed ``invalid_label``
+    refusal a non-string already gets.
+    """
+    if raw is None:
+        return None, None
+    if not isinstance(raw, str):
+        return None, JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_label",
+                "message": "label must be a string, or omitted so the server assigns one.",
+            },
+        )
+    # A LABEL GOES THROUGH THE SAME SERIALIZER AS A FIELD VALUE, so it needs the same
+    # gate. The first version of the value guard iterated `fields` only, and `label`
+    # was the hole: a lone surrogate here 500ed BOTH the run PATCH and the create
+    # route. Checked before `.strip()` rather than after, so the refusal describes
+    # what was sent.
+    if not _is_storable_value(raw, max_bytes=_MAX_LABEL_BYTES):
+        return None, JSONResponse(
+            status_code=422,
+            content={
+                "error": "unrepresentable_value",
+                "key": "label",
+                "keys": ["label"],
+                "message": (
+                    "label cannot be stored: it either contains characters that cannot "
+                    "be represented in JSON, or it is longer than a name may be. "
+                    "Nothing was written."
+                ),
+            },
+        )
+    cleaned = raw.strip()
+    if not cleaned and not blank_is_a_choice:
+        return None, JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_label",
+                "message": (
+                    "label must not be blank. Omit it to leave the current name "
+                    "unchanged; a blank one names nothing and is not applied."
+                ),
+            },
+        )
+    return (cleaned or None), None
+
+
+def _confirmation_required(what: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "confirmation_required",
+            "message": f"confirmed_by_user must be true to {what}.",
+        },
+    )
+
+
+def _confirmation_answer(value) -> str:
+    """The value as the evidence entry records it. A rendering, never an invention.
+
+    A string is recorded verbatim; anything else is rendered with a deterministic
+    ``json.dumps`` so that re-submitting the same value produces the same evidence
+    entry — which is what keeps a repeated write byte-stable (see
+    :func:`_apply_run_field`).
+    """
+    return value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+
+
+def _run_field_question(path: str) -> str:
+    """The question a run-level field write records itself as answering."""
+    return f"Value for {path} on this run?"
+
+
+#: THE COMPLETE SET OF ``draft["fields"]`` KEYS THE RUN EDIT ROUTE MAY WRITE.
+#:
+#: TWO GATES, AND ONLY ONE OF THEM USED TO BE APPLIED. ``workspace.field_level``
+#: answers "whose is this?" and it is a segment-aware PREFIX test — by design, so
+#: that a new leaf under ``context.`` inherits its parent's classification. It is
+#: NOT, and was never meant to be, an answer to "does this path exist?". Applied
+#: alone it accepted ``context.typo_K``, ``context.``, ``context``,
+#: ``context.<script>alert(1)</script>`` and ``timestamps.acquired_start_utc.evil``,
+#: wrote each one with a fabricated ``user_confirmation`` evidence entry, and left
+#: the run permanently unexportable: the official schema closes ``context``, so the
+#: next check reported ``Additional properties are not allowed`` — with no way to
+#: clear it from a UI that offers three fixed paths.
+#:
+#: SO THE SET IS DERIVED FROM ``extract.structured.FIELD_MAP``, filtered by
+#: ``field_level``. FIELD_MAP is the deterministic extractor's own map of official
+#: dotted paths and is therefore the vocabulary the rest of the draft pipeline
+#: already speaks: every key ``draft["fields"]`` legitimately carries was put there
+#: from it. Allowing exactly what the extractor can produce means this route can
+#: never write a KEY the rest of the application cannot read, validate or export.
+#:
+#: THAT SENTENCE SAID "a key" WITHOUT THE EMPHASIS, AND THE MISSING WORD WAS A REAL
+#: GAP. Read as a statement about values it is FALSE, and the false reading is what it
+#: invited: the comprehension below iterates ``FIELD_MAP.values()`` and DISCARDS the
+#: coercer, so nothing about the extractor's type discipline survives into this route.
+#: ``context.temperature_K``'s coercer is ``_to_number`` — the extractor could never
+#: emit ``"hot"``, ``{"a": 1}``, ``[1, 2]``, ``true`` or ``NaN`` there — and this route
+#: accepted all five. Four are caught downstream by the official schema
+#: (``'hot' is not of type 'number'``); ``NaN`` was not caught anywhere, and it
+#: committed a write, 500ed the response, wedged both run reads and drove an
+#: unparseable "official record" through the export gate with a PASS verdict. The
+#: value-side guard is now in the PATCH route (``_is_storable_value``), NOT here,
+#: because this set is a set of paths and should stay one.
+#:
+#: WHY NOT THE OFFICIAL SCHEMA DIRECTLY, since it is the truth plane. Because it
+#: cannot enumerate a closed set of dotted paths: ``sample.composition.*``,
+#: ``sample.geometry.*`` and ``system.configuration.*`` are OPEN namespaces that
+#: declare no ``properties`` at all, so a schema walk would either admit any
+#: invented key under them or need a second, per-subtree policy — a second
+#: definition of "which fields exist". It remains the authority on SHAPE, and the
+#: two agree: ``test_every_run_writable_path_resolves_to_a_typed_node_in_the_official_schema``
+#: measures that every path below resolves to a typed schema node, rather than
+#: trusting FIELD_MAP's comment that says so.
+#:
+#: FAIL-CLOSED. A field a future extractor emits is not writable here until
+#: somebody classifies it, which is the same default ``field_level`` already takes.
+RUN_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
+    path
+    for path, _coercer in EXTRACTOR_FIELD_MAP.values()
+    if ws.field_level(path) == ws.LEVEL_RUN
+)
+
+
+#: The exact call Starlette's ``JSONResponse.render`` makes, transcribed rather than
+#: approximated — ``json.dumps(content, ensure_ascii=False, allow_nan=False,
+#: indent=None, separators=(",", ":")).encode("utf-8")``.
+#:
+#: THE FIRST VERSION OF THIS GUARD OMITTED ``ensure_ascii=False`` AND THE ``.encode``,
+#: while its comment claimed it was "the SAME function Starlette renders responses
+#: with, so a value that passes here cannot fail there". That was false in a way the
+#: comment made hard to doubt. With ``ensure_ascii`` at its default of ``True`` a lone
+#: surrogate is escaped to ``"\ud800"`` and serialises happily; with
+#: ``ensure_ascii=False`` the ``.encode("utf-8")`` raises ``UnicodeEncodeError``. So
+#: ``{"context.temperature_K": "\ud800"}`` — reachable from any client that writes the
+#: escape, though not from ``JSON.stringify`` — still produced a 500.
+#:
+#: Nothing was written and nothing was wedged in that case (the signature hash raises
+#: before ``save_versioned`` writes), which is why it was an Important rather than a
+#: repeat of the ``NaN`` Critical. It is fixed by making the claim true instead of by
+#: narrowing the claim.
+def _render_exactly_as_a_response_would(value) -> bytes:
+    return json.dumps(
+        value, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")
+    ).encode("utf-8")
+
+
+#: The deepest nesting a stored run-level value may carry.
+#:
+#: MEASURED, not picked. All five members of :data:`RUN_WRITABLE_FIELD_PATHS` are
+#: declared ``string`` or ``number`` scalars by ``schema/isaac_record_v1.json``, and the
+#: deepest WHOLE DOCUMENT anywhere in this repository — every committed record and every
+#: fixture — nests 7 levels. 32 is therefore more than four times the deepest real
+#: document and unreachable by any shape the schema declares at these paths, while
+#: sitting far below the depth at which CPython's recursion limit is reached.
+#:
+#: IF THIS GUARD IS EVER REUSED FOR ANOTHER FIELD SET, re-derive it. The vendored schema
+#: contains eight free-form ``type: object`` subschemas that declare no ``properties`` —
+#: ``sample.composition``, ``system.configuration``,
+#: ``context.transport.feed.partial_pressures``, ``measurement.series.items.conditions``
+#: and ``assets.items.citation`` among them — where the instance depth a valid record may
+#: carry is UNBOUNDED. 32 is measured headroom for the five run-level scalars and nothing
+#: more.
+_MAX_VALUE_DEPTH = 32
+
+#: The largest a single stored run-level value may serialise to, in bytes.
+#:
+#: THE DEPTH CAP ALONE WAS THE THIRD NARROW GUARD IN A ROW, and a reviewer measured why:
+#: at perfectly LEGAL depth, a 3-wide tree amplifies ~17-23x on the way to disk, because
+#: the document is stored pretty-printed and the value is carried in an evidence
+#: envelope. Measured on this build — a **236 KB body wrote 4.1 MB**, 2.1 MB wrote
+#: 45.6 MB, and 172 MB wrote 4 GB while holding ``record_lock`` for 184 s and taking
+#: process RSS to 5.6 GB. An 8 MB ``label`` was likewise accepted. Nothing was corrupted
+#: and no verdict was falsified, so it is resource exhaustion rather than a wedge — on a
+#: pod whose workspace is an ``emptyDir`` this project does not own.
+#:
+#: 64 KiB is ~2,000x the longest value the schema can legitimately put at any of the five
+#: writable paths: all five are declared ``string`` or ``number`` scalars, and the longest
+#: plausible one is a 32-character ISO-8601 timestamp with an offset. It is also a quarter
+#: of ``csv_ingest.MAX_BODY_BYTES`` (256 KiB) and an eighth of
+#: ``MAX_VALIDATE_RECORD_BYTES`` (512 KiB), the two limits this repository already
+#: enforces — deliberately in their style rather than as a new kind of number.
+_MAX_VALUE_BYTES = 64 * 1024
+
+#: A label renders on one line of a card header, and the server's own form is
+#: ``Run <ordinal>``. The longest label anywhere in this repository's fixtures is 76
+#: characters. 512 bytes is generous for a name a person types and refuses the 8 MB one.
+_MAX_LABEL_BYTES = 512
+
+
+def _value_depth_within(value, limit: int) -> bool:
+    """Is ``value`` nested no deeper than ``limit``?
+
+    ITERATIVE ON PURPOSE. A depth-COMPUTING recursive walk — ``1 + max(depth(child) …)``,
+    the shape most people reach for — would hit the same ``RecursionError`` it exists to
+    prevent, on the same input, and a guard that crashes on the attack it guards against
+    is not a guard.
+
+    COST, STATED CORRECTLY. It returns at the first node past ``limit``, so a DEEP payload
+    costs O(limit) — measured at 0.00 s for 200,000 levels. It is NOT bounded for a BROAD
+    payload: a legal-depth tree with 43 million leaves took ~12 s in the walk alone, which
+    an earlier version of this docstring denied by claiming the cost was "bounded by
+    ``limit`` and not by the size of a hostile payload". That is what
+    :data:`_MAX_VALUE_BYTES` is for, and it is why size is a separate condition rather
+    than something this function was stretched to cover.
+    """
+    stack = [(value, 0)]
+    while stack:
+        node, level = stack.pop()
+        if level > limit:
+            return False
+        if isinstance(node, dict):
+            stack.extend((child, level + 1) for child in node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend((child, level + 1) for child in node)
+    return True
+
+
+def _is_storable_value(value, *, max_bytes: int = _MAX_VALUE_BYTES) -> bool:
+    """Can the application BUILD AND RETURN a view of this value, and store it?
+
+    THE CONTRACT WAS TOO NARROW ONCE AND THE COST WAS A SECOND WEDGED-RECORD DEFECT, so
+    it is stated as broadly as it is actually relied upon. This function used to be
+    ``_is_json_renderable`` and its docstring promised only that the SERIALIZER could
+    render the value. That was true, and insufficient:
+    ``{"context.temperature_K": [[[…800 deep…]]]}`` renders fine — ``json.dumps``
+    handles thousands of levels — and then ``_run_view`` raised ``RecursionError``
+    while CONSTRUCTING the response, after the write had committed. Same four
+    consequences as the ``NaN`` case: a committed write reported as a 500, an ETag that
+    could not be re-read, and every read of that record 500ing permanently, on disk,
+    across a process restart.
+
+    THREE conditions, all necessary — and the count has gone 1 -> 2 -> 3 across three
+    reviews, each time because the guard protected something narrower than the
+    application relies on. The contract is stated as **bounded size, bounded depth, and
+    renderable**, so a fourth narrowing has to argue with this sentence:
+
+    1. **Depth** (:data:`_MAX_VALUE_DEPTH`) — bounds every recursive walk the value will
+       later be subjected to: ``_run_view``, ``copy.deepcopy``, the signature hash, the
+       draft validator, the exporter. A serializer test cannot express it.
+    2. **Renderability** — a real render with the exact kwargs Starlette uses, so
+       ``NaN``, ``Infinity`` and lone surrogates are refused. Deliberately a render
+       rather than an ``isinstance`` walk: a hand-written type check would be a second,
+       drifting definition of "storable".
+    3. **Size** (:data:`_MAX_VALUE_BYTES`, or ``max_bytes``) — measured on the RENDERED
+       bytes, which is free because condition 2 has already produced them. Bounds the
+       ~17-23x amplification to disk and the time ``record_lock`` is held.
+
+    All three are checked BEFORE the write. None is a schema check: the official schema
+    still decides whether a well-formed value is the right one.
+
+    WHAT THIS DOES NOT BOUND, stated rather than implied: the REQUEST BODY. Starlette
+    allocates it in full before any of this runs, so a large body still costs memory
+    once. The two read-only routes that need that guarantee use
+    :func:`_read_bounded_body` over ``request.stream()``; wiring it in here means
+    replacing ``Body(...)`` with a raw ``Request`` read on both write routes, a real
+    change to their documented request-body handling that is deliberately NOT smuggled
+    into a fix commit. The severe half — unbounded bytes reaching DISK and an unbounded
+    hold on ``record_lock`` — is closed here.
+    """
+    if not _value_depth_within(value, _MAX_VALUE_DEPTH):
+        return False
+    try:
+        rendered = _render_exactly_as_a_response_would(value)
+    except (ValueError, TypeError, UnicodeEncodeError):
+        return False
+    return len(rendered) <= max_bytes
+
+
+def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
+    """Write (or clear) ONE run-level field. Returns whether anything changed.
+
+    A ``null`` CLEARS the field by REMOVING the key. Not by leaving a null-valued
+    envelope behind: the project's rule is that a field nobody supplied stays
+    absent, and an envelope carrying ``value: null`` is a present field with no
+    value, which is a different statement and one a reader has to interpret.
+
+    Every other write records a ``user_confirmation`` evidence entry alongside the
+    evidence the envelope already carries — the same envelope shape and the same
+    ``source_type`` the existing draft completion path uses (``complete.py``), so a
+    value written here is subject to the same no-guessing checks as any other. No
+    value is ever invented: only what the caller literally supplied is written.
+
+    IT IS IDEMPOTENT, and that is a requirement rather than a nicety. The evidence
+    entry carries a timestamp, so appending one unconditionally would make a
+    re-submission of the SAME value change the document, bump the run's ``rev`` and
+    destroy `save_versioned`'s byte-stable no-op. Re-applying a value this envelope
+    already records with an equal user confirmation therefore leaves it untouched —
+    exactly the idempotence `Experiment.set_run_override` documents for an override.
+    """
+    existing = fields.get(path)
+    if value is None:
+        if path in fields:
+            del fields[path]
+            return True
+        return False
+
+    if isinstance(existing, dict):
+        prior_evidence = [e for e in (existing.get("evidence") or []) if isinstance(e, dict)]
+    else:
+        prior_evidence = []
+    answer = _confirmation_answer(value)
+    question = _run_field_question(path)
+    already = (
+        isinstance(existing, dict)
+        and existing.get("value") == value
+        and existing.get("status") == "verified"
+        and any(
+            e.get("source_type") == "user_confirmation"
+            and e.get("question") == question
+            and e.get("answer") == answer
+            for e in prior_evidence
+        )
+    )
+    if already:
+        return False
+
+    envelope = {
+        "value": value,
+        "status": "verified",
+        "evidence": [*prior_evidence, user_confirmation(question, answer, timestamp)],
+    }
+    # A unit already on the envelope is CARRIED, never re-derived and never dropped:
+    # it is evidence-bearing content this request said nothing about.
+    if isinstance(existing, dict) and existing.get("unit") is not None:
+        envelope["unit"] = existing["unit"]
+    fields[path] = envelope
+    return True
+
+
+@router.get(
+    "/experiments/{experiment_id}/runs",
+    tags=[TAG_EXPERIMENTS],
+    summary="List a Record's Runs",
+    description=(
+        "Lists this record's runs in their canonical order, each with its own "
+        "draft fields, its resolved view of the record-level values it inherits, "
+        "and its own revision metadata. Read-only.\n\n"
+        "A run is one measurement condition and exports to exactly one official "
+        "ISAAC record. Inherited record-level content is resolved on read and "
+        "reported separately from the run's own fields — it is never copied down "
+        "into a run, so editing a record-level value flows through to every run "
+        "that has not overridden it.\n\n"
+        "The `ETag` header and `experiment_version` carry the RECORD's current "
+        "revision, which is what adding a run requires in `If-Match`. Each run "
+        "additionally carries its own `version`, which is what editing that run "
+        "requires."
+    ),
+    response_description=(
+        "The record's runs in canonical order, with the record's current revision "
+        "and `ETag`."
+    ),
+    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def list_runs(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
+    return {
+        "runs": [_run_view(exp, run) for run in exp.sorted_runs()],
+        "experiment_version": exp.version_token(),
+    }
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs",
+    tags=[TAG_EXPERIMENTS],
+    status_code=201,
+    summary="Add a Run to a Record",
+    description=(
+        "Adds one run to this record and returns it, together with the record's "
+        "new revision. A run is one measurement condition and exports to exactly "
+        "one official ISAAC record.\n\n"
+        "Adding a run rewrites the record, so this requires the RECORD's current "
+        "`ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is "
+        "`412` with nothing written. The new run starts empty: record-level values "
+        "are never copied down into it, and no scientific value is invented. Its "
+        "`label` may be supplied; when "
+        "it is omitted or blank the server assigns the next `Run N`, and a label "
+        "that is not a string, or one JSON cannot represent (a lone surrogate), is "
+        "rejected with `422` rather than coerced.\n\n"
+        "There is no limit on how many runs a record may have."
+    ),
+    response_description=(
+        "The newly created run and the record's new revision, with the record's "
+        "new `ETag`."
+    ),
+    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
+)
+def post_run(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: dict | None = Body(
+        default=None,
+        description=(
+            "`{\"label\": \"<optional string>\"}`. Omit the body entirely, omit "
+            "`label`, or send a blank one, and the server assigns the next "
+            "`Run N`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it — not a run's."
+        ),
+    ),
+):
+    # Existence pre-check OUTSIDE the lock, exactly as `post_edit` does it, so a
+    # bogus id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        label, err = _clean_label((body or {}).get("label"))
+        if err is not None:
+            return err
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+        run = exp.add_run(label=label)
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; this run was not added
+        # `_changed` is structurally always True here — a new run with a fresh id
+        # cannot leave the authoritative signature equal — so it is not branched on.
+        # `save_versioned` is what bumps the run to its first revision.
+        response.headers["ETag"] = exp.etag()
+        return {"run": _run_view(exp, run), "experiment_version": exp.version_token()}
+
+
+@router.get(
+    "/experiments/{experiment_id}/runs/{run_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read One Run",
+    description=(
+        "Returns one run of this record: its own draft fields, its resolved view "
+        "of the record-level values it inherits, and its revision metadata. "
+        "Read-only.\n\n"
+        "The `ETag` header carries THE RUN's current revision, which is what "
+        "editing this run requires in `If-Match` — the record's own `ETag` will "
+        "not match it, and adding a run needs the record's rather than this one. "
+        "Inherited content is resolved on read and is never stored on the run."
+    ),
+    response_description="The run, with the run's own current `ETag`.",
+    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
+)
+def get_run(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    run = exp.get_run(run_id)
+    if run is None:
+        return _run_not_found(experiment_id, run_id)
+    response.headers["ETag"] = f'"{run.version_token()}"'
+    return {"run": _run_view(exp, run)}
+
+
+@router.patch(
+    "/experiments/{experiment_id}/runs/{run_id}",
+    tags=[TAG_EXPERIMENTS],
+    summary="Edit One Run's Own Fields",
+    description=(
+        "Writes run-level draft values on ONE run, recording a user confirmation "
+        "for each, and optionally renames it. Returns the refreshed run.\n\n"
+        "Requires `confirmed_by_user: true` and THE RUN's current `ETag` in "
+        "`If-Match` — not the record's. Omitted is `428`, malformed is `400`, and "
+        "stale is `412` with nothing written and the run's current `ETag` echoed.\n\n"
+        "Each key in `fields` must be a real official field path that is "
+        "run-level. A key that is not — an invented or misspelt path such as "
+        "`context.typo_K`, a record-level path such as `sample.material.name`, or "
+        "one the contract assigns to neither level — is rejected with `422` naming "
+        "it, and NOTHING in the request is written. It is never silently ignored, "
+        "the classification is never guessed, and a path with no home in the "
+        "official schema is never stored: doing so would record a confirmation for "
+        "a value the schema cannot hold and would block this run's export. A "
+        "`null` value clears that field by removing it; no value is ever invented, "
+        "and a body that names no run-level field and no new label is rejected with "
+        "`422` rather than silently doing nothing. A `label` that is blank or only "
+        "whitespace is rejected the same way — omit it to leave the name "
+        "unchanged.\n\n"
+        "Re-submitting a value the run already records is a no-op: it rewrites "
+        "nothing and does not advance the run's revision."
+    ),
+    response_description="The refreshed run, with the run's new `ETag`.",
+    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
+)
+def patch_run(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"fields\": {<dotted.path>: <value>}, "
+            "\"label\": \"<optional new label>\"}`. Omitting `confirmed_by_user: "
+            "true`, naming a path that is not run-level, naming nothing at all, or "
+            "sending a value or label JSON cannot represent (`NaN`, `Infinity`, a "
+            "lone surrogate) is rejected with `422` and writes nothing."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. THE RUN's current `ETag`, exactly as a run read operation "
+            "returned it — not the record's."
+        ),
+    ),
+):
+    # Existence pre-check OUTSIDE the lock, as every other mutation does. The lock is
+    # per RECORD, not per run: runs live inside the record's document, so two runs of
+    # one record serialise against each other, which is what makes their independent
+    # `If-Match` validators safe.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        run = exp.get_run(run_id)
+        if run is None:
+            return _run_not_found(experiment_id, run_id)
+        if body.get("confirmed_by_user") is not True:
+            return _confirmation_required("edit a run")
+        precondition = _check_if_match(if_match, _RunPrecondition(run, exp.id))
+        if precondition is not None:
+            return precondition
+
+        raw_fields = body.get("fields")
+        if raw_fields is None:
+            raw_fields = {}
+        if not isinstance(raw_fields, dict):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "invalid_fields",
+                    "message": "fields must be an object of dotted official paths.",
+                },
+            )
+        label, err = _clean_label(body.get("label"), blank_is_a_choice=False)
+        if err is not None:
+            return err
+
+        # RESOLVE EVERY KEY BEFORE WRITING ANYTHING. A request naming one key this
+        # route may not write is refused whole, so a caller can never be left with a
+        # partial write it was told was rejected.
+        #
+        # MEMBERSHIP, NOT CLASSIFICATION. `RUN_WRITABLE_FIELD_PATHS` is the derived
+        # set of real official field-map paths that are the run's to write; see its
+        # own comment for why a `field_level` prefix test alone admitted invented
+        # paths and wedged the run's export.
+        refused = [
+            key
+            for key in raw_fields
+            if not isinstance(key, str) or key not in RUN_WRITABLE_FIELD_PATHS
+        ]
+        if refused:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "unrecognized_field",
+                    "key": str(refused[0]),
+                    "keys": [str(k) for k in refused],
+                    "message": (
+                        "These paths are not run-level official fields, so they "
+                        "cannot be written on a run. A path that is not an official "
+                        "field at all is refused rather than stored: writing one "
+                        "would record a confirmation for a value with no home in the "
+                        "schema, and would then block this run's export. "
+                        "Record-level values are edited on the record and inherited; "
+                        "a path the contract classifies as neither level is not "
+                        "guessed into one."
+                    ),
+                },
+            )
+        if not raw_fields and label is None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "unrecognized_field",
+                    "key": None,
+                    "keys": [],
+                    "message": "No run-level field and no new label was named in the request.",
+                },
+            )
+
+        # AND RESOLVE EVERY VALUE, not only every key. The filter above is key-only,
+        # and that was not enough.
+        #
+        # THE DEFECT THIS CLOSES, measured end to end. Starlette parses the body with
+        # the stdlib `json.loads`, which ACCEPTS the JavaScript-only literals `NaN`,
+        # `Infinity` and `-Infinity`; it renders responses with
+        # `json.dumps(..., allow_nan=False)`, which REFUSES them. So a single
+        # `{"fields": {"context.temperature_K": NaN}}` — a legal key, a value no
+        # browser's `JSON.stringify` can emit but `curl` can — produced ALL of:
+        #
+        #   * the write COMMITTED (`rev` 1 -> 2, bare `NaN` in `experiment.json`,
+        #     plus a fabricated confirmation whose answer read "NaN") while the
+        #     response was a 500. A successful write reported as a failure is worse
+        #     than the silent no-op the comment above was written to close.
+        #   * `GET .../runs` and `GET .../runs/{id}` 500ing PERMANENTLY thereafter, so
+        #     a client could not even re-read the ETag it needed to repair the run.
+        #   * a TRUTH-PLANE ESCAPE (`CLAUDE.md` §13): `jsonschema` accepts
+        #     `float('nan')` as `"number"`, so the draft check, the official check,
+        #     the export gate and `isaac validate --official` all reported PASS over a
+        #     record file that no strict RFC-8259 parser will read.
+        #
+        # The ingress is this route and nothing else — `POST /edit` already answers
+        # 422 and `POST /answers` leaves the value untouched, both measured. So the
+        # guard belongs here, before the write, and it uses the SAME typed refusal the
+        # key filter uses rather than inventing a second vocabulary.
+        #
+        # It rejects on RENDERABILITY, not on a hand-written type list: the property
+        # that matters is "the response serializer and the on-disk document can
+        # represent this", and `allow_nan=False` is exactly that test. A type
+        # allowlist would have to be kept in step with the schema by hand, and this
+        # route deliberately derives its key set rather than hand-copying it.
+        unrenderable = [
+            key
+            for key, value in raw_fields.items()
+            if not _is_storable_value(value)
+        ]
+        if unrenderable:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "unrepresentable_value",
+                    "key": str(unrenderable[0]),
+                    "keys": [str(k) for k in unrenderable],
+                    "message": (
+                        "These values cannot be stored. Either they cannot be "
+                        "represented in JSON — `NaN`, `Infinity` and `-Infinity` are "
+                        "accepted by some parsers but are not JSON, and a record "
+                        "containing one could not be read back or exported — or they "
+                        "nest more deeply than a stored value may. Nothing was written."
+                    ),
+                },
+            )
+
+        draft = run.draft if isinstance(run.draft, dict) else {}
+        run.draft = draft
+        # THE EMPTY MAP IS NOT ATTACHED UNTIL SOMETHING IS ACTUALLY WRITTEN.
+        # `draft["fields"]` is part of the run's authoritative signature, so
+        # creating it unconditionally made a request that wrote NOTHING — a `null`
+        # clear of a field this run does not have — still advance the run's `rev`.
+        # Nothing lied about it (the response reported the new version honestly)
+        # and it was reachable once per run; it is fixed because a revision means
+        # "your edit landed" and that one had not.
+        existing_fields = draft.get("fields")
+        fields = existing_fields if isinstance(existing_fields, dict) else {}
+        timestamp = _now_iso()
+        wrote = False
+        for path, value in raw_fields.items():
+            if _apply_run_field(fields, path, value, timestamp):
+                wrote = True
+        if wrote and not isinstance(existing_fields, dict):
+            draft["fields"] = fields
+        if label is not None:
+            run.label = label
+
+        # The client's validator is the RUN's, so it is deliberately NOT passed to
+        # `_save_versioned`: a durable refusal is a statement about the RECORD's
+        # document, and echoing a run version as the `expected_version` of a record
+        # conflict would be two different things wearing one name. `null` is the
+        # honest answer there; the record's current version is still echoed.
+        _changed, stale = _save_versioned(exp, None)
+        if stale is not None:
+            return stale  # another writer won the race; this edit was not applied
+        response.headers["ETag"] = f'"{run.version_token()}"'
+        return {"run": _run_view(exp, run)}
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/check",
+    tags=[TAG_VALIDATION],
+    summary="Check One Run",
+    description=(
+        "Checks the official record ONE run would export — its own content plus "
+        "the record-level content it inherits — and returns the no-guessing draft "
+        "verdict, the official-schema verdict, and the run's open blocking "
+        "questions.\n\n"
+        "Read-only: it writes nothing, exports nothing, and does not advance the "
+        "run's or the record's revision. `checked_run_version` states which "
+        "revision of the run the verdict describes. Every entry in `blockers` "
+        "carries a non-empty `message` taken from what that blocking question "
+        "already records — no finding text is composed here.\n\n"
+        "Both verdicts come from the same deterministic core functions the "
+        "command line and the record-level validate operation use; no second "
+        "validator exists. `ok` is true only when both pass, and it is computed "
+        "from those alone — an advisory warning never turns a pass into a "
+        "failure. If the run has already been exported and its written record "
+        "cannot be read, no verdict is invented: the official block reports the "
+        "single fixed error `Validation could not be completed.`"
+    ),
+    response_description=(
+        "The draft and official verdicts, the run's blocking questions, and the "
+        "run revision that was checked. The official verdict carries `dry_run` — "
+        "false when the run is already exported, in which case the RECORD ALREADY "
+        "WRITTEN was validated rather than a candidate — and `unavailable: true` "
+        "when no verdict could be reached at all, which is not the same as the "
+        "schema rejecting the document."
+    ),
+    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
+)
+def post_run_check(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    run = exp.get_run(run_id)
+    if run is None:
+        return _run_not_found(experiment_id, run_id)
+
+    # The unit is taken from `export_units()` rather than composed here, so this
+    # checks the SAME document the export and the record-level validate operation
+    # would — including the sibling grouping, which is a fact about the set and
+    # cannot be derived from one run alone. `export_units` mutates only the composed
+    # dicts it just built; nothing it does reaches stored state.
+    unit = next((u for u in exp.export_units() if u.run_id == run.id), None)
+    if unit is None:  # pragma: no cover - `run` came from this same experiment
+        return _run_not_found(experiment_id, run_id)
+
+    try:
+        draft_report = validate_draft(unit.draft)
+        draft_verdict = {
+            "ok": draft_report.ok,
+            "errors": [{"path": w, "message": m} for w, m in draft_report.errors],
+            "warnings": [{"path": w, "message": m} for w, m in draft_report.warnings],
+        }
+    except Exception:
+        # Never 500, and never interpolate the exception into the response — the
+        # same fail-closed vocabulary the record-level validate operation uses.
+        _log.exception("run check draft validation failed run=%s", run.id)
+        draft_verdict = {
+            "ok": False,
+            "errors": [{"path": "$", "message": "Validation could not be completed."}],
+            "warnings": [],
+        }
+
+    official = _validate_unit(unit)
+    official["schema"] = SCHEMA_LABEL
+    # EVERY element carries a non-empty `message`, so a client never has to decide
+    # which of several optional keys is the one to render. It is DERIVED from what
+    # the blocker already says (`_blocker_message`); nothing new is composed, and
+    # `serialize.pending_to_list` is left alone because it is the shape the
+    # record-level `/pending` and `/answers` operations already publish.
+    blockers = [
+        {**entry, "message": _blocker_message(entry)}
+        for entry in serialize.pending_to_list(
+            unit.draft, ws.load_demo_answers(), example_scope=_example_scope(experiment_id)
+        )["pending"]
+    ]
+    return {
+        "ok": bool(draft_verdict["ok"] and official["ok"]),
+        "draft": draft_verdict,
+        "official": official,
+        "blockers": blockers,
+        "checked_run_version": run.version_token(),
+    }
+
+
 # --- 8. export ----------------------------------------------------------------
 
 
@@ -3163,11 +4153,19 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
         if record is None:
             # Same fail-closed vocabulary as the single-record path: no verdict, not
             # a schema violation. `dry_run: false` — no dry run happened.
+            #
+            # `unavailable` MAKES THAT DISTINCTION MACHINE-READABLE, and it was added
+            # because a client could not make it. The only signal used to be this
+            # fixed English sentence inside `errors[0].message`, so the Run card
+            # rendered "Check Failed" — a schema verdict — over a case this function
+            # deliberately refuses to give a verdict on. `ok` stays False: the flag
+            # explains the refusal, it does not soften it into a pass.
             return {
                 **entry,
                 "ok": False,
                 "errors": [{"path": "$", "message": "Validation could not be completed."}],
                 "dry_run": False,
+                "unavailable": True,
             }
         report = validate_official(record, REPO_ROOT)
         return {
@@ -3186,6 +4184,7 @@ def _validate_unit(unit: ws.ExportUnit) -> dict:
             "ok": False,
             "errors": [{"path": "$", "message": "Validation could not be completed."}],
             "dry_run": True,
+            "unavailable": True,
         }
     if result.official_report is not None:
         errors = [
@@ -3261,10 +4260,14 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
         "passes. The top-level `dry_run` is `true` if any run's verdict came from "
         "an in-memory candidate rather than a written record.\n\n"
         "If the written record cannot be read at all, no verdict is invented: the "
-        "operation reports `ok: false` with the single fixed error `Validation "
-        "could not be completed.` and `dry_run: false`. Read that as *no verdict*, "
-        "not as a schema violation — the artifacts operation reports why the file "
-        "could not be read."
+        "operation reports `ok: false`, the fixed error `Validation could not be "
+        "completed.`, `dry_run: false`, and **`unavailable: true`** on the run entry. "
+        "Read that as *no verdict*, not as a schema violation — the artifacts "
+        "operation reports why the file could not be read. `unavailable` was added "
+        "because the fixed English sentence was the only signal, and a client that "
+        "matched on `ok` alone rendered a non-verdict as a schema failure; the "
+        "top-level `ok` deliberately stays `false` either way, so the flag explains "
+        "the refusal without softening it."
     ),
     response_description="The official-schema verdict, its errors, and whether it was a dry run.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},

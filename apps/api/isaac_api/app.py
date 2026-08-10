@@ -145,11 +145,19 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_cors_origins(),
         allow_credentials=False,
-        # DELETE is allowed because discarding a worked-example session is a DELETE.
-        # Without it, a cross-origin caller (the Vite dev server, or a deployment
-        # whose frontend is served from another origin) would have its preflight
-        # refused and could never clean a session up.
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        # THE RULE, not a per-verb rationale: this list must contain every HTTP
+        # method any registered route uses, plus OPTIONS for the preflight itself.
+        # A method missing here is not a partial failure — the browser's preflight
+        # is refused (400, "Disallowed CORS method") and the real request is never
+        # sent, so the route becomes unreachable from every cross-origin caller
+        # (the Vite dev server, both Playwright suites, any deployment whose
+        # frontend is served from another origin) while continuing to work in the
+        # single-origin hosted deployment, which is exactly how PATCH shipped
+        # broken: TestClient issues no preflight and the frontend tests mock fetch.
+        # `test_cors_methods.py` derives the required set from the app's own route
+        # table and fails if this list stops covering it — do not hand-maintain it
+        # by adding a clause per verb.
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["ETag"],
     )

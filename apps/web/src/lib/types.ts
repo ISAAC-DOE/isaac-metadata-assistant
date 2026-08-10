@@ -1558,3 +1558,131 @@ export interface ApiSchemaResponse {
   // stays a permissive `unknown`.
   vocabularies: Record<string, unknown>;
 }
+
+// --- Runs (Run workspace, Slice A) ---------------------------------------
+//
+// The wire shapes of the five Run routes, transcribed from the frozen Slice-A
+// Run API contract. They are declared here rather than derived from anything on
+// the client, because the client is a THIN reader of them: it never computes a
+// run's version, its inheritance, or its check verdict.
+//
+// Two of these types are deliberately loose, and the looseness is a statement
+// about what the contract pins rather than laziness:
+//
+//   * `ApiRunFieldEnvelope.value` is `unknown`. A draft field envelope carries
+//     whatever the official schema declares at that path — a string for
+//     `context.environment`, a number for `context.temperature_K` — and this
+//     module has no business narrowing that.
+//   * `ApiRunCheckFinding` is a union including a bare string. The contract
+//     freezes `blockers` as `[...]` and does not say what an element is; a type
+//     that guessed one shape would make the compiler agree with a guess. See
+//     `runFindingText` in `lib/runFields.ts` for how an element that carries no
+//     describable text is rendered — as an honest "cannot describe", never
+//     dropped.
+
+/** One draft field envelope inside a run: `{value, status, evidence[]}`. */
+export interface ApiRunFieldEnvelope {
+  value: unknown;
+  status?: string;
+  evidence?: unknown[];
+}
+
+/**
+ * How one experiment-level address resolves for this run.
+ *
+ * `inherited` — the run has no override and reads the experiment's value.
+ * `overridden` — the run carries its own value in place of the experiment's.
+ * `absent` — neither carries anything at that address.
+ */
+export type RunInheritedState = 'inherited' | 'overridden' | 'absent';
+
+export interface ApiRunInherited {
+  state: RunInheritedState;
+  /** What this run actually has at the address (an envelope for a `field:`). */
+  payload: unknown;
+  /** What the experiment carried when this was resolved. */
+  inherited_payload: unknown;
+  /** What an override displaced when it was recorded. */
+  displaced_payload?: unknown;
+}
+
+export interface ApiRunView {
+  id: string;
+  experiment_id: string;
+  label: string;
+  ordinal: number;
+  created_utc: string;
+  updated_utc: string;
+  rev: number;
+  /** `"<generation>.<rev>"` — the run's OWN optimistic-concurrency token. */
+  version: string;
+  record_id: string | null;
+  /** Keyed by dotted official path. */
+  fields: Record<string, ApiRunFieldEnvelope>;
+  /** Keyed by namespaced draft address (`field:sample.material.name`). */
+  inherited: Record<string, ApiRunInherited>;
+}
+
+export interface ApiRunsResponse {
+  runs: ApiRunView[];
+  /** The EXPERIMENT's version token — the `If-Match` a run CREATE must carry. */
+  experiment_version: string;
+}
+
+export interface ApiRunCreated {
+  run: ApiRunView;
+  /** The experiment's NEW version after the create. */
+  experiment_version: string;
+}
+
+export interface ApiRunResponse {
+  run: ApiRunView;
+}
+
+/** One entry of `blockers` / `errors` — see the note above on why this is a union. */
+export type ApiRunCheckFinding =
+  | string
+  | {
+      message?: string;
+      question?: string;
+      label?: string;
+      path?: string;
+      id?: string;
+    };
+
+export interface ApiRunCheckVerdict {
+  ok: boolean;
+  errors?: ApiRunCheckFinding[];
+  /**
+   * WHICH DOCUMENT WAS CHECKED — present on the `official` verdict only, and it was
+   * MISSING FROM THIS TYPE WHILE THE SCREEN HARD-CODED "(dry run)".
+   *
+   * `_validate_unit` (`apps/api/isaac_api/routes.py:3901`) returns `false` whenever
+   * the unit is materialised: in that branch it validates the record ALREADY WRITTEN
+   * to `records/`, not a candidate. The card said "Official schema (dry run)"
+   * unconditionally, so after an export a scientist read errors about a filed
+   * artifact as errors about a hypothetical one. Dropping the field from this
+   * interface is what made the mislabel invisible to the compiler.
+   */
+  dry_run?: boolean;
+  /**
+   * TRUE when no verdict could be reached — distinct from "the schema rejected it".
+   *
+   * The route's own comment calls this "no verdict, not a schema violation"
+   * (`routes.py:3917`), and it still sets `ok: false` to fail closed. Without this
+   * flag the only signal was a fixed English sentence in `errors[0].message`, so the
+   * card rendered an unreadable artifact as `Check Failed` — a verdict the server
+   * explicitly declined to give. `ok` is deliberately still `false`: this makes the
+   * REASON legible without turning a non-verdict into a pass.
+   */
+  unavailable?: boolean;
+}
+
+export interface ApiRunCheckResponse {
+  ok: boolean;
+  draft: ApiRunCheckVerdict;
+  official: ApiRunCheckVerdict;
+  blockers: ApiRunCheckFinding[];
+  /** The run version the check was computed over. It does NOT advance. */
+  checked_run_version: string;
+}

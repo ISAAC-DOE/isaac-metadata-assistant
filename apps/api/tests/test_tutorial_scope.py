@@ -517,6 +517,7 @@ def test_a_disposed_session_is_404_on_every_scoped_operation(app):
         ("get", f"/api/experiments/{ws.SEED_READY_ID}/pending"),
         ("get", f"/api/experiments/{ws.SEED_READY_ID}/evidence"),
         ("get", f"/api/experiments/{ws.SEED_READY_ID}/artifacts"),
+        ("get", f"/api/experiments/{ws.SEED_READY_ID}/runs"),
         ("post", f"/api/experiments/{ws.SEED_READY_ID}/validate"),
         ("post", f"/api/experiments/{ws.SEED_READY_ID}/audit"),
         ("get", f"/api/experiments/{ws.SEED_READY_ID}/warnings"),
@@ -550,6 +551,13 @@ def test_every_scope_resolving_operation_uses_the_one_shared_dependency(app):
         "/api/experiments/{experiment_id}/source-preview",
         "/api/experiments/{experiment_id}/artifacts",
         "/api/experiments/{experiment_id}/assistant/query",
+        # The Run API. Runs live inside their record's document, so every one of
+        # these resolves scope exactly as the record operations do — and this set is
+        # a SUBSET assertion, so a new route omitting the header would otherwise
+        # have gone uncovered rather than caught.
+        "/api/experiments/{experiment_id}/runs",
+        "/api/experiments/{experiment_id}/runs/{run_id}",
+        "/api/experiments/{experiment_id}/runs/{run_id}/check",
         "/api/runtime/records",
         "/api/search",
         "/api/demo/run",
