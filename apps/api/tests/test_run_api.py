@@ -742,7 +742,7 @@ def test_the_run_check_says_unavailable_when_no_verdict_can_be_reached(
     ]
 
 
-@pytest.mark.parametrize("depth", [33, 600, 800, 900, 1200], ids=lambda d: f"depth-{d}")
+@pytest.mark.parametrize("depth", [33, 600, 800, 900], ids=lambda d: f"depth-{d}")
 def test_a_value_nested_deeper_than_the_limit_is_refused_before_the_write(
     client, experiment_id, depth
 ):
@@ -785,6 +785,56 @@ def test_a_value_nested_deeper_than_the_limit_is_refused_before_the_write(
 
     # NOTHING WRITTEN, and — the half that made the defect unrecoverable — every read
     # still answers, so the caller can still get an ETag.
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.rev == 1
+    assert stored.draft.get("fields") in (None, {})
+    assert client.get(f"/api/experiments/{experiment_id}/runs").status_code == 200
+    assert (
+        client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").status_code == 200
+    )
+    assert client.get(f"/api/experiments/{experiment_id}").status_code == 200
+
+
+@pytest.mark.parametrize("depth", [1200, 5000], ids=lambda d: f"depth-{d}")
+def test_an_absurdly_nested_value_is_refused_by_SOMETHING_and_never_by_a_500(
+    client, experiment_id, depth
+):
+    """PAST SOME DEPTH THE JSON PARSER REFUSES FIRST, AND WHICH DEPTH IS A CPYTHON
+    VERSION PROPERTY — so this test deliberately does not assert a status code.
+
+    `depth-1200` was originally folded into the parametrize above, asserting `422`. It
+    passed locally on CPython 3.12.3, which parses a 2,000-deep array without complaint,
+    and FAILED IN CI on 3.11.15, where `json.loads` raises `RecursionError` inside the
+    body parser and FastAPI answers `400 {"detail": "There was an error parsing the
+    body"}` before this application sees the request at all. Encoding one interpreter's
+    boundary as an expectation is the same mistake `e2e/a11y-baseline.ts` exists to
+    prevent for platform-dependent counts, and it is why that file says never to
+    transcribe a number measured on the wrong platform.
+
+    So what is asserted here is the invariant that holds on EVERY platform, which is
+    also the whole of what the defect was about: the request is REFUSED, the refusal is
+    not a 500, nothing is written, and the record stays readable. A 400 from the parser
+    is a perfectly good refusal — arguably a better one, since it never reaches
+    application code. The guard's own status code is pinned by the test above, at depths
+    both interpreters parse.
+    """
+    run = _create_run(client, experiment_id)
+    etag = _run_etag(client, experiment_id, run["id"])
+    payload = (
+        '{"confirmed_by_user": true, "fields": {"context.temperature_K": '
+        + "[" * depth
+        + "1"
+        + "]" * depth
+        + "}}"
+    )
+    response = client.patch(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}",
+        content=payload.encode(),
+        headers={"If-Match": etag, "content-type": "application/json"},
+    )
+    assert response.status_code in (400, 422), response.text
+    assert response.status_code != 500
+
     stored = _stored_run(client, experiment_id, run["id"])
     assert stored.rev == 1
     assert stored.draft.get("fields") in (None, {})
