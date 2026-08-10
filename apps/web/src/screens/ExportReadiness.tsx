@@ -7,6 +7,7 @@ import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { VerdictCard } from '../components/VerdictCard';
+import { RunFindings } from '../components/RunFindings';
 import { CoverageBadge } from '../components/CoverageBadge';
 import { AdvisoryChip } from '../components/AdvisoryChip';
 import { ArtifactCard } from '../components/ArtifactCard';
@@ -680,6 +681,25 @@ function LoadedExport({
             />
           </div>
         </>
+      )}
+
+      {/* VALIDATE & REVIEW, BY RUN. One insertion point, deliberately AFTER both
+          branches above, so the summary (the reserved verdict post-export, the
+          gate pre-export) is read first and this is the addressable detail under
+          it. On the case that matters — a failing fan-out — nothing renders
+          between them: the artifact section is `verdict === 'pass'` only.
+
+          `validate.runs` is present ONLY for a record whose runs each export
+          their own official record, so a zero-run record — every record this API
+          can currently create — renders exactly what it rendered before: the
+          prop is `undefined` and the section does not exist. That is the whole
+          gate; no new request, no new aggregation, no derived verdict.
+
+          The advisory half is `warnings.runs` from the SAME bundle, passed
+          through untouched. It is separate from the verdict in the markup and in
+          the copy, and no warning count enters any pass/fail figure. */}
+      {validate.runs && validate.runs.length > 0 && (
+        <RunFindings runs={validate.runs} warningRuns={warnings.runs} />
       )}
 
       {/* The fan-out success report. It names what was WRITTEN — the export
