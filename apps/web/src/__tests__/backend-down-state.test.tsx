@@ -330,6 +330,59 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
     ).toBeInTheDocument();
   });
 
+  /*
+   * AN HTML-BODIED 404 ON A RECORD PATH IS NOT A MISSING RECORD, and it used to be
+   * reported as one — the most definitive sentence this panel can say ("this
+   * experiment id is not in the workspace"), asserted from a response that never
+   * reached the application. `httpError` copies the status and nothing else, so the
+   * edge's 404 arrived indistinguishable from `{"error": "experiment_not_found"}`.
+   *
+   * The two record-404 tests above are the other half of this pair and must both
+   * keep passing: a real 404 from ISAAC still says "Record Not Found". What changed
+   * is only which responses are allowed to make that claim.
+   */
+  it('a 404 whose body is HTML is an intercept, not a missing record', async () => {
+    const hosted = await loadHosted();
+    const view = render(
+      <hosted.BackendDown
+        error={
+          new hosted.ApiError('x', {
+            status: 404,
+            path: '/experiments/EXP-1',
+            contentType: 'text/html; charset=utf-8',
+            htmlIntercept: true,
+          })
+        }
+      />,
+    );
+    expect(view.queryByText('Record Not Found')).toBeNull();
+    expect(view.getByText('Sign-In Required')).toBeInTheDocument();
+    expect(
+      view.getByText(/A sign-in page was returned in place of the ISAAC API/),
+    ).toBeInTheDocument();
+    expect(view.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+  });
+
+  it('an HTML-bodied 404 on a NON-record path is also an intercept', async () => {
+    const hosted = await loadHosted();
+    const view = render(
+      <hosted.BackendDown
+        error={
+          new hosted.ApiError('x', {
+            status: 404,
+            path: '/memory/graph',
+            contentType: 'text/html; charset=utf-8',
+            htmlIntercept: true,
+          })
+        }
+      />,
+    );
+    // The generic 404 branch's first sentence — "The ISAAC API answered HTTP 404"
+    // — would be false here: an intercept answered, not the API.
+    expect(view.queryByText('Not Found')).toBeNull();
+    expect(view.getByText('Sign-In Required')).toBeInTheDocument();
+  });
+
   it('the debug box reports the hosted base and build mode', async () => {
     const hosted = await loadHosted();
     expect(hosted.isHostedBuild).toBe(true);
