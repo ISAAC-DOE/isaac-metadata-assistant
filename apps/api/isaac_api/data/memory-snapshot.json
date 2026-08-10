@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "29562d4672dd8dcb6a8f858ed385a7fe8248b1d4b10f1c32a634ee78f139a1af"
+        "sha256": "f87e75aa91fed6a3b3b279e945ec61efdb99bf9cc2feaca078e31beafab35d7f"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10436,7 +10436,7 @@
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "b22af0e38f5a4d2f9eda06b729e4ab0c01581033ae801d4591540861b6ba93d1"
+        "sha256": "bcb054e43f2df0a0ab647bcabb9adb9e59676447db75ae396fd5f5d92c64dd93"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "1add07277e4fd4bad5059eb5e0d98d66754ea8325b80fb9bd54bfa96d2628974"
+    "served_manifest_fingerprint": "d4331d82aa5fb9935418a399d4c4ab64d8545506207f426b991552ee96fc33af"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
