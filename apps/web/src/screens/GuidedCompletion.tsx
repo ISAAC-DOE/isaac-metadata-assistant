@@ -18,6 +18,7 @@ import { Check, CircleHelp, Pencil } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
+import { isUnstorableFieldValue } from '../lib/mutationErrors';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
@@ -142,26 +143,6 @@ function answerWasApplied(resp: ApiAnswersResponse, blockerId: string): boolean 
  */
 function editWasApplied(resp: ApiAnswersResponse): boolean {
   return resp.invalidation.changed === true;
-}
-
-/**
- * Did the server refuse this correction because the VALUE cannot be stored?
- *
- * Narrow on purpose. A 422 from `POST /edit` has three other causes — a missing
- * `confirmed_by_user`, a body naming no recognised field, and whatever a future
- * validation adds — and none of them entitles the screen to say "the field still holds
- * the value it held before". So the `error` code is read, not just the status; an
- * unrecognised 422 falls through to the generic notice, which claims less.
- *
- * `body` is `unknown` by design (`ApiError` does not model per-route payloads), so it
- * is narrowed here rather than cast. A response without the expected shape returns
- * false, which is the fail-closed direction: it under-claims rather than over-claims.
- */
-function isUnstorableFieldValue(err: ApiError | null): boolean {
-  if (err === null || err.status !== 422) return false;
-  const body = err.body;
-  if (typeof body !== 'object' || body === null) return false;
-  return (body as { error?: unknown }).error === 'invalid_field_value';
 }
 
 interface Answered {
@@ -560,7 +541,19 @@ function LoadedCompletion({
          * because the response names none — it does not say WHY the value is wrong, and
          * inventing a reason would be the defect this whole path exists to avoid.
          */
-        <div className="completion-submit-error" role="alert">
+        /*
+         * `data-testid`, and it is not decoration. `e2e/mutation/evidence.spec.ts` used
+         * this notice only as a WAYPOINT — proof the request finished — and matched it by
+         * sentence, so it broke twice for reasons that had nothing to do with the
+         * property that spec exists to test (the evidence trail). A stable hook ends the
+         * recurrence. `edit.spec.ts` still matches the prose, deliberately: there the
+         * sentence IS the thing under test.
+         */
+        <div
+          className="completion-submit-error"
+          role="alert"
+          data-testid="edit-unstorable-notice"
+        >
           That correction was not applied — this field still holds the value it held before, and
           nothing was written. Check the value and try again.
         </div>

@@ -271,6 +271,102 @@ describe('P29.4b unconfirmed proposal card', () => {
     expect(confirm.disabled).toBe(true);
   });
 
+  /*
+   * THE SECOND `/edit` CONSUMER, which had no test at all.
+   *
+   * `grep -rn "422" src/__tests__/*assistant*` returned nothing before these three.
+   * `confirmProposal` catches 412 and RETHROWS, and `onConfirm` was `try`/`finally`
+   * with no `catch`, so a 422 became an unhandled rejection and the reader was shown
+   * nothing. Before the server refused this case the SAME input produced a 200 and this
+   * panel appended `Confirmed "<field>". Your value was sent to the record…` — the fix
+   * replaced a false claim with silence, and these tests are the rest of it.
+   *
+   * Reachable without tampering: `stageAnswer` records the reader's value verbatim with
+   * no format validation, and an already-answered field routes to `editField`. Every
+   * proposal below names `sample.material`, which is NOT in `ctx().pending`, so the
+   * confirm goes to `editField` exactly as it does in the product.
+   */
+  const UNSTORABLE_422 = () =>
+    Object.assign(new Error('unstorable'), {
+      status: 422,
+      body: { error: 'invalid_field_value', key: 'sample.material', keys: ['sample.material'] },
+    });
+
+  function msgTexts(container: HTMLElement): string[] {
+    return Array.from(container.querySelectorAll('.assistant-msg')).map(
+      (m) => m.textContent ?? '',
+    );
+  }
+
+  it('a 422 invalid_field_value is REPORTED, says the previous value stands, and claims no success', async () => {
+    const edit = vi.spyOn(api, 'editField').mockRejectedValue(UNSTORABLE_422());
+    const onRefresh = vi.fn();
+    const { getByRole, container } = panel({
+      proposal: pendingProposal({ field: 'sample.material', value: 'CuO2' }),
+      onRefresh,
+    });
+
+    fireEvent.click(getByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    // The reader is told something. Silence was the state this test was added to end.
+    await waitFor(() =>
+      expect(msgTexts(container).some((t) => /could not be confirmed/i.test(t))).toBe(true),
+    );
+    const note = msgTexts(container).find((t) => /could not be confirmed/i.test(t))!;
+    // The claim the 422 supports, and the one a scientist needs.
+    expect(note).toMatch(/nothing was written/i);
+    expect(note).toMatch(/still holds the value it held before/i);
+    // NOT a success. The old 200 path appended exactly this sentence.
+    expect(msgTexts(container).some((t) => /Your value was sent to the record/i.test(t))).toBe(
+      false,
+    );
+    // A refused write is not a write: nothing to refresh.
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it('a non-412, non-422 failure claims NOTHING about what reached the record', async () => {
+    const edit = vi
+      .spyOn(api, 'editField')
+      .mockRejectedValue(Object.assign(new Error('boom'), { status: 500 }));
+    const { getByRole, container } = panel({
+      proposal: pendingProposal({ field: 'sample.material', value: 'CuO2' }),
+      onRefresh: vi.fn(),
+    });
+
+    fireEvent.click(getByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    const note = await waitFor(
+      () => msgTexts(container).find((t) => /could not be confirmed/i.test(t))!,
+    );
+    // A 500 establishes only that the request failed. It does NOT establish that the
+    // record is untouched, so this message must not say so.
+    expect(note).not.toMatch(/nothing was written/i);
+    expect(note).not.toMatch(/still holds the value it held before/i);
+    expect(note).toMatch(/reload the record/i);
+  });
+
+  it('a 412 still marks the proposal stale — the new catch did not swallow it', async () => {
+    const edit = vi
+      .spyOn(api, 'editField')
+      .mockRejectedValue(Object.assign(new Error('stale'), { status: 412 }));
+    const { getByRole, container } = panel({
+      proposal: pendingProposal({ field: 'sample.material', value: 'CuO2' }),
+      onRefresh: vi.fn(),
+    });
+
+    fireEvent.click(getByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(container.querySelector('.agent-proposal')!.className).toMatch(/stale/),
+    );
+    // The 412 wording, not the new catch's wording.
+    expect(msgTexts(container).some((t) => /changed since it was proposed/i.test(t))).toBe(true);
+    expect(msgTexts(container).some((t) => /reload the record/i.test(t))).toBe(false);
+  });
+
   it('Cancel performs no mutation and clears the proposal', () => {
     const submit = vi.spyOn(api, 'submitAnswer');
     const edit = vi.spyOn(api, 'editField');

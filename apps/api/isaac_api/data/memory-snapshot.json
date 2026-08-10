@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "5e2202756c10f0e8292641d785f8ffa0ed7a0cf8de32f7dd99f659f232947b53"
+        "sha256": "413b6309be221ab7d50ff561f556722a1cf22538f49f8e68ebf19afe0a1713e7"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "b9d4e27375d207387fb5e7f5eb445e02b3448400907d8df81cc5a402836e9848"
+        "sha256": "0423a9f3a6c667dbf1dc9e2d475998d3836985b064606985d9c60e83c52d59be"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "9b4b8571840d1c4b03b34c015415b9aede6734863ab227a4a9d062fce4ec8069"
+        "sha256": "f8a6b08f9d9440bea97d2ec9a67a558d3805838fa62c07fbcd0d1bcc6d7017c9"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "222aa8ae80437d2e915cfa5e3f625326ff285335caba7f7444a69fca6e67915e"
+        "sha256": "e38057f317d0fd1cba6c0ceae67fd8f27abb06b894c61cc0bcdf1dbbe1b9fd5e"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10820,7 +10820,7 @@
       },
       {
         "path": "src/isaac_records/complete.py",
-        "sha256": "f378148b634c92f561817881b83b503f663eb326e005b88d5302e4969adf6037"
+        "sha256": "8647a21b7b4f6ce9edda039d0b59ae523fa0bd80d56ad21a982e2828f53d405f"
       },
       {
         "path": "src/isaac_records/draft_validator.py",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "d9fe43aa1a25d96e048631a3b718b308c43bebd33022202c8b99eeed30c7f063"
+    "served_manifest_fingerprint": "953055bcceb1314a7beeb4afdb350909192fe9ebf98729eaf90544a8f2f9ded6"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

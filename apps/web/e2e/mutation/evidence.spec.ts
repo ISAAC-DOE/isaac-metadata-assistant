@@ -226,9 +226,15 @@ test.describe('R4 · evidence', () => {
      * matching a SENTENCE, and the sentence changed when the server started refusing
      * this request with 422 `invalid_field_value` instead of absorbing it with a 200.
      * The durable property under test — the record and its evidence unchanged, the trail
-     * still citing HASH_A — never changed and is asserted below unaltered. What is
-     * matched now is the notice the 422 produces, which still carries the claim that
-     * matters: the field holds the value it held before.
+     * still citing HASH_A — never changed and is asserted below unaltered.
+     *
+     * SO IT NO LONGER MATCHES PROSE. Twice is a pattern, and the third time was
+     * predictable: this test does not care what the notice SAYS, only that the refusal
+     * has been reported and the request is therefore finished. It now waits on
+     * `data-testid="edit-unstorable-notice"`, which is rendered only by the
+     * `invalid_field_value` branch — so the waypoint still cannot be satisfied by a
+     * generic error, and rewording the copy cannot break this file again.
+     * `edit.spec.ts` owns the wording, and asserts it there.
      */
     await openComplete(page, SEED.fresh);
     await confirmAssetHash(page, HASH_A);
@@ -240,9 +246,7 @@ test.describe('R4 · evidence', () => {
     await editor.getByLabel('Asset Hash').fill('not-a-valid-sha256');
     await editor.getByRole('button', { name: 'Save' }).click();
 
-    await expect(editor.locator('.completion-submit-error')).toContainText(
-      'still holds the value it held before',
-    );
+    await expect(editor.getByTestId('edit-unstorable-notice')).toBeVisible();
     await expect(
       page.locator('.answered-stored'),
       'the refused value must never be shown as an answer'
