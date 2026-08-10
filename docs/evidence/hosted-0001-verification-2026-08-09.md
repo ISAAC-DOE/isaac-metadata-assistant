@@ -22,7 +22,7 @@ headings say which is which, and no reader should have to work it out.
 |---|---|
 | **Measured, in an authenticated browser session on 2026-08-09** | the `/api/health` body, the two recon runs, the create, the subsequent `GET /api/experiments` |
 | **Structural inference from committed code** | that the created experiment's row is physically in PostgreSQL (§3) |
-| **Not measured at all** | pod-restart durability (§4) |
+| ~~**Not measured at all**~~ → **Measured later the same day** | pod-restart durability — §4 said it was unmeasured; **§4.1 supersedes that**, after a deployment replaced the pod on its own. Read §4.1 for what it does and does not license. |
 
 **No agent connected to the database.** The reconnaissance ran **inside the deployed pod**, which
 is the design of Slice 2A and the only authorized execution path. No kubeconfig, port-forward or
@@ -181,11 +181,12 @@ committed. That is a strong inference from code that is under test — and it is
 
 ## 4. What was NOT measured — read this before quoting anything above
 
-- **Pod-restart durability was not measured. Nobody restarted the pod.** What exists is (a) the
-  application's own self-report `{backend: postgres, durable: true, state: durable}`, and (b) an
-  experiment surviving a fresh HTTP request. Neither is a restart. **Do not write "verified durable
-  across restart."** The restart test is the one in
-  `docs/create-experiment-persistence.md` §4 step 6, and it remains unrun on hosted.
+- ~~**Pod-restart durability was not measured. Nobody restarted the pod.**~~ **SUPERSEDED the same
+  day — see §4.1 below.** The original entry is kept rather than deleted, because the rest of this
+  document was written under it and a reader needs to see that it changed. What was true when written:
+  the evidence was (a) the application's own self-report `{backend: postgres, durable: true,
+  state: durable}`, and (b) an experiment surviving a fresh HTTP request — neither of which is a
+  restart.
 - **`durable: true` is not by itself proof of a working write.** `storage_status` opens no
   connection, and *"the FIRST health read after a process start says `durable: true`, because
   nothing has been attempted yet"* (`experiment_repository.py:101-106`). What upgrades this reading
@@ -198,6 +199,40 @@ committed. That is a strong inference from code that is under test — and it is
   reconciliation was witnessed here.
 - **Two runs, ninety-two seconds apart, on one deployment.** That is reproducibility within a
   session, not stability over time.
+
+### 4.1 — Pod-restart durability, MEASURED later the same day (2026-08-09)
+
+The restart happened on its own, as a side effect of shipping. Merging PRs #92, #91 and #94 built a
+new image and Flux rolled it, so the pod serving `/krish` was **replaced** — not restarted by hand
+for a test, which is why this was not available when §4 was written.
+
+| Fact | Before the roll | After the roll |
+|---|---|---|
+| `/api/health` `commit` | `5632300ee6c72f61f4c4e532bba41b8fdf01e728` | `608f587199ba061d7cbb855312c9734845ddd32f` |
+| `01KZM7HYJVQY1C0X3KFV805YT2` in `GET /api/experiments` | present | **present**, `pending_count: 3`, `created_utc: 2026-08-09T21:41:10Z` unchanged |
+| `experiment_storage` | `{postgres, durable: true, state: durable}` | unchanged |
+
+**The process really is new, and that is corroborated rather than inferred from the commit string.**
+`last_recon` reads `null` after the roll. That value is populated by `_db_recon_cache_put` and held
+in **process memory only** — and two recon scans had been run against the previous pod earlier that
+day (§1.2), which had set it. A fresh `null` is therefore a second, independent witness that a
+different process is answering.
+
+**What this does and does not license.** It licenses: *an experiment created through the hosted UI
+survived replacement of the pod serving it.* It does **not** license "verified durable across
+restart" in the unqualified form §4 prohibited, for one specific reason worth keeping: this
+repository cannot verify that the workspace volume is an `emptyDir`. The manifest lives in the
+Dean-owned `isaac-k8`, and `CLAUDE.md` §15 records that **zero** `emptyDir` / `persistentVolumeClaim`
+tokens appear in any in-repo YAML — the ephemerality is asserted by our own docs, not observed. If
+the volume were in fact persistent, survival across a pod roll would not on its own isolate
+PostgreSQL as the thing that preserved the row.
+
+So the honest composite is: the row survived pod replacement, **and** the app reports
+`backend: postgres`, **and** §3's structural inference shows the write path targets PostgreSQL
+whenever `PGHOST` is set. Three independent lines pointing the same way. That is materially stronger
+than what §4 recorded, and still short of reading the row back out of the database — which nothing in
+this repository is authorized to do.
+
 
 ## 5. What has NOT changed, and must not be read as having changed
 
