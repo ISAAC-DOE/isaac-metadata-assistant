@@ -29,7 +29,7 @@
  *
  * ASSERTED, scoped to `section.runs-section`: no nested overflow, no clipped
  * text, no obscured control, at six widths and at 200% zoom, with TWO runs open
- * (the pressure case — two expanded cards, each with three fields, a save-status
+ * (the pressure case — two expanded cards, each with five fields, a save-status
  * chip, a progress line and a conditions line).
  *
  * THE DOCUMENT IS MEASURED BOTH WAYS, and the first version of this file measured
@@ -436,6 +436,68 @@ test.describe('run card — narrow widths', () => {
       expect(failures.join('\n\n'), `save-status chip at ${width}px`).toBe('');
     });
   }
+
+  /**
+   * A COLLAPSED CARD CARRYING EVERY VALUE — the case the sweep above cannot reach.
+   *
+   * Every measurement in this file so far runs with both cards EXPANDED, so the
+   * `.run-card-conditions` line — mono, tabular, on the collapsed header, joined with
+   * ` · ` — has never been measured. It is the one element on this surface whose length
+   * grows with the field set: widening the workspace from three writable fields to five
+   * makes that line up to two segments longer, on the narrowest header in the product.
+   *
+   * The values are entered through the UI, not the API, because the line is built from
+   * what the card holds and a fixture write would prove less. They are typed into ONE
+   * card, which is then collapsed — two collapsed cards would only repeat the
+   * measurement at the same width.
+   */
+  test('@runs-layout a collapsed card carrying every value still fits at 320', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    await twoOpenRuns(page);
+
+    const first = runCards(page).first();
+    const type = async (path: string, value: string) => {
+      const box = first.locator(
+        `.run-field:has(.run-field-path:text-is("${path}")) input, ` +
+          `.run-field:has(.run-field-path:text-is("${path}")) select`,
+      );
+      await pwExpect(box).toBeVisible();
+      const tag = await box.evaluate((el) => el.tagName);
+      if (tag === 'SELECT') await box.selectOption(value);
+      else await box.fill(value);
+    };
+
+    // Every writable path, with the longest plausible values a scientist would enter.
+    await type('context.environment', 'operando');
+    await type('context.temperature_K', '1273.15');
+    await type('context.thermodynamics.atmosphere', '5% H2 in Ar, 1.2 bar');
+    await type('timestamps.acquired_start_utc', '2026-01-31T09:00:00Z');
+    await type('timestamps.acquired_end_utc', '2026-01-31T17:45:00Z');
+
+    // Let the debounced saves settle, then collapse so the conditions line renders.
+    await pwExpect(first.locator('.run-save-status')).toContainText(/Saved/, { timeout: 20_000 });
+    await first.locator('button.run-card-header').click();
+    await pwExpect(first.locator('.run-card-body')).toHaveCount(0);
+
+    const conditions = first.locator('.run-card-conditions');
+    await pwExpect(conditions).toBeVisible();
+    // Asserted, not assumed: a line that rendered none of the values would pass every
+    // geometric check below while proving nothing.
+    await pwExpect(conditions).toContainText('operando');
+    await pwExpect(conditions).toContainText('5% H2 in Ar');
+
+    const findings = await probeRuns(page);
+    await page.screenshot({ path: `${SHOT_DIR}/run-card-collapsed-full-320.png`, fullPage: true });
+
+    const failures = [
+      findings.overflow && `OVERFLOW on a full collapsed card:\n${findings.overflow}`,
+      findings.clipped && `TEXT LOST on a full collapsed card:\n${findings.clipped}`,
+      findings.obscured && `CONTROLS OBSCURED on a full collapsed card:\n${findings.obscured}`,
+      findings.tooWide && `A RUN CARD DOES NOT FIT ITS CONTAINER:\n${findings.tooWide}`,
+    ].filter(Boolean);
+
+    expect(failures.join('\n\n'), 'collapsed card with every value at 320px').toBe('');
+  });
 
   /**
    * THE DIFFERENTIAL DOCUMENT CHECK — the claim this slice owns.
