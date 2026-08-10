@@ -75,6 +75,7 @@ from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
 from isaac_records.ids import is_record_id, new_record_id
+from isaac_records.models import derivation
 
 #: PATH-FREE BY RULE, like every other log line this application emits: a record
 #: id and an exception CLASS NAME, never a message, a filesystem path, a host or a
@@ -565,6 +566,32 @@ def block_level(key: str) -> str:
     record-type stamp that is the same for every run by construction, and ``links``
     is how sibling runs are re-associated at export (contract §1), which is the
     fan-out slice's business and not an inherited value.
+
+    UNCLASSIFIED HERE MEANS "NOT SUBJECT TO THE OVERRIDE MACHINERY", AND THAT IS A
+    NARROWER STATEMENT THAN "NO RUN EVER SEES IT". The distinction was easy to miss
+    and is spelled out because the fan-out slice had to decide it: an override is an
+    audited displacement of an *inherited scientific value*, and none of these five
+    is one. What each of them does at EXPORT is a separate question, answered by
+    :meth:`Experiment.resolved_run_draft` and pinned by its own tests:
+
+    * ``meta`` — CARRIED onto every run's export draft (the run's own wins if it has
+      one). Not because it is inherited, but because the official schema *requires*
+      ``record_type``/``record_domain``/``source_type`` and this docstring already
+      states the stamp cannot legitimately vary between runs of one experiment.
+    * ``block_evidence`` — MERGED, experiment entries first, run entries winning on a
+      key collision. Its keys are namespaced per block (``attribution:…``,
+      ``series:…``, ``qc:status``, ``links:…``), so a merge cannot conflate two
+      blocks' provenance, and withholding it would strand the inherited
+      ``attribution`` block with no evidence — which ``validate_draft`` refuses, so
+      *every* fan-out export would fail. It is a requirement, not a preference.
+    * ``implicit`` — MERGED by ``about``, run entries winning. Sidecar-only
+      provenance that carries its own evidence; dropping it would silently discard
+      recorded evidence, which is a different failure from refusing to invent one.
+    * ``pending`` — NOT merged into the export draft (``validate_draft`` never reads
+      it). It is aggregated separately by :meth:`Experiment.pending`, which is where
+      a run's blockers have to be counted.
+    * ``links`` — NOT inherited and NOT copied. The only links a run's export draft
+      gains are the sibling relations derived in :func:`_apply_sibling_grouping`.
     """
     if key in EXPERIMENT_LEVEL_BLOCKS:
         return LEVEL_EXPERIMENT
@@ -812,6 +839,19 @@ def _as_str(raw: object) -> str:
     return raw if isinstance(raw, str) else ""
 
 
+def _as_record_id(raw: object) -> str | None:
+    """A persisted ``record_id`` if it really is one, else ``None`` (= not exported).
+
+    The third guard in the :func:`_as_int` / :func:`_as_str` family, and the one that
+    cannot use either of them: ``None`` here is a MEANING (this run has not been
+    exported), so ``""`` is not an acceptable fallback and ``str()`` coercion would
+    manufacture an id out of an integer. ``is_record_id`` is the same predicate
+    ``export_draft`` applies before it will mint a record, so a value this rejects
+    could not have produced an artifact in the first place.
+    """
+    return raw if isinstance(raw, str) and is_record_id(raw) else None
+
+
 @dataclass
 class Run:
     """One measurement condition of an experiment. Exports to exactly ONE record.
@@ -932,13 +972,25 @@ class Run:
         rather than closing only the two keys that were observed to break.
 
         ``draft`` and ``overrides`` keep their own guards (``or {}`` / ``isinstance``).
-        ``record_id`` is passed through UNGUARDED and that is a known remaining gap,
-        stated rather than papered over: its declared type is ``str | None`` and
-        ``None`` is a meaningful value there (not-yet-exported) rather than a
-        fallback, so ``_as_str`` would erase the distinction. No code path in this
-        slice builds a filesystem path from ``Run.record_id`` — the 1:1 export path
-        uses ``Experiment.record_id`` — so it is inert here; the export fan-out slice
-        that starts writing it must guard it at the same time.
+
+        ``record_id`` USED TO BE PASSED THROUGH UNGUARDED, declared as a known gap
+        owed to "the export fan-out slice that starts writing it". This is that
+        slice, so the debt is paid here. ``_as_str`` was the wrong instrument and
+        still is — ``None`` is a MEANINGFUL value (not-yet-exported), not a fallback,
+        and coercing garbage to ``""`` would erase the distinction. The guard is
+        :func:`isaac_records.ids.is_record_id` instead: anything that is not a valid
+        record id becomes ``None``, i.e. NOT EXPORTED, which is both fail-closed and
+        true — a malformed id names no artifact this application ever wrote. The
+        reason it now matters is concrete: :func:`_run_artifact_presence` and the
+        export route build ``<records_dir>/<record_id>.json`` from this value, so an
+        unguarded ``"../../etc/x"`` would be a path built from a persisted document.
+
+        ONE CONSEQUENCE, DISCLOSED RATHER THAN HIDDEN. Coercing a garbage
+        ``record_id`` to ``None`` changes that run's authoritative signature on read,
+        so the next save of an experiment holding such a document bumps its ``rev``.
+        That can only happen to a document that was already malformed, and the
+        alternative — keeping the garbage so the signature is stable — keeps a path
+        component this module refuses to trust.
         """
         raw_overrides = state.get("overrides")
         # ``or {}`` is not a type guard: a persisted ``"overrides": "nope"`` is
@@ -953,7 +1005,7 @@ class Run:
             ordinal=_as_int(state.get("ordinal")),
             created_utc=_as_str(state.get("created_utc")),
             draft=state.get("draft") or {},
-            record_id=state.get("record_id"),
+            record_id=_as_record_id(state.get("record_id")),
             overrides={
                 addr: Override.from_state(o)
                 for addr, o in overrides.items()
@@ -1138,6 +1190,338 @@ def _authoritative_signature(exp: "Experiment") -> str:
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+# --- export fan-out (contract §1 DECISION D1) ---------------------------------
+#
+# ONE RUN PRODUCES EXACTLY ONE ISAAC RECORD. An ``Experiment`` with runs exports to
+# N records; an ``Experiment`` with NO runs exports exactly as it always did — one
+# record, ``record_id == exp.id``, byte-identical draft, same artifacts. That is not
+# a transitional courtesy: it is the shape of every experiment this application has
+# ever stored, so the zero-run path is the common case and is preserved by
+# CONSTRUCTION rather than by a compatibility branch bolted on afterwards — the
+# zero-run unit is handed ``self.draft`` ITSELF, not a composed copy, so there is no
+# composition rule that can drift away from today's behaviour.
+#
+# NOTHING IN ``src/isaac_records/`` OR ``schema/`` CHANGES. ``export_draft``,
+# ``transform`` and ``build_sidecar`` are already per-record — one draft in, one
+# record out — which is the correct granularity for ONE run. The 1:1 assumption
+# lived entirely in the caller, and it is the caller that is fixed.
+
+#: The ONE ``rel``/``basis`` pair this module will assert between sibling run
+#: records, and the field whose equality justifies it.
+#:
+#: The schema's own words are the justification, not a scientific judgement of ours
+#: (``schema/isaac_record_v1.json``, ``sample.sample_id``): *"Two records share a
+#: sample_id if and only if they measured the same physical object — this is the
+#: basis that gives same_sample_as links their meaning."* So when two runs resolve
+#: to the SAME ``sample.sample_id``, ``same_sample_as`` / ``same_sample_id`` is a
+#: restatement of stored equality under a definition the schema supplies. No other
+#: relation is emitted, and the omissions are deliberate — see
+#: :func:`_apply_sibling_grouping`.
+SIBLING_REL = "same_sample_as"
+SIBLING_BASIS = "same_sample_id"
+SAMPLE_ID_PATH = "sample.sample_id"
+
+#: Prefix of the grouping tag every fan-out record carries. ``tags`` is the schema's
+#: designated grouping mechanism — *"how a user groups an arbitrary SET of records
+#: at any granularity (campaign, material system, study)"* — and a tag is a label,
+#: not a scientific claim, so emitting one asserts nothing about the science. Its
+#: value encodes a stored identifier and nothing else.
+GROUP_TAG_PREFIX = "experiment:"
+
+
+def _group_tag(experiment_id: str) -> str | None:
+    """The grouping tag for one experiment, or ``None`` if it would be invalid.
+
+    Fail-closed against the schema's own constraints on a tag (``minLength: 1``,
+    ``maxLength: 64``, ``pattern: ^\\S(.*\\S)?$``) rather than trusting that an
+    experiment id is always a 26-character ULID — ``create_experiment`` accepts an
+    explicit id and the fixtures use readable ones. A tag that could not validate is
+    not emitted at all, because an export that fails schema validation on a label we
+    added would be this slice breaking records it was asked to relate.
+
+    The whitespace test is deliberately stricter than the pattern (which permits
+    interior spaces): any whitespace at all disqualifies, which is a superset of what
+    the pattern refuses and needs no reasoning about which regex dialect is in play.
+    """
+    tag = f"{GROUP_TAG_PREFIX}{experiment_id}"
+    if not 1 <= len(tag) <= 64:
+        return None
+    if any(ch.isspace() for ch in tag):
+        return None
+    return tag
+
+
+def _exported_field_value(draft: dict, path: str):
+    """The value a draft field will actually carry INTO the record, or ``None``.
+
+    Deliberately the same rule ``export.transform`` applies (skip ``status ==
+    "missing"``, skip a null value) rather than a second reading of the envelope. It
+    has to be: a sibling link is only honest if the two records really do carry the
+    same ``sample_id``, and "the draft holds one" and "the record will hold one" are
+    different statements whenever the envelope is a missing/null placeholder.
+    """
+    env = (draft.get("fields") or {}).get(path)
+    if not isinstance(env, dict):
+        return None
+    if env.get("status") == "missing" or env.get("value") is None:
+        return None
+    return env.get("value")
+
+
+def _merge_implicit(experiment_draft: dict, run_draft: dict) -> list | None:
+    """Experiment ``implicit`` entries plus the run's, the run winning on ``about``.
+
+    ``implicit`` never becomes a record field — it is sidecar-only provenance — and
+    every entry carries its own evidence, so merging asserts nothing that was not
+    already asserted and evidenced on the experiment. Withholding it would silently
+    delete recorded evidence from every exported sidecar, which is a different and
+    worse failure than refusing to invent one.
+
+    ``None`` rather than ``[]`` when there is nothing, so a draft that had no
+    ``implicit`` key does not acquire an empty one.
+    """
+    exp_items = [e for e in (experiment_draft.get("implicit") or []) if isinstance(e, dict)]
+    run_items = list(run_draft.get("implicit") or [])
+    run_abouts = {e.get("about") for e in run_items if isinstance(e, dict)}
+    merged = [copy.deepcopy(e) for e in exp_items if e.get("about") not in run_abouts]
+    merged.extend(copy.deepcopy(run_items))
+    return merged or None
+
+
+def _merge_block_evidence(experiment_draft: dict, run_draft: dict) -> dict | None:
+    """Experiment ``block_evidence`` overlaid by the run's. Run wins per key.
+
+    THIS MERGE IS A REQUIREMENT, NOT A CONVENIENCE. ``attribution`` is
+    experiment-level and inherited, and ``validate_draft`` demands a covered
+    ``attribution:<name>|<role>`` entry for every contributor. Inherit the block
+    without its evidence and EVERY fan-out export fails the no-guessing gate.
+
+    It is safe because the keys are namespaced per block by construction
+    (``attribution:``, ``series:``, ``qc:status``, ``links:``), so an experiment-level
+    key and a run-level key cannot collide unless they describe the same block — in
+    which case the run's is the more specific and correctly wins.
+    """
+    merged: dict = {}
+    for src in (experiment_draft.get("block_evidence"), run_draft.get("block_evidence")):
+        if isinstance(src, dict):
+            merged.update(copy.deepcopy(src))
+    return merged or None
+
+
+@dataclass
+class ExportUnit:
+    """ONE thing that becomes ONE official ISAAC record.
+
+    Either a :class:`Run` (``run`` set, ``target_id == run.id``, contract §1 D1) or
+    the experiment itself when it has no runs (``run is None``,
+    ``target_id == experiment.id``) — the shape every stored experiment has today.
+
+    ``draft`` is the FULLY RESOLVED draft for this unit. For the zero-run unit it is
+    ``experiment.draft`` ITSELF, not a copy, so that path is provably identical to
+    the pre-fan-out call. For a run it is a fresh composed dict; mutating it cannot
+    reach the run's or the experiment's stored draft, which is what keeps
+    inheritance BY REFERENCE (contract §2 D2) rather than by copy: the composition
+    is recomputed on every read and nothing is ever written back down into a run.
+    """
+
+    experiment: "Experiment"
+    run: "Run | None"
+    target_id: str
+    draft: dict
+
+    @property
+    def run_id(self) -> str | None:
+        return self.run.id if self.run is not None else None
+
+    @property
+    def run_label(self) -> str | None:
+        return self.run.label if self.run is not None else None
+
+    def current_record_id(self) -> str | None:
+        """The record id this unit already holds, or ``None`` if never exported."""
+        return self.run.record_id if self.run is not None else self.experiment.record_id
+
+    def mark_exported(self, record_id: str) -> None:
+        if self.run is not None:
+            self.run.record_id = record_id
+        else:
+            self.experiment.record_id = record_id
+
+    def record_path(self) -> Path | None:
+        """``<records_dir>/<target_id>.json``, or ``None`` if the id is not a record id.
+
+        ``None`` rather than a path built from an untrusted string: ``Run.id`` comes
+        out of a persisted document through :func:`_as_str`, so it can be anything at
+        all. A unit whose id is not a record id can never be exported anyway —
+        ``export_draft`` refuses it with a typed draft error — so refusing to name a
+        file for it costs nothing and removes the only place this slice could have
+        turned document content into a filesystem path.
+        """
+        if not is_record_id(self.target_id):
+            return None
+        return self.experiment.records_dir / f"{self.target_id}.json"
+
+    def sidecar_path(self) -> Path | None:
+        if not is_record_id(self.target_id):
+            return None
+        return self.experiment.records_dir / f"{self.target_id}.evidence.json"
+
+    def materialised(self) -> bool:
+        """State says exported AND both halves of the artifact pair are on disk.
+
+        The same three-part test the export route's immutability guard has always
+        applied to the single-record case (``exported() and record.exists() and
+        sidecar.exists()``), just addressed per unit. Anything less than all three is
+        a half-written state the export path reconciles rather than refuses.
+        """
+        record_path = self.record_path()
+        sidecar_path = self.sidecar_path()
+        return (
+            self.current_record_id() is not None
+            and record_path is not None
+            and record_path.exists()
+            and sidecar_path is not None
+            and sidecar_path.exists()
+        )
+
+
+def _add_sibling_link(draft: dict, target_id: str, sample_id: str) -> None:
+    """Add one ``same_sample_as`` link plus the evidence entry it is required to cite.
+
+    ``validate_draft`` refuses a link with no ``block_evidence`` under
+    ``links:<rel>|<target>|<basis>``, so emitting the link without the evidence would
+    make every fan-out export fail. The evidence is a ``derivation`` with a stated
+    rule — the one form of evidence that does not claim an observation — and the rule
+    quotes the schema clause that licenses the relation. That is the *documented rule*
+    ``CLAUDE.md`` §5 permits an inference to rest on, not a scientific judgement.
+
+    Idempotent on the (rel, target, basis) tuple, because ``validate_draft`` refuses
+    a duplicate link tuple as an unkeyable evidence collision.
+    """
+    links = draft.get("links")
+    if not isinstance(links, list):
+        links = []
+    tuple_key = (SIBLING_REL, target_id, SIBLING_BASIS)
+    if not any(
+        isinstance(link, dict)
+        and (link.get("rel"), link.get("target"), link.get("basis")) == tuple_key
+        for link in links
+    ):
+        links = [*links, {"rel": SIBLING_REL, "target": target_id, "basis": SIBLING_BASIS}]
+    draft["links"] = links
+
+    block_evidence = draft.get("block_evidence")
+    if not isinstance(block_evidence, dict):
+        block_evidence = {}
+    key = f"links:{SIBLING_REL}|{target_id}|{SIBLING_BASIS}"
+    block_evidence.setdefault(
+        key,
+        [
+            derivation(
+                rule=(
+                    "Both records carry sample.sample_id "
+                    f"{sample_id!r}, resolved from the same experiment-level draft "
+                    "field. The official ISAAC schema states that two records share "
+                    "a sample_id if and only if they measured the same physical "
+                    "object, and names that equality as the basis that gives "
+                    "same_sample_as links their meaning. Derived from stored state "
+                    "at export; no scientific judgement was applied."
+                )
+            )
+        ],
+    )
+    draft["block_evidence"] = block_evidence
+
+
+def _apply_sibling_grouping(experiment: "Experiment", units: list[ExportUnit]) -> None:
+    """Relate the sibling records of ONE fan-out, using schema-native means only.
+
+    Two things happen, and the second is much narrower than it could have been.
+
+    **The grouping tag** goes on every unit. It is a label, it encodes a stored
+    identifier, and ``tags`` is the schema's own answer to "how do I group a SET of
+    records". Nothing scientific is claimed by it.
+
+    **The links.** Exactly ONE relation is emitted: ``same_sample_as`` with basis
+    ``same_sample_id``, between units whose exported ``sample.sample_id`` is the same
+    non-empty string. Every other member of the vocabulary the fan-out could have
+    reached is DELIBERATELY NOT EMITTED, and each omission has a reason:
+
+    * ``replica_of`` / ``replicate_preparation`` — asserts that two runs are
+      replicates of one another. Nothing in the stored state says so. Two runs of one
+      experiment may just as well be a deliberate temperature series, which is the
+      opposite claim. Guessing it would be exactly the scientific judgement
+      ``CLAUDE.md`` §5 forbids.
+    * ``follows`` — a procedural/temporal claim. ``Run.ordinal`` is documented in this
+      module as an ORDER KEY for display, explicitly not a label and explicitly
+      renameable/reorderable, so it is not evidence that one measurement followed
+      another. ``timestamps.acquired_start_utc`` would be closer, but "B started after
+      A" is still not "B follows A" in the schema's sense, and no stored field asserts
+      the procedural relation.
+    * ``derived_from`` — nothing in the model records that one run was derived from
+      another.
+    * ``matched_operating_conditions`` — computable (compare the resolved
+      ``context.*``), but it is a BASIS, not a relation, and every ``rel`` it could
+      justify is one of the three refused above. Emitting a basis with a guessed
+      ``rel`` would launder the guess through a legal-looking enum value.
+    * ``shared_material_batch`` — no batch is stored anywhere in the model.
+
+    So on an experiment whose runs carry no ``sample.sample_id``, or different ones,
+    the honest output is the shared tag and NO links at all. That is a legitimate
+    outcome, not a gap to be filled later with something plausible.
+
+    **One asymmetry, disclosed.** A run exported LATER links to its already-exported
+    siblings, but those siblings' records were written before it existed and are
+    immutable, so they do not gain the reverse link. Rewriting them to add it would
+    break record immutability, which is a stronger guarantee than link symmetry.
+    """
+    tag = _group_tag(experiment.id)
+    if tag is not None:
+        for unit in units:
+            tags = unit.draft.get("tags")
+            if not isinstance(tags, list):
+                tags = []
+            if tag not in tags:
+                tags = [*tags, tag]
+            unit.draft["tags"] = tags
+
+    by_sample: dict[str, list[ExportUnit]] = {}
+    for unit in units:
+        sample_id = _exported_field_value(unit.draft, SAMPLE_ID_PATH)
+        # `is_record_id` on the TARGET too: the schema constrains `links[].target` to
+        # `^[0-9A-Z]{26}$`, so a unit whose id is not one cannot be linked to without
+        # producing a record that fails official validation.
+        if isinstance(sample_id, str) and sample_id.strip() and is_record_id(unit.target_id):
+            by_sample.setdefault(sample_id, []).append(unit)
+
+    for sample_id, group in by_sample.items():
+        if len(group) < 2:
+            continue  # nothing to relate; emit no link rather than a self-link
+        for unit in group:
+            for other in group:
+                if other is not unit:
+                    _add_sibling_link(unit.draft, other.target_id, sample_id)
+
+
+def _run_artifact_presence(experiment: "Experiment", run: "Run") -> list:
+    """``[run_id, record_present, sidecar_present]`` for one run's artifact pair.
+
+    The per-run half of :func:`_plan_digest_row`. ``record_id`` is guarded by
+    :func:`_as_record_id` at hydration, so the path built here can only come from a
+    value that passed ``is_record_id``; the belt-and-braces check costs nothing and
+    keeps this function safe if it is ever called on an instance built by hand.
+    """
+    record_id = run.record_id
+    if not isinstance(record_id, str) or not is_record_id(record_id):
+        return [run.id, False, False]
+    records_dir = experiment.records_dir
+    return [
+        run.id,
+        (records_dir / f"{record_id}.json").exists(),
+        (records_dir / f"{record_id}.evidence.json").exists(),
+    ]
 
 
 @dataclass
@@ -1554,6 +1938,108 @@ class Experiment:
         run.overrides[address] = override
         return override
 
+    def resolved_run_draft(self, run: "Run") -> dict:
+        """The complete draft ONE run exports — computed on read, never stored.
+
+        Four layers, in this order, and the order is the rule:
+
+        1. the run's OWN draft, deep-copied (its ``context.*`` fields, its ``series``,
+           ``qc``, ``assets``, ``descriptors_outputs``);
+        2. every experiment-level address, through :func:`resolve_inherited` — so an
+           overridden address contributes the override and an un-overridden one
+           contributes the experiment's current value. This is the whole of contract
+           §2 D2's read half and it is reused, not re-implemented;
+        3. ``meta``, if the run does not carry its own;
+        4. the two evidence maps, merged — see :func:`block_level` for why each of the
+           five unclassified blocks is treated the way it is.
+
+        Layer 2 is applied ON TOP of layer 1, so if a run's own draft somehow carries
+        an experiment-level field directly, the resolution wins. That is not data
+        loss by preference: :meth:`set_run_override` refuses to write an
+        experiment-level address anywhere but the override map, so such a field could
+        only arrive by a document written outside this module, and the resolution is
+        the definition of what the run holds there.
+
+        INHERITANCE STAYS BY REFERENCE. Nothing here writes into ``run.draft`` or
+        ``self.draft``; the composed dict is built fresh and discarded. Edit an
+        experiment-level field and the next call to this method already reflects it,
+        with no fan-out write and no run document having copied anything.
+        """
+        source = run.draft if isinstance(run.draft, dict) else {}
+        draft = copy.deepcopy(source)
+
+        fields = draft.get("fields")
+        if not isinstance(fields, dict):
+            fields = {}
+            draft["fields"] = fields
+
+        for resolution in self.resolve_run(run).values():
+            if resolution.payload is None:
+                continue
+            if resolution.kind == ADDRESS_FIELD:
+                fields[resolution.name] = resolution.payload
+            else:
+                draft[resolution.name] = resolution.payload
+
+        experiment_draft = self.draft if isinstance(self.draft, dict) else {}
+        if draft.get("meta") is None and experiment_draft.get("meta") is not None:
+            draft["meta"] = copy.deepcopy(experiment_draft["meta"])
+
+        implicit = _merge_implicit(experiment_draft, draft)
+        if implicit is not None:
+            draft["implicit"] = implicit
+        block_evidence = _merge_block_evidence(experiment_draft, draft)
+        if block_evidence is not None:
+            draft["block_evidence"] = block_evidence
+
+        return draft
+
+    def export_units(self) -> list[ExportUnit]:
+        """Everything this experiment exports: N records for N runs, else exactly one.
+
+        THE ZERO-RUN UNIT CARRIES ``self.draft`` ITSELF. Not a copy, not a composed
+        equivalent — the same object the pre-fan-out route passed to ``export_draft``.
+        Backward compatibility is therefore not an assertion this slice makes about
+        its own composition rules; it is a property of the code path.
+
+        Sibling grouping runs over ALL units, including ones already exported, so a
+        run added later can link to an existing sibling record. It is applied here
+        rather than inside :meth:`resolved_run_draft` because a relation is a fact
+        about the SET, and a function that composes one run's draft cannot see the set.
+        """
+        if not self.runs:
+            return [ExportUnit(experiment=self, run=None, target_id=self.id, draft=self.draft)]
+        units = [
+            ExportUnit(
+                experiment=self,
+                run=run,
+                target_id=run.id,
+                draft=self.resolved_run_draft(run),
+            )
+            for run in self.sorted_runs()
+        ]
+        _apply_sibling_grouping(self, units)
+        return units
+
+    def all_units_exported(self) -> bool:
+        """Whether EVERY unit this experiment exports already holds a record id.
+
+        Identical to :meth:`exported` when there are no runs — which is why
+        :meth:`exported` is left alone rather than redefined. ``exported()`` answers
+        a question about ``Experiment.record_id`` specifically, and roughly fifteen
+        call sites pair it with :meth:`record_path` to READ the experiment's own
+        single artifact. Broadening it would have made those sites claim an artifact
+        that, for a fan-out experiment, is not there. Status derivation asks a
+        different question, so it gets a different method.
+
+        Deliberately reads ``run.record_id`` directly instead of building units: it
+        is called from :meth:`status` on every experiment in a listing, and composing
+        N drafts to answer a question about N booleans would be wasteful.
+        """
+        if not self.runs:
+            return self.record_id is not None
+        return all(run.record_id is not None for run in self.runs)
+
     def clear_run_override(self, run: "Run", address: str) -> bool:
         """Drop an override so the run inherits again. Returns whether one was removed.
 
@@ -1754,7 +2240,41 @@ class Experiment:
     # -- derived views --
 
     def pending(self) -> list[dict]:
-        return list(self.draft.get("pending") or [])
+        """Every unanswered blocker on this experiment — ITS OWN AND ITS RUNS'.
+
+        THIS USED TO BE RUN-BLIND, AND THAT WAS A MEASURED DEFECT, not a latent one
+        once runs can be exported. It read ``self.draft["pending"]`` alone, so an
+        experiment whose single Run held three unanswered blockers reported
+        ``pending: 0``, ``status: in_review``. My Experiments groups on ``status()``,
+        so a blocked experiment would have been filed as needing nothing. Measured on
+        ``201cab0`` before this change:
+
+            experiment with NO runs   -> status: needs_attention | pending: 3
+            run carries three blockers-> status: in_review       | pending: 0
+
+        The aggregate is ALL UNITS' BLOCKERS, not "the experiment's own", because
+        contract §1 D1 makes each run a record of its own and a record that cannot be
+        completed is the experiment's problem regardless of which run holds it.
+
+        Run-sourced entries are TAGGED with ``run_id``/``run_label`` so a caller can
+        address a blocker to the run that owns it; experiment-level entries are
+        passed through untouched, so a zero-run experiment's list is byte-identical
+        to what it always was. A non-dict entry (a malformed persisted document) is
+        passed through as-is rather than wrapped — this is a derived view, not a
+        place to start repairing documents.
+        """
+        own = list(self.draft.get("pending") or [])
+        if not self.runs:
+            return own
+        out = list(own)
+        for run in self.sorted_runs():
+            run_draft = run.draft if isinstance(run.draft, dict) else {}
+            for item in run_draft.get("pending") or []:
+                if isinstance(item, dict):
+                    out.append({**item, "run_id": run.id, "run_label": run.label})
+                else:
+                    out.append(item)
+        return out
 
     def pending_count(self) -> int:
         return len(self.pending())
@@ -1774,42 +2294,70 @@ class Experiment:
         return self.record_id is not None
 
     def draft_ok(self) -> bool:
-        return validate_draft(self.draft).ok
+        """Whether EVERY unit's draft passes the no-guessing checks.
+
+        Run-aware for the same reason :meth:`pending` is. With runs, ``self.draft``
+        alone is not a thing that gets exported — it holds only the experiment-level
+        half — so validating it in isolation would answer a question nobody asked
+        and would usually answer it ``False`` (no ``series``, no ``qc``).
+        """
+        if not self.runs:
+            return validate_draft(self.draft).ok
+        return all(validate_draft(unit.draft).ok for unit in self.export_units())
+
+    def _all_units_pass_dry_run(self) -> bool:
+        """Dry-run the export gate over every unit. Writes nothing, never raises.
+
+        ``export_draft`` is called WITHOUT ``record_id``, exactly as the pre-fan-out
+        code did. That is deliberate: this is a question about DRAFT validity, and
+        passing an id would additionally fail any experiment or run whose id is not a
+        ULID — a real possibility for hand-built fixtures, and a change in behaviour
+        for the zero-run path this slice promised not to touch.
+        """
+        try:
+            return all(export_draft(unit.draft, REPO_ROOT).ok for unit in self.export_units())
+        except Exception:  # pragma: no cover - defensive, keeps the check non-throwing
+            return False
 
     def status(self) -> str:
         """Derive status deterministically; never stored, always recomputed.
 
-        pending > 0            -> needs_attention
-        pending == 0, exported -> done
-        pending == 0, dry-run export passes -> ready_to_export
-        pending == 0, dry-run export fails  -> in_review
+        pending > 0                 -> needs_attention
+        pending == 0, all exported  -> done
+        pending == 0, every unit's dry-run export passes -> ready_to_export
+        pending == 0, any unit fails                     -> in_review
+
+        THE AGGREGATE IS "ALL UNITS", AND IT IS CHOSEN RATHER THAN INHERITED. The
+        run-domain slice left this open, noting that once one experiment exports to N
+        records "is this ready?" has no single-draft answer and that whether the
+        aggregate is "all runs ready" or "any run ready" is a product decision. It is
+        ALL: a fan-out export is refused unless every eligible run validates
+        (contract §3 D4 — a required validation failure on any run blocks the whole
+        submission, and there is no ``Submit Anyway``), so any weaker aggregate would
+        report a readiness the export path will not honour.
+
+        A zero-run experiment answers exactly as it always did, because its single
+        unit IS its own draft.
         """
-        if self.exported():
+        if self.all_units_exported():
             return DONE
         if self.pending_count() > 0:
             return NEEDS_ATTENTION
         # Dry-run only: export_draft returns an ExportResult and writes nothing.
-        try:
-            result = export_draft(self.draft, REPO_ROOT)
-        except Exception:  # pragma: no cover - defensive, keeps status non-throwing
-            return IN_REVIEW
-        return READY_TO_EXPORT if result.ok else IN_REVIEW
+        return READY_TO_EXPORT if self._all_units_pass_dry_run() else IN_REVIEW
 
     def export_ready(self) -> bool:
-        """True iff a dry-run export of the CURRENT draft passes (pending==0 AND
-        the export gate succeeds), independent of whether it was already exported.
+        """True iff a dry-run export of EVERY unit passes (pending==0 AND the export
+        gate succeeds for each), independent of whether anything was already exported.
 
-        Unlike ``status()`` (which short-circuits to DONE for any exported
-        record), this reflects the CURRENT draft's export-readiness — so an
+        Unlike ``status()`` (which short-circuits to DONE once every unit is
+        exported), this reflects the CURRENT drafts' export-readiness — so an
         exported record edited back to pending>0 is correctly NOT export-ready.
         Read-only dry-run, exactly as ``status()`` uses ``export_draft``.
         """
         if self.pending_count() > 0:
             return False
-        try:
-            return export_draft(self.draft, REPO_ROOT).ok
-        except Exception:  # pragma: no cover - defensive, keeps the check non-throwing
-            return False
+        return self._all_units_pass_dry_run()
 
 
 # --- store operations ---------------------------------------------------------
@@ -2627,6 +3175,17 @@ def _canonical_state_counts(session_id: str | None = None) -> dict:
 #: path through it either flips a presence flag or bumps the state. Keep that
 #: property in mind before adding another filesystem write to a record's directory —
 #: a write the row cannot see is a write this paragraph's promise does not cover.
+#:
+#: **THE FAN-OUT SLICE ADDED TWO MORE WRITES AND KEPT THE PROPERTY, deliberately.**
+#: (1) ``_write_record`` now writes ONE UNIT's pair, and a fan-out experiment has N
+#: of them named by ``Run.record_id`` — covered by the per-run presence flags in
+#: :func:`_plan_digest_row`. (2) ``routes._prune_orphan_artifacts`` DELETES artifact
+#: pairs left behind when the run set changes. A prune of a CURRENT unit's pair is
+#: impossible by construction (the keep-set is exactly the current targets), and a
+#: prune of anything else is invisible to the row — but it can only run on the
+#: success path of an export that also moved at least one ``Run.record_id``, because
+#: an export with nothing to write returns 409 before reaching it. So the row still
+#: moves whenever the filesystem does.
 _reset_lock = threading.Lock()
 
 
@@ -2694,6 +3253,35 @@ def _plan_digest_row(exp: "Experiment", bucket: str) -> list:
     reconciliation republishes and ``save_versioned`` bumps ``rev``. Hashing the file
     contents would cost a full read of every artifact on every preview to detect
     nothing that presence does not already detect.
+
+    **THE LAST ELEMENT EXISTS BECAUSE FAN-OUT REOPENED THE HOLE THE TWO ABOVE CLOSED,
+    ONE GRANULARITY DOWN, and the gap was real rather than theoretical.** The two
+    ``exists()`` calls above stat ``exp.record_path()`` / ``exp.sidecar_path()`` —
+    SINGULAR, the experiment's OWN pair, derived from ``Experiment.record_id``. Under
+    contract §1 D1 an experiment with runs has N pairs, named by ``Run.record_id``,
+    and ``Experiment.record_id`` is ``None`` for such an experiment, so BOTH flags
+    above are permanently ``False`` and describe nothing.
+
+    Trace the destructive path exactly, because it is the same one the export
+    self-heal took: a run is exported (``run.record_id`` moves ``None`` -> an id,
+    which IS inside ``_run_signature_payload`` and therefore inside the authoritative
+    signature, so a FRESH fan-out export is already covered). Later that run's record
+    file goes missing and a re-export republishes it. ``run.record_id`` is ALREADY
+    set, so the signature does not move, ``save_versioned`` returns ``False``, the
+    version token does not move, and — before this element — no row component moved
+    at all. A 200 that durably repaired an acknowledged run export was invisible to
+    the digest, and a reset would have destroyed it in silence: precisely the defect
+    the two ``exists()`` calls were added to close, reintroduced by a slice that could
+    not see them.
+
+    So the row also carries ``[run_id, record_present, sidecar_present]`` for every
+    run, in :meth:`sorted_runs` order. For a zero-run experiment this is ``[]`` and
+    the row is the old row plus an empty list — the digest value changes (it is
+    opaque and lives only between one preview and its execute), the meaning does not.
+
+    Keep the property that made this fixable: this is the ONE definition, shared by
+    :func:`_plan_digest` and by the per-record re-check in
+    :func:`reset_to_canonical_seed`. Do not re-derive a row beside either of them.
     """
     record_path = exp.record_path()
     sidecar_path = exp.sidecar_path()
@@ -2705,6 +3293,7 @@ def _plan_digest_row(exp: "Experiment", bucket: str) -> list:
         _authoritative_signature(exp),
         record_path is not None and record_path.exists(),
         sidecar_path is not None and sidecar_path.exists(),
+        [_run_artifact_presence(exp, run) for run in exp.sorted_runs()],
     ]
 
 
@@ -2786,7 +3375,11 @@ def _plan_digest(buckets: dict[str, list["Experiment"]]) -> str:
     * a record whose provenance marker changed moves bucket;
     * an export self-heal republishes a missing artifact WITHOUT touching the state
       (``save_versioned`` returns False when ``record_id`` is unchanged), so a
-      presence flag is the only thing that moves — and it does move.
+      presence flag is the only thing that moves — and it does move. That holds for
+      the experiment's own pair AND, since the fan-out slice, for each RUN's pair:
+      see the last element of :func:`_plan_digest_row`, which exists because the
+      first two flags describe only ``Experiment.record_id``, and a fan-out
+      experiment does not have one.
 
     The signature and the answer-log length are included because the preview reports
     numbers DERIVED from them (``at_risk``), and a digest that did not cover them

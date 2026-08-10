@@ -1063,7 +1063,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 40 operations, 62 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 40 operations, 64 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(40);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1255,8 +1255,28 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // as the corrected 29,052 was: the re-transcribed entry is 2,047 characters where
     // the old one was 1,637 (+410), and it holds one more `\n\n` separator, which this
     // sum drops (+410 - 2 = +408).
-    expect(total).toBe(29460);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(62);
+    //
+    // 29,460 -> 30,677 and 62 -> 64 paragraphs (export fan-out). One operation
+    // changed: `POST /api/experiments/{experiment_id}/export`. Under contract §1 D1
+    // an experiment with runs now exports ONE record PER RUN, so the old description
+    // was not merely thin, it was wrong for that case — it promised a single
+    // `record_id` and a single `artifact_refs` pair, and a fan-out returns neither.
+    // The re-transcribed entry adds two paragraphs: what a record with runs returns
+    // (and that a record with NO runs, which is every record this API can currently
+    // create, is unchanged), and what is actually guaranteed if the export fails
+    // part-way — validation is all-or-nothing, the state is saved once at the end,
+    // and it is NOT atomic across the individual file writes. That last sentence is
+    // the one worth protecting: the honest guarantee is weaker than "atomic", and
+    // the description says so rather than implying a stronger one.
+    //
+    // Cross-checked in Python rather than only by re-running this assertion, as
+    // every corrected total above was: the re-transcribed entry is 1,867 characters
+    // where the old one was 646 (+1,221) and holds two more `\n\n` separators, which
+    // this sum drops (+1,221 - 4 = +1,217). Independently, the whole array
+    // re-measured from the file: 40 operations, 40 unique, raw sum 30,805, 64
+    // separators, 30,805 - 128 = 30,677.
+    expect(total).toBe(30677);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(64);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

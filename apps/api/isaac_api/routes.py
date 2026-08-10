@@ -29,6 +29,7 @@ from isaac_records.complete import apply_answers, apply_corrections
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
+from isaac_records.ids import is_record_id
 from isaac_records.official import EXPECTED_VERSION, schema_path, validate_official
 from isaac_records.portal_warnings import portal_warnings
 
@@ -775,12 +776,20 @@ def _detail(exp: Experiment) -> dict:
 def _workflow_for(exp: Experiment) -> dict:
     """Derive the workflow from an experiment's current signals (same call as
     ``_detail``). Used to capture the pre-mutation step states and to surface the
-    post-mutation workflow on a mutation response."""
+    post-mutation workflow on a mutation response.
+
+    ``exported`` is ``all_units_exported()``, not ``exported()``. The workflow's
+    final step asks "has this record been exported", and under contract §1 D1 an
+    experiment with runs is exported when every run is — ``Experiment.record_id``
+    stays ``None`` for such an experiment, so ``exported()`` would report the step
+    unsatisfied forever. For an experiment with no runs the two are the same
+    function of the same field, so nothing about today's behaviour moves.
+    """
     return derive_workflow(
         pending_count=exp.pending_count(),
         draft_ok=exp.draft_ok(),
         ready=exp.export_ready(),
-        exported=exp.exported(),
+        exported=exp.all_units_exported(),
         rev=exp.rev,
     )
 
@@ -2192,14 +2201,133 @@ def post_edit(
 # --- 8. export ----------------------------------------------------------------
 
 
-def _write_record(exp: Experiment, result) -> None:
-    """Write record + sidecar into the experiment records dir and mark it exported."""
+def _write_record(exp: Experiment, result, unit=None) -> None:
+    """Write ONE unit's record + sidecar into the records dir and mark it exported.
+
+    ``unit`` is an :class:`~isaac_api.workspace.ExportUnit`. It defaults to ``None``
+    for the pre-fan-out shape — one experiment, one record, ``exp.record_id`` — which
+    is what the test suite's fault-injection helpers drive, and what an experiment
+    with no runs still does. With a unit, the record id lands on the unit's Run
+    instead (contract §1 D1: the record identity is per-Run).
+
+    The filenames come from ``result.record["record_id"]``, which is what
+    ``export_draft`` minted, NOT from the unit — so the file and the id inside it can
+    never disagree.
+    """
     exp.records_dir.mkdir(parents=True, exist_ok=True)
-    exp.record_id = result.record["record_id"]
-    record_path = exp.records_dir / f"{exp.record_id}.json"
-    sidecar_path = exp.records_dir / f"{exp.record_id}.evidence.json"
+    record_id = result.record["record_id"]
+    if unit is not None:
+        unit.mark_exported(record_id)
+    else:
+        exp.record_id = record_id
+    record_path = exp.records_dir / f"{record_id}.json"
+    sidecar_path = exp.records_dir / f"{record_id}.evidence.json"
     atomic_write_text(record_path, json.dumps(result.record, indent=2) + "\n")
     atomic_write_text(sidecar_path, json.dumps(result.sidecar, indent=2) + "\n")
+
+
+def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> list[str]:
+    """Remove artifact pairs in this experiment's records dir that nothing points at.
+
+    WHY THIS EXISTS. A fan-out writes one pair per Run. Delete a Run and export
+    again and its pair is still on disk, named by an id no state references — an
+    orphan that ``get_artifacts`` cannot reach, that no reset bucket classifies, and
+    that would be presented by any future artifact listing as a record of this
+    experiment. Re-export must not accumulate those.
+
+    FOUR THINGS BOUND WHAT IT CAN DELETE, because this is the only code in the
+    application that removes an exported artifact:
+
+    * it only ever looks inside ``exp.records_dir``, which belongs to this one
+      experiment;
+    * only a regular file named exactly ``<record-id>.json`` or
+      ``<record-id>.evidence.json`` is a candidate — ``is_record_id`` on the stem, so
+      a file with any other name is never touched;
+    * ``keep_ids`` holds every current unit's target id AND ``exp.record_id`` when the
+      experiment has one, so a legacy 1:1 artifact is preserved even after runs are
+      added to that experiment;
+    * the CALLER only invokes it for an experiment that HAS runs. A zero-run
+      experiment's export path is byte-for-byte what it was, pruning included — which
+      is to say, not included.
+
+    Returns the ids removed (MEASURED from the unlinks that succeeded, not asserted
+    from what was planned), so the response can disclose them. A failed unlink is
+    skipped rather than raised: this runs after the artifacts were written and the
+    export succeeded, and turning a tidy-up failure into a 500 would report a
+    successful export as a failure.
+    """
+    records_dir = exp.records_dir
+    if not records_dir.is_dir():
+        return []
+    removed: set[str] = set()
+    for path in sorted(records_dir.iterdir()):
+        if not path.is_file():
+            continue
+        name = path.name
+        if name.endswith(".evidence.json"):
+            stem = name[: -len(".evidence.json")]
+        elif name.endswith(".json"):
+            stem = name[: -len(".json")]
+        else:
+            continue
+        if not is_record_id(stem) or stem in keep_ids:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        removed.add(stem)
+    return sorted(removed)
+
+
+def _flat_export_errors(payload: dict, result) -> list:
+    """The flat `errors` list this endpoint has always returned for a failed export.
+
+    Extracted verbatim from the handler so the fan-out branch and the single-record
+    branch cannot drift: official errors when the record was built and refused,
+    otherwise the draft errors that stopped it being built at all.
+    """
+    if payload["official_report"]:
+        return payload["official_report"]["errors"]
+    if not result.draft_report.ok:
+        return payload["draft_report"]["errors"]
+    return []
+
+
+def _unit_result_entry(unit, result) -> dict:
+    """One unit's verdict, ADDRESSED TO ITS RUN.
+
+    "Per-run failures must be addressable to the correct Run" is not satisfied by a
+    flat error list: three runs can produce the same message and a client cannot tell
+    which to open. So every entry names its run and carries that run's own reports.
+    """
+    payload = serialize.export_result_to_dict(result)
+    return {
+        "run_id": unit.run_id,
+        "run_label": unit.run_label,
+        "record_id": unit.target_id,
+        "ok": result.ok,
+        "errors": _flat_export_errors(payload, result),
+        "draft_report": payload["draft_report"],
+        "official_report": payload["official_report"],
+    }
+
+
+def _unit_artifact_entry(unit) -> dict:
+    """One successfully written unit: which run, which record, which two files.
+
+    P30.6 — SAFE basenames only, never a filesystem path. The id is read back from
+    the unit AFTER `_write_record` marked it, so it is the id actually written.
+    """
+    record_path = unit.record_path()
+    sidecar_path = unit.sidecar_path()
+    return {
+        "run_id": unit.run_id,
+        "run_label": unit.run_label,
+        "record_id": unit.current_record_id(),
+        "record_filename": record_path.name if record_path is not None else None,
+        "sidecar_filename": sidecar_path.name if sidecar_path is not None else None,
+    }
 
 
 @router.post(
@@ -2212,11 +2340,30 @@ def _write_record(exp: Experiment, result) -> None:
         "returns the record id, the two artifact filenames (basenames only, never "
         "a server path), the refreshed revision metadata, the workflow, and the "
         "downstream invalidation.\n\n"
+        "A record with **runs** exports one official record per run "
+        "(`record_id = run.id`), not one per record. In that case `record_id` and "
+        "`artifact_refs` are `null` — they are singular and a fan-out has several — "
+        "and `records[]` carries one entry per run instead. A record with no runs, "
+        "which is every record this API can currently create, exports exactly one "
+        "record with `record_id` equal to its own id, unchanged.\n\n"
+        "**What is guaranteed if something fails part-way.** Every run is validated "
+        "before any file is written, so a validation failure on one run means no "
+        "file is written for any of them. The state is saved once, after every "
+        "file. It is NOT atomic across the individual file writes: a fault between "
+        "them can leave some records on disk with the state still saying they were "
+        "not exported. That is the same half-written shape a single-record export "
+        "has always been able to produce, and the same repair applies — retry the "
+        "export and every not-yet-exported run is republished from its current "
+        "draft.\n\n"
         "A gated failure also returns `200`, with `ok: false`, the failing draft "
         "and official reports, and a flat `errors` list — decide by reading `ok`, "
-        "not the status code. Nothing is written in that case.\n\n"
+        "not the status code. With runs, `runs[]` carries each run's own verdict and "
+        "`failed_run_ids` names the ones that refused. Nothing is written in that "
+        "case.\n\n"
         "Requires the record's current `ETag` in `If-Match`. Exported records are "
-        "immutable: exporting a record that already has one is refused."
+        "immutable: exporting a record whose runs have all already been exported is "
+        "refused, and a run that is already exported is never rewritten when a "
+        "sibling run is exported alongside it."
     ),
     response_description=(
         "The export result. `ok: true` means the record and sidecar were written; "
@@ -2240,11 +2387,12 @@ def _write_record(exp: Experiment, result) -> None:
                 "Two arms, and they differ in what is left on disk. If `If-Match` "
                 "did not match the revision this server read, nothing at all was "
                 "written. If the record's stored copy moved on between that check "
-                "and the durable write, the official record and its evidence "
-                "sidecar had ALREADY been written and they remain — the record's "
-                "own state was not updated, so it still reports as not exported. "
-                "That is a state this API repairs by itself: retry the export and "
-                "it republishes from the current draft."
+                "and the durable write, every official record and evidence sidecar "
+                "this export produced had ALREADY been written and they remain — "
+                "the record's own state was not updated, so it still reports as not "
+                "exported. That is a state this API repairs by itself: retry the "
+                "export and it republishes from the current draft, for every run "
+                "that is not yet exported."
             )
         },
         409: {
@@ -2315,60 +2463,107 @@ def post_export(
         # remove, one file over. Requiring both is also the SAME rule `get_artifacts`
         # already applies ("force `stale` whenever EITHER file failed to read"), so
         # the two agree about what "the artifact is present" means.
-        record_path = exp.records_dir / f"{exp.id}.json"
-        sidecar_path = exp.records_dir / f"{exp.id}.evidence.json"
-        if exp.exported() and record_path.exists() and sidecar_path.exists():
+        #
+        # THE GUARD IS NOW PER UNIT (contract §1 D1 — one Run, one record). For an
+        # experiment with NO runs there is exactly one unit whose target id is
+        # `exp.id` and whose `current_record_id()` is `exp.record_id`, so
+        # `unit.materialised()` is character-for-character the old
+        # `exp.exported() and record_path.exists() and sidecar_path.exists()`. The
+        # 409 body below is likewise built from that unit, so a zero-run experiment's
+        # refusal is byte-identical to the one this endpoint has always returned.
+        units = exp.export_units()
+        pending_units = [unit for unit in units if not unit.materialised()]
+        if not pending_units:
+            # Every unit is already exported AND both halves of its pair are on disk.
+            first = units[0]
+            first_record = first.record_path()
+            name = first_record.name if first_record is not None else f"{first.target_id}.json"
             return JSONResponse(
                 status_code=409,
                 content={
                     "error": "record_exists",
-                    "message": f"{record_path.name} already exists; records are immutable.",
-                    "record_id": exp.id,
+                    "message": f"{name} already exists; records are immutable.",
+                    "record_id": first.target_id,
                 },
             )
-        if not exp.exported() and record_path.exists():
-            # RECONCILIATION: not exported, yet an artifact exists — the crash window
-            # above. Proceed and republish from the CURRENT draft (the orphan may be
-            # a projection of an older draft, so it is replaced, never adopted). Warn
-            # so an operator sees that a fault happened rather than the repair being
-            # silent. Path-free by rule: the record id and the BASENAME only, never a
-            # filesystem path (P30.6, and a log line is an exfiltration surface too).
-            #
-            # `not exp.exported()` is EXPLICIT (it was implied by the fall-through
-            # before the sidecar clause above existed). This warning means exactly one
-            # thing — "state and disk disagree about whether an export happened" — and
-            # an exported record missing one of its files is NOT that: state and disk
-            # agree an export happened, one file is simply gone. That is the same
-            # class as the mirror case, which is deliberately silent (see
-            # `test_no_reconciliation_warning_on_the_mirror_case`), so both self-heals
-            # stay silent and the warning keeps one unambiguous meaning.
-            _log.warning(
-                "export reconciliation: record %s has an orphan artifact %s on disk "
-                "while its state says not exported (a fault between the artifact "
-                "write and the state save); republishing from the current draft",
-                exp.id,
-                record_path.name,
-            )
 
-        result = export_draft(exp.draft, REPO_ROOT, record_id=exp.id)
-        payload = serialize.export_result_to_dict(result)
-        if not result.ok:
+        # A unit that IS materialised is skipped entirely from here on — never
+        # revalidated, never rewritten. That is what keeps records immutable during a
+        # PARTIAL fan-out: adding a sixth run to an experiment whose five records are
+        # already on disk exports the sixth and leaves the five untouched, rather than
+        # republishing them from a draft that may have moved on since.
+        for unit in pending_units:
+            record_path = unit.record_path()
+            if unit.current_record_id() is None and record_path is not None and record_path.exists():
+                # RECONCILIATION: not exported, yet an artifact exists — the crash
+                # window above. Proceed and republish from the CURRENT draft (the
+                # orphan may be a projection of an older draft, so it is replaced,
+                # never adopted). Warn so an operator sees that a fault happened
+                # rather than the repair being silent. Path-free by rule: the record
+                # id and the BASENAME only, never a filesystem path (P30.6, and a log
+                # line is an exfiltration surface too).
+                #
+                # The `current_record_id() is None` test is EXPLICIT (it was implied
+                # by the fall-through before the sidecar clause above existed). This
+                # warning means exactly one thing — "state and disk disagree about
+                # whether an export happened" — and an exported record missing one of
+                # its files is NOT that: state and disk agree an export happened, one
+                # file is simply gone. That is the same class as the mirror case,
+                # which is deliberately silent (see
+                # `test_no_reconciliation_warning_on_the_mirror_case`), so both
+                # self-heals stay silent and the warning keeps one unambiguous
+                # meaning.
+                _log.warning(
+                    "export reconciliation: record %s has an orphan artifact %s on disk "
+                    "while its state says not exported (a fault between the artifact "
+                    "write and the state save); republishing from the current draft",
+                    unit.target_id,
+                    record_path.name,
+                )
+
+        # ---- THE COMMIT BOUNDARY, stated exactly (see the endpoint description) ----
+        # PHASE 1: validate EVERY eligible unit. Nothing is written in this loop —
+        # `export_draft` is a pure transform + two validations. A single failure means
+        # no artifact is written for ANY unit, which is contract §3 D4's rule ("a
+        # required validation failure on any Run blocks the whole submission") and is
+        # the reason validation is a separate pass rather than interleaved with the
+        # writes.
+        results = [
+            (unit, export_draft(unit.draft, REPO_ROOT, record_id=unit.target_id))
+            for unit in pending_units
+        ]
+        failures = [(unit, result) for unit, result in results if not result.ok]
+        if failures:
             # Nothing written. Surface the failing reports and a flat errors list.
             # No mutation happened, so report an honest changed=False invalidation
             # (never fabricate a mutation that did not occur).
-            errors = []
-            if payload["official_report"]:
-                errors = payload["official_report"]["errors"]
-            elif not result.draft_report.ok:
-                errors = payload["draft_report"]["errors"]
-            payload["errors"] = errors
+            #
+            # The top-level report is the FIRST FAILING unit's, not the first unit's:
+            # a client that reads only `errors` must be shown an actual failure. Every
+            # unit's own verdict is in `runs`, so nothing is hidden by that choice.
+            first_failed = failures[0][1]
+            payload = serialize.export_result_to_dict(first_failed)
+            payload["errors"] = _flat_export_errors(payload, first_failed)
+            if exp.runs:
+                payload.pop("record", None)
+                payload.pop("sidecar", None)
+                payload["runs"] = [
+                    _unit_result_entry(unit, result) for unit, result in results
+                ]
+                payload["failed_run_ids"] = [unit.run_id for unit, _ in failures]
             payload["workflow"] = _workflow_for(exp)
             payload["invalidation"] = dependencies.build_invalidation(
                 changed=False, changed_fields=[], pre_steps=pre_steps, post_exp=exp
             )
             return JSONResponse(status_code=200, content=payload)
 
-        _write_record(exp, result)
+        # PHASE 2: every unit validated, so write. See the endpoint's 412 description
+        # and the module note above for what a fault BETWEEN two units' writes leaves
+        # behind, and why that state is recoverable rather than merely tolerated.
+        result = results[0][1]
+        payload = serialize.export_result_to_dict(result)
+        for unit, unit_result in results:
+            _write_record(exp, unit_result, unit)
         # export normally changes the authoritative state (record_id: None -> id), so
         # this bumps rev and stamps updated_utc, persisting the state atomically. On a
         # self-heal of an already-exported record `record_id` is ALREADY set, the
@@ -2383,19 +2578,47 @@ def post_export(
         # fabricate a mutation that did not occur").
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
-            # The artifact PAIR was already written to disk above and the state was
-            # not — the same half-written shape a fault between the two produces,
-            # and the one this handler's own reconciliation branch repairs on the
-            # next export (`not exp.exported()` + an orphan artifact -> republish
-            # from the current draft). So this degrades into a state the app already
-            # handles rather than into a new one.
+            # EVERY unit's artifact PAIR was already written to disk above and the
+            # state was not — the same half-written shape a fault between the two
+            # produces, and the one this handler's own reconciliation branch repairs
+            # on the next export (a unit with no `record_id` + an orphan artifact ->
+            # republish from the current draft). So this degrades into a state the app
+            # already handles rather than into a new one. With N units it is N orphan
+            # pairs instead of one, repaired by the same loop.
             return stale
-        payload["record_id"] = exp.record_id
-        # P30.6 — SAFE basename only (see _detail); never the absolute path.
-        payload["artifact_refs"] = {
-            "record_filename": exp.record_path().name,
-            "sidecar_filename": exp.sidecar_path().name,
-        }
+        if exp.runs:
+            # Orphan pruning runs ONLY for a fan-out and ONLY after a successful state
+            # save, so a run removed from the experiment cannot leave its record
+            # behind. See `_prune_orphan_artifacts` for the four bounds on what it may
+            # delete.
+            keep = {unit.target_id for unit in units}
+            if exp.record_id is not None:
+                keep.add(exp.record_id)
+            pruned = _prune_orphan_artifacts(exp, keep)
+            # FAN-OUT SHAPE. `record_id` / `artifact_refs` are SINGULAR by name and by
+            # every existing client's reading of them, and a fan-out has N of each.
+            # Filling them from an arbitrary one of the N would be a false singular,
+            # so they are null and `records` carries the truth.
+            #
+            # `records` lists what THIS export produced, not every record the
+            # experiment owns — on a partial fan-out the already-materialised units
+            # were skipped and are deliberately absent, because reporting them here
+            # would claim writes that did not happen. Nothing that exists today can
+            # reach this branch (no route creates a Run), so no client contract is
+            # being changed.
+            payload.pop("record", None)
+            payload.pop("sidecar", None)
+            payload["record_id"] = None
+            payload["artifact_refs"] = None
+            payload["records"] = [_unit_artifact_entry(unit) for unit, _ in results]
+            payload["pruned_record_ids"] = pruned
+        else:
+            payload["record_id"] = exp.record_id
+            # P30.6 — SAFE basename only (see _detail); never the absolute path.
+            payload["artifact_refs"] = {
+                "record_filename": exp.record_path().name,
+                "sidecar_filename": exp.sidecar_path().name,
+            }
         payload.update(vc.version_fields(exp))
         # export completes the final workflow step and makes the artifact current.
         payload["workflow"] = _workflow_for(exp)
