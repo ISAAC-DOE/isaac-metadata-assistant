@@ -1,0 +1,490 @@
+/*
+ * The Run workspace.
+ *
+ * Built entirely on the existing Scientific Clarity tokens — no new hue, no new
+ * radius, no new shadow. The card geometry is `.field-group`'s, deliberately, so
+ * a run and a draft block read as two things on one screen rather than two
+ * screens.
+ *
+ * The one place this surface spends any boldness is the CONDITIONS LINE on a
+ * collapsed header: mono, tabular, `in_situ · 300 K`. It is how a scientist
+ * tells one run from its siblings, so it gets the identity treatment while
+ * everything around it stays quiet.
+ *
+ * Reserved verdict colour (--pass-*/--fail-*) appears only where a StatusChip
+ * carries an actual validator verdict. Nothing here paints a save state in it:
+ * a save is not a verdict about the science.
+ */
+
+.runs-section {
+  margin-bottom: 20px;
+}
+
+.runs-head {
+  margin-bottom: 10px;
+}
+
+.runs-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-heading);
+}
+
+.runs-sub {
+  margin: 4px 0 0;
+  max-width: 66ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+}
+
+.runs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.runs-toolbar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.runs-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.runs-empty {
+  margin: 0;
+  padding: 18px 16px;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.runs-error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--fail-bg);
+  border: 1px solid var(--fail-border);
+  border-radius: var(--radius-inner);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fail-text);
+}
+
+.runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- one run card ------------------------------------------------------ */
+
+.run-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.run-card-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.run-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: 0;
+  text-align: left;
+}
+
+.run-card-header:hover {
+  background: var(--surface-subtle);
+}
+
+.run-card-chevron {
+  color: var(--text-quaternary);
+  flex: none;
+}
+
+.run-card-name {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text-primary);
+  flex: none;
+}
+
+/* The identity line. Mono because it is a reading, not prose. */
+.run-card-conditions {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-slate);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.run-card-conditions-empty {
+  font-family: var(--font-ui);
+  font-style: italic;
+  color: var(--text-quaternary);
+}
+
+.run-card-progress {
+  margin-left: auto;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.run-card-body {
+  border-top: 1px solid var(--border-faint);
+  padding: 4px 0 14px;
+}
+
+/* ---- the run's own fields ---------------------------------------------- */
+
+.run-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-hair);
+}
+
+.run-field:first-child {
+  border-top: 0;
+}
+
+.run-field-label {
+  width: 190px;
+  flex: none;
+  padding-top: 7px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.run-field-unit {
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.run-field-control {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.run-input {
+  width: 100%;
+  max-width: 320px;
+  padding: 7px 10px;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+}
+
+.run-input:focus-visible {
+  outline: none;
+  border-color: var(--action);
+  box-shadow: var(--ring-active);
+}
+
+.run-input[aria-invalid='true'] {
+  border-color: var(--fail-solid);
+}
+
+.run-field-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+  overflow-wrap: anywhere;
+}
+
+.run-field-hint {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* Never colour alone: the glyph and the sentence carry it, the hue reinforces. */
+.run-field-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--fail-text);
+}
+
+/* ---- inherited from the experiment -------------------------------------- */
+
+/*
+ * Visually a different KIND of thing, not a disabled version of the form above:
+ * a tinted slate panel — the design system's neutral reference tone — carrying
+ * no controls at all, with each value in mono beside the path it came from.
+ *
+ * IT HAD A COLOURED LEFT RULE AND NOW DOES NOT. `no-vertical-rail.test.ts`
+ * catches it, and the rule (no-vertical-rail-rule.md) is system-wide and
+ * permanent. The fill, the border, the eyebrow and the absence of any input are
+ * already four independent signals that these values are not this run's to
+ * edit; a fifth was the accessory to remove.
+ */
+.run-inherited {
+  margin: 12px 16px 0;
+  padding: 10px 12px 12px;
+  background: var(--cover-bg);
+  border: 1px solid var(--cover-border);
+  border-radius: var(--radius-inner);
+}
+
+.run-inherited-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cover-text);
+}
+
+.run-inherited-note {
+  margin: 3px 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.run-inherited-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run-inherited-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.run-inherited-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-quaternary);
+  width: 190px;
+  flex: none;
+  overflow-wrap: anywhere;
+}
+
+.run-inherited-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.run-inherited-state {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--cover-text);
+}
+
+/* ---- conflict ----------------------------------------------------------- */
+
+.run-conflict {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 16px 0;
+  padding: 11px 12px;
+  background: var(--needsyou-bg);
+  border: 1px solid var(--needsyou-border);
+  border-radius: var(--radius-inner);
+}
+
+.run-conflict-icon {
+  color: var(--needsyou-text);
+  flex: none;
+  margin-top: 1px;
+}
+
+.run-conflict-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.run-conflict-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--needsyou-text);
+}
+
+.run-conflict-text {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ---- actions + the save readout ----------------------------------------- */
+
+.run-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 16px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-hair);
+}
+
+.run-save-status {
+  margin: 0 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.run-save-status[data-save-status='saved'] {
+  color: var(--pass-text-soft);
+}
+
+.run-save-status[data-save-status='failed'] {
+  color: var(--fail-text);
+}
+
+.run-save-status[data-save-status='conflict'] {
+  color: var(--needsyou-text);
+}
+
+.run-save-icon {
+  flex: none;
+}
+
+/* ---- check result ------------------------------------------------------- */
+
+.run-check {
+  margin: 14px 16px 0;
+  padding: 12px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+
+.run-check-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--fail-bg);
+  border-color: var(--fail-border);
+  color: var(--fail-text);
+  font-size: 12.5px;
+}
+
+.run-check-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.run-check-scope {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.run-check-group {
+  margin-top: 10px;
+}
+
+.run-check-group-title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-slate);
+}
+
+.run-check-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.run-check-item {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.run-check-item-opaque {
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+
+.run-check-clean {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* ---- narrow widths ------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .run-card-header {
+    flex-wrap: wrap;
+  }
+  .run-card-progress {
+    margin-left: 0;
+  }
+  .run-field {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .run-field-label {
+    width: auto;
+    padding-top: 0;
+  }
+  .run-input {
+    max-width: none;
+  }
+  .run-inherited-path {
+    width: auto;
+  }
+  .run-inherited-state {
+    margin-left: 0;
+  }
+  .run-card-actions {
+    flex-wrap: wrap;
+  }
+  .run-save-status {
+    margin-left: 0;
+  }
+}

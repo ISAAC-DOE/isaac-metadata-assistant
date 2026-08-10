@@ -1,0 +1,220 @@
+/*
+ * THE RUN-LEVEL FIELD SET THE RUN WORKSPACE EDITS — and the evidence for every
+ * entry in it.
+ *
+ * Three fields, not thirty. Two independent sources had to agree before a path
+ * could appear here, and NOTHING is here because it seemed useful:
+ *
+ *   1. `apps/api/isaac_api/workspace.py::RUN_LEVEL_FIELD_PATHS` decides what is
+ *      per-run. It is `("context", "timestamps.acquired_start_utc",
+ *      "timestamps.acquired_end_utc")`, matched segment-aware by
+ *      `_path_matches`. The Run PATCH route refuses — 422, never a silent
+ *      no-op — any key `field_level()` does not classify as `run`, so a field
+ *      that is not under one of those prefixes cannot be written from here at
+ *      all.
+ *   2. `schema/isaac_record_v1.json` decides the SHAPE. `context.environment`
+ *      is `{"type": "string", "enum": ["operando","in_situ","ex_situ",
+ *      "in_silico"]}` and `context.temperature_K` is `{"type": "number"}` —
+ *      both listed in `context.required`. `timestamps.acquired_start_utc` is
+ *      `{"type": "string", "format": "date-time"}`.
+ *
+ * WHAT IS DELIBERATELY ABSENT, and why each absence is a decision:
+ *
+ *   * `timestamps.acquired_end_utc` IS run-level and IS schema-backed, and is
+ *     still not here. The brief asked for a small representative set; a second
+ *     timestamp demonstrates nothing the first does not, and every field on
+ *     this surface is a field a scientist has to read past.
+ *   * `context.electrochemistry.*` is run-level by prefix and is a large
+ *     schema subtree belonging to a domain this repository's MVP scope
+ *     (`CLAUDE.md` §15) does not support. Putting it on screen would advertise
+ *     a capability the rest of the app does not have.
+ *   * `system.configuration.*` is UNCLASSIFIED, not run-level.
+ *     `field_level()` documents that as a real answer rather than an oversight
+ *     — whether two runs may legitimately differ in detector model is a
+ *     scientific question this repository has no answer to — and the PATCH
+ *     route refuses it with a typed 422. It is not offered here, so a reader is
+ *     never handed a control whose only outcome is a refusal.
+ *
+ * The enum values below are TRANSCRIBED from the vendored official schema, not
+ * invented and not curated. If the schema changes, this list is wrong and the
+ * server's own validation is what will say so — this file never validates.
+ */
+
+import type { ApiRunCheckFinding, ApiRunFieldEnvelope, ApiRunView } from './types';
+
+/** How one run-level field is entered. Drives the control, nothing else. */
+export type RunFieldKind = 'enum' | 'number' | 'datetime';
+
+export interface RunFieldSpec {
+  /** The dotted OFFICIAL path, sent verbatim as a `fields` key. */
+  path: string;
+  /** The human label. The path is shown too, demoted, never instead. */
+  label: string;
+  kind: RunFieldKind;
+  /** Enum members, verbatim from the official schema. `enum` kind only. */
+  options?: readonly string[];
+  /** The unit the schema's path name already encodes (`_K`). Display only. */
+  unit?: string;
+  /** A format hint. It describes a FORMAT; it never suggests a value. */
+  hint?: string;
+}
+
+export const RUN_FIELDS: readonly RunFieldSpec[] = [
+  {
+    path: 'context.environment',
+    label: 'Environment',
+    kind: 'enum',
+    // schema/isaac_record_v1.json → properties.context.properties.environment.enum
+    options: ['operando', 'in_situ', 'ex_situ', 'in_silico'],
+  },
+  {
+    path: 'context.temperature_K',
+    label: 'Temperature',
+    kind: 'number',
+    unit: 'K',
+  },
+  {
+    path: 'timestamps.acquired_start_utc',
+    label: 'Acquisition start',
+    kind: 'datetime',
+    hint: 'ISO 8601 UTC, e.g. YYYY-MM-DDTHH:MM:SSZ',
+  },
+] as const;
+
+/**
+ * A deliberately permissive ISO-8601 date-time shape.
+ *
+ * It is a FORMAT gate and nothing more: it stops a plainly unparseable string
+ * being sent as a timestamp, and it does not decide whether a well-formed
+ * timestamp is the right one. The server's official-schema check is what
+ * decides that, and this never stands in for it.
+ */
+const ISO_DATETIME =
+  /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/;
+
+/** The result of turning one raw input string into something sendable. */
+export type ParsedRunField =
+  | { ok: true; value: unknown }
+  | { ok: false; error: string };
+
+/**
+ * Raw input text -> the value to PATCH, or a typed refusal to send.
+ *
+ * AN EMPTY BOX IS `null`, WHICH IS THE CONTRACT'S "CLEAR THIS FIELD" — not an
+ * omission and not an empty string. Clearing a value a person entered has to be
+ * possible, and the only honest encoding of it is the one the server defines.
+ *
+ * A malformed entry returns `{ok:false}` and is NOT sent. That is a formatting
+ * check, not a scientific one: it never rewrites, rounds, coerces or completes
+ * what was typed. The alternative — send it and let the 422 come back — turns a
+ * typo into a red failure state, which reads as the app rejecting the science.
+ */
+export function parseRunField(spec: RunFieldSpec, raw: string): ParsedRunField {
+  const text = raw.trim();
+  if (text === '') return { ok: true, value: null };
+  switch (spec.kind) {
+    case 'number': {
+      // `Number('')` is 0 and `Number(' 12 ')` is 12 — the empty case is already
+      // returned above, and the trim is why the second is not a surprise.
+      const n = Number(text);
+      if (!Number.isFinite(n)) return { ok: false, error: 'Enter a number.' };
+      return { ok: true, value: n };
+    }
+    case 'datetime':
+      if (!ISO_DATETIME.test(text)) {
+        return { ok: false, error: 'Enter an ISO 8601 date-time, e.g. 2026-01-31T09:00:00Z.' };
+      }
+      return { ok: true, value: text };
+    case 'enum':
+      if (spec.options && !spec.options.includes(text)) {
+        return { ok: false, error: 'Choose one of the listed values.' };
+      }
+      return { ok: true, value: text };
+  }
+}
+
+/** The scalar inside a field envelope, or `null` when there is nothing there. */
+export function envelopeValue(env: ApiRunFieldEnvelope | undefined): unknown {
+  if (env === undefined || env === null) return null;
+  return env.value ?? null;
+}
+
+/** A field's current value as input text. `null`/absent renders as empty. */
+export function envelopeText(env: ApiRunFieldEnvelope | undefined): string {
+  const value = envelopeValue(env);
+  if (value === null || value === undefined) return '';
+  return String(value);
+}
+
+/** How many of {@link RUN_FIELDS} this run has a value for. */
+export function runFilledCount(run: ApiRunView): number {
+  return RUN_FIELDS.filter((spec) => envelopeValue(run.fields?.[spec.path]) !== null).length;
+}
+
+/**
+ * The one-line conditions summary on a collapsed card.
+ *
+ * It states only what the run actually carries, in the order the fields are
+ * entered, and returns `null` when the run carries none of them — a collapsed
+ * card then says so in words rather than showing an empty slot that reads like
+ * a rendering failure.
+ */
+export function runConditionsSummary(run: ApiRunView): string | null {
+  const parts = RUN_FIELDS.map((spec) => {
+    const value = envelopeValue(run.fields?.[spec.path]);
+    if (value === null || value === undefined) return null;
+    return spec.unit ? `${String(value)} ${spec.unit}` : String(value);
+  }).filter((p): p is string => p !== null);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/**
+ * The displayable text of one check finding, or `null` when there is none.
+ *
+ * The contract does not pin the element shape of `blockers`, so this reads the
+ * fields a finding plausibly carries in a fixed order and gives up honestly
+ * rather than guessing. `null` is rendered by the caller as a stated inability
+ * to describe the finding — a finding is never silently dropped, because the
+ * count of things blocking a run is the one number on this surface that must
+ * not quietly shrink.
+ */
+export function runFindingText(finding: ApiRunCheckFinding): string | null {
+  if (typeof finding === 'string') return finding.trim() || null;
+  if (finding === null || typeof finding !== 'object') return null;
+  const text = finding.message ?? finding.question ?? finding.label ?? finding.path ?? finding.id;
+  return typeof text === 'string' && text.trim() !== '' ? text.trim() : null;
+}
+
+/**
+ * The `field:`-addressed inherited entries, in a stable order, for display.
+ *
+ * `block:` addresses (`attribution`, `tags`) are excluded: their payloads are
+ * whole objects and arrays, and this surface has no honest one-line rendering
+ * for them — showing a truncated one would be a claim about their content.
+ * `absent` entries are excluded too: nothing was inherited, so there is nothing
+ * to attribute to the experiment.
+ */
+export function inheritedFieldRows(
+  run: ApiRunView,
+): { address: string; path: string; state: string; text: string }[] {
+  const entries = Object.entries(run.inherited ?? {});
+  const rows: { address: string; path: string; state: string; text: string }[] = [];
+  for (const [address, resolution] of entries) {
+    if (!address.startsWith('field:')) continue;
+    if (!resolution || resolution.state === 'absent') continue;
+    const payload = resolution.payload;
+    const value =
+      payload !== null && typeof payload === 'object' && 'value' in payload
+        ? (payload as { value: unknown }).value
+        : payload;
+    if (value === null || value === undefined) continue;
+    rows.push({
+      address,
+      path: address.slice('field:'.length),
+      state: resolution.state,
+      text: String(value),
+    });
+  }
+  rows.sort((a, b) => a.path.localeCompare(b.path));
+  return rows;
+}

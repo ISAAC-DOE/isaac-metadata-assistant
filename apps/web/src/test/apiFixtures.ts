@@ -254,6 +254,47 @@ export const experimentDetail = {
   artifact: { state: 'none', reason: null } as const,
 };
 
+/*
+ * --- Runs (Slice A) -----------------------------------------------------
+ *
+ * The Run wire fixtures, shaped verbatim from the frozen Run API contract.
+ * `runsEmpty` is what `bundleRoutes` serves, so every EXISTING record-screen
+ * test keeps a Runs section that loads successfully and shows nothing — which
+ * is the state those tests were written against and the state that adds no new
+ * text for them to trip over.
+ */
+
+/** One run of the demo experiment, with two of the three fields filled in. */
+export function runFixture(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: '01SYNTHTESTRUN0000000000A1',
+    experiment_id: EXP_ID,
+    label: 'Run 1',
+    ordinal: 1,
+    created_utc: '2099-04-02T09:05:00Z',
+    updated_utc: '2099-04-02T09:05:00Z',
+    rev: 0,
+    version: 'r1.0',
+    record_id: null,
+    fields: {
+      'context.environment': { value: 'in_situ', status: 'verified', evidence: [] },
+      'context.temperature_K': { value: 300, status: 'verified', evidence: [] },
+    },
+    inherited: {
+      'field:sample.material.name': {
+        state: 'inherited',
+        payload: { value: 'Synthetic CuO powder', status: 'verified', evidence: [] },
+        inherited_payload: { value: 'Synthetic CuO powder', status: 'verified', evidence: [] },
+      },
+    },
+    ...over,
+  };
+}
+
+export const runsEmpty = { runs: [], experiment_version: VERSION_FIELDS.version };
+
+export const runsOne = { runs: [runFixture()], experiment_version: VERSION_FIELDS.version };
+
 export const draftResponse = {
   groups: [
     {
@@ -1169,6 +1210,11 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, StubbedRoute> 
     // owner fetches on every record screen (not just S5).
     [`GET ${base}/evidence-classification`]: { body: evidenceClassificationResponse },
     [`GET ${base}/artifacts`]: { body: artifactsNull },
+    // The Runs section on the record screen reads this on mount. An EMPTY list
+    // is the neutral default: the section renders its heading and Add Run and
+    // nothing else, so no existing assertion in any other file has to change.
+    // A test about runs supplies its own body for this key.
+    [`GET ${base}/runs`]: { body: runsEmpty },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }

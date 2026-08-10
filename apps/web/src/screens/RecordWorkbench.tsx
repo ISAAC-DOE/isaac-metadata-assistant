@@ -8,6 +8,7 @@ import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
+import { RunsSection } from '../components/RunsSection';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
@@ -458,6 +459,26 @@ function LoadedWorkbench({
           </button>
         </div>
       )}
+
+      {/*
+        THE RUNS SECTION SITS HERE — on this screen, inside the field workbench,
+        ABOVE the draft blocks. Three reasons, in the order they decided it:
+
+        1. THIS is the experiment screen. `ExperimentsHome` is the queue: it
+           lists experiments and knows nothing about any one of them beyond a
+           summary row, so a run editor there would have to load a record to
+           show anything, and would then be a second record surface competing
+           with this one.
+        2. Adding and filling in a run is an ACTION; the draft blocks below are
+           a review of what the experiment already holds. The action goes first
+           — with five collapsed blocks above it, Add Run would start roughly a
+           screen down on a laptop.
+        3. A section, not a third view tab. `Record Fields` / `Graph` are two
+           renderings of the same content; runs are additional content, and
+           putting them behind a tab would hide from a reader on the fields view
+           that this experiment has runs at all.
+      */}
+      <RunsSection experimentId={id} />
 
       {groups.map((group) => (
         <FieldGroup

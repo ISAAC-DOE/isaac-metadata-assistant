@@ -44,6 +44,10 @@ import type {
   ApiMemoryGraphResponse,
   ApiOpenApiResponse,
   ApiPendingResponse,
+  ApiRunCheckResponse,
+  ApiRunCreated,
+  ApiRunResponse,
+  ApiRunsResponse,
   ApiSchemaResponse,
   ApiSearchResponse,
   ApiSearchScope,
@@ -615,6 +619,100 @@ export const api = {
     });
     if (res.ok) return readJson<ApiAnswersResponse>(res, path);
     throw await mutationError(res, path);
+  },
+
+  /*
+   * ---- Runs -------------------------------------------------------------
+   *
+   * Five thin readers over the frozen Slice-A Run contract. They reuse THIS
+   * module's `request` / `readJson` / `mutationError` — so the tutorial scope
+   * header, the HTML-intercept detection, the unreachable classification and
+   * the 412/400 body attachment all behave exactly as they do for every other
+   * write in the app. There is no second HTTP layer for runs.
+   *
+   * THE TWO `If-Match` TOKENS ARE DIFFERENT TOKENS, and confusing them is the
+   * one mistake this seam invites. Creating a run mutates the EXPERIMENT
+   * document, so `createRun` carries the experiment's version. Editing a run
+   * mutates the RUN, so `updateRun` carries `run.version`. Sending the wrong
+   * one is not a silent bug — it is a 412 — but it is a 412 the reader would
+   * be told to resolve by refreshing something that was never stale.
+   *
+   * Each guards `If-Match` on truthiness exactly as `submitAnswer`/`editField`
+   * do: an empty token is sent as ABSENT so the server refuses with 428, rather
+   * than as `If-Match: ""`, which is a malformed token (400) and would report a
+   * client bug as a precondition failure.
+   */
+
+  listRuns(experimentId: string): Promise<ApiRunsResponse> {
+    return getJson<ApiRunsResponse>(`/experiments/${enc(experimentId)}/runs`);
+  },
+
+  getRun(experimentId: string, runId: string): Promise<ApiRunResponse> {
+    return getJson<ApiRunResponse>(
+      `/experiments/${enc(experimentId)}/runs/${enc(runId)}`,
+    );
+  },
+
+  /**
+   * Create one run. `label` is omitted from the body when blank rather than
+   * sent as `""` — the server assigns `"Run N"` for an omitted label, and `""`
+   * is not a label a person chose.
+   */
+  async createRun(
+    experimentId: string,
+    opts: { experimentVersion: string; label?: string },
+  ): Promise<ApiRunCreated> {
+    const path = `/experiments/${enc(experimentId)}/runs`;
+    const label = (opts.label ?? '').trim();
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(label ? { label } : {}),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiRunCreated>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * Write run-level draft fields. `confirmed_by_user: true` is required by the
+   * contract and is sent unconditionally, because this client only ever calls
+   * this from a control the reader typed into — there is no path here that
+   * writes a value nobody entered.
+   *
+   * A `null` value CLEARS a field; that is the contract's meaning and it is
+   * passed through untouched rather than being turned into an omission.
+   */
+  async updateRun(
+    experimentId: string,
+    runId: string,
+    body: { fields: Record<string, unknown>; label?: string },
+    runVersion: string,
+  ): Promise<ApiRunResponse> {
+    const path = `/experiments/${enc(experimentId)}/runs/${enc(runId)}`;
+    const res = await request(path, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        confirmed_by_user: true,
+        fields: body.fields,
+        ...(body.label !== undefined ? { label: body.label } : {}),
+      }),
+      ...(runVersion ? { headers: { 'If-Match': `"${runVersion}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiRunResponse>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * Check one run. READ-ONLY: it sends no `If-Match` because it writes nothing,
+   * and the contract states its response advances no ETag. It is a POST only
+   * because the check is computed rather than served.
+   */
+  checkRun(experimentId: string, runId: string): Promise<ApiRunCheckResponse> {
+    return postJson<ApiRunCheckResponse>(
+      `/experiments/${enc(experimentId)}/runs/${enc(runId)}/check`,
+    );
   },
 
   // P31.3 — CSV reconciliation preview (RECONCILIATION-ONLY). Uploads the raw
