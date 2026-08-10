@@ -42,7 +42,11 @@
  *     pending edit from before a reload over a document that may have moved is the
  *     silent overwrite the conflict state exists to prevent.
  *
- * Both are stated on screen by the card rather than only here.
+ * BOTH ARE STATED ON SCREEN BY THE CARD — and this line asserted that before it was
+ * true. A reviewer stripped the comments from every file under `apps/web/src` and found
+ * no user-facing text saying either thing, in the commit whose subject was closing an
+ * honesty gap. `RunCard` now renders the disclosure while edits are held; the claim is
+ * kept here because it is now checkable, and pinned by a test.
  */
 
 import { ApiError, api } from './api';
@@ -442,14 +446,33 @@ export function snapshotFor(experimentId: string, runId: string): RunSaveSnapsho
   return entries.get(runKey(experimentId, runId))?.snapshot ?? IDLE;
 }
 
-/** Register where adopted runs are delivered while a component is mounted. */
+/**
+ * Register where adopted runs are delivered while a component is mounted.
+ *
+ * ONE SINK, LAST WRITER WINS — and the clearing path is identity-checked, which is the
+ * part that was wrong. With two cards somehow mounted for one run, the second's
+ * registration replaced the first's (harmless: only one card can be visible per run
+ * today) but the second's UNMOUNT then cleared the sink outright and stranded the
+ * still-mounted first, which would receive no adopted run thereafter. Not reachable in
+ * this app — one card per run id, one record screen at a time — so it was latent rather
+ * than a defect. Clearing now only clears the sink it installed.
+ */
 export function setRunSink(
   experimentId: string,
   runId: string,
-  sink: ((run: ApiRunView) => void) | null,
+  sink: (run: ApiRunView) => void,
 ): void {
   const entry = entries.get(runKey(experimentId, runId));
   if (entry !== undefined) entry.onRun = sink;
+}
+
+export function clearRunSink(
+  experimentId: string,
+  runId: string,
+  sink: (run: ApiRunView) => void,
+): void {
+  const entry = entries.get(runKey(experimentId, runId));
+  if (entry !== undefined && entry.onRun === sink) entry.onRun = null;
 }
 
 /**

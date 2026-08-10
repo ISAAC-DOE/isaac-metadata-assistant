@@ -51,6 +51,21 @@ function runsBody(runs: unknown[]) {
   return { runs, experiment_version: VERSION_FIELDS.version };
 }
 
+/** Like `renderRecord`, but returns the render result so a test can unmount the SCREEN.
+ *  Routes are installed BEFORE rendering — the bug that made the old disposal test
+ *  vacuous was installing them after, so no card ever mounted. */
+function renderRecordIn(extra: Record<string, RouteEntry>) {
+  stubFetchRoutes({ ...bundleRoutes(ID), ...extra });
+  return render(
+    <MemoryRouter
+      initialEntries={[`/record/${ID}`]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <AppRoutes />
+    </MemoryRouter>,
+  );
+}
+
 function renderRecord(extra: Record<string, RouteEntry>): string[] {
   const calls = stubFetchRoutes({ ...bundleRoutes(ID), ...extra });
   render(
@@ -1462,29 +1477,103 @@ describe('PHASE 2 — save state that outlives the card', () => {
     expect(sent).toEqual([324]);
   });
 
-  it('leaving the RECORD screen disposes the store, but never mid-write', async () => {
-    const gate2 = gate<void>();
-    const view = render(
-      <MemoryRouter
-        initialEntries={[`/record/${ID}`]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <AppRoutes />
-      </MemoryRouter>,
-    );
-    stubFetchRoutes({
-      ...bundleRoutes(ID),
+  it('leaving the RECORD screen disposes an entry that has nothing left to remember', async () => {
+    /*
+     * THIS TEST WAS VACUOUS AND A REVIEWER PROVED IT: with `disposeExperiment` made a
+     * complete no-op the whole file still reported 41 passed. Two independent reasons —
+     * the fetch stub was installed AFTER `render` and nothing was awaited, so no card
+     * ever mounted and no entry was ever created (`__entryCount()` was 0 regardless);
+     * and the gate was resolved after the assertion, so the "never mid-write" half was
+     * not exercised at all. The name claimed two guarantees and verified neither.
+     */
+    const view = renderRecordIn({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    // An entry exists only once a card has subscribed, which is the precondition the
+    // old test never reached.
+    expect(__entryCount()).toBeGreaterThan(0);
+
+    await act(async () => {
+      view.unmount();
+    });
+    expect(__entryCount()).toBe(0);
+  });
+
+  it('leaving the RECORD screen does NOT dispose an entry still holding an edit', async () => {
+    /*
+     * THE CONSERVATIVE HALF, and the one that matters for a scientist: disposal must
+     * never discard a write that has not landed. A refused edit is held for a later
+     * `Retry Save`, so its entry has something to remember and must survive.
+     */
+    let patches = 0;
+    const view = renderRecordIn({
       [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
-      [`PATCH ${BASE}/runs/RUNAAA`]: async () => {
-        await gate2.promise;
-        return { body: { run: { ...RUN_A, version: 'ra.3' } } };
+      [`PATCH ${BASE}/runs/RUNAAA`]: () => {
+        patches += 1;
+        return { status: 422, body: { error: 'not_run_level' } };
       },
     });
-    view.unmount();
-    // A screen that never held an entry leaves none behind; the point of the assertion
-    // is that disposal exists and is bounded, not that it is aggressive.
-    expect(__entryCount()).toBe(0);
-    gate2.resolve();
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '325' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(patches).toBeGreaterThan(0);
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toContain('Save failed');
+
+    await act(async () => {
+      view.unmount();
+    });
+    // Retained, because the edit is still unsent. `disposeExperiment` is deliberately
+    // conservative; the cost is recorded at its call site rather than hidden.
+    expect(__entryCount()).toBe(1);
+  });
+
+  it('the card SAYS unsent changes are tab-only, and only while something is unsent', async () => {
+    /*
+     * A-1: both new file headers asserted this sentence was "stated on screen by the
+     * card". It was not — a reviewer stripped comments from every file under
+     * `apps/web/src` and found no such user-facing text, in the commit whose subject was
+     * closing an honesty gap. The copy exists now and this pins it, so the headers'
+     * claim stays checkable.
+     */
+    const gate3 = gate<void>();
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: async () => {
+        await gate3.promise;
+        return { body: { run: { ...RUN_A, version: 'ra.7' } } };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    const note = /Unsent changes live in this browser tab only/;
+
+    // Nothing held: no warning. A permanent one would be false most of the time.
+    expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(note);
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '326' },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(cardFor('RUNAAA').textContent ?? '').toMatch(note);
+    expect(cardFor('RUNAAA').textContent ?? '').toMatch(/reloading the page discards/);
+
+    // Acknowledged: the disclosure goes away, because it no longer applies.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+      gate3.resolve();
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toBe('Saved');
+    expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(note);
   });
 });
 

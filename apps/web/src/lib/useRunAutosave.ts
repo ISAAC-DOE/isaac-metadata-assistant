@@ -1,7 +1,8 @@
 /*
  * AUTOSAVE FOR ONE RUN — a thin subscriber to `runAutosaveStore`.
  *
- * THIS FILE USED TO BE THE WHOLE MECHANISM, in 457 lines. It held the pending map, the
+ * THIS FILE USED TO BE THE WHOLE MECHANISM, in 457 lines (this one is 217 — a
+ * reviewer caught the commit message rounding it to 184). It held the pending map, the
  * version token, the in-flight flag, the halt flag and the retry counters in refs
  * inside `RunCard`, and it was honest that its guarantee ended at unmount: an edit
  * could be handed to the network but its OUTCOME could not be reported, because there
@@ -44,15 +45,21 @@
  *   * A 412 after a remount can say "may or may not have been saved", truthfully.
  *   * `Retry Save` works on a card that has unmounted and remounted since the failure.
  *
- * WHAT IT DOES NOT BUY, and the card says this too rather than only this comment: a
- * closed tab or a killed browser still loses an edit that had not reached the network,
- * and a full page reload deliberately DISCARDS held edits rather than replaying them
- * over a document that may have moved — which would be the silent overwrite the
- * conflict state exists to prevent.
+ * WHAT IT DOES NOT BUY: a closed tab or a killed browser still loses an edit that had
+ * not reached the network, and a full page reload deliberately DISCARDS held edits
+ * rather than replaying them over a document that may have moved — which would be the
+ * silent overwrite the conflict state exists to prevent.
+ *
+ * THE CARD SAYS SO TOO, and that sentence was FALSE when first written here. This header
+ * and the store's both claimed the limits were "stated on screen by the card"; a reviewer
+ * checked every user-facing string and found nothing of the kind — in the commit whose
+ * subject was closing an honesty gap. `RunCard` now renders it, and only while edits are
+ * actually held, so it is a disclosure rather than a permanent warning.
  */
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import {
+  clearRunSink,
   flushPending,
   queueEdit,
   refreshRun,
@@ -96,6 +103,11 @@ export interface RunAutosave {
    * values the reader chose NOT to keep.
    */
   adoptedNonce: number;
+  /**
+   * How many field edits are held but not yet acknowledged. The card uses it to show
+   * the session-only limit exactly when it applies — see `RunCard`.
+   */
+  pendingCount: number;
 }
 
 export function useRunAutosave(args: {
@@ -117,7 +129,6 @@ export function useRunAutosave(args: {
    * are still held, the STORE's token is the newer one; overwriting it would send a
    * superseded token and turn the reader's next keystroke into a 412 about nothing.
    */
-  seedVersion(experimentId, runId, run.version);
 
   const subscribe = useCallback(
     (listener: () => void) => subscribeRun(experimentId, runId, run.version, listener),
@@ -132,6 +143,14 @@ export function useRunAutosave(args: {
   );
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
+  // IN AN EFFECT, NOT THE RENDER BODY. `seedVersion` calls `entryFor`, which CREATES a
+  // store entry — a side effect, and one that would run for renders React discards. No
+  // wrong-token outcome was reachable either way (its three guards cover every sequence
+  // a reviewer could construct), so this is principle rather than a measured defect.
+  useEffect(() => {
+    seedVersion(experimentId, runId, run.version);
+  }, [experimentId, runId, run.version]);
+
   // The sink is registered while this card is mounted and cleared on unmount, so a
   // late resolve delivers to nobody rather than into a dead setState.
   const onRunRef = useRef(onRun);
@@ -139,9 +158,11 @@ export function useRunAutosave(args: {
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
   useEffect(() => {
-    setRunSink(experimentId, runId, (next) => onRunRef.current(next));
+    const sink = (next: ApiRunView) => onRunRef.current(next);
+    setRunSink(experimentId, runId, sink);
     return () => {
-      setRunSink(experimentId, runId, null);
+      // Identity-checked, so unmounting cannot clear a sink another card installed.
+      clearRunSink(experimentId, runId, sink);
       /*
        * FLUSH ON UNMOUNT, STILL — and keeping it was a deliberate call rather than
        * carried-over code. The store keeps the debounce alive, so the edit would go out
@@ -191,5 +212,6 @@ export function useRunAutosave(args: {
     failureMessage: snapshot.status === 'failed' ? snapshot.failureMessage : null,
     retriedBeforeConflict: snapshot.retriedBeforeConflict,
     adoptedNonce: snapshot.adoptedNonce,
+    pendingCount: snapshot.pendingCount,
   };
 }

@@ -345,6 +345,27 @@ export function RunCard({
         )}
       </div>
 
+      {/*
+        THE ONE LIMIT THE APP CANNOT ENGINEER AWAY, SAID ON SCREEN.
+        Save state now outlives this card, so an edit abandoned by switching tabs still
+        reaches the server and its outcome still comes back. It does NOT outlive the
+        PAGE: nothing in a browser can promise that, because `beforeunload` cannot hold
+        a tab open for a fetch and `sendBeacon` can carry neither an `If-Match`
+        precondition nor a readable response, both of which a compare-and-swap write
+        needs. A reload deliberately discards held edits rather than replaying them over
+        a document that may have moved.
+        Shown ONLY while something is actually held — a permanent warning about work at
+        risk would be false most of the time, and this project has enough copy that was
+        true when written. Two file headers claimed this sentence existed before it did;
+        `run-workspace.test.tsx` now pins it so the claim stays checkable.
+      */}
+      {(autosave.pendingCount > 0 || heldInvalid) && (
+        <p className="run-card-session-note">
+          Unsent changes live in this browser tab only. Closing the tab or reloading the
+          page discards anything the server has not yet acknowledged.
+        </p>
+      )}
+
       {expanded && (
         <div id={panelId} className="run-card-body" role="region" aria-labelledby={headerId}>
           <div className="run-fields">
