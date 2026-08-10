@@ -1,6 +1,6 @@
 import './screens.css';
 import '../components/evidence.css';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
@@ -9,6 +9,7 @@ import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RunsSection } from '../components/RunsSection';
+import { disposeExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
@@ -139,6 +140,29 @@ export function draftPhaseDotFromWorkflow(
 export function RecordWorkbench() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getRecordBundle(id), [id]);
+
+  /*
+   * THE RUN AUTOSAVE STORE IS DISPOSED HERE — at the RECORD screen's boundary, not at a
+   * card's, and that difference is the whole of the Phase-2 change.
+   *
+   * Save state deliberately outlives a `RunCard`, because a card unmounts one click
+   * away (the Runs section is inside the `fields` tabpanel, so the Graph tab takes it
+   * down) and an edit's outcome must survive that. It must not outlive the record
+   * screen either, or the map keeps an entry for every run a session ever opened.
+   *
+   * `disposeExperiment` IS CONSERVATIVE, AND THE COST OF THAT IS REAL RATHER THAN
+   * THEORETICAL. It refuses to drop an entry that is mid-flight or still holding edits,
+   * so leaving the screen never discards a write that has not landed — which is the
+   * right trade for a scientist. The consequence, MEASURED (12 records abandoned each
+   * holding one refused edit retain 12 entries indefinitely; nothing revisits them):
+   * the map grows for exactly the runs that still have something unsent. An earlier
+   * version of this comment implied disposal bounded growth in general. It bounds it
+   * for entries with nothing to remember, which is every entry whose last write
+   * succeeded. Entries that hold a refusal are kept ON PURPOSE, because `Retry Save`
+   * needs them; a sweep would have to decide when to discard a scientist's unsent edit,
+   * and that is not a decision to make silently.
+   */
+  useEffect(() => () => disposeExperiment(id), [id]);
   // D1 — this record belongs to the workspace scope the surface was opened in. If
   // that scope changes (the walkthrough's temporary workspace was discarded, and
   // with it these records) nothing loaded here describes anything any more. See
