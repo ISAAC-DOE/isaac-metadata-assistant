@@ -533,17 +533,29 @@ test.describe('R5 · the Run workspace', () => {
     expect(run.values['context.temperature_K'], 'the first edit must also be there').toBe(301);
 
     /*
-     * AND THE HONEST LIMIT, ASSERTED RATHER THAN ONLY DOCUMENTED. Returning to the
-     * fields view re-mounts a card whose autosave state is brand new, so the
-     * detached write's OUTCOME is reported nowhere — the hook's own header comment
-     * says acceptance is not guaranteed. Here it succeeded, so the value is on
-     * screen; if it had been refused, this card would look exactly the same. That
-     * asymmetry is what the Phase 2 ownership refactor exists to fix, and pinning
-     * it here means the refactor has something to change.
+     * AND THE OUTCOME SURVIVES THE ROUND TRIP — which is the Phase 2 change, asserted
+     * in a browser rather than only in jsdom.
+     *
+     * This comment used to record the opposite as an honest limit: "Returning to the
+     * fields view re-mounts a card whose autosave state is brand new, so the detached
+     * write's OUTCOME is reported nowhere … if it had been refused, this card would
+     * look exactly the same." That was true of the in-component hook. Save state now
+     * lives in `runAutosaveStore`, keyed by experiment and run and disposed at the
+     * RECORD screen's boundary rather than the card's, so a verdict that arrives while
+     * every card is unmounted is still on screen when one comes back.
+     *
+     * What is asserted below is the SUCCESS path, because that is what this spec's
+     * sequence produces. The refusal path — where the old code was silent and the new
+     * code reports — is covered in jsdom by "a save REFUSED while the card was
+     * unmounted is reported when it comes back", which fails if the state dies with the
+     * card (verified against a reintroduced defect).
      */
     await page.getByRole('tab', { name: 'Record Fields' }).click();
     const remounted = nthCard(page, 0);
-    await expect(saveStatus(remounted)).toHaveText('');
+    // `Saved`, NOT the empty string this line used to assert. The empty string WAS the
+    // old behaviour and was the defect: a card that had just had a write acknowledged
+    // for it came back claiming nothing, because the state died with the component.
+    await expect(saveStatus(remounted)).toHaveText('Saved');
     // BOTH values, and the timestamp is the one this spec is about — an earlier
     // revision asserted only `301 K`, the ordinary edit, while the comment above
     // talked about the detached one. The server-side poll proved the timestamp
