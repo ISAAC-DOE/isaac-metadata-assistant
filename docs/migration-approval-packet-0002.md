@@ -440,14 +440,21 @@ The job ran. What was observed:
 | checkout | GitHub checks out a merge commit, not the branch head: the log reads `HEAD is now at b9b9c78 Merge 758360cc… into b7792c1f…`. `758360c` is a descendant of `b7792c1` (`git merge-base --is-ancestor`), so that tree and the branch head's tree coincide — but the job did not literally check out `758360c`, and the distinction is recorded rather than glossed. |
 
 Almost every line below is a **printed assertion in that job's log** rather than an inference from
-the workflow file — and the five exceptions are marked `[silent]`, because a claim that everything
+the workflow file — and the six exceptions are marked `[silent]`, because a claim that everything
 was printed is exactly the kind of thing a reader cannot check without re-reading 1,400 lines. A
-`[silent]` item is asserted by the shell (`set -euo pipefail` plus a `[ … ] || exit 1`), so the job's
-green conclusion is the evidence, and the value itself never reaches the log:
+`[silent]` item is asserted by the job rather than printed — either by the shell
+(`set -euo pipefail` plus a `[ … ] || exit 1`) or by a Python `assert` inside an inline
+`python - <<PY` step — so the job's green conclusion is the evidence and the value itself
+never reaches the log. **The Python case is called out because an earlier revision of this
+sentence said only "asserted by the shell", which let 53 unprinted `assert` statements fall
+outside the count.** Item 2 is the one that matters most: its two printed lines are
+narrations *after* unprinted Python asserts, and it carries this section's strongest claim
+— "this is the hosted deployment's exact state today" — so it is marked too.
 
 1. **Plan order.** `pending: 0001_experiments, 0002_runs` — in FK-dependency order, asserted as a
    string equality rather than a substring.
-2. **Degradation with nothing applied**, then `database migrated to 0001 only; 0002 pending` and
+2. **Degradation with nothing applied** — **`[silent]`** for the assertions themselves —
+   then `database migrated to 0001 only; 0002 pending` and
    `0001-only database: create, read and list all work with 0002 pending`. **This is the hosted
    deployment's exact state today** (§6 item 2), now witnessed rather than specified.
 3. **Forward apply.** `applied: 0002_runs` — *not* `0001_experiments, 0002_runs`, which is precisely

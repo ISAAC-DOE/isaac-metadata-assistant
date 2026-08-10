@@ -2469,7 +2469,7 @@ def _clean_label(
     # was the hole: a lone surrogate here 500ed BOTH the run PATCH and the create
     # route. Checked before `.strip()` rather than after, so the refusal describes
     # what was sent.
-    if not _is_storable_value(raw):
+    if not _is_storable_value(raw, max_bytes=_MAX_LABEL_BYTES):
         return None, JSONResponse(
             status_code=422,
             content={
@@ -2477,8 +2477,9 @@ def _clean_label(
                 "key": "label",
                 "keys": ["label"],
                 "message": (
-                    "label contains characters that cannot be represented in JSON, so "
-                    "it cannot be stored. Nothing was written."
+                    "label cannot be stored: it either contains characters that cannot "
+                    "be represented in JSON, or it is longer than a name may be. "
+                    "Nothing was written."
                 ),
             },
         )
@@ -2606,17 +2607,56 @@ def _render_exactly_as_a_response_would(value) -> bytes:
 #: fixture — nests 7 levels. 32 is therefore more than four times the deepest real
 #: document and unreachable by any shape the schema declares at these paths, while
 #: sitting far below the depth at which CPython's recursion limit is reached.
+#:
+#: IF THIS GUARD IS EVER REUSED FOR ANOTHER FIELD SET, re-derive it. The vendored schema
+#: contains eight free-form ``type: object`` subschemas that declare no ``properties`` —
+#: ``sample.composition``, ``system.configuration``,
+#: ``context.transport.feed.partial_pressures``, ``measurement.series.items.conditions``
+#: and ``assets.items.citation`` among them — where the instance depth a valid record may
+#: carry is UNBOUNDED. 32 is measured headroom for the five run-level scalars and nothing
+#: more.
 _MAX_VALUE_DEPTH = 32
+
+#: The largest a single stored run-level value may serialise to, in bytes.
+#:
+#: THE DEPTH CAP ALONE WAS THE THIRD NARROW GUARD IN A ROW, and a reviewer measured why:
+#: at perfectly LEGAL depth, a 3-wide tree amplifies ~17-23x on the way to disk, because
+#: the document is stored pretty-printed and the value is carried in an evidence
+#: envelope. Measured on this build — a **236 KB body wrote 4.1 MB**, 2.1 MB wrote
+#: 45.6 MB, and 172 MB wrote 4 GB while holding ``record_lock`` for 184 s and taking
+#: process RSS to 5.6 GB. An 8 MB ``label`` was likewise accepted. Nothing was corrupted
+#: and no verdict was falsified, so it is resource exhaustion rather than a wedge — on a
+#: pod whose workspace is an ``emptyDir`` this project does not own.
+#:
+#: 64 KiB is ~2,000x the longest value the schema can legitimately put at any of the five
+#: writable paths: all five are declared ``string`` or ``number`` scalars, and the longest
+#: plausible one is a 32-character ISO-8601 timestamp with an offset. It is also a quarter
+#: of ``csv_ingest.MAX_BODY_BYTES`` (256 KiB) and an eighth of
+#: ``MAX_VALIDATE_RECORD_BYTES`` (512 KiB), the two limits this repository already
+#: enforces — deliberately in their style rather than as a new kind of number.
+_MAX_VALUE_BYTES = 64 * 1024
+
+#: A label renders on one line of a card header, and the server's own form is
+#: ``Run <ordinal>``. The longest label anywhere in this repository's fixtures is 76
+#: characters. 512 bytes is generous for a name a person types and refuses the 8 MB one.
+_MAX_LABEL_BYTES = 512
 
 
 def _value_depth_within(value, limit: int) -> bool:
     """Is ``value`` nested no deeper than ``limit``?
 
-    ITERATIVE ON PURPOSE. A recursive depth check would hit the same
-    ``RecursionError`` it exists to prevent, on the same input, one frame earlier — a
-    guard that crashes on the attack it guards against is not a guard. It also stops at
-    the first node past ``limit``, so the cost is bounded by ``limit`` and not by the
-    size of a hostile payload.
+    ITERATIVE ON PURPOSE. A depth-COMPUTING recursive walk — ``1 + max(depth(child) …)``,
+    the shape most people reach for — would hit the same ``RecursionError`` it exists to
+    prevent, on the same input, and a guard that crashes on the attack it guards against
+    is not a guard.
+
+    COST, STATED CORRECTLY. It returns at the first node past ``limit``, so a DEEP payload
+    costs O(limit) — measured at 0.00 s for 200,000 levels. It is NOT bounded for a BROAD
+    payload: a legal-depth tree with 43 million leaves took ~12 s in the walk alone, which
+    an earlier version of this docstring denied by claiming the cost was "bounded by
+    ``limit`` and not by the size of a hostile payload". That is what
+    :data:`_MAX_VALUE_BYTES` is for, and it is why size is a separate condition rather
+    than something this function was stretched to cover.
     """
     stack = [(value, 0)]
     while stack:
@@ -2630,7 +2670,7 @@ def _value_depth_within(value, limit: int) -> bool:
     return True
 
 
-def _is_storable_value(value) -> bool:
+def _is_storable_value(value, *, max_bytes: int = _MAX_VALUE_BYTES) -> bool:
     """Can the application BUILD AND RETURN a view of this value, and store it?
 
     THE CONTRACT WAS TOO NARROW ONCE AND THE COST WAS A SECOND WEDGED-RECORD DEFECT, so
@@ -2644,27 +2684,41 @@ def _is_storable_value(value) -> bool:
     could not be re-read, and every read of that record 500ing permanently, on disk,
     across a process restart.
 
-    Two conditions, both necessary:
+    THREE conditions, all necessary — and the count has gone 1 -> 2 -> 3 across three
+    reviews, each time because the guard protected something narrower than the
+    application relies on. The contract is stated as **bounded size, bounded depth, and
+    renderable**, so a fourth narrowing has to argue with this sentence:
 
     1. **Depth** (:data:`_MAX_VALUE_DEPTH`) — bounds every recursive walk the value will
        later be subjected to: ``_run_view``, ``copy.deepcopy``, the signature hash, the
-       draft validator, the exporter. It is the only one of the two that a serializer
-       test cannot express.
+       draft validator, the exporter. A serializer test cannot express it.
     2. **Renderability** — a real render with the exact kwargs Starlette uses, so
        ``NaN``, ``Infinity`` and lone surrogates are refused. Deliberately a render
        rather than an ``isinstance`` walk: a hand-written type check would be a second,
        drifting definition of "storable".
+    3. **Size** (:data:`_MAX_VALUE_BYTES`, or ``max_bytes``) — measured on the RENDERED
+       bytes, which is free because condition 2 has already produced them. Bounds the
+       ~17-23x amplification to disk and the time ``record_lock`` is held.
 
-    Both are checked BEFORE the write. Neither is a schema check: the official schema
+    All three are checked BEFORE the write. None is a schema check: the official schema
     still decides whether a well-formed value is the right one.
+
+    WHAT THIS DOES NOT BOUND, stated rather than implied: the REQUEST BODY. Starlette
+    allocates it in full before any of this runs, so a large body still costs memory
+    once. The two read-only routes that need that guarantee use
+    :func:`_read_bounded_body` over ``request.stream()``; wiring it in here means
+    replacing ``Body(...)`` with a raw ``Request`` read on both write routes, a real
+    change to their documented request-body handling that is deliberately NOT smuggled
+    into a fix commit. The severe half — unbounded bytes reaching DISK and an unbounded
+    hold on ``record_lock`` — is closed here.
     """
     if not _value_depth_within(value, _MAX_VALUE_DEPTH):
         return False
     try:
-        _render_exactly_as_a_response_would(value)
+        rendered = _render_exactly_as_a_response_would(value)
     except (ValueError, TypeError, UnicodeEncodeError):
         return False
-    return True
+    return len(rendered) <= max_bytes
 
 
 def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:

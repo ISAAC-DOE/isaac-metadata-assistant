@@ -152,6 +152,15 @@ def _patch(client, experiment_id: str, run_id: str, body: dict, *, if_match=...)
     )
 
 
+def _nested_wide(levels: int, breadth: int = 3):
+    """A tree that is LEGAL by depth and large by breadth — the shape the depth cap alone
+    let through."""
+    value = 1
+    for _ in range(levels):
+        value = [value] * breadth
+    return value
+
+
 def _stored_run(client, experiment_id: str, run_id: str):
     """The run as the STORE holds it — never as the response reported it."""
     exp = client_ws(client).load_experiment(experiment_id)
@@ -845,6 +854,147 @@ def test_an_absurdly_nested_value_is_refused_by_SOMETHING_and_never_by_a_500(
     assert client.get(f"/api/experiments/{experiment_id}").status_code == 200
 
 
+def test_the_run_check_says_unavailable_when_the_dry_run_itself_raises(
+    client, experiment_id, monkeypatch
+):
+    """THE SECOND `unavailable` BRANCH, which the first test did not reach.
+
+    `_validate_unit` sets the flag in TWO places: the materialised-but-unreadable branch,
+    and the branch where `export_draft` itself raises during the dry run. A reviewer
+    deleted only the SECOND and the file still reported `99 passed` — so
+    "it fails with either line removed", which the previous commit message asserted, was
+    false. That is the FOURTH consecutive commit on this branch to over-state a
+    "verified against a reintroduced defect" claim, which is why this test exists at all
+    rather than the claim simply being softened.
+    """
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("synthetic export failure")
+
+    monkeypatch.setattr(routes, "export_draft", _boom)
+
+    run = _create_run(client, experiment_id)
+    body = client.post(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}/check"
+    ).json()
+    official = body["official"]
+    assert official["unavailable"] is True
+    # This branch IS a dry run — it is the dry run that failed.
+    assert official["dry_run"] is True
+    assert official["ok"] is False
+    assert body["ok"] is False
+    assert official["errors"] == [
+        {"path": "$", "message": "Validation could not be completed."}
+    ]
+    # And it is a 200 with a verdict-shaped body, never a 500.
+    assert (
+        client.post(f"/api/experiments/{experiment_id}/runs/{run['id']}/check").status_code
+        == 200
+    )
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: {"fields": {"context.temperature_K": _nested_wide(10)}},
+        lambda: {"fields": {"context.temperature_K": "x" * 200_000}},
+        lambda: {"fields": {"context.temperature_K": [1] * 200_000}},
+        lambda: {"label": "L" * 100_000},
+        # BETWEEN THE TWO LIMITS: 2,000 bytes is far under `_MAX_VALUE_BYTES` (64 KiB)
+        # and far over `_MAX_LABEL_BYTES` (512). Without this case the label cap is not
+        # load-bearing — a 100 KB label is refused by the value cap alone, which is
+        # exactly what a negative control showed.
+        lambda: {"label": "L" * 2_000},
+    ],
+    ids=[
+        "wide-tree-at-legal-depth",
+        "big-string",
+        "big-list",
+        "big-label",
+        "label-over-its-own-smaller-cap",
+    ],
+)
+def test_a_value_too_LARGE_to_store_is_refused_even_at_legal_depth(
+    client, experiment_id, make
+):
+    """SIZE, WHICH THE DEPTH CAP DID NOT BOUND — the fourth instance of one defect class,
+    and the reason the guard's contract is now stated as three conditions rather than
+    grown by one each review.
+
+    A reviewer measured the amplification on this build: at PERFECTLY LEGAL depth (a
+    3-wide tree, 10 levels) a **236 KB body wrote 4.1 MB** to disk; 2.1 MB wrote 45.6 MB;
+    172 MB wrote 4 GB while holding `record_lock` for 184 s and taking process RSS to
+    5.6 GB. An 8 MB `label` was accepted too, since the value guard iterated `fields`
+    only. The document is stored pretty-printed and each value is wrapped in an evidence
+    envelope, which is where the ~17-23x comes from.
+
+    Nothing was corrupted and no verdict was falsified — this is resource exhaustion, on
+    a pod whose workspace is an `emptyDir` this project does not own — which is why it
+    was an Important rather than a Critical. The sizes here are far below the measured
+    hazard on purpose: the point is to pin the GUARD, not to spend 184 s in CI proving
+    the hazard again.
+    """
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client, experiment_id, run["id"], {"confirmed_by_user": True, **make()}
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrepresentable_value"
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.rev == 1
+    assert stored.draft.get("fields") in (None, {})
+    assert stored.label == run["label"]
+
+
+def test_a_value_and_a_label_at_ordinary_size_are_still_accepted(client, experiment_id):
+    """The floor for the cap above. Without this it could pass by refusing everything —
+    and the limits are deliberately ~2,000x the longest value the schema can put at any
+    of the five writable paths (all scalars; the longest plausible is a 32-character
+    ISO-8601 timestamp)."""
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {
+            "confirmed_by_user": True,
+            "label": "Cold run \u00b7 4 K",
+            "fields": {"context.temperature_K": 277.15},
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["run"]
+    assert body["fields"]["context.temperature_K"]["value"] == 277.15
+    assert body["label"] == "Cold run \u00b7 4 K"
+
+
+def test_the_size_cap_is_measured_on_the_rendered_bytes_not_the_python_object():
+    """A 2-character string is not 2 bytes once rendered, and the cap is on what is
+    STORED. Pinned directly, because the difference is what makes the check free: the
+    render has already happened for condition 2."""
+    assert routes._is_storable_value("x" * 10, max_bytes=12) is True
+    # 10 characters render as 12 bytes with the quotes; 11 do not fit.
+    assert routes._is_storable_value("x" * 11, max_bytes=12) is False
+
+
+def test_the_depth_and_size_limits_have_a_floor():
+    """THE CONSTANTS ARE PINNED FROM BELOW, because both boundary tests READ them and so
+    would follow them anywhere. A reviewer set `_MAX_VALUE_DEPTH` to 1 and the file still
+    reported `100 passed` — a limit nobody bounds is a limit that can be tightened into a
+    product defect by a one-character edit.
+
+    The floors are justified rather than round: the deepest whole document anywhere in
+    this repository nests 7, and the longest value the schema can legitimately put at any
+    of the five writable paths is a 32-character ISO-8601 timestamp.
+    """
+    assert routes._MAX_VALUE_DEPTH >= 16, "shallower than twice the deepest real document"
+    assert routes._MAX_VALUE_BYTES >= 4 * 1024, "smaller than any plausible value needs"
+    assert routes._MAX_LABEL_BYTES >= 128, "shorter than a name a person might type"
+    # And an ordinary scalar must survive whatever the constants are set to.
+    assert routes._is_storable_value("2026-01-31T09:00:00.000000+00:00") is True
+    assert routes._is_storable_value(277.15) is True
+
+
 def test_a_value_at_exactly_the_depth_limit_is_accepted(client, experiment_id):
     """The boundary from the other side. Without this, the fix above could pass by
     refusing every nested value — and the limit is deliberately far above anything the
@@ -870,9 +1020,16 @@ def test_a_value_at_exactly_the_depth_limit_is_accepted(client, experiment_id):
 
 
 def test_the_depth_guard_does_not_itself_recurse():
-    """A recursive depth check would raise `RecursionError` on the same input it exists
-    to refuse, one frame earlier. `_value_depth_within` uses an explicit stack, so this
-    call must return `False` rather than raise."""
+    """`_value_depth_within` must REFUSE a 5,000-deep value rather than raise.
+
+    SCOPED, because the obvious justification is over-general and a reviewer measured
+    that. A *recursive early-exit* walk also passes this test: because the level is
+    checked BEFORE descending, it returns at frame 33 and never overflows. What this
+    test actually catches is a depth-COMPUTING implementation — `1 + max(depth(child) …)`,
+    the shape most people reach for first — which recurses the full 5,000 frames and
+    raises the very error the guard exists to prevent. That is the realistic regression,
+    and it is worth a test; "proves the walk is iterative" is not what it proves.
+    """
     deep = 1
     for _ in range(5000):
         deep = [deep]

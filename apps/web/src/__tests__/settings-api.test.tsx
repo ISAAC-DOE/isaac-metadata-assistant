@@ -1380,12 +1380,16 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // which this figure counts. Three operation descriptions growing by those amounts
     // would have given +701.
     //
-    // AND THAT EXPOSES A REAL GAP, recorded rather than quietly left: `ApiDocs.tsx`
-    // renders `requestBody.description` and each response `description`, but NEITHER
-    // this total NOR `test_contract_description_parity.py` covers them. So two of the
-    // three strings edited to stop "a lie shipped to a reader" have no drift guard at
-    // all. Extending the parity fixture to those fields is the fix; it is named here so
-    // the next reader does not have to rediscover the asymmetry.
+    // AND THAT EXPOSES A REAL GAP, recorded rather than quietly left. NEITHER this total
+    // NOR `test_contract_description_parity.py` covers anything but operation
+    // descriptions, so the other two edited strings have no drift guard at all. Their
+    // exact homes, because "requestBody.description" was the first guess and is wrong:
+    // the PATCH string lives at
+    // `requestBody.content['application/json'].schema.description` — that operation's
+    // `requestBody` has only `content` and `required` — and reaches the screen as raw
+    // JSON inside the collapsed Technical Schema `<pre>` (`ApiDocs.tsx:888,893`); the
+    // check string is a RESPONSE description. Extending the parity fixture to both fields
+    // is the fix; it is named here so the next reader does not rediscover the asymmetry.
     //
     // NOT 45 unique — 44. `GET` and `POST /api/experiments/{id}/warnings`
     // deliberately share one description, and they did so before this slice

@@ -318,7 +318,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
      * `IMPROVED … on linux` messages, each naming its exact figure. A pair that ends
      * up equal collapses back to a scalar.
      *
-     * WHAT IS NOT FIXED: `--text-tertiary` (189 uses) and `--text-quaternary` (69)
+     * WHAT IS NOT FIXED: `--text-tertiary` (189 `var()` DECLARATIONS) and
+     * `--text-quaternary` (69)
      * — both counted at this commit, after every change in it, over file bytes rather
      * than with a bare `rg`, which silently skips NUL-byte files while exiting 0 — remain
      * too light almost everywhere, which is why both are still in
@@ -689,7 +690,10 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * branch chose. This branch DID fix the same class of defect where it was
        * local — three `.statusbar-*` declarations, see `chrome.css` and the 26
        * entries lowered above and below — and deliberately did not touch the two
-       * tokens, which have 189 and 69 uses at this commit.
+       * tokens, which have 189 and 69 `var()` DECLARATIONS at this commit. Counted that
+       * way on purpose: a bare grep for the token NAMES finds 207/78, because the names
+       * also appear in `tokens.css` and in prose — including in this sentence. Three
+       * reviewers have now re-opened this figure on that difference.
        */
       'settings-explorer@desktop-1280x800': 48,
       'settings-explorer@laptop-1024x768': { darwin: 49, linux: 48 },
