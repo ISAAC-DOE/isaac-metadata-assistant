@@ -1,6 +1,6 @@
 import './screens.css';
 import '../components/evidence.css';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
@@ -9,6 +9,7 @@ import { WorkflowSpine } from '../components/WorkflowSpine';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RunsSection } from '../components/RunsSection';
+import { disposeExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LiveSyncNote } from '../components/LiveSyncNote';
@@ -139,6 +140,19 @@ export function draftPhaseDotFromWorkflow(
 export function RecordWorkbench() {
   const { id = '' } = useParams();
   const bundle = useFetch(() => api.getRecordBundle(id), [id]);
+
+  /*
+   * THE RUN AUTOSAVE STORE IS DISPOSED HERE — at the RECORD screen's boundary, not at a
+   * card's, and that difference is the whole of the Phase-2 change.
+   *
+   * Save state deliberately outlives a `RunCard`, because a card unmounts one click
+   * away (the Runs section is inside the `fields` tabpanel, so the Graph tab takes it
+   * down) and an edit's outcome must survive that. It must NOT outlive the record
+   * screen, or the map grows for every run a session ever opened. `disposeExperiment`
+   * is conservative: it refuses to drop an entry that is mid-flight or still holding
+   * edits, so leaving the screen never discards a write that has not landed.
+   */
+  useEffect(() => () => disposeExperiment(id), [id]);
   // D1 — this record belongs to the workspace scope the surface was opened in. If
   // that scope changes (the walkthrough's temporary workspace was discarded, and
   // with it these records) nothing loaded here describes anything any more. See

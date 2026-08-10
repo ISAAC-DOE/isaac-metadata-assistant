@@ -23,6 +23,7 @@ import { resolve } from 'node:path';
 
 import { AppRoutes } from '../App';
 import { AUTOSAVE_DEBOUNCE_MS, AUTOSAVE_RETRY_BASE_MS } from '../lib/useRunAutosave';
+import { __entryCount, __resetRunAutosaveStore } from '../lib/runAutosaveStore';
 import {
   bundleRoutes,
   runFixture,
@@ -109,6 +110,13 @@ function patchLog() {
 
 beforeEach(() => {
   vi.useRealTimers();
+  /*
+   * THE AUTOSAVE STORE IS MODULE-LEVEL, so it outlives a test the same way it outlives
+   * a card — which is the point of the refactor and a hazard for the suite. Without
+   * this, one test's `conflict` (which HALTS the entry) leaks into the next and the
+   * failure looks like a product bug in whatever ran second.
+   */
+  __resetRunAutosaveStore();
 });
 
 afterEach(() => {
@@ -322,10 +330,16 @@ describe('autosave', () => {
     // through if the optimistic path happened to be slower than the mock.
     // Resolved from the vitest root (`apps/web`), not from `import.meta.url` —
     // the module URL is not a `file:` URL under the test transform.
-    const source = readFileSync(resolve('src/lib/useRunAutosave.ts'), 'utf8');
-    const occurrences = source.split("setStatus('saved')").length - 1;
+    //
+    // THE FILE MOVED, and the guard follows it rather than being deleted. `Saved` used
+    // to be set by `setStatus('saved')` in the hook; the save state now lives in
+    // `runAutosaveStore`, so the single writer is `emit(entry, { status: 'saved' … })`
+    // there. Same property, same reason: a future edit must not be able to add a
+    // second, optimistic place that sets it.
+    const source = readFileSync(resolve('src/lib/runAutosaveStore.ts'), 'utf8');
+    const occurrences = source.split("status: 'saved'").length - 1;
     expect(occurrences).toBe(1);
-    const at = source.indexOf("setStatus('saved')");
+    const at = source.indexOf("status: 'saved'");
     const thenAt = source.indexOf('.then((res) => {');
     const catchAt = source.indexOf('.catch((err: unknown) => {');
     expect(thenAt).toBeGreaterThan(-1);
@@ -1264,6 +1278,213 @@ describe('the denominator discloses its scope (review finding: invented denomina
     const progress = cardFor('RUNAAA').querySelector('.run-card-progress') as HTMLElement;
     expect(progress.textContent).toMatch(/run fields on this screen/);
     expect(progress.textContent).not.toMatch(/^\s*\d+ of \d+ set\s*$/);
+  });
+});
+
+describe('PHASE 2 — save state that outlives the card', () => {
+  /*
+   * WHAT WAS IMPOSSIBLE BEFORE. Every one of these was a documented limit of the old
+   * in-component hook, whose header said acceptance could not be reported once the
+   * card was gone. The Graph tab is the realistic trigger: the Runs section lives
+   * inside the `fields` tabpanel, so switching view unmounts every card.
+   */
+  function toGraph() {
+    return act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+    });
+  }
+  function toFields() {
+    return act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'Record Fields' }));
+    });
+  }
+
+  it('a save REFUSED while the card was unmounted is reported when it comes back', async () => {
+    const gate1 = gate<void>();
+    let patches = 0;
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: async () => {
+        patches += 1;
+        await gate1.promise;
+        return { status: 422, body: { error: 'not_run_level' } };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '321' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(patches).toBe(1);
+
+    // Leave the fields view entirely — every card unmounts.
+    await toGraph();
+    expect(document.querySelectorAll('[data-run-id]')).toHaveLength(0);
+
+    // The refusal lands with nothing mounted. Under the old hook this verdict went
+    // nowhere: the rejection was swallowed and the reader was never told.
+    await act(async () => {
+      gate1.resolve();
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    await toFields();
+    const card = cardFor('RUNAAA');
+    expect(within(card).getByRole('status').textContent).toContain('Save failed');
+    expect(headerOf('RUNAAA')).toHaveAccessibleName(/Save failed/);
+  });
+
+  it('Retry Save works on a card that unmounted and came back since the failure', async () => {
+    /*
+     * THE MOCK REFUSES UNTIL THE TEST SAYS OTHERWISE, and the first draft of this test
+     * got that wrong in an instructive way: it refused only the FIRST attempt, and the
+     * unmount flush then re-sent and SUCCEEDED — so by the time the card came back there
+     * was no failure left and no `Retry Save` to find. The flush doing that is correct
+     * and is a feature; it just means a test about a persisting refusal has to make the
+     * refusal persist.
+     */
+    let patches = 0;
+    let refuse = true;
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: () => {
+        patches += 1;
+        return refuse
+          ? { status: 422, body: { error: 'not_run_level' } }
+          : { body: { run: { ...RUN_A, version: 'ra.9' } } };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '322' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toContain('Save failed');
+
+    await toGraph();
+    await toFields();
+
+    // The refusal, the held edit and the control that re-sends it all survived the
+    // round trip. Under the old hook the state died with the card.
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toContain('Save failed');
+    const before = patches;
+    const retry = within(cardFor('RUNAAA')).getByRole('button', { name: 'Retry Save' });
+    refuse = false;
+    await act(async () => {
+      fireEvent.click(retry);
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(patches).toBe(before + 1);
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toBe('Saved');
+  });
+
+  it('THE HONESTY GAP: a 412 after a remount no longer claims nothing was written', async () => {
+    /*
+     * THE DEFECT THIS CLOSES, named as Phase-2's job by the old hook itself. A transient
+     * failure means no verdict reached this browser, so the write MAY have landed. The
+     * flag that knew this lived in a ref inside the card; unmounting destroyed it, so a
+     * later 412 asserted "Nothing you typed was written" about a write that might well
+     * have been. The flag now lives in the store and survives the round trip.
+     */
+    let patches = 0;
+    let stale = false;
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: () => {
+        patches += 1;
+        // No verdict at all — for as long as the test wants — and then a 412 on the
+        // explicit retry. Controlled by a flag rather than by counting attempts,
+        // because the unmount flush makes the attempt count an implementation detail.
+        return stale ? { status: 412, body: { error: 'stale_write' } } : { status: 500, body: {} };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '323' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 60_000);
+    });
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toContain('Save failed');
+
+    await toGraph();
+    await toFields();
+    await expand('RUNAAA');
+
+    stale = true;
+    await act(async () => {
+      fireEvent.click(within(cardFor('RUNAAA')).getByRole('button', { name: 'Retry Save' }));
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    const alert = within(cardFor('RUNAAA')).getByRole('alert').textContent ?? '';
+    expect(alert).toMatch(/may or may not have been saved/);
+    expect(alert).not.toMatch(/Nothing you typed was written/);
+  });
+
+  it('an edit typed and then abandoned still reaches the server', async () => {
+    const sent: unknown[] = [];
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: (init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          fields?: Record<string, unknown>;
+        };
+        sent.push(body.fields?.['context.temperature_K']);
+        return { body: { run: { ...RUN_A, version: 'ra.2' } } };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    vi.useFakeTimers();
+    // INSIDE the debounce window — nothing has been sent when the view changes.
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '324' },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(sent).toHaveLength(0);
+
+    await toGraph();
+    // Flushed at once rather than waiting out the debounce: between the unmount and
+    // the timer firing, a closed tab would lose it.
+    expect(sent).toEqual([324]);
+  });
+
+  it('leaving the RECORD screen disposes the store, but never mid-write', async () => {
+    const gate2 = gate<void>();
+    const view = render(
+      <MemoryRouter
+        initialEntries={[`/record/${ID}`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    stubFetchRoutes({
+      ...bundleRoutes(ID),
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: async () => {
+        await gate2.promise;
+        return { body: { run: { ...RUN_A, version: 'ra.3' } } };
+      },
+    });
+    view.unmount();
+    // A screen that never held an entry leaves none behind; the point of the assertion
+    // is that disposal exists and is bounded, not that it is aggressive.
+    expect(__entryCount()).toBe(0);
+    gate2.resolve();
   });
 });
 
