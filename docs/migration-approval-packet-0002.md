@@ -1,31 +1,50 @@
 # Migration approval packet — `0002_runs`
 
-> ## STATUS: **AWAITING APPROVAL. Nothing has been applied to any database.**
+> ## STATUS: **AWAITING APPROVAL. Nothing has been applied to any DEPLOYED database.**
 >
 > `0001_experiments` was applied to the hosted database by Dean on 2026-08-09
 > ([evidence](evidence/hosted-0001-verification-2026-08-09.md)). **That changes nothing about this
-> migration.** `0002_runs` is unapplied, and applying it to the hosted environment is the owner's
+> migration.** `0002_runs` is unapplied on the hosted database, and applying it there is the owner's
 > act, not an agent's — the project rule at
 > `docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md:48-52` still bars any agent
 > connection to that database from a laptop or from CI, and no kubeconfig, port-forward or Secret
 > was requested or used in preparing this packet.
 >
-> **No database of any kind was contacted while writing this migration.** The machine it was
-> written on has no PostgreSQL binary and no Docker (`which psql pg_ctl postgres initdb docker`
-> → all not found), so the SQL below has **never been executed anywhere**. §12 says exactly what
-> that leaves unproven.
+> **CORRECTED 2026-08-10. The superseded wording is kept visible rather than swapped in silently,
+> because a packet whose evidence status changes without saying so is exactly the failure this
+> project keeps finding.** This block previously read: *"No database of any kind was contacted while
+> writing this migration … so the SQL below has **never been executed anywhere**."* That was true
+> when written and is **now false**. The forward SQL, the rollback, and every constraint in them
+> have been executed against a real PostgreSQL 18.4 engine in GitHub Actions, at this branch's exact
+> head — see §12, which names the run, the job, the engine version and each printed assertion.
+>
+> **The claim that survives is narrower, and it is the one that bears on your decision:** no agent
+> has contacted the SLAC database; this migration is unapplied on every *deployed* environment; and
+> a green `postgres-migration` job is **not** a hosted rehearsal. §12 keeps those two categories
+> apart on purpose.
 
 Prepared against the committed files:
 
 | File | sha256 |
 |---|---|
-| `apps/api/isaac_api/migrations/0002_runs.sql` | `f951cc6d2fda141160a55f6330e102c2e9d99aafc074c07a0628ac5a9f63163a` |
+| `apps/api/isaac_api/migrations/0002_runs.sql` | `c96e308d7fdfd508ab2c2aeffb08abcb18a88aae84db6f1d08b83f9cba8fda3e` |
 | `apps/api/isaac_api/migrations/0002_runs.rollback.sql` | `0206012116a443fb301e9c161b5eb2ffcfe0e99ee6f460ce83d80e30d327cdd5` |
 
 Quote these in any future re-check rather than re-reading the files by eye. `0001`'s packet notes
 that it described its migration in prose rather than quoting it, and that this made "the migration
 matches the packet" a weaker claim than it sounded. **This packet quotes the forward SQL verbatim**
 (§2), so a byte comparison is available.
+
+**The forward hash above was WRONG from `90b432d` until 2026-08-10, and how it broke is worth one
+sentence, because the mechanism that broke is this packet's only means of checking itself.** It read
+`f951cc6d2fda141160a55f6330e102c2e9d99aafc074c07a0628ac5a9f63163a` — the file as committed in
+`b8f0a1a`. `90b432d` then corrected the identity CHECK **in place**: it updated the SQL quoted in §2
+and rewrote the §2 row explaining the constraint, and left this table pointing at the superseded
+bytes. An operator following the instruction directly above would have computed a mismatch against
+the very file they were about to apply. Nothing read this document, so nothing caught it.
+`test_the_approval_packet_quotes_the_migration_it_describes` now reads **both** this table and the
+§2 code block off disk and compares them against the committed migration, so the next in-place edit
+fails a test instead of drifting.
 
 ---
 
@@ -199,6 +218,10 @@ a semicolon inside the `CHECK` regex literal can never split a statement in half
 contains a `$`; the dollar-quote refusal is narrow enough not to trip on it, pinned by test.
 
 ## 6. Idempotence and legacy compatibility
+
+> Everything in this section **has been observed**, not merely specified — §12A(4), (6) and (9) give
+> the run, the job and the printed assertions. When this section was written it described a job that
+> had never executed; that is no longer the case.
 
 **Idempotent, twice over.** Both statements are `CREATE … IF NOT EXISTS`, and the bookkeeping table
 skips a recorded version. Either alone makes a re-run a no-op; both means losing the bookkeeping row
@@ -381,14 +404,74 @@ on, dump first:
 **Do not roll back merely to "undo" a successful migration.** The table is additive, inert while
 nothing writes it, and the application already tolerates a configured-but-unmigrated database.
 
-## 12. What remains unproven — read this before approving
+## 12. Evidence, and what remains unproven — read this before approving
 
-- **The SQL has never been executed.** Not on a laptop, not in CI, not anywhere. The machine this
-  was written on has no PostgreSQL and no Docker. Everything asserted about the constraints'
-  *behaviour* in §2 and §3 is reasoned from PostgreSQL's documentation and from the constraint text;
-  it becomes evidence only when the `postgres-migration` job runs.
-- **CI has not been observed either.** This work was not pushed, so no `postgres-migration` run
-  exists for it. The job's new steps are *specified* here, not *witnessed*.
+### 12A. What has actually been executed (added 2026-08-10)
+
+**This section replaces two bullets that are now false, and they are quoted rather than deleted so
+the change of status is visible.** They read: *"The SQL has never been executed. Not on a laptop, not
+in CI, not anywhere. The machine this was written on has no PostgreSQL and no Docker. Everything
+asserted about the constraints' behaviour in §2 and §3 is reasoned from PostgreSQL's documentation
+and from the constraint text; it becomes evidence only when the `postgres-migration` job runs."* and
+*"CI has not been observed either. This work was not pushed, so no `postgres-migration` run exists
+for it. The job's new steps are specified here, not witnessed."*
+
+The job ran. What was observed:
+
+| | |
+|---|---|
+| commit under test | `758360cc8520144db445fd440f0a59e4c12931c2` — PR [#97](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/97) head |
+| forward SQL bytes executed | sha256 `c96e308d7fdfd508ab2c2aeffb08abcb18a88aae84db6f1d08b83f9cba8fda3e` — the file in the table at the top of this packet, unchanged since `90b432d` |
+| workflow run | [31364785191](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31364785191), job `migration and durable repository against a real PostgreSQL` ([93380745818](https://github.com/ISAAC-DOE/isaac-metadata-assistant/actions/runs/31364785191/job/93380745818)), conclusion **success** |
+| engine | service container image `postgres:18`; the job prints the server's own answer: `PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on x86_64-pc-linux-gnu` |
+
+Each line below is a **printed assertion in that job's log**, not an inference from the workflow
+file:
+
+1. **Plan order.** `pending: 0001_experiments, 0002_runs` — in FK-dependency order, asserted as a
+   string equality rather than a substring.
+2. **Degradation with nothing applied**, then `database migrated to 0001 only; 0002 pending` and
+   `0001-only database: create, read and list all work with 0002 pending`. **This is the hosted
+   deployment's exact state today** (§6 item 2), now witnessed rather than specified.
+3. **Forward apply.** `applied: 0002_runs` — *not* `0001_experiments, 0002_runs`, which is precisely
+   the distinction §9 tells you to check.
+4. **Idempotence, over three schema states.** A second `--apply` prints
+   `nothing to apply (every migration is already recorded)`; then every bookkeeping row is deleted
+   and `--apply` prints `applied: 0001_experiments, 0002_runs`. An md5 over
+   `information_schema.columns` for the whole `public` schema is identical at all three points.
+5. **Table-set diff.** Added exactly `isaac_experiments isaac_runs isaac_schema_migrations`; removed
+   nothing; and an md5 over every row of the stand-in `records` table is unchanged —
+   `records: byte-identical`.
+6. **The application does not touch the table.** The full durable-repository exercise runs against
+   the real engine (`durable repository OK`, `durable compare-and-swap OK`), after which
+   `isaac_runs: still empty after the application ran`.
+7. **The index is what §2 claims.** `CREATE INDEX isaac_runs_experiment_order_idx ON
+   public.isaac_runs USING btree (experiment_id, ordinal, run_id)`, read back from `pg_indexes`.
+8. **Twelve negative controls, each refused by the *named* constraint** — the job fails if a
+   statement is refused by something other than the constraint under test:
+   `isaac_runs_experiment_fk` (an orphan run), `isaac_runs_id_shape` (a malformed run id),
+   `isaac_runs_pkey` (a duplicate), `isaac_runs_ordinal_non_negative` (`-1`),
+   `isaac_runs_rev_non_negative` (`-1`), `isaac_runs_state_is_object` (`'"nope"'`),
+   `isaac_runs_document_identity` × 4 (a document naming a different run; naming a different
+   experiment; an `experiment_id` naming another experiment; an empty `id`), the `generation`
+   NOT NULL, and `isaac_runs_experiment_fk` again for **deleting a parent that still has runs** —
+   after which the child row is re-counted and found to have survived.
+9. **The two admissions the relaxed CHECK exists for.** A second run at the same ordinal and a
+   document with no `id` column are admitted; so is a document whose `experiment_id` is the empty
+   string — the legacy shape `Run.to_state()` actually produces, built in CI *from `to_state()`
+   itself* rather than from a hand-written approximation. §2's `coalesce(nullif(…))` claim is
+   therefore measured, and its asymmetry with `id` holds.
+10. **Rollback, both orders.** Rolling back `0001` first fails with PostgreSQL's own
+    `cannot drop table isaac_experiments because other objects depend on it / constraint
+    isaac_runs_experiment_fk`, and all three tables are re-counted and still present — the safe
+    failure §11 describes. Rolling back `0002` first drops the table, deletes its bookkeeping row,
+    and restores `pending: 0002_runs`.
+
+**§2, §3, §6, §9 and §11 are therefore executed-and-witnessed against a real engine.** §5 is not —
+see below.
+
+### 12B. What CI does **not** prove
+
 - **CI proving this against `postgres:18` is NOT the same as proving it against the hosted
   database.** Different server build, different extensions, different roles, different existing
   objects, and — the part CI structurally cannot model — **real data**. CI removes the "is this
@@ -396,9 +479,13 @@ nothing writes it, and the application already tolerates a configured-but-unmigr
   risk. It does not remove the "does it behave correctly against the hosted database as it actually
   is" class. Only you applying it, deliberately, resolves that. Do not read a green
   `postgres-migration` check as a hosted rehearsal.
-- **Version parity is documented, not measured.** `docs/postgres-test-db-guide.md` states the SLAC
-  cluster runs PostgreSQL 18 and the service container is pinned to 18. This environment cannot
-  reach the hosted server to confirm the running version.
+- **CI's `records` is a stand-in, not the corpus.** The byte-identical proof in 12A(5) is over two
+  synthetic rows the job seeds itself. It proves no statement in this migration reaches a table named
+  `records`; it says nothing about the 30 production-derived rows, which no agent has read.
+- **Version parity: CI's engine is measured, the hosted engine's is not.** The job prints
+  `PostgreSQL 18.4`. `docs/postgres-test-db-guide.md` states the SLAC cluster runs PostgreSQL 18.
+  This environment cannot reach the hosted server to confirm its running version, so "same major"
+  is documented and "same build" is unknown.
 - **The locking analysis in §5 is reasoned, not measured.** No `pg_locks` observation exists.
 - **`isaac_experiments` is not empty on the hosted database, and its contents are unknown here.**
   The FK validates child rows and there are none, so no scan of the parent is expected — but "no

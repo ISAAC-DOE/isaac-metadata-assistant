@@ -221,12 +221,36 @@ export function auditScan(
   return failures;
 }
 
+/**
+ * How many offending nodes a failure message lists before truncating.
+ *
+ * IT WAS 4, AND THAT NUMBER COST A WHOLE INVESTIGATION. When the Run vertical
+ * slice grew `record-detail@tablet-768x1024` from 14 to 16 `color-contrast`
+ * nodes, CI printed four nodes — all four of them pre-existing debt
+ * (`.section-tab`, `.needsyou-about`, `.evidence-trail-link-count`) — and
+ * "… and 9 more node(s)". The two NEW nodes, which are the entire point of a
+ * regression message, were inside the truncated part, so the only way to find out
+ * what had regressed was to re-run the scan locally against two commits. The
+ * baseline's whole design is "tell the author exactly what got worse"; a limit
+ * that hides the delta defeats it.
+ *
+ * 24 is chosen against the actual numbers rather than as a round figure: the
+ * largest baselined count in this repository is `settings-explorer@tablet-768x1024`
+ * at 62, so this is deliberately NOT "print everything" — a 62-node dump would
+ * bury the signal again. It is comfortably above every *delta* the baseline has
+ * ever reported, which is the thing a reader needs to see.
+ */
+const MAX_REPORTED_NODES = 24;
+
 /** A compact, greppable rendering of one violation for failure output. */
 export function formatViolation(v: Result): string {
   const nodes = v.nodes
-    .slice(0, 4)
+    .slice(0, MAX_REPORTED_NODES)
     .map((n) => `      - ${n.target.join(' ')}\n        ${n.html.replace(/\s+/g, ' ').slice(0, 160)}`)
     .join('\n');
-  const more = v.nodes.length > 4 ? `\n      … and ${v.nodes.length - 4} more node(s)` : '';
+  const more =
+    v.nodes.length > MAX_REPORTED_NODES
+      ? `\n      … and ${v.nodes.length - MAX_REPORTED_NODES} more node(s)`
+      : '';
   return `  [${v.impact ?? 'unknown'}] ${v.id} — ${v.help} (${v.nodes.length} node(s))\n    ${v.helpUrl}\n${nodes}${more}`;
 }

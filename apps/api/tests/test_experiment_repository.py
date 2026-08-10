@@ -23,9 +23,11 @@ never dialled.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1156,6 +1158,77 @@ def test_0002_declares_no_on_delete_action_so_the_default_RESTRICT_applies():
             "CREATE TABLE IF NOT EXISTS isaac_runs (experiment_id text REFERENCES "
             "isaac_experiments (experiment_id) ON DELETE CASCADE)"
         )
+
+
+def test_the_approval_packet_quotes_the_migration_it_describes():
+    """THE PACKET IS A RELEASE GATE, SO IT GETS A TEST — because it drifted.
+
+    `docs/migration-approval-packet-0002.md` is the document the owner reads before
+    applying this migration, and it offers exactly one mechanism for checking
+    itself: a table of sha256 digests, introduced with the instruction *"Quote
+    these in any future re-check rather than re-reading the files by eye."*
+
+    THAT TABLE WAS WRONG FOR THE WHOLE LIFE OF THE BRANCH. `b8f0a1a` wrote the
+    packet and the migration together, so the digest matched. `90b432d` then
+    corrected the identity CHECK **in place** — the only legitimate way to change a
+    migration that has never been applied — and updated the SQL quoted in §2 and the
+    prose explaining the constraint, but not the digest. An operator following the
+    packet's own instruction would have computed a mismatch against the very file
+    they were about to apply, and concluded either that the packet was stale or that
+    the migration had been tampered with. Nothing read this document, so nothing
+    caught it; the failure mode is `CLAUDE.md` §35's exactly — correct code
+    surrounded by false documentation.
+
+    Two claims are pinned, deliberately not one. The digest catches an edit to the
+    bytes; the quoted SQL catches an edit that *keeps* the digest honest but lets the
+    human-readable quotation drift, which is what a reviewer actually reads.
+
+    Normalisation is whitespace-only. Comment lines are dropped from the migration
+    because §2 says so in its own text ("Commentary stripped"), and the runner drops
+    them too, so the effective SQL is identical either way.
+    """
+    packet = (
+        Path(__file__).resolve().parents[3] / "docs" / "migration-approval-packet-0002.md"
+    ).read_text(encoding="utf-8")
+
+    # 1. Every digest the packet quotes is the digest of the file it names. Driven
+    #    off the packet's own table rather than a hardcoded list, so adding a row
+    #    for a future file is covered without editing this test.
+    rows = re.findall(
+        r"^\|\s*`(apps/api/isaac_api/migrations/[^`]+)`\s*\|\s*`([0-9a-f]{64})`\s*\|$",
+        packet,
+        re.M,
+    )
+    assert len(rows) == 2, f"expected the two 0002 files in the digest table, got {rows}"
+    root = Path(__file__).resolve().parents[3]
+    for rel, quoted in rows:
+        actual = hashlib.sha256((root / rel).read_bytes()).hexdigest()
+        assert actual == quoted, (
+            f"{rel}: the packet quotes {quoted} but the committed file hashes to "
+            f"{actual}. Update the digest table in "
+            f"docs/migration-approval-packet-0002.md in the SAME commit as the SQL."
+        )
+
+    # 2. The SQL the packet SHOWS is the SQL the runner will execute. §2's fenced
+    #    block is the first ```sql fence in the document.
+    quoted_sql = re.search(r"```sql\n(.*?)```", packet, re.S)
+    assert quoted_sql is not None, "§2's fenced SQL block is gone"
+
+    def _normalise(text: str) -> str:
+        body = "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("--")
+        )
+        return " ".join(body.split())
+
+    expected = _normalise(quoted_sql.group(1))
+    actual = " ".join(
+        _normalise(statement) + ";" for statement in _runs_migration().statements
+    )
+    assert expected == actual, (
+        "§2 of the approval packet no longer quotes the committed migration.\n"
+        f"packet:    {expected}\n"
+        f"migration: {actual}"
+    )
 
 
 def test_0002_declares_no_uniqueness_on_experiment_and_ordinal():

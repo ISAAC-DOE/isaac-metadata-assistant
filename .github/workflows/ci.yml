@@ -481,7 +481,11 @@ jobs:
             > /tmp/records-after.txt
           diff /tmp/records-before.txt /tmp/records-after.txt || {
             echo "::error::the production-derived stand-in table was modified"; exit 1; }
-          echo "records: byte-identical; added exactly the two application-owned tables"
+          # THE COUNT IN THIS LINE SAID "two" AND THE ASSERTION ABOVE NAMES THREE.
+          # `isaac_schema_migrations` is as application-owned as the other two — it is
+          # in `db_write.OWNED_TABLES` — so the tally was simply wrong, in the one line
+          # a reviewer skims to conclude the guard passed.
+          echo "records: byte-identical; added exactly the three application-owned tables"
 
       # The repository, end to end, against the real engine — the half the
       # in-process fake cannot cover.

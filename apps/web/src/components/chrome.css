@@ -368,12 +368,48 @@
   letter-spacing: 0.04em;
   color: var(--text-slate);
 }
+/*
+ * THESE THREE DECLARATIONS FAILED WCAG AA AND WERE FOUND BY ACCIDENT, which is
+ * worth recording because it says something about how the baseline reads.
+ *
+ * MEASURED against the status bar's own background, `--surface-subtle` #fbfcfd:
+ *   --text-tertiary   #78838f -> 3.76:1   at 11.5px — AA needs 4.5:1. FAILS.
+ *   --text-quaternary #9aa4af -> 2.46:1   at 10.5px — fails AA at ANY size,
+ *                                          large-text 3.0:1 included.
+ * Replaced by, measured the same way:
+ *   --text-muted      #5b6570 -> 5.77:1   (UI prose)
+ *   --text-slate      #5b6b7d -> 5.32:1   (mono, matching `.statusbar-eyebrow`)
+ *
+ * HOW THEY SURFACED, AND WHY THE ROUTE MATTERS. The Run workspace added a
+ * section above the field groups on the record screen. That changed no colour
+ * anywhere — but it grew `record-detail@tablet-768x1024` from 14 to 16
+ * `color-contrast` nodes on linux, and the three nodes that entered the measured
+ * set were `.statusbar-right` and the two `.statusbar-pending` spans. An A/B
+ * against `b7792c1` is what established that; CI's message printed four nodes and
+ * "… and 9 more", all four of them pre-existing debt, so the delta was invisible
+ * in the failure output (now `MAX_REPORTED_NODES` in `e2e/helpers/axe.ts`).
+ *
+ * SO THE PIXELS DID NOT GET WORSE — a reader saw 2.46:1 here before this branch
+ * too. What changed is that the scanner started judging them. Ratcheting the
+ * baseline was therefore available and is what the surrounding entries do for the
+ * Endpoint Explorer's clipped list. It is NOT what was done here: these are three
+ * declarations in one component, the fix is local and the failure is real, and
+ * blessing a real AA failure because it is old is how debt becomes permanent.
+ *
+ * WHAT IS DELIBERATELY NOT FIXED. `--text-tertiary` has 189 uses and
+ * `--text-quaternary` 71 across this app, and most of them fail AA in exactly
+ * this way. Darkening the two TOKENS is the systemic fix, and it is a
+ * design-system change that would move dozens of measured baseline entries at
+ * five viewports each; it is not this slice's to make. Both colours therefore
+ * remain in `A11Y_BASELINE`'s `foregrounds` set, because both still fail
+ * elsewhere — checked, not assumed.
+ */
 .statusbar-pending {
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 .statusbar-note {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: 11.5px;
   padding: 0 16px;
 }
@@ -401,10 +437,11 @@
   align-items: center;
   gap: 14px;
 }
+/* 2.46:1 -> 5.32:1. See the note above `.statusbar-pending`. */
 .statusbar-right {
   font-family: var(--font-mono);
   font-size: 10.5px;
-  color: var(--text-quaternary);
+  color: var(--text-slate);
 }
 
 /* ---- GraphStatusChip (memory plane · advisory, never a validator) --- */
