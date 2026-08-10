@@ -685,6 +685,20 @@ export interface ApiWarningsResponse {
   gating: false;
   warnings: AdvisoryWarning[];
   dry_run?: boolean;
+  // Present ONLY for a record whose runs each export their own official record.
+  // The advice used to be computed from the experiment-level half — never exported,
+  // no measurement block — so it reported NO_MEASUREMENT_SERIES about records that
+  // all carry one. `warnings` above is the deduplicated union over these entries,
+  // which is safe here (and is NOT what `ApiValidateResult` does) precisely because
+  // this channel carries no verdict: aggregating advice cannot turn a pass into a
+  // fail. `dry_run` above is true if ANY entry's advice came from a candidate.
+  runs?: {
+    run_id: string | null;
+    run_label: string | null;
+    record_id: string;
+    warnings: AdvisoryWarning[];
+    dry_run: boolean;
+  }[];
 }
 
 export interface ApiEvidenceEntry {
@@ -1353,6 +1367,22 @@ export interface ApiExportResponse extends VersionFields {
   // on both the success and the gated-failure paths).
   workflow?: ApiWorkflow;
   invalidation?: ApiInvalidation;
+  // Present ONLY on the success path of a record with runs. `records` is what THIS
+  // export wrote — already-materialised runs are skipped and deliberately absent.
+  records?: {
+    run_id: string | null;
+    run_label: string | null;
+    record_id: string | null;
+    record_filename: string | null;
+    sidecar_filename: string | null;
+  }[];
+  // The three-way prune outcome. `pruned_record_ids` alone could not distinguish
+  // "nothing was orphaned" from "an orphan is KEPT because a surviving record still
+  // links to it" (the normal case once two runs share a sample id, and previously
+  // invisible) from "a kept record could not be read, so nothing was examined".
+  pruned_record_ids?: string[];
+  protected_record_ids?: string[];
+  prune_declined?: boolean;
 }
 
 // Everything S6 needs to render the three signals + the export gate, fetched

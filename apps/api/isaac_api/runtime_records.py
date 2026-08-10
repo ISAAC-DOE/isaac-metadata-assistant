@@ -82,7 +82,19 @@ def _project_one(exp) -> dict:
     this record's projection.
     """
     pending = exp.pending_count()
-    exported = exp.exported()
+    # REVIEW ITEM F2 — `all_units_exported()`, not `exported()`. The C5 fix named
+    # "all three `derive_workflow` sites" and there are FIVE; this projection was one
+    # of the two it missed, so `GET /api/runtime/records` disagreed with the detail
+    # endpoint about the same experiment in the same process:
+    #
+    #     runtime_records._project_one(exp)["exported"] -> False
+    #     GET /api/experiments/{id} ["exported"]        -> True
+    #
+    # For an experiment with no runs the two are the same function of the same field.
+    # `record_id` below stays `exp.record_id` — null for a fan-out — for exactly the
+    # reason `routes._summary` gives: `exported` and `record_id` answer two different
+    # questions, and a fan-out genuinely has no single record id.
+    exported = exp.all_units_exported()
     status = exp.status()
     draft_ok = exp.draft_ok()
     ready = exp.export_ready()

@@ -2319,14 +2319,43 @@ def _link_targets_of_surviving_records(exp: Experiment, keep_ids: set[str]) -> s
     return targets
 
 
-def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> list[str]:
+def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> dict:
     """Remove artifact pairs in this experiment's records dir that nothing points at.
+
+    Returns ``{"pruned": [...], "protected": [...], "declined": bool}`` — see the two
+    review items at the end of this docstring for why one list was not enough.
 
     WHY THIS EXISTS. A fan-out writes one pair per Run. Delete a Run, then export
     again *for some other reason* — a newly added run, a run not yet exported — and
     the deleted run's pair is still on disk, named by an id no state references: an
     orphan that ``get_artifacts`` cannot reach, that no reset bucket classifies, and
     that any future artifact listing would present as a record of this experiment.
+
+    **HOW OFTEN IT ACTUALLY REMOVES ANYTHING, MEASURED (review item F3).** The
+    sentence above describes the intent; this one describes the behaviour, and they
+    are further apart than the first revision of this docstring admitted. The C4
+    protection below keeps any stem named as a ``links[].target`` by a KEPT record —
+    and sibling records are MUTUALLY linked whenever two or more runs resolve to the
+    same ``sample.sample_id``, which is the intended normal case, not an edge one.
+    Surviving records are immutable, so that protection never expires. Measured::
+
+        2 runs sharing sample_id, exported (mutually linked);
+        delete run 2, add run 3, export ->
+          pruned_record_ids: []
+          stems on disk: [run 1, run 2 (orphan), run 3]
+
+    The orphan accumulates, permanently, in the ordinary case. That trade is KEPT —
+    deleting a record a surviving immutable record still points at manufactures a
+    dangling link, and an accumulated orphan is recoverable where a deleted record is
+    not — but it is no longer silent: ``protected`` names every stem the prune
+    declined to remove for this reason, so the accumulation is visible in the response
+    instead of being inferable only by listing the directory.
+
+    The headline coverage for the removal path
+    (``test_re_export_after_a_run_is_removed_leaves_no_orphan_artifact``) passes only
+    because its fixture uses ``sample_id=None`` and therefore emits no links at all;
+    ``test_a_shared_sample_id_makes_the_prune_decline_and_the_response_say_so`` is the
+    companion that exercises the case a user will actually hit.
 
     **WHAT IT DOES NOT DO, corrected (review item C8).** An earlier version of this
     docstring said the cleanup exists so that *"Delete a Run and export again and its
@@ -2368,17 +2397,25 @@ def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> list[str]:
     strictly less consequential export reconciliation, which deletes nothing, logs.
     Path-free by rule (P30.6) — the record id and the basename only.
 
-    Returns the ids removed (MEASURED from the unlinks that succeeded, not asserted
-    from what was planned), so the response can disclose them. A failed unlink is
-    skipped rather than raised: this runs after the artifacts were written and the
-    export succeeded, and turning a tidy-up failure into a 500 would report a
+    ``pruned`` is the ids removed, MEASURED from the unlinks that succeeded rather
+    than asserted from what was planned, so the response can disclose them. A failed
+    unlink is skipped rather than raised: this runs after the artifacts were written
+    and the export succeeded, and turning a tidy-up failure into a 500 would report a
     successful export as a failure.
+
+    **``declined`` EXISTS BECAUSE THIS FUNCTION NOW HAS TWO INDEPENDENT WAYS OF DOING
+    NOTHING (review item F9).** One unreadable kept record disables pruning entirely
+    (fail-closed, below); with the F3 disclosure above there is a second no-op path,
+    and an empty ``pruned`` therefore meant three different things — nothing was
+    orphaned, everything orphaned was protected, or nothing was even examined. The
+    caller can now tell them apart, which matters most for the third: a declined prune
+    is the one that reports a state an operator should look at.
     """
     records_dir = exp.records_dir
     if not records_dir.is_dir():
-        return []
+        return {"pruned": [], "protected": [], "declined": False}
     try:
-        protected = keep_ids | _link_targets_of_surviving_records(exp, keep_ids)
+        link_targets = _link_targets_of_surviving_records(exp, keep_ids)
     except _UnreadableSurvivor as unreadable:
         # A record we are keeping could not be read, so we do not know what it
         # points at. Delete nothing: an accumulated orphan is recoverable, a record
@@ -2388,13 +2425,23 @@ def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> list[str]:
             "so its link targets are unknown",
             unreadable.args[0],
         )
-        return []
+        return {"pruned": [], "protected": [], "declined": True}
+    protected = keep_ids | link_targets
     removed: set[str] = set()
+    spared: set[str] = set()
     for path in sorted(records_dir.iterdir()):
         if not path.is_file():
             continue
         stem = _artifact_stem(path.name)
-        if stem is None or stem in protected:
+        if stem is None:
+            continue
+        if stem in protected:
+            # Only a stem NO CURRENT UNIT CLAIMS is reported as protected. A stem in
+            # `keep_ids` is a live record of this experiment, not an orphan that
+            # survived — reporting those would bury the one fact this list exists to
+            # publish under a restatement of the run set.
+            if stem not in keep_ids:
+                spared.add(stem)
             continue
         try:
             path.unlink()
@@ -2408,7 +2455,18 @@ def _prune_orphan_artifacts(exp: Experiment, keep_ids: set[str]) -> list[str]:
                 exp.id,
             )
         removed.add(stem)
-    return sorted(removed)
+    if spared:
+        _log.warning(
+            "export prune: kept %d orphan artifact pair(s) in experiment %s that no "
+            "current run claims, because a surviving record still links to them",
+            len(spared),
+            exp.id,
+        )
+    return {
+        "pruned": sorted(removed),
+        "protected": sorted(spared),
+        "declined": False,
+    }
 
 
 def _flat_export_errors(payload: dict, result) -> list:
@@ -2491,10 +2549,24 @@ def _unit_artifact_entry(unit) -> dict:
         "not the status code. With runs, `runs[]` carries each run's own verdict and "
         "`failed_run_ids` names the ones that refused. Nothing is written in that "
         "case.\n\n"
+        "**What happens to the records of runs that have been removed.** When a "
+        "record with runs exports, artifact pairs in its own records directory that "
+        "no current run claims are removed, and `pruned_record_ids` names them. Two "
+        "things stop that removal, and they are reported separately because an empty "
+        "`pruned_record_ids` would otherwise mean three different things. A pair a "
+        "surviving record still links to is kept and named in "
+        "`protected_record_ids` — records are immutable, so removing it would leave "
+        "that link pointing at nothing. And if a record being kept cannot be read at "
+        "all, nothing is removed and `prune_declined` is `true`, because a record "
+        "whose links are unknown may reference anything.\n\n"
         "Requires the record's current `ETag` in `If-Match`. Exported records are "
         "immutable: exporting a record whose runs have all already been exported is "
         "refused, and a run that is already exported is never rewritten when a "
-        "sibling run is exported alongside it."
+        "sibling run is exported alongside it. An export is also refused with "
+        "`sibling_link_conflict` when it would rewrite a record that an already-"
+        "exported record links to as sharing its sample id, with a different sample "
+        "id — the link could not be corrected afterwards, so one of the two records "
+        "would be false. Nothing is written in that case."
     ),
     response_description=(
         "The export result. `ok: true` means the record and sidecar were written; "
@@ -2672,6 +2744,51 @@ def post_export(
                     record_path.name,
                 )
 
+        # ---- REWRITE-TIME FALSITY (review item F7), CHECKED BEFORE ANYTHING RUNS ---
+        #
+        # C1 closed EMIT-TIME falsity: `_linkable` stops this export writing a link
+        # its target disproves. Nothing asked the converse — does REWRITING a record
+        # falsify a link a SURVIVING sibling already carries? Measured on `c467dc7`:
+        # two runs share `SYN-A`, are exported and mutually linked; delete run 1's
+        # artifacts, change the experiment's `sample.sample_id`, export along the
+        # blessed self-heal path, and the result was
+        #
+        #     01…63G  sample_id SYN-CHANGED  links []
+        #     01…63H  sample_id SYN-A        links ['01…63G']   <- asserts a shared id
+        #
+        # disprovable from the two records alone. The falsified record is the
+        # SURVIVING one, which is immutable, so there is no write that leaves both
+        # true. The export is therefore REFUSED rather than performed with a
+        # correction we are not allowed to make — see `workspace.sibling_link_conflicts`
+        # for why refusal is the answer and not a placeholder for a better one.
+        #
+        # A zero-run experiment has no siblings, so this cannot fire for any
+        # experiment this API can currently create.
+        if exp.runs:
+            conflicts = ws.sibling_link_conflicts(units)
+            if conflicts:
+                _log.warning(
+                    "export refused for record %s: writing %d run record(s) would "
+                    "falsify a same_sample_as link an already-exported sibling carries",
+                    exp.id,
+                    len({conflict["record_id"] for conflict in conflicts}),
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "sibling_link_conflict",
+                        "message": (
+                            "This export would rewrite a record that an already-"
+                            "exported record links to as sharing its sample id, with "
+                            "a different sample id. Exported records are immutable, "
+                            "so the link could not be corrected and one of the two "
+                            "records would be false. Nothing was written. Restore the "
+                            "sample id, or remove the run."
+                        ),
+                        "conflicts": conflicts,
+                    },
+                )
+
         # ---- THE COMMIT BOUNDARY, stated exactly (see the endpoint description) ----
         # PHASE 1: validate EVERY eligible unit. Nothing is written in this loop —
         # `export_draft` is a pure transform + two validations. A single failure means
@@ -2767,7 +2884,7 @@ def post_export(
             keep.add(exp.id)
             if exp.record_id is not None:
                 keep.add(exp.record_id)
-            pruned = _prune_orphan_artifacts(exp, keep)
+            prune = _prune_orphan_artifacts(exp, keep)
             # FAN-OUT SHAPE. `record_id` / `artifact_refs` are SINGULAR by name and by
             # every existing client's reading of them, and a fan-out has N of each.
             # Filling them from an arbitrary one of the N would be a false singular,
@@ -2784,7 +2901,15 @@ def post_export(
             payload["record_id"] = None
             payload["artifact_refs"] = None
             payload["records"] = [_unit_artifact_entry(unit) for unit, _ in results]
-            payload["pruned_record_ids"] = pruned
+            # THREE KEYS, NOT ONE (review items F3 and F9). `pruned_record_ids` alone
+            # could not distinguish "nothing was orphaned" from "every orphan is
+            # protected by a surviving record's link" from "one kept record could not
+            # be read, so nothing was even examined" — and the middle case is the
+            # NORMAL one for a fan-out whose runs share a sample id. See
+            # `_prune_orphan_artifacts`.
+            payload["pruned_record_ids"] = prune["pruned"]
+            payload["protected_record_ids"] = prune["protected"]
+            payload["prune_declined"] = prune["declined"]
         else:
             payload["record_id"] = exp.record_id
             # P30.6 — SAFE basename only (see _detail); never the absolute path.
@@ -3040,6 +3165,47 @@ def _validate_unit(unit) -> dict:
     return {**entry, "ok": result.ok, "errors": errors, "dry_run": True}
 
 
+def _fan_out_official_verdict(exp: Experiment) -> dict:
+    """The official-schema verdict for an experiment WITH RUNS. One definition.
+
+    REVIEW ITEM F1 — THE C6 FIX REPAIRED ONE OF TWO COPIES. C6 made ``post_validate``
+    fan-out aware, and ``_assistant_validate_dryrun`` — reached from the Assistant Q&A
+    route — carried the identical defect untouched: it tested ``exp.exported()``,
+    permanently False for a fan-out, and validated ``exp.draft``, the experiment-level
+    half that is never exported and is not a record. Measured on ``c467dc7``, one
+    process, one fully-exported 2-run fan-out::
+
+        /api/experiments/{id}/validate         -> ok: true
+        routes._assistant_validate_dryrun(exp) -> {"ok": false, "errors":
+           [{"path": "$", "message": "'descriptors' is a required property"}]}
+
+    That error string is verbatim the defect C6 was written to remove. So this is not
+    fixed twice: it is ONE function, called from both, and a third divergence would
+    have to be introduced deliberately.
+
+    It returns ``post_validate``'s whole response body rather than a smaller shared
+    core, because that endpoint is the one that OWNS this contract; the assistant
+    projects the two keys it answers with. The reverse — a lowest-common-denominator
+    return that each caller re-wraps — would have left the ``runs``/``dry_run``
+    aggregation duplicated, which is the half that was actually wrong.
+
+    ``dry_run`` at the top level is true if ANY unit's verdict came from an in-memory
+    candidate: ``dry_run: false`` is the strong claim that a WRITTEN record was
+    checked, and it must not be made on behalf of a unit that has no written record.
+    """
+    entries = [_validate_unit(unit) for unit in exp.export_units()]
+    failed = [entry for entry in entries if not entry["ok"]]
+    return {
+        "ok": not failed,
+        # The FIRST FAILING unit's errors, so a caller reading only `errors` is shown
+        # an actual failure; every unit's own verdict is in `runs`.
+        "errors": failed[0]["errors"] if failed else [],
+        "schema": SCHEMA_LABEL,
+        "dry_run": any(entry["dry_run"] for entry in entries),
+        "runs": entries,
+    }
+
+
 # --- 9. validate --------------------------------------------------------------
 
 
@@ -3095,17 +3261,11 @@ def post_validate(scope: TutorialScopeDep, experiment_id: ExperimentId):
         # in-memory candidate. `dry_run: false` is the strong claim that the WRITTEN
         # record was checked, and it must not be made on behalf of a unit that has no
         # written record; `runs[]` carries the per-unit answer.
-        entries = [_validate_unit(unit) for unit in exp.export_units()]
-        failed = [entry for entry in entries if not entry["ok"]]
-        return {
-            "ok": not failed,
-            # The FIRST FAILING unit's errors, so a caller reading only `errors` is
-            # shown an actual failure; every unit's own verdict is in `runs`.
-            "errors": failed[0]["errors"] if failed else [],
-            "schema": SCHEMA_LABEL,
-            "dry_run": any(entry["dry_run"] for entry in entries),
-            "runs": entries,
-        }
+        #
+        # REVIEW ITEM F1 — the body is built by `_fan_out_official_verdict`, which the
+        # assistant's validate thunk also calls. It used to be inline here, and the
+        # assistant kept its own pre-C6 copy.
+        return _fan_out_official_verdict(exp)
 
     if exp.exported():
         # P4 review FIX C — read DEFENSIVELY. The state can say exported while the
@@ -3311,7 +3471,26 @@ def post_audit(scope: TutorialScopeDep, experiment_id: ExperimentId):
     exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
-    if not exp.exported():
+    # REVIEW ITEM F5 — `any_unit_exported()`, not `exported()`. This gate asserted
+    # something false about a fully-exported fan-out, whose N records were all on
+    # disk. Measured on `c467dc7`:
+    #
+    #     POST .../audit -> {"records": [], "text": "No records found.",
+    #                        "message": "Nothing exported yet — export this
+    #                                    experiment before auditing."}
+    #
+    # The audit itself was never fan-out-blind: `audit_records` GLOBS this
+    # experiment's own records dir (see the note below) and would have found every
+    # run's record. Only the predicate in front of it was.
+    #
+    # `any_unit_exported()` and not `all_units_exported()`, deliberately: a PARTIALLY
+    # exported fan-out has records on disk and they are worth auditing, so the
+    # stricter aggregate would have replaced one false "nothing exported" with a
+    # narrower one. This route describes WHAT IS ON DISK; the export gate is where the
+    # all-or-nothing aggregate belongs (contract §3 D4). For an experiment with no
+    # runs the two are the same function of the same field, so the refusal below is
+    # byte-identical for every experiment this API can create.
+    if not exp.any_unit_exported():
         return {
             "records": [],
             "text": "No records found.",
@@ -3331,7 +3510,95 @@ def post_audit(scope: TutorialScopeDep, experiment_id: ExperimentId):
 # --- 11. warnings (advisory, non-gating) --------------------------------------
 
 
+def _unit_warnings_entry(unit) -> dict:
+    """One export unit's advisory warnings, ADDRESSED TO ITS RUN.
+
+    Mirrors ``_validate_unit``: ``dry_run`` is per unit and states WHICH document the
+    advice describes — the written record when this unit is materialised, an in-memory
+    candidate otherwise. An unreadable written record degrades to the candidate and
+    SAYS so, because this channel carries no verdict and ``dry_run`` is exactly the
+    field that distinguishes the two documents.
+
+    **It does not raise, and that is a DIFFERENCE from the single-record path rather
+    than a restatement of it.** ``_warnings_payload`` calls ``export_draft``
+    unguarded, so a draft that makes the transform throw takes that route to a 500;
+    here one bad run would take down the advice for every other run in the set, which
+    is a worse trade at N units than at one. The degradation is the one this channel
+    already has for a draft too broken to produce a record at all
+    (``result.record or {}`` below and in ``_warnings_payload``): advise on the empty
+    record, with ``dry_run: true`` saying no written record was read. That is a
+    deliberately weak answer, not a good one — see the comment in ``_warnings_payload``
+    for why it is still preferred to reporting zero warnings, which would read as
+    "nothing to advise" about a document nobody could build.
+    """
+    entry = {
+        "run_id": unit.run_id,
+        "run_label": unit.run_label,
+        "record_id": unit.target_id,
+    }
+    record = _read_artifact_json(unit.record_path()) if unit.materialised() else None
+    if record is not None:
+        dry_run = False
+    else:
+        try:
+            result = export_draft(unit.draft, REPO_ROOT)
+            record = result.record or {}
+        except Exception:
+            _log.exception("warnings dry-run failed run=%s", unit.run_id)
+            record = {}
+        dry_run = True
+    payload = serialize.warnings_to_dict(portal_warnings(record))
+    return {**entry, "warnings": payload["warnings"], "dry_run": dry_run}
+
+
+def _fan_out_warnings_payload(exp: Experiment) -> dict:
+    """:func:`_warnings_payload` for an experiment WITH RUNS.
+
+    REVIEW ITEM F5. ``exp.exported()`` is permanently False for a fan-out, so the
+    single-record path below dry-ran ``exp.draft`` — the EXPERIMENT-LEVEL HALF, which
+    holds no measurement, no links and no run content at all, and is never exported.
+    Measured on ``c467dc7`` for a fully-exported 2-run fan-out::
+
+        GET .../warnings -> dry_run: true, codes ['NO_LINKS','NO_MEASUREMENT_SERIES']
+        exported record keys -> [... 'measurement' ...]
+
+    Every record on disk HAS a measurement block. The advice was true of nothing.
+
+    **The top-level ``warnings`` is the DEDUPLICATED UNION over the runs, in first-seen
+    order — not the first failing unit's, which is what ``/validate`` does.** The two
+    channels differ in a way that justifies differing here: ``/validate`` returns a
+    VERDICT, so a caller reading only ``errors`` must be shown a real failure and any
+    aggregation risks implying a whole-set claim. This channel returns ADVICE and
+    carries no pass/fail field by design, so the union cannot mislead — it can only
+    under- or over-report which run to look at, and ``runs[]`` carries that exactly.
+    Deduplication is on the whole ``(code, where, message)`` triple, so two runs
+    raising the same advice about the same place appear once, while the same code
+    about different places stays two pieces of advice.
+    """
+    entries = [_unit_warnings_entry(unit) for unit in exp.export_units()]
+    seen: set[tuple] = set()
+    merged: list[dict] = []
+    for entry in entries:
+        for warning in entry["warnings"]:
+            key = (warning["code"], warning["where"], warning["message"])
+            if key not in seen:
+                seen.add(key)
+                merged.append(warning)
+    return {
+        "advisory": True,
+        "gating": False,
+        "warnings": merged,
+        # Same rule as `/validate`: `dry_run: false` is the strong claim that a
+        # WRITTEN record was advised on, so it must not be made for the set while any
+        # member's advice came from an in-memory candidate.
+        "dry_run": any(entry["dry_run"] for entry in entries),
+        "runs": entries,
+    }
+
+
 def _warnings_payload(exp: Experiment) -> dict:
+    if exp.runs:
+        return _fan_out_warnings_payload(exp)
     # P4 review FIX C — read DEFENSIVELY (see `post_validate`). `getExportReadiness`
     # fetches this in the same `Promise.all` as `/artifacts`, so an unguarded read here
     # took the whole readiness view down with an unhandled 500.
@@ -3369,7 +3636,13 @@ _WARNINGS_DESCRIPTION = (
     "This channel deliberately carries no pass, fail, or validity field, and it "
     "never blocks an export — read it as advice for a human, alongside the "
     "official-schema verdict, not instead of it. The `GET` and `POST` forms are "
-    "equivalent: both are read-only and return the same payload."
+    "equivalent: both are read-only and return the same payload.\n\n"
+    "A record with **runs** exports one official record per run, so it is advised "
+    "on per run: `runs[]` carries each run's own warnings and its own `dry_run`. "
+    "The top-level `warnings` is the deduplicated union over the runs — advice, "
+    "unlike a verdict, is safe to aggregate — and the top-level `dry_run` is "
+    "`true` if any run's advice came from an in-memory candidate rather than a "
+    "written record."
 )
 _WARNINGS_RESPONSE_DESCRIPTION = (
     "The advisory warnings and whether they were computed from a dry run. No "
@@ -4454,7 +4727,20 @@ def _assistant_validate_dryrun(exp: Experiment) -> dict:
     ``is_validation_unavailable`` check already routes to the honest
     "could not be completed" answer — so the assistant states no count, no location
     and no verdict, instead of describing a violation nobody located.
+
+    REVIEW ITEM F1 — a record WITH RUNS is answered by ``_fan_out_official_verdict``,
+    the same function ``post_validate`` returns. This branch did not exist, so the
+    assistant fell through to the dry run below and validated ``exp.draft`` — the
+    experiment-level half, which is never exported and is not a record — reporting
+    ``'descriptors' is a required property`` about a set of records that had just
+    passed official validation. The verdict is PROJECTED to the two keys this channel
+    answers with: the assistant answers a question, it does not serve the validation
+    contract, so widening it to carry ``schema``/``dry_run``/``runs`` would put a
+    second copy of that contract on a surface with no consumer for it.
     """
+    if exp.runs:
+        verdict = _fan_out_official_verdict(exp)
+        return {"ok": verdict["ok"], "errors": verdict["errors"]}
     if exp.exported():
         record = _read_artifact_json(exp.record_path())
         if record is None:

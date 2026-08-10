@@ -1240,35 +1240,105 @@ def _authoritative_signature(exp: "Experiment") -> str:
 # most of both; it is not added here because it introduces a cache into a module
 # whose correctness argument is "recomputed on every read, never stored".
 #
-# --- WHAT THE OTHER ROUTES DO FOR A FAN-OUT, corrected ------------------------
+# --- WHAT EVERY OTHER SURFACE DOES FOR A FAN-OUT ------------------------------
 #
-# An earlier disclosure of this slice said the remaining read-only routes "surface
-# no artifacts" for a fan-out. That was too kind to it, and being too kind to your
-# own slice is the failure this file exists to avoid. They did not merely omit;
-# some of them ASSERTED, and what they asserted was false. Measured, and each is
-# now either fixed or stated:
+# HOW THIS LIST WAS BUILT, because that is the part that keeps failing. Two earlier
+# revisions of this block were wrong in the same way, and neither was wrong about a
+# fact — both were wrong about a COUNT. The first said the remaining read-only routes
+# "surface no artifacts", which was too kind: some of them ASSERTED, and falsely. The
+# second corrected that, enumerated FOUR routes, and claimed *"each is now either
+# fixed or stated"* — a completeness claim over an enumeration that was missing six
+# surfaces, including two that were still asserting falsehoods. A disclosure that
+# claims completeness it does not have is worse than one that says "at least these",
+# because it stops the next reader looking.
 #
-#   * ``POST .../validate`` returned ``{"ok": false, "errors": [{"path": "$",
-#     "message": "'descriptors' is a required property"}], "dry_run": true}`` about
-#     a fan-out whose N records had all just passed official validation — because
-#     ``exp.exported()`` is False for a fan-out, so it validated ``exp.draft``, the
-#     experiment-level half, which is never exported and is not a record. FIXED
-#     (C6): checked per run, ``runs[]`` carries each verdict.
-#   * ``GET .../<id>`` reported ``exported: false`` and ``workflow.export:
-#     'current'`` for a fully-exported fan-out, disagreeing with the export
-#     response's own ``completed`` — and any later mutation then reported
-#     ``reopened_steps: ['export']``. FIXED (C5).
-#   * ``evidenced_field_count`` is 14 for a fan-out where the byte-equivalent
-#     zero-run experiment reports 26, because it reads ``exp.draft`` alone. NOT
-#     FIXED — see the comment at its call site in ``routes._summary`` for why the
-#     honest options are "disclose" or "redefine", and why redefining is a product
-#     decision rather than a bug fix.
-#   * ``GET .../artifacts`` still serves the experiment's OWN pair only, so for a
-#     fan-out it returns four nulls — beside an ``artifact.state`` that can now
-#     read ``current``, which together said "current, but there is nothing". The
-#     nulls are correct (there is no such pair); what was missing was the reason,
-#     and it is now served. LISTING the per-run pairs is left to the Run-workspace
-#     slice, which is the slice with a UI for them.
+# So the enumeration below is established BY SEARCH over the API package —
+# every function that calls ``exported()``, ``record_path()`` or ``sidecar_path()`` on
+# an ``Experiment`` (as opposed to an ``ExportUnit``, which is fan-out-native by
+# construction), plus every ``derive_workflow`` call site — and the search is RE-RUN
+# AT TEST TIME by
+# ``test_export_fan_out.test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair``,
+# which fails until any new such caller is named here. The list cannot silently go
+# stale again; it can only go stale loudly.
+#
+# There are FIVE ``derive_workflow`` call sites, not three as the C5 fix said:
+# ``routes._workflow_for``, ``dependencies._post_workflow``,
+# ``runtime_records._project_one``, ``corpus_mutation._workflow_consistent`` (which
+# takes no experiment at all — it calls the pure function with literal arguments as a
+# regression check, and is correct as written), and the definition itself.
+#
+# FIXED — these asserted something false about a fan-out and no longer do:
+#
+#   * ``routes.post_validate`` returned ``{"ok": false, "errors": [{"path": "$",
+#     "message": "'descriptors' is a required property"}], "dry_run": true}`` about a
+#     fan-out whose N records had all just passed official validation, because
+#     ``exp.exported()`` is False for a fan-out and it therefore validated
+#     ``exp.draft`` — the experiment-level half, which is never exported and is not a
+#     record. FIXED (C6): checked per run, ``runs[]`` carries each verdict.
+#   * ``routes._assistant_validate_dryrun`` — the Assistant Q&A route's validation
+#     thunk — was a SECOND COPY of that same defect and the C6 fix did not touch it.
+#     Measured on ``c467dc7`` in one process: the endpoint answered ``ok: true`` while
+#     the thunk answered ``ok: false`` with the identical ``'descriptors' is a
+#     required property``. FIXED (F1), and fixed ONCE: both now call
+#     ``routes._fan_out_official_verdict``.
+#   * ``routes._summary`` (``exported``) and ``routes._detail`` reported ``exported:
+#     false`` and ``workflow.export: 'current'`` for a fully-exported fan-out,
+#     disagreeing with the export response's own ``completed`` — and any later
+#     mutation then reported ``reopened_steps: ['export']``. FIXED (C5).
+#   * ``routes._workflow_for`` and ``dependencies._post_workflow`` are the other two
+#     halves of that same disagreement. FIXED (C5).
+#   * ``runtime_records._project_one`` — served by ``GET /api/runtime/records`` — was
+#     the FIFTH site the C5 fix's "all three" did not count. Measured on ``c467dc7``:
+#     ``_project_one(exp)["exported"] -> False`` beside ``GET /api/experiments/{id}
+#     ["exported"] -> True``, same experiment, same process. FIXED (F2).
+#   * ``dependencies.artifact_state`` reported ``none`` — "nothing was exported" — for
+#     an experiment whose N records were all on disk and current. FIXED (C5), and
+#     corrected again in ``_fan_out_artifact_state`` (F4), which used to report a
+#     PERMANENT ``stale`` that nothing could repair: it compared each materialised
+#     record against a draft carrying the reverse sibling link that record will
+#     deliberately never gain.
+#   * ``routes.post_audit`` answered ``{"records": [], "text": "No records found.",
+#     "message": "Nothing exported yet — export this experiment before auditing."}``
+#     about a fully-exported fan-out. The audit itself was never fan-out-blind —
+#     ``audit_records`` globs this experiment's own records dir — only the
+#     ``exported()`` gate in front of it was. FIXED (F5), gated on
+#     ``any_unit_exported()`` so a PARTIAL fan-out is audited too.
+#   * ``routes._warnings_payload`` (both the GET and the POST warnings operations)
+#     dry-ran ``exp.draft`` and advised ``NO_LINKS`` / ``NO_MEASUREMENT_SERIES`` about
+#     a fan-out whose every record on disk carries a ``measurement`` block. FIXED
+#     (F5): per run, with ``runs[]`` and a deduplicated union at the top level.
+#   * ``routes.post_export`` itself: the 409 named one arbitrary run's record as
+#     though it were THE record (FIXED, C10), the prune could delete a record a
+#     surviving run or a surviving link still named (FIXED, C3/C4/C7), and it could
+#     rewrite a record in a way that falsified a surviving sibling's link (FIXED, F7 —
+#     the export is refused with ``sibling_link_conflict``).
+#   * ``workspace._plan_digest_row`` stats the SINGULAR pair, which is permanently
+#     absent for a fan-out, so an acknowledged run export could be destroyed by a
+#     reset in silence. FIXED by the per-run ``[run_id, record_present,
+#     sidecar_present]`` element; the singular stats are retained for the legacy pair.
+#
+# STATED, NOT FIXED — these do not assert anything false, and each is incomplete for
+# a reason that is a product decision rather than a bug:
+#
+#   * ``routes.get_artifacts`` serves the experiment's OWN pair, so a fan-out gets
+#     four nulls — beside an ``artifact.state`` that can now read ``current``, which
+#     together said "current, but there is nothing". The nulls are correct; what was
+#     missing was the reason, and it is now served (``FAN_OUT_ARTIFACT_REASON``).
+#     LISTING the per-run pairs is left to the Run-workspace slice, which is the slice
+#     with a UI for them.
+#   * ``routes.get_evidence`` reads the experiment's own sidecar+record pair, which a
+#     fan-out does not have, so it degrades to the EXPERIMENT-LEVEL draft trail. That
+#     trail is this record's own evidence and nothing is fabricated, but it omits
+#     every run-level field. Merging N sidecars would have to answer "whose evidence
+#     is this" for a field N runs each resolve, and that is the same product question
+#     ``evidenced_field_count`` raises below.
+#   * ``routes.get_evidence_classification`` classifies ``exp.draft`` alone, so its
+#     five-class histogram counts the experiment-level fields only. Same question,
+#     same answer: it is a display axis, not a verdict, and nothing gates on it.
+#   * ``evidenced_field_count`` is 14 for a fan-out where the byte-equivalent zero-run
+#     experiment reports 26, because it reads ``exp.draft`` alone. See the comment at
+#     its call site in ``routes._summary`` for why the honest options are "disclose"
+#     or "redefine", and why redefining is a product decision rather than a bug fix.
 
 #: The ONE ``rel``/``basis`` pair this module will assert between sibling run
 #: records, and the field whose equality justifies it.
@@ -1341,12 +1411,28 @@ def _merge_implicit(
     each entry is a DERIVATION, and a derivation is only true relative to the values
     it was derived from. That distinction is the whole of this function.
 
-    **``inherit=True`` — a run that overrides nothing.** It genuinely holds the
-    experiment's values at every experiment-level address, so the experiment's
-    derivations are true of it, and withholding them would silently delete recorded
-    evidence from the exported sidecar. Carrying them is correct.
+    **``inherit=True`` — a run that holds the experiment's values.** It genuinely
+    holds them at every experiment-level address, so the experiment's derivations are
+    true of it, and withholding them would silently delete recorded evidence from the
+    exported sidecar. Carrying them is correct.
 
-    **``inherit=False`` — a run that overrides ANY address.** An earlier revision
+    **THAT TEST IS ABOUT VALUES, NOT ABOUT WHETHER AN OVERRIDE WAS RECORDED (review
+    item F8).** The caller used to pass ``inherit=not run.overrides``, so an override
+    whose value EQUALS the experiment's — a no-op — stripped every inherited entry.
+    Measured. That was consistent with the rule as it was written down and
+    inconsistent with the argument written immediately below it, which reasons
+    entirely from DIVERGENCE (*"That argument was wrong the moment a run diverged"*).
+    A no-op override has not diverged; the run holds what the experiment holds, which
+    is the very premise the paragraph above rests on, so dropping the entries deleted
+    real evidence for no reason.
+
+    Comparing values needs no dependency table and invents no relationship: it asks
+    only whether this run's payload at an address equals the experiment's CURRENT
+    payload at that address, which :class:`Resolution` already reports. An override at
+    an address the experiment does not carry counts as divergence — there is no value
+    to agree with, and fail-closed is the right side of that.
+
+    **``inherit=False`` — a run that diverges at ANY address.** An earlier revision
     carried the entries unconditionally, arguing that "merging asserts nothing that
     was not already asserted and evidenced on the experiment". That argument was
     wrong the moment a run diverged, and the review measured it: a run overriding
@@ -1356,7 +1442,8 @@ def _merge_implicit(
     to this record's own value yields ``Fe``. The entry was evidenced RELATIVE TO THE
     EXPERIMENT'S value; against the run's it is false.
 
-    **Why ALL the experiment's entries are dropped and not just the dependent ones.**
+    **Why ALL the experiment's entries are dropped when it does, and not just the
+    dependent ones.**
     An ``implicit`` entry carries no machine-readable link to the field it derives
     from — only prose in ``rule``. Keeping the entries that "obviously" do not depend
     on an overridden field would mean parsing that prose, or hard-coding a dependency
@@ -1379,6 +1466,32 @@ def _merge_implicit(
     merged = [copy.deepcopy(e) for e in exp_items if e.get("about") not in run_abouts]
     merged.extend(copy.deepcopy(run_items))
     return merged or None
+
+
+def _diverges_from_experiment(resolutions: dict[str, "Resolution"]) -> bool:
+    """Whether this run holds a DIFFERENT value from the experiment anywhere.
+
+    The ``inherit`` input to :func:`_merge_implicit`, inverted. It reads only what
+    :func:`resolve_inherited` already computed, so it adds no traversal and no second
+    definition of what a run holds at an address.
+
+    A resolution is divergent when it came from an override AND its payload differs
+    from the experiment's CURRENT payload at the same address. ``inherited_payload``
+    is ``None`` for an override at an address the experiment does not carry, and that
+    counts as divergence: there is no value for the run to agree with, so the
+    experiment's derivations cannot be shown to be true of it.
+
+    ``displaced_payload`` is deliberately NOT consulted. It records what an override
+    displaced WHEN IT WAS RECORDED, and the question here is about now — an
+    experiment-level edit that moved the experiment onto the override's own value
+    should stop the entries being withheld, and an edit that moved it away should
+    start withholding them.
+    """
+    return any(
+        resolution.provenance == PROVENANCE_OVERRIDDEN
+        and resolution.payload != resolution.inherited_payload
+        for resolution in resolutions.values()
+    )
 
 
 def _merge_block_evidence(experiment_draft: dict, run_draft: dict) -> dict | None:
@@ -1569,8 +1682,6 @@ def _linkable(unit: ExportUnit) -> tuple[str, str] | None:
 
     * **materialised** (state exported AND both halves on disk) — its record will not
       be rewritten by this export, so the only honest source is the record itself.
-      Its own ``record_id`` is the link target, because that is the id of the file
-      that exists, rather than the id we would have minted.
     * **not materialised** — this export writes it from ``unit.draft``, so the draft
       is what the record will carry.
 
@@ -1578,6 +1689,27 @@ def _linkable(unit: ExportUnit) -> tuple[str, str] | None:
     the draft.** A fallback would restore exactly the defect for the one case where
     we have the least evidence. A unit with no linkable id is simply not grouped:
     no link is a legitimate outcome (``CLAUDE.md`` §5), a false one is not.
+
+    **THE TARGET IS ``unit.target_id``, NOT THE RECORD'S OWN ``record_id`` (review
+    item F6).** The first revision of this function returned ``record["record_id"]``
+    and justified it as *"the id of the file that exists"*. That was wrong by one
+    level of indirection: the FILE is named by ``unit.target_id``
+    (:meth:`ExportUnit.record_path`), and the ``record_id`` string INSIDE it is
+    separate content that a document written outside this module can set to anything.
+    With the divergence section 10's own C7 test plants, the measured result was a
+    link whose target matched no stem in the directory::
+
+        targets = ['01JQZ0ADVPHANTOMTARGET0001']
+        stems   = ['01KZMKT511J6RCMDGHJ1AVH618', '01KZMKT51KCWDN6C17WRYKQZF7']
+
+    — the application manufacturing exactly the ``dangling_link_count`` that
+    :func:`routes._link_targets_of_surviving_records` exists to prevent.
+
+    A record whose own ``record_id`` DISAGREES with the file carrying it yields no
+    link at all, rather than a link under the filename. The disagreement means the
+    record cannot vouch for its own identity, and a record we cannot trust to name
+    itself is not evidence for a relation between records. Refusing is the same
+    fail-closed side as the unreadable case above.
 
     ``is_record_id`` on the target as well, because the schema constrains
     ``links[].target`` to ``^[0-9A-Z]{26}$``.
@@ -1597,14 +1729,15 @@ def _linkable(unit: ExportUnit) -> tuple[str, str] | None:
         return None  # never guess what a record we could not read says
     if not isinstance(record, dict):
         return None
-    target_id = record.get("record_id")
+    if record.get("record_id") != unit.target_id:
+        return None  # the record does not name the file it is stored in
     sample = record.get("sample")
     sample_id = sample.get("sample_id") if isinstance(sample, dict) else None
-    if not isinstance(target_id, str) or not is_record_id(target_id):
-        return None
     if not isinstance(sample_id, str) or not sample_id.strip():
         return None
-    return target_id, sample_id
+    if not is_record_id(unit.target_id):
+        return None
+    return unit.target_id, sample_id
 
 
 def _apply_sibling_grouping(experiment: "Experiment", units: list[ExportUnit]) -> None:
@@ -1685,6 +1818,149 @@ def _apply_sibling_grouping(experiment: "Experiment", units: list[ExportUnit]) -
             for other, other_target in group:
                 if other is not unit:
                     _add_sibling_link(unit.draft, other_target, sample_id)
+
+
+def without_sibling_links(record: dict) -> dict:
+    """``record`` with every link this module's grouping emits removed.
+
+    PUBLIC, and used by exactly one caller: ``dependencies._fan_out_artifact_state``
+    (review item F4). It lives here because the ``(rel, basis)`` pair it filters on is
+    defined here, and a second copy of that pair in the freshness module would be free
+    to drift away from what the export actually writes.
+
+    WHY A FRESHNESS COMPARISON MUST IGNORE THESE. ``artifact_state`` asks "is the
+    written record still a faithful projection of the current draft", and the draft it
+    compares against comes from :meth:`Experiment.export_units`, which applies
+    :func:`_apply_sibling_grouping` to EVERY unit including materialised ones. So
+    exporting a second run adds the REVERSE link into the first run's composed draft —
+    a link that function's own docstring says the first record will deliberately never
+    gain, because records are immutable. Measured before this fix: export run 1 alone,
+    add run 2, export, and run 1's artifact reported::
+
+        {"state": "stale", "reason": "The record changed after export; … regenerate
+         the record (or reset the workspace) to refresh it."}
+
+    Nothing had changed, re-export answered 409, and the only remedy the reason
+    offered was a destructive whole-workspace reset. A permanent unrepairable
+    ``stale`` is worse than no signal, because it trains a reader to ignore the one
+    that is real.
+
+    THE NARROWNESS IS THE POINT, and it is stated because it is a real loss. Only
+    links matching BOTH :data:`SIBLING_REL` and :data:`SIBLING_BASIS` are dropped, and
+    they are dropped from BOTH sides of the comparison, so a link a run carries for
+    any other reason still stales its record when it changes. What this cannot detect
+    is a change to a ``same_sample_as`` link on a materialised record — which is
+    exactly the change that record can never receive, so reporting it would be
+    reporting an unfixable difference rather than a stale artifact.
+
+    ``links`` is DROPPED rather than left empty when nothing survives, because
+    ``export.transform`` omits the key entirely for a draft with no links, and an
+    empty list beside an absent key would compare unequal for no reason. Never
+    mutates its argument.
+    """
+    links = record.get("links")
+    if not isinstance(links, list):
+        return record
+    kept = [
+        link
+        for link in links
+        if not (
+            isinstance(link, dict)
+            and link.get("rel") == SIBLING_REL
+            and link.get("basis") == SIBLING_BASIS
+        )
+    ]
+    if kept == links:
+        return record
+    trimmed = dict(record)
+    if kept:
+        trimmed["links"] = kept
+    else:
+        trimmed.pop("links", None)
+    return trimmed
+
+
+def sibling_link_conflicts(units: list[ExportUnit]) -> list[dict]:
+    """Rewrites this export would perform that a SURVIVING record already disproves.
+
+    REVIEW ITEM F7, and it is the converse of the question :func:`_linkable` asks.
+    ``_linkable`` closed EMIT-TIME falsity — "will the record I am about to write
+    assert something its target disproves?". Nothing asked the other direction: *does
+    rewriting this record falsify a link a surviving sibling already carries?*
+
+    Measured before this fix. Two runs share ``SYN-A``, are exported, and are mutually
+    linked. Delete run 1's artifact pair, change the experiment's
+    ``sample.sample_id``, and export along the blessed self-heal path::
+
+        01…63G  sample_id SYN-CHANGED  links []
+        01…63H  sample_id SYN-A        links ['01…63G']   <- asserts a shared id
+
+    Disprovable from the two records alone — the same class of defect as C1, one
+    direction over — and this time the falsified record is the SURVIVING one, which is
+    immutable and cannot be corrected afterwards.
+
+    **SO THE EXPORT IS REFUSED, and refusal is the answer rather than a placeholder
+    for a better one.** Within record immutability there is no write that leaves both
+    records true: rewriting the sibling to drop its link is the immutability breach
+    this module refuses everywhere else, and writing the unit anyway leaves a false
+    claim in an official ISAAC record (``CLAUDE.md`` §5). Declining to write, and
+    saying which pair disagrees, is the only remaining honest act. The operator can
+    restore the value, or delete the run.
+
+    Only MATERIALISED units are consulted as accusers, because only a written record
+    can already carry the link, and only NOT-materialised units are candidates,
+    because a materialised unit is skipped by the export entirely and its record is
+    not rewritten. An unreadable sibling accuses nobody: it is fail-open here on
+    purpose, and that asymmetry with the prune is deliberate — the prune's fail-closed
+    protects against DELETING a file, while blocking every export in the workspace on
+    one corrupt record would turn a repairable artifact into a wedge.
+
+    Returns one entry per conflicting ``(unit, sibling)`` pair, in unit order.
+    """
+    conflicts: list[dict] = []
+    pending = [unit for unit in units if not unit.materialised()]
+    if not pending:
+        return conflicts
+    survivors: list[tuple[str, dict]] = []
+    for unit in units:
+        if not unit.materialised():
+            continue
+        record_path = unit.record_path()
+        if record_path is None:
+            continue
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict):
+            survivors.append((unit.target_id, record))
+
+    for unit in pending:
+        candidate = _exported_field_value(unit.draft, SAMPLE_ID_PATH)
+        for sibling_id, record in survivors:
+            asserted = any(
+                isinstance(link, dict)
+                and link.get("rel") == SIBLING_REL
+                and link.get("basis") == SIBLING_BASIS
+                and link.get("target") == unit.target_id
+                for link in record.get("links") or []
+            )
+            if not asserted:
+                continue
+            sample = record.get("sample")
+            sibling_value = sample.get("sample_id") if isinstance(sample, dict) else None
+            if candidate == sibling_value:
+                continue
+            conflicts.append(
+                {
+                    "run_id": unit.run_id,
+                    "run_label": unit.run_label,
+                    "record_id": unit.target_id,
+                    "sibling_record_id": sibling_id,
+                    "basis": SIBLING_BASIS,
+                }
+            )
+    return conflicts
 
 
 def _run_artifact_presence(experiment: "Experiment", run: "Run") -> list:
@@ -2135,9 +2411,9 @@ class Experiment:
         4. the two evidence maps, merged — see :func:`block_level` for why each of the
            five unclassified blocks is treated the way it is. ``implicit`` is the
            exception, and :func:`_merge_implicit` explains it: the experiment's
-           entries are carried onto a run that overrides NOTHING and withheld from a
-           run that overrides anything, because they are derivations and a derivation
-           can outlive the value it was derived from.
+           entries are carried onto a run that holds the experiment's VALUES and
+           withheld from a run that diverges from any of them, because they are
+           derivations and a derivation can outlive the value it was derived from.
 
         Layer 2 is applied ON TOP of layer 1, so if a run's own draft somehow carries
         an experiment-level field directly, the resolution wins. That is not data
@@ -2159,7 +2435,8 @@ class Experiment:
             fields = {}
             draft["fields"] = fields
 
-        for resolution in self.resolve_run(run).values():
+        resolutions = self.resolve_run(run)
+        for resolution in resolutions.values():
             if resolution.payload is None:
                 continue
             if resolution.kind == ADDRESS_FIELD:
@@ -2171,10 +2448,15 @@ class Experiment:
         if draft.get("meta") is None and experiment_draft.get("meta") is not None:
             draft["meta"] = copy.deepcopy(experiment_draft["meta"])
 
-        # `inherit` is false for a run that overrides ANYTHING — see `_merge_implicit`
-        # for why the test is "any override" rather than "an override of the field
-        # this entry derives from" (there is no stored link between the two).
-        implicit = _merge_implicit(experiment_draft, draft, inherit=not run.overrides)
+        # `inherit` is false for a run that DIVERGES IN VALUE at any experiment-level
+        # address — see `_merge_implicit` for why the test is "any divergence" rather
+        # than "a divergence at the field this entry derives from" (there is no stored
+        # link between the two), and for why review item F8 moved it off
+        # `not run.overrides`: a NO-OP override stripped every inherited entry while
+        # the run held exactly the experiment's values.
+        implicit = _merge_implicit(
+            experiment_draft, draft, inherit=not _diverges_from_experiment(resolutions)
+        )
         if implicit is not None:
             draft["implicit"] = implicit
         block_evidence = _merge_block_evidence(experiment_draft, draft)
@@ -2228,6 +2510,29 @@ class Experiment:
         if not self.runs:
             return self.record_id is not None
         return all(run.record_id is not None for run in self.runs)
+
+    def any_unit_exported(self) -> bool:
+        """Whether ANY unit this experiment exports already holds a record id.
+
+        The third member of the family, and it exists because two read-only routes
+        were asking the wrong one of the other two (review item F5). ``/audit`` and
+        ``/warnings`` describe WHAT IS ON DISK, so their gate is "is there anything to
+        describe" — not :meth:`exported` (permanently False for a fan-out, so both
+        routes reported a fully-exported experiment as having exported nothing) and
+        not :meth:`all_units_exported` (which would have replaced one false answer
+        with a narrower one: a PARTIAL fan-out has records on disk and they are worth
+        auditing).
+
+        Identical to :meth:`exported` when there are no runs — ``all()`` and ``any()``
+        agree on a one-element set — so the common case has exactly one behaviour, as
+        it does for :meth:`all_units_exported`.
+
+        Reads ``run.record_id`` directly for the same reason its sibling does: this is
+        a question about N booleans, not a reason to compose N drafts.
+        """
+        if not self.runs:
+            return self.record_id is not None
+        return any(run.record_id is not None for run in self.runs)
 
     def clear_run_override(self, run: "Run", address: str) -> bool:
         """Drop an override so the run inherits again. Returns whether one was removed.

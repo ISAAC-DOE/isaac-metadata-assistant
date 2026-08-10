@@ -762,8 +762,11 @@ def test_pruning_never_touches_a_file_that_is_not_a_record_artifact(client):
     not_an_id = exp.records_dir / "not-a-record-id.json"
     not_an_id.write_text("{}\n", encoding="utf-8")
 
-    removed = routes._prune_orphan_artifacts(exp, {"01JQZ0KEEPTHISRECORDID0001"})
-    assert removed == []
+    result = routes._prune_orphan_artifacts(exp, {"01JQZ0KEEPTHISRECORDID0001"})
+    # F9 — the three-way answer. Nothing was removed AND nothing was protected AND
+    # the prune was not declined: a file that is not a record artifact is simply not
+    # a candidate, which is a different fact from every one of those three.
+    assert result == {"pruned": [], "protected": [], "declined": False}
     assert bystander.exists()
     assert not_an_id.exists()
 
@@ -1322,3 +1325,689 @@ def test_the_artifacts_operation_says_why_a_fan_out_has_no_pair_of_its_own(clien
     # The zero-run case gains nothing: no `reason` key at all.
     zero = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/artifacts").json()
     assert "reason" not in zero
+
+
+# --- 11. the SECOND review: fixes that repaired one copy of a two-copy defect ---
+#
+# A second independent adversarial review of the fix commit returned SHIP AFTER
+# FIXES. It confirmed the ten findings above are genuinely closed and that no
+# zero-run behaviour regressed. What it found instead is a class of its own, and it
+# is the reason this section is separate from section 10: several of those fixes
+# repaired ONE COPY of a defect that had two, one bought its result by removing
+# capability without saying so, one introduced a new permanent bad state, and the
+# corrected disclosure block was itself incomplete.
+#
+# The lesson each test below encodes is "the fix was right and the search for its
+# other copies was not", so every one of them asserts AGREEMENT BETWEEN TWO
+# SURFACES rather than the behaviour of one.
+
+
+def _corrupt(path: pathlib.Path) -> None:
+    path.write_text("{ this is not json", encoding="utf-8")
+
+
+# --- F1: the `/validate` fix repaired one of TWO copies ------------------------
+
+
+def test_the_assistant_validate_thunk_agrees_with_the_validate_endpoint(client):
+    """F1 — ``_assistant_validate_dryrun`` still carried the C6 defect verbatim.
+
+    C6 made ``POST .../validate`` fan-out aware. The Assistant Q&A route reaches a
+    SECOND copy of the same logic through ``_assistant_validate_dryrun``, which still
+    tested ``exp.exported()`` — permanently False for a fan-out — and validated
+    ``exp.draft``. Measured on ``c467dc7``, same experiment, one process::
+
+        /api/experiments/{id}/validate         -> ok: true
+        routes._assistant_validate_dryrun(exp) -> {"ok": false, "errors":
+           [{"path": "$", "message": "'descriptors' is a required property"}]}
+
+    That string is verbatim the defect C6 fixed. The two are now ONE function called
+    from both places, so a third divergence would have to be written deliberately.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTASSISTVALID010"
+    _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"))
+
+    # Before export: both surfaces answer from in-memory candidates.
+    before_endpoint = client.post(f"/api/experiments/{experiment_id}/validate").json()
+    before_thunk = routes._assistant_validate_dryrun(store.load_experiment(experiment_id))
+    assert (before_thunk["ok"], before_thunk["errors"]) == (
+        before_endpoint["ok"],
+        before_endpoint["errors"],
+    )
+
+    assert _export(client, experiment_id).status_code == 200
+
+    endpoint = client.post(f"/api/experiments/{experiment_id}/validate").json()
+    assert endpoint["ok"] is True and endpoint["errors"] == []
+    thunk = routes._assistant_validate_dryrun(store.load_experiment(experiment_id))
+    assert thunk["ok"] is True, thunk
+    assert thunk["errors"] == []
+    # The assistant channel carries no `runs`/`schema`/`dry_run` — it answers a
+    # question, it does not serve the validation contract — so it is projected, not
+    # widened. Pinned so the shared function cannot leak its envelope into it.
+    assert set(thunk) == {"ok", "errors"}
+
+
+def test_the_assistant_validate_thunk_is_unchanged_for_a_zero_run_experiment(client):
+    """F1 CONTROL — the common case must not move. Both branches, exported and not."""
+    store = client_ws(client)
+    fresh = routes._assistant_validate_dryrun(store.load_experiment(ws.SEED_READY_ID))
+    assert set(fresh) == {"ok", "errors"}
+    assert fresh["ok"] is True and fresh["errors"] == []
+
+    assert _export(client, ws.SEED_READY_ID).status_code == 200
+    exported = routes._assistant_validate_dryrun(store.load_experiment(ws.SEED_READY_ID))
+    assert exported == {"ok": True, "errors": []}
+
+    # …and the crash sentinel still degrades honestly rather than dry-running.
+    exp = store.load_experiment(ws.SEED_READY_ID)
+    _corrupt(exp.record_path())
+    unreadable = routes._assistant_validate_dryrun(store.load_experiment(ws.SEED_READY_ID))
+    assert unreadable == {
+        "ok": False,
+        "errors": [{"path": "$", "message": "Validation could not be completed."}],
+    }
+
+
+# --- F2: "all three `derive_workflow` sites" was a WRONG COUNT ------------------
+
+
+def test_every_workflow_call_site_agrees_on_a_fully_exported_fan_out(client):
+    """F2 — the C5 fix named THREE ``derive_workflow`` sites. There are five.
+
+    ``runtime_records._project_one`` — the cross-record runtime projection served by
+    ``GET /api/runtime/records`` — still passed ``exported=exp.exported()``. Measured
+    on ``c467dc7``::
+
+        runtime_records._project_one(exp)["exported"] -> False
+        GET /api/experiments/{id} ["exported"]        -> True
+
+    This test enumerates EVERY site that derives a workflow for a real experiment, so
+    the count is established here rather than remembered. The fifth site,
+    ``corpus_mutation._workflow_consistent``, takes no experiment at all — it calls
+    ``derive_workflow`` with literal arguments as a pure-function regression check —
+    and is asserted to be exactly that, so it cannot quietly become a sixth answer.
+    """
+    from isaac_api import corpus_mutation, dependencies, runtime_records
+
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTRUNTIMEPROJ010"
+    _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"))
+    assert _export(client, experiment_id).status_code == 200
+
+    exp = store.load_experiment(experiment_id)
+    detail = client.get(f"/api/experiments/{experiment_id}").json()
+
+    def export_step(workflow: dict) -> str:
+        return next(s for s in workflow["ordered_steps"] if s["id"] == "export")["state"]
+
+    projected = runtime_records._project_one(exp)
+    assert projected["exported"] is True, projected
+    assert projected["workflow"]["current_step"] == detail["workflow"]["current_step"]
+    assert projected["artifact_state"] == "current"
+    assert projected["workflow"]["reopened"] is False
+
+    assert detail["exported"] is True
+    assert export_step(detail["workflow"]) == "completed"
+    assert export_step(routes._workflow_for(exp)) == "completed"
+    assert export_step(dependencies._post_workflow(exp)) == "completed"
+
+    # The fifth site takes no experiment: a pure-function check over literals.
+    import inspect
+
+    source = inspect.getsource(corpus_mutation._workflow_consistent)
+    assert "exported=False" in source
+    assert "exp" not in inspect.signature(corpus_mutation._workflow_consistent).parameters
+
+
+def test_the_runtime_projection_is_unchanged_for_a_zero_run_experiment(client):
+    """F2 CONTROL — ``exported()`` and ``all_units_exported()`` are one function here."""
+    from isaac_api import runtime_records
+
+    store = client_ws(client)
+    before = runtime_records._project_one(store.load_experiment(ws.SEED_READY_ID))
+    assert before["exported"] is False and before["record_id"] is None
+    assert _export(client, ws.SEED_READY_ID).status_code == 200
+    after = runtime_records._project_one(store.load_experiment(ws.SEED_READY_ID))
+    assert after["exported"] is True
+    assert after["record_id"] == ws.SEED_READY_ID
+
+
+# --- F5: `/audit` and `/warnings` still asserted false things ------------------
+
+
+def test_audit_reports_the_records_a_fan_out_actually_exported(client):
+    """F5 — ``/audit`` said nothing had been exported about N records on disk.
+
+    Measured on ``c467dc7`` for a fully-exported 2-run fan-out::
+
+        POST .../audit -> {"records": [], "text": "No records found.",
+                           "message": "Nothing exported yet — export this
+                                       experiment before auditing."}
+
+    The audit itself was never the problem: ``audit_records`` GLOBS this experiment's
+    own records dir and would have found every run's record. Only the ``exported()``
+    gate in front of it was, and it is the same None-backed predicate C5 and C6 fixed
+    two surfaces at a time.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTAUDITTRUTH0010"
+    exp = _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"))
+    run_ids = [run.id for run in exp.sorted_runs()]
+
+    before = client.post(f"/api/experiments/{experiment_id}/audit").json()
+    assert before["records"] == []
+    assert "message" in before  # nothing exported yet: still the honest answer
+
+    assert _export(client, experiment_id).status_code == 200
+    body = client.post(f"/api/experiments/{experiment_id}/audit").json()
+    assert "message" not in body, body
+    assert {row["name"] for row in body["records"]} == {f"{rid}.json" for rid in run_ids}
+    assert all(row["ok"] for row in body["records"]), body
+    assert body["text"] != "No records found."
+
+
+def test_audit_covers_a_partially_exported_fan_out(client):
+    """F5 — the gate asks "is anything on disk", not "is everything exported".
+
+    A partial fan-out has records to audit. Gating on ``all_units_exported()`` would
+    have replaced one false "nothing exported" with a narrower one.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTAUDITPARTIAL01"
+    exp = _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1",))
+    assert _export(client, experiment_id).status_code == 200
+
+    grown = store.load_experiment(experiment_id)
+    _, run_draft = _split_full_draft()
+    grown.add_run(label="Run 2", draft=copy.deepcopy(run_draft))
+    grown.save_versioned()
+
+    body = client.post(f"/api/experiments/{experiment_id}/audit").json()
+    assert [row["name"] for row in body["records"]] == [
+        f"{exp.sorted_runs()[0].id}.json"
+    ]
+    assert "message" not in body
+
+
+def test_audit_is_unchanged_for_a_zero_run_experiment(client):
+    """F5 CONTROL — both arms of the gate, byte-for-byte."""
+    refused = client.post(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}/audit").json()
+    assert refused == {
+        "records": [],
+        "text": "No records found.",
+        "message": "Nothing exported yet — export this experiment before auditing.",
+    }
+    assert _export(client, ws.SEED_READY_ID).status_code == 200
+    audited = client.post(f"/api/experiments/{ws.SEED_READY_ID}/audit").json()
+    assert [row["name"] for row in audited["records"]] == [f"{ws.SEED_READY_ID}.json"]
+    assert "message" not in audited
+
+
+def test_warnings_describe_the_records_a_fan_out_actually_exported(client):
+    """F5 — ``/warnings`` advised on a document that is never exported.
+
+    ``exp.exported()`` is False for a fan-out, so ``_warnings_payload`` dry-ran
+    ``exp.draft`` — the experiment-level half. Measured on ``c467dc7`` for a fully
+    exported 2-run fan-out::
+
+        GET .../warnings -> dry_run: true, codes ['NO_LINKS','NO_MEASUREMENT_SERIES']
+        exported record keys -> [... 'measurement' ...]
+
+    Every record on disk HAS a measurement block. The advice was about a document
+    with no run-level content in it at all.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTWARNINGSTRUE01"
+    exp = _fan_out_experiment(
+        store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"), sample_id="SYN-W"
+    )
+    run_ids = [run.id for run in exp.sorted_runs()]
+    assert _export(client, experiment_id).status_code == 200
+
+    for body in (
+        client.get(f"/api/experiments/{experiment_id}/warnings").json(),
+        client.post(f"/api/experiments/{experiment_id}/warnings").json(),
+    ):
+        assert body["advisory"] is True and body["gating"] is False
+        assert body["dry_run"] is False, body
+        codes = {w["code"] for w in body["warnings"]}
+        assert "NO_MEASUREMENT_SERIES" not in codes, body
+        assert [entry["record_id"] for entry in body["runs"]] == run_ids
+        assert all(entry["dry_run"] is False for entry in body["runs"])
+
+    # …and the claim is checkable against the records themselves.
+    final = store.load_experiment(experiment_id)
+    for run_id in run_ids:
+        record = json.loads((final.records_dir / f"{run_id}.json").read_text())
+        assert "measurement" in record
+
+
+def test_warnings_for_an_unexported_fan_out_are_a_dry_run_per_run(client):
+    """F5 — ``dry_run`` states WHICH document the advice describes, per run."""
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTWARNINGSDRY001"
+    exp = _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"))
+    run_ids = [run.id for run in exp.sorted_runs()]
+
+    body = client.get(f"/api/experiments/{experiment_id}/warnings").json()
+    assert body["dry_run"] is True
+    assert [entry["record_id"] for entry in body["runs"]] == run_ids
+    assert all(entry["dry_run"] is True for entry in body["runs"])
+
+
+def test_warnings_are_unchanged_for_a_zero_run_experiment(client):
+    """F5 CONTROL — no ``runs`` key at all, and the same two arms as before."""
+    before = client.get(f"/api/experiments/{ws.SEED_READY_ID}/warnings").json()
+    assert "runs" not in before
+    assert before["dry_run"] is True
+    assert _export(client, ws.SEED_READY_ID).status_code == 200
+    after = client.get(f"/api/experiments/{ws.SEED_READY_ID}/warnings").json()
+    assert "runs" not in after
+    assert after["dry_run"] is False
+
+
+def test_the_fan_out_disclosure_names_every_surface_that_reads_the_singular_pair(client):
+    """F5 — the disclosure claimed completeness (*"each is now either fixed or
+    stated"*) over four routes, while six more surfaces read the same None-backed
+    predicate and were named nowhere.
+
+    THE LIST IS ESTABLISHED BY SEARCH, HERE, AT TEST TIME — not transcribed from a
+    reviewer's message and not remembered. Every function in the API package that
+    reads ``exp.exported()``, ``exp.record_path()`` or ``exp.sidecar_path()`` on an
+    EXPERIMENT (as opposed to an ``ExportUnit``, which is fan-out-native by
+    construction) must be named in the disclosure block. A new such caller fails this
+    test until its disposition is written down, which is the only mechanism that can
+    keep an enumeration honest as the code moves.
+    """
+    import ast
+
+    package = pathlib.Path(routes.__file__).parent
+    disclosure = (package / "workspace.py").read_text(encoding="utf-8")
+    start = disclosure.index("# --- WHAT EVERY OTHER SURFACE DOES FOR A FAN-OUT")
+    end = disclosure.index("SIBLING_REL = ")
+    block = disclosure[start:end]
+
+    #: Reads the SINGULAR pair through a receiver that is not an `ExportUnit`.
+    singular = {"exported", "record_path", "sidecar_path"}
+    callers: set[str] = set()
+    for module in ("routes.py", "dependencies.py", "runtime_records.py", "workspace.py"):
+        tree = ast.parse((package / module).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for inner in ast.walk(node):
+                if not isinstance(inner, ast.Call) or not isinstance(inner.func, ast.Attribute):
+                    continue
+                if inner.func.attr not in singular or inner.args:
+                    continue
+                receiver = inner.func.value
+                if isinstance(receiver, ast.Name) and receiver.id in ("exp", "post_exp"):
+                    callers.add(node.name)
+    assert callers, "the search itself found nothing — it has stopped measuring"
+    missing = sorted(name for name in callers if name not in block)
+    assert missing == [], (
+        "these read the experiment's singular exported state and the fan-out "
+        f"disclosure names none of them: {missing}"
+    )
+    # And the claim itself must match what it lists: the old block said "each is now
+    # either fixed or stated" over an enumeration that was not complete.
+    assert "each is now either fixed or stated" not in block
+
+
+# --- F3: the C4 fix disables pruning in the NORMAL fan-out case ----------------
+
+
+def test_a_shared_sample_id_makes_the_prune_decline_and_the_response_say_so(client):
+    """F3 — C4's protection never expires, so pruning is off in the normal case.
+
+    ``_link_targets_of_surviving_records`` protects any stem named as a
+    ``links[].target`` by a kept record. Sibling records are MUTUALLY linked whenever
+    two or more runs share a ``sample_id`` — the intended normal case — and surviving
+    records are immutable, so nothing ever removes the protection. Measured on
+    ``c467dc7``::
+
+        2 runs sharing sample_id, exported (mutually linked);
+        delete run 2, add run 3, export ->
+          pruned_record_ids: []
+          stems on disk: [run1, run2 (orphan), run3]
+
+    The headline prune test passes only because its fixture uses ``sample_id=None``
+    and therefore emits no links. The accumulation is REAL and is kept — deleting a
+    record a surviving immutable record points at is the worse outcome — but it is no
+    longer SILENT: the response names what it declined to remove.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTPROTECTEDPRUNE"
+    exp = _fan_out_experiment(
+        store,
+        experiment_id=experiment_id,
+        run_labels=("Run 1", "Run 2"),
+        sample_id="SYNTH-PELLET-001",
+    )
+    first, second = exp.sorted_runs()
+    assert _export(client, experiment_id).status_code == 200
+
+    trimmed = store.load_experiment(experiment_id)
+    trimmed.runs = [run for run in trimmed.runs if run.id != second.id]
+    _, run_draft = _split_full_draft()
+    third = trimmed.add_run(label="Run 3", draft=copy.deepcopy(run_draft))
+    trimmed.save_versioned()
+
+    body = _export(client, experiment_id).json()
+    assert body["ok"] is True
+    assert body["pruned_record_ids"] == []
+    assert body["protected_record_ids"] == [second.id]
+    assert body["prune_declined"] is False
+    assert _artifact_stems(store.load_experiment(experiment_id)) == {
+        first.id,
+        second.id,
+        third.id,
+    }
+
+
+def test_nothing_to_prune_is_distinguishable_from_pruning_declined(client):
+    """F9 — with F3 the prune has TWO independent ways of doing nothing.
+
+    An unreadable kept record makes every survivor's targets unknown and the prune
+    refuses entirely (fail-closed, logged). An empty ``pruned_record_ids`` therefore
+    meant three different things at once. The response now separates them.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTPRUNEDECLINE01"
+    exp = _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"))
+    first, second = exp.sorted_runs()
+    assert _export(client, experiment_id).status_code == 200
+
+    trimmed = store.load_experiment(experiment_id)
+    trimmed.runs = [run for run in trimmed.runs if run.id != second.id]
+    _, run_draft = _split_full_draft()
+    trimmed.add_run(label="Run 3", draft=copy.deepcopy(run_draft))
+    trimmed.save_versioned()
+    _corrupt(trimmed.records_dir / f"{first.id}.json")
+
+    body = _export(client, experiment_id).json()
+    assert body["ok"] is True
+    assert body["prune_declined"] is True, body
+    assert body["pruned_record_ids"] == []
+    assert body["protected_record_ids"] == []
+    assert second.id in _artifact_stems(store.load_experiment(experiment_id))
+
+
+def test_a_real_prune_reports_that_it_was_not_declined(client):
+    """F9 CONTROL — the ordinary removal keeps reporting exactly what it removed."""
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTPRUNENORMAL010"
+    exp = _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"))
+    _, second = exp.sorted_runs()
+    assert _export(client, experiment_id).status_code == 200
+
+    trimmed = store.load_experiment(experiment_id)
+    trimmed.runs = [run for run in trimmed.runs if run.id != second.id]
+    _, run_draft = _split_full_draft()
+    trimmed.add_run(label="Run 3", draft=copy.deepcopy(run_draft))
+    trimmed.save_versioned()
+
+    body = _export(client, experiment_id).json()
+    assert body["pruned_record_ids"] == [second.id]
+    assert body["protected_record_ids"] == []
+    assert body["prune_declined"] is False
+
+
+# --- F4: the C5 fix introduced a permanent unrepairable `stale` ----------------
+
+
+def test_exporting_a_new_run_does_not_stale_its_already_exported_siblings(client):
+    """F4 — a ``stale`` nothing can repair, offering a destructive reset as the cure.
+
+    ``_fan_out_artifact_state`` compares each materialised record against
+    ``transform(unit.draft)``, and ``unit.draft`` comes from ``export_units()``, which
+    applies sibling grouping to EVERY unit. So exporting a second run adds the REVERSE
+    link into the first run's composed draft — a link ``_apply_sibling_grouping``'s own
+    docstring says that record will deliberately never gain, because records are
+    immutable. Measured on ``c467dc7``: export run 1 alone; add run 2; export ->
+
+        artifact: {"state": "stale", "reason": "The record changed after export; …
+                   regenerate the record (or reset the workspace) to refresh it."}
+        status: done | exported: true | re-export -> 409 record_exists
+
+    Nothing changed, and the only remedy offered was a whole-workspace reset.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTSTALESIBLING20"
+    _fan_out_experiment(
+        store,
+        experiment_id=experiment_id,
+        run_labels=("Run 1",),
+        sample_id="SYNTH-PELLET-001",
+    )
+    assert _export(client, experiment_id).status_code == 200
+
+    grown = store.load_experiment(experiment_id)
+    _, run_draft = _split_full_draft()
+    grown.add_run(label="Run 2", draft=copy.deepcopy(run_draft))
+    grown.save_versioned()
+    assert _export(client, experiment_id).status_code == 200
+
+    detail = client.get(f"/api/experiments/{experiment_id}").json()
+    assert detail["exported"] is True
+    assert detail["artifact"] == {"state": "current", "reason": None}, detail["artifact"]
+
+    artifacts = client.get(f"/api/experiments/{experiment_id}/artifacts").json()
+    assert artifacts["artifact"]["state"] == "current"
+
+
+def test_a_genuine_change_to_a_fan_out_record_is_still_reported_as_stale(client):
+    """F4 CONTROL — the fix must not buy ``current`` by ceasing to compare.
+
+    Only the links sibling grouping ADDS are excluded from the comparison, and only
+    for a materialised unit whose record can never be rewritten to carry them. A
+    scientific edit still stales the set, which is the whole point of the signal.
+
+    Deliberately a TWO-run fan-out with a shared ``sample_id``, so both records carry
+    a sibling link: the exclusion is exercised at the same time as the change it must
+    not hide, rather than in a fixture where there is nothing to exclude.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTSTILLSTALE0010"
+    _fan_out_experiment(
+        store,
+        experiment_id=experiment_id,
+        run_labels=("Run 1", "Run 2"),
+        sample_id="SYNTH-PELLET-001",
+    )
+    assert _export(client, experiment_id).status_code == 200
+    assert client.get(f"/api/experiments/{experiment_id}").json()["artifact"]["state"] == (
+        "current"
+    )
+
+    edited = store.load_experiment(experiment_id)
+    edited.draft["fields"]["sample.material.formula"] = _formula_override("FeO2")
+    edited.save_versioned()
+
+    detail = client.get(f"/api/experiments/{experiment_id}").json()
+    assert detail["artifact"]["state"] == "stale"
+    assert detail["artifact"]["reason"].startswith("The record changed after export")
+
+
+def test_a_partially_exported_fan_out_is_still_incomplete_not_current(client):
+    """F4 CONTROL — the C5 label for "part of the set was never written" survives."""
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTPARTIALSTATE01"
+    _fan_out_experiment(
+        store, experiment_id=experiment_id, run_labels=("Run 1",), sample_id="SYNTH-PELLET-001"
+    )
+    assert _export(client, experiment_id).status_code == 200
+    grown = store.load_experiment(experiment_id)
+    _, run_draft = _split_full_draft()
+    grown.add_run(label="Run 2", draft=copy.deepcopy(run_draft))
+    grown.save_versioned()
+
+    detail = client.get(f"/api/experiments/{experiment_id}").json()
+    assert detail["artifact"]["state"] == "stale"
+    assert "have not been exported yet" in detail["artifact"]["reason"]
+
+
+# --- F6: `_linkable` could emit a target naming a record id no file carries -----
+
+
+def test_a_sibling_link_target_always_names_a_record_file_that_exists(client):
+    """F6 — the materialised branch returned the record's OWN ``record_id``.
+
+    That was justified as "the id of the file that exists", but the FILE is named by
+    ``unit.target_id`` and the ``record_id`` inside it is a separate string. With the
+    divergence section 10's own C7 test plants, measured on ``c467dc7``::
+
+        targets = ['01JQZ0ADVPHANTOMTARGET0001']
+        stems   = ['01KZMKT511J6RCMDGHJ1AVH618', '01KZMKT51KCWDN6C17WRYKQZF7']
+
+    A manufactured dangling link — the exact metric C4 exists to protect. The target
+    is now ``unit.target_id``, and a record whose own id disagrees with the file that
+    carries it yields NO link, because a record we cannot trust to name itself is
+    not evidence for a relation.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTPHANTOMLINK010"
+    phantom = "01JQZ0ADVPHANTOMTARGET0001"
+    _fan_out_experiment(
+        store, experiment_id=experiment_id, run_labels=("Run 1",), sample_id="SYNTH-PELLET-001"
+    )
+    assert _export(client, experiment_id).status_code == 200
+
+    exported = store.load_experiment(experiment_id)
+    first = exported.sorted_runs()[0]
+    record_path = exported.records_dir / f"{first.record_id}.json"
+    record = json.loads(record_path.read_text())
+    record["record_id"] = phantom
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    _, run_draft = _split_full_draft()
+    second = exported.add_run(label="Run 2", draft=copy.deepcopy(run_draft))
+    exported.save_versioned()
+    assert _export(client, experiment_id).status_code == 200
+
+    final = store.load_experiment(experiment_id)
+    stems = _artifact_stems(final)
+    new_record = json.loads((final.records_dir / f"{second.id}.json").read_text())
+    targets = [link["target"] for link in new_record.get("links") or []]
+    assert phantom not in targets, targets
+    assert all(target in stems for target in targets), (targets, sorted(stems))
+    # The record could not vouch for its own identity, so no relation is asserted.
+    assert targets == []
+
+
+# --- F7: C1 closed emit-time falsity but not rewrite-time falsity ---------------
+
+
+def test_a_rewrite_that_would_falsify_a_surviving_siblings_link_is_refused(client):
+    """F7 — C1 asked "what will the record I write say"; nothing asked the converse.
+
+    Measured on ``c467dc7``: two runs share ``SYN-A``, exported and mutually linked.
+    Delete run 1's artifacts, change the experiment ``sample.sample_id``, and export
+    along the blessed self-heal path ->
+
+        01…63G  sample_id SYN-CHANGED  links []
+        01…63H  sample_id SYN-A        links ['01…63G']   <- asserts a shared id
+
+    Disprovable from the two records alone, and the falsified record is the SURVIVING
+    one, which is immutable and cannot be corrected. The export is refused instead:
+    within record immutability there is no way to write this unit without leaving a
+    record asserting a relation the pair disproves.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTREWRITEFALSE01"
+    exp = _fan_out_experiment(
+        store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"), sample_id="SYN-A"
+    )
+    first, second = exp.sorted_runs()
+    assert _export(client, experiment_id).status_code == 200
+
+    exported = store.load_experiment(experiment_id)
+    survivor_path = exported.records_dir / f"{second.id}.json"
+    survivor_bytes = survivor_path.read_bytes()
+    assert [link["target"] for link in json.loads(survivor_bytes)["links"]] == [first.id]
+
+    for suffix in (".json", ".evidence.json"):
+        (exported.records_dir / f"{first.id}{suffix}").unlink()
+    changed = store.load_experiment(experiment_id)
+    changed.draft["fields"]["sample.sample_id"] = _sample_id_envelope("SYN-CHANGED")
+    changed.save_versioned()
+
+    response = _export(client, experiment_id)
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["error"] == "sibling_link_conflict"
+    assert [c["record_id"] for c in body["conflicts"]] == [first.id]
+    assert body["conflicts"][0]["sibling_record_id"] == second.id
+
+    # NOTHING was written, and the surviving record is untouched.
+    final = store.load_experiment(experiment_id)
+    assert not (final.records_dir / f"{first.id}.json").exists()
+    assert survivor_path.read_bytes() == survivor_bytes
+
+
+def test_a_self_heal_that_falsifies_nothing_still_republishes(client):
+    """F7 CONTROL — the refusal must be about the falsehood, not about self-healing.
+
+    Same shape with the sample id LEFT ALONE: the republished record will carry the
+    value its sibling's link names, so the pair still agrees and the blessed
+    self-heal path must work exactly as it did.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTSELFHEALOK0010"
+    exp = _fan_out_experiment(
+        store, experiment_id=experiment_id, run_labels=("Run 1", "Run 2"), sample_id="SYN-A"
+    )
+    first, _second = exp.sorted_runs()
+    assert _export(client, experiment_id).status_code == 200
+
+    exported = store.load_experiment(experiment_id)
+    for suffix in (".json", ".evidence.json"):
+        (exported.records_dir / f"{first.id}{suffix}").unlink()
+
+    response = _export(client, experiment_id)
+    assert response.status_code == 200, response.text
+    final = store.load_experiment(experiment_id)
+    rewritten = json.loads((final.records_dir / f"{first.id}.json").read_text())
+    assert rewritten["sample"]["sample_id"] == "SYN-A"
+
+
+# --- F8: a NO-OP override stripped all inherited `implicit` --------------------
+
+
+def test_a_no_op_override_does_not_strip_inherited_implicit_provenance(client):
+    """F8 — the rule was "any override recorded"; the justification was divergence.
+
+    ``_merge_implicit``'s docstring argues from DIVERGENCE: *"That argument was wrong
+    the moment a run diverged"*. An override whose value equals the experiment's has
+    not diverged — the run genuinely holds the experiment's value at every address —
+    so the experiment's derivations are still true of it and dropping them silently
+    deletes recorded evidence, which is the failure ``inherit=True`` exists to avoid.
+
+    Comparing values needs no dependency table: it asks only whether this run holds
+    what the experiment holds, which is exactly the premise the ``inherit=True`` case
+    already rests on. So the code is changed to match its own argument rather than the
+    argument to match the code.
+    """
+    store = client_ws(client)
+    experiment_id = "01JQZ0FANOUTNOOPOVERRIDE01"
+    exp = _fan_out_experiment(store, experiment_id=experiment_id, run_labels=("Run 1",))
+    run = exp.sorted_runs()[0]
+    inherited = copy.deepcopy(exp.draft["fields"]["sample.material.formula"])
+
+    exp.set_run_override(run, ws.field_address("sample.material.formula"), inherited)
+    exp.save_versioned()
+
+    assert run.overrides, "the override must actually be recorded for this to mean anything"
+    resolved = exp.resolved_run_draft(run)
+    assert resolved["fields"]["sample.material.formula"] == inherited
+    abouts = {entry["about"] for entry in resolved.get("implicit") or []}
+    assert "absorbing_element" in abouts, resolved.get("implicit")
+
+    assert _export(client, experiment_id).status_code == 200
+    final = store.load_experiment(experiment_id)
+    sidecar = json.loads(
+        (final.records_dir / f"{final.sorted_runs()[0].record_id}.evidence.json").read_text()
+    )
+    assert [k for k in sidecar["evidence"] if k.startswith("implicit:")] != []

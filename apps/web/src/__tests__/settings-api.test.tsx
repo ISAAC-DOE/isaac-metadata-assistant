@@ -1295,8 +1295,39 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // Cross-checked in Python rather than transcribed from the assertion that
     // reported it: 40 operations, 40 unique, raw sum 31,368, 66 separators,
     // 31,368 - 132 = 31,236.
-    expect(total).toBe(31236);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(66);
+    //
+    // 31,236 -> 33,010 and 66 -> 69 paragraphs (the SECOND fan-out review). THREE
+    // operations changed — one export, and the two equivalent warnings forms that
+    // share one description constant:
+    //
+    //   `POST .../export` gained two paragraphs. One states what happens to the
+    //   records of runs that have been REMOVED, and it exists because the response
+    //   now separates three outcomes an empty `pruned_record_ids` used to conflate:
+    //   nothing was orphaned, an orphan is kept because a surviving record still
+    //   links to it (`protected_record_ids` — the NORMAL case for runs sharing a
+    //   sample id, previously invisible), and a kept record could not be read so
+    //   nothing was examined at all (`prune_declined`). The other adds the
+    //   `sibling_link_conflict` refusal: an export that would rewrite a record an
+    //   already-exported record links to as sharing its sample id, with a different
+    //   sample id, is refused, because the link could not be corrected afterwards
+    //   and one of the two records would be false.
+    //
+    //   `GET`/`POST .../warnings` each gained one paragraph. For a record with runs
+    //   the advice is now computed per run — it used to be computed from the
+    //   experiment-level half, which is never exported and holds no measurement, and
+    //   it therefore advised `NO_MEASUREMENT_SERIES` about records that all carry a
+    //   measurement block. `runs[]` carries each run's own warnings and `dry_run`;
+    //   the top level is the deduplicated union, which is safe here precisely
+    //   because this channel carries no verdict.
+    //
+    // Cross-checked in Python from the file rather than transcribed from the
+    // assertion that reported it. Per entry: export 1,867 -> 2,865 (+998) with one
+    // more separator; each warnings entry 600 -> 991 (+391) with one more separator.
+    // Raw sum 31,368 + 998 + 2x391 = 33,148; separators 66 + 3 = 69; 33,148 - 138 =
+    // 33,010. Whole array re-measured independently: 40 operations, 40 unique, raw
+    // sum 33,148, 69 separators.
+    expect(total).toBe(33010);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(69);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

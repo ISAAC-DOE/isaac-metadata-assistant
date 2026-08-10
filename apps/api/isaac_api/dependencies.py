@@ -23,6 +23,7 @@ import json
 from isaac_records.export import transform
 
 from .workflow import CANONICAL_LABELS, derive_workflow
+from .workspace import without_sibling_links
 
 _STALE_REASON = (
     "The record changed after export; the exported artifact no longer reflects "
@@ -112,7 +113,18 @@ def _fan_out_artifact_state(exp) -> dict:
     sibling links, which are properties of the SET and are invisible to a per-run
     composition.
 
-    Never throws, for the same reason the single-record path does not.
+    **THE GROUPING-ADDED SIBLING LINKS ARE EXCLUDED FROM THE COMPARISON (review item
+    F4), and that is a correction of this function rather than a concession.** The
+    drafts come from ``export_units()``, which applies sibling grouping to every unit
+    including materialised ones — so exporting a second run adds the REVERSE link into
+    an already-written record's composed draft, a link that record will deliberately
+    never gain because records are immutable. Every materialised sibling therefore
+    reported ``stale`` with the reason "The record changed after export … regenerate
+    the record (or reset the workspace) to refresh it", while nothing had changed,
+    re-export answered 409, and the only offered remedy was a destructive reset.
+
+    ``workspace.without_sibling_links`` is applied to BOTH sides, so every other link
+    still compares faithfully; see that function for what this can and cannot detect.
     """
     try:
         units = exp.export_units()
@@ -134,6 +146,8 @@ def _fan_out_artifact_state(exp) -> dict:
             current = transform(unit.draft, record_id=unit.target_id, now=now0)
         except Exception:
             return {"state": "stale", "reason": MISSING_REASON}
+        current = without_sibling_links(current)
+        ondisk = without_sibling_links(ondisk)
         if _canonical(current) != _canonical(ondisk):
             return {"state": "stale", "reason": _STALE_REASON}
     return {"state": "current", "reason": None}
