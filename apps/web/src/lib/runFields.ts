@@ -107,6 +107,35 @@ export const RUN_FIELDS: readonly RunFieldSpec[] = [
     // inventing a vocabulary the official schema does not define.
     kind: 'text',
   },
+  // THE TWO TIMESTAMPS ARE NOT CHECKED AGAINST EACH OTHER, and that is a recorded
+  // open decision rather than an oversight. There is no `start <= end` check here, in
+  // the card, in the PATCH route, or in official validation. MEASURED, not assumed:
+  // a PATCH carrying `acquired_start_utc: 2026-01-31T12:00:00Z` with
+  // `acquired_end_utc: 2026-01-01T00:00:00Z` returns 200 and stores both verbatim;
+  // Check Run reports nothing about either path; and a record that validates
+  // `ok: true` still validates `ok: true`, with zero errors, once its window is
+  // inverted. So nothing downstream will catch it — do not read the schema reference
+  // above as implying otherwise. The schema declares each field's TYPE and FORMAT and
+  // says nothing about their relative order, and there is no cross-field constraint
+  // for it to say it in.
+  //
+  // It is NEWLY REACHABLE through the product, which is the only thing this slice
+  // changed about it: `acquired_end_utc` previously had no control, so a scientist
+  // could not enter a window at all, inverted or otherwise. The behaviour is older
+  // than the control.
+  //
+  // NOT FIXED HERE ON PURPOSE. Whether an inverted window is an error, a legitimate
+  // encoding of something, or a question to ask is a scientific-validity judgement,
+  // and this file's whole doctrine is that it does not make those (see the atmosphere
+  // entry above, which declines to invent a vocabulary for the same reason). A gate
+  // added here would also sit in the wrong place: the client is not where validity is
+  // decided, and one added only here would be silent for every other writer.
+  //
+  // Related, and deliberately not contradicted: `official.py` installs no
+  // `FormatChecker`, so `format: date-time` is unenforced repo-wide by design
+  // (`apps/api/isaac_api/format_shadow.py` documents that and shadows it without
+  // changing it). ISO_DATETIME below is therefore STRICTER than the downstream stack,
+  // not a local restatement of it.
   {
     path: 'timestamps.acquired_start_utc',
     label: 'Acquisition start',

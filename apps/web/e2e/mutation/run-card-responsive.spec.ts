@@ -29,7 +29,7 @@
  *
  * ASSERTED, scoped to `section.runs-section`: no nested overflow, no clipped
  * text, no obscured control, at six widths and at 200% zoom, with TWO runs open
- * (the pressure case — two expanded cards, each with three fields, a save-status
+ * (the pressure case — two expanded cards, each with five fields, a save-status
  * chip, a progress line and a conditions line).
  *
  * THE DOCUMENT IS MEASURED BOTH WAYS, and the first version of this file measured

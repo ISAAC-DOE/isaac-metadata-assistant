@@ -9,7 +9,7 @@
  * demoting a path, because that line IS how a run is told apart from its
  * siblings.
  *
- * EXPANDED it is a short form over three run-level fields and a read-only panel
+ * EXPANDED it is a short form over five run-level fields and a read-only panel
  * of what the run inherits from its experiment. The inherited panel is not
  * styled as a disabled version of the form: it has no controls at all, which is
  * the strongest available statement that those values are not this run's to
