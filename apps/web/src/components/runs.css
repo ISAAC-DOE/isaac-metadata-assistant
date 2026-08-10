@@ -533,8 +533,39 @@
   .run-input {
     max-width: none;
   }
+  /*
+   * `width: auto` ALONE WAS NOT ENOUGH, and the gap was measured at 320px: the
+   * longest inherited path IN THE WORKED EXAMPLE —
+   * `sample.composition.sucrose_mass_fraction`, 265px — was painted inside a 182px
+   * content box, overflowed the card (which is `overflow: hidden`, so the text was
+   * LOST rather than scrollable), and took the card's scrollWidth to 294 against a
+   * clientWidth of 240.
+   *
+   * THREE OF THOSE NUMBERS WERE WRONG IN THE FIRST VERSION OF THIS COMMENT, and a
+   * reviewer measured each: it named `CuO2_mass_fraction` (245px) as the longest,
+   * which is the row the clipped-text report happened to quote rather than the widest
+   * row; it said 184px where the content box is 182; and it said `overflow-x: hidden`
+   * where `:94` sets `overflow: hidden` on both axes. It also called this "the
+   * longest path this app renders", which is not a fact about the app — the address
+   * set is open, since `inheritedFieldRows` renders whatever paths the experiment's
+   * draft carries. A 76-character schema path measures 182px over 3 lines with the
+   * card at scrollWidth == clientWidth, so the fix generalises; the claim did not.
+   *
+   * The cause is the base rule's `flex: none`, which is `flex: 0 0 auto`. Dropping
+   * the fixed 190px to `auto` makes the used width MAX-CONTENT, and a flex item with
+   * `flex-shrink: 0` cannot then be shrunk below it — so `overflow-wrap: anywhere`
+   * never got the chance to break the string. Restoring shrinkability (and clearing
+   * the automatic minimum size, which is otherwise min-content) is what lets that
+   * wrap happen.
+   *
+   * `article.run-card` is never in the read-only suite's width sweep — no surface in
+   * `e2e/surfaces.ts` can render a run — so this was invisible until
+   * `e2e/mutation/run-card-responsive.spec.ts` measured it. That spec is the guard.
+   */
   .run-inherited-path {
     width: auto;
+    flex: 0 1 auto;
+    min-width: 0;
   }
   .run-inherited-state {
     margin-left: 0;
