@@ -1551,7 +1551,7 @@ describe('PHASE 2 — save state that outlives the card', () => {
     });
     await screen.findByRole('button', { name: /Add Run/ });
     await expand('RUNAAA');
-    const note = /Unsent changes live in this browser tab only/;
+    const note = /Changes this tab has not finished saving live here only/;
 
     // Nothing held: no warning. A permanent one would be false most of the time.
     expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(note);
@@ -1564,11 +1564,22 @@ describe('PHASE 2 — save state that outlives the card', () => {
       await vi.advanceTimersByTimeAsync(100);
     });
     expect(cardFor('RUNAAA').textContent ?? '').toMatch(note);
-    expect(cardFor('RUNAAA').textContent ?? '').toMatch(/reloading the page discards/);
+    // The wording distinguishes the two fates, because they genuinely differ: unsent is
+    // lost, in-flight is unknown. An earlier version asserted loss for both.
+    expect(cardFor('RUNAAA').textContent ?? '').toMatch(/anything still unsent is lost/);
+    expect(cardFor('RUNAAA').textContent ?? '').toMatch(/may or may not have been saved/);
+
+    // AND IT STAYS UP WHILE THE REQUEST IS IN FLIGHT. Gating on `pendingCount` hid it
+    // for that whole window, because `send()` empties the pending map before dispatching
+    // — absent in exactly the state it describes.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toBe('Saving…');
+    expect(cardFor('RUNAAA').textContent ?? '').toMatch(note);
 
     // Acknowledged: the disclosure goes away, because it no longer applies.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
       gate3.resolve();
       await vi.advanceTimersByTimeAsync(50);
     });

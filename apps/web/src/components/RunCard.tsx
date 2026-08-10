@@ -354,15 +354,34 @@ export function RunCard({
         precondition nor a readable response, both of which a compare-and-swap write
         needs. A reload deliberately discards held edits rather than replaying them over
         a document that may have moved.
-        Shown ONLY while something is actually held — a permanent warning about work at
+        Shown ONLY while something is unacknowledged — a permanent warning about work at
         risk would be false most of the time, and this project has enough copy that was
         true when written. Two file headers claimed this sentence existed before it did;
         `run-workspace.test.tsx` now pins it so the claim stays checkable.
+
+        TWO CORRECTIONS A REVIEWER MADE TO THE FIRST VERSION OF THIS, and they had to be
+        made together because fixing either alone made the other worse:
+
+        · IT SAID "discards anything the server has not yet acknowledged", which
+          OVER-CLAIMS. What is certainly lost is anything not yet SENT. An edit in flight
+          when the tab closes may well have been committed — the browser simply never
+          learns, which is the exact distinction this branch built `unresolvedAttempt`
+          for and which the conflict panel two elements away already draws. Asserting
+          loss where the honest answer is unknown fate is the same mistake as
+          "Nothing you typed was written".
+        · IT WAS GATED ON `pendingCount > 0`, and `send()` empties the pending map before
+          dispatching — so the note VANISHED for the whole in-flight window and flickered
+          back if the request failed. Absent in exactly the state it describes. Gating on
+          the transport state instead covers both sub-states of `saving`.
       */}
-      {(autosave.pendingCount > 0 || heldInvalid) && (
+      {(autosave.status === 'saving' ||
+        autosave.status === 'failed' ||
+        autosave.status === 'conflict' ||
+        heldInvalid) && (
         <p className="run-card-session-note">
-          Unsent changes live in this browser tab only. Closing the tab or reloading the
-          page discards anything the server has not yet acknowledged.
+          Changes this tab has not finished saving live here only. If you close the tab or
+          reload, anything still unsent is lost — and anything already sent may or may not
+          have been saved.
         </p>
       )}
 
