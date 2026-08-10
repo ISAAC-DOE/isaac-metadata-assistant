@@ -32,18 +32,25 @@
  * (the pressure case — two expanded cards, each with three fields, a save-status
  * chip, a progress line and a conditions line).
  *
- * NOT asserted here: whole-document horizontal scroll as an absolute number. The
- * record screen ALREADY has recorded document-level offenders at 320/375/390
- * (`e2e/layout-baseline.ts`, `record-detail@width-320` and siblings), inherited
- * from the screen shell rather than from anything in this slice. Asserting
- * `docScrollWidth <= docClientWidth` here would fail for a cause this file cannot
- * fix and does not own, and the honest failure would look like a run-card defect.
+ * THE DOCUMENT IS MEASURED BOTH WAYS, and the first version of this file measured
+ * only one of them on a premise a reviewer showed to be false. It said an absolute
+ * `docScrollWidth <= docClientWidth` "would fail for a cause this file cannot fix",
+ * citing `e2e/layout-baseline.ts`'s `record-detail@width-320` and siblings as
+ * document-level offenders on this screen. They are not. Those entries are under
+ * LAYOUT-04, whose own note reads "NESTED horizontal overflow: regions that scroll
+ * or clip sideways INSIDE the page **while the document itself measures clean**",
+ * and no document-level finding exists anywhere in that file. Measured on this
+ * surface with two open runs, `docScrollWidth == docClientWidth` at all six widths
+ * and at the zoom case — so the stronger assertion was available all along, and the
+ * paragraph excusing its absence was the only thing standing in its way.
  *
- * So the document is measured DIFFERENTIALLY instead: the same page, same width,
- * with zero runs and then with two, and the run cards must not widen the document
- * by a single pixel. That is the claim this slice is actually responsible for, and
- * unlike an absolute threshold it cannot be satisfied by someone else's fix or
- * broken by someone else's regression.
+ * Both now run. The DIFFERENTIAL form (zero runs, then two, at 320) is kept because
+ * it attributes a regression to this slice rather than to the shell; the ABSOLUTE
+ * form is added because it is strictly stronger and passes today.
+ *
+ * NEITHER OF THEM CAN SEE THE WORST CASE, which is why `cardsTooWide` exists:
+ * `main#main.screen-main.pad` is `overflow-x: auto` and absorbs a card wider than
+ * the page without the document growing at all.
  *
  * NO ALLOWLIST. `layout-allowlist.ts` and `layout-baseline.ts` record measured,
  * argued exceptions for surfaces that already had them; this surface has never
@@ -130,6 +137,101 @@ interface Findings {
   overflow: string;
   clipped: string;
   obscured: string;
+  tooWide: string;
+}
+
+/**
+ * Does this offender belong to the runs section?
+ *
+ * ASKED OF THE DOM, NOT OF THE SELECTOR STRING, and the first version of this file
+ * asked the string — `o.selector.includes('run')`. A reviewer broke it with two
+ * declarations: `min-width: 400px` on `.run-card` at a 320px viewport, a card 160px
+ * wider than its container, **and all ten tests passed.**
+ *
+ * The reason is that `selector` names the CLIPPING ANCESTOR, not the culprit.
+ * `.runs-section`, `.runs-list` and `.record-view-panel` are all `overflow-x:
+ * visible`, so `findOverflowingRegions` skips them and the chain terminates at
+ * `main#main.screen-main.pad` or `div.screen-card` — neither of which contains the
+ * substring "run". That is not an edge case: it is the NORMAL termination for "the
+ * card is too wide for its container", as opposed to "content is too wide for the
+ * card", which is the only sub-class the substring filter ever caught.
+ *
+ * So membership is decided by containment, evaluated in the page against the same
+ * selector strings the report carries — and the offender counts if EITHER it or its
+ * culprit is inside the runs section, because the culprit is the thing to fix.
+ */
+async function belongsToRuns(page: Page, selectors: string[]): Promise<boolean[]> {
+  return page.evaluate(
+    ({ root, sels }) => {
+      const runs = document.querySelector(root);
+      if (!runs) return sels.map(() => false);
+      // `describe()` renders "a.b < c.d < e.f" innermost-first; the leading term is
+      // the element itself, and matching any run-scoped node with that exact class
+      // signature is what containment means here.
+      const inside = (rendered: string): boolean => {
+        const leaf = rendered.split('<')[0].trim();
+        if (!leaf) return false;
+        try {
+          return Array.from(document.querySelectorAll(leaf)).some((el) => runs.contains(el));
+        } catch {
+          return false; // an unparseable signature is not evidence of membership
+        }
+      };
+      return sels.map(inside);
+    },
+    { root: RUNS_ROOT, sels: selectors }
+  );
+}
+
+async function keepRunScoped<T extends { selector: string; culprit?: string | null }>(
+  page: Page,
+  items: T[]
+): Promise<T[]> {
+  if (!items.length) return [];
+  const own = await belongsToRuns(page, items.map((i) => i.selector));
+  const culprits = await belongsToRuns(page, items.map((i) => i.culprit ?? ''));
+  return items.filter((_, i) => own[i] || culprits[i]);
+}
+
+/**
+ * EVERY RUN CARD FITS ITS CONTAINER — the assertion the four probes cannot make.
+ *
+ * `main#main.screen-main.pad` is `overflow-x: auto`, so it ABSORBS a card wider than
+ * the page: nothing clips, no text is lost, no control is obscured, and even the
+ * document's own `scrollWidth` stays at the viewport width. Measured — a 400px card
+ * at a 320px viewport produced exactly zero findings from the other four probes.
+ *
+ * A sideways-scrolling main content region is the defect, not the mitigation (see
+ * `findObscuredControls`' docstring, which refuses to scroll horizontally to reveal
+ * a control for the same reason). So this is measured directly, per card, against
+ * the list's own content box.
+ */
+async function cardsTooWide(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const list = document.querySelector('div.runs-list');
+    if (!list) return ['div.runs-list is not present, so no card could be measured'];
+    const box = list.getBoundingClientRect();
+    const style = getComputedStyle(list);
+    const right = box.right - parseFloat(style.paddingRight || '0');
+    const out: string[] = [];
+    document.querySelectorAll('article.run-card').forEach((card, i) => {
+      const rect = card.getBoundingClientRect();
+      // 1px of tolerance: sub-pixel layout rounding, not a real overhang.
+      if (rect.right > right + 1) {
+        out.push(
+          `run card ${i + 1} extends to ${Math.round(rect.right)} past its list's content ` +
+            `edge at ${Math.round(right)} (card width ${Math.round(rect.width)})`
+        );
+      }
+      if (card.scrollWidth > card.clientWidth + 1) {
+        out.push(
+          `run card ${i + 1} scrolls or clips its own content: scrollWidth ` +
+            `${card.scrollWidth} vs clientWidth ${card.clientWidth}`
+        );
+      }
+    });
+    return out;
+  });
 }
 
 /**
@@ -142,7 +244,7 @@ interface Findings {
  */
 async function probeRuns(page: Page): Promise<Findings> {
   const overflow = await findOverflowingRegions(page, []);
-  const runsOverflow = overflow.offenders.filter((o) => o.selector.includes('run'));
+  const runsOverflow = await keepRunScoped(page, overflow.offenders);
 
   const clipped = (await findClippedText(page, RUNS_ROOT, [])).filter((o) => o.text.trim() !== '');
 
@@ -152,17 +254,21 @@ async function probeRuns(page: Page): Promise<Findings> {
   const obscuredBottom = await findObscuredControls(page);
   await scrollToTop(page);
   const seen = new Set<string>();
-  const obscured = [...obscuredTop, ...obscuredBottom].filter((o) => {
+  const deduped = [...obscuredTop, ...obscuredBottom].filter((o) => {
     const key = `${o.selector}::${o.detail}`;
-    if (seen.has(key) || !o.selector.includes('run')) return false;
+    if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+  const obscured = await keepRunScoped(page, deduped);
+
+  const tooWide = await cardsTooWide(page);
 
   return {
     overflow: runsOverflow.length ? renderOverflow(runsOverflow) : '',
     clipped: clipped.length ? render(clipped) : '',
     obscured: obscured.length ? render(obscured) : '',
+    tooWide: tooWide.length ? tooWide.map((line) => `  - ${line}`).join('\n') : '',
   };
 }
 
@@ -256,6 +362,7 @@ test.describe('run card — narrow widths', () => {
         findings.overflow && `OVERFLOW inside the runs section:\n${findings.overflow}`,
         findings.clipped && `TEXT LOST inside the runs section:\n${findings.clipped}`,
         findings.obscured && `CONTROLS OBSCURED inside the runs section:\n${findings.obscured}`,
+        findings.tooWide && `A RUN CARD DOES NOT FIT ITS CONTAINER:\n${findings.tooWide}`,
       ].filter(Boolean);
 
       expect(failures.join('\n\n'), `run card at ${width}px`).toBe('');
@@ -306,6 +413,7 @@ test.describe('run card — narrow widths', () => {
         findings.overflow && `OVERFLOW with the save chip present:\n${findings.overflow}`,
         findings.clipped && `TEXT LOST with the save chip present:\n${findings.clipped}`,
         findings.obscured && `CONTROLS OBSCURED with the save chip present:\n${findings.obscured}`,
+        findings.tooWide && `A RUN CARD DOES NOT FIT ITS CONTAINER:\n${findings.tooWide}`,
       ].filter(Boolean);
 
       expect(failures.join('\n\n'), `save-status chip at ${width}px`).toBe('');
@@ -341,6 +449,15 @@ test.describe('run card — narrow widths', () => {
         `${after.docScrollWidth} at 320px (clientWidth ${after.docClientWidth}). ` +
         'Whatever the screen shell already overflows by, the run card must add nothing.'
     ).toBeLessThanOrEqual(before.docScrollWidth);
+
+    // AND THE ABSOLUTE FORM, which the header's first version wrongly excused. It
+    // holds today at every width this file measures; a differential alone would
+    // tolerate slack if the shell ever regressed above the viewport width.
+    expect(
+      after.docScrollWidth,
+      `the document scrolls sideways at 320px: scrollWidth ${after.docScrollWidth} vs ` +
+        `clientWidth ${after.docClientWidth}. This is the WCAG 1.4.10 reflow width.`
+    ).toBeLessThanOrEqual(after.docClientWidth);
   });
 });
 
@@ -362,17 +479,30 @@ base('@responsive run card at 200% zoom (640x400 @ DPR2) stays usable', async ({
     deviceScaleFactor: 2,
     baseURL: MUT_BASE_URL,
   });
+  /*
+   * THE `try` OPENS HERE, BEFORE ANYTHING THAT CAN THROW, and it did not in the first
+   * version of this file. The session was opened and two `pwExpect`s were evaluated
+   * ABOVE the `try`, so a non-201 — or a body without a `session_id` — threw with the
+   * context unclosed and the session undisposed, while this file's header claimed
+   * both were disposed in a `finally`. A reviewer found the claim and the code
+   * disagreeing.
+   *
+   * `sessionId` is therefore declared out here and cleaned up conditionally: the
+   * failure that leaves it unset is exactly the failure that must still close the
+   * context.
+   */
   const page = await context.newPage();
-
-  const opened = await context.request.post(`${MUT_API_BASE}/tutorial/sessions`);
-  pwExpect(
-    opened.status(),
-    `could not open a worked-example session for the zoom case: ${await opened.text()}`
-  ).toBe(201);
-  const sessionId = ((await opened.json()) as { session_id?: string }).session_id;
-  pwExpect(typeof sessionId === 'string' && sessionId !== '').toBeTruthy();
+  let sessionId: string | undefined;
 
   try {
+    const opened = await context.request.post(`${MUT_API_BASE}/tutorial/sessions`);
+    pwExpect(
+      opened.status(),
+      `could not open a worked-example session for the zoom case: ${await opened.text()}`
+    ).toBe(201);
+    sessionId = ((await opened.json()) as { session_id?: string }).session_id;
+    pwExpect(typeof sessionId === 'string' && sessionId !== '').toBeTruthy();
+
     // Installs the route handler that attaches the session header to every API
     // call this page makes, and survives reloads. Same helper, same glob, same
     // argument order as the `scope` fixture — not a second implementation.
@@ -397,6 +527,7 @@ base('@responsive run card at 200% zoom (640x400 @ DPR2) stays usable', async ({
       findings.overflow && `OVERFLOW inside the runs section:\n${findings.overflow}`,
       findings.clipped && `TEXT LOST inside the runs section:\n${findings.clipped}`,
       findings.obscured && `CONTROLS OBSCURED inside the runs section:\n${findings.obscured}`,
+      findings.tooWide && `A RUN CARD DOES NOT FIT ITS CONTAINER:\n${findings.tooWide}`,
     ].filter(Boolean);
 
     pwExpect(failures.join('\n\n'), 'run card at 200% zoom').toBe('');
@@ -404,8 +535,11 @@ base('@responsive run card at 200% zoom (640x400 @ DPR2) stays usable', async ({
     await assertOperable(page);
   } finally {
     // Idempotent and swallowed, matching the `session` fixture: cleanup must never
-    // turn a passing test red.
-    await disposeWorkedExampleSession(sessionId!, MUT_API_BASE).catch(() => undefined);
+    // turn a passing test red. Guarded on `sessionId` because the failure that
+    // leaves it unset is precisely the one that must still close the context.
+    if (sessionId) {
+      await disposeWorkedExampleSession(sessionId, MUT_API_BASE).catch(() => undefined);
+    }
     await context.close();
   }
 });
