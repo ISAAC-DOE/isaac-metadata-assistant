@@ -42,8 +42,15 @@ export function LoadingPanel({ label = 'Loading…' }: { label?: string }) {
 /**
  * Which failure this is, from the observable signals only.
  *
- * - `not_found`  — HTTP 404 for a path that NAMES ONE RECORD: that record is not
- *                  there. Unchanged behaviour and unchanged copy.
+ * - `not_found`  — HTTP 404 the API attributed to the RECORD
+ *                  (`experiment_not_found`), or — no reason observed — for a path
+ *                  that names one record and nothing else. That record is not
+ *                  there. Unchanged copy.
+ * - `record_part_not_found`
+ *                — HTTP 404 the API attributed to a PART of a record
+ *                  (`run_not_found`, `source_not_allowed`), or for a path that
+ *                  read one. It names the part that was read and refuses to claim
+ *                  the experiment is absent.
  * - `path_not_found`
  *                — HTTP 404 for anything else — a collection read, a build-level
  *                  read, or a request whose path was not recorded. See
@@ -61,6 +68,7 @@ export function LoadingPanel({ label = 'Loading…' }: { label?: string }) {
  */
 export type DownKind =
   | 'not_found'
+  | 'record_part_not_found'
   | 'path_not_found'
   | 'auth'
   | 'http_error'
@@ -79,11 +87,11 @@ export interface DownCopy {
 }
 
 /**
- * Does this failed API path name ONE record?
+ * Does this failed API path name ONE record AND NOTHING BELOW IT?
  *
  * WHY THIS PREDICATE EXISTS. Every 404 used to render "Record Not Found — this
  * experiment id is not in the local workspace", from all 14 call sites. That is
- * true of `GET /api/experiments/{id}` and its sub-reads, and FALSE of everything
+ * true of `GET /api/experiments/{id}`, and FALSE of everything
  * else that can answer 404 — and the false case was reached. Browser testing
  * caught My Experiments rendering it: a reload holding an expired worked-example
  * pointer issued `GET /api/experiments`, the backend rejected the unknown session
@@ -96,9 +104,49 @@ export interface DownCopy {
  * as `/experiments/{id}` plus an optional suffix, and the only other `/experiments`
  * path is the bare collection. `/memory/concepts/{id}` is deliberately NOT matched —
  * a concept is not an experiment.
+ *
+ * `$` NARROWED THIS PREDICATE, and is only PART of the second fix. The pattern used
+ * to be `/^\/experiments\/[^/]/` — no anchor — so it also matched all EIGHTEEN
+ * sub-reads `api.ts` builds under a record (`/draft`, `/pending`, `/answers`,
+ * `/edit`, `/runs`, `/runs/{run_id}`, `/runs/{run_id}/check`, `/export`,
+ * `/validate`, `/evidence`, `/source-preview`, `/artifacts`, `/assistant/query`,
+ * …). A 404 from any of them rendered "this experiment id is not in the
+ * workspace", while the backend DELIBERATELY distinguishes four reasons it can 404
+ * under this prefix: `experiment_not_found` (`routes.py::_not_found`),
+ * `run_not_found` (`routes.py::_run_not_found`, whose docstring says collapsing
+ * them "would tell a client to go looking in the wrong place"),
+ * `source_not_allowed`, and `tutorial_session_not_found` from the scope
+ * dependency. The client collapsed all four.
+ *
+ * THE ANCHOR ALONE WOULD NOT HAVE BEEN A CORRECT FIX, which is why `downCopy` reads
+ * `ApiError.reason` first and consults this predicate only when no reason was
+ * observed. `getEvidenceBundle` races a record read against its sub-reads in one
+ * `Promise.all`, so on a genuinely missing experiment the path that reaches the
+ * panel is nondeterministic — see the comment in `downCopy`. This predicate answers
+ * a question about a PATH; it is not, on its own, evidence about a record.
+ *
+ * A query string is deliberately still matched: `?scope=x` on a bare record read
+ * does not stop it naming that one record. A `/` after the id does.
  */
 export function isRecordPath(path: string | undefined): boolean {
-  return path !== undefined && /^\/experiments\/[^/]/.test(path);
+  return path !== undefined && /^\/experiments\/[^/]+$/.test(path);
+}
+
+/**
+ * The first path segment BELOW `/experiments/{id}` — the PART that was read — or
+ * `undefined` when the path does not read one.
+ *
+ * Deliberately structural, and deliberately not a lookup table of friendlier
+ * names. It reports the segment `api.ts` put in the URL, so it cannot drift out
+ * of sync with the eighteen sub-reads (a translation table would have to be
+ * amended every time one is added, and would silently mislabel the one that was
+ * forgotten). The query string is stripped because `/source-preview?source=…` is
+ * the one sub-read that carries one, and the segment — not the parameter — is
+ * what names the subject.
+ */
+export function recordSubResource(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  return /^\/experiments\/[^/]+\/([^/?#]+)/.exec(path)?.[1];
 }
 
 /**
@@ -130,7 +178,54 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    */
   const interceptedByEdge = error?.htmlIntercept === true;
 
-  if (status === 404 && !interceptedByEdge && isRecordPath(error?.path)) {
+  /*
+   * THE BACKEND'S OWN REASON WINS OVER THE PATH, and the path is only a fallback.
+   *
+   * WHY, and this is the part a later reader will be tempted to "simplify" back into
+   * a path test. `api.getEvidenceBundle` fetches `getExperiment(id)` and every
+   * `getSourcePreview(id, file)` in ONE `Promise.all`. When the experiment is
+   * genuinely absent, all of those reads 404, and `Promise.all` rejects with
+   * WHICHEVER REJECTED FIRST — a race. A purely path-based rule is therefore unsound
+   * in both directions: keep it broad and a `source_not_allowed` 404 claims the
+   * record is missing (the reachable false claim), narrow it to the exact record path
+   * and a genuinely absent experiment renders generic copy whenever a sub-read's
+   * rejection happens to win the race — nondeterministic copy for one underlying
+   * truth, which is a different way of hiding a real 404.
+   *
+   * A REASON-BASED RULE IS IMMUNE TO THE RACE: `experiment_not_found` says the record
+   * is absent no matter which promise lost, and `run_not_found` /
+   * `source_not_allowed` say it is not, likewise. `httpErrorWithReason` reads that
+   * reason only from a JSON 404 body and never from an HTML one, so
+   * `interceptedByEdge` still wins over every branch below.
+   *
+   * `undefined` MEANS NOT OBSERVED — a POST failure, a non-JSON body, an empty body,
+   * or `{"detail": …}` from an unrouted path. Only then does the path shape decide,
+   * and an unrecognised reason falls through to the generic branch rather than to any
+   * confident claim.
+   */
+  const reason = interceptedByEdge ? undefined : error?.reason;
+  const subResource = interceptedByEdge ? undefined : recordSubResource(error?.path);
+
+  /*
+   * THE RECORD ITSELF IS ABSENT. Today's copy and behaviour, unchanged.
+   *
+   * Reached either because the API said `experiment_not_found` — which is now
+   * honoured ON A SUB-RESOURCE PATH TOO, so the race above cannot downgrade a real
+   * missing record to generic copy — or, with no reason observed, because the path
+   * names one record and nothing below it.
+   *
+   * One behaviour DID change here, and it is a correction rather than a regression: a
+   * 404 carrying `tutorial_session_not_found` on a record path no longer takes this
+   * branch. That reason is raised by the scope dependency BEFORE any record work
+   * happens (`routes.py::tutorial_scope`), so it is evidence about a dead
+   * worked-example session and none at all about whether the record exists. It falls
+   * through to the generic branch, which is what the panel can honestly say.
+   */
+  if (
+    status === 404 &&
+    !interceptedByEdge &&
+    (reason === 'experiment_not_found' || (reason === undefined && isRecordPath(error?.path)))
+  ) {
     return {
       kind: 'not_found',
       title: 'Record Not Found',
@@ -138,6 +233,66 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
         hosted
           ? 'This experiment id is not in the workspace — it may not have been created yet.'
           : 'This experiment id is not in the local workspace — it may not have been created yet.',
+      ],
+      showRunCommand: false,
+      offerReload: false,
+    };
+  }
+
+  /*
+   * A 404 ABOUT ONE PART OF A RECORD — which is NOT evidence that the record is
+   * absent, and used to be reported as exactly that.
+   *
+   * THE REACHABLE FALSE CLAIM, and it is data-driven rather than hypothetical.
+   * `api.getEvidenceBundle` previews every source file `citedSourceFiles(evidence)`
+   * derives from the evidence itself, with no per-item catch, so ONE evidence entry
+   * citing a file outside `ws.SOURCE_FILES` makes the backend answer `404 {"error":
+   * "source_not_allowed"}` ("Only the two committed reference files may be
+   * previewed"), rejects the whole bundle, and `EvidenceExplorer` — reading it
+   * through `useFetch` — rendered "Record Not Found — this experiment id is not in
+   * the workspace" for an experiment that exists and whose evidence had loaded fine.
+   *
+   * MEASURED ON THE DEPLOYED APP for the sibling reason, hosted commit `bd3effc`
+   * (`v0.0.100`), 2026-08-10: `GET /krish/api/experiments` lists
+   * `01KZM7HYJVQY1C0X3KFV805YT2`, so that record demonstrably EXISTS, while
+   * `…/runs/01BOGUS0000000000000000000` answers `404 {"error":"run_not_found",…}`.
+   * The unanchored `isRecordPath` matched that path too, so the panel contradicted a
+   * listing the same deployment had just produced.
+   *
+   * `_run_not_found` is a separate body from `_not_found` BECAUSE, in its own words,
+   * the record "exists and was read successfully and simply holds no run under that
+   * id", and collapsing the two "would tell a client to go looking in the wrong
+   * place". The client collapsed them.
+   *
+   * WHY THIS NAMES THE PART BUT NOT THE VERDICT, even with a reason in hand. When the
+   * reason IS observed the panel could say "the record exists but holds no such run";
+   * it deliberately does not, because the reason is evidence about the sub-resource
+   * and the copy would then also have to be right about a race it did not witness.
+   * What it states is the subject of the REQUEST — observed, in the URL this client
+   * built — and it declines to state the subject of the 404. That understates rather
+   * than overstates. Callers passing `onRetry` still render Retry, useful either way.
+   *
+   * A bare `/experiments/{id}` 404 does NOT land here — it took the branch above with
+   * its copy unchanged. Nor does an HTML-bodied 404, nor an `experiment_not_found`
+   * arriving on a sub-resource path.
+   */
+  if (
+    status === 404 &&
+    !interceptedByEdge &&
+    (reason === 'run_not_found' || reason === 'source_not_allowed' || subResource !== undefined)
+  ) {
+    return {
+      kind: 'record_part_not_found',
+      title: 'Not Found',
+      lines: [
+        // The part is named only when the PATH carried it. A reason can be observed
+        // without one (a reason from a request whose path this client did not shape),
+        // and inventing a segment to fill the sentence would be a small fabrication.
+        subResource !== undefined
+          ? `The ISAAC API answered HTTP 404 for a read of “${subResource}” under this experiment id, so this view has no server-derived data to show.`
+          : 'The ISAAC API answered HTTP 404 for a read of one part of this experiment, so this view has no server-derived data to show.',
+        'The request read one part of an experiment rather than the experiment itself, so this 404 does not establish that the experiment is missing — and this page does not claim it is.',
+        'This prototype reads only server-derived truth — it will never show placeholder data.',
       ],
       showRunCommand: false,
       offerReload: false,
@@ -158,6 +313,16 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    *
    * AN HTML-BODIED 404 DOES NOT LAND HERE — see `interceptedByEdge` above. Its first
    * sentence would be false of one: the ISAAC API did not answer, an intercept did.
+   *
+   * NEITHER DOES A READ UNDER `/experiments/{id}/…` — that is the branch immediately
+   * above, which can at least name the part that was read.
+   *
+   * TWO KINDS OF 404 NOW LAND HERE THAT USED TO CLAIM A MISSING RECORD: one carrying
+   * `tutorial_session_not_found` (evidence about a dead worked-example session, none
+   * about the record), and one carrying a reason this build does not recognise. Both
+   * are cases where a subject was reported and it was not the record, so the generic
+   * wording is the honest one — and an unknown reason must never be optimistically
+   * mapped onto a branch that asserts something.
    *
    * A pathless 404 lands here too. Every `ApiError` this client raises carries a
    * path (`httpError`, `readJson` and `request`'s network branch all pass one), so

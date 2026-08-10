@@ -597,3 +597,139 @@ describe('typed API client — edge intercepts and non-JSON bodies', () => {
     expect(isHostedBuild).toBe(false);
   });
 });
+
+/*
+ * THE BACKEND'S TYPED 404 REASON, plumbed onto `ApiError.reason`.
+ *
+ * `routes.py` deliberately answers a 404 under `/experiments/{id}` with FOUR
+ * different bodies — `experiment_not_found`, `run_not_found` ("the record exists and
+ * was read successfully and simply holds no run under that id"; collapsing them
+ * "would tell a client to go looking in the wrong place"), `source_not_allowed`, and
+ * `tutorial_session_not_found` from the scope dependency. `httpError` copies the
+ * status and nothing else, so all four arrived at the UI identical and
+ * `FetchStates.downCopy` reported every one of them as a missing record.
+ *
+ * `getJson` now reads that reason. The rules below are each a defect this module has
+ * already had at least once, so they are pinned rather than assumed.
+ */
+describe('typed API client — the typed 404 reason', () => {
+  /** A fetch stub whose body text and content-type the caller chooses. */
+  function stub404(text: string, contentType: string | null = 'application/json'): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        let consumed = false;
+        return {
+          ok: false,
+          status: 404,
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === 'content-type' ? contentType : null,
+          },
+          json: async () => {
+            // A body can be consumed ONCE. If anything reads it twice this throws,
+            // which is the point — `readJson` must not also run on the failure path.
+            if (consumed) throw new TypeError('body stream already read');
+            consumed = true;
+            return JSON.parse(text) as unknown;
+          },
+        } as unknown as Response;
+      }),
+    );
+  }
+
+  it('run_not_found reaches the client as a reason, alongside the status and path', async () => {
+    stub404(
+      JSON.stringify({ error: 'run_not_found', experiment_id: EXP_ID, id: 'RUN-1' }),
+    );
+    const error = (await api.getRun(EXP_ID, 'RUN-1').catch((e: unknown) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(404);
+    expect(error.reason).toBe('run_not_found');
+    expect(error.path).toBe(`/experiments/${EXP_ID}/runs/RUN-1`);
+    expect(error.htmlIntercept).toBe(false);
+  });
+
+  it('source_not_allowed reaches the client — the reachable Evidence-screen case', async () => {
+    stub404(
+      JSON.stringify({
+        error: 'source_not_allowed',
+        message: 'Only the two committed reference files may be previewed.',
+        allowed: ['a.csv', 'b.csv'],
+      }),
+    );
+    const error = (await api
+      .getSourcePreview(EXP_ID, 'outside.csv')
+      .catch((e: unknown) => e)) as ApiError;
+    expect(error.reason).toBe('source_not_allowed');
+  });
+
+  it('experiment_not_found reaches the client, so the record claim rests on evidence', async () => {
+    stub404(JSON.stringify({ error: 'experiment_not_found', id: EXP_ID }));
+    const error = (await api.getExperiment(EXP_ID).catch((e: unknown) => e)) as ApiError;
+    expect(error.reason).toBe('experiment_not_found');
+  });
+
+  /*
+   * THE LOAD-BEARING REFUSAL. An authenticating edge answers `/api/*` with its
+   * sign-in page; a "reason" parsed out of that would be fabricated, and
+   * `downCopy`'s `interceptedByEdge` guard must keep winning over the reason
+   * branches. Asserted in BOTH directions.
+   */
+  it('an HTML-bodied 404 yields NO reason, and is still flagged as an intercept', async () => {
+    stub404('<!doctype html><title>Sign in</title>', 'text/html; charset=utf-8');
+    const error = (await api.getExperiment(EXP_ID).catch((e: unknown) => e)) as ApiError;
+    expect(error.htmlIntercept).toBe(true);
+    expect(error.reason).toBeUndefined();
+  });
+
+  it('an unreadable, empty or untyped 404 body yields NO reason rather than a wrong one', async () => {
+    for (const body of [
+      'not json at all', // parse rejects
+      '{}', // JSON, no `error`
+      JSON.stringify({ detail: 'Not Found' }), // FastAPI's shape for an unrouted path
+      JSON.stringify({ error: 42 }), // present but not a string
+      JSON.stringify({ error: { code: 'nested' } }),
+    ]) {
+      stub404(body);
+      const error = (await api.getExperiment(EXP_ID).catch((e: unknown) => e)) as ApiError;
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.status).toBe(404);
+      expect(error.reason).toBeUndefined();
+    }
+  });
+
+  it('only 404 is widened — another status keeps its body unread', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        return {
+          ok: false,
+          status: 500,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ error: 'experiment_not_found' }),
+        } as unknown as Response;
+      }),
+    );
+    const error = (await api.getExperiment(EXP_ID).catch((e: unknown) => e)) as ApiError;
+    expect(error.status).toBe(500);
+    // Reading a reason here would let a 500 masquerade as a missing record.
+    expect(error.reason).toBeUndefined();
+  });
+
+  /*
+   * POST IS WIDENED TOO, and this test exists because leaving it out was a measured
+   * bug rather than a hypothetical one. The record screen fetches seven requests for
+   * one route, two of them POSTs (`/validate`, `/audit`). With only `getJson`
+   * widened, a POST rejection winning that race left `reason === undefined` and the
+   * copy fell back to the path rule — which, for a sub-resource path, is NOT the
+   * record claim. `tutorial-session-lifecycle`'s deep-link test caught exactly that.
+   */
+  it('postJson is widened too, so a bundle cannot depend on which member lost the race', async () => {
+    stub404(JSON.stringify({ error: 'experiment_not_found', id: EXP_ID }));
+    const error = (await api.validate(EXP_ID).catch((e: unknown) => e)) as ApiError;
+    expect(error.status).toBe(404);
+    expect(error.reason).toBe('experiment_not_found');
+    expect(error.path).toBe(`/experiments/${EXP_ID}/validate`);
+  });
+});

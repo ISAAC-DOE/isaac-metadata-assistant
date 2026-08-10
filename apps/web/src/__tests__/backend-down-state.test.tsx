@@ -413,6 +413,44 @@ describe('downCopy — the branch table, as a pure function', () => {
     ).kind,
     notFoundCollection: downCopy(new ApiError('x', { status: 404, path: '/experiments' }), hosted)
       .kind,
+    // A read BELOW the record, with no reason observed — the path decides.
+    notFoundRecordPart: downCopy(
+      new ApiError('x', { status: 404, path: '/experiments/EXP-1/runs/RUN-1' }),
+      hosted,
+    ).kind,
+    // THE REASON OVERRIDES THE PATH, both ways. These two rows are the race-proof
+    // half of the rule: `experiment_not_found` on a sub-path is still the record
+    // claim, and `source_not_allowed` on a sub-path never is.
+    reasonRecordOnSubPath: downCopy(
+      new ApiError('x', {
+        status: 404,
+        path: '/experiments/EXP-1/source-preview?source=x.csv',
+        reason: 'experiment_not_found',
+      }),
+      hosted,
+    ).kind,
+    reasonSourceNotAllowed: downCopy(
+      new ApiError('x', {
+        status: 404,
+        path: '/experiments/EXP-1/source-preview?source=x.csv',
+        reason: 'source_not_allowed',
+      }),
+      hosted,
+    ).kind,
+    // A dead worked-example session is not a missing record, and an unrecognised
+    // reason is not anything — both must degrade, not assert.
+    reasonDeadSession: downCopy(
+      new ApiError('x', {
+        status: 404,
+        path: '/experiments/EXP-1',
+        reason: 'tutorial_session_not_found',
+      }),
+      hosted,
+    ).kind,
+    reasonUnrecognised: downCopy(
+      new ApiError('x', { status: 404, path: '/experiments/EXP-1', reason: 'brand_new_reason' }),
+      hosted,
+    ).kind,
     notFoundPathless: downCopy(new ApiError('x', { status: 404 }), hosted).kind,
     unauthenticated: downCopy(new ApiError('x', { status: 401 }), hosted).kind,
     forbidden: downCopy(new ApiError('x', { status: 403 }), hosted).kind,
@@ -426,6 +464,11 @@ describe('downCopy — the branch table, as a pure function', () => {
     expect(kindsFor(true)).toEqual({
       notFoundRecord: 'not_found',
       notFoundCollection: 'path_not_found',
+      notFoundRecordPart: 'record_part_not_found',
+      reasonRecordOnSubPath: 'not_found',
+      reasonSourceNotAllowed: 'record_part_not_found',
+      reasonDeadSession: 'path_not_found',
+      reasonUnrecognised: 'path_not_found',
       notFoundPathless: 'path_not_found',
       unauthenticated: 'auth',
       forbidden: 'auth',
@@ -442,6 +485,11 @@ describe('downCopy — the branch table, as a pure function', () => {
       // Deliberately NOT the `local` branch: the API answered, so "Backend Not
       // Running" would be false. A 404 is a 404 in both builds.
       notFoundCollection: 'path_not_found',
+      notFoundRecordPart: 'record_part_not_found',
+      reasonRecordOnSubPath: 'not_found',
+      reasonSourceNotAllowed: 'record_part_not_found',
+      reasonDeadSession: 'path_not_found',
+      reasonUnrecognised: 'path_not_found',
       notFoundPathless: 'path_not_found',
       unauthenticated: 'auth',
       forbidden: 'auth',
@@ -494,5 +542,195 @@ describe('both render sites guard the run command at build time', () => {
     expect(source).toContain('downCopy(error)');
     expect(source).toContain('DownTechnicalDetails');
     expect(source).not.toContain('The local ISAAC API is not responding');
+  });
+});
+
+/*
+ * A MISSING SUB-RESOURCE IS NOT A MISSING EXPERIMENT.
+ *
+ * `isRecordPath` was `/^\/experiments\/[^/]/` — unanchored — so it matched all
+ * EIGHTEEN sub-reads `api.ts` builds under a record as well as the record itself,
+ * and every 404 from any of them rendered the most definitive sentence this panel
+ * can say: "Record Not Found — this experiment id is not in the workspace".
+ *
+ * The backend had gone out of its way to say otherwise. `routes.py::_run_not_found`
+ * is a deliberately DIFFERENT body from `_not_found` because, in its own docstring,
+ * `run_not_found` means the record "exists and was read successfully and simply
+ * holds no run under that id", and collapsing the two "would tell a client to go
+ * looking in the wrong place". The client collapsed them anyway.
+ *
+ * MEASURED ON THE DEPLOYED APP, hosted commit `bd3effc` (`v0.0.100`), 2026-08-10:
+ * `GET /krish/api/experiments` lists `01KZM7HYJVQY1C0X3KFV805YT2`, and
+ * `GET /krish/api/experiments/01KZM7HYJVQY1C0X3KFV805YT2/runs/01BOGUS0000000000000000000`
+ * answers `404 {"error":"run_not_found","experiment_id":"01KZM7HYJVQY1C0X3KFV805YT2",
+ * "id":"01BOGUS0000000000000000000"}`. A real, existing, listed record.
+ *
+ * The reachable USER-FACING instance is Evidence, not Runs: `getEvidenceBundle`
+ * previews every cited source file in one `Promise.all` with no per-item catch, so a
+ * single `source_not_allowed` 404 rejected the whole bundle and `EvidenceExplorer`
+ * blamed the record's existence.
+ */
+describe('a 404 about part of a record never claims the record is missing', () => {
+  const at = (path: string, reason?: string) =>
+    new ApiError('Request failed (404).', { status: 404, path, reason });
+
+  /** The two sentences that assert the record does not exist. */
+  const assertsMissingRecord = (text: string) =>
+    /experiment id is not in the/i.test(text) || /may not have been created yet/i.test(text);
+
+  const bodyOf = (error: ApiError) => {
+    const view = render(<BackendDown error={error} />);
+    const text = view.container.querySelector('.fetch-state-body')!.textContent ?? '';
+    view.unmount();
+    return text;
+  };
+
+  it('THE REGRESSION: a run 404 does not claim the experiment is missing', () => {
+    const body = bodyOf(at('/experiments/EXP-1/runs/RUN-1', 'run_not_found'));
+    expect(assertsMissingRecord(body)).toBe(false);
+    expect(body).toContain('does not establish that the experiment is missing');
+    // It names the part that WAS read, from the path.
+    expect(body).toContain('“runs”');
+  });
+
+  it('THE REGRESSION: a source-preview 404 does not claim the experiment is missing', () => {
+    const error = at('/experiments/EXP-1/source-preview?source=outside.csv', 'source_not_allowed');
+    expect(assertsMissingRecord(bodyOf(error))).toBe(false);
+    const lines = downCopy(error, false).lines.join(' ');
+    // The query string is not mistaken for part of the segment. Asserted over the
+    // COPY, not the whole panel: Technical Details reports the full request path by
+    // design, and that row is pre-existing, correct, and credential-free.
+    expect(lines).toContain('“source-preview”');
+    expect(lines).not.toContain('outside.csv');
+  });
+
+  it('no sub-read of a record can produce the missing-record claim from its PATH alone', () => {
+    // Every suffix `api.ts` builds under `/experiments/{id}`.
+    const suffixes = [
+      'draft',
+      'pending',
+      'answers',
+      'edit',
+      'runs',
+      'runs/RUN-1',
+      'runs/RUN-1/check',
+      'ingestion/csv/preview',
+      'export',
+      'validate',
+      'audit',
+      'warnings',
+      'evidence',
+      'evidence-classification',
+      'source-preview?source=a.csv',
+      'artifacts',
+      'assistant/query',
+    ];
+    for (const suffix of suffixes) {
+      const copy = downCopy(at(`/experiments/EXP-1/${suffix}`), true);
+      expect(copy.kind).toBe('record_part_not_found');
+      expect(assertsMissingRecord(copy.lines.join(' '))).toBe(false);
+    }
+    // Guard the guard: the list above must be sub-reads, not the record itself.
+    expect(downCopy(at('/experiments/EXP-1'), true).kind).toBe('not_found');
+  });
+
+  /*
+   * THE CASE A PATH-BASED FIX SILENTLY BREAKS, which is why the reason is read at
+   * all. `getEvidenceBundle` awaits `getExperiment(id)` and every
+   * `getSourcePreview(id, file)` in ONE `Promise.all`; when the experiment really is
+   * absent they all 404 and the rejection that arrives is whichever landed first — a
+   * race. Narrowing the path predicate alone would make the copy for one underlying
+   * truth depend on that race. The reason does not.
+   */
+  it('experiment_not_found on a SUB-resource path still says Record Not Found', () => {
+    const view = render(
+      <BackendDown
+        error={at('/experiments/EXP-1/source-preview?source=a.csv', 'experiment_not_found')}
+      />,
+    );
+    expect(view.getByText('Record Not Found')).toBeInTheDocument();
+    expect(
+      view.getByText(
+        'This experiment id is not in the local workspace — it may not have been created yet.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('a real missing record is still reported plainly — the fix hides no 404', () => {
+    for (const error of [
+      at('/experiments/EXP-1'), // no reason observed; the path names one record
+      at('/experiments/EXP-1', 'experiment_not_found'),
+      at('/experiments/EXP-1/runs', 'experiment_not_found'),
+    ]) {
+      const body = bodyOf(error);
+      expect(assertsMissingRecord(body)).toBe(true);
+    }
+  });
+
+  it('a dead worked-example session is not reported as a missing record', () => {
+    // `tutorial_scope` raises this BEFORE any record work, so it is evidence about
+    // the session and none at all about whether the record exists.
+    const body = bodyOf(at('/experiments/EXP-1', 'tutorial_session_not_found'));
+    expect(assertsMissingRecord(body)).toBe(false);
+    expect(body).toContain('answered HTTP 404 for this request');
+  });
+
+  it('an unrecognised reason degrades to generic — never to a confident claim', () => {
+    const copy = downCopy(at('/experiments/EXP-1', 'some_future_reason'), true);
+    expect(copy.kind).toBe('path_not_found');
+    expect(assertsMissingRecord(copy.lines.join(' '))).toBe(false);
+  });
+
+  it('a pathless, reasonless 404 still lands generic', () => {
+    const copy = downCopy(new ApiError('x', { status: 404 }), true);
+    expect(copy.kind).toBe('path_not_found');
+    expect(assertsMissingRecord(copy.lines.join(' '))).toBe(false);
+  });
+
+  it('Retry is still offered on a sub-resource 404 when the caller supplies one', () => {
+    const view = render(
+      <BackendDown error={at('/experiments/EXP-1/runs/RUN-1', 'run_not_found')} onRetry={() => {}} />,
+    );
+    expect(view.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    // No unevidenced reload prompt, and no unactionable local remedy.
+    expect(view.queryByRole('button', { name: 'Reload' })).toBeNull();
+    expect(view.queryByText(RUN_COMMAND)).toBeNull();
+  });
+
+  /*
+   * POLARITY GUARD, asserted in BOTH directions because a test in this repo once
+   * shipped inverted and passed. `interceptedByEdge` must win over every 404 branch,
+   * including the two new reason-based ones: a sign-in page served with a 404 carries
+   * no ISAAC reason, and a reason must never be honoured from one.
+   */
+  it('an HTML-bodied 404 on a record path is STILL the auth branch, not either 404 branch', () => {
+    const html = (path: string, reason?: string) =>
+      new ApiError('x', {
+        status: 404,
+        path,
+        contentType: 'text/html; charset=utf-8',
+        htmlIntercept: true,
+        reason,
+      });
+    // The positive half: it lands in `auth`.
+    const view = render(<BackendDown error={html('/experiments/EXP-1')} />);
+    expect(view.getByText('Sign-In Required')).toBeInTheDocument();
+    expect(
+      view.getByText(/A sign-in page was returned in place of the ISAAC API/),
+    ).toBeInTheDocument();
+    // The negative half: neither 404 branch, and neither 404 branch's wording.
+    expect(view.queryByText('Record Not Found')).toBeNull();
+    expect(view.queryByText('Not Found')).toBeNull();
+    const body = view.container.querySelector('.fetch-state-body')!.textContent ?? '';
+    expect(assertsMissingRecord(body)).toBe(false);
+    expect(body).not.toContain('answered HTTP 404');
+
+    // And the intercept wins even when a reason field is somehow populated — on a
+    // record path, a sub-resource path, and for each reason the branches key on.
+    for (const path of ['/experiments/EXP-1', '/experiments/EXP-1/runs/RUN-1']) {
+      for (const reason of [undefined, 'experiment_not_found', 'run_not_found']) {
+        expect(downCopy(html(path, reason), true).kind).toBe('auth');
+      }
+    }
   });
 });

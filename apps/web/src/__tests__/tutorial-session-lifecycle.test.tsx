@@ -1001,11 +1001,29 @@ describe('worked-example session — scope handling', () => {
    */
   it('a deep link to an example record with no session fails safely', async () => {
     const base = `/api/experiments/${CANONICAL_RESET_IDS[0]}`;
+    /*
+     * ALL SEVEN READS THE RECORD SCREEN ISSUES ARE STUBBED, with the body the real
+     * backend sends (`routes.py::_not_found`). This fixture used to stub only
+     * `GET {base}`, which left the other six hitting the stub's "no route" TypeError
+     * and arriving as `unreachable` — so the assertion below was decided by which
+     * rejection won a `Promise.all` race, and the state it simulated (one read 404ing
+     * while the API is simultaneously unreachable) cannot occur in production. When
+     * the client began reading the typed 404 reason, the extra await flipped that
+     * race and the screen rendered "Backend Not Running" — a fixture artifact, not a
+     * product regression, but it was hiding behind a coincidence either way.
+     */
+    const missing = { status: 404, body: { error: 'experiment_not_found', id: CANONICAL_RESET_IDS[0] } };
     stubFetchRoutes({
       'GET /api/health': { body: healthSynthetic },
       'GET /api/experiments': { body: { experiments: [] } },
       'GET /api/graph/status': { body: graphStatusUnavailable },
-      [`GET ${base}`]: { status: 404, body: { detail: 'Not Found' } },
+      [`GET ${base}`]: missing,
+      [`GET ${base}/draft`]: missing,
+      [`GET ${base}/pending`]: missing,
+      [`POST ${base}/validate`]: missing,
+      [`POST ${base}/audit`]: missing,
+      [`GET ${base}/warnings`]: missing,
+      [`GET ${base}/evidence`]: missing,
     } as never);
     const view = renderAt(`/record/${CANONICAL_RESET_IDS[0]}`);
 
