@@ -25,7 +25,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from isaac_records.audit import audit_records, render_audit
-from isaac_records.complete import apply_answers, apply_corrections
+from isaac_records.complete import (
+    apply_answers,
+    apply_corrections,
+    is_descriptor_shaped,
+    is_series_shaped,
+)
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
@@ -1992,20 +1997,45 @@ def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: 
 # --- 7. answers ---------------------------------------------------------------
 
 
-def _correction_is_shaped(key: str, value) -> bool:
-    """Can ``apply_corrections`` actually store this structured value?
+def _correction_is_storable(key: str, value) -> bool:
+    """Can ``apply_corrections`` store this value, AND can the app survive doing so?
 
-    Mirrors the guards in ``isaac_records.complete`` rather than restating them loosely:
-    ``series`` is a list of mappings, ``descriptor`` is a mapping. Kept as one named
-    predicate because the route and the core drifted once already — the core's
-    ``apply_answers`` was hardened against wrong types and its ``apply_corrections`` was
-    not, and nothing noticed because only the first had a test.
+    TWO PREVIOUS VERSIONS OF THIS WERE WRONG IN THE SAME WAY — they answered a narrower
+    question than the name, and a reviewer measured what got through each time:
+
+    * it IMPORTS the shape predicates now instead of re-implementing them. The last version
+      copied ``is_series_shaped``'s body under a docstring claiming it "mirrors the guards
+      … rather than restating them loosely". Copying is restating, and it created exactly
+      the second definition that comment warned about.
+    * it applies :func:`_is_storable_value` as well, which is where depth, renderability
+      and size live. Without it, ``NaN`` and ``Infinity`` were accepted and written as bare
+      JSON literals — making ``experiment.json`` invalid JSON and every later export raise
+      ``ValueError: Out of range float values are not JSON compliant`` forever — and a lone
+      surrogate crashed the response render after the write had committed. The run write
+      path already guards all three; this route did not, and the guard existing two
+      thousand lines away is not a defence.
+    * it is asked of EVERY key in the shaped body, not just ``series`` and ``descriptor``.
+      Asset-URI keys with a non-string value, and ``descriptor_label`` / ``edge`` at any
+      type, were silently absorbed with a 200 — the outcome this block's own comment calls
+      forbidden.
+
+    The size bound is deliberately NOT the run path's 64 KiB: a reduced spectrum is
+    legitimately large. 8 MiB bounds a pathological payload without putting a scientific
+    limit on real data, and it is a bound on ONE corrected value rather than on the record.
     """
+    if not _is_storable_value(value, max_bytes=_MAX_CORRECTION_BYTES):
+        return False
     if key == "series":
-        return isinstance(value, list) and all(isinstance(item, dict) for item in value)
+        return is_series_shaped(value)
     if key == "descriptor":
-        return isinstance(value, dict)
-    return True
+        return is_descriptor_shaped(value)
+    if key == "descriptor_label":
+        # It is rendered as a label; only a string is one.
+        return isinstance(value, str)
+    if key == "edge":
+        return isinstance(value, (str, int, float))
+    # Anything else in the shaped body is an asset sha256, keyed by URI.
+    return isinstance(value, str)
 
 
 def _answers_to_apply_shape(answers_by_id: dict, draft: dict, timestamp: str) -> dict:
@@ -2268,8 +2298,13 @@ def post_edit(
         # blocker to leave open, so silence there is genuinely silent.
         wrong_typed = [
             key
-            for key, expected in (("series", "a list of objects"), ("descriptor", "an object"))
-            if key in apply_shape and not _correction_is_shaped(key, apply_shape[key])
+            for key, value in apply_shape.items()
+            if key not in ("timestamp", "asset_sha256")
+            and not _correction_is_storable(key, value)
+        ] + [
+            uri
+            for uri, sha in (apply_shape.get("asset_sha256") or {}).items()
+            if not _correction_is_storable(uri, sha)
         ]
         if wrong_typed:
             return JSONResponse(
@@ -2689,6 +2724,13 @@ _MAX_VALUE_DEPTH = 32
 #: ``MAX_VALIDATE_RECORD_BYTES`` (512 KiB), the two limits this repository already
 #: enforces — deliberately in their style rather than as a new kind of number.
 _MAX_VALUE_BYTES = 64 * 1024
+
+#: The largest ONE corrected value on `POST /edit` may serialise to. Deliberately much
+#: larger than `_MAX_VALUE_BYTES`: a reduced spectrum is legitimately big, so the run
+#: path's 64 KiB would refuse real science. This bounds a pathological payload — 20,000
+#: series entries (~4 MB) were previously accepted and written while holding `record_lock`
+#: — without pretending to be a scientific limit.
+_MAX_CORRECTION_BYTES = 8 * 1024 * 1024
 
 #: A label renders on one line of a card header, and the server's own form is
 #: ``Run <ordinal>``. The longest label anywhere in this repository's fixtures is 76

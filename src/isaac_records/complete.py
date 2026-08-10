@@ -102,7 +102,7 @@ def apply_answers(draft: dict, answers: dict) -> dict:
             # wrong-typed answer must never crash the truth core; it follows the same
             # "not applied -> stays pending" rule an off-enum qc verdict already does,
             # so nothing is invented and nothing is silently written.
-            if not isinstance(series, list) or not all(isinstance(s, dict) for s in series):
+            if not is_series_shaped(series):
                 remaining_pending.append(entry)
                 continue
             draft["series"] = copy.deepcopy(series)
@@ -144,7 +144,7 @@ def apply_answers(draft: dict, answers: dict) -> dict:
             # Same guard, same reason: `desc["evidence"] = [...]` two lines down raises
             # TypeError on a str ("does not support item assignment"), which also
             # surfaced as a 500. Only a mapping can carry a descriptor value.
-            if not isinstance(descriptor, dict):
+            if not is_descriptor_shaped(descriptor):
                 remaining_pending.append(entry)
                 continue
             desc = copy.deepcopy(descriptor)
@@ -189,14 +189,60 @@ def apply_answers(draft: dict, answers: dict) -> dict:
     return draft
 
 
-def _is_series_shaped(value) -> bool:
-    """Is this a measurement series this module can apply — a list of mappings?
+#: A ``series_id`` must be one of these, or absent. It is used as a DICT KEY by
+#: ``draft_validator`` (``if series_id in seen_series``), so an unhashable one raises
+#: ``TypeError`` there — and by then the value has been written, which wedges the record:
+#: every subsequent read 500s, so the caller cannot even obtain the ETag needed to correct
+#: it. Measured on ``[{"series_id": {"a": 1}, "mu": 0.1}]``.
+_HASHABLE_SERIES_ID = (str, int, float, bool)
 
-    Named rather than inlined because `apply_answers` and `apply_corrections` must agree:
-    the two paths drifted once already, and the drift was invisible because only one of
-    them had a test.
+
+def is_series_shaped(value) -> bool:
+    """Can ``apply_corrections`` and ``apply_answers`` actually STORE this series?
+
+    THE FIRST VERSION OF THIS ANSWERED A WEAKER QUESTION THAN ITS NAME, and a reviewer
+    showed the gap was not academic. It tested "list of mappings" and nothing about what
+    the mappings contain, so two shapes still got through:
+
+    * ``[{"series_id": {"a": 1}, …}]`` — a list of dicts, so admitted, written, and then
+      ``TypeError: unhashable type: 'dict'`` out of ``draft_validator``. The record is
+      left permanently unreadable.
+    * ``[]`` — ``all()`` over an empty list is vacuously true, so an empty correction was
+      admitted. That DESTROYED an already-confirmed spectrum, ``validate`` then reported
+      ``ok: true``, and an official record was EXPORTED with ``measurement.series: []``,
+      which the schema permits because it declares no ``minItems``. That is the exact harm
+      the previous commit called "worse than the crash" — refused for ``{}`` and admitted
+      for ``[]``, one line of reasoning apart.
+
+    So an empty series is refused here. Deleting a confirmed measurement is not a
+    correction, and if it is ever wanted it should be an explicit act with its own name,
+    not the by-product of sending an empty list to an overwrite route.
+
+    EXPORTED, not private: the route imports this rather than restating it. The previous
+    version had a copy in ``routes.py`` under a docstring that said it "mirrors the guards
+    … rather than restating them loosely" — copying IS restating, and it created the
+    second definition the comment warned about.
     """
-    return isinstance(value, list) and all(isinstance(item, dict) for item in value)
+    if not isinstance(value, list) or not value:
+        return False
+    for item in value:
+        if not isinstance(item, dict):
+            return False
+        series_id = item.get("series_id")
+        if series_id is not None and not isinstance(series_id, _HASHABLE_SERIES_ID):
+            return False
+    return True
+
+
+def is_descriptor_shaped(value) -> bool:
+    """Can a descriptor correction be stored — a NON-EMPTY mapping?
+
+    ``{}`` is refused for the same reason ``[]`` is. Measured: it destroyed a confirmed
+    descriptor AND appended an evidence entry reading ``"answer": "None"`` — a recorded
+    human confirmation of a value that does not exist, which is a `CLAUDE.md` §5
+    violation in the evidence trail itself.
+    """
+    return isinstance(value, dict) and bool(value)
 
 
 def apply_corrections(draft: dict, answers: dict) -> dict:
@@ -270,7 +316,7 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
     # alone rather than guessed into place. The ROUTE turns this into a typed refusal so
     # the caller is not told 200 about a no-op — this function's job is only to refuse to
     # corrupt.
-    if series is not None and not _is_series_shaped(series):
+    if series is not None and not is_series_shaped(series):
         series = None
     if series is not None and series != draft.get("series"):
         draft["series"] = copy.deepcopy(series)
@@ -288,7 +334,7 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
     # The mirror of the `series` guard above, and of `apply_answers` at :147: only a
     # mapping can carry a descriptor value, and a non-mapping raised a `TypeError` here
     # for the same reason it did there.
-    if descriptor is not None and not isinstance(descriptor, dict):
+    if descriptor is not None and not is_descriptor_shaped(descriptor):
         descriptor = None
     if descriptor is not None:
         outputs = draft.get("descriptors_outputs") or []

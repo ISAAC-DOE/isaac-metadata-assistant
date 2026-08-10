@@ -1939,14 +1939,21 @@ def test_reading_one_run_returns_only_the_run(client, experiment_id):
 #: does not list. A guard whose message misnames what it caught teaches the next reader
 #: the wrong boundary, and invites being switched off rather than understood.
 #:
-#: What is protected here is unchanged in strength where §13 puts it: the official
-#: validator, the draft validator, the exporter, the audit path, the CLI and the vendored
-#: schema. A change to any of those is a truth-path change and must be reported as §13
-#: requires. ``complete.py`` is core but not truth-path; changing it still carries §13's
-#: disclosure obligations, which is why the commit that did so reports what changed, what
-#: covers it, and that neither export behaviour nor schema compliance moved.
+#: ONLY THE ``src/isaac_records`` GLOB NEEDED NARROWING, and the first attempt at this
+#: narrowed ``schema`` too — which a reviewer caught as a real loss of coverage. With
+#: ``schema`` reduced to the one vendored record schema, ``schema/PROVENANCE.md`` and
+#: ``schema/isaac_draft.schema.json`` became editable unguarded, for no benefit to the
+#: change that prompted the narrowing. §1 names ``PROVENANCE.md`` as the record that must
+#: be updated whenever the vendored schema is refreshed, so a silent edit there is exactly
+#: the kind this guard exists to surface. The directory is back.
+#:
+#: What is protected: every file §13 names, plus the whole of ``schema/``. A change to any
+#: of them is a truth-path change and must be reported as §13 requires. ``complete.py`` is
+#: core but NOT truth-path — §13's list does not include it — and changing it still carries
+#: §13's disclosure obligations, which is why the commit that did so reports what changed,
+#: what covers it, and that neither export behaviour nor schema compliance moved.
 _TRUTH_PATH_FILES = (
-    "schema/isaac_record_v1.json",
+    "schema",
     "src/isaac_records/official.py",
     "src/isaac_records/draft_validator.py",
     "src/isaac_records/export.py",

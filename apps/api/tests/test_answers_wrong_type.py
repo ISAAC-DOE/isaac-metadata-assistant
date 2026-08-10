@@ -215,6 +215,11 @@ def test_a_valid_structured_correction_is_accepted(client):
         ("series", {}),
         ("series", [{}, 3]),
         ("series", "x" * 100_000),
+        # THE TWO CRITICALS, which the first version of this parametrize did not contain —
+        # a negative control re-admitting `[]` left every test passing.
+        ("series", []),
+        ("series", [{"series_id": {"a": 1}, "mu": 0.1}]),
+        ("descriptor", {}),
         ("descriptor", 5),
         ("descriptor", "nope"),
         ("descriptor", [1]),
@@ -226,6 +231,9 @@ def test_a_valid_structured_correction_is_accepted(client):
         "series-dict",
         "series-list-with-a-non-dict",
         "series-long-str",
+        "series-EMPTY-destroys-a-confirmed-spectrum",
+        "series-unhashable-series_id-wedges-the-record",
+        "descriptor-EMPTY-destroys-a-confirmed-descriptor",
         "descriptor-int",
         "descriptor-str",
         "descriptor-list",
@@ -278,8 +286,16 @@ def test_a_wrong_typed_correction_is_refused_and_destroys_nothing(client, key, v
 
 @pytest.mark.parametrize(
     "value",
-    [5, "nope", [1, 2], {}, [{}, 3]],
-    ids=["int", "str", "list-of-ints", "dict", "list-with-a-non-dict"],
+    [5, "nope", [1, 2], {}, [{}, 3], [], [{"series_id": {"a": 1}, "mu": 0.1}]],
+    ids=[
+        "int",
+        "str",
+        "list-of-ints",
+        "dict",
+        "list-with-a-non-dict",
+        "EMPTY-list",
+        "unhashable-series_id",
+    ],
 )
 def test_apply_corrections_refuses_a_wrong_typed_series_without_touching_the_draft(value):
     from isaac_records.complete import apply_corrections
@@ -294,13 +310,35 @@ def test_apply_corrections_refuses_a_wrong_typed_series_without_touching_the_dra
     assert isinstance(out["series"], list)
 
 
-@pytest.mark.parametrize("value", [5, "nope", [1]], ids=["int", "str", "list"])
+@pytest.mark.parametrize(
+    "value", [5, "nope", [1], {}], ids=["int", "str", "list", "empty-dict"]
+)
 def test_apply_corrections_refuses_a_wrong_typed_descriptor(value):
+    """ASSERTS ON `descriptors_outputs`, WHICH IS WHERE THE VALUE ACTUALLY GOES.
+
+    The first version of this test asserted `out["descriptor"] == {...}` — a key
+    `apply_corrections` NEVER writes. A reviewer replaced the guard with
+    `descriptor = {"CORRUPTED_BY_MUTANT": True}`, so a wrong-typed descriptor was absorbed
+    and written, and all 31 tests still passed. It proved only "did not raise"; the word
+    "refuses" in its name was untested. `{}` is included because it is the case that
+    destroyed a confirmed descriptor AND appended an evidence entry reading
+    `"answer": "None"` — a recorded human confirmation of a value that does not exist.
+    """
     from isaac_records.complete import apply_corrections
 
-    draft = {"descriptor": {"value": "kept"}}
-    out = apply_corrections(draft, {"descriptor": value, "timestamp": "2026-01-01T00:00:00Z"})
-    assert out["descriptor"] == {"value": "kept"}
+    kept = {"name": "d", "value": 1.0, "evidence": [{"source_type": "spreadsheet"}]}
+    out = apply_corrections(
+        {"descriptors_outputs": [dict(kept)]},
+        {"descriptor": value, "timestamp": "2026-01-01T00:00:00Z"},
+    )
+    # Not applied: the confirmed descriptor is byte-identical, and no confirmation was
+    # fabricated for a value that was never supplied.
+    assert out["descriptors_outputs"] == [kept]
+    assert all(
+        e.get("source_type") != "user_confirmation"
+        for d in out["descriptors_outputs"]
+        for e in (d.get("evidence") or [])
+    )
 
 
 def test_apply_corrections_still_applies_a_WELL_typed_series():
@@ -314,3 +352,42 @@ def test_apply_corrections_still_applies_a_WELL_typed_series():
     )
     assert out["series"] == fresh
     assert "series:s2" in out["block_evidence"]
+
+
+
+def test_an_empty_series_correction_cannot_reach_an_exported_record(client):
+    """THE HARM, END TO END — and the reason `[]` is refused rather than merely guarded.
+
+    Measured on the unguarded code, on the exportable seed: `POST /edit {"series": []}`
+    returned 200 and replaced a confirmed 7-point spectrum with `[]`; `POST /validate` then
+    reported `ok: true` with zero errors, and `POST /export` wrote an official ISAAC record
+    whose `measurement.series` was `[]`. The schema permits it — `measurement.series` is an
+    array with no `minItems` — so nothing downstream could have caught it. A record that
+    passes validation while describing no measurement is worse than one that fails.
+    """
+    exportable = "01SYNTHXANESSEED0000000003"
+    before = client.post(f"/api/experiments/{exportable}/validate").json()
+    assert before["ok"] is True, "this test needs a record that starts exportable"
+
+    etag = client.get(f"/api/experiments/{exportable}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{exportable}/edit",
+        json={"confirmed_by_user": True, "answers": {"series": []}},
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 422, res.text
+    assert res.json()["error"] == "invalid_field_value"
+
+    # Still exportable, and still describing the measurement it described before.
+    after = client.post(f"/api/experiments/{exportable}/validate").json()
+    assert after["ok"] is True
+    etag = client.get(f"/api/experiments/{exportable}").headers["ETag"]
+    exported = client.post(
+        f"/api/experiments/{exportable}/export", json={}, headers={"If-Match": etag}
+    )
+    assert exported.status_code == 200, exported.text
+    artifacts = client.get(f"/api/experiments/{exportable}/artifacts").json()
+    series = ((artifacts.get("record") or {}).get("measurement") or {}).get("series")
+    assert isinstance(series, list) and len(series) > 0, (
+        "an exported official record must not describe an empty measurement series"
+    )
