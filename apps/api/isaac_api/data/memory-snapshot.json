@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "1e699efb9429c16530c877a19ba4f70eb8a6d5769abc06c614c6f431ac069e5d"
+        "sha256": "0abf24d256c9a1c954bae981dff2107e527b777aa6f880be9fc20ea62a4701b3"
       },
       {
         "path": "AGENTS.md",
@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "0a86be10f915ab24259ffd069cbac19c4d1b2ecef90389d9bcb6c2874538bd46"
+        "sha256": "9829683bfad67de7df94ac5669e15698fb0db7fa2e590fec418247e99db3eb97"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10376,7 +10376,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-status.test.tsx",
-        "sha256": "e54bc26a924d335b9449c69ae91b88577de13348afe6ffd96ade2781240a6ff4"
+        "sha256": "379ff5a4b28e37880e069ada3f9aedf647baa704b74a068b762f5a913e749a8d"
       },
       {
         "path": "apps/web/src/__tests__/modal-a11y.test.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "517fe7c7d96115238993ca9b8ce824643e930d001e49977ba030fc11c16cc536"
+    "served_manifest_fingerprint": "f7117ec165bbc764977e65cfa48b48ff9d1f8458c31bdb8dd7436678f678323a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

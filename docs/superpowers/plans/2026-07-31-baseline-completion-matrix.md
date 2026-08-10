@@ -391,9 +391,22 @@ Recorded so that a later session cannot quietly promote these into scope:
   it was skipped, and it must never be counted against the verdict in §7.2 or listed alongside
   findings like A3–A8. The guide is explicit that database *reachability* is not display
   authorization (`:149-162`).
-- Any database write, migration, or app-specific table — no baseline capability needs one.
+- ~~Any database write, migration, or app-specific table — no baseline capability needs one.~~
+  **SUPERSEDED, twice, and struck rather than deleted so the change of scope is visible.** (a) The
+  project owner lifted the blanket prohibition on 2026-08-07, narrowly, for durable Create
+  Experiment persistence in app-owned tables (`CLAUDE.md` §15). (b) Migration `0001_experiments`
+  was **applied to the hosted database by Dean on 2026-08-09**
+  ([evidence](../../evidence/hosted-0001-verification-2026-08-09.md)); the deployment now reports
+  `experiment_storage: {backend: "postgres", durable: true, state: "durable"}`.
+  **The original sentence's own claim remains true and is the reason it is not simply replaced:**
+  *no baseline capability needs one*. Durable persistence is still **not** a baseline row, and
+  nothing here promotes it into one — what changed is that it exists, not that baseline requires
+  it. `0002` remains unapplied and unauthorized for hosted application.
 - Upload / ingestion. The endpoint stays fail-closed.
-- Durable persistence beyond the pod.
+- ~~Durable persistence beyond the pod.~~ **Same supersession as the bullet above** — it is no
+  longer absent, and it is still not baseline. Note what it does *not* extend to: **pod-restart
+  durability has not been measured** (nobody restarted the pod), and exported artifact files still
+  live only in the workspace directory (`docs/create-experiment-persistence.md` §5).
 - Collaboration in every form (ownership, review assignment, comments, mentions, presence,
   notifications, approval workflows, conflict resolution, role-based controls).
 - External LLM / model provider; new Assistant intelligence.
@@ -884,7 +897,14 @@ that change the shape of that phase, recorded here so they are not re-derived:
    lifting it as standalone migration approval is the move its structure guards against; and this
    repository **independently** blocks the work — `2026-07-24-phase-37-readiness-plan.md:48-52` bars
    *"writes of any kind (DML, **DDL**, …); a PostgreSQL-backed record repository"*, and `CLAUDE.md` §15
-   lists durable persistence as NOT authorized. Storage location is additionally **contingent on Q12**
+   lists durable persistence as NOT authorized. **CORRECTED 2026-08-09 — the last clause is no longer
+   an accurate citation, and the conclusion survives it.** `CLAUDE.md` §15 was narrowed on 2026-08-07:
+   durable persistence for **Create Experiment, in app-owned tables**, is authorized, and Dean applied
+   `0001_experiments` to the hosted database on **2026-08-09**. What §15 still does **not** authorize is
+   what this paragraph is actually about — a repository over `records`, record loading, upload writes,
+   and anything group- or user-scoped — and the readiness-plan bar and Q12 contingency below are
+   untouched. So the row's verdict stands; only this one supporting citation had gone stale.
+   Storage location is additionally **contingent on Q12**
    (does a portal identity service already own users and groups?). Migration process, backup/retention,
    identity source and group administration policy are untouched.
 4. **The schema already owns record attribution, and the app has never used it.** `/attribution/uploaded_by`

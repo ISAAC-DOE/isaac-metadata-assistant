@@ -1,14 +1,41 @@
 # Create Experiment — durable persistence
 
-**Status: implemented and tested. NOT applied to the hosted database.**
-Applying the migration is the owner's act. This document is what he reviews first.
+**Status, 2026-08-09: implemented, tested, and APPLIED to the hosted database.**
+`0001_experiments` was applied by **Dean** on 2026-08-09. `/api/health` on `/krish` reports
+`experiment_storage: {configured: true, backend: "postgres", durable: true, state: "durable"}`,
+and an experiment created through the hosted UI survived a fresh HTTP request. Evidence, with
+its limits attached:
+[`docs/evidence/hosted-0001-verification-2026-08-09.md`](evidence/hosted-0001-verification-2026-08-09.md).
+
+*Status before that: "implemented and tested. NOT applied to the hosted database." Applying the
+migration was the owner's act, and this document is what he reviewed first.*
+
+**Two things that did not change with it.** Migration `0002` is still unapplied and still
+unauthorized for hosted application, and it needs its own packet. And **pod-restart durability
+has not been measured** — see §0's closing note and the evidence page §4.
 
 ---
 
-## 0. OPEN BLOCKER — there is no reachable way to apply the migration
+## 0. ~~OPEN BLOCKER~~ — RESOLVED 2026-08-09. Kept as the record of how the migration became reachable
+
+> **RESOLVED.** This section asked "how, at all" the migration could be applied. It was applied by
+> Dean on 2026-08-09. **This repository does not record which of options A–E below he used**, and
+> that is an honest gap rather than a detail omitted for brevity: the *effect* is measured, the
+> *method* is not. If it matters later — for example when `0002` needs applying — ask him rather
+> than inferring it from this page.
+>
+> **The measured facts in the table below are still accurate statements about this repository**
+> (re-checked 2026-08-09: `Dockerfile:42` still copies exactly one file out of `scripts/`, and the
+> base image still has no `psql`). So option A was **not** taken in this repository, and the
+> section is kept because the same question returns verbatim for `0002`.
+>
+> **The one row that IS superseded** is the third: applying a migration to hosted was not
+> authorized *for this agent*, and still is not. It was applied by the operator, which is the path
+> the rule always contemplated.
 
 **Read this before anything else. It is the one decision only the owner can make,
-and nothing below it can happen until he makes it.**
+and nothing below it can happen until he makes it.** *(Historical framing, 2026-08-07. He made it
+on 2026-08-09.)*
 
 Section 4 documents an operator procedure that begins `python scripts/db_migrate.py
 --plan`. **That command cannot be run anywhere it needs to be run.** The procedure
@@ -32,7 +59,7 @@ Dockerfile does `COPY apps/api/ apps/api/`, so **the runner module
 thin CLI wrapper that gives them a command line. That is why option A below costs
 one line rather than a redesign.
 
-### Why this matters right now, and not later
+### Why this mattered when it was written *(2026-08-07; resolved 2026-08-09)*
 
 `docs/postgres-test-db-guide.md:160-162`: *"PGHOST is already set in the deployed
 pod, so anything placed behind the 'DB configured' switch goes live on the next
@@ -59,7 +86,12 @@ preparing this note.** Option A in particular was deliberately NOT taken on the
 implementer's own initiative: it changes what a deployed image can do to its own
 schema, which is an owner's decision, not a tidy-up.
 
-### §0.1 — What the app does in the meantime, so the choice is not urgent
+### §0.1 — What the app does when the migration has NOT been applied
+
+*(Written as "in the meantime". Re-titled 2026-08-09: this is no longer the hosted deployment's
+state, but it is still the state of a fresh environment, a rolled-back one, and the window before
+any future migration — so the behaviour below is a live property and the table is unchanged. The
+`postgres-migration` CI job proves it on every PR, deliberately before it applies anything.)*
 
 It **degrades, and discloses**, rather than failing. Verified by
 `apps/api/tests/test_experiment_repository.py` §10 and by the CI step
@@ -206,15 +238,42 @@ the previous revision's backend figure (2787) was already stale when it was writ
   privilege-statement refusals, and the un-migrated-database degradation —
   **against an in-process fake driver**, which proves the shape and not the SQL.
 
-### Specified in CI, and NOT YET EXECUTED — `.github/workflows/ci.yml` → `postgres-migration`
+### Specified in CI — and, since 2026-08-09, EXECUTED. `.github/workflows/ci.yml` → `postgres-migration`
 
-**Read the heading literally.** An earlier revision of this section was titled
-*"Already run, in CI"*, and that was false: the job is new on this branch, the
-branch had not been pushed when it was written, and **this job has never run**.
-The steps below are what it is written to do, not what it has been observed doing.
-Nothing in this section may be quoted as a result until a run exists.
+**CORRECTED 2026-08-09, and the heading has now been wrong in both directions, which is why the
+history is kept.** It first read *"Already run, in CI"* when the job had never run — false. It was
+then corrected to *"NOT YET EXECUTED"* — true when written, and false by the time it was read.
 
-The same applies to the version: a `postgres:18` service container is *pinned*, and
+Measured, with the command quoted rather than recalled:
+
+```
+$ gh run list --workflow=ci.yml -L 1 --json databaseId -q '.[0].databaseId' \
+    | xargs -I{} gh run view {} --json jobs -q '.jobs[] | "\(.name) :: \(.conclusion)"'
+migration and durable repository against a real PostgreSQL :: success
+browser accessibility and responsive baseline :: success
+frontend tests and build :: success
+tests and synthetic demo :: success
+```
+
+That run is the merge of PR #89 (`5632300`, 2026-08-09T00:23:07Z) — the commit the hosted
+deployment reports serving. So the steps enumerated below **have** run green against a real
+`postgres:18` service container, and may now be quoted as results.
+
+**What that does NOT license** is unchanged and is set out in *"What CI does NOT prove"* below: a
+green service-container run is not a hosted rehearsal.
+
+*The paragraph this section carried while the job was unrun is preserved, because the reasoning in
+it is what kept the earlier false claim from being repeated:*
+
+> **Read the heading literally.** An earlier revision of this section was titled
+> *"Already run, in CI"*, and that was false: the job is new on this branch, the
+> branch had not been pushed when it was written, and **this job has never run**.
+> The steps below are what it is written to do, not what it has been observed doing.
+> Nothing in this section may be quoted as a result until a run exists.
+
+*(A run now exists, so that last sentence has been satisfied rather than overruled.)*
+
+The version qualification stands regardless: a `postgres:18` service container is *pinned*, and
 whether the hosted server is really 18 is a separate question answered below.
 
 A `postgres:18` service container. `docs/postgres-test-db-guide.md:18` states the
@@ -228,8 +287,13 @@ version.
    workspace view, an unknown id returns **404**, a known id returns **200**, the
    create returns a typed **503** having written nothing, and
    `/api/health.experiment_storage` reports `durable: false`,
-   `state: "unavailable"`. This is the deployed pod's state on the next image roll
-   (§0), and the job previously stepped straight over it.
+   `state: "unavailable"`. *(Re-dated 2026-08-09, and the step is unchanged. This
+   line read "This is the deployed pod's state on the next image roll (§0)" —
+   true when written, false since `0001_experiments` was applied to the hosted
+   database. What the step proves is still a live property: this is the state of
+   a **fresh** environment, of a **rolled-back** one, and of the window before
+   any future migration such as `0002`. Only the justification needed re-dating.)*
+   The job previously stepped straight over it.
 1. `--plan` reports `0001_experiments` and creates no application table.
 2. Apply. Assert `applied: 0001_experiments`.
 3. Apply again. Assert it is a no-op, and that `information_schema.columns` is
@@ -307,6 +371,11 @@ the owner applying it, deliberately, resolves that.
 
 ### What the owner should run, in order, when he chooses to apply
 
+> **APPLIED 2026-08-09 by Dean, by a route this repository does not record — so the sequence below
+> is the approved procedure, not a transcript of what ran.** The paragraph that follows is kept
+> verbatim because it still describes this repository accurately and the same obstacle returns for
+> `0002`.
+>
 > **This sequence is not runnable as written — see §0.** `scripts/db_migrate.py` is
 > not in the container image and there is no `psql` in it either, so neither the
 > Python command nor the raw SQL can be run from the pod; and running it from a

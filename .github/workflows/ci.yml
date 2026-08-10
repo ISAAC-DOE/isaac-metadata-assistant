@@ -207,16 +207,28 @@ jobs:
           cat /tmp/tables-before.txt
 
       # ==================================================================
-      # THE STATE THE DEPLOYED POD IS ACTUALLY IN, and the one this whole job
-      # previously skipped over: a database is CONFIGURED and the migration is
-      # NOT YET APPLIED.
+      # A DATABASE IS CONFIGURED AND THE MIGRATION IS NOT YET APPLIED — the state
+      # this whole job previously skipped over.
       #
-      # It is not a hypothetical. `docs/postgres-test-db-guide.md` states that
-      # `PGHOST` is already set in the deployed pod, and `PGDATABASE` there is
-      # exactly `db_write.EXPECTED_DATABASE` — so the durable backend selects
-      # itself on the next image roll, while the migration is deliberately applied
-      # by an operator and not at boot. Every statement against `isaac_experiments`
-      # therefore raises.
+      # RE-DATED 2026-08-09, AND THE STEP ITSELF IS UNCHANGED. This block used to
+      # open "THE STATE THE DEPLOYED POD IS ACTUALLY IN" and insist "it is not a
+      # hypothetical". That was true when it was written and it is not true now:
+      # Dean applied `0001_experiments` to the hosted database on 2026-08-09, and
+      # `/api/health` there reports `experiment_storage: {backend: "postgres",
+      # durable: true, state: "durable"}` — measured, see
+      # `docs/evidence/hosted-0001-verification-2026-08-09.md`.
+      #
+      # WHAT THIS STEP PROVES IS STILL A LIVE PROPERTY, which is why nothing below
+      # was weakened or removed. The un-migrated state is now the state of a FRESH
+      # environment, of a ROLLED-BACK one, and of the window before any future
+      # migration (`0002`) is applied. Only the justification needed re-dating.
+      #
+      # The mechanism is unchanged and still holds: `docs/postgres-test-db-guide.md`
+      # states that `PGHOST` is already set in the deployed pod, and `PGDATABASE`
+      # there is exactly `db_write.EXPECTED_DATABASE` — so the durable backend
+      # selects itself on the next image roll, while a migration is deliberately
+      # applied by an operator and not at boot. Every statement against a table
+      # that has not been created yet therefore raises.
       #
       # WHAT THAT USED TO DO, measured before the fix: `GET /api/experiments` → 500
       # (My Experiments, the product's primary screen, rendered "Backend Not

@@ -1,6 +1,33 @@
 # Migration approval packet — `0001_experiments`
 
-**Status: AWAITING APPROVAL. Nothing has been applied to any database.**
+> ## STATUS, 2026-08-09: APPLIED. This packet is now a HISTORICAL RECORD.
+>
+> **Dean applied `0001_experiments` to the hosted database on 2026-08-09**, reporting *"ok those
+> tables are added to the db"*. Measured the same day at hosted commit `5632300`:
+> `/api/health` → `experiment_storage: {configured: true, backend: "postgres", durable: true,
+> state: "durable"}`; an experiment created through the hosted UI survived a fresh HTTP request;
+> and a recon run taken *after* that create still reported 30/30 records, `rows_modified: 0`,
+> `dml_statements_issued: 0`, `ddl_statements_issued: 0` — so the protected corpus was not
+> perturbed. Full evidence, with its limits attached:
+> [`docs/evidence/hosted-0001-verification-2026-08-09.md`](evidence/hosted-0001-verification-2026-08-09.md).
+>
+> **Everything below is preserved deliberately and must not be deleted.** Its value is that it
+> records *what was approved, in what exact form, and why it was blocked for as long as it was* —
+> and that record is what makes the application reviewable after the fact. Present-tense framing
+> that would now mislead has been re-dated in place; **no content has been removed**, and the
+> `sha256` values, the seventeen-point re-verification and the three reasons in
+> "Why it was unapplied" all still stand as the account of that period.
+>
+> **Four things this does NOT change**, because "0001 is applied" has an obvious pull toward each:
+> migration **`0002`** remains **unapplied and unauthorized** for hosted application and still needs
+> its own packet (§10); gate **G2**, hosted per-record display, remains **CLOSED**
+> (`record_display: "closed"`); gate **G3** remains **OPEN**; and the project rule barring an agent
+> from connecting to that database from a laptop or from CI
+> (`docs/superpowers/plans/2026-07-24-phase-37-readiness-plan.md:48-52`) is **unchanged and still
+> binding** — applying this migration was an operator's act, not an agent's.
+
+**Status when this packet was written: AWAITING APPROVAL. Nothing had been applied to any
+database.**
 This packet exists because the standing rule is that the first hosted migration is not
 applied without explicit approval. It states exactly what would run, what it would lock,
 what would happen if it failed halfway, and how to undo it.
@@ -210,10 +237,16 @@ user data.
 
 ---
 
-# Re-verification, 2026-08-08 — and why this is still unapplied
+# Re-verification, 2026-08-08 — and why it was still unapplied *then*
+
+*(Written 2026-08-08, one day before it was applied. Re-titled 2026-08-09 — "still unapplied" was
+present tense and is now history. Nothing in this section's contents was changed: the
+re-verification it records is exactly the check that stood behind the application, and it is
+therefore more useful now, not less.)*
 
 The standing authorization is conditional: apply the first hosted migration **only if the exact
-current committed migration still matches the reviewed packet**. It was re-checked today.
+current committed migration still matches the reviewed packet**. It was re-checked on 2026-08-08,
+the day before the migration was applied.
 
 ## The migration has not drifted
 
@@ -254,7 +287,12 @@ describes is present and correct*, verified mechanically, rather than *a byte co
 quoted original*. That is a weaker form of match than the phrase suggests, and it is worth saying so
 rather than letting the checkmarks imply more.
 
-## Why it is still unapplied: no *authorized* path from here to that database
+## Why it was unapplied as of 2026-08-08: no *authorized* path from **here** to that database
+
+*(Past tense as of 2026-08-09. Read "here" strictly: it always meant "from this agent, this laptop,
+this CI" — never "by anybody". The three reasons below were reasons why **an agent** could not
+apply it, and all three remain true of an agent today. Dean applied it as the operator, which is
+precisely the path this section describes as the only legitimate one.)*
 
 This is not caution and it is not an oversight. **Corrected 2026-08-08:** this section previously
 said *"There is no mechanism."* That was too strong, and the overstatement mattered, because it
@@ -279,7 +317,10 @@ in the module rather than in the wrapper. `db_write.pgdatabase_gate` refuses a w
 statement policy and `_FORBIDDEN_TABLES` apply identically, and the one-transaction-per-migration
 behaviour is `migrate()`'s, not the CLI's.
 
-So the three real reasons it is unapplied are:
+So the three real reasons it was unapplied were — and **all three are still true statements about
+this repository and this agent today** (re-checked 2026-08-09: `Dockerfile:42` still copies exactly
+one file out of `scripts/`), which is why they are stated rather than struck. What changed is not
+any of them; what changed is that an operator who is not bound by reason 3 acted:
 
 1. **The operator *CLI wrapper* is not in the container image.** `Dockerfile:42` copies exactly one
    file out of `scripts/`: `COPY scripts/check_graphify_freshness.py`. `scripts/db_migrate.py` is
@@ -309,17 +350,42 @@ version, different extensions, different roles, different existing objects. Do n
 
 ## Consequence for Create Experiment, stated plainly
 
-Until the migration is applied, `isaac_experiments` does not exist in the hosted database. The app
-degrades honestly rather than crashing — `experiment_repository.storage_status` reports
-`state: unavailable` and `durable: false` once a write has actually been attempted and failed, and
-the UI derives its durability sentence from that — but **a created experiment is not durable on the
-hosted deployment today.** Any demo that claims durability before the migration is applied is
-claiming something untrue.
+*(Written 2026-08-08. The "today" in it is 2026-08-08. It described the state until 0001 was
+applied, and it still describes the state of any environment where it has not been — a fresh
+deployment, a rolled-back one, or the window before a later migration. Kept for that reason.)*
+
+> Until the migration is applied, `isaac_experiments` does not exist in the hosted database. The app
+> degrades honestly rather than crashing — `experiment_repository.storage_status` reports
+> `state: unavailable` and `durable: false` once a write has actually been attempted and failed, and
+> the UI derives its durability sentence from that — but **a created experiment is not durable on the
+> hosted deployment today.** Any demo that claims durability before the migration is applied is
+> claiming something untrue.
+
+**As of 2026-08-09 the hosted deployment is on the other side of that.** `/api/health` reports
+`{backend: "postgres", durable: true, state: "durable"}`, and a created experiment survived a fresh
+HTTP request. **What is still untrue to claim is durability across a pod restart** — nobody
+restarted the pod, and no row was read back out of `isaac_experiments`. See
+[`docs/evidence/hosted-0001-verification-2026-08-09.md`](evidence/hosted-0001-verification-2026-08-09.md)
+§3–§4 for exactly which part of "durable" is measured and which part is inferred from the storage
+code.
 
 ## The exact operator sequence
+
+*(Kept as the reviewed procedure. **It was applied on 2026-08-09 by Dean, and this repository does
+not record which of the §0 options in `docs/create-experiment-persistence.md` he used**, so it
+cannot claim these are the steps that ran. What follows is the sequence that was approved, not a
+transcript of the application.)*
 
 Unchanged from §6–§8 above. It must be run by someone who already holds a SLAC cluster context, from
 a shell where the five `PG*` variables point at the database (see `docs/postgres-test-db-guide.md`).
 Run the §6 prechecks, then `python scripts/db_migrate.py --apply`, then every §8 postcheck — the
 record count in postcheck 1 must equal precheck 3 exactly, in either direction, or the migration has
 failed its own contract.
+
+**One postcheck-equivalent WAS measured after the fact, and it is the important one.** Two recon
+runs on 2026-08-09 — one of them taken after an experiment had been created — both reported
+`dataset.total_records: 30`, `integrity.rows_before: 30`, `rows_after: 30`, `rows_modified: 0`. That
+is the §8 postcheck-1 property (the record count did not move) observed through the application's
+own read-only path rather than through `psql`. The remaining postchecks (`\d isaac_experiments`, the
+`isaac_schema_migrations` row, the index, and a second idempotent `--apply`) were **not** observed
+from this environment and are not claimed.

@@ -38,6 +38,18 @@ import {
  * which is exactly what section 1 relies on.
  */
 
+/*
+ * THE HARNESS DEADLINE. Every test below mounts Project Memory and drives the
+ * deep layer across two level crossings. Under parallel-worker contention that
+ * ran past vitest's 5,000 ms default: `does NOT steal focus when no mark held it`
+ * failed by HARNESS TIMEOUT on an untouched tree in this session, and passed on
+ * the very next identical run. Nothing here declares a time budget, so no
+ * assertion was being usurped — but a deadline that fires on load rather than on
+ * behaviour is a false failure, and it lands on whichever test the scheduler
+ * happens to squeeze. See `experiment-graph.test.tsx` for the full reasoning.
+ */
+vi.setConfig({ testTimeout: 30000 });
+
 const baseRoutes = {
   'GET /api/graph/status': { body: graphStatusUnavailable },
   'GET /api/memory/graph': { body: memoryGraphAvailable },

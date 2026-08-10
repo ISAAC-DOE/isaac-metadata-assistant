@@ -472,6 +472,21 @@ describe('experiment graph — search within this experiment', () => {
   });
 });
 
+/*
+ * THE HARNESS DEADLINE, on the two tests below that declare a time budget.
+ *
+ * `buildMs < 6000` sat ABOVE vitest's 5,000 ms default, which `vite.config.ts`
+ * never overrides — so between 5 s and 6 s the ceiling could not adjudicate: the
+ * harness fired first and reported "Test timed out in 5000ms", naming no budget.
+ * The `interactionMs < 2000` ceiling below is nominally under the default, but
+ * the deadline covers the whole test INCLUDING the untimed `build()` prelude,
+ * so a slow build could pre-empt it in the same way.
+ *
+ * The ceilings are UNCHANGED — 6,000 and 2,000 are still the claims. Only the
+ * harness limit moves, to the 30,000 ms this repository already uses elsewhere,
+ * so that the ceiling is what fails first. This is a pure-model file and the
+ * rest of it stays on the strict default; only these two tests are annotated.
+ */
 describe('experiment graph — a large but plausible experiment', () => {
   it('stays bounded, and SAYS it is bounded rather than truncating silently', () => {
     const started = performance.now();
@@ -485,7 +500,7 @@ describe('experiment graph — a large but plausible experiment', () => {
     // A generous ceiling: this is a smoke guard against an accidental
     // quadratic, not a benchmark. The measured local figure is far below it.
     expect(buildMs).toBeLessThan(6000);
-  });
+  }, 30000);
 
   it('keeps INTERACTION responsive on it — 60 actions plus every derivation', () => {
     const graph = build(stressExperimentGraphBundle());
@@ -507,7 +522,7 @@ describe('experiment graph — a large but plausible experiment', () => {
 
     expect(visibleNodeIds(state, graph).length).toBeLessThanOrEqual(MAX_VISIBLE_NODES);
     expect(interactionMs).toBeLessThan(2000);
-  });
+  }, 30000);
 
   it('bounds what is DRAWN even when far more is expanded', () => {
     const graph = build(stressExperimentGraphBundle());
