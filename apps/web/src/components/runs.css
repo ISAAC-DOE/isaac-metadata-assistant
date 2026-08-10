@@ -116,9 +116,14 @@
 }
 
 /*
- * NOT `--text-quaternary`. It is #9aa4af — 2.46:1 on the card surface, the ratio
- * `chrome.css` describes in this same commit as failing AA "at ANY size, large-text
- * 3.0:1 included" — and this chevron is the card's only visual expand/collapse
+ * NOT `--text-quaternary`. It is #9aa4af — **2.53:1 against a run card's own
+ * background**, which is `--surface` #ffffff, not the `--surface-subtle` #fbfcfd the
+ * first version of this comment quoted a 2.46:1 figure against. Same verdict either
+ * way, and `--text-slate` clears WCAG 1.4.11's 3:1 for a graphical object at 5.46:1
+ * on white — but a ratio is only evidence if it names the pair it was computed over.
+ * It is the token `chrome.css` describes in this same commit as failing AA "at ANY
+ * size, large-text 3.0:1 included" — and this chevron is the card's only visual
+ * expand/collapse
  * affordance, so WCAG 1.4.11 applies to it as a graphical object. `aria-hidden`
  * exempts it from name computation, not from contrast, and axe's `color-contrast`
  * rule does not scan SVG, so no baseline in this repository would ever have caught
@@ -160,8 +165,9 @@
 }
 
 /* The denominator's scope, demoted but never hidden — see the note in RunCard.tsx.
-   `--text-muted` is 5.77:1 on the card surface, so demotion is weight and size, not
-   a contrast shortfall. */
+   `--text-muted` #5b6570 is 5.93:1 against a card's `--surface` #ffffff (5.77:1 is the
+   figure against `--surface-subtle`, which is the status bar's background, not this
+   one), so the demotion is weight and size and not a contrast shortfall. */
 .run-card-progress-scope {
   font-size: 11px;
   color: var(--text-muted);

@@ -145,11 +145,17 @@ export function useRunAutosave(args: {
   /** Adopt a run the server returned. Called for every 200 and every refresh. */
   onRun: (run: ApiRunView) => void;
   /**
-   * The field paths a 200 just acknowledged. The card uses it to drop its local
-   * text for those paths and fall back to rendering the SERVER's value, so the
-   * box and the header cannot disagree about the same field.
+   * The fields a 200 just acknowledged, AS SENT. The card uses it to drop its local
+   * text for those paths and fall back to rendering the SERVER's value, so the box and
+   * the header cannot disagree about the same field.
+   *
+   * It carries the VALUES and not only the paths, because a version that dropped by
+   * path alone reverted the input under the reader's fingers: type `301`, the PATCH
+   * leaves, type `301.5`, and when `301`'s response lands the box snaps back to `301`
+   * with the cursor reset — while `301.5` is still queued and about to be sent. The
+   * card compares before clearing.
    */
-  onSaved?: (paths: string[]) => void;
+  onSaved?: (fields: Record<string, unknown>) => void;
 }): RunAutosave {
   const { experimentId, run, onRun, onSaved } = args;
 
@@ -182,6 +188,22 @@ export function useRunAutosave(args: {
   const inFlightRef = useRef(false);
   const haltedRef = useRef(false);
   const retriesRef = useRef(0);
+  /*
+   * HAS AN ATTEMPT GONE OUT WHOSE OUTCOME THIS CLIENT NEVER LEARNED?
+   *
+   * That — not "was a retry made" — is the condition under which a later 412 may be
+   * about the reader's OWN earlier write. `api.request` throws with no status for any
+   * fetch-level failure, and a response can be lost after the server has committed, so
+   * a transient failure means the write MIGHT have landed. A 4xx/412 does not: the
+   * server answered.
+   *
+   * Deliberately NOT `retriesRef`, which `retryNow` zeroes — reading that made the copy
+   * wrong on the likeliest path (four no-verdict attempts, then a manual retry that
+   * 412s). And deliberately not set on every send: doing that made a FIRST-attempt 412
+   * claim uncertainty it does not have. Cleared by a confirmed 200 or an adopted
+   * refresh.
+   */
+  const unresolvedAttemptRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -240,6 +262,7 @@ export function useRunAutosave(args: {
       .then((res) => {
         inFlightRef.current = false;
         retriesRef.current = 0;
+        unresolvedAttemptRef.current = false;
         // Adopt the new token even if this component has gone: a late resolve
         // must not leave the ref pointing at a token the server superseded.
         versionRef.current = res.run.version;
@@ -256,7 +279,7 @@ export function useRunAutosave(args: {
         // them so the input renders the server's own value — otherwise typing `1e3`
         // leaves the box showing "1e3" while the header reads `1000 K`, one screen,
         // two answers about one field.
-        onSavedRef.current?.(Object.keys(fields));
+        onSavedRef.current?.(fields);
         if (Object.keys(pendingRef.current).length > 0) {
           // More was typed while this was in flight. The reader still has an
           // unacknowledged edit, so this is NOT `Saved` — it stays `Saving…`
@@ -291,11 +314,12 @@ export function useRunAutosave(args: {
         if (httpStatus === 412) {
           clearTimers();
           haltedRef.current = true;
-          // Was this the FIRST attempt, or a retry? On a retry an earlier attempt
-          // may have been committed with its response lost, so the panel must not
-          // assert that nothing was written. `retriesRef` is reset to 0 on every
-          // success and read here before anything clears it.
-          setRetriedBeforeConflict(retriesRef.current > 0);
+          // Was an attempt already made since the last confirmed success? If so an
+          // earlier one may have been committed with its response lost, and the panel
+          // must not assert that nothing was written. Deliberately NOT `retriesRef`,
+          // which `retryNow` zeroes — that read made the copy wrong on exactly the
+          // path it was written for.
+          setRetriedBeforeConflict(unresolvedAttemptRef.current);
           setStatus('conflict');
           return;
         }
@@ -307,9 +331,13 @@ export function useRunAutosave(args: {
         );
         setStatus('failed');
 
-        // Unreachable (no status) or a server fault: the request never earned a
-        // verdict, so try again. Any other 4xx is a considered refusal.
+        // Unreachable (no status) or a server fault: no verdict reached this client,
+        // so try again. Any other 4xx is a considered refusal.
         const transient = httpStatus === undefined || httpStatus >= 500;
+        // AND REMEMBER IT, because a later 412 may then be about this very write. This
+        // is the only place the flag is set: a transport failure or a 5xx is exactly
+        // the case where the server's state is unknown to us.
+        if (transient) unresolvedAttemptRef.current = true;
         if (transient && retriesRef.current < AUTOSAVE_MAX_RETRIES) {
           const delay = AUTOSAVE_RETRY_BASE_MS * 2 ** retriesRef.current;
           retriesRef.current += 1;
@@ -363,6 +391,7 @@ export function useRunAutosave(args: {
         pendingRef.current = {};
         haltedRef.current = false;
         retriesRef.current = 0;
+        unresolvedAttemptRef.current = false;
         if (!mountedRef.current) return;
         onRunRef.current(res.run);
         setRefreshing(false);

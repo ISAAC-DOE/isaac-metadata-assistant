@@ -95,12 +95,28 @@ export function RunCard({
     // shows what was STORED. Without this, `1e3` stays in the input while the
     // header's conditions line reads `1000 K` — the same field, two renderings, and
     // no way for the reader to tell which one the record holds.
-    onSaved: (paths) =>
+    onSaved: (saved) =>
       setDraft((prev) => {
         const next = { ...prev };
         let changed = false;
-        for (const path of paths) {
-          if (path in next) {
+        for (const [path, sentValue] of Object.entries(saved)) {
+          if (!(path in next)) continue;
+          /*
+           * ONLY IF THE BOX STILL HOLDS WHAT WAS SENT. Clearing by path alone
+           * reverted the input under the reader's fingers: type `301`, the PATCH
+           * leaves, type `301.5`, and `301`'s 200 snapped the box back to `301` with
+           * the cursor reset — while `301.5` sat queued and about to be sent. Nothing
+           * was lost, but the number on screen was one nobody had typed, and a
+           * keystroke in that window appended to the reverted string.
+           *
+           * The comparison is on the PARSED value rather than the raw text, because
+           * the point is exactly that the two can differ in presentation: `1e3` was
+           * sent as `1000`, and dropping the draft is what makes the box show `1000`.
+           */
+          const spec = RUN_FIELDS.find((f) => f.path === path);
+          if (spec === undefined) continue;
+          const stillTheSame = parseRunField(spec, next[path]);
+          if (stillTheSame.ok && stillTheSame.value === sentValue) {
             delete next[path];
             changed = true;
           }
@@ -194,16 +210,47 @@ export function RunCard({
   const notSentLabel =
     invalidPaths.length === 1 ? 'Change not sent' : `${invalidPaths.length} changes not sent`;
 
-  // `heldInvalid` WINS over `saved` and loses to nothing, because it is the only one
-  // of the two that is still true. It does not suppress `saving`/`failed`/`conflict`:
-  // those describe a different edit that really is in flight or really was refused.
-  const showHeldInvalid = heldInvalid && autosave.status !== 'saving';
-  const SaveIcon = showHeldInvalid
-    ? TriangleAlert
-    : autosave.status === 'idle'
-      ? null
-      : SAVE_ICON[autosave.status];
-  const statusText = showHeldInvalid ? notSentLabel : autosave.label;
+  /*
+   * HELD-INVALID IS ADDITIVE, NEVER A REPLACEMENT — and the first version of this got
+   * that wrong in the one way that matters most.
+   *
+   * It read `showHeldInvalid ? notSentLabel : autosave.label`, which SUPPRESSED
+   * `failed` and `conflict` in the live region while a comment two lines up claimed it
+   * "does not suppress `saving`/`failed`/`conflict`". Measured consequence: with an
+   * invalid field held and a 412 on another field, the region said only "Change not
+   * sent" and the header said both — so the header and the region disagreed about
+   * which state was current, and **the word `Conflict` never reached the live region
+   * at all**. For a screen-reader user the one state that requires their decision was
+   * announced nowhere.
+   *
+   * THE ONE STATE IT STILL REPLACES IS `saved`, and that asymmetry is the whole point
+   * rather than an inconsistency. `Saved` is defined as "the server took every edit
+   * this hook held AND NOTHING HAS BEEN TYPED SINCE" — holding an unparseable entry
+   * makes the second half false, so the word must go. `saving`, `failed` and
+   * `conflict` all remain true about a different edit, so they stay and the
+   * held-invalid fact is added beside them.
+   */
+  const suppressedSaved = heldInvalid && autosave.status === 'saved';
+  const transportLabel = suppressedSaved ? null : autosave.label;
+  const showHeldInvalid = heldInvalid;
+  const SaveIcon =
+    transportLabel !== null
+      ? SAVE_ICON[autosave.status as Exclude<RunSaveStatus, 'idle'>]
+      : heldInvalid
+        ? TriangleAlert
+        : null;
+  /*
+   * ONE SENTENCE, ASSEMBLED IN A FIXED ORDER: the transport state, then WHY it
+   * failed, then the separate fact that this card is also holding something it will
+   * not send. The cause stays adjacent to the state it explains — an earlier draft
+   * concatenated the held-invalid clause into the middle and produced
+   * "Save failed · Change not sent · Request failed (428)", which reads as though the
+   * 428 were the reason the unparseable value was not sent.
+   */
+  const statusText =
+    [transportLabel, autosave.failureMessage, showHeldInvalid ? notSentLabel : null]
+      .filter((part): part is string => part !== null && part !== '')
+      .join(' · ') || null;
 
   return (
     <article className="run-card" data-run-id={run.id}>
@@ -279,18 +326,15 @@ export function RunCard({
       */}
       <div className="run-card-save" data-save-status={autosave.status}>
         <p className="run-save-status" role="status" data-save-status={autosave.status}>
+          {/* `statusText` already carries the state, WHY it failed, and any
+              held-invalid edit, in that order — see where it is built. The cause is
+              part of it because "Save failed" with no reason made a 428, a 404 after a
+              workspace reset in another tab, and an unreachable backend one
+              indistinguishable state whose only control was a Retry that would loop. */}
           {statusText && SaveIcon && (
             <>
               <SaveIcon className="run-save-icon" size={14} strokeWidth={2.2} aria-hidden="true" />
               {statusText}
-              {/* WHY IT FAILED, in the server's or the transport's own words. The
-                  card used to render "Save failed" and nothing else, so a 428, a
-                  404 after a workspace reset in another tab, and an unreachable
-                  backend were one indistinguishable state whose only control was a
-                  Retry that would loop. */}
-              {autosave.failureMessage !== null && (
-                <span className="run-save-cause"> · {autosave.failureMessage}</span>
-              )}
             </>
           )}
         </p>

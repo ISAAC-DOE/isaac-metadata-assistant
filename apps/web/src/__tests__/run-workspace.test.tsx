@@ -419,7 +419,12 @@ describe('autosave', () => {
     // indicator and the live region. The count is the assertion, not
     // uniqueness — the header one is what a reader who has collapsed the card
     // sees, and it is required to be there.
-    expect(within(card).getAllByText('Save failed')).toHaveLength(2);
+    // TWO PLACES, matched on containment rather than on exact text: the live region
+    // now carries the cause as well ("Save failed · <why>"), so an exact-text matcher
+    // finds only the chip. The property under test is that the failure is stated in
+    // BOTH the header and the region, which is what this asserts.
+    expect(within(card).getByRole('status').textContent).toContain('Save failed');
+    expect(headerOf('RUNAAA')).toHaveAccessibleName(/Save failed/);
     // The live region now names the CAUSE as well as the state. "Save failed" with no
     // reason made a 428, a 404 after a workspace reset in another tab, and an
     // unreachable backend one indistinguishable state whose only control retried.
@@ -450,7 +455,9 @@ describe('autosave', () => {
       await vi.advanceTimersByTimeAsync(600_000);
     });
     expect(patches).toBe(4);
-    expect(within(card).getAllByText('Save failed')).toHaveLength(2);
+    // Both places, matched on containment: the live region now also carries the cause.
+    expect(within(card).getByRole('status').textContent).toContain('Save failed');
+    expect(within(card).getByText('Save failed').closest('.chip')).not.toBeNull();
   });
 
   it('does not retry a refusal that is not a 412', async () => {
@@ -471,7 +478,9 @@ describe('autosave', () => {
       fireEvent.change(within(card).getByLabelText('Temperature (K)'), { target: { value: '305' } });
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
-    expect(within(card).getAllByText('Save failed')).toHaveLength(2);
+    // Both places, matched on containment: the live region now also carries the cause.
+    expect(within(card).getByRole('status').textContent).toContain('Save failed');
+    expect(within(card).getByText('Save failed').closest('.chip')).not.toBeNull();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(600_000);
     });
@@ -917,7 +926,8 @@ describe('a save refused while the card is collapsed', () => {
     // The refusal is on the card, in words, with the card collapsed. Both the
     // header indicator and the live region carry it — the same pairing the
     // `conflict` state already had.
-    expect(within(b).getAllByText('Save failed')).toHaveLength(2);
+    expect(within(b).getByRole('status').textContent).toContain('Save failed');
+    expect(headerOf('RUNBBB')).toHaveAccessibleName(/Save failed/);
     expect(within(b).getByRole('status').textContent).toBe(
       'Save failed · Request failed (422).',
     );
@@ -928,8 +938,10 @@ describe('a save refused while the card is collapsed', () => {
     expect(headerOf('RUNBBB')).toHaveAccessibleName(/Save failed/);
     // Both indicators are a glyph PLUS words, and the glyph is decorative — the
     // failure is never carried by colour or by a shape alone.
-    for (const el of within(b).getAllByText('Save failed')) {
-      const indicator = el.closest('.chip, .run-save-status') as HTMLElement;
+    for (const indicator of [
+      within(b).getByRole('status'),
+      within(b).getByText('Save failed').closest('.chip') as HTMLElement,
+    ]) {
       expect(indicator).not.toBeNull();
       expect(indicator.querySelectorAll('svg[aria-hidden="true"]').length).toBeGreaterThan(0);
       expect(indicator.textContent).toContain('Save failed');
@@ -1056,6 +1068,188 @@ describe('a value the client itself refuses (review finding: the client-refusal 
   });
 });
 
+describe('the two conflict sentences (review finding: the retry that lies)', () => {
+  async function conflictAfter(kind: 'first-attempt' | 'manual-retry') {
+    let patches = 0;
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: () => {
+        patches += 1;
+        // First attempt 412 for one case; for the other, fail without a verdict
+        // until the reader clicks Retry Save, then 412.
+        if (kind === 'first-attempt') {
+          return { status: 412, body: { error: 'stale_write' } };
+        }
+        return patches <= 4 ? { status: 500, body: {} } : { status: 412, body: { error: 'stale_write' } };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '321' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    if (kind === 'manual-retry') {
+      // Exhaust the automatic backoff, then retry by hand.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toContain('Save failed');
+      await act(async () => {
+        fireEvent.click(within(cardFor('RUNAAA')).getByRole('button', { name: 'Retry Save' }));
+        await vi.advanceTimersByTimeAsync(100);
+      });
+    }
+    return within(cardFor('RUNAAA')).getByRole('alert').textContent ?? '';
+  }
+
+  it('on a FIRST attempt, says nothing was written — because nothing was', async () => {
+    const text = await conflictAfter('first-attempt');
+    expect(text).toMatch(/Nothing you typed was written/);
+    expect(text).not.toMatch(/may or may not/);
+  });
+
+  it('after a MANUAL Retry Save, does NOT claim nothing was written', async () => {
+    /*
+     * THE PATH THE FIX EXISTS FOR, and the one the first version got wrong. Four
+     * automatic attempts got no verdict — any of which the server may have committed —
+     * then the reader retried by hand and earned a 412. `retryNow` resets `retriesRef`
+     * to 0, so a `retriesRef > 0` test read FALSE here and the card asserted that
+     * nothing had been written about five attempts. `attemptedSinceSuccessRef` is
+     * cleared only by a confirmed 200 or an adopted refresh, so it survives a manual
+     * retry.
+     */
+    const text = await conflictAfter('manual-retry');
+    expect(text).toMatch(/may or may not have been saved/);
+    expect(text).not.toMatch(/Nothing you typed was written/);
+  });
+});
+
+describe('a held-invalid edit is ADDITIVE, not a replacement (review finding)', () => {
+  async function invalidPlus(kind: 'conflict' | 'failed') {
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: () =>
+        kind === 'conflict'
+          ? { status: 412, body: { error: 'stale_write' } }
+          : { status: 422, body: { error: 'not_run_level' } },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    vi.useFakeTimers();
+    // A valid edit the server refuses...
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Temperature (K)'), {
+        target: { value: '333' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    // ...then an unparseable one this build will not send.
+    await act(async () => {
+      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Acquisition start'), {
+        target: { value: 'not-a-date' },
+      });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    return within(cardFor('RUNAAA')).getByRole('status').textContent ?? '';
+  }
+
+  it('says Conflict AND the held edit — the word Conflict must reach the live region', async () => {
+    /*
+     * MEASURED DEFECT: `showHeldInvalid ? notSentLabel : autosave.label` suppressed
+     * `conflict` in the live region while the header still showed it, so the two
+     * disagreed about the current state and the word `Conflict` never reached the
+     * region at all. That is the one state requiring the reader's decision.
+     */
+    const text = await invalidPlus('conflict');
+    expect(text).toContain('Conflict');
+    expect(text).toContain('not sent');
+  });
+
+  it('says Save failed AND the held edit, with the cause beside the state it explains', async () => {
+    const text = await invalidPlus('failed');
+    expect(text).toMatch(/^Save failed · .* · Change not sent$/);
+  });
+});
+
+describe('a save that lands mid-typing does not revert the box (review finding)', () => {
+  it('keeps the newer text the reader is still typing', async () => {
+    /*
+     * TWO GATES, because the defect is visible only BETWEEN the two responses. The
+     * mock ECHOES the value it was sent — a mock that always answered `301` would
+     * make the final state look reverted for a different reason and would not
+     * isolate the window this test is about.
+     */
+    const first = gate<void>();
+    const second = gate<void>();
+    let patches = 0;
+    const sent: unknown[] = [];
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      // The handler receives the `RequestInit`, so the payload is `init.body` as a
+      // JSON string — the same thing the real `api.updateRun` sends.
+      [`PATCH ${BASE}/runs/RUNAAA`]: async (init?: RequestInit) => {
+        patches += 1;
+        const parsed = JSON.parse(String(init?.body ?? '{}')) as {
+          fields?: Record<string, unknown>;
+        };
+        const value = parsed.fields?.['context.temperature_K'];
+        sent.push(value);
+        if (patches === 1) await first.promise;
+        else await second.promise;
+        return {
+          body: {
+            run: runFixture({
+              id: 'RUNAAA',
+              label: 'Run 1',
+              ordinal: 1,
+              version: `ra.${patches}`,
+              fields: {
+                'context.temperature_K': { value, status: 'verified', evidence: [] },
+              },
+            }),
+          },
+        };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    const input = () =>
+      within(cardFor('RUNAAA')).getByLabelText('Temperature (K)') as HTMLInputElement;
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(input(), { target: { value: '301' } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    // The first PATCH is open. Keep typing.
+    await act(async () => {
+      fireEvent.change(input(), { target: { value: '301.5' } });
+    });
+    expect(input().value).toBe('301.5');
+    // Now 301's response lands, while 301.5 is still only queued. Clearing the draft
+    // BY PATH snapped the box back to "301" here, with the cursor reset — a number
+    // nobody had typed, and a keystroke in this window appended to it.
+    await act(async () => {
+      first.resolve();
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 200);
+    });
+    expect(input().value).toBe('301.5');
+
+    // And once the newer value IS acknowledged, the box does fall back to the stored
+    // rendering — the behaviour the clearing exists for is still there.
+    await act(async () => {
+      second.resolve();
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(sent).toEqual([301, 301.5]);
+    expect(input().value).toBe('301.5');
+  });
+});
+
 describe('the denominator discloses its scope (review finding: invented denominator)', () => {
   it('says which three fields it is counting, not bare "of 3"', async () => {
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
@@ -1070,6 +1264,72 @@ describe('the denominator discloses its scope (review finding: invented denomina
     const progress = cardFor('RUNAAA').querySelector('.run-card-progress') as HTMLElement;
     expect(progress.textContent).toMatch(/run fields on this screen/);
     expect(progress.textContent).not.toMatch(/^\s*\d+ of \d+ set\s*$/);
+  });
+});
+
+describe('Check Run names WHICH document it read (review finding)', () => {
+  async function check(official: Record<string, unknown>) {
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`POST ${BASE}/runs/RUNAAA/check`]: {
+        body: {
+          ok: false,
+          draft: { ok: true, errors: [], warnings: [] },
+          official,
+          blockers: [],
+          checked_run_version: 'ra.0',
+        },
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    await act(async () => {
+      fireEvent.click(within(cardFor('RUNAAA')).getByRole('button', { name: 'Check Run' }));
+    });
+    return cardFor('RUNAAA');
+  }
+
+  it('says "the record already written" when the unit is materialised', async () => {
+    /*
+     * `_validate_unit` returns `dry_run: false` for a materialised unit — where it
+     * validates the record ALREADY WRITTEN to `records/`. The heading was hard-coded
+     * to "Official schema (dry run)", so after an export a scientist read errors
+     * about a filed artifact as errors about a hypothetical one. `dry_run` was also
+     * missing from `ApiRunCheckVerdict`, which is what hid the mislabel from tsc.
+     */
+    const card = await check({ ok: false, dry_run: false, errors: [{ message: 'boom' }] });
+    expect(card.textContent).toContain('Official schema (the record already written)');
+    expect(card.textContent).not.toContain('(dry run)');
+  });
+
+  it('says "(dry run)" only when the server says so', async () => {
+    const card = await check({ ok: false, dry_run: true, errors: [{ message: 'boom' }] });
+    expect(card.textContent).toContain('Official schema (dry run)');
+  });
+
+  it('claims neither when the flag is absent — an absent flag is not evidence', async () => {
+    const card = await check({ ok: false, errors: [{ message: 'boom' }] });
+    expect(card.textContent).toContain('Official schema');
+    expect(card.textContent).not.toContain('(dry run)');
+    expect(card.textContent).not.toContain('already written');
+  });
+
+  it('reports a NON-VERDICT as "Could Not Be Checked", not as a schema failure', async () => {
+    /*
+     * The route's own comment for this branch reads "no verdict, not a schema
+     * violation". `ok` is false to fail closed, and the card turned that into
+     * `Check Failed` — asserting a verdict the server explicitly declined to give.
+     */
+    const card = await check({
+      ok: false,
+      dry_run: false,
+      unavailable: true,
+      errors: [{ path: '$', message: 'Validation could not be completed.' }],
+    });
+    expect(within(card).getAllByText('Could Not Be Checked').length).toBeGreaterThan(0);
+    expect(within(card).queryByText('Check Failed')).toBeNull();
+    // And it is still not a pass.
+    expect(within(card).queryByText('Check Passed')).toBeNull();
   });
 });
 

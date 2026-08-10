@@ -248,9 +248,9 @@ export function auditScan(
  * confidently mis-cited log line is the failure mode this file exists to catch.)
  *
  * 24 is chosen against the actual numbers rather than as a round figure. The
- * largest baselined counts here are `evidence@{desktop,laptop,tablet}` at 69 and
- * `settings-explorer@tablet-768x1024` at 63-64, so this is deliberately NOT "print
- * everything" — a 69-node dump would bury the signal again. It is comfortably above
+ * largest baselined counts here are `settings-explorer@tablet-768x1024` at 63-64 and
+ * the `evidence@*` family at 67-69, so this is deliberately NOT "print everything" —
+ * a 69-node dump would bury the signal again. It is comfortably above
  * every *delta* the baseline has ever reported, which is the thing a reader needs.
  */
 const MAX_REPORTED_NODES = 24;

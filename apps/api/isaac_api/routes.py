@@ -2464,6 +2464,24 @@ def _clean_label(
                 "message": "label must be a string, or omitted so the server assigns one.",
             },
         )
+    # A LABEL GOES THROUGH THE SAME SERIALIZER AS A FIELD VALUE, so it needs the same
+    # gate. The first version of the value guard iterated `fields` only, and `label`
+    # was the hole: a lone surrogate here 500ed BOTH the run PATCH and the create
+    # route. Checked before `.strip()` rather than after, so the refusal describes
+    # what was sent.
+    if not _is_json_renderable(raw):
+        return None, JSONResponse(
+            status_code=422,
+            content={
+                "error": "unrepresentable_value",
+                "key": "label",
+                "keys": ["label"],
+                "message": (
+                    "label contains characters that cannot be represented in JSON, so "
+                    "it cannot be stored. Nothing was written."
+                ),
+            },
+        )
     cleaned = raw.strip()
     if not cleaned and not blank_is_a_choice:
         return None, JSONResponse(
@@ -2557,22 +2575,46 @@ RUN_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
 )
 
 
+#: The exact call Starlette's ``JSONResponse.render`` makes, transcribed rather than
+#: approximated — ``json.dumps(content, ensure_ascii=False, allow_nan=False,
+#: indent=None, separators=(",", ":")).encode("utf-8")``.
+#:
+#: THE FIRST VERSION OF THIS GUARD OMITTED ``ensure_ascii=False`` AND THE ``.encode``,
+#: while its comment claimed it was "the SAME function Starlette renders responses
+#: with, so a value that passes here cannot fail there". That was false in a way the
+#: comment made hard to doubt. With ``ensure_ascii`` at its default of ``True`` a lone
+#: surrogate is escaped to ``"\ud800"`` and serialises happily; with
+#: ``ensure_ascii=False`` the ``.encode("utf-8")`` raises ``UnicodeEncodeError``. So
+#: ``{"context.temperature_K": "\ud800"}`` — reachable from any client that writes the
+#: escape, though not from ``JSON.stringify`` — still produced a 500.
+#:
+#: Nothing was written and nothing was wedged in that case (the signature hash raises
+#: before ``save_versioned`` writes), which is why it was an Important rather than a
+#: repeat of the ``NaN`` Critical. It is fixed by making the claim true instead of by
+#: narrowing the claim.
+def _render_exactly_as_a_response_would(value) -> bytes:
+    return json.dumps(
+        value, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")
+    ).encode("utf-8")
+
+
 def _is_json_renderable(value) -> bool:
     """Can this value survive the response serializer and a round trip through disk?
 
-    `json.dumps(..., allow_nan=False)` is the exact test, and it is used rather than
-    an `isinstance` walk on purpose: it is the SAME function Starlette renders
-    responses with, so a value that passes here cannot fail there. A hand-written type
-    check would be a second, drifting definition of "storable".
+    The test is a real render, not an ``isinstance`` walk, and that is deliberate: the
+    property being protected is "the response serializer and the on-disk document can
+    represent this", so the only honest test is to try. A hand-written type check would
+    be a second, drifting definition of "storable" — and this route already derives its
+    key set rather than hand-copying it.
 
-    Non-finite floats are the case that motivated it (see the caller), but the test is
-    general: it also refuses a value that is not JSON-serialisable at all, and it
-    recurses into nested lists and objects for free, where a shallow check would let
-    `{"a": NaN}` through.
+    Non-finite floats are the case that motivated it and lone surrogates are the case
+    that proved the first version incomplete. Both are covered, along with anything
+    else the serializer cannot take, and it recurses into nested lists and objects for
+    free where a shallow check would let ``{"a": NaN}`` through.
     """
     try:
-        json.dumps(value, allow_nan=False)
-    except (ValueError, TypeError):
+        _render_exactly_as_a_response_would(value)
+    except (ValueError, TypeError, UnicodeEncodeError):
         return False
     return True
 
@@ -2814,8 +2856,9 @@ def patch_run(
         description=(
             "`{\"confirmed_by_user\": true, \"fields\": {<dotted.path>: <value>}, "
             "\"label\": \"<optional new label>\"}`. Omitting `confirmed_by_user: "
-            "true`, naming a path that is not run-level, or naming nothing at all "
-            "is rejected with `422`."
+            "true`, naming a path that is not run-level, naming nothing at all, or "
+            "sending a value or label JSON cannot represent (`NaN`, `Infinity`, a "
+            "lone surrogate) is rejected with `422` and writes nothing."
         ),
     ),
     if_match: str | None = Header(
@@ -3013,7 +3056,11 @@ def patch_run(
     ),
     response_description=(
         "The draft and official verdicts, the run's blocking questions, and the "
-        "run revision that was checked."
+        "run revision that was checked. The official verdict carries `dry_run` — "
+        "false when the run is already exported, in which case the RECORD ALREADY "
+        "WRITTEN was validated rather than a candidate — and `unavailable: true` "
+        "when no verdict could be reached at all, which is not the same as the "
+        "schema rejecting the document."
     ),
     responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND},
 )
@@ -4109,10 +4156,14 @@ def _fan_out_official_verdict(exp: Experiment) -> dict:
         "passes. The top-level `dry_run` is `true` if any run's verdict came from "
         "an in-memory candidate rather than a written record.\n\n"
         "If the written record cannot be read at all, no verdict is invented: the "
-        "operation reports `ok: false` with the single fixed error `Validation "
-        "could not be completed.` and `dry_run: false`. Read that as *no verdict*, "
-        "not as a schema violation — the artifacts operation reports why the file "
-        "could not be read."
+        "operation reports `ok: false`, the fixed error `Validation could not be "
+        "completed.`, `dry_run: false`, and **`unavailable: true`** on the run entry. "
+        "Read that as *no verdict*, not as a schema violation — the artifacts "
+        "operation reports why the file could not be read. `unavailable` was added "
+        "because the fixed English sentence was the only signal, and a client that "
+        "matched on `ok` alone rendered a non-verdict as a schema failure; the "
+        "top-level `ok` deliberately stays `false` either way, so the flag explains "
+        "the refusal without softening it."
     ),
     response_description="The official-schema verdict, its errors, and whether it was a dry run.",
     responses={**_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},

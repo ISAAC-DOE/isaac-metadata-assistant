@@ -598,6 +598,113 @@ def test_a_value_json_cannot_represent_is_refused_before_anything_is_written(
     )
 
 
+@pytest.mark.parametrize(
+    "literal,where",
+    [
+        (r'"\ud800"', "fields"),
+        (r'"\udfff"', "fields"),
+        (r'{"k": "\ud800"}', "fields"),
+        (r'"\ud800"', "label"),
+    ],
+    ids=["lone-high-surrogate", "lone-low-surrogate", "nested-in-an-object", "in-the-label"],
+)
+def test_a_lone_surrogate_is_refused_rather_than_500ing(
+    client, experiment_id, literal, where
+):
+    """THE SECOND ROUND OF THE SAME DEFECT CLASS, and the reason the guard is now a
+    real render rather than a near-enough one.
+
+    The first version of `_is_json_renderable` called
+    `json.dumps(value, allow_nan=False)` under a comment asserting it was "the SAME
+    function Starlette renders responses with, so a value that passes here cannot fail
+    there". It omitted `ensure_ascii=False` and the `.encode("utf-8")`. With
+    `ensure_ascii` at its default a lone surrogate escapes to `"\ud800"` and serialises
+    happily; with `ensure_ascii=False` the encode raises `UnicodeEncodeError`. So a
+    lone surrogate still produced a 500 — and `label` was not covered by the value
+    guard at all, so it 500ed on BOTH this route and `POST .../runs`.
+
+    Unlike the `NaN` case nothing was written even before the fix: the signature hash
+    raises before `save_versioned` writes. The assertions below still check the store,
+    because "nothing was written" is the claim, not an assumption.
+    """
+    run = _create_run(client, experiment_id)
+    etag = _run_etag(client, experiment_id, run["id"])
+    body = (
+        '{"confirmed_by_user": true, "label": ' + literal + "}"
+        if where == "label"
+        else '{"confirmed_by_user": true, "fields": {"context.temperature_K": '
+        + literal
+        + "}}"
+    )
+    response = client.patch(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}",
+        content=body.encode(),
+        headers={"If-Match": etag, "content-type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrepresentable_value"
+
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.rev == 1
+    assert client.get(f"/api/experiments/{experiment_id}/runs").status_code == 200
+
+
+def test_creating_a_run_with_an_unrepresentable_label_is_refused_not_a_500(
+    client, experiment_id
+):
+    """`label` reaches the store through TWO routes and the value guard iterates
+    `fields`. This is the other one."""
+    etag = client.get(f"/api/experiments/{experiment_id}").headers["ETag"]
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        content=rb'{"label": "\ud800"}',
+        headers={"If-Match": etag, "content-type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrepresentable_value"
+    assert client.get(f"/api/experiments/{experiment_id}/runs").json()["runs"] == []
+
+
+def test_a_label_of_real_non_ascii_text_is_still_accepted(client, experiment_id):
+    """The guard is about REPRESENTABILITY, not about ASCII. Without this the fix
+    above could pass by refusing every non-ASCII label."""
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "label": "Run \u03b1 \u00b7 \u6e29\u5ea6"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["run"]["label"] == "Run \u03b1 \u00b7 \u6e29\u5ea6"
+
+
+def test_the_run_check_reports_which_document_it_read_and_when_it_has_no_verdict(
+    client, experiment_id
+):
+    """THE WIRE CONTRACT THE FRONTEND NOW RENDERS, pinned on the server side.
+
+    `dry_run` and `unavailable` were both added to `_validate_unit` and NEITHER was
+    asserted anywhere — a new field on a served contract, on two endpoints, entirely
+    unpinned, which a reviewer found by grepping for it. `dry_run` states WHICH
+    document was checked (the card said "(dry run)" unconditionally while a
+    materialised unit validates the record already written); `unavailable` separates
+    "no verdict could be reached" from "the schema rejected it", which the card
+    rendered as `Check Failed`.
+    """
+    run = _create_run(client, experiment_id)
+    body = client.post(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}/check"
+    ).json()
+    official = body["official"]
+    # Not exported, so this IS a dry run over an in-memory candidate.
+    assert official["dry_run"] is True
+    # And a dry run that reached a verdict does not claim it could not be reached.
+    assert official.get("unavailable") is not True
+    # `ok` is still the composition of the two deterministic checks.
+    assert body["ok"] == bool(body["draft"]["ok"] and official["ok"])
+
+
 def test_a_finite_number_at_the_same_path_is_still_accepted(client, experiment_id):
     """The guard is about REPRESENTABILITY, not about numbers. Without this, the fix
     above could pass by refusing every float."""

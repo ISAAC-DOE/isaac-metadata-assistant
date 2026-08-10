@@ -402,7 +402,10 @@
  * said "189 and 71" — a pair quoted on two different bases: 71 was the count BEFORE
  * this commit removed one use, and a later fix to `.run-card-chevron` removed
  * another. Counted with Python over file bytes as well as `rg --text`, because
- * `CLAUDE.md` §36 records that a plain `rg` silently skips NUL-byte files.) Darkening the two TOKENS is the systemic fix, and it is a
+ * a plain `rg` silently skips any file containing a NUL byte while still exiting 0.
+ * That cross-reference read "`CLAUDE.md` §36" until a reviewer checked: that file has
+ * 17 sections, so the citation was fabricated — in a comment about false
+ * documentation.) Darkening the two TOKENS is the systemic fix, and it is a
  * design-system change that would move dozens of measured baseline entries at
  * five viewports each; it is not this slice's to make. Both colours therefore
  * remain in `A11Y_BASELINE`'s `foregrounds` set, because both still fail

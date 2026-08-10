@@ -260,7 +260,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
      * (Ratios against the status bar's own `--surface-subtle` #fbfcfd, computed
      * rather than eyeballed. AA wants 4.5:1 at these sizes — 11.5px and 10.5px.)
      * The status bar renders on every record screen, which is why five surfaces move
-     * together and why `settings-*` does not move at all: measured, `<StatusBar` is
+     * together and why no `settings-*` cell moves FOR THIS REASON — the three
+     * `settings-explorer` cells that do change in this same commit change for the
+     * unrelated clipped-scroll reason documented at their own entry, and it is worth
+     * being exact because "does not move at all", which this line used to say, is
+     * contradicted by the diff it sits in. Measured, `<StatusBar` is
      * rendered only by `RecordWorkbench`, `GuidedCompletion`, `EvidenceExplorer` and
      * `ExportReadiness`, and `.statusbar-{pending,note,right}` exist only in
      * `StatusBar.tsx`. "Five surfaces" is the surface count, not a claim about every
@@ -278,11 +282,20 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
      * An A/B against `b7792c1` at `desktop-1280x800` identified the newcomers as
      * `.statusbar-right` and the two `.statusbar-pending` spans — THREE nodes there,
      * and the count is viewport-dependent, which the first version of this note got
-     * wrong by narrating the desktop observation as the tablet one. How many
-     * `.statusbar-*` nodes each viewport actually carries is exactly the per-entry
-     * delta recorded above: -3 at desktop and laptop, -2 at tablet and zoom-200,
-     * -1 at width-390 and width-320, and 0 at mobile-375x812. So the tablet +2 is
+     * wrong by narrating the desktop observation as the tablet one. How many of the
+     * three each viewport actually carries is the per-entry delta recorded above, and
+     * it is NOT uniform across surfaces — desktop alone spans -3 (`record-detail`,
+     * `export-readiness`), -2 (`guided-completion`, `evidence`) and -1
+     * (`export-readiness-done`). For `record-detail`, the row the linux regression was
+     * reported on: -3 at desktop and laptop, -2 at tablet and zoom-200, -1 at
+     * width-390, and 0 at BOTH mobile-375x812 and width-320. So the tablet +2 is
      * explained by two of the three, not three.
+     *
+     * (An earlier revision of this paragraph gave one flat list for every surface and
+     * put -1 at width-320 — which is `guided-completion`'s delta, not
+     * `record-detail`'s, whose width-320 count is 12 at all three commits. That is the
+     * same wrong-row attribution the sibling `axe.ts` comment corrects, made again two
+     * paragraphs after apologising for it.)
      *
      * SO THE OPTION TAKEN WAS THE HARDER ONE. Ratcheting `record-detail` upward was
      * available and would have been green; it would also have blessed a 2.46:1
@@ -300,7 +313,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
      *
      * WHAT IS NOT FIXED: `--text-tertiary` (189 uses) and `--text-quaternary` (69)
      * — both counted at this commit, after every change in it, over file bytes rather
-     * than with a bare `rg` (`CLAUDE.md` §36) — remain too light almost everywhere, which is why both are still in
+     * than with a bare `rg`, which silently skips NUL-byte files while exiting 0 — remain
+     * too light almost everywhere, which is why both are still in
      * `foregrounds` below — checked, not assumed. Darkening the TOKENS is the
      * systemic fix and is a design-system change, not a slice's to make.
      */
@@ -1612,11 +1626,16 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // records a case where removing a DOM node moved one platform and not the other.
   // It happened to agree everywhere this time; that is a measurement, not a rule.
   //
-  // WHY THE TWO TOTALS STILL DIFFER BY ONE while all 26 changed entries agree: three
-  // entries elsewhere in the file are per-platform and do not cancel —
-  // `settings-explorer@laptop-1024x768` { 49, 48 } and
-  // `settings-explorer@tablet-768x1024` { 64, 63 } put darwin two ahead, and the
-  // pre-existing `memory-graph@zoom-200` { 21, 22 } puts it one behind. Net +1. This
+  // WHY THE TWO TOTALS STILL DIFFER BY ONE while all 26 changed entries agree: SIX
+  // entries in this file are per-platform, and they net to +1 —
+  // `settings-explorer@laptop-1024x768` { 49, 48 } +1,
+  // `settings-explorer@tablet-768x1024` { 64, 63 } +1,
+  // `settings-explorer@width-390` { 58, 56 } +2, against `memory-graph@zoom-200`
+  // { 21, 22 } -1, `validator@zoom-200` -1 and `load@width-390` { 1, 2 } -1.
+  // (An earlier revision named THREE of the six — the three that happen to sum to +1
+  // on their own — which describes no determinate fact, since several 3-subsets do.
+  // Written three lines below its own apology for a decomposition that had been
+  // back-computed to make the arithmetic close.) This
   // arithmetic is a RECONCILIATION of a number the suite computed, not the source of
   // it: the first attempt at this constant wrote 2162 for linux and the
   // well-formedness test rejected it with the correct figure.

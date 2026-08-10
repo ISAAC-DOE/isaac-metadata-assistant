@@ -228,8 +228,11 @@ contains a `$`; the dollar-quote refusal is narrow enough not to trip on it, pin
 ## 6. Idempotence and legacy compatibility
 
 > Everything in this section **has been observed**, not merely specified — §12A(4), (6) and (9) give
-> the run, the job and the printed assertions. When this section was written it described a job that
-> had never executed; that is no longer the case.
+> the run, the job and the observations. When this section was written it described a job that had
+> never executed; that is no longer the case. Read §12A for WHICH KIND of observation each is: (4)
+> and (6) are marked `[silent]` there, meaning the shell compared the value and exited non-zero on a
+> mismatch rather than printing it, so the job's green conclusion is the evidence. This line said
+> "printed assertions" until that distinction was added one section away and not propagated here.
 
 **Idempotent, twice over.** Both statements are `CREATE … IF NOT EXISTS`, and the bookkeeping table
 skips a recorded version. Either alone makes a re-run a no-op; both means losing the bookkeeping row
@@ -437,7 +440,7 @@ The job ran. What was observed:
 | checkout | GitHub checks out a merge commit, not the branch head: the log reads `HEAD is now at b9b9c78 Merge 758360cc… into b7792c1f…`. `758360c` is a descendant of `b7792c1` (`git merge-base --is-ancestor`), so that tree and the branch head's tree coincide — but the job did not literally check out `758360c`, and the distinction is recorded rather than glossed. |
 
 Almost every line below is a **printed assertion in that job's log** rather than an inference from
-the workflow file — and the three exceptions are marked `[silent]`, because a claim that everything
+the workflow file — and the four exceptions are marked `[silent]`, because a claim that everything
 was printed is exactly the kind of thing a reader cannot check without re-reading 1,400 lines. A
 `[silent]` item is asserted by the shell (`set -euo pipefail` plus a `[ … ] || exit 1`), so the job's
 green conclusion is the evidence, and the value itself never reaches the log:
@@ -461,8 +464,11 @@ green conclusion is the evidence, and the value itself never reaches the log:
    added set by eye; the equality test against that exact three-name string, and the `records` digest
    `diff`, are **`[silent]`**.
 6. **The application does not touch the table.** The full durable-repository exercise runs against
-   the real engine (`durable repository OK`, `durable compare-and-swap OK`), after which
-   `isaac_runs: still empty after the application ran`.
+   the real engine (`durable repository OK`, `durable compare-and-swap OK`), after which the job
+   prints `isaac_runs: still empty after the application ran` — but the COUNT that line rests on is
+   **`[silent]`**: `runs=$(psql -Atc "select count(*) from isaac_runs")` is compared in the shell and
+   never echoed. Structurally identical to item 10, and it was the fourth exception to a sentence
+   that claimed there were three.
 7. **The index is what §2 claims.** `CREATE INDEX isaac_runs_experiment_order_idx ON
    public.isaac_runs USING btree (experiment_id, ordinal, run_id)`, read back from `pg_indexes`.
 8. **Twelve negative controls, each refused by the expected named object** — the job fails if a
