@@ -144,6 +144,26 @@ function editWasApplied(resp: ApiAnswersResponse): boolean {
   return resp.invalidation.changed === true;
 }
 
+/**
+ * Did the server refuse this correction because the VALUE cannot be stored?
+ *
+ * Narrow on purpose. A 422 from `POST /edit` has three other causes — a missing
+ * `confirmed_by_user`, a body naming no recognised field, and whatever a future
+ * validation adds — and none of them entitles the screen to say "the field still holds
+ * the value it held before". So the `error` code is read, not just the status; an
+ * unrecognised 422 falls through to the generic notice, which claims less.
+ *
+ * `body` is `unknown` by design (`ApiError` does not model per-route payloads), so it
+ * is narrowed here rather than cast. A response without the expected shape returns
+ * false, which is the fail-closed direction: it under-claims rather than over-claims.
+ */
+function isUnstorableFieldValue(err: ApiError | null): boolean {
+  if (err === null || err.status !== 422) return false;
+  const body = err.body;
+  if (typeof body !== 'object' || body === null) return false;
+  return (body as { error?: unknown }).error === 'invalid_field_value';
+}
+
 interface Answered {
   id: string;
   label: string;
@@ -521,6 +541,28 @@ function LoadedCompletion({
           >
             Refresh
           </button>
+        </div>
+      ) : isUnstorableFieldValue(editError) ? (
+        /*
+         * A VALUE THE RECORD CANNOT STORE, and the reason this branch exists rather
+         * than falling through to the generic one below.
+         *
+         * The server refuses `POST /edit` with `invalid_field_value` when a recognised
+         * field carries a value it cannot write — a malformed sha256, a `series` that
+         * is not a list of objects. Before that refusal existed, this path answered
+         * 200 and the SCREEN had to interpret it; the copy it used then said the one
+         * thing that actually matters to a scientist, which the generic sentence below
+         * does not: THE VALUE YOU HAD IS STILL THERE. That sentence is kept here.
+         *
+         * Every claim is one the response supports. `Nothing was written` is what the
+         * 422 asserts; `still holds the value it held before` follows from it, because
+         * the route refuses before it mutates. No cause is named beyond the shape,
+         * because the response names none — it does not say WHY the value is wrong, and
+         * inventing a reason would be the defect this whole path exists to avoid.
+         */
+        <div className="completion-submit-error" role="alert">
+          That correction was not applied — this field still holds the value it held before, and
+          nothing was written. Check the value and try again.
         </div>
       ) : (
         <div className="completion-submit-error" role="alert">

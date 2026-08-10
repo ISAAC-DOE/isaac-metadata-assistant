@@ -221,6 +221,14 @@ test.describe('R4 · evidence', () => {
      * is asserted rather than deferred. Strictly stronger: it pins that the request
      * finished AND that nothing was claimed. `edit.spec.ts` owns the full behaviour of
      * that state; this file keeps its focus on the evidence trail.
+     *
+     * THE WAYPOINT MOVED AGAIN, for the same reason it moved the first time: it was
+     * matching a SENTENCE, and the sentence changed when the server started refusing
+     * this request with 422 `invalid_field_value` instead of absorbing it with a 200.
+     * The durable property under test — the record and its evidence unchanged, the trail
+     * still citing HASH_A — never changed and is asserted below unaltered. What is
+     * matched now is the notice the 422 produces, which still carries the claim that
+     * matters: the field holds the value it held before.
      */
     await openComplete(page, SEED.fresh);
     await confirmAssetHash(page, HASH_A);
@@ -232,7 +240,9 @@ test.describe('R4 · evidence', () => {
     await editor.getByLabel('Asset Hash').fill('not-a-valid-sha256');
     await editor.getByRole('button', { name: 'Save' }).click();
 
-    await expect(editor.locator('.completion-submit-error')).toContainText('Nothing was applied');
+    await expect(editor.locator('.completion-submit-error')).toContainText(
+      'still holds the value it held before',
+    );
     await expect(
       page.locator('.answered-stored'),
       'the refused value must never be shown as an answer'

@@ -30,6 +30,7 @@ from isaac_records.complete import (
     apply_corrections,
     is_descriptor_shaped,
     is_series_shaped,
+    is_sha256_shaped,
 )
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
@@ -2035,7 +2036,15 @@ def _correction_is_storable(key: str, value) -> bool:
     if key == "edge":
         return isinstance(value, (str, int, float))
     # Anything else in the shaped body is an asset sha256, keyed by URI.
-    return isinstance(value, str)
+    #
+    # `isinstance(value, str)` WAS NOT ENOUGH, and a reviewer measured what it let
+    # through: `"Z" * 64`, `"abc"`, 63 hex chars and 65 hex chars each passed this
+    # guard, were then declined by `apply_corrections` as malformed, and this route
+    # answered **200 having changed nothing** — the outcome the block below calls
+    # forbidden, in the one key where malformation is a question of FORMAT rather
+    # than of type. `is_sha256_shaped` is imported rather than restated for the same
+    # reason the other two predicates are.
+    return is_sha256_shaped(value)
 
 
 def _answers_to_apply_shape(answers_by_id: dict, draft: dict, timestamp: str) -> dict:
