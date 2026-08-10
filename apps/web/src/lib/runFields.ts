@@ -2,7 +2,7 @@
  * THE RUN-LEVEL FIELD SET THE RUN WORKSPACE EDITS — and the evidence for every
  * entry in it.
  *
- * Three fields, not thirty. Two independent sources had to agree before a path
+ * FIVE fields — the whole of the writable set, and not one more. Two independent sources had to agree before a path
  * could appear here, and NOTHING is here because it seemed useful:
  *
  *   1. `routes.RUN_WRITABLE_FIELD_PATHS` decides what can be written per run. It is
@@ -26,18 +26,25 @@
  *      both listed in `context.required`. `timestamps.acquired_start_utc` is
  *      `{"type": "string", "format": "date-time"}`.
  *
- * WHAT IS DELIBERATELY ABSENT, and why each absence is a decision:
+ * THE LIST IS NOW THE WHOLE WRITABLE SET — five fields, not three, and the two that
+ * were added are the two this comment used to explain the absence of:
  *
- *   * `timestamps.acquired_end_utc` IS run-level and IS schema-backed, and is
- *     still not here. The brief asked for a small representative set; a second
- *     timestamp demonstrates nothing the first does not, and every field on
- *     this surface is a field a scientist has to read past.
- *   * `context.thermodynamics.atmosphere` IS in the writable set and is not offered.
- *     It is the one omission with no stronger reason than the first bullet's: three
- *     fields were asked for, and this is the fourth. It belongs in this list because
- *     a list headed "why each absence is a decision" that silently omits an
- *     offerable field is not that list — and it was omitted until a reviewer counted
- *     the set against the screen.
+ *   * `timestamps.acquired_end_utc` was withheld because "a second timestamp
+ *     demonstrates nothing the first does not". That was a reason to keep a DEMO
+ *     small; it is not a reason to withhold half of a scientist's acquisition window
+ *     once the surface is the real one. It needs no new machinery — same `datetime`
+ *     kind, same format gate.
+ *   * `context.thermodynamics.atmosphere` was withheld with "three fields were asked
+ *     for, and this is the fourth", which that comment itself called the weaker of the
+ *     two reasons. It is `{"type": "string"}` in the official schema with NO enum, so
+ *     it is offered as free text. A curated dropdown here would be this file inventing
+ *     a vocabulary the schema does not define.
+ *
+ * Neither addition widens what the SERVER accepts: both were already members of
+ * `RUN_WRITABLE_FIELD_PATHS`, so the PATCH route accepted them before this file
+ * offered them. What changed is only whether a scientist can reach them.
+ *
+ * WHAT IS STILL DELIBERATELY ABSENT, and why each absence is a decision:
  *   * `context.electrochemistry.*` is under a run-level PREFIX but is NOT in the
  *     writable set — measured, not assumed — so the route would 422 every path in it.
  *     That puts it in the same category as `system.configuration.*` below rather than
@@ -61,7 +68,7 @@
 import type { ApiRunCheckFinding, ApiRunFieldEnvelope, ApiRunView } from './types';
 
 /** How one run-level field is entered. Drives the control, nothing else. */
-export type RunFieldKind = 'enum' | 'number' | 'datetime';
+export type RunFieldKind = 'enum' | 'number' | 'datetime' | 'text';
 
 export interface RunFieldSpec {
   /** The dotted OFFICIAL path, sent verbatim as a `fields` key. */
@@ -92,8 +99,23 @@ export const RUN_FIELDS: readonly RunFieldSpec[] = [
     unit: 'K',
   },
   {
+    path: 'context.thermodynamics.atmosphere',
+    label: 'Atmosphere',
+    // schema/isaac_record_v1.json -> properties.context.properties.thermodynamics
+    // .properties.atmosphere is `{"type": "string"}` with NO enum, so this is free
+    // text and not a picker. Offering a curated list here would be this file
+    // inventing a vocabulary the official schema does not define.
+    kind: 'text',
+  },
+  {
     path: 'timestamps.acquired_start_utc',
     label: 'Acquisition start',
+    kind: 'datetime',
+    hint: 'ISO 8601 UTC, e.g. YYYY-MM-DDTHH:MM:SSZ',
+  },
+  {
+    path: 'timestamps.acquired_end_utc',
+    label: 'Acquisition end',
     kind: 'datetime',
     hint: 'ISO 8601 UTC, e.g. YYYY-MM-DDTHH:MM:SSZ',
   },
@@ -156,6 +178,12 @@ export function parseRunField(spec: RunFieldSpec, raw: string): ParsedRunField {
       if (spec.options && !spec.options.includes(text)) {
         return { ok: false, error: 'Choose one of the listed values.' };
       }
+      return { ok: true, value: text };
+    case 'text':
+      // The schema says `{"type": "string"}` and nothing else, so there is nothing
+      // to check. It is returned trimmed and otherwise untouched: no casing, no
+      // vocabulary, no normalisation. The empty case became `null` above, which is
+      // the contract's "clear this field".
       return { ok: true, value: text };
   }
 }
