@@ -23,6 +23,7 @@ import { resolve } from 'node:path';
 
 import { AppRoutes } from '../App';
 import { AUTOSAVE_DEBOUNCE_MS, AUTOSAVE_RETRY_BASE_MS } from '../lib/useRunAutosave';
+import { RUN_FIELDS } from '../lib/runFields';
 import { __entryCount, __resetRunAutosaveStore } from '../lib/runAutosaveStore';
 import {
   bundleRoutes,
@@ -587,6 +588,105 @@ describe('autosave', () => {
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
     expect(status.textContent).toBe('Saved');
+  });
+});
+
+describe('the whole writable set is reachable, not three fifths of it', () => {
+  /*
+   * WHY THIS BLOCK EXISTS. `RUN_WRITABLE_FIELD_PATHS` has always been a closed set of
+   * FIVE, and this screen offered THREE. The two it withheld —
+   * `context.thermodynamics.atmosphere` and `timestamps.acquired_end_utc` — were a
+   * presentation choice recorded in `runFields.ts`, not a classification question and
+   * not a server limit: the PATCH route accepted both before any control existed for
+   * them. A scientist simply had no way to enter half of an acquisition window.
+   *
+   * These tests assert the two new controls REACH THE SERVER with the value typed, and
+   * that the free-text one is sent untouched. That last point is the one worth a test
+   * rather than a comment: `atmosphere` is `{"type": "string"}` in the official schema
+   * with no enum, so anything this client did to normalise it — casing, trimming to a
+   * known vocabulary, mapping "air" onto something else — would be the client inventing
+   * scientific vocabulary. It sends what was typed.
+   */
+
+  async function patchBodyAfterTyping(label: string, value: string) {
+    const bodies: Record<string, unknown>[] = [];
+    renderRecord({
+      [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) },
+      [`PATCH ${BASE}/runs/RUNAAA`]: (init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')));
+        return { body: { run: { ...RUN_A, version: 'ra.1' } } };
+      },
+    });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    const card = cardFor('RUNAAA');
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(within(card).getByLabelText(label), { target: { value } });
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    });
+    return bodies;
+  }
+
+  it('offers a control for every path the server accepts', async () => {
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNAAA');
+    const card = cardFor('RUNAAA');
+
+    // Addressed by the OFFICIAL PATH shown beside each control, which is the one
+    // handle that cannot drift from what is sent.
+    const paths = Array.from(card.querySelectorAll('.run-field-path')).map(
+      (el) => el.textContent,
+    );
+    expect(paths).toEqual([
+      'context.environment',
+      'context.temperature_K',
+      'context.thermodynamics.atmosphere',
+      'timestamps.acquired_start_utc',
+      'timestamps.acquired_end_utc',
+    ]);
+    expect(paths).toHaveLength(RUN_FIELDS.length);
+  });
+
+  it('sends the acquisition END timestamp, under its own official path', async () => {
+    const bodies = await patchBodyAfterTyping('Acquisition end', '2026-01-31T11:30:00Z');
+    expect(bodies).toHaveLength(1);
+    // The WHOLE body, including the confirmation flag the route requires — asserted
+     // rather than projected, so a change to either half fails here.
+    expect(bodies[0]).toEqual({
+      confirmed_by_user: true,
+      fields: { 'timestamps.acquired_end_utc': '2026-01-31T11:30:00Z' },
+    });
+  });
+
+  it('applies the SAME format gate to the end timestamp as to the start', async () => {
+    const bodies = await patchBodyAfterTyping('Acquisition end', 'yesterday afternoon');
+    expect(bodies).toHaveLength(0);
+    const card = cardFor('RUNAAA');
+    expect(within(card).getByLabelText('Acquisition end')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+  });
+
+  it('sends the atmosphere VERBATIM — no casing, no vocabulary, no normalisation', async () => {
+    const bodies = await patchBodyAfterTyping('Atmosphere', '5% H2 in Ar');
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toEqual({
+      confirmed_by_user: true,
+      fields: { 'context.thermodynamics.atmosphere': '5% H2 in Ar' },
+    });
+  });
+
+  it('clears the atmosphere with null, not with an empty string', async () => {
+    const bodies = await patchBodyAfterTyping('Atmosphere', '   ');
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toEqual({
+      confirmed_by_user: true,
+      fields: { 'context.thermodynamics.atmosphere': null },
+    });
   });
 });
 
@@ -1310,19 +1410,25 @@ describe('a save that lands mid-typing does not revert the box (review finding)'
 });
 
 describe('the denominator discloses its scope (review finding: invented denominator)', () => {
-  it('says which three fields it is counting, not bare "of 3"', async () => {
+  it('says which fields it is counting, never a bare "of N"', async () => {
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
     await screen.findByRole('button', { name: /Add Run/ });
     /*
-     * "1 of 3 set" is a completion claim the number was not entitled to make: three
-     * is what THIS SCREEN offers, the backend accepts five, and a valid ISAAC record
-     * needs far more — so "3 of 3 set" was displayable on a run whose Check Run
-     * fails. This project has a written rule against a denominator that is not
-     * enumerated from the record's own content.
+     * RENAMED FROM "says which three fields", because the screen now offers five and a
+     * test whose NAME carries a stale count is a small lie in the place a reader looks
+     * first. The assertion never depended on the number — it asserts the SCOPE CLAUSE
+     * is present — which is why it kept passing when the set grew, and why the rename
+     * is the whole of the change here.
+     *
+     * The reason the clause exists is unchanged and is now larger, not smaller: a
+     * valid ISAAC record needs far more than five fields, most of them inherited, so
+     * "5 of 5" is still displayable on a run whose Check Run fails.
      */
     const progress = cardFor('RUNAAA').querySelector('.run-card-progress') as HTMLElement;
     expect(progress.textContent).toMatch(/run fields on this screen/);
     expect(progress.textContent).not.toMatch(/^\s*\d+ of \d+ set\s*$/);
+    // The denominator is DERIVED, so it cannot drift from what the screen renders.
+    expect(progress.textContent).toContain(`of ${RUN_FIELDS.length}`);
   });
 });
 

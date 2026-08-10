@@ -256,10 +256,20 @@ test.describe('R5 · the Run workspace', () => {
     // Nothing is claimed about a run nobody has touched.
     await expect(saveStatus(nthCard(page, 0))).toHaveText('');
     await expect(conditions(nthCard(page, 0))).toContainText('No conditions recorded yet');
-    // The scope is part of the figure — "0 of 3" alone was a completion claim the
-    // number is not entitled to make. See the note in RunCard.tsx.
-    await expect(progress(nthCard(page, 0))).toContainText('0 of 3');
-    await expect(progress(nthCard(page, 0))).toContainText('run fields on this screen');
+    /*
+     * The scope is part of the figure — a bare "0 of N" is a completion claim the
+     * number is not entitled to make. See the note in RunCard.tsx.
+     *
+     * THE DENOMINATOR IS MATCHED AS A PATTERN, NOT AS A LITERAL, and it used to be
+     * `'0 of 3'`. That literal broke the moment the screen offered the whole writable
+     * set (five paths, not three) — a green suite failing on a number it had hardcoded
+     * about a set that was always allowed to grow. What this test is about is the
+     * NUMERATOR being zero and the SCOPE being stated; the size of the offered set is
+     * `runFields.ts`'s business and is asserted against the rendered controls below.
+     */
+    await expect(progress(nthCard(page, 0))).toHaveText(
+      /^\s*0 of \d+\s+run fields on this screen\s*$/,
+    );
   });
 
   test('a typed value says Saved only AFTER the server acknowledges, and survives a reload', async ({
@@ -295,15 +305,23 @@ test.describe('R5 · the Run workspace', () => {
     // 2, not 1: creating the run was the first write (see the I2 spec below).
     expect(run.rev, 'a write must advance the run rev').toBe(2);
 
-    await expect(progress(card)).toContainText('1 of 3');
+    await expect(progress(card)).toHaveText(/^\s*1 of \d+\s+run fields on this screen\s*$/);
     await expect(conditions(card)).toContainText('277.15 K');
+
+    // The denominator is the number of controls the card actually renders — asserted
+    // against the DOM rather than against a constant, so it cannot drift from what a
+    // reader sees and cannot be broken by widening the offered set.
+    const denominator = Number(
+      ((await progress(card).textContent()) ?? '').match(/of (\d+)/)?.[1] ?? '0',
+    );
+    await expect(card.locator('.run-field')).toHaveCount(denominator);
 
     // DURABILITY, through the real read path rather than through React state.
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
     const reloaded = nthCard(page, 0);
     await expect(conditions(reloaded)).toContainText('277.15 K');
-    await expect(progress(reloaded)).toContainText('1 of 3');
+    await expect(progress(reloaded)).toHaveText(/^\s*1 of \d+\s+run fields on this screen\s*$/);
     // And the value is in the box, not merely in the summary line.
     await header(reloaded).click();
     await expect(fieldControl(reloaded, 'context.temperature_K')).toHaveValue('277.15');
