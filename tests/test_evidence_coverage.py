@@ -147,3 +147,88 @@ def test_sha256_asdf_rejected_at_draft(draft):
     report = validate_draft(draft)
     assert not report.ok
     assert "sha256 'asdf'" in _joined(report)
+
+
+# --- sha256 EXACTNESS -------------------------------------------------------
+#
+# `_SHA256_RE` was `^[0-9a-f]{64}$` and applied with `.match()`. Python's `$` also
+# matches immediately before a trailing newline, so the 65-character string
+# `"9"*64 + "\n"` validated clean as a sha256 — and nothing downstream caught it:
+# the official schema declares `assets.items.properties.sha256` as bare
+# `{"type": "string"}` with no pattern and no length bound, so the malformed digest
+# exported into an official record and passed `validate_official`. The pattern is
+# now `\A[0-9a-f]{64}\Z`.
+#
+# Each case below names EXACTLY the character it appends. A newline and a space are
+# separate categories: only the newline was ever accepted, so a case labelled
+# "trailing whitespace" that used a space would give false confidence for the
+# newline it named.
+
+_GOOD_SHA256 = "9" * 64
+
+
+def test_sha256_exactly_64_lowercase_hex_is_accepted(draft):
+    # Baseline: the fix must not narrow what a legitimate digest looks like.
+    draft["assets"][0]["sha256"] = _GOOD_SHA256
+    assert validate_draft(draft).ok, validate_draft(draft).render()
+
+
+def test_sha256_with_trailing_newline_is_refused(draft):
+    # THE headline regression. 65 characters, the 65th being LF (0x0a).
+    bad = _GOOD_SHA256 + "\n"
+    assert len(bad) == 65 and bad[-1] == "\n"
+    draft["assets"][0]["sha256"] = bad
+    report = validate_draft(draft)
+    assert not report.ok
+    assert "is not a 64-char lowercase hex digest" in _joined(report)
+
+
+def test_sha256_with_trailing_space_is_refused(draft):
+    # A DIFFERENT character from the case above: SPACE (0x20), not LF. `$` never
+    # accepted this one; the case exists so the two are not conflated.
+    bad = _GOOD_SHA256 + " "
+    assert len(bad) == 65 and bad[-1] == " "
+    draft["assets"][0]["sha256"] = bad
+    assert not validate_draft(draft).ok
+
+
+def test_sha256_with_trailing_carriage_return_is_refused(draft):
+    # CRLF-terminated file reads produce this; `\Z` refuses it, and `$` did too
+    # only because `\r` is not the newline `$` is lenient about.
+    bad = _GOOD_SHA256 + "\r\n"
+    draft["assets"][0]["sha256"] = bad
+    assert not validate_draft(draft).ok
+
+
+def test_sha256_of_wrong_length_is_refused(draft):
+    for bad, why in ((_GOOD_SHA256[:-1], "63 hex chars"), (_GOOD_SHA256 + "9", "65 hex chars")):
+        d = copy.deepcopy(draft)
+        d["assets"][0]["sha256"] = bad
+        assert not validate_draft(d).ok, why
+
+
+def test_sha256_uppercase_hex_is_refused(draft):
+    # Pins PRE-EXISTING intent, not new behaviour: the character class has always
+    # been `[0-9a-f]`, and both the constant's comment and the error message say
+    # "lowercase". The exactness fix did not change the accepted alphabet.
+    draft["assets"][0]["sha256"] = "9" * 63 + "A"
+    report = validate_draft(draft)
+    assert not report.ok
+    assert "is not a 64-char lowercase hex digest" in _joined(report)
+
+
+def test_sha256_with_leading_whitespace_or_newline_is_refused(draft):
+    # `\A` is what refuses these. `^` alone also did (no `re.MULTILINE`), so this
+    # pins the start anchor against a future `re.M` being added to the pattern.
+    for lead in ("\n", " ", "\t"):
+        d = copy.deepcopy(draft)
+        d["assets"][0]["sha256"] = lead + _GOOD_SHA256
+        assert not validate_draft(d).ok, f"leading {lead!r} must be refused"
+
+
+def test_malformed_sha256_cannot_reach_an_exported_official_record(draft):
+    # The consequence, pinned end-to-end. The official schema cannot catch this
+    # (bare `{"type": "string"}`), so the draft gate is the ONLY gate. Measured
+    # before the fix: export ok=True, official validate ok=True, 65-char digest.
+    draft["assets"][0]["sha256"] = _GOOD_SHA256 + "\n"
+    assert export_draft(draft, ROOT, record_id=RID).ok is False
