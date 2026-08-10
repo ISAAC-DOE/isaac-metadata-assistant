@@ -234,32 +234,6 @@ def is_series_shaped(value) -> bool:
     return True
 
 
-def is_sha256_shaped(value) -> bool:
-    """Is this a sha256 the asset paths will actually STORE — 64 lowercase hex chars?
-
-    EXPORTED FOR THE SAME REASON THE OTHER TWO ARE, and added because a reviewer found
-    the gap they left. ``routes.py``'s ``/edit`` guard asked only ``isinstance(value,
-    str)`` of an asset sha, so a malformed one — ``"Z" * 64``, ``"abc"``, 63 or 65 hex
-    chars — passed the guard, was then declined by :func:`apply_corrections` for being
-    malformed, and the route answered **200 having changed nothing**. Measured: 200,
-    ``rev`` unmoved, nothing written.
-
-    That is precisely the outcome the ``/edit`` route's own comment calls forbidden. It
-    was closed for ``series`` and ``descriptor``, where malformation is a question of
-    TYPE, and left open here, where it is a question of FORMAT.
-
-    ``_SHA256_RE`` rather than a second pattern: the route imports this so there is one
-    definition of "a storable hash", exactly as ``is_series_shaped`` exists so the route
-    does not carry a copy of the series rule.
-
-    Note what this deliberately does NOT do: re-sending the SAME valid hash still
-    answers 200 with nothing changed, and that is correct — the value was usable, and
-    the byte-stable no-op is documented behaviour. The defect was answering 200 about a
-    value that could never be stored at all.
-    """
-    return isinstance(value, str) and bool(_SHA256_RE.match(value))
-
-
 def is_descriptor_shaped(value) -> bool:
     """Can a descriptor correction be stored — a NON-EMPTY mapping?
 
