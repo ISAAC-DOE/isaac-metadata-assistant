@@ -36,7 +36,7 @@
   max-width: 66ch;
   font-size: 12.5px;
   line-height: 1.55;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .runs-toolbar {
@@ -54,7 +54,7 @@
 
 .runs-count {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .runs-empty {
@@ -64,7 +64,7 @@
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-card);
   font-size: 13px;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .runs-error {
@@ -139,14 +139,14 @@
 .run-card-conditions-empty {
   font-family: var(--font-ui);
   font-style: italic;
-  color: var(--text-quaternary);
+  color: var(--text-slate);
 }
 
 .run-card-progress {
   margin-left: auto;
   flex: none;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .run-card-body {
@@ -179,7 +179,7 @@
 
 .run-field-unit {
   font-weight: 400;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .run-field-control {
@@ -215,13 +215,13 @@
 .run-field-path {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-quaternary);
+  color: var(--text-slate);
   overflow-wrap: anywhere;
 }
 
 .run-field-hint {
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 /* Never colour alone: the glyph and the sentence carry it, the hue reinforces. */
@@ -267,7 +267,7 @@
   margin: 3px 0 8px;
   font-size: 11.5px;
   line-height: 1.5;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .run-inherited-list {
@@ -289,7 +289,7 @@
 .run-inherited-path {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-quaternary);
+  color: var(--text-slate);
   width: 190px;
   flex: none;
   overflow-wrap: anywhere;
@@ -388,7 +388,7 @@
   gap: 6px;
   min-height: 18px;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .run-save-status[data-save-status='saved'] {
@@ -437,7 +437,7 @@
 .run-check-scope {
   font-size: 11.5px;
   line-height: 1.5;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .run-check-group {
@@ -470,7 +470,7 @@
 
 .run-check-item-opaque {
   font-style: italic;
-  color: var(--text-tertiary);
+  color: var(--text-slate);
 }
 
 .run-check-clean {
