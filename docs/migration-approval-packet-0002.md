@@ -439,17 +439,25 @@ The job ran. What was observed:
 | engine | service container image `postgres:18`; the job prints the server's own answer: `PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on x86_64-pc-linux-gnu` |
 | checkout | GitHub checks out a merge commit, not the branch head: the log reads `HEAD is now at b9b9c78 Merge 758360cc… into b7792c1f…`. `758360c` is a descendant of `b7792c1` (`git merge-base --is-ancestor`), so that tree and the branch head's tree coincide — but the job did not literally check out `758360c`, and the distinction is recorded rather than glossed. |
 
-Almost every line below is a **printed assertion in that job's log** rather than an inference from
-the workflow file — and the six exceptions are marked `[silent]`, because a claim that everything
-was printed is exactly the kind of thing a reader cannot check without re-reading 1,400 lines. A
-`[silent]` item is asserted by the job rather than printed — either by the shell
-(`set -euo pipefail` plus a `[ … ] || exit 1`) or by a Python `assert` inside an inline
-`python - <<PY` step — so the job's green conclusion is the evidence and the value itself
-never reaches the log. **The Python case is called out because an earlier revision of this
-sentence said only "asserted by the shell", which let 53 unprinted `assert` statements fall
-outside the count.** Item 2 is the one that matters most: its two printed lines are
-narrations *after* unprinted Python asserts, and it carries this section's strongest claim
-— "this is the hosted deployment's exact state today" — so it is marked too.
+Most of what follows is a **printed assertion in that job's log** rather than an inference from
+the workflow file. Where it is not, the item carries `[silent]` — because a blanket claim that
+everything was printed is exactly what a reader cannot check without re-reading 1,400 lines.
+
+**THE RULE, written down rather than left as a tally.** An item is marked `[silent]` when the
+claim *as written here* has no printed line witnessing it, so the evidence is the job's green
+conclusion instead. The assertion may be the shell's (`set -euo pipefail` plus
+`[ … ] || exit 1`) or a Python `assert` inside an inline `python - <<PY` step — **both count**,
+and that is stated because an earlier revision said only "asserted by the shell", which let 53
+unprinted `assert` statements fall outside the definition. Where an item's *primary* claim is
+printed and only a subsidiary re-count is not, the marking names the sub-claim rather than the
+item.
+
+This is deliberately a rule and not a number. Two successive revisions of this paragraph said
+"three exceptions" and then "four", and then "five", and each was wrong by one — a reviewer
+found a further unmarked item each time, and a sixth (item 2, which carries this section's
+strongest claim, *"this is the hosted deployment's exact state today"*) only after the count had
+been corrected twice. A count invites exactly that error; the rule above can be applied by the
+reader to any item, including ones added later.
 
 1. **Plan order.** `pending: 0001_experiments, 0002_runs` — in FK-dependency order, asserted as a
    string equality rather than a substring.
@@ -490,9 +498,11 @@ narrations *after* unprinted Python asserts, and it carries this section's stron
    `isaac_runs_document_identity` × 4 (a document naming a different run; naming a different
    experiment; an `experiment_id` naming another experiment; an empty `id`), the `generation`
    NOT NULL, and `isaac_runs_experiment_fk` again for **deleting a parent that still has runs** —
-   after which the child row is re-counted and found to have survived (that re-count is
-   **`[silent]`**; the twelve refusal lines themselves are printed).
-9. **The two admissions the relaxed CHECK exists for.** A second run at the same ordinal and a
+   after which the child row is re-counted and found to have survived. The twelve refusal lines
+   are printed; **the surviving-child re-count is the `[silent]` sub-claim**.
+9. **The two admissions the relaxed CHECK exists for.** (Both `admitted as designed` lines are
+   printed and each insert prints its own `INSERT 0 1`; **the closing re-count is a `[silent]`
+   sub-claim**, the same shape as item 8.) A second run at the same ordinal and a
    document with no `id` column are admitted; so is a document whose `experiment_id` is the empty
    string — the legacy shape `Run.to_state()` actually produces, built in CI *from `to_state()`
    itself* rather than from a hand-written approximation. §2's `coalesce(nullif(…))` claim is
