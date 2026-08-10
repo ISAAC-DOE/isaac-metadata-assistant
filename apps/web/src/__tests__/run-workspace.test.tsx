@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { act, render, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, configure, render, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -31,6 +31,36 @@ import {
   VERSION_FIELDS,
   type RouteEntry,
 } from '../test/apiFixtures';
+
+/*
+ * WHY THIS FILE RAISES THE ASYNC TIMEOUT, measured rather than guessed.
+ *
+ * `Add Run > creates a run through POST /runs …` failed once in CI with
+ * "Unable to find role=button and name /Add Run/" while passing locally on the same
+ * commit — GitHub Actions run 31418749059, job 93554059934. The numbers say what it
+ * was: the file took **24,932 ms** on that runner against **7,514 ms** locally, and
+ * `findByRole`'s default budget is testing-library's **1,000 ms**. A six-endpoint
+ * record bundle resolving inside one second is an assumption about a shared CI host,
+ * not an assertion about the product.
+ *
+ * 5,000 ms is a CEILING, not a delay: every `find*`/`waitFor` here still resolves as
+ * soon as the DOM is ready, and the whole file runs in ~7.5 s locally with this set.
+ * It only changes how long a genuinely-slow runner is given before the failure is
+ * reported as a missing button.
+ *
+ * SCOPED TO THIS FILE ON PURPOSE. `src/test/setup.ts` is in the served-content
+ * manifest, so a global change there drifts the committed snapshot and serialises
+ * merges (CLAUDE.md §17); this file is not in the manifest. If a second file shows
+ * the same flake, that is the moment to weigh one global change against two local
+ * ones — not before.
+ *
+ * NOT A MASK FOR A REAL WAIT. The three load-bearing assertions in this file are
+ * about what the component CLAIMS (never a false `Saved`, a 412 becomes `Conflict`,
+ * two runs stay isolated), and each is pinned by fake timers advanced explicitly, not
+ * by a wall-clock race. Raising a find timeout cannot make any of them pass wrongly:
+ * a value that never arrives still never arrives.
+ */
+configure({ asyncUtilTimeout: 5_000 });
 
 const ID = 'demo';
 const BASE = `/api/experiments/${ID}`;
