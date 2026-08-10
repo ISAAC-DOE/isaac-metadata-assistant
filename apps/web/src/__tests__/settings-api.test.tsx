@@ -1063,8 +1063,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 40 operations, 66 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(40);
+  it('describes the contract it claims to: 45 operations, 79 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(45);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1326,8 +1326,38 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // Raw sum 31,368 + 998 + 2x391 = 33,148; separators 66 + 3 = 69; 33,148 - 138 =
     // 33,010. Whole array re-measured independently: 40 operations, 40 unique, raw
     // sum 33,148, 69 separators.
-    expect(total).toBe(33010);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(69);
+    //
+    // 33,010 -> 36,699, 40 -> 45 operations and 69 -> 79 paragraphs (the Run HTTP
+    // API). FIVE operations were ADDED, none was edited: list, add, read, edit and
+    // check one run. The Run domain model already existed in `workspace` — one run
+    // exports one official ISAAC record — and nothing in it was reachable over
+    // HTTP; these five expose it.
+    //
+    // ONE OF THE FIVE WAS REWORDED BECAUSE THIS SUITE CAUGHT IT, and that is worth
+    // recording, because the `hides ZERO characters` test below is the only thing
+    // that could have. `POST .../runs` shipped a 483-character, caveat-bearing
+    // remainder ("no scientific value is copied into it and none is invented",
+    // "there is no limit on how many runs") that matched NOT ONE
+    // `BOUNDARY_CAVEAT_MARKERS` entry, so length alone collapsed it behind the
+    // disclosure — exactly the failure mode that list's own comment predicts for a
+    // boundary paragraph written in new words. The description was corrected to say
+    // what it means in the vocabulary the rule recognises ("record-level values are
+    // never copied down into it"), rather than the marker list being widened to
+    // admit prose nobody had checked.
+    //
+    // A second pass on the same slice moved it 36,699 -> 36,846 with the operation
+    // and paragraph counts UNCHANGED: `POST .../runs/{run_id}/check` gained one
+    // sentence, extending an existing paragraph rather than adding one, after the
+    // frontend workstream reported that the `blockers[]` element shape was
+    // unspecified and it had had to guess. Every element now carries a non-empty
+    // `message`, derived from what the blocking question already records, and the
+    // contract says so.
+    //
+    // Cross-checked in Python from the file rather than transcribed from the
+    // assertion that reported it: 45 operations, 45 unique, raw sum 37,004, 79
+    // separators, 37,004 - 158 = 36,846.
+    expect(total).toBe(36846);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(79);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

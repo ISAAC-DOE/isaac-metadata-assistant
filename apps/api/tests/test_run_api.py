@@ -1,0 +1,1193 @@
+"""The Run HTTP API — exposing the Run domain model, not rebuilding it.
+
+``workspace`` already carried the whole model: :class:`~isaac_api.workspace.Run`,
+its per-run ``version_token``, ``Override``/``Resolution``, ``resolve_inherited``,
+``field_level`` and ``Experiment.resolved_run_draft``. Nothing in it was reachable
+over HTTP. These five operations expose it, and the tests below are addressed at
+what exposing it can get WRONG rather than at the model, which
+``test_run_domain_model.py`` already pins.
+
+The seven invariants of the frozen slice contract, each with the test that holds it:
+
+1. **Two runs of one experiment are isolated** — writing run 1 changes nothing about
+   run 2's fields, ``rev`` or ``version``.
+   (``test_writing_one_run_leaves_its_sibling_byte_identical``)
+2. **A stale run ``If-Match`` is refused 412 and the stored value is unchanged.**
+   (``test_a_stale_run_if_match_is_refused_and_the_stored_value_does_not_move``)
+3. **A byte-stable PATCH does not bump ``rev``.** ``save_versioned`` already has that
+   property; what could break it is THIS layer stamping a fresh timestamp into an
+   evidence entry on every write, so the no-op is pinned end to end.
+   (``test_resubmitting_the_same_value_does_not_advance_the_run``)
+4. **Runs survive a reload from persisted state.**
+   (``test_a_created_run_survives_a_reload_from_persisted_state``)
+5. **Check Run writes nothing** — every version, the experiment's and every run's, is
+   byte-identical across the call.
+   (``test_check_run_moves_no_version_at_all``)
+6. **``record_id`` is not advanced by any route here.**
+   (``test_no_operation_in_this_api_mints_a_record_id``)
+7. **Nothing under ``src/isaac_records/`` or ``schema/`` is modified.**
+   (``test_the_truth_path_is_untouched_by_this_slice``)
+
+Three of these were MUTATION-CHECKED: the production code was broken in the specific
+way the test claims to catch, the test was confirmed RED, and the break was reverted.
+The mutations are recorded on the tests themselves.
+
+Every fixture is built from the committed synthetic seed drafts. Nothing here reads
+real data and nothing here connects to a database.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import subprocess
+
+import pytest
+
+import isaac_api.routes as routes
+import isaac_api.workspace as ws
+from isaac_records.models import field_value, user_confirmation
+
+from conftest import client_ws, tutorial_client
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_UI_API_KEY", raising=False)
+    from isaac_api.app import create_app
+
+    return tutorial_client(create_app())
+
+
+# --- fixtures -----------------------------------------------------------------
+#
+# The split of the committed export-ready seed into its experiment-level and
+# run-level halves uses the APPLICATION's own classifiers, exactly as
+# `test_export_fan_out.py` does — a hand-written list here would be a second
+# definition of the split and could pass while the product's composition was wrong.
+
+
+def _split_full_draft() -> tuple[dict, dict]:
+    full = ws._full_draft()
+    experiment: dict = {"meta": copy.deepcopy(full["meta"]), "fields": {}, "pending": []}
+    run: dict = {"fields": {}, "pending": []}
+
+    for path, envelope in (full.get("fields") or {}).items():
+        level = ws.field_level(path)
+        if level == ws.LEVEL_EXPERIMENT:
+            experiment["fields"][path] = copy.deepcopy(envelope)
+        elif level == ws.LEVEL_RUN:
+            run["fields"][path] = copy.deepcopy(envelope)
+
+    for key, value in full.items():
+        if key in ("fields", "meta", "pending", "implicit", "block_evidence"):
+            continue
+        level = ws.block_level(key)
+        if level == ws.LEVEL_EXPERIMENT:
+            experiment[key] = copy.deepcopy(value)
+        elif level == ws.LEVEL_RUN:
+            run[key] = copy.deepcopy(value)
+
+    experiment["implicit"] = copy.deepcopy(full.get("implicit") or [])
+    block_evidence = full.get("block_evidence") or {}
+    experiment["block_evidence"] = {
+        k: copy.deepcopy(v)
+        for k, v in block_evidence.items()
+        if k.startswith("attribution:")
+    }
+    run["block_evidence"] = {
+        k: copy.deepcopy(v)
+        for k, v in block_evidence.items()
+        if not k.startswith("attribution:")
+    }
+    return experiment, run
+
+
+@pytest.fixture()
+def experiment_id(client):
+    """An ordinary experiment with NO runs, seeded from the export-ready draft.
+
+    Record-level content only: the runs this API creates start empty, and the
+    inherited half is what makes ``RunView.inherited`` non-trivial.
+    """
+    experiment_draft, _ = _split_full_draft()
+    store = client_ws(client)
+    exp = store.create_experiment(
+        "Run API fixture", {"kind": "synthetic"}, experiment_draft
+    )
+    return exp.id
+
+
+def _experiment_etag(client, experiment_id: str) -> str:
+    response = client.get(f"/api/experiments/{experiment_id}")
+    assert response.status_code == 200, response.text
+    return response.headers["ETag"]
+
+
+def _create_run(client, experiment_id: str, label: str | None = None):
+    body = {} if label is None else {"label": label}
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json=body,
+        headers={"If-Match": _experiment_etag(client, experiment_id)},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["run"]
+
+
+def _run_etag(client, experiment_id: str, run_id: str) -> str:
+    response = client.get(f"/api/experiments/{experiment_id}/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    return response.headers["ETag"]
+
+
+def _patch(client, experiment_id: str, run_id: str, body: dict, *, if_match=...):
+    headers = {}
+    tag = _run_etag(client, experiment_id, run_id) if if_match is ... else if_match
+    if tag is not None:
+        headers["If-Match"] = tag
+    return client.patch(
+        f"/api/experiments/{experiment_id}/runs/{run_id}", json=body, headers=headers
+    )
+
+
+def _stored_run(client, experiment_id: str, run_id: str):
+    """The run as the STORE holds it — never as the response reported it."""
+    exp = client_ws(client).load_experiment(experiment_id)
+    return exp.get_run(run_id)
+
+
+# --- 1. list / read / not-found -----------------------------------------------
+
+
+def test_listing_runs_of_an_unknown_experiment_is_a_404(client):
+    response = client.get("/api/experiments/NOT-A-RECORD/runs")
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "experiment_not_found"
+
+
+def test_reading_an_unknown_run_is_a_404_that_names_the_run_not_the_experiment(
+    client, experiment_id
+):
+    """The two 404s are deliberately different bodies.
+
+    ``experiment_not_found`` means the workspace has no such record;
+    ``run_not_found`` means the record was read successfully and holds no run under
+    that id. Collapsing them would send a client looking in the wrong place.
+    """
+    response = client.get(f"/api/experiments/{experiment_id}/runs/NOPE")
+    assert response.status_code == 404, response.text
+    body = response.json()
+    assert body["error"] == "run_not_found"
+    assert body["experiment_id"] == experiment_id
+    assert body["id"] == "NOPE"
+
+
+def test_an_experiment_with_no_runs_lists_none_and_carries_its_own_etag(
+    client, experiment_id
+):
+    response = client.get(f"/api/experiments/{experiment_id}/runs")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["runs"] == []
+    exp = client_ws(client).load_experiment(experiment_id)
+    assert body["experiment_version"] == exp.version_token()
+    assert response.headers["ETag"] == exp.etag()
+
+
+# --- 2. create ----------------------------------------------------------------
+
+
+def test_creating_a_run_without_if_match_is_428_and_creates_nothing(
+    client, experiment_id
+):
+    response = client.post(f"/api/experiments/{experiment_id}/runs", json={})
+    assert response.status_code == 428, response.text
+    assert response.json() == {
+        "error": "precondition_required",
+        "experiment_id": experiment_id,
+    }
+    assert client_ws(client).load_experiment(experiment_id).runs == []
+
+
+def test_creating_a_run_with_a_stale_experiment_if_match_is_412_and_creates_nothing(
+    client, experiment_id
+):
+    stale = _experiment_etag(client, experiment_id)
+    _create_run(client, experiment_id, "Run A")  # moves the experiment on
+    before = len(client_ws(client).load_experiment(experiment_id).runs)
+
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json={"label": "Run B"},
+        headers={"If-Match": stale},
+    )
+    assert response.status_code == 412, response.text
+    body = response.json()
+    assert body["error"] == "stale_write"
+    assert body["experiment_id"] == experiment_id
+    exp = client_ws(client).load_experiment(experiment_id)
+    assert body["current_version"] == exp.version_token()
+    assert response.headers["ETag"] == exp.etag()
+    assert len(exp.runs) == before
+
+
+def test_creating_a_run_with_a_malformed_if_match_is_400(client, experiment_id):
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json={},
+        headers={"If-Match": 'W/"weak"'},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error"] == "malformed_if_match"
+    assert client_ws(client).load_experiment(experiment_id).runs == []
+
+
+@pytest.mark.parametrize("label", [None, "", "   "])
+def test_an_omitted_or_blank_label_is_assigned_run_n_by_the_server(
+    client, experiment_id, label
+):
+    """Blank is not a label. It is NEVER stored as one, and none is invented from
+    request content — ``Run N`` comes from ``next_ordinal()``, which the domain
+    model owns."""
+    body = {} if label is None else {"label": label}
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json=body,
+        headers={"If-Match": _experiment_etag(client, experiment_id)},
+    )
+    assert response.status_code == 201, response.text
+    run = response.json()["run"]
+    assert run["label"] == "Run 1"
+    assert run["ordinal"] == 1
+
+
+def test_a_request_with_no_body_at_all_still_creates_a_run(client, experiment_id):
+    """The body is optional, not merely optional-in-prose. A caller with nothing to
+    say sends nothing, and the server names the run rather than refusing."""
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        headers={"If-Match": _experiment_etag(client, experiment_id)},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["run"]["label"] == "Run 1"
+
+
+def test_a_supplied_label_is_kept_verbatim_and_does_not_decide_the_ordinal(
+    client, experiment_id
+):
+    first = _create_run(client, experiment_id, "Run 10")
+    second = _create_run(client, experiment_id, "Run 2")
+    assert [first["label"], second["label"]] == ["Run 10", "Run 2"]
+    # The ORDER KEY is the ordinal, never the label — "Run 10" sorts before "Run 2"
+    # lexically and must not be re-ordered by this API.
+    listed = client.get(f"/api/experiments/{experiment_id}/runs").json()["runs"]
+    assert [r["label"] for r in listed] == ["Run 10", "Run 2"]
+    assert [r["ordinal"] for r in listed] == [1, 2]
+
+
+def test_a_non_string_label_is_refused_rather_than_coerced(client, experiment_id):
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json={"label": 5},
+        headers={"If-Match": _experiment_etag(client, experiment_id)},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_label"
+    assert client_ws(client).load_experiment(experiment_id).runs == []
+
+
+def test_creating_a_run_returns_201_the_new_experiment_etag_and_an_empty_run(
+    client, experiment_id
+):
+    before = _experiment_etag(client, experiment_id)
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json={"label": "Cold"},
+        headers={"If-Match": before},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    exp = client_ws(client).load_experiment(experiment_id)
+    assert response.headers["ETag"] == exp.etag()
+    assert response.headers["ETag"] != before
+    assert body["experiment_version"] == exp.version_token()
+
+    run = body["run"]
+    assert run["experiment_id"] == experiment_id
+    assert run["record_id"] is None
+    # NOTHING SCIENTIFIC IS COPIED IN. A new run carries no field of its own; the
+    # record-level content it will export is resolved on read, not written down.
+    assert run["fields"] == {}
+    assert run["inherited"], "the seeded record-level content should resolve"
+    assert all(
+        entry["state"] == "inherited" for entry in run["inherited"].values()
+    ), run["inherited"]
+
+
+def test_there_is_no_server_side_maximum_run_count(client, experiment_id):
+    for _ in range(12):
+        _create_run(client, experiment_id)
+    listed = client.get(f"/api/experiments/{experiment_id}/runs").json()["runs"]
+    assert [r["ordinal"] for r in listed] == list(range(1, 13))
+
+
+# --- 3. read one --------------------------------------------------------------
+
+
+def test_a_run_read_carries_the_runs_own_etag_not_the_experiments(
+    client, experiment_id
+):
+    """The distinction the whole PATCH contract rests on. If these two were the
+    same string, a client could edit a run with a validator that says nothing about
+    it."""
+    run = _create_run(client, experiment_id)
+    response = client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}")
+    assert response.status_code == 200, response.text
+    exp = client_ws(client).load_experiment(experiment_id)
+    stored = exp.get_run(run["id"])
+    assert response.headers["ETag"] == f'"{stored.version_token()}"'
+    assert response.headers["ETag"] != exp.etag()
+    assert response.json()["run"]["version"] == stored.version_token()
+
+
+def test_the_run_view_reports_inheritance_and_overrides_separately(
+    client, experiment_id
+):
+    """``inherited`` is computed on read and is never merged into ``fields``.
+
+    Contract §2 D2 makes inheritance a read-time resolution; a run that appeared to
+    HOLD the record's values would have copied them, which is the thing the model
+    exists to avoid.
+    """
+    run = _create_run(client, experiment_id)
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    stored = exp.get_run(run["id"])
+    address = ws.field_address("sample.material.name")
+    assert address in exp.resolve_run(stored), "fixture must carry this record-level field"
+
+    exp.set_run_override(
+        stored, address, field_value("Overridden", status="verified", evidence=[])
+    )
+    exp.save_versioned()
+
+    view = client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").json()["run"]
+    entry = view["inherited"][address]
+    assert entry["state"] == "overridden"
+    assert entry["payload"]["value"] == "Overridden"
+    assert entry["inherited_payload"]["value"] != "Overridden"
+    assert entry["displaced_payload"] == entry["inherited_payload"]
+    # The override lives in the override map, NOT in the run's own field map.
+    assert "sample.material.name" not in view["fields"]
+
+
+# --- 4. patch: preconditions and refusals -------------------------------------
+
+
+def test_patching_a_run_without_if_match_is_428(client, experiment_id):
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+        if_match=None,
+    )
+    assert response.status_code == 428, response.text
+    assert response.json() == {
+        "error": "precondition_required",
+        "experiment_id": experiment_id,
+        "run_id": run["id"],
+    }
+    assert _stored_run(client, experiment_id, run["id"]).draft.get("fields") in (None, {})
+
+
+def test_patching_a_run_with_the_experiments_etag_is_stale_not_accepted(
+    client, experiment_id
+):
+    """A real trap, and the reason the run carries its own validator at all: the
+    record's `ETag` is a perfectly well-formed strong validator that says nothing
+    about this run."""
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+        if_match=_experiment_etag(client, experiment_id),
+    )
+    assert response.status_code == 412, response.text
+    assert response.json()["run_id"] == run["id"]
+
+
+def test_patching_a_run_with_a_malformed_if_match_is_400_naming_both_ids(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+        if_match='W/"weak"',
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error"] == "malformed_if_match"
+    assert body["experiment_id"] == experiment_id
+    assert body["run_id"] == run["id"]
+
+
+def test_patching_a_run_requires_confirmed_by_user(client, experiment_id):
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"fields": {"context.temperature_K": 300.0}},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "confirmation_required"
+    assert _stored_run(client, experiment_id, run["id"]).draft.get("fields") in (None, {})
+
+
+def test_patching_an_unknown_run_is_a_404(client, experiment_id):
+    response = client.patch(
+        f"/api/experiments/{experiment_id}/runs/NOPE",
+        json={"confirmed_by_user": True, "fields": {"context.temperature_K": 1.0}},
+        headers={"If-Match": "*"},
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "run_not_found"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Unclassified: the contract assigns `system.configuration.*` to NEITHER
+        # level, and guessing which one would be the unevidenced inference the
+        # project's no-guessing rules forbid.
+        "system.configuration.detector_model",
+        "system.configuration.n_scans",
+        "timestamps.created_utc",
+        # Record-level: entered once and inherited. Writing it on a run would put
+        # the same value in two places.
+        "sample.material.name",
+        "sample.sample_id",
+        "system.domain",
+    ],
+)
+def test_a_path_that_is_not_run_level_is_refused_and_not_written(
+    client, experiment_id, path
+):
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {path: "anything"}},
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "unrecognized_field"
+    assert body["key"] == path
+    assert body["keys"] == [path]
+    # NOT silently ignored, and NOT written.
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert path not in (stored.draft.get("fields") or {})
+
+
+def test_one_bad_path_refuses_the_whole_request_including_its_valid_neighbour(
+    client, experiment_id
+):
+    """Classification happens BEFORE any write, so a caller is never left holding a
+    partial write it was told had been rejected."""
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {
+            "confirmed_by_user": True,
+            "fields": {
+                "context.temperature_K": 300.0,
+                "system.configuration.n_scans": 4,
+            },
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["keys"] == ["system.configuration.n_scans"]
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.draft.get("fields") in (None, {})
+    assert stored.rev == 1  # created, never edited
+
+
+def test_a_body_naming_no_run_level_field_and_no_label_is_422_not_a_silent_no_op(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    for body in ({"confirmed_by_user": True}, {"confirmed_by_user": True, "fields": {}}):
+        response = _patch(client, experiment_id, run["id"], body)
+        assert response.status_code == 422, response.text
+        assert response.json()["error"] == "unrecognized_field"
+
+
+def test_a_non_object_fields_value_is_refused(client, experiment_id):
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": "context.temperature_K"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "invalid_fields"
+
+
+# --- 5. patch: what it writes --------------------------------------------------
+
+
+def test_an_accepted_write_stores_the_value_with_user_confirmation_evidence(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {
+            "confirmed_by_user": True,
+            "fields": {
+                "context.temperature_K": 300.0,
+                "context.environment": "electrolyte",
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    view = response.json()["run"]
+    assert view["fields"]["context.temperature_K"]["value"] == 300.0
+    assert view["fields"]["context.environment"]["value"] == "electrolyte"
+
+    stored = _stored_run(client, experiment_id, run["id"])
+    envelope = stored.draft["fields"]["context.temperature_K"]
+    assert envelope["status"] == "verified"
+    assert [e["source_type"] for e in envelope["evidence"]] == ["user_confirmation"]
+    assert envelope["evidence"][0]["answer"] == "300.0"
+    assert envelope["evidence"][0]["timestamp"]
+    # The new ETag is the RUN's, and it moved.
+    assert response.headers["ETag"] == f'"{stored.version_token()}"'
+    assert stored.rev == 2  # 1 at creation, 2 after the edit
+
+
+def test_a_null_value_clears_the_field_entirely(client, experiment_id):
+    run = _create_run(client, experiment_id)
+    _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+    )
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": None}},
+    )
+    assert response.status_code == 200, response.text
+    assert "context.temperature_K" not in response.json()["run"]["fields"]
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert "context.temperature_K" not in stored.draft["fields"]
+
+
+def test_a_label_only_patch_renames_the_run_and_writes_no_field(client, experiment_id):
+    run = _create_run(client, experiment_id)
+    response = _patch(
+        client, experiment_id, run["id"], {"confirmed_by_user": True, "label": "Warm"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["run"]["label"] == "Warm"
+    stored = _stored_run(client, experiment_id, run["id"])
+    assert stored.label == "Warm"
+    assert stored.draft.get("fields") in (None, {})
+
+
+def test_an_existing_unit_on_an_envelope_is_carried_not_dropped(client, experiment_id):
+    """A unit is evidence-bearing content the request said nothing about. It is
+    neither dropped nor re-derived — this API never invents a unit, and it must not
+    delete one either."""
+    run = _create_run(client, experiment_id)
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    stored = exp.get_run(run["id"])
+    stored.draft["fields"] = {
+        "context.temperature_K": field_value(
+            77.0,
+            unit="K",
+            status="verified",
+            evidence=[user_confirmation("q", "77.0", "2026-01-01T00:00:00Z")],
+        )
+    }
+    exp.save_versioned()
+
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+    )
+    assert response.status_code == 200, response.text
+    envelope = _stored_run(client, experiment_id, run["id"]).draft["fields"][
+        "context.temperature_K"
+    ]
+    assert envelope["unit"] == "K"
+    assert envelope["value"] == 300.0
+    # The prior evidence is kept alongside the new confirmation, never replaced.
+    assert len(envelope["evidence"]) == 2
+
+
+# --- 6. INVARIANT 3: a byte-stable re-entry does not advance the run -----------
+
+
+def test_resubmitting_the_same_value_does_not_advance_the_run(client, experiment_id):
+    """INVARIANT 3, pinned END TO END rather than at ``save_versioned``.
+
+    ``save_versioned``'s byte-stable no-op is not enough on its own here: the write
+    path stamps a ``user_confirmation`` with a fresh timestamp, so an unconditional
+    append would make an identical re-submission a genuine document change and the
+    no-op would never be reached. ``_apply_run_field`` is idempotent for exactly
+    that reason, and this is the test that says so.
+    """
+    run = _create_run(client, experiment_id)
+    body = {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}}
+    first = _patch(client, experiment_id, run["id"], body)
+    assert first.status_code == 200, first.text
+    after_first = _stored_run(client, experiment_id, run["id"])
+    version = after_first.version_token()
+    evidence = copy.deepcopy(after_first.draft["fields"]["context.temperature_K"])
+
+    second = _patch(client, experiment_id, run["id"], body)
+    assert second.status_code == 200, second.text
+    after_second = _stored_run(client, experiment_id, run["id"])
+    assert after_second.rev == after_first.rev
+    assert after_second.version_token() == version
+    assert after_second.draft["fields"]["context.temperature_K"] == evidence
+    assert second.headers["ETag"] == f'"{version}"'
+
+
+# --- 7. INVARIANT 1: run isolation --------------------------------------------
+
+
+def test_writing_one_run_leaves_its_sibling_byte_identical(client, experiment_id):
+    """INVARIANT 1 — two runs of one experiment are isolated.
+
+    MUTATION-CHECKED. `routes._apply_run_field` was made to write into the FIRST
+    run's field map regardless of which run the request addressed (`fields` replaced
+    by `exp.sorted_runs()[0].draft["fields"]` at the `patch_run` call site). This
+    test went RED on the sibling's `fields` comparison; the other run-API tests
+    stayed green, because every one of them uses a single run. Reverted.
+    """
+    first = _create_run(client, experiment_id, "Cold")
+    second = _create_run(client, experiment_id, "Warm")
+
+    before = _stored_run(client, experiment_id, second["id"])
+    before_fields = copy.deepcopy(before.draft.get("fields") or {})
+    before_rev, before_version = before.rev, before.version_token()
+
+    response = _patch(
+        client,
+        experiment_id,
+        first["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+    )
+    assert response.status_code == 200, response.text
+
+    after = _stored_run(client, experiment_id, second["id"])
+    assert (after.draft.get("fields") or {}) == before_fields
+    assert after.rev == before_rev
+    assert after.version_token() == before_version
+
+    # ...and the run that WAS addressed did move, so the assertion above is not
+    # passing because nothing happened at all.
+    written = _stored_run(client, experiment_id, first["id"])
+    assert written.draft["fields"]["context.temperature_K"]["value"] == 300.0
+    assert written.version_token() != second["version"]
+
+
+def test_two_runs_hold_independent_field_maps(client, experiment_id):
+    first = _create_run(client, experiment_id, "Cold")
+    second = _create_run(client, experiment_id, "Warm")
+    _patch(
+        client,
+        experiment_id,
+        first["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 77.0}},
+    )
+    _patch(
+        client,
+        experiment_id,
+        second["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+    )
+    listed = {
+        r["id"]: r for r in client.get(f"/api/experiments/{experiment_id}/runs").json()["runs"]
+    }
+    assert listed[first["id"]]["fields"]["context.temperature_K"]["value"] == 77.0
+    assert listed[second["id"]]["fields"]["context.temperature_K"]["value"] == 300.0
+
+
+# --- 8. INVARIANT 2: a stale run validator is refused -------------------------
+
+
+def test_a_stale_run_if_match_is_refused_and_the_stored_value_does_not_move(
+    client, experiment_id
+):
+    """INVARIANT 2 — a stale run `If-Match` is 412 and the stored value is unchanged.
+
+    MUTATION-CHECKED. The `_check_if_match(...)` call in `patch_run` was replaced by
+    `precondition = None`, so every validator was accepted. This test went RED on
+    the status code AND, independently, on the stored-value assertion — the second
+    run's write landed at 200 and overwrote 77.0 with 300.0. Reverted.
+
+    The stored value is read back from the STORE, not from the response, and it is
+    asserted to be the value the FIRST write left — a test that only checked the
+    status code would pass against a handler that returned 412 after writing.
+    """
+    run = _create_run(client, experiment_id)
+    stale = _run_etag(client, experiment_id, run["id"])
+
+    first = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 77.0}},
+        if_match=stale,
+    )
+    assert first.status_code == 200, first.text
+    fresh = _stored_run(client, experiment_id, run["id"])
+    assert fresh.version_token() != stale.strip('"')
+
+    response = _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+        if_match=stale,
+    )
+    assert response.status_code == 412, response.text
+    body = response.json()
+    assert body == {
+        "error": "stale_write",
+        "experiment_id": experiment_id,
+        "run_id": run["id"],
+        "expected_rev": 1,
+        "current_rev": fresh.rev,
+        "expected_version": stale.strip('"'),
+        "current_version": fresh.version_token(),
+    }
+    assert response.headers["ETag"] == f'"{fresh.version_token()}"'
+
+    after = _stored_run(client, experiment_id, run["id"])
+    assert after.draft["fields"]["context.temperature_K"]["value"] == 77.0
+    assert after.rev == fresh.rev
+    assert after.version_token() == fresh.version_token()
+
+
+# --- 9. INVARIANT 4: durability across a reload -------------------------------
+
+
+def test_a_created_run_survives_a_reload_from_persisted_state(client, experiment_id):
+    """INVARIANT 4 — create, drop the in-memory experiment, reload, same run.
+
+    The reload goes through the persisted state document on disk, not through a
+    cached object: ``load_experiment`` re-reads and re-hydrates every time.
+    """
+    run = _create_run(client, experiment_id, "Cold")
+    _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 77.0}},
+    )
+    live = _stored_run(client, experiment_id, run["id"])
+
+    state = json.loads(
+        client_ws(client).load_experiment(experiment_id).state_path.read_text()
+    )
+    assert [entry["id"] for entry in state["runs"]] == [run["id"]]
+
+    reloaded = _stored_run(client, experiment_id, run["id"])
+    assert reloaded is not live  # genuinely a fresh hydration
+    assert reloaded.id == run["id"]
+    assert reloaded.label == "Cold"
+    assert reloaded.rev == live.rev
+    assert reloaded.draft["fields"]["context.temperature_K"]["value"] == 77.0
+
+    # And over HTTP, which is what a browser would see after a restart.
+    view = client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").json()["run"]
+    assert view["label"] == "Cold"
+    assert view["rev"] == live.rev
+    assert view["fields"]["context.temperature_K"]["value"] == 77.0
+
+
+# --- 10. INVARIANT 5: Check Run writes nothing --------------------------------
+
+
+def _all_versions(client, experiment_id: str) -> dict:
+    exp = client_ws(client).load_experiment(experiment_id)
+    return {
+        "experiment": exp.version_token(),
+        **{run.id: run.version_token() for run in exp.sorted_runs()},
+    }
+
+
+def test_check_run_moves_no_version_at_all(client, experiment_id):
+    """INVARIANT 5 — Check Run writes nothing.
+
+    MUTATION-CHECKED. A single `exp.save_versioned()` was inserted into
+    `post_run_check` immediately before the return. This test went RED on the
+    version comparison. Reverted.
+
+    The state file's bytes are compared as well as the versions, because a write
+    that happened to be byte-stable would leave the versions equal and still be a
+    write this operation promised not to make.
+    """
+    first = _create_run(client, experiment_id, "Cold")
+    second = _create_run(client, experiment_id, "Warm")
+    _patch(
+        client,
+        experiment_id,
+        first["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 77.0}},
+    )
+
+    exp = client_ws(client).load_experiment(experiment_id)
+    state_path = exp.state_path
+    before_versions = _all_versions(client, experiment_id)
+    before_bytes = state_path.read_bytes()
+    before_mtime = state_path.stat().st_mtime_ns
+
+    response = client.post(
+        f"/api/experiments/{experiment_id}/runs/{first['id']}/check"
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["checked_run_version"] == before_versions[first["id"]]
+    # No ETag is minted by a read-only check.
+    assert "ETag" not in response.headers
+
+    assert _all_versions(client, experiment_id) == before_versions
+    assert state_path.read_bytes() == before_bytes
+    assert state_path.stat().st_mtime_ns == before_mtime
+    assert second["id"] in before_versions  # the sibling was in scope of the check
+
+
+def test_check_run_reports_both_deterministic_verdicts_and_no_third_one(
+    client, experiment_id
+):
+    run = _create_run(client, experiment_id)
+    body = client.post(
+        f"/api/experiments/{experiment_id}/runs/{run['id']}/check"
+    ).json()
+    assert set(body) == {"ok", "draft", "official", "blockers", "checked_run_version"}
+    assert set(body["draft"]) == {"ok", "errors", "warnings"}
+    assert body["official"]["run_id"] == run["id"]
+    assert body["official"]["dry_run"] is True
+    assert body["official"]["schema"] == routes.SCHEMA_LABEL
+    assert body["ok"] is (body["draft"]["ok"] and body["official"]["ok"])
+
+
+def test_check_run_agrees_with_the_records_own_validate_operation(
+    client, experiment_id
+):
+    """No second validator exists — this operation must produce the SAME verdict the
+    record-level validate operation already produces for that run."""
+    first = _create_run(client, experiment_id, "Cold")
+    _create_run(client, experiment_id, "Warm")
+
+    record_level = client.post(f"/api/experiments/{experiment_id}/validate").json()
+    per_run = {entry["run_id"]: entry for entry in record_level["runs"]}
+    check = client.post(
+        f"/api/experiments/{experiment_id}/runs/{first['id']}/check"
+    ).json()
+    assert check["official"]["ok"] == per_run[first["id"]]["ok"]
+    assert check["official"]["errors"] == per_run[first["id"]]["errors"]
+    assert check["official"]["dry_run"] == per_run[first["id"]]["dry_run"]
+
+
+def test_checking_an_unknown_run_is_a_404(client, experiment_id):
+    response = client.post(f"/api/experiments/{experiment_id}/runs/NOPE/check")
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "run_not_found"
+
+
+# --- 11. INVARIANT 6: no route here mints a record id -------------------------
+
+
+def test_no_operation_in_this_api_mints_a_record_id(client, experiment_id):
+    """INVARIANT 6 — ``record_id`` is not advanced by any of these five operations.
+
+    Exporting is what mints a record id, and it is deliberately not reachable from
+    here: a check is a verdict, never a commit.
+    """
+    run = _create_run(client, experiment_id)
+    client.get(f"/api/experiments/{experiment_id}/runs")
+    client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}")
+    _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+    )
+    client.post(f"/api/experiments/{experiment_id}/runs/{run['id']}/check")
+
+    exp = client_ws(client).load_experiment(experiment_id)
+    assert exp.record_id is None
+    assert [r.record_id for r in exp.runs] == [None]
+    assert not exp.records_dir.exists() or list(exp.records_dir.iterdir()) == []
+
+
+# --- 11b. the integration contract the frontend is built against --------------
+#
+# Five corrections came back from the frontend workstream after it built against
+# the frozen slice contract. Four of them are assertions about the WIRE SHAPE that
+# no other test in this file was making, and the frontend is already built on them,
+# so they are pinned here rather than left to a review to notice.
+
+
+def _split_raw_draft() -> tuple[dict, dict]:
+    """``(experiment_draft, run_draft)`` from the EXTRACTION-ONLY seed.
+
+    The same split as :func:`_split_full_draft`, except that the extractor's open
+    blocking questions are kept and put on the RUN. That is where they belong: the
+    raw draft's blockers are all asset / series / qc / descriptor questions, and
+    every one of those blocks classifies as run-level (``block_level``).
+    """
+    full = ws._raw_draft()
+    experiment: dict = {"meta": copy.deepcopy(full["meta"]), "fields": {}, "pending": []}
+    run: dict = {"fields": {}, "pending": copy.deepcopy(full.get("pending") or [])}
+
+    for path, envelope in (full.get("fields") or {}).items():
+        level = ws.field_level(path)
+        if level == ws.LEVEL_EXPERIMENT:
+            experiment["fields"][path] = copy.deepcopy(envelope)
+        elif level == ws.LEVEL_RUN:
+            run["fields"][path] = copy.deepcopy(envelope)
+
+    for key, value in full.items():
+        if key in ("fields", "meta", "pending", "implicit", "block_evidence"):
+            continue
+        level = ws.block_level(key)
+        if level == ws.LEVEL_EXPERIMENT:
+            experiment[key] = copy.deepcopy(value)
+        elif level == ws.LEVEL_RUN:
+            run[key] = copy.deepcopy(value)
+    return experiment, run
+
+
+def test_every_inherited_entry_reports_state_and_never_provenance(
+    client, experiment_id
+):
+    """CORRECTION 1 — the wire key is `state`, with THREE values.
+
+    ``Resolution.provenance`` has only two (``inherited``/``overridden``) and is
+    merged, tested domain code that this slice does not touch. The third value is
+    the SERIALIZER's: an address in the resolution key set that the experiment
+    carries nothing at, and that this run does not override, is ``absent`` — which
+    ``provenance`` alone cannot say, because it would report that case as
+    ``inherited`` and a client would render an inherited value that is not there.
+
+    All three are asserted REACHABLE in one response. A test that only checked the
+    two easy ones would pass against a serializer that never emits the third.
+    """
+    store = client_ws(client)
+    exp = store.load_experiment(experiment_id)
+    # An experiment-level address the experiment carries NOTHING at. A persisted
+    # draft can hold a null envelope, and `resolve_inherited` keeps the address in
+    # its key set, so this is the reachable `absent` case rather than a contrived one.
+    exp.draft["fields"]["sample.sample_id"] = None
+    exp.save_versioned()
+
+    run = _create_run(client, experiment_id)
+    exp = store.load_experiment(experiment_id)
+    stored = exp.get_run(run["id"])
+    exp.set_run_override(
+        stored,
+        ws.field_address("sample.material.name"),
+        field_value("Overridden", status="verified", evidence=[]),
+    )
+    exp.save_versioned()
+
+    body = client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").json()
+    inherited = body["run"]["inherited"]
+    states = {entry["state"] for entry in inherited.values()}
+    assert states == {"inherited", "overridden", "absent"}, inherited
+    assert inherited[ws.field_address("sample.sample_id")]["state"] == "absent"
+    assert inherited[ws.field_address("sample.material.name")]["state"] == "overridden"
+
+    # `provenance` is the DOMAIN model's name and must not reach the wire as a KEY:
+    # a client keying on it would silently miss the third state. The assertion is
+    # on the key set of every entry, deliberately NOT on the whole serialized body
+    # — the seed legitimately contains the WORD (`sample.material.provenance` is a
+    # real official path, and one evidence quote uses it), so a substring scan
+    # would fail for a reason that has nothing to do with this contract.
+    for address, entry in inherited.items():
+        assert set(entry) == {
+            "state",
+            "payload",
+            "inherited_payload",
+            "displaced_payload",
+        }, (address, entry)
+
+
+def test_every_blocker_carries_a_non_empty_message(client):
+    """CORRECTION 2 — the `blockers[]` element shape is pinned.
+
+    Exercised against a run that genuinely has open blocking questions (the
+    extraction-only seed), not against an empty list — an empty list satisfies
+    "every element has a message" vacuously, which is exactly the shape of green
+    test this repository has shipped before.
+    """
+    experiment_draft, run_draft = _split_raw_draft()
+    store = client_ws(client)
+    exp = store.create_experiment(
+        "Blocked run fixture", {"kind": "synthetic"}, experiment_draft
+    )
+    exp.add_run(label="Cold", draft=run_draft)
+    exp.save_versioned()
+    run_id = store.load_experiment(exp.id).runs[0].id
+
+    body = client.post(f"/api/experiments/{exp.id}/runs/{run_id}/check").json()
+    assert body["ok"] is False, "the fixture must actually be blocked"
+    assert body["blockers"], "the fixture must actually carry blocking questions"
+    for blocker in body["blockers"]:
+        assert isinstance(blocker.get("message"), str), blocker
+        assert blocker["message"].strip(), blocker
+    # Derived, never composed: each message is text the blocker itself records.
+    for blocker in body["blockers"]:
+        assert blocker["message"] in (
+            blocker.get("question"),
+            blocker.get("about"),
+            blocker.get("kind"),
+        ), blocker
+
+
+def test_the_etag_header_and_the_body_version_never_disagree(client, experiment_id):
+    """CORRECTION 3 — the header and the body report the SAME revision.
+
+    The frontend takes its `If-Match` from the BODY, so a header that had moved on
+    while the body had not would hand it a validator that is already stale. Note
+    the one difference that is not a disagreement: an `ETag` is a QUOTED validator
+    (RFC 9110) and the body carries the bare revision, so the header is the body's
+    value in double quotes — and `_check_if_match` accepts only the quoted form.
+    Both are asserted, including that the body's value, quoted, is ACCEPTED.
+    """
+    created = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json={"label": "Cold"},
+        headers={"If-Match": _experiment_etag(client, experiment_id)},
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert created.headers["ETag"] == f'"{body["experiment_version"]}"'
+    run_id = body["run"]["id"]
+
+    # The experiment version the create returned, quoted, is what the NEXT create
+    # must be able to send — the other body-sourced validator. Done here, before
+    # anything else moves the record on.
+    second = client.post(
+        f"/api/experiments/{experiment_id}/runs",
+        json={"label": "Warm"},
+        headers={"If-Match": f'"{body["experiment_version"]}"'},
+    )
+    assert second.status_code == 201, second.text
+    assert second.headers["ETag"] == f'"{second.json()["experiment_version"]}"'
+
+    read = client.get(f"/api/experiments/{experiment_id}/runs/{run_id}")
+    assert read.headers["ETag"] == f'"{read.json()["run"]["version"]}"'
+
+    # The body's own value, quoted, is what a PATCH must be able to send.
+    patched = client.patch(
+        f"/api/experiments/{experiment_id}/runs/{run_id}",
+        json={"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+        headers={"If-Match": f'"{read.json()["run"]["version"]}"'},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.headers["ETag"] == f'"{patched.json()["run"]["version"]}"'
+
+
+def test_reading_one_run_returns_only_the_run(client, experiment_id):
+    """CORRECTION 4 — `{"run": RunView}` and nothing else.
+
+    The frontend's conflict-refresh depends on that shape; adding
+    `experiment_version` here would give it a second validator to choose between
+    at the exact moment it is recovering from having chosen wrong.
+    """
+    run = _create_run(client, experiment_id)
+    body = client.get(f"/api/experiments/{experiment_id}/runs/{run['id']}").json()
+    assert set(body) == {"run"}
+
+
+# --- 12. INVARIANT 7 + tutorial isolation -------------------------------------
+
+
+def test_the_truth_path_is_untouched_by_this_slice():
+    """INVARIANT 7 — nothing under ``src/isaac_records/`` or ``schema/`` is modified.
+
+    Asked of git rather than asserted in prose: the working tree is compared with
+    the branch point, so an edit made anywhere in this slice would be reported here
+    whatever file it hid in.
+    """
+    root = ws.REPO_ROOT
+    merge_base = subprocess.run(
+        ["git", "merge-base", "HEAD", "origin/main"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    base = merge_base.stdout.strip() if merge_base.returncode == 0 else "HEAD"
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", base, "--", "src/isaac_records", "schema"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert changed == [], f"the truth path was modified: {changed}"
+
+
+def test_the_run_api_does_not_weaken_tutorial_isolation(client, experiment_id):
+    """A worked-example session's runs stay unpersistable, exactly as before.
+
+    This API adds no storage path of its own — a run lives inside its experiment's
+    state document — so the guard that refuses to write a session record to the
+    database is the guard that refuses its runs. That is asserted here rather than
+    assumed, because it is the invariant a new write path is most likely to break
+    silently.
+    """
+    from isaac_api.experiment_repository import NotPersistable, PostgresOrdinaryStore
+
+    run = _create_run(client, experiment_id)
+    _patch(
+        client,
+        experiment_id,
+        run["id"],
+        {"confirmed_by_user": True, "fields": {"context.temperature_K": 300.0}},
+    )
+    exp = client_ws(client).load_experiment(experiment_id)
+    assert exp.session_id == client.tutorial_session_id
+    assert exp.runs, "the fixture must actually hold a run"
+    with pytest.raises(NotPersistable):
+        PostgresOrdinaryStore.refuse_if_not_persistable(exp)
+
+    # The same guard still refuses a canonical example id in the ordinary scope.
+    ordinary = ws.Experiment(
+        session_id=None,
+        id=next(iter(ws.CANONICAL_IDS)),
+        title="t",
+        created_utc="2026-01-01T00:00:00Z",
+        source={},
+        draft={},
+    )
+    with pytest.raises(NotPersistable):
+        PostgresOrdinaryStore.refuse_if_not_persistable(ordinary)
