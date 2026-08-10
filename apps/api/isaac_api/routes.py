@@ -30,6 +30,7 @@ from isaac_records.complete import (
     apply_corrections,
     is_descriptor_shaped,
     is_series_shaped,
+    is_sha256_shaped,
 )
 from isaac_records.draft_validator import validate_draft
 from isaac_records.export import export_draft
@@ -2035,24 +2036,55 @@ def _correction_is_storable(key: str, value) -> bool:
     if key == "edge":
         return isinstance(value, (str, int, float))
     # Anything else in the shaped body is an asset sha256, keyed by URI.
-    return isinstance(value, str)
+    #
+    # `isinstance(value, str)` WAS NOT ENOUGH, and a reviewer measured what it let
+    # through: `"Z" * 64`, `"abc"`, 63 hex chars and 65 hex chars each passed this
+    # guard, were then declined by `apply_corrections` as malformed, and this route
+    # answered **200 having changed nothing** — the outcome the block below calls
+    # forbidden, in the one key where malformation is a question of FORMAT rather
+    # than of type. `is_sha256_shaped` is imported rather than restated for the same
+    # reason the other two predicates are.
+    return is_sha256_shaped(value)
 
 
-def _answers_to_apply_shape(answers_by_id: dict, draft: dict, timestamp: str) -> dict:
+def _answers_to_apply_shape(
+    answers_by_id: dict, draft: dict, timestamp: str, *, edit_only: bool = False
+) -> dict:
     """Translate UI answers (keyed by blocker id/about) into ``apply_answers`` input.
 
     Only values literally present are forwarded; blank/missing answers are dropped, so the
     core never invents. Asset blockers key on their URI; ``series``/``descriptor``/``edge``
     key on their kind name.
+
+    ``edit_only`` NARROWS THE ASSET KEY SET TO ASSETS THAT ACTUALLY EXIST, and it exists
+    because the union below was measured answering **200 about a write that could not
+    happen** — the same defect class the sha256 guard above was added to close, on the same
+    route and the same key. Measured on the correction path with a PERFECTLY WELL-FORMED
+    hash for a still-PENDING asset uri: ``200``, ``rev`` unmoved, nothing stored, and
+    ``invalidation.reason`` reading "the submitted value was identical; nothing was
+    invalidated" — which names a cause that is false twice over, because the value was
+    neither identical nor ever stored.
+
+    Why it cannot be stored: :func:`apply_corrections` iterates ``draft["assets"]``, and a
+    pending asset is by construction not in it — :func:`apply_answers` is what CREATES the
+    asset entry from the blocker. So on the correction path a pending uri names no editable
+    field at all, and this route's existing "no recognised editable field" refusal is the
+    honest answer. It is deliberately NOT the ``invalid_field_value`` refusal: the VALUE
+    was fine, and telling the reader "the field still holds the value it held before" would
+    be a third false claim about a field that holds no value yet.
+
+    ``POST /answers`` keeps the union unchanged — there a pending uri is precisely the key
+    the route is supposed to accept, and that direction is pinned by test.
     """
     pending = draft.get("pending") or []
-    # An asset key is recognized if it names a still-pending asset blocker (the
-    # /answers fill path) OR an asset already present in the draft (the /edit
-    # correction path, where 0 pending means no blocker carries the uri). The union
-    # leaves /answers behaviour unchanged — a pending asset is never yet in
-    # draft["assets"], so its uri is still recognized exactly as before.
-    asset_uris = {e.get("uri") for e in pending if e.get("kind") == "asset"}
-    asset_uris |= {a.get("uri") for a in (draft.get("assets") or []) if isinstance(a, dict)}
+    # An asset already present in the draft: the only thing a CORRECTION can overwrite.
+    stored_uris = {a.get("uri") for a in (draft.get("assets") or []) if isinstance(a, dict)}
+    if edit_only:
+        asset_uris = stored_uris
+    else:
+        # The /answers fill path: a still-pending asset blocker's uri, plus the stored
+        # ones (a re-answer of an already-materialised asset).
+        asset_uris = {e.get("uri") for e in pending if e.get("kind") == "asset"} | stored_uris
     out: dict = {"timestamp": timestamp, "asset_sha256": {}}
     for key, value in (answers_by_id or {}).items():
         if value in (None, ""):
@@ -2157,7 +2189,11 @@ def post_answers(
             exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
         # Derived downstream invalidation (P28.2) at the post-mutation revision. A
         # byte-stable no-op reports changed=False with empty deltas and no rev bump.
-        changed_fields = submitted_fields if changed else []
+        # The fields reported are the ones the apply-shape CARRIED, not every key the
+        # body happened to contain — see `_fields_the_shape_carries`.
+        changed_fields = (
+            _fields_the_shape_carries(apply_shape, submitted_fields) if changed else []
+        )
         invalidation = dependencies.build_invalidation(
             changed=changed,
             changed_fields=changed_fields,
@@ -2192,6 +2228,38 @@ def _has_correction_target(apply_shape: dict) -> bool:
     )
 
 
+def _fields_the_shape_carries(apply_shape: dict, submitted_fields: list[str]) -> list[str]:
+    """The submitted keys the apply-shape ACTUALLY carries, in submission order.
+
+    NOT ``submitted_fields``, which is every non-blank REQUEST-BODY key regardless of
+    whether the core ever saw it. Measured on the old code, and worse than silence:
+
+      ``{<a stored asset uri>: <a valid sha>, "totally_made_up_field": "invented"}``
+      answered ``200`` with ``changed_fields`` naming BOTH keys and ``reason`` reading
+      "Updated 2 field(s); no downstream steps reopened", while
+      ``totally_made_up_field`` was dropped by :func:`_answers_to_apply_shape` and appears
+      nowhere in the stored draft.
+
+      ``qc`` did the same and is the more insidious one, because it is a REAL field:
+      :func:`~isaac_records.complete.apply_corrections` handles it, but the apply-shape
+      does not produce it, so a ``qc`` key was reported as an updated field while
+      ``draft["qc"]["status"]`` never moved.
+
+    A field the record never received must not be reported as updated. The count in
+    ``reason`` is derived from this list too, so both the list and the sentence become
+    claims about what was actually forwarded.
+
+    This is narrower than "what was written". A key the shape carries can still be
+    declined further down (an ``edge`` correction on a draft with no implicit ``edge``
+    entry writes nothing), and this function does not detect that — it removes the claims
+    that are provably false, and does not pretend to per-field write confirmation the
+    core does not report.
+    """
+    carried = set(apply_shape.get("asset_sha256") or {})
+    carried |= {k for k in apply_shape if k not in ("timestamp", "asset_sha256")}
+    return [k for k in submitted_fields if k in carried]
+
+
 @router.post(
     "/experiments/{experiment_id}/edit",
     tags=[TAG_DRAFTS],
@@ -2202,9 +2270,13 @@ def _has_correction_target(apply_shape: dict) -> bool:
         "bundle as the answers operation.\n\n"
         "Requires `confirmed_by_user: true` and the record's current `ETag` in "
         "`If-Match`. A body that names no recognised editable field is rejected "
-        "with `422` rather than silently doing nothing, and a value that fails the "
-        "core's own checks leaves the stored value unchanged. It never reopens or "
-        "creates a blocking question."
+        "with `422` rather than silently doing nothing, and so is a recognised "
+        "field carrying a value the record cannot store — the refusal happens "
+        "before any mutation, so the stored value is unchanged. It never reopens "
+        "or creates a blocking question.\n\n"
+        "Only a field that is already answered can be corrected here. An asset "
+        "whose hash is still an open question is answered through the answers "
+        "operation, not this one."
     ),
     response_description=(
         "The refreshed blocking questions, status, revision metadata, workflow, "
@@ -2214,6 +2286,39 @@ def _has_correction_target(apply_shape: dict) -> bool:
         **_R_UNAUTHORIZED,
         **_R_EXPERIMENT_NOT_FOUND,
         **_R_PRECONDITION,
+        # DECLARED, because the generated 422 said only "Validation Error" while this
+        # operation refuses three DOMAIN conditions under that status, each with a body
+        # the framework's schema does not describe. The description carries them.
+        #
+        # THE SCHEMA REF IS RE-DECLARED ON PURPOSE, and dropping it is a trap this
+        # repository already documents: FastAPI skips generating its own 422 entry the
+        # moment a route declares one, which silently strips the `HTTPValidationError`
+        # content ref that `test_operations_with_parameters_keep_the_validation_error_schema`
+        # pins for every operation with a parameter or a body. That framework shape is
+        # genuinely reachable here (a request body that is not a JSON object), so it is
+        # kept rather than replaced — and no JSON `example` of the domain body is attached
+        # beside it, because an example that does not validate against its own declared
+        # schema would be a second wrong answer rather than a fix.
+        422: {
+            "description": (
+                "Either the request body failed framework validation (the "
+                "`HTTPValidationError` shape below), or the correction was refused by "
+                "this operation before anything was written, as "
+                "`{error, key, keys, message}`. `error` is then "
+                "`confirmation_required` (`confirmed_by_user` was not `true`), "
+                "`unrecognized_field` (no already-answered editable field was named — "
+                "including an asset whose hash is still an open question, which belongs "
+                "to the answers operation), or `invalid_field_value` (a recognised field "
+                "carried a value the record cannot store; `key` and `keys` name the "
+                "offending field(s), and `message` deliberately states no cause). "
+                "Nothing is written on any of them."
+            ),
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                }
+            },
+        },
     },
 )
 def post_edit(
@@ -2267,7 +2372,13 @@ def post_edit(
             k for k, v in (body.get("answers") or {}).items() if v not in (None, "")
         ]
         timestamp = _now_iso()
-        apply_shape = _answers_to_apply_shape(body.get("answers") or {}, exp.draft, timestamp)
+        # `edit_only`: a CORRECTION can only overwrite an asset that exists. A pending
+        # asset uri is not an editable field here (see `_answers_to_apply_shape`), so it
+        # falls through to the "no recognised editable field" refusal below instead of
+        # being absorbed with a 200 that reports a write which could not happen.
+        apply_shape = _answers_to_apply_shape(
+            body.get("answers") or {}, exp.draft, timestamp, edit_only=True
+        )
         if not _has_correction_target(apply_shape):
             # No recognized field to correct — never invent one.
             return JSONResponse(
@@ -2313,10 +2424,19 @@ def post_edit(
                     "error": "invalid_field_value",
                     "key": wrong_typed[0],
                     "keys": wrong_typed,
+                    # NAMES NO CAUSE, and the two type-specific clauses that used to be
+                    # here were REMOVED rather than extended. They read "`series` must be
+                    # a list of objects and `descriptor` must be an object" — measured
+                    # verbatim on a body whose only offending key was an ASSET URI, and
+                    # likewise for `descriptor_label`. The keys the refusal covers were
+                    # widened without the sentence being touched, so its honesty depended
+                    # on the browser client suppressing the server's own misstatement:
+                    # every curl, OpenAPI reader and Assistant consumer saw the false
+                    # text. `key`/`keys` already say WHICH field was refused; nothing here
+                    # is entitled to say why.
                     "message": (
-                        "These corrections are not the shape the record can store, so "
-                        "nothing was written: `series` must be a list of objects and "
-                        "`descriptor` must be an object. The stored value is unchanged."
+                        "This correction is not a shape the record can store, so nothing "
+                        "was written. The stored value is unchanged."
                     ),
                 },
             )
@@ -2330,7 +2450,11 @@ def post_edit(
             return stale  # another replica won the race; this change was not applied
         if not changed:
             exp.answer_log.pop()  # byte-stable no-op: discard the speculative log append
-        changed_fields = submitted_fields if changed else []
+        # Only the fields the apply-shape carried — a ride-along key the shape dropped is
+        # not an updated field, and the count in `reason` is derived from this list.
+        changed_fields = (
+            _fields_the_shape_carries(apply_shape, submitted_fields) if changed else []
+        )
         invalidation = dependencies.build_invalidation(
             changed=changed,
             changed_fields=changed_fields,

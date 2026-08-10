@@ -31,6 +31,7 @@
  */
 
 import { hasVerdictLanguage } from './assistant';
+import { statusOf } from './mutationErrors';
 
 /** One workflow step as reported by the authoritative P28 workflow context. */
 export type WorkflowStep = {
@@ -414,12 +415,10 @@ export function proposeForField(
   }
 }
 
-function statusOf(err: unknown): number | undefined {
-  if (typeof err === 'object' && err !== null && 'status' in err) {
-    return (err as { status?: number }).status;
-  }
-  return undefined;
-}
+// `statusOf` now lives in `lib/mutationErrors` (imported at the top of this file). It
+// was private here until `AssistantPanel` needed the same reader to describe a non-412
+// failure honestly; it is imported rather than copied, and its behaviour is unchanged —
+// the 412 branch below reads exactly what it read before.
 
 /**
  * Confirm a staged proposal — the ONLY write path.

@@ -152,6 +152,78 @@ describe('S4 · summary-first edit of a confirmed field (P28.3)', () => {
     expect(screen.getByText('Refresh')).toBeInTheDocument();
   });
 
+  /*
+   * THE 422 THAT MEANS "THIS VALUE CANNOT BE STORED", and the reason it gets its own
+   * notice rather than the generic one.
+   *
+   * The generic branch says "could not be applied (422) … try again", which DROPS the
+   * one sentence a scientist needs — that the value they had is still there. Before the
+   * server refused this case, the screen carried that sentence while interpreting a
+   * 200; the refusal must not cost it.
+   *
+   * The three tests below are a set: the reassuring copy appears for
+   * `invalid_field_value` and MUST NOT appear for any other 422, because no other 422
+   * entitles the screen to claim anything about the stored value.
+   */
+  it('a 422 invalid_field_value says the previous value still stands, and names no cause', async () => {
+    stubFetchRoutes({
+      ...completeRoutes(),
+      'POST /api/experiments/demo/edit': {
+        status: 422,
+        body: { error: 'invalid_field_value', key: NOTEBOOK_URI, keys: [NOTEBOOK_URI] },
+      },
+    });
+    const screen = renderAt('/record/demo/complete');
+    await answerNotebook(screen);
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit Asset Hash/ }));
+    fireEvent.change(screen.getByDisplayValue(SHA), { target: { value: 'not-a-hash' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    const note = await screen.findByText(/still holds the value it held before/);
+    expect(note).toBeInTheDocument();
+    expect(note.textContent).toMatch(/nothing was written/i);
+    // NO CAUSE: the response names none, so neither may the screen.
+    expect(note.textContent).not.toMatch(/malformed|invalid|sha|hex|identical/i);
+    // The editor stays open with the typed value, so the correction is retryable.
+    expect(screen.getByDisplayValue('not-a-hash')).toBeInTheDocument();
+  });
+
+  it('a 422 with a DIFFERENT error code gets the generic notice, claiming less', async () => {
+    stubFetchRoutes({
+      ...completeRoutes(),
+      'POST /api/experiments/demo/edit': {
+        status: 422,
+        body: { error: 'unrecognized_field', message: 'No editable field was recognized.' },
+      },
+    });
+    const screen = renderAt('/record/demo/complete');
+    await answerNotebook(screen);
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit Asset Hash/ }));
+    fireEvent.change(screen.getByDisplayValue(SHA), { target: { value: 'whatever' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    expect(await screen.findByText(/could not be applied \(422\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/still holds the value it held before/)).toBeNull();
+  });
+
+  it('a 422 with no body at all still falls back to the generic notice', async () => {
+    stubFetchRoutes({
+      ...completeRoutes(),
+      'POST /api/experiments/demo/edit': { status: 422, body: undefined },
+    });
+    const screen = renderAt('/record/demo/complete');
+    await answerNotebook(screen);
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit Asset Hash/ }));
+    fireEvent.change(screen.getByDisplayValue(SHA), { target: { value: 'whatever' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    expect(await screen.findByText(/could not be applied \(422\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/still holds the value it held before/)).toBeNull();
+  });
+
   it('viewing/editing a confirmed field issues NO backend request (no hidden workflow mutation)', async () => {
     const calls = stubFetchRoutes(completeRoutes());
     const screen = renderAt('/record/demo/complete');
