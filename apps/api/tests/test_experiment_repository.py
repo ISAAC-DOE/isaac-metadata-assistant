@@ -779,6 +779,9 @@ class _SiblingRacesTheSelect(FakeConnection):
         super().__init__(**kw)
         self._sibling = sibling
         self.races = 0
+        #: What the SIBLING restored, so the test can assert the sibling actually
+        #: wrote the file rather than merely having been called.
+        self.sibling_restored: int | None = None
 
     def cursor(self):
         cur = super().cursor()
@@ -789,7 +792,7 @@ class _SiblingRacesTheSelect(FakeConnection):
             rows = inner_fetchall()
             if rows and outer.races == 0:
                 outer.races += 1
-                outer._sibling()
+                outer.sibling_restored = outer._sibling()
             return rows
 
         cur.fetchall = fetchall  # type: ignore[method-assign]
@@ -822,6 +825,18 @@ def test_a_record_a_concurrent_read_restored_is_200_and_not_404(app, tmp_path, m
     monkeypatch.setenv("PGHOST", "db.invalid")
     monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
     monkeypatch.setattr(dbw, "connect_psycopg2", _connector(racing))
+
+    # Record what THIS request's own hydrate returned, so the assertions below can say
+    # the 200 came from the file check and not from a count that happened to be non-zero.
+    hydrate_counts: list[int] = []
+    real_hydrate = ws._hydrate_ordinary_scope
+
+    def spy() -> int:
+        got = real_hydrate()
+        hydrate_counts.append(got)
+        return got
+
+    monkeypatch.setattr(ws, "_hydrate_ordinary_scope", spy)
     client = TestClient(app, raise_server_exceptions=False)
 
     state_path = tmp_path / "ws" / rid / "experiment.json"
@@ -830,7 +845,17 @@ def test_a_record_a_concurrent_read_restored_is_200_and_not_404(app, tmp_path, m
     response = client.get(f"/api/experiments/{rid}")
 
     assert racing.races == 1, "the race never happened, so this test proved nothing"
+    assert racing.sibling_restored == 1, "the SIBLING is the writer; it must have restored the file"
     assert state_path.is_file(), "the sibling's hydrate should have written the file"
+    # THE 200 MUST BE FOR THE RIGHT REASON. A reviewer noted that with one row and the
+    # `exists()` skip this call's own count is NECESSARILY 0, so the test discriminates
+    # today — but a refactor could make it pass because the count came back non-zero
+    # rather than because the file check answered. Asserting the count closes that.
+    assert hydrate_counts == [0], (
+        f"this request's own hydrate must have restored nothing, got {hydrate_counts} — "
+        "that is the whole premise, and a non-zero count would let a count-based guard "
+        "pass for the wrong reason"
+    )
     assert response.status_code == 200, response.text
     # The record it returned is the one asked for, not merely "a 200".
     assert response.json()["id"] == rid
@@ -862,6 +887,41 @@ def test_an_unknown_id_is_404_even_when_hydration_restored_other_records(app, tm
     # guard would have been satisfied and only the file check can have refused.
     assert (tmp_path / "ws" / other / "experiment.json").is_file()
     assert not (tmp_path / "ws" / unknown).exists()
+
+
+def test_a_worked_example_scope_miss_never_hydrates_the_ordinary_root(app, tmp_path, monkeypatch):
+    """THE ONE LINE IN THE FIX THAT NOTHING WAS PINNING, and a reviewer measured it:
+    deleting ``if session_id is not None: return None`` left **2690 backend tests
+    passing**.
+
+    It is not a correctness guard — ``_hydrate_ordinary_scope`` resolves its store with
+    ``session_id=None`` unconditionally, so removing it still returns ``None`` for a
+    session-scope miss. What it guards is a SIDE EFFECT: without it, a miss inside a
+    worked-example session would hydrate the ORDINARY root and spend a ``SELECT`` doing
+    it — one scope's read writing into another's directory. Bounded, wrong, and now
+    asserted rather than assumed.
+    """
+    rid = "01ABCDEFGHJKMNPQRSTVWXYZ03"
+    conn = FakeConnection(rows=[(rid, json.dumps(_stored_state(rid)))])
+
+    monkeypatch.setenv("PGHOST", "db.invalid")
+    monkeypatch.setenv("PGDATABASE", dbw.EXPECTED_DATABASE)
+    monkeypatch.setattr(dbw, "connect_psycopg2", _connector(conn))
+
+    calls: list[str] = []
+    real_hydrate = ws._hydrate_ordinary_scope
+    monkeypatch.setattr(
+        ws, "_hydrate_ordinary_scope", lambda: (calls.append("hydrate"), real_hydrate())[1]
+    )
+
+    assert ws.load_experiment(rid, session_id="sess-does-not-exist") is None
+    assert calls == [], "a session-scope miss must not hydrate the ordinary root"
+    assert not (tmp_path / "ws" / rid).exists(), "nor write into it"
+
+    # And the ordinary scope still does hydrate, so the guard is narrow rather than a
+    # blanket disable.
+    assert ws.load_experiment(rid) is not None
+    assert calls == ["hydrate"]
 
 
 def test_a_durable_row_is_still_404_while_the_database_is_unreachable(app, tmp_path, monkeypatch):
