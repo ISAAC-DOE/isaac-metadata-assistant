@@ -106,11 +106,15 @@ export interface DownCopy {
  * a concept is not an experiment.
  *
  * `$` NARROWED THIS PREDICATE, and is only PART of the second fix. The pattern used
- * to be `/^\/experiments\/[^/]/` — no anchor — so it also matched all EIGHTEEN
- * sub-reads `api.ts` builds under a record (`/draft`, `/pending`, `/answers`,
- * `/edit`, `/runs`, `/runs/{run_id}`, `/runs/{run_id}/check`, `/export`,
- * `/validate`, `/evidence`, `/source-preview`, `/artifacts`, `/assistant/query`,
- * …). A 404 from any of them rendered "this experiment id is not in the
+ * to be `/^\/experiments\/[^/]/` — no anchor — so it also matched EVERY sub-read
+ * `api.ts` builds under a record (`/draft`, `/pending`, `/answers`, `/edit`, `/runs`,
+ * `/runs/{run_id}`, `/runs/{run_id}/check`, `/export`, `/validate`, `/evidence`,
+ * `/source-preview`, `/artifacts`, `/assistant/query`, …). MEASURED, rather than
+ * counted by eye: 19 sub-read path literals → 17 distinct suffixes → 15 distinct
+ * first segments, derived from `api.ts` by `backend-down-state.test.tsx` and asserted
+ * there, so the figure cannot go stale silently. (An earlier revision of this comment
+ * said "all EIGHTEEN sub-reads"; that number matched none of the three measurements
+ * and is withdrawn.) A 404 from any of them rendered "this experiment id is not in the
  * workspace", while the backend DELIBERATELY distinguishes four reasons it can 404
  * under this prefix: `experiment_not_found` (`routes.py::_not_found`),
  * `run_not_found` (`routes.py::_run_not_found`, whose docstring says collapsing
@@ -120,10 +124,12 @@ export interface DownCopy {
  *
  * THE ANCHOR ALONE WOULD NOT HAVE BEEN A CORRECT FIX, which is why `downCopy` reads
  * `ApiError.reason` first and consults this predicate only when no reason was
- * observed. `getEvidenceBundle` races a record read against its sub-reads in one
- * `Promise.all`, so on a genuinely missing experiment the path that reaches the
- * panel is nondeterministic — see the comment in `downCopy`. This predicate answers
- * a question about a PATH; it is not, on its own, evidence about a record.
+ * observed. The record screens read an experiment and its parts CONCURRENTLY —
+ * `api.getRecordBundle` issues seven experiment-scoped reads in one `Promise.all` —
+ * so on a genuinely missing experiment the path that reaches the panel is
+ * nondeterministic. See the comment in `downCopy` for the citation and for a
+ * correction to an earlier revision of it. This predicate answers a question about
+ * a PATH; it is not, on its own, evidence about a record.
  *
  * A query string is deliberately still matched: `?scope=x` on a bare record read
  * does not stop it naming that one record. A `/` after the id does.
@@ -136,17 +142,74 @@ export function isRecordPath(path: string | undefined): boolean {
  * The first path segment BELOW `/experiments/{id}` — the PART that was read — or
  * `undefined` when the path does not read one.
  *
- * Deliberately structural, and deliberately not a lookup table of friendlier
- * names. It reports the segment `api.ts` put in the URL, so it cannot drift out
- * of sync with the eighteen sub-reads (a translation table would have to be
- * amended every time one is added, and would silently mislabel the one that was
- * forgotten). The query string is stripped because `/source-preview?source=…` is
- * the one sub-read that carries one, and the segment — not the parameter — is
- * what names the subject.
+ * STRUCTURAL, and used for the BRANCH DECISION only; the reader never sees this
+ * string when it is one this build recognises (see `SUB_RESOURCE_LABELS`). The
+ * query string is stripped because `/source-preview?source=…` is the one sub-read
+ * that carries one, and the segment — not the parameter — is what names the
+ * subject.
  */
 export function recordSubResource(path: string | undefined): string | undefined {
   if (path === undefined) return undefined;
   return /^\/experiments\/[^/]+\/([^/?#]+)/.exec(path)?.[1];
+}
+
+/**
+ * PRODUCT NAMES for the parts of a record, keyed by the wire segment `api.ts`
+ * puts in the URL.
+ *
+ * WHY THIS EXISTS, and why it is a map rather than the raw segment. Without it
+ * this panel rendered the backend's own path vocabulary into product copy —
+ * "a read of “ingestion”", "a read of “evidence-classification”" — which is the
+ * "backend-sourced jargon on product screens" class `CLAUDE.md` §11 records as
+ * still open. The segment is a wire name; the reader is a scientist.
+ *
+ * WHY A MAP IS SAFE HERE, WHICH IT WOULD NOT BE ON ITS OWN. A hand-maintained
+ * translation table rots silently the moment `api.ts` gains a sub-read: the new
+ * segment gets no entry, and the panel quietly falls back to leaking it. That
+ * objection is answered by a TEST, not by doing without the map —
+ * `backend-down-state.test.tsx` derives the sub-resource suffixes `api.ts`
+ * actually builds by reading `api.ts` itself, and fails if any of them has no
+ * entry here. A new suffix therefore breaks CI loudly instead of leaking quietly.
+ *
+ * The keys are wire segments and are deliberately NOT re-cased or re-spelled;
+ * only the values are copy.
+ */
+export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
+  answers: 'saved answers',
+  artifacts: 'exported artifacts',
+  assistant: 'an assistant answer',
+  audit: 'the evidence audit',
+  draft: 'the draft fields',
+  edit: 'a field edit',
+  evidence: 'the evidence trail',
+  'evidence-classification': 'evidence support',
+  export: 'the export',
+  ingestion: 'a CSV comparison',
+  pending: 'the missing fields',
+  runs: 'the measurement runs',
+  'source-preview': 'a reference source file',
+  validate: 'validation',
+  warnings: 'advisory warnings',
+};
+
+/**
+ * The part that was read, in product words when this build knows the segment and
+ * VERBATIM when it does not.
+ *
+ * THE FALLBACK IS DELIBERATE AND IS THE LESSER OF TWO EVILS. An unrecognised
+ * segment can only arrive from a path this build did not shape, or from a
+ * sub-read added to `api.ts` without an entry above — and in that case naming the
+ * segment we observed is honest but jargon, while inventing a friendly name for a
+ * part we do not recognise would be a fabrication. Honest jargon wins, and the
+ * coverage test above keeps the second case from reaching a user.
+ *
+ * THE QUOTES CARRY THAT DISTINCTION rather than decorating the sentence: a
+ * recognised part is named in the app's own words and reads as prose, while an
+ * unrecognised one is quoted, marking it as the verbatim token this client
+ * observed in the URL and not as a name the product uses.
+ */
+function subResourceLabel(segment: string): string {
+  return SUB_RESOURCE_LABELS[segment] ?? `“${segment}”`;
 }
 
 /**
@@ -182,15 +245,38 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * THE BACKEND'S OWN REASON WINS OVER THE PATH, and the path is only a fallback.
    *
    * WHY, and this is the part a later reader will be tempted to "simplify" back into
-   * a path test. `api.getEvidenceBundle` fetches `getExperiment(id)` and every
-   * `getSourcePreview(id, file)` in ONE `Promise.all`. When the experiment is
-   * genuinely absent, all of those reads 404, and `Promise.all` rejects with
-   * WHICHEVER REJECTED FIRST — a race. A purely path-based rule is therefore unsound
-   * in both directions: keep it broad and a `source_not_allowed` 404 claims the
-   * record is missing (the reachable false claim), narrow it to the exact record path
-   * and a genuinely absent experiment renders generic copy whenever a sub-read's
-   * rejection happens to win the race — nondeterministic copy for one underlying
-   * truth, which is a different way of hiding a real 404.
+   * a path test. The record screens read an experiment and its PARTS CONCURRENTLY.
+   * `api.getRecordBundle` (`api.ts:1136-1147`) issues SEVEN experiment-scoped reads
+   * in ONE `Promise.all` — `GET /experiments/{id}` plus `/draft`, `/pending`,
+   * `/validate`, `/audit`, `/warnings`, `/evidence` — so six of the seven are
+   * sub-resource paths. When the experiment is genuinely absent all seven 404, and
+   * `Promise.all` rejects with WHICHEVER REJECTED FIRST — a race. The same fan-out
+   * shape recurs in `getEvidenceBundle`'s FIRST `Promise.all` (1 exact + 3
+   * sub-resource), in `getExportReadiness`, in the experiment graph bundle, and at
+   * `GuidedCompletion.tsx:46`; `useRecordSession.ts:226` awaits only SUB-resource
+   * reads, so there a path rule could never reach the record claim at all, race or
+   * no race.
+   *
+   * A purely path-based rule is therefore unsound in both directions: keep it broad
+   * and a `source_not_allowed` 404 claims the record is missing (the reachable false
+   * claim), narrow it to the exact record path and a genuinely absent experiment
+   * renders generic copy whenever a sub-read's rejection happens to win the race —
+   * nondeterministic copy for one underlying truth, which is a different way of
+   * hiding a real 404.
+   *
+   * CORRECTION, RECORDED RATHER THAN OVERWRITTEN, because the withdrawn version is
+   * the plausible-sounding one. An earlier revision of this comment grounded the race
+   * on "`getEvidenceBundle` fetches `getExperiment(id)` and every
+   * `getSourcePreview(id, file)` in ONE `Promise.all`". THAT IS FALSE and is
+   * withdrawn. `getEvidenceBundle` is TWO SEQUENTIAL `Promise.all`s
+   * (`api.ts:1172-1180`) and the previews are deliberately fetched second, "so we
+   * know which fixtures are actually referenced": when the experiment is genuinely
+   * absent the FIRST bundle rejects and `getSourcePreview` is never called, so
+   * `source_not_allowed` is reachable only once the record has provably been read.
+   * There is no race between `getExperiment` and `getSourcePreview` in either
+   * direction. `source_not_allowed` remains a real non-experiment 404 reason and the
+   * reachable false claim this branch table removes — only the RACE claim about it
+   * was wrong. The conclusion is unchanged; its evidence is now `getRecordBundle`.
    *
    * A REASON-BASED RULE IS IMMUNE TO THE RACE: `experiment_not_found` says the record
    * is absent no matter which promise lost, and `run_not_found` /
@@ -214,6 +300,19 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * missing record to generic copy — or, with no reason observed, because the path
    * names one record and nothing below it.
    *
+   * THE REASON IS HONOURED ONLY UNDER `/experiments/{id}`, and that constraint is
+   * load-bearing rather than defensive. This is the most definitive sentence the
+   * panel can say, so it may only be reached by a request that named a record: the
+   * reason widens WHERE under that prefix the claim is allowed (the record path and
+   * its parts, instead of the record path alone), and it must not widen the claim to
+   * paths that name no experiment. Without the constraint a 404 carrying this reason
+   * on `/memory/concepts/{id}`, `/graph/status` or `/schema` would render "this
+   * experiment id is not in the workspace" over a path that has no experiment id in
+   * it — the exact class of defect `isRecordPath` was introduced to end, and one
+   * that the first revision of this branch reintroduced. Latent rather than live
+   * today (every `_not_found(` call site in `routes.py` is inside an
+   * `/experiments/{experiment_id}` handler), and pinned by test so it stays that way.
+   *
    * One behaviour DID change here, and it is a correction rather than a regression: a
    * 404 carrying `tutorial_session_not_found` on a record path no longer takes this
    * branch. That reason is raised by the scope dependency BEFORE any record work
@@ -221,10 +320,12 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * worked-example session and none at all about whether the record exists. It falls
    * through to the generic branch, which is what the panel can honestly say.
    */
+  const underOneRecord = isRecordPath(error?.path) || subResource !== undefined;
   if (
     status === 404 &&
     !interceptedByEdge &&
-    (reason === 'experiment_not_found' || (reason === undefined && isRecordPath(error?.path)))
+    ((reason === 'experiment_not_found' && underOneRecord) ||
+      (reason === undefined && isRecordPath(error?.path)))
   ) {
     return {
       kind: 'not_found',
@@ -273,8 +374,10 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * than overstates. Callers passing `onRetry` still render Retry, useful either way.
    *
    * A bare `/experiments/{id}` 404 does NOT land here — it took the branch above with
-   * its copy unchanged. Nor does an HTML-bodied 404, nor an `experiment_not_found`
-   * arriving on a sub-resource path.
+   * its copy unchanged. Nor does an `experiment_not_found` arriving on a sub-resource
+   * path. Nor does a RECOGNISED HTML-bodied 404 — see the scope note on the generic
+   * branch below for what "recognised" excludes, which this branch's first sentence
+   * inherits verbatim.
    */
   if (
     status === 404 &&
@@ -285,11 +388,22 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
       kind: 'record_part_not_found',
       title: 'Not Found',
       lines: [
-        // The part is named only when the PATH carried it. A reason can be observed
-        // without one (a reason from a request whose path this client did not shape),
-        // and inventing a segment to fill the sentence would be a small fabrication.
+        /*
+         * The part is named only when the PATH carried it, in this build's own words
+         * (`SUB_RESOURCE_LABELS`) rather than in the backend's path vocabulary.
+         *
+         * THE SECOND ARM IS UNREACHABLE THROUGH `api.ts` AND IS KEPT ANYWAY, as an
+         * explicit anti-fabrication guard. Every `ApiError` this client raises carries
+         * a path, and a reason-only entry to this branch therefore cannot happen in
+         * production — but `downCopy` is exported and pure, the reason arms above can
+         * be satisfied without a path, and the alternative to this sentence is
+         * inventing a segment to fill the gap. It is exercised by test
+         * (`backend-down-state.test.tsx`, "names no part when the path carried none")
+         * so that "unreachable" stays a claim about `api.ts` rather than about
+         * untested code.
+         */
         subResource !== undefined
-          ? `The ISAAC API answered HTTP 404 for a read of “${subResource}” under this experiment id, so this view has no server-derived data to show.`
+          ? `The ISAAC API answered HTTP 404 for a read of ${subResourceLabel(subResource)} under this experiment id, so this view has no server-derived data to show.`
           : 'The ISAAC API answered HTTP 404 for a read of one part of this experiment, so this view has no server-derived data to show.',
         'The request read one part of an experiment rather than the experiment itself, so this 404 does not establish that the experiment is missing — and this page does not claim it is.',
         'This prototype reads only server-derived truth — it will never show placeholder data.',
@@ -311,18 +425,41 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * not necessarily the scope the failed request carried, and naming a cause we did
    * not observe is the same defect as the copy this replaces.
    *
-   * AN HTML-BODIED 404 DOES NOT LAND HERE — see `interceptedByEdge` above. Its first
-   * sentence would be false of one: the ISAAC API did not answer, an intercept did.
+   * A RECOGNISED HTML-BODIED 404 DOES NOT LAND HERE — see `interceptedByEdge` above.
+   * Its first sentence would be false of one: the ISAAC API did not answer, an
+   * intercept did.
+   *
+   * "RECOGNISED" IS THE WHOLE SCOPE OF THAT SENTENCE, and the gap is stated rather
+   * than implied. `isHtml` matches `text/html` only, so a 404 carrying
+   * `application/xhtml+xml`, or carrying NO `Content-Type` at all, is not detected as
+   * an intercept and DOES land here (and in the branch above), where the claim that
+   * the ISAAC API answered is unproven. That is a PRE-EXISTING class, not something
+   * this branch table introduced: the generic wording made the identical claim before
+   * `interceptedByEdge` existed, `isHtml` is unchanged, and every branch that names
+   * the API inherits it. It is deliberately NOT fixed here — widening `isHtml` is a
+   * change to how every API response is classified, which does not belong in a copy
+   * correction — so treat this as a known, bounded limit of the intercept guard.
    *
    * NEITHER DOES A READ UNDER `/experiments/{id}/…` — that is the branch immediately
    * above, which can at least name the part that was read.
    *
-   * TWO KINDS OF 404 NOW LAND HERE THAT USED TO CLAIM A MISSING RECORD: one carrying
+   * ON A BARE RECORD PATH (`/experiments/{id}`, nothing below it) TWO KINDS OF 404 NOW
+   * LAND HERE THAT USED TO CLAIM A MISSING RECORD: one carrying
    * `tutorial_session_not_found` (evidence about a dead worked-example session, none
    * about the record), and one carrying a reason this build does not recognise. Both
    * are cases where a subject was reported and it was not the record, so the generic
    * wording is the honest one — and an unknown reason must never be optimistically
    * mapped onto a branch that asserts something.
+   *
+   * THE PATH QUALIFIER ON THAT PARAGRAPH IS NECESSARY. On a SUB-RESOURCE path neither
+   * of those two reaches this branch: `subResource !== undefined` satisfies the branch
+   * above, so both land in `record_part_not_found`. The copy is honest either way —
+   * that branch names the part that was read and refuses the record claim, which is
+   * exactly as much as a dead session or an unknown reason supports — but an earlier
+   * revision of this comment described a routing the code does not perform, and a
+   * comment that misdescribes its own branch is how the next reader gets the branch
+   * wrong. A third kind now lands here as well: `experiment_not_found` arriving on a
+   * path that names no experiment (see `underOneRecord` above).
    *
    * A pathless 404 lands here too. Every `ApiError` this client raises carries a
    * path (`httpError`, `readJson` and `request`'s network branch all pass one), so

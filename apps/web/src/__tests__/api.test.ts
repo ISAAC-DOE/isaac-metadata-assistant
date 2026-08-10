@@ -732,4 +732,45 @@ describe('typed API client — the typed 404 reason', () => {
     expect(error.reason).toBe('experiment_not_found');
     expect(error.path).toBe(`/experiments/${EXP_ID}/validate`);
   });
+
+  /*
+   * A MIXED-STATUS BUNDLE — the one behaviour change reading the body causes, pinned
+   * so that changing it later is loud rather than silent.
+   *
+   * Only the 404 path awaits `res.json()`, so a 404 rejects one `await` LATER than
+   * any other failing status. When two members of a `Promise.all` fail with DIFFERENT
+   * statuses the non-404 therefore wins deterministically, where before this change
+   * the winner was whatever the network delivered first.
+   *
+   * THIS IS ORDERING, NOT INFORMATION, AND BOTH OUTCOMES ARE HONEST. The 500 renders
+   * `http_error` ("the API was reached but answered with HTTP 500"), which is true of
+   * that response; a 404 that does reach the panel still carries its reason. It is
+   * pinned rather than compensated for: adding a delay to even the tie-break up would
+   * be complexity in service of cosmetics. Asserted with the 404 FIRST in the array
+   * and then LAST, so the result is shown to depend on the status rather than on
+   * argument order.
+   */
+  it('a mixed-status bundle rejects with the non-404, whichever order it is listed in', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const is404 = url.endsWith(`/experiments/${EXP_ID}`);
+        return {
+          ok: false,
+          status: is404 ? 404 : 500,
+          headers: { get: () => 'application/json' },
+          json: async () => (is404 ? { error: 'experiment_not_found', id: EXP_ID } : { detail: 'x' }),
+        } as unknown as Response;
+      }),
+    );
+    for (const order of ['404-first', '404-last'] as const) {
+      const reads = [api.getExperiment(EXP_ID), api.getWarnings(EXP_ID)];
+      const error = (await Promise.all(
+        order === '404-first' ? reads : [...reads].reverse(),
+      ).catch((e: unknown) => e)) as ApiError;
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.status).toBe(500);
+      expect(error.reason).toBeUndefined();
+    }
+  });
 });

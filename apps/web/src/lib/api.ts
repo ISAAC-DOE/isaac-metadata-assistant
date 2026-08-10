@@ -285,6 +285,20 @@ function httpError(res: Response, path: string): ApiError {
  *  3. ONLY 404. Widening this to other statuses would read bodies that
  *     `mutationError` owns and could double-consume one; there is no need, and
  *     the narrow rule is the safe one.
+ *
+ * A BEHAVIOUR CHANGE RULE 3 CAUSES, DISCLOSED BECAUSE IT IS REAL AND NOT OBVIOUS.
+ * Only the 404 path awaits `res.json()`, so a 404 now rejects one `await` LATER than
+ * every other failing status. In a bundle whose members fail with MIXED statuses —
+ * say a 404 on `GET /experiments/{id}` and a 500 on `POST /audit` — the non-404
+ * rejection therefore wins the `Promise.all` systematically, where previously the
+ * winner was whatever the network happened to deliver first. Three things to hold
+ * onto: this is ORDERING, not information (no reason is lost, and a 404 reaching the
+ * panel still carries its reason); both outcomes produce honest copy (a 500 renders
+ * `http_error`, "the API was reached but answered with HTTP 500", which is true of
+ * that response); and it is deliberately NOT compensated for, because introducing a
+ * delay to even the race up would be complexity in service of a cosmetic tie-break.
+ * It is pinned by test (`api.test.ts`, "a mixed-status bundle") so that a future
+ * change to the precedence is loud rather than silent.
  */
 async function httpErrorWithReason(res: Response, path: string): Promise<ApiError> {
   const base = httpError(res, path);
@@ -440,17 +454,29 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
  * to be BOTH, which is a correction of a first attempt that widened only `getJson`.
  *
  * Every read that renders `BackendDown` through `useFetch` comes through one of
- * these, and the screens fetch in BUNDLES. The record screen issues seven requests
- * for one route — `GET {id}`, `/draft`, `/pending`, `POST /validate`, `POST /audit`,
- * `/warnings`, `/evidence` — and `getEvidenceBundle` races `getExperiment` against
- * every `getSourcePreview`. On a genuinely missing record ALL of them 404, and the
- * rejection that reaches the panel is whichever landed first. If only `getJson`
- * carried the reason, a `POST /validate` rejection winning that race would leave
- * `reason === undefined` and the copy would fall back to the path rule — so the
- * screen's wording for ONE underlying truth would depend on scheduling. Widening
- * both makes every member of the bundle carry `experiment_not_found`, and the race
- * stops mattering. That race-independence is the entire reason this is done by
- * reason rather than by path; see `FetchStates.downCopy`.
+ * these, and the screens fetch in BUNDLES. `getRecordBundle` issues SEVEN
+ * experiment-scoped requests for one route in ONE `Promise.all` — `GET {id}`,
+ * `/draft`, `/pending`, `POST /validate`, `POST /audit`, `/warnings`, `/evidence`,
+ * so six of the seven are sub-resource paths and two of the seven are POSTs. On a
+ * genuinely missing record ALL of them 404, and the rejection that reaches the panel
+ * is whichever landed first. If only `getJson` carried the reason, a `POST /validate`
+ * rejection winning that race would leave `reason === undefined` and the copy would
+ * fall back to the path rule — so the screen's wording for ONE underlying truth would
+ * depend on scheduling. Widening both makes every member of the bundle carry
+ * `experiment_not_found`, and the race stops mattering. That race-independence is the
+ * entire reason this is done by reason rather than by path; see
+ * `FetchStates.downCopy`.
+ *
+ * CORRECTION, RECORDED RATHER THAN OVERWRITTEN. An earlier revision of this comment
+ * cited "`getEvidenceBundle` races `getExperiment` against every `getSourcePreview`"
+ * as the racing site. THAT IS FALSE and is withdrawn: `getEvidenceBundle` is TWO
+ * SEQUENTIAL `Promise.all`s (see its own comment below), the previews are fetched
+ * only after the first bundle resolves, and on a genuinely missing record the first
+ * bundle rejects and `getSourcePreview` is never called at all. The racing sites are
+ * `getRecordBundle` above, `getEvidenceBundle`'s FIRST `Promise.all` (1 exact +
+ * 3 sub-resource reads), `getExportReadiness`, `getExperimentGraphBundle`,
+ * `GuidedCompletion.tsx:46` and `useRecordSession.ts:226`. The conclusion — widen
+ * both helpers — is unchanged; only the example was wrong.
  *
  * SAFE AGAINST DOUBLE-CONSUMPTION: on the failure path the body is untouched before
  * this point and the throw follows immediately, so `readJson` never also runs. On
