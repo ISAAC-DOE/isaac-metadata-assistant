@@ -1063,7 +1063,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 40 operations, 62 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 40 operations, 66 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(40);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1255,8 +1255,79 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // as the corrected 29,052 was: the re-transcribed entry is 2,047 characters where
     // the old one was 1,637 (+410), and it holds one more `\n\n` separator, which this
     // sum drops (+410 - 2 = +408).
-    expect(total).toBe(29460);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(62);
+    //
+    // 29,460 -> 30,677 and 62 -> 64 paragraphs (export fan-out). One operation
+    // changed: `POST /api/experiments/{experiment_id}/export`. Under contract §1 D1
+    // an experiment with runs now exports ONE record PER RUN, so the old description
+    // was not merely thin, it was wrong for that case — it promised a single
+    // `record_id` and a single `artifact_refs` pair, and a fan-out returns neither.
+    // The re-transcribed entry adds two paragraphs: what a record with runs returns
+    // (and that a record with NO runs, which is every record this API can currently
+    // create, is unchanged), and what is actually guaranteed if the export fails
+    // part-way — validation is all-or-nothing, the state is saved once at the end,
+    // and it is NOT atomic across the individual file writes. That last sentence is
+    // the one worth protecting: the honest guarantee is weaker than "atomic", and
+    // the description says so rather than implying a stronger one.
+    //
+    // Cross-checked in Python rather than only by re-running this assertion, as
+    // every corrected total above was: the re-transcribed entry is 1,867 characters
+    // where the old one was 646 (+1,221) and holds two more `\n\n` separators, which
+    // this sum drops (+1,221 - 4 = +1,217). Independently, the whole array
+    // re-measured from the file: 40 operations, 40 unique, raw sum 30,805, 64
+    // separators, 30,805 - 128 = 30,677.
+    //
+    // 30,677 -> 31,236 and 64 -> 66 paragraphs (fan-out review fixes). TWO
+    // operations changed, each gaining exactly one paragraph:
+    //
+    //   `POST .../validate` used to fall into its dry-run branch for a record with
+    //   runs and validate the experiment-level half — which is never exported —
+    //   returning a schema-invalid verdict about a set of records that had just
+    //   passed official validation. It is now checked per run, and says so,
+    //   including that the top-level `dry_run` is true if any run's verdict came
+    //   from an in-memory candidate.
+    //
+    //   `GET .../artifacts` returns four nulls for such a record, because it serves
+    //   the record's OWN pair and there is none. Beside a fan-out-aware
+    //   `artifact.state` of `current` that read as "current, but there is nothing",
+    //   so the operation now states why and that the per-run files are not listed
+    //   here yet.
+    //
+    // Cross-checked in Python rather than transcribed from the assertion that
+    // reported it: 40 operations, 40 unique, raw sum 31,368, 66 separators,
+    // 31,368 - 132 = 31,236.
+    //
+    // 31,236 -> 33,010 and 66 -> 69 paragraphs (the SECOND fan-out review). THREE
+    // operations changed — one export, and the two equivalent warnings forms that
+    // share one description constant:
+    //
+    //   `POST .../export` gained two paragraphs. One states what happens to the
+    //   records of runs that have been REMOVED, and it exists because the response
+    //   now separates three outcomes an empty `pruned_record_ids` used to conflate:
+    //   nothing was orphaned, an orphan is kept because a surviving record still
+    //   links to it (`protected_record_ids` — the NORMAL case for runs sharing a
+    //   sample id, previously invisible), and a kept record could not be read so
+    //   nothing was examined at all (`prune_declined`). The other adds the
+    //   `sibling_link_conflict` refusal: an export that would rewrite a record an
+    //   already-exported record links to as sharing its sample id, with a different
+    //   sample id, is refused, because the link could not be corrected afterwards
+    //   and one of the two records would be false.
+    //
+    //   `GET`/`POST .../warnings` each gained one paragraph. For a record with runs
+    //   the advice is now computed per run — it used to be computed from the
+    //   experiment-level half, which is never exported and holds no measurement, and
+    //   it therefore advised `NO_MEASUREMENT_SERIES` about records that all carry a
+    //   measurement block. `runs[]` carries each run's own warnings and `dry_run`;
+    //   the top level is the deduplicated union, which is safe here precisely
+    //   because this channel carries no verdict.
+    //
+    // Cross-checked in Python from the file rather than transcribed from the
+    // assertion that reported it. Per entry: export 1,867 -> 2,865 (+998) with one
+    // more separator; each warnings entry 600 -> 991 (+391) with one more separator.
+    // Raw sum 31,368 + 998 + 2x391 = 33,148; separators 66 + 3 = 69; 33,148 - 138 =
+    // 33,010. Whole array re-measured independently: 40 operations, 40 unique, raw
+    // sum 33,148, 69 separators.
+    expect(total).toBe(33010);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(69);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);

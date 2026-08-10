@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "99af350bc8f61f559c66e955d3819dbe4380f5cc557f1e276697408814a8bb12"
+        "sha256": "974ec009f1ad2b45bc2eea707573bfe964ec6b3bc947e16dc006d78206078bd2"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "633121636231cc95358690e18b85c79f9915465310ab07e520247778cacdca75"
+        "sha256": "3fcd6683fd11a1e5c00783484c11c635cd8c4751972e7be576a9c93705a8d6ab"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "2eee919c11ed6c9b28ac2e75fc3b3e1746d45ed97b1c06f8bf6fb54f56222707"
+        "sha256": "4e147f116b6c0b9511ca1037a0fc2ab350436cfa515705bb7749935e6ce15dd2"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10536,7 +10536,7 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "8dda3c40d643df331e0e5bb71814c2a027e9af162d01fcaa4384b2edcc079d07"
+        "sha256": "d1d3d0c35b7da51ea803bb0e5b1e80e971410b4041ab04e2f1181fd79653d225"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "0ae4e56fe30a1b52080b163c7c38fe3cc32a3200f87e3a7fb0407c3e33a8f249"
+        "sha256": "6973938b200b8c132d9f3ed364f40c602ed5e88de4e7476f397540ce396cf23f"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "72c6c3d0169351edcb87f2db79ced5b137110c16c1abfa99ec622a6830b48518"
+        "sha256": "9dc79925dd5a72b79e38fe52ac33a3464368b9663b4f1d3a126b62e4d46de519"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "e8893e44b3775d5cb89b424b59623c17506864def9416dbd72f15bd0c214d9d3"
+        "sha256": "0cb4be3661d1451e41f75cbfdfff2e780cec4dd44ef466a2fb6ac8f69f3dc93e"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "b0ff42c74ff60c77653489bd8d58fd63445ca4638c73b749eaf69c1d66f0698c"
+    "served_manifest_fingerprint": "a038bf214311d670972fb508f12bd8771389612cb9c93caedac958a67d517a4d"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -561,7 +561,16 @@ export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields
   draft_ok: boolean;
   // P30.6 — safe basenames only (e.g. "<id>.json"), never an absolute
   // server/mount path. Null when not yet exported.
-  artifact_refs: { record_filename: string | null; sidecar_filename: string | null };
+  //
+  // `reason` is present ONLY for a record whose runs each export their own official
+  // record: the filenames are null there because the field is SINGULAR and such a
+  // record has several, which is a different statement from "nothing was exported"
+  // and now says so rather than being inferred from two nulls.
+  artifact_refs: {
+    record_filename: string | null;
+    sidecar_filename: string | null;
+    reason?: string;
+  };
   source_files: string[];
   workflow: ApiWorkflow;
   artifact: ApiArtifactState;
@@ -611,6 +620,18 @@ export interface ApiValidateResult {
   errors: { path: string; message: string }[];
   schema: string; // "ISAAC v1.05"
   dry_run: boolean; // true until the record is exported
+  // Present ONLY for a record whose runs each export their own official record:
+  // one verdict per run, because a flat list of N records' errors is not
+  // addressable. `ok` above is true only when every entry is; `dry_run` above is
+  // true if ANY entry's verdict came from an in-memory candidate.
+  runs?: {
+    run_id: string | null;
+    run_label: string | null;
+    record_id: string;
+    ok: boolean;
+    errors: { path: string; message: string }[];
+    dry_run: boolean;
+  }[];
 }
 
 // P36.3 — the standalone validator (POST /api/validate/record). No experiment,
@@ -664,6 +685,20 @@ export interface ApiWarningsResponse {
   gating: false;
   warnings: AdvisoryWarning[];
   dry_run?: boolean;
+  // Present ONLY for a record whose runs each export their own official record.
+  // The advice used to be computed from the experiment-level half — never exported,
+  // no measurement block — so it reported NO_MEASUREMENT_SERIES about records that
+  // all carry one. `warnings` above is the deduplicated union over these entries,
+  // which is safe here (and is NOT what `ApiValidateResult` does) precisely because
+  // this channel carries no verdict: aggregating advice cannot turn a pass into a
+  // fail. `dry_run` above is true if ANY entry's advice came from a candidate.
+  runs?: {
+    run_id: string | null;
+    run_label: string | null;
+    record_id: string;
+    warnings: AdvisoryWarning[];
+    dry_run: boolean;
+  }[];
 }
 
 export interface ApiEvidenceEntry {
@@ -1325,13 +1360,34 @@ export interface ApiExportResponse extends VersionFields {
   record?: Record<string, unknown>;
   sidecar?: Record<string, unknown>;
   errors?: { path: string; message: string }[];
-  record_id?: string;
+  // NULL, not absent, for a fan-out: both are SINGULAR by name and a record whose
+  // runs each export their own official record has several. The type said `?:
+  // string` and the wire says `null`, which is how a screen came to test
+  // `resp.record && resp.sidecar` and route a successful fan-out export to its
+  // `failed` phase.
+  record_id?: string | null;
   // P30.6 — safe basenames only, never an absolute server/mount path.
-  artifact_refs?: { record_filename: string; sidecar_filename: string };
+  artifact_refs?: { record_filename: string; sidecar_filename: string } | null;
   // P28.2 — the post-export workflow + downstream-invalidation summary (present
   // on both the success and the gated-failure paths).
   workflow?: ApiWorkflow;
   invalidation?: ApiInvalidation;
+  // Present ONLY on the success path of a record with runs. `records` is what THIS
+  // export wrote — already-materialised runs are skipped and deliberately absent.
+  records?: {
+    run_id: string | null;
+    run_label: string | null;
+    record_id: string | null;
+    record_filename: string | null;
+    sidecar_filename: string | null;
+  }[];
+  // The three-way prune outcome. `pruned_record_ids` alone could not distinguish
+  // "nothing was orphaned" from "an orphan is KEPT because a surviving record still
+  // links to it" (the normal case once two runs share a sample id, and previously
+  // invisible) from "a kept record could not be read, so nothing was examined".
+  pruned_record_ids?: string[];
+  protected_record_ids?: string[];
+  prune_declined?: boolean;
 }
 
 // Everything S6 needs to render the three signals + the export gate, fetched

@@ -31,6 +31,19 @@ import type {
   ValidationResult,
 } from '../lib/types';
 
+/**
+ * Shown when `exported` is true and the singular `record_id` is null — a record
+ * whose runs each export their own official record.
+ *
+ * A LAST RESORT, NOT THE COPY. `artifact_refs.reason` is authored server-side and
+ * is what renders; this exists only because the contract types `reason` as
+ * optional, and a screen that has already established there is no single pair must
+ * not fall back to silence. It deliberately does not name a place to find the
+ * per-run files, because no read operation lists them yet.
+ */
+const FAN_OUT_NO_SINGLE_PAIR =
+  "This record's runs each export their own official record, so there is no single record file.";
+
 type Load =
   | { name: 'loading' }
   | { name: 'error'; error: ApiError }
@@ -46,10 +59,16 @@ interface ExportedArtifacts {
   validation: ValidationResult;
 }
 
+/** One written run record, as `POST /export` reports it for a fan-out. */
+type FanOutRecord = NonNullable<ApiExportResponse['records']>[number];
+
 type ExportPhase =
   | { name: 'idle' }
   | { name: 'exporting' }
   | { name: 'done'; artifacts: ExportedArtifacts }
+  // A record whose runs each exported their own official record. There is no
+  // singular pair to card, so this phase carries the LIST that was written.
+  | { name: 'fanout'; records: FanOutRecord[] }
   | { name: 'conflict'; message: string }
   | { name: 'stale'; message: string }
   | { name: 'failed'; errors: { path: string; message: string }[] }
@@ -261,7 +280,7 @@ function LoadedExport({
   // Pre-export: `validate` is a DRY-RUN (validate.dry_run true). Its `ok` tells us
   // whether export WILL pass — a gate input, never rendered as the reserved verdict.
   const dryRunOk = validate.dry_run && validate.ok;
-  const exported = phase.name === 'done' || detail.exported;
+  const exported = phase.name === 'done' || phase.name === 'fanout' || detail.exported;
   const canExport = pendingZero && validate.ok && !exported;
 
   const doExport = () => {
@@ -287,6 +306,21 @@ function LoadedExport({
             },
           });
           onRefresh(); // refresh coverage/advisory to post-export truth
+        } else if (resp.ok && resp.records) {
+          // A FAN-OUT SUCCESS, AND IT USED TO LAND IN `failed`. `post_export` pops
+          // `record`/`sidecar` for a record whose runs each export their own
+          // official record — they are singular and it has several — so the test
+          // above is false while `ok` is true. The screen then rendered, in a
+          // `role="alert"`: "Export was refused by the gated validation — nothing
+          // was written. 0 schema errors." It was not refused, N immutable official
+          // ISAAC records HAD been written, and `onRefresh()` was never reached, so
+          // the screen could not recover — the retry returned 409 "This record
+          // already exists on disk", contradicting "nothing was written" seconds
+          // earlier. A durability claim about immutable artifacts is the same
+          // category of falsehood as `_plan_digest_row`'s, which was fixed.
+          setCurrentVersion(resp.version);
+          setPhase({ name: 'fanout', records: resp.records });
+          onRefresh();
         } else {
           setPhase({ name: 'failed', errors: resp.errors ?? [] });
         }
@@ -344,17 +378,23 @@ function LoadedExport({
   const coverage = audit.records.length > 0 ? toAuditResult(audit) : 'pending';
   const advisory = toAdvisoryResult(warnings);
 
+  // A record whose runs each export their own official record has NO singular
+  // record id or filename pair — the fields are singular and it has several — while
+  // `exported` is true. Measured: both fallbacks below interpolated the literal
+  // null and rendered `null.json` / `null.evidence.json`, into the TopBar filename
+  // and into both artifact cards, beside a PASS verdict.
+  const fanOut = detail.exported && detail.record_id === null;
   // P30.6 — safe basenames only (never a server path). The API returns null
   // until exported; the fallback below is a locally-constructed filename, not
-  // a server-provided path.
+  // a server-provided path. It is only constructible when there IS an id.
   const recordFilename =
     inSession?.recordFilename ||
     detail.artifact_refs.record_filename ||
-    `${detail.record_id}.json`;
+    (detail.record_id ? `${detail.record_id}.json` : '');
   const sidecarFilename =
     inSession?.sidecarFilename ||
     detail.artifact_refs.sidecar_filename ||
-    `${detail.record_id}.evidence.json`;
+    (detail.record_id ? `${detail.record_id}.evidence.json` : '');
   // Never invent a coverage total: while audit data hasn't arrived yet, the
   // sidecar card simply omits the path-count badge (ArtifactCard renders
   // nothing when pathCount is undefined) rather than guessing a number.
@@ -483,22 +523,32 @@ function LoadedExport({
                 </span>
               </div>
 
-              <div className="artifact-row">
-                <ArtifactCard
-                  artifact={{ kind: 'record', path: recordFilename, verdict: 'pass' }}
-                  onView={viewArtifacts ? (e) => openViewer('record', e.currentTarget) : undefined}
-                  onDownload={
-                    viewArtifacts ? () => download(viewArtifacts.record, recordFilename) : undefined
-                  }
-                />
-                <ArtifactCard
-                  artifact={{ kind: 'sidecar', path: sidecarFilename, pathCount: coverageTotal }}
-                  onView={viewArtifacts ? (e) => openViewer('sidecar', e.currentTarget) : undefined}
-                  onDownload={
-                    viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarFilename) : undefined
-                  }
-                />
-              </div>
+              {/* No singular pair to card. The reason is authored server-side
+                  (`artifact_refs.reason`) so this screen states the backend's own
+                  account rather than inventing one; the fallback exists only
+                  because the field is optional in the contract. */}
+              {fanOut ? (
+                <p className="artifact-hint" role="note">
+                  {detail.artifact_refs.reason ?? FAN_OUT_NO_SINGLE_PAIR}
+                </p>
+              ) : (
+                <div className="artifact-row">
+                  <ArtifactCard
+                    artifact={{ kind: 'record', path: recordFilename, verdict: 'pass' }}
+                    onView={viewArtifacts ? (e) => openViewer('record', e.currentTarget) : undefined}
+                    onDownload={
+                      viewArtifacts ? () => download(viewArtifacts.record, recordFilename) : undefined
+                    }
+                  />
+                  <ArtifactCard
+                    artifact={{ kind: 'sidecar', path: sidecarFilename, pathCount: coverageTotal }}
+                    onView={viewArtifacts ? (e) => openViewer('sidecar', e.currentTarget) : undefined}
+                    onDownload={
+                      viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarFilename) : undefined
+                    }
+                  />
+                </div>
+              )}
 
               <div className="sidecar-note" role="note">
                 <Shield
@@ -521,7 +571,11 @@ function LoadedExport({
                   Download show the exact written content.
                 </p>
               )}
-              {!viewArtifacts && (
+              {/* `!fanOut` — there are no "paths above" for a fan-out, and nothing
+                  failed to read. `viewArtifacts` is null there simply because the
+                  singular pair does not exist, so this sentence was a second false
+                  claim stacked on the first. */}
+              {!viewArtifacts && !fanOut && (
                 <p className="artifact-hint">
                   The artifact content could not be read from the workspace — open the files at the
                   paths above.
@@ -626,6 +680,35 @@ function LoadedExport({
             />
           </div>
         </>
+      )}
+
+      {/* The fan-out success report. It names what was WRITTEN — the export
+          response is the only place those filenames exist; no read operation lists
+          them yet — and claims nothing about a singular pair this record does not
+          have. `role="status"`, not `alert`: it is good news. */}
+      {phase.name === 'fanout' && (
+        <section className="preexport-ready" role="status">
+          <div className="preexport-ready-head">
+            <span className="dot dot-ready" aria-hidden="true" />
+            <span className="preexport-ready-title">
+              Exported {phase.records.length} official record
+              {phase.records.length === 1 ? '' : 's'} — one per run
+            </span>
+          </div>
+          <p className="preexport-text">
+            Each run exported its own official ISAAC record and evidence sidecar, so this
+            record has no single record file. These are the files that were written.
+            Official records are immutable: written once, never overwritten.
+          </p>
+          <ul className="preexport-errors mono">
+            {phase.records.map((entry) => (
+              <li key={entry.record_id ?? entry.run_id ?? entry.run_label}>
+                <span className="preexport-error-path">{entry.run_label ?? 'Run'}</span> —{' '}
+                {entry.record_filename} · {entry.sidecar_filename}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {phase.name === 'conflict' && (
