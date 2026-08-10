@@ -52,6 +52,23 @@
  * `main#main.screen-main.pad` is `overflow-x: auto` and absorbs a card wider than
  * the page without the document growing at all.
  *
+ * ── The tag is `@runs-layout`, and it MUST NOT be `@responsive` ─────────────
+ *
+ * These titles were tagged `@responsive` at first, and CI failed in the way that
+ * teaches the rule: every test errored with `connect ECONNREFUSED 127.0.0.1:8100`
+ * in the `desktop-1280x800` project of the READ-ONLY suite.
+ *
+ * `playwright.config.ts` sets `testDir: './e2e'` with `testMatch: /.*\.spec\.ts$/`,
+ * so the read-only suite COLLECTS every spec under `e2e/` — this directory included.
+ * What keeps the other mutation specs out of it is not the directory; it is that no
+ * project's `grep` matches their titles. `ALL_VIEWPORTS = /@responsive/` matched
+ * these, so the read-only suite ran them against a backend only the mutation
+ * config starts — port 8100, which nothing was listening on.
+ *
+ * So the tag is deliberately one no project in `playwright.config.ts` greps for.
+ * Renaming it to `@responsive` "for consistency" would re-break CI in a way that
+ * looks like a product failure and is not one.
+ *
  * NO ALLOWLIST. `layout-allowlist.ts` and `layout-baseline.ts` record measured,
  * argued exceptions for surfaces that already had them; this surface has never
  * been measured, so it starts with none. An offender found here is a defect to
@@ -341,7 +358,7 @@ async function tabTo(page: Page, selector: string, maxPresses = 80): Promise<boo
 
 test.describe('run card — narrow widths', () => {
   for (const width of WIDTHS) {
-    test(`@responsive run card at ${width}: nothing overflows, clips, or is obscured`, async ({
+    test(`@runs-layout run card at ${width}: nothing overflows, clips, or is obscured`, async ({
       page,
     }, testInfo) => {
       await page.setViewportSize({ width, height: 812 });
@@ -387,7 +404,7 @@ test.describe('run card — narrow widths', () => {
    * anything is measured.
    */
   for (const width of [390, 320] as const) {
-    test(`@responsive the save-status chip does not collide at ${width}`, async ({ page }) => {
+    test(`@runs-layout the save-status chip does not collide at ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 812 });
       await twoOpenRuns(page);
 
@@ -427,7 +444,7 @@ test.describe('run card — narrow widths', () => {
    * `layout-baseline.ts`; see the file header. What must hold is that the run
    * cards add nothing to it. Measured at 320, the width where a pixel costs most.
    */
-  test('@responsive run cards widen the document by nothing at 320', async ({ page }) => {
+  test('@runs-layout run cards widen the document by nothing at 320', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 812 });
 
     await openRecord(page, SEED.partial);
@@ -473,7 +490,7 @@ test.describe('run card — narrow widths', () => {
  * It uses the bare `base` test, not the extended one, precisely so the auto-use
  * `scope` fixture does not open a session this test would not use.
  */
-base('@responsive run card at 200% zoom (640x400 @ DPR2) stays usable', async ({ browser }) => {
+base('@runs-layout run card at 200% zoom (640x400 @ DPR2) stays usable', async ({ browser }) => {
   const context: BrowserContext = await browser.newContext({
     viewport: { width: 640, height: 400 },
     deviceScaleFactor: 2,
