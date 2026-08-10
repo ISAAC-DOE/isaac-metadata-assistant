@@ -27,6 +27,8 @@ improvement. This test pins the crash being gone, and pins that nothing was writ
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -150,3 +152,165 @@ def test_a_correctly_typed_series_answer_still_applies(client):
     assert res.status_code == 200, res.text
     after = client.get(f"/api/experiments/{PARTIAL}").json()
     assert after["rev"] > before_rev, "a correctly-typed series answer must be applied"
+
+
+# ---------------------------------------------------------------------------
+# POST /edit — the half of this file that did not exist
+# ---------------------------------------------------------------------------
+#
+# THIS FILE HARDENED `POST /answers` AND STOPPED THERE, and the gap was invisible for the
+# same reason gaps usually are: nothing named it. `grep -c /edit` over this file returned
+# 0 until now, and `apply_answers` in `complete.py` grew type guards while
+# `apply_corrections` — the `/edit` path — did not.
+#
+# MEASURED on the unguarded code, with a valid correction accepted first so the negatives
+# mean something:
+#
+#   series = 5 / "nope" / [1, 2] / a 1 MB string  ->  HTTP 500 from the truth core
+#   series = {}                                   ->  HTTP 200, and the already-confirmed
+#                                                     series REPLACED BY `{}` — a dict
+#                                                     where the schema requires a list
+#
+# The second is the worse of the two: the first writes nothing and reports failure, while
+# the second reports success and destroys a value a scientist had confirmed. Both are
+# closed — the core refuses to apply an unusable shape, and the route turns that refusal
+# into a typed 422 rather than a silent 200, which its own description requires.
+
+
+def _valid_series() -> list[dict]:
+    return [{"energy_eV": 8979.0, "mu": 0.1, "series_id": "s1"}]
+
+
+def _draft(client: TestClient) -> dict:
+    """The draft as the STORE holds it, never as a response summarised it — the claim
+    under test is about what was written, not about what was reported."""
+    import isaac_api.workspace as ws
+
+    # `tutorial_client` pins the session id on the client for exactly this use.
+    exp = ws.load_experiment(PARTIAL, session_id=client.tutorial_session_id)
+    assert exp is not None
+    return exp.draft
+
+
+def test_a_valid_structured_correction_is_accepted(client):
+    """THE POSITIVE CONTROL, and it is load-bearing rather than ceremonial: an earlier
+    investigation of this defect sent the wrong body shape, got 422 for everything
+    including the valid case, and concluded the route was already safe. A negative result
+    means nothing without this."""
+    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{PARTIAL}/edit",
+        json={"confirmed_by_user": True, "answers": {"series": _valid_series()}},
+        headers={"If-Match": etag},
+    )
+    assert res.status_code == 200, res.text
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("series", 5),
+        ("series", "nope"),
+        ("series", [1, 2]),
+        ("series", {}),
+        ("series", [{}, 3]),
+        ("series", "x" * 100_000),
+        ("descriptor", 5),
+        ("descriptor", "nope"),
+        ("descriptor", [1]),
+    ],
+    ids=[
+        "series-int",
+        "series-str",
+        "series-list-of-ints",
+        "series-dict",
+        "series-list-with-a-non-dict",
+        "series-long-str",
+        "descriptor-int",
+        "descriptor-str",
+        "descriptor-list",
+    ],
+)
+def test_a_wrong_typed_correction_is_refused_and_destroys_nothing(client, key, value):
+    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
+    ok = client.post(
+        f"/api/experiments/{PARTIAL}/edit",
+        json={"confirmed_by_user": True, "answers": {"series": _valid_series()}},
+        headers={"If-Match": etag},
+    )
+    assert ok.status_code == 200, ok.text
+    before = _draft(client)
+
+    etag = client.get(f"/api/experiments/{PARTIAL}").headers["ETag"]
+    res = client.post(
+        f"/api/experiments/{PARTIAL}/edit",
+        json={"confirmed_by_user": True, "answers": {key: value}},
+        headers={"If-Match": etag},
+    )
+
+    # A typed refusal, NOT a 500 and NOT a silent 200.
+    assert res.status_code == 422, res.text
+    assert res.json()["error"] == "invalid_field_value"
+    assert res.json()["keys"] == [key]
+
+    # And the confirmed value the correction would have replaced is byte-identical.
+    assert _draft(client).get("series") == before.get("series")
+    assert _draft(client).get("series") == _valid_series()
+    # The record is still readable — no wedge.
+    assert client.get(f"/api/experiments/{PARTIAL}").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# The core guard, tested AT THE CORE
+# ---------------------------------------------------------------------------
+#
+# WHY THIS EXISTS AS A SEPARATE TEST, established by a negative control rather than
+# assumed: with the core guard removed, every route-level test above still PASSED, because
+# the route now refuses a wrong-typed correction before `apply_corrections` ever sees it.
+# So the two layers need two tests, or the inner one is decoration.
+#
+# It is defence in depth on purpose. `apply_corrections` lives in `src/isaac_records/`, is
+# importable by the CLI and by any future caller, and the failure it prevents is not a
+# crash but the destruction of an already-confirmed scientific value: `series = {}` used to
+# replace a valid series with `{}`, return no error at all, and leave a dict where the
+# official schema requires a list.
+
+
+@pytest.mark.parametrize(
+    "value",
+    [5, "nope", [1, 2], {}, [{}, 3]],
+    ids=["int", "str", "list-of-ints", "dict", "list-with-a-non-dict"],
+)
+def test_apply_corrections_refuses_a_wrong_typed_series_without_touching_the_draft(value):
+    from isaac_records.complete import apply_corrections
+
+    draft = {"series": [{"energy_eV": 8979.0, "mu": 0.1, "series_id": "s1"}]}
+    before = copy.deepcopy(draft)
+
+    out = apply_corrections(draft, {"series": value, "timestamp": "2026-01-01T00:00:00Z"})
+
+    # Neither applied nor raised. The confirmed series is byte-identical.
+    assert out["series"] == before["series"]
+    assert isinstance(out["series"], list)
+
+
+@pytest.mark.parametrize("value", [5, "nope", [1]], ids=["int", "str", "list"])
+def test_apply_corrections_refuses_a_wrong_typed_descriptor(value):
+    from isaac_records.complete import apply_corrections
+
+    draft = {"descriptor": {"value": "kept"}}
+    out = apply_corrections(draft, {"descriptor": value, "timestamp": "2026-01-01T00:00:00Z"})
+    assert out["descriptor"] == {"value": "kept"}
+
+
+def test_apply_corrections_still_applies_a_WELL_typed_series():
+    """The floor. Without it the guards above could pass by refusing everything."""
+    from isaac_records.complete import apply_corrections
+
+    fresh = [{"energy_eV": 9000.0, "mu": 0.2, "series_id": "s2"}]
+    out = apply_corrections(
+        {"series": [{"energy_eV": 1.0, "mu": 0.0, "series_id": "s1"}]},
+        {"series": fresh, "timestamp": "2026-01-01T00:00:00Z"},
+    )
+    assert out["series"] == fresh
+    assert "series:s2" in out["block_evidence"]

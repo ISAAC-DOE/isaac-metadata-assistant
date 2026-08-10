@@ -1992,6 +1992,22 @@ def get_pending(scope: TutorialScopeDep, experiment_id: ExperimentId, response: 
 # --- 7. answers ---------------------------------------------------------------
 
 
+def _correction_is_shaped(key: str, value) -> bool:
+    """Can ``apply_corrections`` actually store this structured value?
+
+    Mirrors the guards in ``isaac_records.complete`` rather than restating them loosely:
+    ``series`` is a list of mappings, ``descriptor`` is a mapping. Kept as one named
+    predicate because the route and the core drifted once already — the core's
+    ``apply_answers`` was hardened against wrong types and its ``apply_corrections`` was
+    not, and nothing noticed because only the first had a test.
+    """
+    if key == "series":
+        return isinstance(value, list) and all(isinstance(item, dict) for item in value)
+    if key == "descriptor":
+        return isinstance(value, dict)
+    return True
+
+
 def _answers_to_apply_shape(answers_by_id: dict, draft: dict, timestamp: str) -> dict:
     """Translate UI answers (keyed by blocker id/about) into ``apply_answers`` input.
 
@@ -2229,6 +2245,44 @@ def post_edit(
                 content={
                     "error": "unrecognized_field",
                     "message": "No editable field was recognized in the request.",
+                },
+            )
+        # A STRUCTURED CORRECTION OF THE WRONG TYPE IS REFUSED HERE, not absorbed.
+        #
+        # `apply_corrections` now REFUSES to apply a malformed `series` or `descriptor`
+        # (see `complete.py`), which is what stops the two defects measured on the
+        # unguarded code: a 500 out of the truth core for `5` / `"nope"` / `[1, 2]` / a
+        # 1 MB string, and — worse — a 200 for `{}` that stored a dict where the schema
+        # requires a list and DESTROYED an already-confirmed series.
+        #
+        # But refusing to apply it would leave this route answering 200 having changed
+        # nothing, which its own description forbids in the sentence directly above:
+        # a body that names no recognised editable field "is rejected with 422 rather
+        # than silently doing nothing". A body that names one and gives it an
+        # unusable value is the same case, so it gets the same typed refusal.
+        #
+        # NOT extended to `POST /answers`, deliberately. There, a value that cannot be
+        # applied leaves the blocker OPEN, so the response already tells the caller the
+        # question was not answered — and that behaviour is pinned by
+        # `test_answers_wrong_type.py` and by a browser spec. `/edit` has no pending
+        # blocker to leave open, so silence there is genuinely silent.
+        wrong_typed = [
+            key
+            for key, expected in (("series", "a list of objects"), ("descriptor", "an object"))
+            if key in apply_shape and not _correction_is_shaped(key, apply_shape[key])
+        ]
+        if wrong_typed:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "invalid_field_value",
+                    "key": wrong_typed[0],
+                    "keys": wrong_typed,
+                    "message": (
+                        "These corrections are not the shape the record can store, so "
+                        "nothing was written: `series` must be a list of objects and "
+                        "`descriptor` must be an object. The stored value is unchanged."
+                    ),
                 },
             )
         # OVERWRITE the current value(s) for the recognized keys, recording a fresh

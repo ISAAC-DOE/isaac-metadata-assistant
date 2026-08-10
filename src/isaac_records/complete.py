@@ -189,6 +189,16 @@ def apply_answers(draft: dict, answers: dict) -> dict:
     return draft
 
 
+def _is_series_shaped(value) -> bool:
+    """Is this a measurement series this module can apply — a list of mappings?
+
+    Named rather than inlined because `apply_answers` and `apply_corrections` must agree:
+    the two paths drifted once already, and the drift was invisible because only one of
+    them had a test.
+    """
+    return isinstance(value, list) and all(isinstance(item, dict) for item in value)
+
+
 def apply_corrections(draft: dict, answers: dict) -> dict:
     """Return a NEW draft with ``answers`` OVERWRITING already-confirmed values.
 
@@ -237,6 +247,31 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
 
     # -- series: overwrite the whole series block + refresh its block_evidence --
     series = answers.get("series")
+    #
+    # THE SAME TYPE GUARD `apply_answers` HAS AT :105, AND ITS ABSENCE HERE WAS TWO
+    # DEFECTS RATHER THAN ONE. `apply_answers` was hardened when a wrong-typed answer
+    # was found to crash the truth core; `apply_corrections` — the `POST /edit` path —
+    # was not, and nothing tested it (`tests/test_answers_wrong_type.py` contains no
+    # `/edit` reference). Measured on the un-guarded code:
+    #
+    #   series = 5 / "nope" / [1, 2] / a 1 MB string  ->  HTTP 500
+    #       `AttributeError: 'str' object has no attribute 'get'` from the loop below,
+    #       raised AFTER the assignment, so the write is attempted and the caller is
+    #       told the request failed.
+    #   series = {}                                   ->  HTTP 200, AND WORSE
+    #       a dict passes `is not None`, the loop iterates its (zero) keys without
+    #       raising, and `draft["series"]` is left as `{}` — a dict where the official
+    #       schema requires a list, with a scientist's already-confirmed series
+    #       DESTROYED and a 200 reported. Silent loss of a confirmed value is worse
+    #       than the crash, because nothing anywhere says it happened.
+    #
+    # A malformed correction is therefore not applied at all. That matches
+    # `apply_answers`' rule and `CLAUDE.md` §5: a value the core cannot shape is left
+    # alone rather than guessed into place. The ROUTE turns this into a typed refusal so
+    # the caller is not told 200 about a no-op — this function's job is only to refuse to
+    # corrupt.
+    if series is not None and not _is_series_shaped(series):
+        series = None
     if series is not None and series != draft.get("series"):
         draft["series"] = copy.deepcopy(series)
         block_evidence = draft.setdefault("block_evidence", {})
@@ -250,6 +285,11 @@ def apply_corrections(draft: dict, answers: dict) -> dict:
 
     # -- descriptor: overwrite the descriptor output block --
     descriptor = answers.get("descriptor")
+    # The mirror of the `series` guard above, and of `apply_answers` at :147: only a
+    # mapping can carry a descriptor value, and a non-mapping raised a `TypeError` here
+    # for the same reason it did there.
+    if descriptor is not None and not isinstance(descriptor, dict):
+        descriptor = None
     if descriptor is not None:
         outputs = draft.get("descriptors_outputs") or []
         current_core = None

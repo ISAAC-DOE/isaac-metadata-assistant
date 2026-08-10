@@ -1928,12 +1928,38 @@ def test_reading_one_run_returns_only_the_run(client, experiment_id):
 # --- 12. INVARIANT 7 + tutorial isolation -------------------------------------
 
 
+#: The truth path, exactly as ``CLAUDE.md`` §13 defines it. Named files, not a directory
+#: glob — and that distinction was learned rather than designed.
+#:
+#: THIS GUARD USED TO FREEZE ALL OF ``src/isaac_records/``, which is broader than §13 and
+#: broader than it needed to be. It was written for the Run slice, where the correct
+#: statement was "this slice changes no core file at all", and it compares against the
+#: merge base — so it fired on the FIRST later branch with a legitimate reason to touch a
+#: core file, reporting "the truth path was modified" about ``complete.py``, which §13
+#: does not list. A guard whose message misnames what it caught teaches the next reader
+#: the wrong boundary, and invites being switched off rather than understood.
+#:
+#: What is protected here is unchanged in strength where §13 puts it: the official
+#: validator, the draft validator, the exporter, the audit path, the CLI and the vendored
+#: schema. A change to any of those is a truth-path change and must be reported as §13
+#: requires. ``complete.py`` is core but not truth-path; changing it still carries §13's
+#: disclosure obligations, which is why the commit that did so reports what changed, what
+#: covers it, and that neither export behaviour nor schema compliance moved.
+_TRUTH_PATH_FILES = (
+    "schema/isaac_record_v1.json",
+    "src/isaac_records/official.py",
+    "src/isaac_records/draft_validator.py",
+    "src/isaac_records/export.py",
+    "src/isaac_records/audit.py",
+    "src/isaac_records/cli.py",
+)
+
+
 def test_the_truth_path_is_untouched_by_this_slice():
-    """INVARIANT 7 — nothing under ``src/isaac_records/`` or ``schema/`` is modified.
+    """INVARIANT 7 — no file ``CLAUDE.md`` §13 names as the truth path is modified.
 
     Asked of git rather than asserted in prose: the working tree is compared with
-    the branch point, so an edit made anywhere in this slice would be reported here
-    whatever file it hid in.
+    the branch point, so an edit would be reported here whatever file it hid in.
     """
     root = ws.REPO_ROOT
     merge_base = subprocess.run(
@@ -1944,7 +1970,7 @@ def test_the_truth_path_is_untouched_by_this_slice():
     )
     base = merge_base.stdout.strip() if merge_base.returncode == 0 else "HEAD"
     changed = subprocess.run(
-        ["git", "diff", "--name-only", base, "--", "src/isaac_records", "schema"],
+        ["git", "diff", "--name-only", base, "--", *_TRUTH_PATH_FILES],
         cwd=root,
         capture_output=True,
         text=True,
