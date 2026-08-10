@@ -40,7 +40,9 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -1161,15 +1163,23 @@ def test_an_invented_path_cannot_wedge_the_run_it_was_addressed_to(
     assert "Additional properties are not allowed" not in findings
 
 
-def test_the_three_paths_the_run_workspace_offers_are_all_still_writable(
+def test_the_five_paths_the_run_workspace_offers_are_all_still_writable(
     client, experiment_id
 ):
     """THE POSITIVE CONTROL for the refusal above.
 
-    These three are `RUN_FIELDS` in `apps/web/src/lib/runFields.ts`, which is the
+    These five are `RUN_FIELDS` in `apps/web/src/lib/runFields.ts`, which is the
     only surface that writes a run field. A tightening that broke any of them
     would take the whole Run workspace with it, and a refusal-only test suite
     would not notice.
+
+    IT USED TO PATCH ONLY THREE. The slice that widened the workspace from three
+    offered paths to five left this control at three, so
+    `context.thermodynamics.atmosphere` and `timestamps.acquired_end_utc` — the two
+    paths that slice newly exposed — had NO end-to-end backend coverage: the route
+    had always accepted them, but nothing measured that it still did. The stored
+    value is asserted for each, not merely the 200, because a route that accepted a
+    key and wrote nothing would satisfy the status code alone.
     """
     run = _create_run(client, experiment_id)
     response = _patch(
@@ -1181,7 +1191,9 @@ def test_the_three_paths_the_run_workspace_offers_are_all_still_writable(
             "fields": {
                 "context.environment": "in_situ",
                 "context.temperature_K": 300.0,
+                "context.thermodynamics.atmosphere": "5% H2 in Ar",
                 "timestamps.acquired_start_utc": "2026-01-01T00:00:00Z",
+                "timestamps.acquired_end_utc": "2026-01-01T02:30:00Z",
             },
         },
     )
@@ -1189,7 +1201,15 @@ def test_the_three_paths_the_run_workspace_offers_are_all_still_writable(
     stored = _stored_run(client, experiment_id, run["id"]).draft["fields"]
     assert stored["context.environment"]["value"] == "in_situ"
     assert stored["context.temperature_K"]["value"] == 300.0
+    # Verbatim — the atmosphere path has no enum in the official schema, so the
+    # route must not case-fold, normalise or vocabulary-check what was sent.
+    assert stored["context.thermodynamics.atmosphere"]["value"] == "5% H2 in Ar"
     assert stored["timestamps.acquired_start_utc"]["value"] == "2026-01-01T00:00:00Z"
+    assert stored["timestamps.acquired_end_utc"]["value"] == "2026-01-01T02:30:00Z"
+    # Every offered path, covered — pinned against the authority rather than
+    # against the count, so adding a path to the writable set without adding it
+    # here fails rather than passing quietly.
+    assert set(stored) == routes.RUN_WRITABLE_FIELD_PATHS
 
 
 def test_the_run_writable_paths_are_derived_from_the_extractor_field_map():
@@ -1218,6 +1238,77 @@ def test_the_run_writable_paths_are_derived_from_the_extractor_field_map():
         "timestamps.acquired_start_utc",
         "timestamps.acquired_end_utc",
     }
+
+
+#: The frontend's own list of the run-level paths it offers a control for. Read as
+#: TEXT because the two halves of this contract are written in different languages —
+#: this file cannot import TypeScript, and adding a toolchain to let it would be a
+#: dependency in exchange for one set comparison.
+RUN_FIELDS_TS = Path(__file__).resolve().parents[3] / "apps/web/src/lib/runFields.ts"
+
+
+def _run_fields_ts_paths() -> set[str]:
+    """The `path:` literals of `RUN_FIELDS`, or a loud failure.
+
+    Scoped to the array's own block rather than the whole file, because
+    `runFields.ts` carries other `path` members (`RunFieldSpec.path`'s declaration,
+    and the `path` key `inheritedFieldRows` builds) that are not offered controls.
+
+    EVERY FAILURE MODE HERE RAISES. A parse that quietly returned an empty set would
+    make the parity test below compare `set() == set()` on one side of a real
+    divergence and pass — a vacuous guard, which this repository has shipped before
+    and which is worse than no guard at all because it reads as coverage.
+    """
+    if not RUN_FIELDS_TS.is_file():
+        raise AssertionError(f"cannot read the frontend field list: {RUN_FIELDS_TS}")
+    text = RUN_FIELDS_TS.read_text(encoding="utf-8")
+    block = re.search(
+        r"export const RUN_FIELDS[^=]*=\s*\[(.*?)\n\]\s*as const;", text, re.S
+    )
+    if block is None:
+        raise AssertionError(
+            "could not locate the `export const RUN_FIELDS = [ ... ] as const;` block "
+            f"in {RUN_FIELDS_TS} — the declaration was renamed or reshaped, so this "
+            "parity test is no longer measuring anything and must be repaired, not "
+            "skipped"
+        )
+    paths = set(re.findall(r"""path:\s*['"]([^'"]+)['"]""", block.group(1)))
+    if not paths:
+        raise AssertionError(
+            f"parsed ZERO paths out of RUN_FIELDS in {RUN_FIELDS_TS} — refusing to "
+            "compare two empty sets and report agreement"
+        )
+    return paths
+
+
+def test_the_run_workspace_offers_exactly_the_paths_the_server_accepts():
+    """THE CROSS-LANGUAGE PARITY CHECK, and the one thing nothing else held.
+
+    The server pins its writable set with a literal
+    (``test_the_run_writable_paths_are_derived_from_the_extractor_field_map``) and the
+    frontend pins its own with a literal
+    (``apps/web/src/__tests__/run-workspace.test.tsx``) — but until this test, NOTHING
+    compared the two. Both suites stayed green while the screen offered three of the
+    five paths the route accepted, which is the exact defect this slice exists to
+    correct, and both would stay green again if the server's set grew to six.
+
+    ``RUN_WRITABLE_FIELD_PATHS`` is the AUTHORITY — it is what the route enforces, and
+    it is derived, not hand-written. A path it accepts that the screen does not offer
+    is an unreachable field; a path the screen offers that it does not accept is a
+    control whose only outcome is a 422. Both are failures, so the assertion is
+    set EQUALITY in both directions and not a subset test.
+
+    This is a text parse of a TypeScript file, so it is a check on the DECLARATION and
+    not on the rendered DOM. The rendered controls are pinned against the same
+    declaration in ``run-workspace.test.tsx`` ("offers a control for every path the
+    server accepts"); together the two close the loop.
+    """
+    offered = _run_fields_ts_paths()
+    assert offered == routes.RUN_WRITABLE_FIELD_PATHS, (
+        "the Run workspace and the PATCH route disagree about the writable set — "
+        f"offered only: {sorted(offered - routes.RUN_WRITABLE_FIELD_PATHS)}, "
+        f"accepted only: {sorted(routes.RUN_WRITABLE_FIELD_PATHS - offered)}"
+    )
 
 
 def test_every_run_writable_path_resolves_to_a_typed_node_in_the_official_schema():

@@ -536,13 +536,25 @@ def field_level(path: str) -> str:
     ``LEVEL_UNCLASSIFIED`` IS A REAL ANSWER AND IS NOT AN OVERSIGHT. Two families of
     field-map key are in neither list, for two different reasons:
 
-    * ``system.configuration.*`` (``detector_model``, ``monochromator_crystal``,
-      ``n_scans``, ``proposal_id``, ``session_id``) and ``timestamps.created_utc``
-      are emitted by the real extractor (``extract/structured.FIELD_MAP``) and the
-      contract assigns them to neither level. Guessing would be the unevidenced
-      inference ``CLAUDE.md`` §5 forbids: whether two runs of one experiment may
-      legitimately differ in detector model is a scientific question this repository
-      has no answer to.
+    * ``system.configuration.*`` — SIX fields, not the five this list used to name:
+      ``detector_model``, ``monochromator_crystal``, ``spectrometer_geometry``,
+      ``n_scans``, ``proposal_id``, ``session_id``. The behaviour was always correct
+      (the prefix test covers the whole namespace); only this prose undercounted, and
+      it was found by enumerating ``extract/structured.FIELD_MAP`` rather than reading
+      it. They are emitted by the real extractor and the contract assigns them to
+      neither level. Guessing would be the unevidenced inference ``CLAUDE.md`` §5
+      forbids: whether two runs of one experiment may legitimately differ in detector
+      model is a scientific question this repository has no answer to. The question is
+      written out per field, with what each answer would unlock, in
+      ``docs/run-scope-decision-packet.md``.
+    * ``timestamps.created_utc`` is also unclassified, and it is the one member of this
+      list that does NOT need a scientific answer — stated here because grouping it
+      with the six made it look as though it did. The official schema REQUIRES it and
+      gives it no description, ``export.py`` already defaults it to the export time via
+      ``setdefault``, and an unclassified field is not inherited — so it is a
+      record-creation stamp, not an inherited scientific value. The consequence, logged
+      rather than fixed here: a creation time recorded in a source sheet is dropped on
+      the fan-out path and replaced by the export time.
     * anything else a future extractor emits, which defaults to unclassified rather
       than to a level — fail-closed, so a new field is inherited by nobody until
       somebody decides.
@@ -3476,14 +3488,29 @@ def load_experiment(experiment_id: str, session_id: str | None = None) -> Experi
         # happened to list. Hydration cannot invent a record: it writes back only
         # rows this application stored, and never a canonical example id.
         #
-        # AND A MISS STAYS A 404 WHEN THE DATABASE IS DOWN. `_hydrate_ordinary_scope`
-        # returns 0 rather than raising on a failed read, so this returns `None` and
-        # the route answers "not found" — which is what it answered before durable
-        # storage existed. It must not become a 500: "we could not check" and "it is
-        # not here" look identical to a client holding a stale link, and only one of
-        # them is a server error.
-        if session_id is not None or _hydrate_ordinary_scope() == 0:
+        # THE ANSWER IS THE FILE, NEVER THE COUNT, and that distinction is the whole
+        # of this branch. `_hydrate_ordinary_scope` returns how many directories THIS
+        # CALL wrote across the WHOLE SCOPE — it says nothing about the record being
+        # asked for. This used to short-circuit on `... == 0`, so a zero count
+        # returned `None` without ever re-checking the file, and the record screen's
+        # SEVEN concurrent per-record reads made that routine on the first burst after
+        # a pod roll: whichever read hydrated first wrote every missing directory, and
+        # each sibling that reached its own hydrate afterwards restored nothing,
+        # counted 0, and answered 404 for a record whose `experiment.json` was on disk
+        # at that instant. Measured at 6 of 7. The count is also wrong in the other
+        # direction — a sibling that restored a DIFFERENT record returns non-zero and
+        # says nothing about this one — so it is not consulted at all.
+        #
+        # AND A MISS STILL STAYS A 404 WHEN THE DATABASE IS DOWN, by the same line
+        # rather than despite it. `_hydrate_ordinary_scope` returns 0 rather than
+        # raising on a failed read and writes nothing, so the file is still absent, the
+        # re-check fails and the route answers "not found" — which is what it answered
+        # before durable storage existed. It must not become a 500: "we could not
+        # check" and "it is not here" look identical to a client holding a stale link,
+        # and only one of them is a server error.
+        if session_id is not None:
             return None
+        _hydrate_ordinary_scope()
         if not state_path.exists():
             return None
     return Experiment.from_state(

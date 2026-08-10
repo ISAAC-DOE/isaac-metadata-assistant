@@ -111,7 +111,26 @@ export function isRecordPath(path: string | undefined): boolean {
 export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): DownCopy {
   const status = error?.status;
 
-  if (status === 404 && isRecordPath(error?.path)) {
+  /*
+   * AN HTML-BODIED 404 IS NOT ISAAC'S 404, and until this guard existed both 404
+   * branches below treated it as one.
+   *
+   * `httpError` copies the status and nothing else, so a sign-in page served with a
+   * 404 by the edge arrived here indistinguishable from `{"error":
+   * "experiment_not_found"}` — and on a record path it was reported to the reader as
+   * "Record Not Found — this experiment id is not in the workspace". That is a
+   * definitive claim about a record's existence, made from a response that never
+   * reached the application. `api.ts:498-503` already refuses to read a typed reason
+   * out of such a response for exactly this reason; this is the same rule applied to
+   * the copy, not a new one.
+   *
+   * The `auth` branch below is where it lands instead, which is the honest place: the
+   * signal actually observed is HTML on an API path, and that branch says so and
+   * offers the reload that re-enters the identity flow.
+   */
+  const interceptedByEdge = error?.htmlIntercept === true;
+
+  if (status === 404 && !interceptedByEdge && isRecordPath(error?.path)) {
     return {
       kind: 'not_found',
       title: 'Record Not Found',
@@ -137,6 +156,9 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * not necessarily the scope the failed request carried, and naming a cause we did
    * not observe is the same defect as the copy this replaces.
    *
+   * AN HTML-BODIED 404 DOES NOT LAND HERE — see `interceptedByEdge` above. Its first
+   * sentence would be false of one: the ISAAC API did not answer, an intercept did.
+   *
    * A pathless 404 lands here too. Every `ApiError` this client raises carries a
    * path (`httpError`, `readJson` and `request`'s network branch all pass one), so
    * in production that is the case where the failure did not come from this client
@@ -146,7 +168,7 @@ export function downCopy(error?: ApiError, hosted: boolean = isHostedBuild): Dow
    * cause, but that is the cause we just said we cannot establish. The callers that
    * pass `onRetry` still render Retry.
    */
-  if (status === 404) {
+  if (status === 404 && !interceptedByEdge) {
     return {
       kind: 'path_not_found',
       title: 'Not Found',
