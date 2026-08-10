@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import functools
 import hashlib
 import json
 import os
@@ -31,7 +32,7 @@ from isaac_records.complete import (
     is_descriptor_shaped,
     is_series_shaped,
 )
-from isaac_records.draft_validator import validate_draft
+from isaac_records.draft_validator import UPLOADED_BY_PATH, validate_draft
 from isaac_records.export import export_draft
 from isaac_records.extract.draft_builder import build_draft
 from isaac_records.extract.structured import FIELD_MAP as EXTRACTOR_FIELD_MAP
@@ -2665,6 +2666,46 @@ RUN_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
 )
 
 
+#: THE COMPLETE SET OF NAMESPACED ADDRESSES A RUN MAY RECORD AN OVERRIDE AT.
+#:
+#: The mirror image of :data:`RUN_WRITABLE_FIELD_PATHS`, derived the same way and for
+#: the same reason. An override displaces an INHERITED value, so the admissible set is
+#: the experiment-level half of the split rather than the run-level half.
+#:
+#: TWO GATES ON THE FIELD HALF, AND THE LESSON IS ALREADY WRITTEN DOWN ABOVE — read it
+#: before touching this. ``field_level`` is a segment-aware PREFIX test, so on its own
+#: it answers ``LEVEL_EXPERIMENT`` for ``sample.material.typo`` and for ``sample.``
+#: just as readily as for ``sample.material.name``. Membership in
+#: ``EXTRACTOR_FIELD_MAP`` is what makes the address a REAL official field path, and
+#: both gates are applied here. Without the first gate this route would store a
+#: confirmed override at a path the official schema closes, and the run would then be
+#: unexportable — the same wedge ``context.typo_K`` produced on the edit route, with
+#: the one difference that the clear operation below can undo it.
+#:
+#: THE BLOCK HALF IS FILTERED, NOT COPIED. Iterating ``EXPERIMENT_LEVEL_BLOCKS`` alone
+#: would be tautological, so the comprehension runs over BOTH block tuples and lets
+#: ``block_level`` decide. That is not decoration: it means moving ``tags`` from the
+#: experiment tuple to the run tuple updates this set from the one place the
+#: classification lives, instead of leaving a second copy of the decision here.
+#:
+#: FAIL-CLOSED, exactly as its sibling. An address the contract classifies as neither
+#: level — ``system.configuration.*``, ``timestamps.created_utc``, ``meta``,
+#: ``pending``, ``implicit``, ``links``, ``block_evidence`` — is not overridable until
+#: somebody decides, and it is never guessed into a level here.
+EXPERIMENT_OVERRIDABLE_ADDRESSES: frozenset[str] = frozenset(
+    [
+        ws.field_address(path)
+        for path, _coercer in EXTRACTOR_FIELD_MAP.values()
+        if ws.field_level(path) == ws.LEVEL_EXPERIMENT
+    ]
+    + [
+        ws.block_address(key)
+        for key in (*ws.EXPERIMENT_LEVEL_BLOCKS, *ws.RUN_LEVEL_BLOCKS)
+        if ws.block_level(key) == ws.LEVEL_EXPERIMENT
+    ]
+)
+
+
 #: The exact call Starlette's ``JSONResponse.render`` makes, transcribed rather than
 #: approximated — ``json.dumps(content, ensure_ascii=False, allow_nan=False,
 #: indent=None, separators=(",", ":")).encode("utf-8")``.
@@ -3230,6 +3271,477 @@ def patch_run(
             return stale  # another writer won the race; this edit was not applied
         response.headers["ETag"] = f'"{run.version_token()}"'
         return {"run": _run_view(exp, run)}
+
+
+# --- overriding ONE inherited record-level value on ONE run --------------------
+#
+# WHAT IS AND IS NOT AUDITED HERE, STATED WHERE A READER MEETS IT rather than left to
+# be discovered. An override is meant to be an audited act, and two thirds of that is
+# real: ``Override`` stores ``recorded_utc`` (when it was recorded) and ``displaced``
+# (the inherited payload it displaced, deep-copied at capture, never refreshed). The
+# third — WHO recorded it — IS NOT STORED, and no field is stamped with a guess.
+#
+# The reason is not oversight and it is not laziness. This application plumbs no
+# per-request user identity at all: the edge supplies Authentik headers and ISAAC
+# consumes NONE of them, and two of the seven arrived carrying the client's own value
+# untouched (``docs/identity-trust-contract.md`` §6A). So there is nothing here that
+# could make an actor field true. Stamping one anyway — a username read from an
+# unverified header, a literal ``"user"``, the string ``"unknown"`` — would write a
+# claim about a person into an audit record on no evidence, which is exactly the
+# guessing this project's field-level rules exist to refuse. Absence is the honest
+# encoding, the same way a missing draft value is.
+#
+# ADDING ONE IS A DECISION GATED ON THE IDENTITY WORK, not a follow-up ticket for
+# whoever next opens this file. And it is not free even then: ``Override`` is inside
+# ``_run_signature_payload``, so a new field changes the authoritative signature of
+# every override already stored and bumps every affected run's ``rev`` on the next
+# save. Whoever adds it owns that migration.
+
+
+#: The JSON type names the vendored official schema uses, mapped to what a parsed
+#: request body would actually be.
+_JSON_TYPE_TO_PYTHON: dict[str, type | tuple[type, ...]] = {
+    "object": dict,
+    "array": list,
+    "string": str,
+    "boolean": bool,
+    "integer": int,
+    "number": (int, float),
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _official_block_type(key: str) -> str | None:
+    """The JSON type the OFFICIAL SCHEMA declares for one top-level block, or ``None``.
+
+    DERIVED, NOT HAND-WRITTEN, and the derivation is doing real work rather than
+    showing off. Both overridable blocks are top-level official properties —
+    ``attribution`` is declared ``object`` and ``tags`` ``array`` — and a payload of
+    the wrong one is not merely invalid later, it REACHES A CRASH: the draft
+    validator's attribution branch guards the server-stamped-identity check with an
+    ``isinstance`` and then reads ``attribution.get("contributors")`` unguarded, so a
+    LIST stored at ``attribution`` raises ``AttributeError`` inside the deterministic
+    core the moment anything checks that run. That is a 500 out of the truth plane
+    reached from a stored document, so the type is gated before the write.
+
+    Reading the schema rather than transcribing it means the gate follows a schema
+    refresh instead of silently disagreeing with it. ``None`` means the schema
+    declares no type for that key, which the caller treats as fail-closed — see
+    :func:`_refuse_override_payload`.
+    """
+    try:
+        schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
+        declared = ((schema.get("properties") or {}).get(key) or {}).get("type")
+    except (OSError, ValueError):  # unreadable or unparseable vendored schema
+        return None
+    return declared if isinstance(declared, str) else None
+
+
+def _not_overridable(address: object) -> JSONResponse:
+    """A 422 naming the address, for anything that cannot carry an override.
+
+    ONE refusal for four distinct causes, deliberately: a malformed address, a
+    run-level one, one the contract classifies as neither level, and a well-formed
+    record-level-LOOKING path that is not a real official field. A client's remedy is
+    the same in all four — name an address the run view actually reports under
+    ``inherited`` — so splitting them would be four names for one repair.
+    """
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "not_overridable",
+            "address": str(address),
+            "message": (
+                "This address cannot hold a run override. Only a record-level value "
+                "a run INHERITS can be overridden, named exactly as the run's "
+                "`inherited` map reports it — `field:<official.dotted.path>` or "
+                "`block:attribution` / `block:tags`. A run's own fields are edited on "
+                "the run instead, a misspelt or invented path is refused rather than "
+                "stored, and an address the contract assigns to neither level is not "
+                "guessed into one. Nothing was written."
+            ),
+        },
+    )
+
+
+def _refuse_override_payload(kind: str, name: str, payload: object) -> JSONResponse | None:
+    """A 422 if this payload cannot be stored at this address, else ``None``.
+
+    THREE GATES, and each one closes something measured rather than imagined.
+
+    1. **Storable at all** — the shared :func:`_is_storable_value`, so ``NaN``,
+       ``Infinity``, a lone surrogate, an absurdly nested value and an oversized one
+       are refused here for the same reasons they are refused on the run edit route.
+       An override payload lands in the same document, is walked by the same signature
+       hash, and is rendered by the same response serializer.
+
+    2. **The right SHAPE for the namespace.** A ``field:`` payload is a draft field
+       envelope; a ``block:`` payload is the block itself.
+
+       The envelope check is NOT re-implemented here. It runs the deterministic draft
+       validator over a probe draft carrying only this field and keeps the findings
+       filed against that field, so the five legal statuses, "status 'missing' but a
+       value is present", "status 'verified' but value is null" and "verified field has
+       no observed evidence or user confirmation" are the truth plane's own rules
+       rather than a second copy of them that would drift. That last one matters most:
+       it is what stops this operation storing a `verified` scientific value carrying
+       no evidence, which is the whole no-guessing rule the draft format exists to
+       enforce. The probe's ``meta.*`` findings are discarded — a probe draft has no
+       record-type stamp and that is not this field's problem.
+
+       The block check is the schema-declared JSON type (:func:`_official_block_type`),
+       fail-closed when the schema declares none.
+
+    3. **The server-stamped identity is refused even inside a block.** ``attribution``
+       is overridable and ``attribution.uploaded_by`` is a field no client may author:
+       the schema declares it stamped from an authenticated identity, and this
+       application has none to stamp it with. The refusal is the draft validator's own
+       — the same probe, filtered to that one finding — so this route holds a reference
+       to the rule and not a copy of it. It is checked AFTER the type gate on purpose:
+       the validator's attribution branch would raise on a non-dict.
+
+    WHAT THIS DOES NOT DO. It does not decide whether the value is scientifically
+    right, and it does not run the block-evidence coverage checks. Those legitimately
+    depend on evidence the EXPERIMENT carries — a contributor's provenance lives in the
+    experiment's ``block_evidence``, which a probe draft holding one block does not
+    have — so running them here would refuse a perfectly good override for evidence
+    that is present. The run check and the export gate remain the authority, and an
+    override they refuse is stored, visible, refused at the gate, and removable by the
+    clear operation below. That is the same posture as any other unfinished draft
+    content, and it is fail-closed at the boundary that mints an official record.
+    """
+    if not _is_storable_value(payload):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "unrepresentable_value",
+                "address": (
+                    ws.field_address(name)
+                    if kind == ws.ADDRESS_FIELD
+                    else ws.block_address(name)
+                ),
+                "message": (
+                    "This override cannot be stored. Either it cannot be represented "
+                    "in JSON — `NaN`, `Infinity` and `-Infinity` are accepted by some "
+                    "parsers but are not JSON, and a record containing one could not "
+                    "be read back or exported — or it nests more deeply, or is larger, "
+                    "than a stored value may. Nothing was written."
+                ),
+            },
+        )
+
+    if kind == ws.ADDRESS_FIELD:
+        where = f"fields.{name}"
+        findings = [
+            message
+            for at, message in validate_draft({"fields": {name: payload}}).errors
+            if at == where
+        ]
+        if findings:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "invalid_envelope",
+                    "address": ws.field_address(name),
+                    "findings": findings,
+                    "message": (
+                        "A record-level field override must be a draft field envelope "
+                        "— `{\"value\": …, \"status\": …, \"evidence\": [ … ]}` — and "
+                        "this one is not one the no-guessing rules accept. The "
+                        "findings are the deterministic draft validator's own words. "
+                        "Nothing was written."
+                    ),
+                },
+            )
+        return None
+
+    declared = _official_block_type(name)
+    expected = _JSON_TYPE_TO_PYTHON.get(declared or "")
+    # `bool` is a subclass of `int`, so it satisfies an `integer`/`number` check it has
+    # no business satisfying. Excluded unless the schema actually declared `boolean`.
+    if (
+        expected is None
+        or not isinstance(payload, expected)
+        or (declared != "boolean" and isinstance(payload, bool))
+    ):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_block_payload",
+                "address": ws.block_address(name),
+                "expected_type": declared,
+                "message": (
+                    "A record-level block override must be the block itself, of the "
+                    "type the official schema declares for it — an object for "
+                    "`attribution`, an array of labels for `tags`. A payload of "
+                    "another type is refused rather than stored: it has no valid "
+                    "shape in an exported record, and the deterministic checks that "
+                    "read it are entitled to assume the declared one. Nothing was "
+                    "written."
+                ),
+            },
+        )
+
+    identity_findings = [
+        message
+        for at, message in validate_draft({name: payload}).errors
+        if at == UPLOADED_BY_PATH
+    ]
+    if identity_findings:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_block_payload",
+                "address": ws.block_address(name),
+                "expected_type": declared,
+                "findings": identity_findings,
+                "message": (
+                    "This block override names a field no client may author. The "
+                    "finding is the deterministic draft validator's own words. "
+                    "Nothing was written."
+                ),
+            },
+        )
+    return None
+
+
+def _override_address(body: dict) -> tuple[str, str, str] | None:
+    """``(address, kind, name)`` for an admissible address, else ``None``.
+
+    BOTH GATES, in the order that makes the second safe: membership in
+    :data:`EXPERIMENT_OVERRIDABLE_ADDRESSES` first, which is what makes
+    ``parse_address`` below unable to raise — every member is well-formed by
+    construction, because every member was BUILT by ``field_address`` or
+    ``block_address``.
+    """
+    address = body.get("address")
+    if not isinstance(address, str) or address not in EXPERIMENT_OVERRIDABLE_ADDRESSES:
+        return None
+    kind, name = ws.parse_address(address)
+    return address, kind, name
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/overrides",
+    tags=[TAG_EXPERIMENTS],
+    summary="Override One Inherited Value on a Run",
+    description=(
+        "Records that ONE run deliberately holds its own value at ONE record-level "
+        "address, instead of the value it inherits. Returns the refreshed run and "
+        "when the override was recorded.\n\n"
+        "Nothing is copied down. The run stores the override and only the override, "
+        "so every OTHER record-level value it holds still resolves from the record "
+        "and still changes when the record does. The override itself does not: it "
+        "keeps the value you gave it, and it keeps a copy of the inherited value it "
+        "displaced at the moment it was recorded, which the run view reports as "
+        "`displaced_payload` beside the record's current `inherited_payload`. The "
+        "two legitimately differ once the record-level value is edited afterwards.\n\n"
+        "WHAT IS RECORDED, AND WHAT IS NOT. The time of the override and the value "
+        "it displaced are stored. WHO recorded it is NOT: this application receives "
+        "no verified user identity, so no name is attached rather than an unverified "
+        "one being attached.\n\n"
+        "Requires `confirmed_by_user: true` and THE RUN's current `ETag` in "
+        "`If-Match` — not the record's. Omitted is `428`, malformed is `400`, and "
+        "stale is `412` with nothing written and the run's current `ETag` echoed.\n\n"
+        "`address` is spelt exactly as the run's `inherited` map spells it — "
+        "`field:<official.dotted.path>`, `block:attribution` or `block:tags`. "
+        "Appearing in that map is where a client READS the spelling, and it is "
+        "neither necessary nor sufficient: `block:tags` is overridable but is absent "
+        "from the map until the record carries a tag, and `field:system.domain` is "
+        "reported there but is NOT overridable, because the set of overridable field "
+        "paths is the deterministic extractor's own map of official paths and that one "
+        "is not in it. A run-level address, a misspelt or invented path, and one the "
+        "contract assigns to neither level are each rejected with `422` naming the "
+        "address; a run's own fields are edited on the run instead. A "
+        "`field:` payload must be a draft field envelope the no-guessing rules "
+        "accept — a `verified` value carrying no evidence is refused, not stored — "
+        "and a `block:` payload must be the block itself, of the type the official "
+        "schema declares for it. Nothing is written on any refusal.\n\n"
+        "Recording the same override twice is a no-op: the recorded time is not "
+        "restamped and the run's revision does not advance."
+    ),
+    response_description=(
+        "The refreshed run and the override's recorded time, with the run's new "
+        "`ETag`."
+    ),
+    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
+)
+def post_run_override(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"address\": \"<field:… or block:…>\", "
+            "\"payload\": <the envelope or the block>}`. Omitting "
+            "`confirmed_by_user: true`, naming an address that is not an inherited "
+            "record-level one, or sending a payload of the wrong shape — or one JSON "
+            "cannot represent (`NaN`, `Infinity`, a lone surrogate) — is rejected "
+            "with `422` and writes nothing."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. THE RUN's current `ETag`, exactly as a run read operation "
+            "returned it — not the record's."
+        ),
+    ),
+):
+    # THE ADDRESS IS IN THE BODY, NOT THE URL, and that is a decision rather than a
+    # convenience. An address is ONE namespaced token — `field:sample.material.name`,
+    # `block:tags` — and it is the same token the run view already publishes as the
+    # KEY of its `inherited` map. Keeping it in the body means a client sends back
+    # exactly what it read, with no splitting, no re-joining and no percent-encoding
+    # of the `:` a path segment would need care over. Splitting it into two path
+    # segments would have been clean to route and would have put a SECOND spelling of
+    # an address on the wire, which is the ambiguity `parse_address`'s namespace
+    # prefix exists to remove. Both operations therefore take it the same way, and
+    # this API's own convention is action-named POST sub-paths (`/edit`, `/check`,
+    # `/validate`, `/answers`) rather than CRUD on a URL-identified resource.
+    #
+    # Existence pre-check OUTSIDE the lock, as every other mutation does, so a bogus
+    # id never pins a permanent entry in the never-evicting lock map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        run = exp.get_run(run_id)
+        if run is None:
+            return _run_not_found(experiment_id, run_id)
+        if body.get("confirmed_by_user") is not True:
+            return _confirmation_required("override an inherited value on a run")
+        precondition = _check_if_match(if_match, _RunPrecondition(run, exp.id))
+        if precondition is not None:
+            return precondition
+
+        resolved = _override_address(body)
+        if resolved is None:
+            return _not_overridable(body.get("address"))
+        address, kind, name = resolved
+        refusal = _refuse_override_payload(kind, name, body.get("payload"))
+        if refusal is not None:
+            return refusal
+
+        # THE DOMAIN'S OWN REFUSALS ARE MAPPED EVEN THOUGH THE GATES ABOVE MAKE THEM
+        # UNREACHABLE TODAY, and the point is the day they stop being unreachable.
+        # `EXPERIMENT_OVERRIDABLE_ADDRESSES` is derived from the same two classifiers
+        # `set_run_override` consults, so the two agree by construction — but they are
+        # two expressions of one rule, and if they ever disagree the honest outcome is
+        # the typed refusal a client can act on, not an unhandled exception rendered as
+        # a 500 with a traceback. `NotOverridable` is a `ValueError`, so the malformed
+        # address `parse_address` raises on is caught by the same clause.
+        try:
+            override = exp.set_run_override(run, address, body.get("payload"))
+        except ValueError:
+            return _not_overridable(address)
+
+        # The client's validator is the RUN's, so it is deliberately NOT passed to
+        # `_save_versioned` — see `patch_run` for why echoing a run version as a
+        # record conflict's `expected_version` would be two things wearing one name.
+        _changed, stale = _save_versioned(exp, None)
+        if stale is not None:
+            return stale  # another writer won the race; this override was not recorded
+        response.headers["ETag"] = f'"{run.version_token()}"'
+        return {
+            "run": _run_view(exp, run),
+            "override": {"address": address, "recorded_utc": override.recorded_utc},
+        }
+
+
+@router.post(
+    "/experiments/{experiment_id}/runs/{run_id}/overrides/clear",
+    tags=[TAG_EXPERIMENTS],
+    summary="Restore One Inherited Value on a Run",
+    description=(
+        "Removes ONE run's override at ONE record-level address, so the run "
+        "inherits again. Returns the refreshed run and whether an override was "
+        "actually there.\n\n"
+        "The run goes back to holding NO value at that address — not to holding a "
+        "copy of what the record currently says — so it resolves from the record "
+        "again and follows every later change to it. The value the override "
+        "displaced is not restored onto the run, because it was never taken off "
+        "the record in the first place.\n\n"
+        "Requires `confirmed_by_user: true` and THE RUN's current `ETag` in "
+        "`If-Match` — not the record's. Omitted is `428`, malformed is `400`, and "
+        "stale is `412` with nothing written and the run's current `ETag` echoed.\n\n"
+        "`address` is spelt exactly as the run's `inherited` map spells it, and the "
+        "admissible set is the same one the override operation accepts — appearing in "
+        "that map is neither necessary nor sufficient, for the reasons that operation "
+        "states. Anything that could not hold an override in the first place is "
+        "rejected with `422` naming it, rather than reported as an override that was "
+        "not there. Clearing an "
+        "address that carries no override IS a success — `cleared` is `false`, "
+        "nothing is written, and the run's revision does not advance — so a client "
+        "may repeat the request or retry a dropped one safely."
+    ),
+    response_description=(
+        "The refreshed run and whether an override was removed, with the run's "
+        "current `ETag`."
+    ),
+    responses={**_R_UNAUTHORIZED, **_R_RUN_NOT_FOUND, **_R_PRECONDITION},
+)
+def post_run_override_clear(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    run_id: RunId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"confirmed_by_user\": true, \"address\": \"<field:… or block:…>\"}`. "
+            "Omitting `confirmed_by_user: true`, or naming an address that could not "
+            "hold an override, is rejected with `422` and writes nothing."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. THE RUN's current `ETag`, exactly as a run read operation "
+            "returned it — not the record's."
+        ),
+    ),
+):
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check→lock race window
+        run = exp.get_run(run_id)
+        if run is None:
+            return _run_not_found(experiment_id, run_id)
+        if body.get("confirmed_by_user") is not True:
+            return _confirmation_required("clear an override on a run")
+        precondition = _check_if_match(if_match, _RunPrecondition(run, exp.id))
+        if precondition is not None:
+            return precondition
+
+        resolved = _override_address(body)
+        if resolved is None:
+            return _not_overridable(body.get("address"))
+        address, _kind, _name = resolved
+        try:
+            cleared = exp.clear_run_override(run, address)
+        except ValueError:
+            return _not_overridable(address)
+
+        # SAVED UNCONDITIONALLY, INCLUDING THE NO-OP, and the no-op still does not move
+        # the run: `save_versioned` persists only when the authoritative signature
+        # changed, so a clear that removed nothing writes nothing and leaves `rev`
+        # alone. Branching on `cleared` here would add a second path to the same
+        # outcome and would skip the durable-conflict check on it.
+        _changed, stale = _save_versioned(exp, None)
+        if stale is not None:
+            return stale  # another writer won the race; this clear was not applied
+        response.headers["ETag"] = f'"{run.version_token()}"'
+        return {"run": _run_view(exp, run), "cleared": cleared}
 
 
 @router.post(

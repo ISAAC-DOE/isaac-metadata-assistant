@@ -1063,8 +1063,8 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 45 operations, 79 post-lead paragraphs', () => {
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(45);
+  it('describes the contract it claims to: 47 operations, 87 post-lead paragraphs', () => {
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
       0,
@@ -1397,8 +1397,19 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // never true and is corrected here rather than left to be re-derived by
     // whoever next changes this number. Nothing asserts uniqueness, which is why
     // the false count survived being written down.
-    expect(total).toBe(37527);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(79);
+    // 37,527 -> 41,067 and 45 -> 47 operations: the backend now publishes the two run
+    // OVERRIDE operations — recording that one run holds its own value at one
+    // record-level address, and clearing it so the run inherits again. The override
+    // machinery already existed in the domain model and had no HTTP caller at all. The
+    // post-lead paragraph count moves 79 -> 87: five paragraphs on the override
+    // operation (what is not copied down; what IS and is NOT recorded, since no actor
+    // is stored; the preconditions; the address and payload gates; the idempotence) and
+    // three on the clear (what inheriting again means; the preconditions; that clearing
+    // nothing is a success). Every one of the eight is post-lead and every one renders
+    // INLINE — the `collapsedOps: 0` assertion below is what proves that, and it was
+    // green on the first run rather than being made green.
+    expect(total).toBe(41067);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(87);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);
