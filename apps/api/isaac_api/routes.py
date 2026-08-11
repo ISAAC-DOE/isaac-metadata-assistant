@@ -39,6 +39,7 @@ from isaac_records.extract.draft_builder import build_draft
 from isaac_records.extract.structured import FIELD_MAP as EXTRACTOR_FIELD_MAP
 from isaac_records.ids import is_record_id
 from isaac_records.models import user_confirmation
+from isaac_records.exactness import check_exactness, combined_summary
 from isaac_records.official import EXPECTED_VERSION, schema_path, validate_official
 from isaac_records.portal_warnings import portal_warnings
 
@@ -5331,6 +5332,26 @@ async def post_validate_record(request: Request):
 
     report = validate_official(body, REPO_ROOT)
 
+    # EXACTNESS — a HARD gate, and the ONE thing on this route that is allowed to turn a
+    # schema PASS into an overall refusal. Read this together with the `warnings` note
+    # below, because the two are deliberately opposite and the difference is the point.
+    #
+    # `portal_warnings` is ADVISORY: it may never move `ok`, because doing so would make
+    # this module a second authority on *schema validity*. `check_exactness` is not an
+    # opinion about the science — it reports that a value passes an anchored schema
+    # pattern only because Python's `$` also matches before a trailing newline, and
+    # `export_draft` REFUSES such a record. If this route returned an unqualified `ok:
+    # true` for a record the exporter will not accept, the standalone validator — the
+    # surface an operator points at a candidate file precisely to ask "is this good?" —
+    # would be the one place that says yes to something the product says no to.
+    #
+    # `schema_ok` is preserved ALONGSIDE `ok` and remains exactly `validate_official`'s
+    # verdict, so nothing is lost: a caller that wants the pure schema answer still has
+    # it, under a name that says what it is. `errors` likewise stays schema-only; the
+    # exactness findings are a separate list, because they are not schema errors and
+    # merging them would attribute an ISAAC policy to the upstream schema.
+    exactness = check_exactness(body, REPO_ROOT)
+
     # R2 — the advisory tier, which this route did not run.
     #
     # Until now `post_validate_record` called `validate_official` and NOTHING else, while
@@ -5347,15 +5368,26 @@ async def post_validate_record(request: Request):
     # schema. Same serializer as the per-record route, so the two cannot drift.
     warnings = serialize.warnings_to_dict(portal_warnings(body))
     _log.info(
-        "validate_record outcome=ok ok=%s error_count=%d warning_count=%d",
-        report.ok,
+        "validate_record outcome=ok ok=%s error_count=%d exactness_error_count=%d "
+        "warning_count=%d",
+        report.ok and exactness.ok,
         len(report.errors),
+        len(exactness.errors),
         len(warnings.get("warnings", [])),
     )
     return {
-        "ok": report.ok,
-        "summary": report.render(),
+        "ok": report.ok and exactness.ok,
+        "schema_ok": report.ok,
+        # BOTH verdicts. The web Validator renders `summary` and (today) does NOT
+        # render `exactness_errors`, so a schema-only summary would put a FAIL badge
+        # above a pane reading "PASS — valid against official ISAAC schema v1.05"
+        # with no reason stated anywhere. Shared renderer with `isaac validate
+        # --official` so the two surfaces cannot drift.
+        "summary": combined_summary(report.render(), exactness),
         "errors": [{"path": e.path, "message": e.message} for e in report.errors],
+        "exactness_errors": [
+            {"path": e.path, "message": e.message} for e in exactness.errors
+        ],
         "schema_version": EXPECTED_VERSION,
         **warnings,
     }

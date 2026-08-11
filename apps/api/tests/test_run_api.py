@@ -3526,6 +3526,38 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "in the constant and no future `.match()` caller can reopen the hole. Delete this "
         "entry once the change has landed on main."
     ),
+    "src/isaac_records/export.py": (
+        "Anchored-pattern EXACTNESS gate. All five `pattern` gates in the vendored "
+        "official schema are written `^...$`, and Python's `$` also matches before a "
+        "trailing newline, so every one of them accepts a value it visibly intends to "
+        "refuse — measured with the project's jsonschema 4.26.0. The sharpest case is "
+        "`tags`, whose `^\\S(.*\\S)?$` exists solely to forbid leading/trailing "
+        "whitespace and which refuses a trailing space and a trailing tab while "
+        "admitting a trailing newline; `transform` copies tags verbatim "
+        "(`list(draft[\"tags\"])`) and nothing in export.py or draft_validator.py "
+        "strips, so `\"campaign\\n\"` exported into an official record that then "
+        "validated PASS. `export_draft` now calls `exactness.check_exactness` on the "
+        "ASSEMBLED RECORD (not the draft — same reasoning as "
+        "`_enforce_server_owned_invariant`: transform writes strings from several "
+        "independent places and guarding writers one at a time loses to the one you "
+        "forgot) and REFUSES, naming the field and the character class. It never strips "
+        "— silently repairing a value would mutate metadata the author supplied, which "
+        "CLAUDE.md §5 forbids. The schema is NOT edited (§1) and `validate_official` is "
+        "NOT made stricter, so the official-schema verdict, the audit, `diagnose` and "
+        "the corpus-mutation oracle are all unchanged. Same commit also corrects the "
+        "record_id rejection message, which cited `^[0-9A-Z]{26}$` — a pattern that in "
+        "Python MATCHES the newline-suffixed string it was rejecting. Covered by "
+        "tests/test_schema_string_gate_exactness.py. Delete this entry once landed."
+    ),
+    "src/isaac_records/cli.py": (
+        "`isaac validate --official` now also runs `exactness.check_exactness`, prints "
+        "it under its own heading — explicitly labelled NOT a schema rule, so a local "
+        "ISAAC policy is never attributed to the upstream schema — and folds it into the "
+        "exit code. Without this, the command CLAUDE.md §1 tells users to run would exit "
+        "0 on a record `isaac export` refuses. `portal_warnings` remains advisory and "
+        "still cannot move the exit code; exactness is the only non-schema input added. "
+        "Covered by tests/test_schema_string_gate_exactness.py. Delete once landed."
+    ),
 }
 
 

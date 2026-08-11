@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .draft_validator import UPLOADED_BY_PATH, DraftReport, validate_draft
+from .exactness import check_exactness, describe_characters
 from .ids import is_record_id, new_record_id
 from .official import OfficialReport, validate_official
 
@@ -273,11 +274,74 @@ def export_draft(
 ) -> ExportResult:
     draft_report = validate_draft(draft)
     if record_id is not None and not is_record_id(record_id):
-        draft_report.err("record_id", f"{record_id!r} is not a valid ULID (^[0-9A-Z]{{26}}$)")
+        # The message must NOT quote `^[0-9A-Z]{26}$` as the rule it applied. That was
+        # the old text, and it was false in the one case that matters most: for
+        # `"A"*26 + "\n"` the quoted pattern MATCHES in Python (`$` also matches before a
+        # trailing newline), so the operator was handed a refusal justified by a rule
+        # that, checked as written, accepts their value. On a defect whose whole subject
+        # is "`$` is not what you think", an error message asserting the wrong rule is
+        # the same defect in prose.
+        #
+        # `is_record_id` is the authority for what was actually applied; the message now
+        # describes the requirement in words instead of quoting a regex whose flavour is
+        # the thing in question. `describe_characters` names any control character rather
+        # than echoing it — `repr()` alone would render a raw newline into the terminal.
+        detail = ""
+        if isinstance(record_id, str):
+            lead = record_id[: len(record_id) - len(record_id.lstrip())]
+            trail = record_id[len(record_id.rstrip()):]
+            if lead or trail:
+                detail = (
+                    " It carries surrounding whitespace or control characters: "
+                    f"{describe_characters(lead + trail)}."
+                )
+        draft_report.err(
+            "record_id",
+            f"{record_id!r} is not a valid ULID: exactly 26 characters, each of them "
+            f"an uppercase letter A-Z or a digit 0-9, and nothing before or after "
+            f"them.{detail}",
+        )
     if not draft_report.ok:
         return ExportResult(False, None, None, draft_report, None)
 
     record = transform(draft, record_id=record_id, now=now)
+
+    # EXACTNESS, on the ASSEMBLED RECORD, before official validation.
+    #
+    # The five anchored `pattern` gates in the vendored schema accept one value each
+    # that they visibly intend to refuse, because Python's `$` also matches before a
+    # trailing newline (see `exactness.py` for the measured table and the cause, which
+    # is NOT the search-vs-match difference people usually reach for). `tags` is the
+    # clearest: `transform` above copies it verbatim — `list(draft["tags"])`, no
+    # normalisation anywhere in this module or in `draft_validator` — so `"campaign\n"`
+    # went in at the draft and came out in an official record that then validated PASS.
+    #
+    # CHECKED ON THE OUTPUT, NOT ON THE DRAFT, for the reason
+    # `_enforce_server_owned_invariant` records at length: `transform` writes strings
+    # into the record from several independent places (the `fields` loop's `set_path` to
+    # an arbitrary dotted path, the verbatim `tags` copy, `strip_evidence` over `links`,
+    # `attribution` and `descriptors_outputs`), and guarding writers one at a time loses
+    # to whichever one you did not think of. Guarding the output does not.
+    #
+    # BEFORE `validate_official`, so the refusal names the real problem. Run after, a
+    # newline-bearing record would validate clean and the operator would be told PASS by
+    # one gate and refused by another in the same breath.
+    #
+    # REFUSED, NEVER STRIPPED — `CLAUDE.md` §5. Trimming the value would hand back a
+    # record the author did not write, and a silent repair of scientific metadata is the
+    # exact failure the no-guessing policy exists to prevent.
+    #
+    # Reported through `draft_report` rather than through a new `ExportResult` field:
+    # the offending value ORIGINATES in the draft, every existing caller already renders
+    # `draft_report` on failure (`cli.py`'s "Draft validation failed — nothing exported",
+    # the API's export route), and adding a field would leave those callers silently
+    # dropping the only explanation of the refusal.
+    exactness_report = check_exactness(record, root)
+    if not exactness_report.ok:
+        for err in exactness_report.errors:
+            draft_report.err(err.path, err.message)
+        return ExportResult(False, record, None, draft_report, None)
+
     official_report = validate_official(record, root)
     if not official_report.ok:
         return ExportResult(False, record, None, draft_report, official_report)
