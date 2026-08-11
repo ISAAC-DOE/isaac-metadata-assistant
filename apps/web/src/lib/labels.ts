@@ -366,12 +366,23 @@ export const LABELS = {
    * was written (the server's own message ends "Nothing was written."), and it must
    * not restate the server's API-facing remedy — a reader is not going to send an
    * HTTP header, so the remedy names the product control that opens a session.
+   *
+   * "THIS TAB", NOT "NONE" — corrected 2026-08-11, and the superseded wording is named
+   * so the reason survives. It read "no worked example is open" / "and none is open
+   * right now". The signal behind it is `readTutorialSession()`, which reads
+   * **`sessionStorage`** — deliberately per-tab, so the pointer dies with the tab. The
+   * server's 409 likewise says only that THIS REQUEST carried no scope header. Neither
+   * is evidence about other tabs. A reader running the walkthrough in tab A who hits
+   * this control in tab B was being told that no worked example existed, while theirs
+   * was open and healthy. Same defect, same day, as the one corrected in
+   * `FetchStates.tsx`'s worked-example panel; found because a test asserted the shared
+   * phrase. Fixed here too rather than left as the surviving half.
    */
-  demoScopeRequiredTitle: 'Example not run — no worked example is open',
+  demoScopeRequiredTitle: 'Example not run — this tab has no worked example open',
   demoScopeRequiredBody:
-    'The built-in example records exist only inside a worked example of their own, and none is ' +
-    'open right now — so there was nothing here for this to run. Nothing was written and nothing ' +
-    'changed.',
+    'The built-in example records exist only inside a worked example of their own, and this ' +
+    'browser tab is not in one — so there was nothing here for this to run. Nothing was written ' +
+    'and nothing changed.',
   demoScopeRequiredRemedy:
     'Opening the guided walkthrough opens a worked example, and this control works inside one. ' +
     'It lives in Settings & API → Help & Tutorial.',

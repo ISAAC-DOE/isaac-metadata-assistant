@@ -50,6 +50,7 @@ import {
 import { __resetHealthCache } from '../lib/useHealth';
 import {
   CANONICAL_RESET_IDS,
+  RESET_TITLE_BASE,
   TUTORIAL_SESSION_ID,
   aboutResponse,
   bundleRoutes,
@@ -998,6 +999,15 @@ describe('worked-example session — scope handling', () => {
    * must fail safely: the record is genuinely not in the ordinary workspace, so the
    * screen must say the backend could not give it to them rather than render an empty
    * shell, invent a record, or silently enter a scope it has no session for.
+   *
+   * THE SAFETY ASSERTIONS BELOW ARE THE POINT OF THIS TEST AND ARE UNCHANGED — no
+   * record content, no invented scope, no scoped request, no session opened. What
+   * changed is the SENTENCE the panel shows, and only because the old one was the
+   * wrong explanation for THIS id: "it may not have been created yet" is false-ish
+   * of a record that was created and whose temporary workspace was then discarded.
+   * The new copy is asserted to be at least as careful as the old one — it must not
+   * claim the record exists, is retrievable, or can be restored — and this test now
+   * asserts the absence of record content BY NAME as well as by shape.
    */
   it('a deep link to an example record with no session fails safely', async () => {
     const base = `/api/experiments/${CANONICAL_RESET_IDS[0]}`;
@@ -1027,18 +1037,40 @@ describe('worked-example session — scope handling', () => {
     } as never);
     const view = renderAt(`/record/${CANONICAL_RESET_IDS[0]}`);
 
-    // The honest backend state, not a blank record and not a fabricated one. The app
-    // already has a dedicated 404 state for this, and it is the right one: the id
-    // genuinely is not in the workspace this request addressed.
-    await waitFor(() => expect(view.getByText('Record Not Found')).toBeInTheDocument());
-    expect(view.container.textContent).toMatch(/not in the local workspace/i);
-    // No draft, no field, no value was rendered from nothing.
+    // The honest backend state, not a blank record and not a fabricated one — and now
+    // with the RIGHT account of it: this id is a worked-example id, worked-example
+    // records live only in a temporary workspace, and THIS TAB is not in one.
+    await waitFor(() => expect(view.getByText('Worked Example Not Open')).toBeInTheDocument());
+    const shown = view.container.textContent ?? '';
+    expect(shown).toMatch(/one of the five built-in worked-example records/i);
+    // The panel is honest that the workspace is UNREACHABLE FROM HERE — no weaker than
+    // the sentence it replaces, and it must not hint that the record is still reachable.
+    expect(shown).toMatch(/this page cannot reach it/i);
+    expect(shown).not.toMatch(/still (exists|available)|try again later/i);
+    // …but it must NOT overreach into a global claim. The scope signal is `sessionStorage`
+    // and therefore per-tab, so "none is open" would be a lie to a reader whose
+    // walkthrough is running in another tab — the same defect this panel replaces.
+    expect(shown).toMatch(/this browser tab is not in one/i);
+    expect(shown).not.toMatch(/none is open/i);
+    // The old, wrong explanation is gone rather than merely joined.
+    expect(view.queryByText('Record Not Found')).toBeNull();
+    expect(shown).not.toMatch(/may not have been created yet/i);
+    // No draft, no field, no value was rendered from nothing — by shape…
     expect(view.container.querySelector('.fg-header')).toBeNull();
+    // …and by name: not one character of the example record's own content appears.
+    expect(shown).not.toContain(RESET_TITLE_BASE);
+    expect(view.queryByText(CANONICAL_RESET_IDS[0])).toBeNull();
     // No scope was invented in order to reach it.
     expect(getTutorialScope()).toBeNull();
     expect(sentRequests().filter((r) => r.scope !== undefined)).toEqual([]);
     // and no session was silently opened on the reader's behalf
     expect(sentRequests().map((r) => r.key)).not.toContain(SESSION_CREATE);
+    // The one affordance offered is a real link to a surface that works — not a
+    // "retry"-shaped promise that this record can be fetched after all.
+    expect(view.getByRole('link', { name: LABELS.navExperiments })).toHaveAttribute(
+      'href',
+      '/experiments',
+    );
   });
 
   it('leaving a session stops the scope being carried by later navigation', async () => {

@@ -86,6 +86,19 @@
   gap: 10px;
 }
 
+/* The one action here that is a LINK rather than a button (My Experiments, on the
+   ended-worked-example state). It takes the shared `.btn` shape, so it needs only
+   the two things an anchor brings with it: no underline, and the button's own
+   colour rather than the link colour. Focus styling is deliberately NOT overridden
+   — the global focus ring applies to it exactly as to the buttons beside it. */
+.fetch-state-actions a.fetch-state-link {
+  text-decoration: none;
+  color: inherit;
+}
+.fetch-state-actions a.fetch-state-link.btn-primary {
+  color: #fff;
+}
+
 /* --- Technical Details -------------------------------------------------
    Its OWN box below the message, visually separate from the copy — the same
    collapsed `<details>` convention Settings and Graph Help use. */
