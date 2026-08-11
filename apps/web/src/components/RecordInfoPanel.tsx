@@ -36,7 +36,8 @@
  * rather than offering a control whose only outcome would be a refusal.
  *
  * NO STATE IS CARRIED BY COLOUR. Every state on both panels is a word first —
- * "Record stamp", "No target id", "Not a record id", "Not in this workspace" —
+ * "Record stamp", "No target id", "Not a record id", "Not a relation", "Not in
+ * this workspace" —
  * with a glyph beside it and no colour-only distinction; the type-scale and
  * italic treatments come from `fields.css`, which the rows reuse wholesale so
  * this surface inherits the existing responsive stacking at 640px instead of
@@ -225,13 +226,37 @@ export function RecordInfoPanel({
 
 /* ─────────────────────────────── links ────────────────────────────────────── */
 
-/** One enum member of a link — the stored token, and whether the schema knows it. */
+/**
+ * One enum member of a link — the stored token, and whether the schema knows it.
+ *
+ * THREE STATES, THE SAME THREE `LinkTargetView` RENDERS, in the same vocabulary:
+ * an absent member says the schema requires one, a wrong-typed one is named
+ * "Not a relation" / "Not a basis" and shown exactly as stored, and a token the
+ * schema's enum does not list is flagged beside the token rather than renamed or
+ * silently accepted.
+ */
 function LinkTermView({ term, kind }: { term: LinkTerm; kind: 'relation' | 'basis' }) {
-  if (term.token === null) {
+  const vocabulary = kind === 'relation' ? 'eight relations' : 'twelve bases';
+  if (term.state === 'absent') {
     return (
       <span className="link-term missing">
         <CircleDashed size={12} strokeWidth={2} aria-hidden="true" />
         No {kind}. The official schema requires one.
+      </span>
+    );
+  }
+  if (term.state === 'malformed') {
+    return (
+      <span className="link-term">
+        <span className="link-term-state">
+          <TriangleAlert size={12} strokeWidth={2} aria-hidden="true" />
+          Not a {kind}
+        </span>
+        <span className="link-term-token">{term.text}</span>
+        <span className="link-term-unknown">
+          The official schema declares the {kind} as one of {vocabulary} written as
+          text. This value is not text, and it is shown exactly as stored.
+        </span>
       </span>
     );
   }
@@ -242,8 +267,7 @@ function LinkTermView({ term, kind }: { term: LinkTerm; kind: 'relation' | 'basi
       {!term.known && (
         <span className="link-term-unknown">
           <CircleHelp size={12} strokeWidth={2} aria-hidden="true" />
-          Not one of the {kind === 'relation' ? 'eight relations' : 'twelve bases'} the
-          official schema lists.
+          Not one of the {vocabulary} the official schema lists.
         </span>
       )}
     </span>

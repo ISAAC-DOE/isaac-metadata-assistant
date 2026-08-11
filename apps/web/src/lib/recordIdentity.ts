@@ -62,6 +62,46 @@
  *     value"*, the schema makes it required, and the exporter already supplies
  *     it. It is presented as a stamp here, and no control offers to edit it.
  *
+ * ─── AND WHY A FAN-OUT IS NOT ONE STATE FOR ALL SIX ─────────────────────────
+ *
+ * `routes.py::_detail` sets `fan_out = bool(exp.runs)` and stamps
+ * `artifact_refs["reason"]` for ANY experiment that has a run, exported or not;
+ * `export_units()` then exports one record per run under `target_id=run.id` and
+ * never sets the experiment's own `record_id`, so `exported()` stays false and
+ * this screen never gets a single record to read. That is a fact about THE
+ * RECORD FILE. It is not automatically a fact about a VALUE, and the two must
+ * not be collapsed — this branch once applied `no_single_value` to all six rows,
+ * which told a reader that four values with one provable value had none:
+ *
+ *   * `isaac_record_version` — `export.py::transform` writes the module constant
+ *     `ISAAC_VERSION` into EVERY record unconditionally, and the schema declares
+ *     the property `{"type": "string", "const": "1.05"}`. It cannot differ
+ *     between runs.
+ *   * the classification trio — `meta` is `draft_builder._META`, a module-level
+ *     constant; `resolved_run_draft` layer 3 copies the experiment's `meta` onto
+ *     any run that carries none, and the only route that makes a run calls
+ *     `exp.add_run(label=label)` with no draft at all. `workspace.block_level`
+ *     states it outright: `meta` is "the record-type stamp that is the same for
+ *     every run by construction". It cannot differ between runs either.
+ *
+ * So four rows keep their ordinary before-export state in a fan-out, and only
+ * two take `no_single_value`:
+ *
+ *   * `record_id` — each unit exports under its own `target_id`, so the ids are
+ *     distinct by construction.
+ *   * `timestamps.created_utc` — it is on NEITHER `EXPERIMENT_LEVEL_FIELD_PATHS`
+ *     nor `RUN_LEVEL_FIELD_PATHS`, so `resolved_run_draft` does not carry the
+ *     experiment's stamp onto a run, and each run's record is stamped by
+ *     `transform`'s own `setdefault` when that run is exported. That is also why
+ *     the fan-out branch is tested BEFORE the draft-stamp branch below: the
+ *     draft's stamp reaches no per-run record, so showing it here would present a
+ *     value no exported record will carry.
+ *
+ * Every row's fan-out sentence is its own (`RecordInfoSpec.fanOut.note`), and the
+ * server's sentence is appended to it verbatim rather than reworded. The server's
+ * sentence is about the FILE; each row now states its own claim first, so a
+ * file-level sentence is never left standing in for a value-level one.
+ *
  * WHAT THIS SCREEN CAN ACTUALLY SEE. Only `GET /api/experiments/{id}/artifacts`
  * serves an official record's own top-level values, and it serves them only once
  * the record exists. No route serves the draft's `meta` block — verified by
@@ -139,8 +179,24 @@ export type RecordInfoSource =
   | 'written_at_export'
   /** Real, but this screen does not read it before export. Not a claim of absence. */
   | 'not_read_here'
-  /** This experiment's runs each export their own record, so there is no single value. */
+  /**
+   * This value is minted per record AND this experiment's runs each export their
+   * own record, so the experiment has no single one. Both halves are required: a
+   * fan-out alone does not make a value multi-valued, and a value the exporter
+   * fixes for every record it writes keeps its ordinary state in a fan-out.
+   */
   | 'no_single_value';
+
+/** The state and the sentence one row takes when this experiment's runs fan out. */
+export interface RecordInfoFanOut {
+  source: RecordInfoSource;
+  /**
+   * The row's OWN claim. The server's `artifact_refs.reason` is appended to it
+   * verbatim, so the file-level sentence supports a value-level one rather than
+   * standing in for it.
+   */
+  note: string;
+}
 
 export interface RecordInfoSpec {
   /** The official dotted path, shown demoted beside the label. */
@@ -152,6 +208,15 @@ export interface RecordInfoSpec {
   beforeExport: RecordInfoSource;
   /** Why it is not on screen yet / how it is produced. Never a value. */
   beforeExportNote: string;
+  /**
+   * What this row says when this experiment's runs each export their own record.
+   *
+   * REQUIRED, not optional with a shared default, because the shared default is
+   * exactly the defect: one blanket state for all six rows asserted "no single
+   * value" for four values that provably have one. A future row has to answer
+   * the question rather than inherit an answer.
+   */
+  fanOut: RecordInfoFanOut;
   /** True for a value the exporter owns outright — rendered as a stamp. */
   stamp?: boolean;
 }
@@ -164,6 +229,14 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
     beforeExport: 'written_at_export',
     beforeExportNote:
       'The exporter writes the one version the vendored schema fixes for every record. Nobody is asked for it.',
+    // NOT `written_at_export` here: in a fan-out whose runs have already exported,
+    // "not written yet" is false — every one of those records carries this value.
+    // `not_read_here` is a claim about this screen alone, and it holds whether or
+    // not the runs have exported.
+    fanOut: {
+      source: 'not_read_here',
+      note: 'The exporter writes the same schema-fixed version into every record it writes, so it cannot differ between this experiment’s runs. This screen reads it out of a record, and this experiment has no single one to read.',
+    },
     stamp: true,
   },
   {
@@ -173,6 +246,10 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
     description: 'ULID identifier for the record.',
     beforeExport: 'written_at_export',
     beforeExportNote: 'The exporter mints this when the record is written.',
+    fanOut: {
+      source: 'no_single_value',
+      note: 'Each run exports its own record under its own identifier, so this experiment has no single one.',
+    },
     stamp: true,
   },
   {
@@ -183,6 +260,13 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
     beforeExport: 'not_read_here',
     beforeExportNote:
       'Derived by a stored rule — this build supports one path and stamps the same classification on every draft. This screen reads it from the exported record, so it is shown once the record is written.',
+    // The trailing clause of `beforeExportNote` — "shown once the record is
+    // written" — is a promise a fan-out never keeps, because no experiment-level
+    // record is ever written for one. The state is unchanged; the sentence is.
+    fanOut: {
+      source: 'not_read_here',
+      note: 'The stored rule stamps the same classification on every draft and the export carries it onto every run, so it cannot differ between this experiment’s runs. This screen reads it out of a record, and this experiment has no single one to read.',
+    },
   },
   {
     path: 'record_domain',
@@ -192,6 +276,10 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
     beforeExport: 'not_read_here',
     beforeExportNote:
       'Derived by the same stored rule as the record type, and read from the exported record.',
+    fanOut: {
+      source: 'not_read_here',
+      note: 'Derived by the same stored rule as the record type, so it cannot differ between this experiment’s runs. This screen reads it out of a record, and this experiment has no single one to read.',
+    },
   },
   {
     path: 'source_type',
@@ -201,6 +289,10 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
     beforeExport: 'not_read_here',
     beforeExportNote:
       'Derived by the same stored rule as the record type, and read from the exported record.',
+    fanOut: {
+      source: 'not_read_here',
+      note: 'Derived by the same stored rule as the record type, so it cannot differ between this experiment’s runs. This screen reads it out of a record, and this experiment has no single one to read.',
+    },
   },
   {
     path: 'timestamps.created_utc',
@@ -209,6 +301,10 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
     beforeExport: 'written_at_export',
     beforeExportNote:
       'A record-creation stamp, not a measurement time. The exporter stamps it when the record is written.',
+    fanOut: {
+      source: 'no_single_value',
+      note: 'Each run’s record is stamped when that run is exported, and this experiment’s own draft stamp is not carried onto any of them, so this experiment has no single one.',
+    },
     stamp: true,
   },
 ] as const;
@@ -271,8 +367,11 @@ export interface RecordInfoInput {
  *     says the record does not carry it. Both are statements about a file that
  *     exists.
  *  2. No readable record, but `artifact_refs.reason` is present → this
- *     experiment's runs each exported their own record, so there is no single
- *     value. The server's own sentence is shown verbatim rather than reworded.
+ *     experiment's runs each export their own record. The row takes ITS OWN
+ *     fan-out state — `no_single_value` for the two values minted per record,
+ *     and the ordinary before-export state for the four the exporter or the
+ *     stored rule fixes identically for every run (see the file header). The
+ *     server's own sentence is appended verbatim rather than reworded.
  *  3. Otherwise the spec's own `beforeExport` state applies, with one exception:
  *     `timestamps.created_utc` is shown from the DRAFT when the draft carries
  *     one, because then the exporter's `setdefault` will keep that value rather
@@ -305,7 +404,12 @@ export function recordInfoRows(input: RecordInfoInput): RecordInfoRow[] {
     }
 
     if (typeof fanOutReason === 'string' && fanOutReason !== '') {
-      return { ...spec, value: null, source: 'no_single_value', note: fanOutReason };
+      return {
+        ...spec,
+        value: null,
+        source: spec.fanOut.source,
+        note: `${spec.fanOut.note} ${fanOutReason}`,
+      };
     }
 
     if (spec.path === CREATED_UTC_PATH) {
@@ -361,15 +465,38 @@ export const LINK_BASES: readonly string[] = [
   'unspecified',
 ];
 
-/** One enum-valued member of a link, as it actually arrived. */
-export interface LinkTerm {
-  /** The stored token, verbatim, or `null` when the link carries none. */
-  token: string | null;
-  /** The token with underscores opened up. Mechanical — never a rename. */
-  text: string | null;
-  /** Whether the token is one the schema's own enum declares. */
-  known: boolean;
-}
+/**
+ * One enum-valued member of a link, as it actually arrived.
+ *
+ * THE SAME THREE STATES `LinkTarget` HAS, and deliberately so. This used to be a
+ * single shape with a nullable token, which collapsed two different facts into
+ * one: a link carrying no `rel` and a link carrying `rel: 5` both read
+ * "No relation. The official schema requires one." — a false statement about the
+ * second, where a relation IS present and is merely not text.
+ *
+ * It also used to `trim()` before testing enum membership, so the stored token
+ * `"derived_from "` — which the schema's enum does NOT contain, the enum holding
+ * exact strings — was reported as one the schema lists. `targetOf` had already
+ * taken the opposite and correct decision for `target`; this now matches it. A
+ * stored value is reported as stored, never trimmed into validity.
+ */
+export type LinkTerm =
+  /** No `rel` / `basis` at all. The schema requires one, so the link is incomplete. */
+  | { state: 'absent' }
+  /** Present and not text at all. Shown verbatim, never coerced into a token. */
+  | { state: 'malformed'; text: string }
+  /**
+   * Present as text. `known` is membership of the schema's own enum tested on the
+   * stored string, with nothing stripped from it first.
+   */
+  | {
+      state: 'present';
+      /** The stored token, verbatim. */
+      token: string;
+      /** The token with underscores opened up. Mechanical — never a rename. */
+      text: string;
+      known: boolean;
+    };
 
 export type LinkTarget =
   /** No `target` at all. The schema requires one, so the link is incomplete. */
@@ -385,16 +512,32 @@ export interface LinkView {
   basis: LinkTerm;
   target: LinkTarget;
   notes: string | null;
-  /** True when the schema's three required members are all present and well-formed. */
+  /**
+   * True when the schema's three required members are each PRESENT and of the
+   * kind the schema declares — a text relation, a text basis, a record-id target.
+   *
+   * Enum membership is deliberately NOT folded in. A `rel` the schema does not
+   * list is reported on its own row ("Not one of the eight relations the official
+   * schema lists"), and calling the link "Incomplete" for it would name a
+   * different defect from the one it has. This flag drives that one word.
+   */
   complete: boolean;
 }
 
 function term(raw: unknown, vocabulary: readonly string[]): LinkTerm {
-  if (typeof raw !== 'string' || raw.trim() === '') {
-    return { token: null, text: null, known: false };
-  }
-  const token = raw.trim();
-  return { token, text: token.replace(/_/g, ' '), known: vocabulary.includes(token) };
+  // The same absence test `targetOf` applies, for the same reason: `''` is the
+  // one string a JSON document uses to mean "nothing here", and treating it as a
+  // present-but-unlisted token would report an emptiness as a vocabulary error.
+  // Nothing else is trimmed away — a whitespace-only token is a token that is not
+  // in the enum, exactly as ` ${id} ` is a target that is not a record id.
+  if (raw === undefined || raw === null || raw === '') return { state: 'absent' };
+  if (typeof raw !== 'string') return { state: 'malformed', text: JSON.stringify(raw) };
+  return {
+    state: 'present',
+    token: raw,
+    text: raw.replace(/_/g, ' '),
+    known: vocabulary.includes(raw),
+  };
 }
 
 function targetOf(raw: unknown): LinkTarget {
@@ -431,7 +574,7 @@ export function readLinks(record: Record<string, unknown> | null): LinkView[] {
       basis,
       target,
       notes: typeof notesRaw === 'string' && notesRaw.trim() !== '' ? notesRaw.trim() : null,
-      complete: rel.token !== null && basis.token !== null && target.state === 'ok',
+      complete: rel.state === 'present' && basis.state === 'present' && target.state === 'ok',
     });
   });
   return out;

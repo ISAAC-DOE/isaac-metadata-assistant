@@ -11,6 +11,9 @@
  *     `isaac_record_version` — not a disabled one, none — because the exporter
  *     writes them and inviting an edit would misdescribe who owns the value;
  *   · a value this client does not fetch reads as not-fetched, NOT as missing;
+ *   · a fan-out reads as "no single value" ONLY on the two values minted per
+ *     record. The version and the classification trio have one value across every
+ *     run, and saying they have none would be a false statement to a scientist;
  *   · a link target that is not a record id is refused with the schema's own
  *     reason, shown verbatim, and never resolved as though it were valid;
  *   · a target this app cannot find is described by the SET IT SEARCHED, never
@@ -205,7 +208,7 @@ describe('Record Info — the six top-level values, and where each comes from', 
     expect(section.textContent).not.toMatch(/unknown|n\/a|TBD|—\s*missing/i);
   });
 
-  it('states a fan-out in the server’s own words rather than inventing a record id', () => {
+  it('says "no single value" in a fan-out only where there is none, in the server’s own words', () => {
     const reason = 'This record’s runs each export their own official record.';
     renderInfo({
       detail: detail({
@@ -215,9 +218,29 @@ describe('Record Info — the six top-level values, and where each comes from', 
       }),
     });
     const section = open('Record Info');
-    const row = infoRow(section, 'record_id');
-    expect(within(row).getByText('no single value for this experiment')).toBeInTheDocument();
-    expect(within(row).getByText(reason)).toBeInTheDocument();
+
+    // Minted per record: each run exports under its own id and is stamped as it
+    // is written, so the experiment has no single one of either.
+    for (const path of ['record_id', 'timestamps.created_utc']) {
+      expect(
+        within(infoRow(section, path)).getByText('no single value for this experiment'),
+      ).toBeInTheDocument();
+    }
+
+    // Fixed for every run — by the exporter for the version, by the stored `meta`
+    // rule for the trio. Telling a scientist these have no single value is a
+    // false statement, and this panel made it for one commit.
+    for (const path of ['isaac_record_version', 'record_type', 'record_domain', 'source_type']) {
+      const row = infoRow(section, path);
+      expect(within(row).getByText('not read on this screen')).toBeInTheDocument();
+      expect(row.textContent).not.toMatch(/no single value/);
+    }
+
+    // The server's sentence still reaches every row, word for word — after that
+    // row's own claim, not in place of one.
+    const rows = Array.from(section.querySelectorAll<HTMLElement>('[data-record-info-path]'));
+    expect(rows).toHaveLength(6);
+    for (const row of rows) expect(row.textContent).toContain(reason);
   });
 
   it('quotes the schema’s own description where the schema gives one', () => {
@@ -332,6 +355,29 @@ describe('Relationships — the links block, read from the record', () => {
     ).toBeInTheDocument();
     expect(
       within(section).getByText(/Not one of the twelve bases the official schema lists/),
+    ).toBeInTheDocument();
+  });
+
+  it('names a wrong-typed relation as present, never as one the record does not carry', async () => {
+    stubFetchRoutes(workspaceRoutes);
+    renderLinks({ links: [{ rel: 5, target: ID_B, basis: 'unspecified' }] });
+    const section = open('Relationships');
+    await within(section).findByText(/Points at/);
+    expect(within(section).getByText('Not a relation')).toBeInTheDocument();
+    // Shown exactly as stored, like a malformed target is.
+    expect(within(section).getByText('5')).toBeInTheDocument();
+    // The absent-member sentence would be false here: a relation IS present.
+    expect(section.textContent).not.toMatch(/No relation\. The official schema requires one/);
+    expect(within(section).getByText('Incomplete')).toBeInTheDocument();
+  });
+
+  it('flags a relation the enum does not hold EXACTLY, instead of trimming it in', async () => {
+    stubFetchRoutes(workspaceRoutes);
+    renderLinks({ links: [{ rel: 'derived_from ', target: ID_B, basis: 'unspecified' }] });
+    const section = open('Relationships');
+    await within(section).findByText(/Points at/);
+    expect(
+      within(section).getByText(/Not one of the eight relations the official schema lists/),
     ).toBeInTheDocument();
   });
 

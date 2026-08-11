@@ -5,13 +5,18 @@
  * Three properties are what this file exists for, and each of them is a way the
  * surface could lie to a scientist:
  *
- *  1. A TARGET IS NOT REPAIRED OR GUESSED. `links[].target` carries the same
+ *  1. NOTHING IS REPAIRED OR GUESSED. `links[].target` carries the same
  *     `^[0-9A-Z]{26}$` pattern `record_id` does; anything else is reported as
- *     what it is and never completed, trimmed into shape, or dropped.
- *  2. "NOT WRITTEN YET", "NOT READ HERE" AND "NOT IN THE RECORD" ARE THREE
- *     DIFFERENT CLAIMS. Collapsing them would let the panel assert a record is
- *     missing a required value when the truth is only that this client does not
- *     fetch it.
+ *     what it is and never completed, trimmed into shape, or dropped. `rel` and
+ *     `basis` are held to the same rule against the schema's two closed enums,
+ *     which hold EXACT strings — a stored `"derived_from "` is not one of them,
+ *     and trimming it before the membership test would report a schema-invalid
+ *     value as a listed one.
+ *  2. "NOT WRITTEN YET", "NOT READ HERE", "NOT IN THE RECORD" AND "NO SINGLE
+ *     VALUE" ARE FOUR DIFFERENT CLAIMS. Collapsing them would let the panel
+ *     assert a record is missing a required value when the truth is only that
+ *     this client does not fetch it — or, as the fan-out branch once did, assert
+ *     that four values with one provable value have none.
  *  3. A MALFORMED ARTIFACT DOES NOT TAKE THE SCREEN DOWN. The record is a file
  *     this process did not write.
  */
@@ -221,20 +226,104 @@ describe('recordInfoRows — six addresses, and one state each', () => {
     expect(row.source).toBe('missing_from_record');
   });
 
-  it('gives the fan-out its own state, carrying the server’s own sentence', () => {
-    const reason = 'This record’s runs each export their own official record.';
-    const rows = recordInfoRows({
+  const FAN_OUT_REASON = 'This record’s runs each export their own official record.';
+
+  function fanOutRows() {
+    return recordInfoRows({
       detail: detail({
         exported: true,
         record_id: null,
-        artifact_refs: { record_filename: null, sidecar_filename: null, reason },
+        artifact_refs: { record_filename: null, sidecar_filename: null, reason: FAN_OUT_REASON },
       }),
       groups: NO_GROUPS,
       artifacts: artifacts(null),
     });
-    expect(rows.every((r) => r.source === 'no_single_value')).toBe(true);
-    expect(rows.every((r) => r.note === reason)).toBe(true);
-    expect(rows.every((r) => r.value === null)).toBe(true);
+  }
+
+  it('gives ONLY the two values minted per record the fan-out’s "no single value"', () => {
+    // THE WHOLE MAP, not a filter over the two. An assertion that named only the
+    // two rows expected to fan out would still pass if a third joined them, which
+    // is exactly the regression this replaces: the branch used to apply
+    // `no_single_value` to all six, and `rows.every(r => r.source ===
+    // 'no_single_value')` PASSED on that.
+    expect(Object.fromEntries(fanOutRows().map((r) => [r.path, r.source]))).toEqual({
+      // `export.py::transform` writes `ISAAC_VERSION` into every record it writes
+      // and the schema fixes it as `const: "1.05"`, so a fan-out has one value.
+      isaac_record_version: 'not_read_here',
+      // Each unit exports under its own `target_id` — genuinely no single one.
+      record_id: 'no_single_value',
+      // `meta` is `draft_builder._META`, a constant, carried onto every run:
+      // "the same for every run by construction" (`workspace.block_level`).
+      record_type: 'not_read_here',
+      record_domain: 'not_read_here',
+      source_type: 'not_read_here',
+      // Not inherited onto a run; `transform` stamps each record as it writes it.
+      'timestamps.created_utc': 'no_single_value',
+    });
+    expect(fanOutRows().every((r) => r.value === null)).toBe(true);
+  });
+
+  it('states each row’s own claim BEFORE the server’s sentence, which stays verbatim', () => {
+    const rows = fanOutRows();
+    // The server's sentence is about the record FILE ("there is no single record
+    // file"). It is kept word for word, but it no longer stands alone as though
+    // it were a statement about a VALUE.
+    expect(rows.every((r) => r.note.endsWith(FAN_OUT_REASON))).toBe(true);
+    expect(rows.every((r) => r.note !== FAN_OUT_REASON)).toBe(true);
+
+    // The four rows that keep a single value say so, in their own words.
+    for (const path of ['isaac_record_version', 'record_type', 'record_domain', 'source_type']) {
+      expect(rowFor(rows, path).note).toMatch(/cannot differ between this experiment’s runs/);
+      expect(rowFor(rows, path).note).not.toMatch(/no single value/);
+    }
+    // The two that do not, say that instead — and say it of the VALUE.
+    expect(rowFor(rows, 'record_id').note).toMatch(
+      /Each run exports its own record under its own identifier/,
+    );
+    expect(rowFor(rows, 'timestamps.created_utc').note).toMatch(
+      /stamped when that run is exported/,
+    );
+  });
+
+  it('does not show a draft created stamp in a fan-out — no run’s record carries it', () => {
+    // `timestamps.created_utc` is on neither `EXPERIMENT_LEVEL_FIELD_PATHS` nor
+    // `RUN_LEVEL_FIELD_PATHS`, so `resolved_run_draft` never carries the
+    // experiment's stamp onto a run and `transform` stamps each record itself.
+    // Showing the draft's value here would present one no exported record holds,
+    // which is why the fan-out branch is tested before the draft branch.
+    const groups: ApiDraftGroup[] = [
+      {
+        title: 'Timestamps',
+        fields: [
+          {
+            path: 'timestamps.created_utc',
+            label: 'Created Utc',
+            value: '2099-01-02T03:04:05Z',
+            status: 'verified',
+            evidence_count: 1,
+            source_types: ['spreadsheet'],
+          },
+        ],
+      },
+    ];
+    const row = rowFor(
+      recordInfoRows({
+        detail: detail({
+          exported: true,
+          record_id: null,
+          artifact_refs: {
+            record_filename: null,
+            sidecar_filename: null,
+            reason: FAN_OUT_REASON,
+          },
+        }),
+        groups,
+        artifacts: artifacts(null),
+      }),
+      'timestamps.created_utc',
+    );
+    expect(row.value).toBeNull();
+    expect(row.source).toBe('no_single_value');
   });
 
   it('never renders a container as a value', () => {
@@ -263,8 +352,18 @@ describe('readLinks — the record’s own array, read defensively', () => {
         },
       ],
     });
-    expect(link.rel).toEqual({ token: 'same_sample_as', text: 'same sample as', known: true });
-    expect(link.basis.known).toBe(true);
+    expect(link.rel).toEqual({
+      state: 'present',
+      token: 'same_sample_as',
+      text: 'same sample as',
+      known: true,
+    });
+    expect(link.basis).toEqual({
+      state: 'present',
+      token: 'same_sample_id',
+      text: 'same sample id',
+      known: true,
+    });
     expect(link.target).toEqual({ state: 'ok', id: ID_B });
     expect(link.notes).toBe('Two runs of one experiment.');
     expect(link.complete).toBe(true);
@@ -297,10 +396,68 @@ describe('readLinks — the record’s own array, read defensively', () => {
     const [link] = readLinks({
       links: [{ rel: 'supersedes', target: ID_B, basis: 'a_new_basis' }],
     });
-    expect(link.rel).toEqual({ token: 'supersedes', text: 'supersedes', known: false });
-    expect(link.basis.known).toBe(false);
+    expect(link.rel).toEqual({
+      state: 'present',
+      token: 'supersedes',
+      text: 'supersedes',
+      known: false,
+    });
+    expect(link.basis).toEqual({
+      state: 'present',
+      token: 'a_new_basis',
+      text: 'a new basis',
+      known: false,
+    });
     expect(LINK_RELATIONS).not.toContain('supersedes');
     expect(LINK_BASES).not.toContain('a_new_basis');
+  });
+
+  it('does NOT trim a relation or basis into validity — the enums hold exact strings', () => {
+    const [link] = readLinks({
+      links: [{ rel: 'derived_from ', target: ID_B, basis: ' same_sample_id' }],
+    });
+    // The TRIMMED forms are in the schema's enums; the STORED forms are not, and
+    // it is the stored form the record holds. `targetOf` already refused to trim
+    // ` ${ID_B} ` into a valid target; this is the same decision for the enums.
+    expect(LINK_RELATIONS).toContain('derived_from');
+    expect(LINK_BASES).toContain('same_sample_id');
+    expect(link.rel).toEqual({
+      state: 'present',
+      token: 'derived_from ',
+      text: 'derived from ',
+      known: false,
+    });
+    expect(link.basis).toEqual({
+      state: 'present',
+      token: ' same_sample_id',
+      text: ' same sample id',
+      known: false,
+    });
+  });
+
+  it('keeps an absent relation apart from a present, wrong-typed one', () => {
+    const [absent, empty, numeric, structured] = readLinks({
+      links: [
+        { target: ID_B, basis: 'unspecified' },
+        { rel: '', target: ID_B, basis: 'unspecified' },
+        { rel: 5, target: ID_B, basis: 'unspecified' },
+        { rel: { name: 'derived_from' }, target: ID_B, basis: 'unspecified' },
+      ],
+    });
+    expect(absent.rel).toEqual({ state: 'absent' });
+    // `''` is the one string a JSON document uses to mean "nothing here", and
+    // `targetOf` reads it the same way.
+    expect(empty.rel).toEqual({ state: 'absent' });
+    // A relation IS present on these two. Reporting them as absent — which the
+    // single nullable-token shape did — tells a reader a required member is
+    // missing when it is merely not text.
+    expect(numeric.rel).toEqual({ state: 'malformed', text: '5' });
+    expect(structured.rel).toEqual({
+      state: 'malformed',
+      text: '{"name":"derived_from"}',
+    });
+    // None of the four is complete, and that has not changed.
+    expect([absent, empty, numeric, structured].some((l) => l.complete)).toBe(false);
   });
 
   it('survives a record whose links block is not what the schema declares', () => {

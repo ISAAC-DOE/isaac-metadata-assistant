@@ -108,6 +108,7 @@
 }
 .link-item-incomplete,
 .link-target-state,
+.link-term-state,
 .link-term-unknown,
 .link-term.missing {
   display: inline-flex;
