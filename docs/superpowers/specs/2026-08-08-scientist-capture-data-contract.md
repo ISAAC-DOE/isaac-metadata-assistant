@@ -1084,11 +1084,31 @@ rediscovered from scratch. All verified at `2209b8e`.
    over `export_units()`; and runs are creatable over HTTP —
    `POST /api/experiments/{experiment_id}/runs` (`routes.py:2916-2917`), `PATCH .../runs/{run_id}`
    (`:3019-3020`), `POST .../runs/{run_id}/check` (`:3235-3236`).
-2. **`apps/api/isaac_api/routes.py:3631`** — the export description calls a record with no runs
-   *"every record this API can currently create"*. **False**, for the same reason as (1). It is
-   **mirrored verbatim** into `apps/web/src/test/apiFixtures.ts:2495` and referenced by
-   `apps/web/src/__tests__/fan-out-null-render.test.tsx:204`, so **all three must change together** or
-   the fixture-parity assertions break.
+2. ~~**`apps/api/isaac_api/routes.py:3631`** — the export description calls a record with no runs
+   *"every record this API can currently create"*.~~ **FIXED 2026-08-11** (`fix/openapi-prose-truth`),
+   and it is worth recording *why it survived*: the sentence is **served OpenAPI prose**, it was true
+   when written (`f7c286c`) and was falsified hours later by the run routes (`3ce946e`), and the
+   fixture-parity test could only ever prove the copy MATCHED the server — never that either was
+   true. A green test pinning a false claim is the failure mode this entry documents. All three
+   artifacts moved together as this entry required (`routes.py` description,
+   `apps/web/src/test/apiFixtures.ts`, the comment in
+   `apps/web/src/__tests__/fan-out-null-render.test.tsx`), plus **three** sibling comments in the
+   same export handler that asserted the fan-out branches were unreachable "(no route creates a
+   Run)" — two of which were justifications for NOT TESTING branches that are now reachable.
+
+   **THE FIRST PASS MARKED THIS FIXED WHILE THREE LIVE INSTANCES REMAINED, and that is recorded
+   here rather than quietly repaired, because it is the same failure this register exists to
+   catch.** An independent review found the sentence still live at `routes.py` (the
+   `any_unit_exported` refusal comment), `fan-out-null-render.test.tsx` — **the very file whose
+   other instance had just been fixed** — and `run-findings.test.tsx`. All three are now corrected.
+   An earlier revision of this bullet also said "two sibling comments" where there were three.
+
+   **Why a `rg` sweep missed them, since the next person will reach for one:** in all three the
+   phrase **wraps across a line break** ("…this API can\n currently create"), and a line-oriented
+   search cannot match it. A single-line regex returned a confident empty result. Search for a
+   distinctive *fragment* on one line, or match multiline, before concluding a phrase is gone.
+
+   **(1), (3) and (4) below are NOT fixed** — they remain as recorded, re-verified 2026-08-11.
 3. **`Run.version_token`'s docstring** (`workspace.py:925-932`) — *"No route consumes it yet."*
    **Stale.** Routes consume it at `routes.py:2423`, `:2426`, `:2511`, `:3015`, `:3231`, `:3323`, and
    `PATCH .../runs/{run_id}` takes the run's own `If-Match` (`:2364`).

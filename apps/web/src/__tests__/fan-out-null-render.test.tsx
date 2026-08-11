@@ -134,8 +134,10 @@ describe('a fan-out record never renders the string "null"', () => {
 
   it('CONTROL — a zero-run exported record is unchanged and still names its id', async () => {
     // The whole point of the guard above is that it must not have been bought by
-    // deleting the id from the ordinary case, which is every record this API can
-    // currently create.
+    // deleting the id from the ordinary case — a record with no runs, which is how
+    // every record starts and how it stays until a run is added through
+    // `POST /api/experiments/{experiment_id}/runs`. (Was "every record this API can
+    // currently create"; false since #109 added that route.)
     const { bundleRoutes, exportedReadyRoutes } = await import('../test/apiFixtures');
     stubFetchRoutes({ ...bundleRoutes('demo'), ...exportedReadyRoutes('demo') });
     const { findByText } = renderAt('/record/demo');
@@ -200,8 +202,12 @@ describe('a fan-out never states something false', () => {
   });
 
   it('CONTROL — a zero-run export still reaches the ordinary success path', async () => {
-    // The branch above must not have been bought by weakening the common case, which
-    // is every record this API can currently create.
+    // The branch above must not have been bought by weakening the common case: a
+    // record with no runs, which is how every record starts and how it stays until
+    // `POST /api/experiments/{id}/runs` adds one. (This comment used to say "which
+    // is every record this API can currently create" — false since that route
+    // shipped, and mirrored in the export operation's own description, which is
+    // corrected in the same change as this line.)
     const { exportSuccess } = await import('../test/apiFixtures');
     stubFetchRoutes({
       ...exportReadyRoutes('demo'),

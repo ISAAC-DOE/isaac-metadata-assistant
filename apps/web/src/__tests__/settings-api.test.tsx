@@ -1063,7 +1063,7 @@ describe('Settings → Endpoint Explorer', () => {
  * itself, not this copy, is what protects a description added later.
  */
 describe('the Full Description rule over the REAL generated contract', () => {
-  it('describes the contract it claims to: 47 operations, 88 post-lead paragraphs', () => {
+  it('describes the contract it claims to: 47 operations, 90 post-lead paragraphs', () => {
     expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(47);
     const total = REAL_CONTRACT_DESCRIPTIONS.reduce(
       (n, d) => n + splitPurpose(d.description).lead.length + rest(d).join('').length,
@@ -1452,8 +1452,54 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // the `contains each operation exactly once` test below is what proves the merge
     // did not duplicate a row — the exact defect the "42 / 32,174 / 67" entry above
     // records, which arose from resolving this same file by keeping both sides.
-    expect(total).toBe(41297);
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(88);
+    //
+    // (d) 41,297 -> 42,371 and 88 -> 90 post-lead paragraphs, from a PROSE-TRUTH pass
+    // over three descriptions that were false or incomplete about the behaviour they
+    // describe. This entry exists to record that a green assertion here proved nothing
+    // about truth: it pins that the copy MATCHES the server, and the server was the
+    // thing that was wrong.
+    //
+    //   · `POST .../export` +75, paragraphs unchanged. "A record with no runs, which is
+    //     every record this API can currently create" was true when written (`f7c286c`)
+    //     and false hours later when `POST .../runs` shipped (`3ce946e`). A client CAN
+    //     create a record and add runs to it, so the fan-out branch it called
+    //     unreachable is reachable.
+    //   · `GET /api/experiments` +1649, +2 paragraphs. It claimed one row per experiment
+    //     in the workspace and its response line said "Every experiment as a summary
+    //     row" — a completeness claim the implementation deliberately cannot keep:
+    //     `workspace._hydrate_ordinary_scope` swallows a durable-storage outage and the
+    //     list degrades to the working copies on disk, which its own docstring calls
+    //     INCOMPLETE. The degradation is now described, along with where it is
+    //     disclosed (`/api/health`) and why a single-record read answers 503 instead.
+    //
+    //     THE FIRST CORRECTION OF IT WAS ITSELF FALSE, and that is the point of this
+    //     sub-entry. It read "every one of them whenever durable storage is answering",
+    //     which an independent review REFUTED BY EXECUTION: let the `SELECT` succeed —
+    //     storage IS answering — and let one working-copy WRITE fail part-way through
+    //     hydration (a full `emptyDir`). The restore loop's `except Exception` swallows
+    //     it, every row after the failure is never restored, `/api/health` still says
+    //     `durable`, and a read by id of an unrestored record answers `404`. That is
+    //     the "your work is gone" claim #113 exists to prevent, in a mode nothing
+    //     discloses. The description now names that second mode as an undisclosed hole
+    //     instead of asserting a completeness it cannot keep. A slice whose whole
+    //     purpose is removing false completeness claims introduced one; it took an
+    //     adversarial reviewer running the code, not reading it, to catch that.
+    //   · `POST /api/validate/record` +354, +1 paragraph. The description enumerated the
+    //     response as ok/summary/errors/schema_version; the route has also returned
+    //     advisory `warnings` since R2 added the advisory tier to it. The tier is now
+    //     described, including that `ok` is computed from the schema verdict alone.
+    //
+    // MEASURED, and cross-checked the two ways every corrected total above was:
+    //   · from the SERVED document, not the copy: the `splitPurpose` paragraph rule
+    //     transcribed into Python over `create_app().openapi()` gives 47 operations,
+    //     total 43,375 and 91 post-lead paragraphs — identical to the same rule run
+    //     over this captured array.
+    //   · internal consistency: raw sum of `d.description.length` = 43,557; this figure
+    //     drops the 91 `\n\n` separators, and 43,557 - 182 = 43,375.
+    // A third witness, before either line was changed: `npx vitest run` reported
+    // `expected 43375 to be 42371`.
+    expect(total).toBe(43375);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(91);
     // Every operation has a lead: none of them renders "states no purpose".
     for (const d of REAL_CONTRACT_DESCRIPTIONS) {
       expect(splitPurpose(d.description).lead.length, d.op).toBeGreaterThan(0);
