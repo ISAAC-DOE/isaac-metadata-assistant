@@ -2,7 +2,13 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { BackendDown, downCopy } from '../components/FetchStates';
+import {
+  BackendDown,
+  downCopy,
+  isRecordPath,
+  recordSubResource,
+  SUB_RESOURCE_LABELS,
+} from '../components/FetchStates';
 import { ApiError, RUN_COMMAND } from '../lib/api';
 
 /*
@@ -413,6 +419,59 @@ describe('downCopy — the branch table, as a pure function', () => {
     ).kind,
     notFoundCollection: downCopy(new ApiError('x', { status: 404, path: '/experiments' }), hosted)
       .kind,
+    // A read BELOW the record, with no reason observed — the path decides.
+    notFoundRecordPart: downCopy(
+      new ApiError('x', { status: 404, path: '/experiments/EXP-1/runs/RUN-1' }),
+      hosted,
+    ).kind,
+    // THE REASON OVERRIDES THE PATH, both ways. These two rows are the race-proof
+    // half of the rule: `experiment_not_found` on a sub-path is still the record
+    // claim, and `source_not_allowed` on a sub-path never is.
+    reasonRecordOnSubPath: downCopy(
+      new ApiError('x', {
+        status: 404,
+        path: '/experiments/EXP-1/source-preview?source=x.csv',
+        reason: 'experiment_not_found',
+      }),
+      hosted,
+    ).kind,
+    reasonSourceNotAllowed: downCopy(
+      new ApiError('x', {
+        status: 404,
+        path: '/experiments/EXP-1/source-preview?source=x.csv',
+        reason: 'source_not_allowed',
+      }),
+      hosted,
+    ).kind,
+    // ...BUT THE REASON MAY NOT WIDEN THE RECORD CLAIM OFF `/experiments/{id}`. The
+    // sentence names an experiment id, so a path with no experiment id in it may not
+    // reach it — see the sibling describe for the three concrete paths.
+    reasonRecordOnConceptPath: downCopy(
+      new ApiError('x', {
+        status: 404,
+        path: '/memory/concepts/CONC-1',
+        reason: 'experiment_not_found',
+      }),
+      hosted,
+    ).kind,
+    reasonRecordPathless: downCopy(
+      new ApiError('x', { status: 404, reason: 'experiment_not_found' }),
+      hosted,
+    ).kind,
+    // A dead worked-example session is not a missing record, and an unrecognised
+    // reason is not anything — both must degrade, not assert.
+    reasonDeadSession: downCopy(
+      new ApiError('x', {
+        status: 404,
+        path: '/experiments/EXP-1',
+        reason: 'tutorial_session_not_found',
+      }),
+      hosted,
+    ).kind,
+    reasonUnrecognised: downCopy(
+      new ApiError('x', { status: 404, path: '/experiments/EXP-1', reason: 'brand_new_reason' }),
+      hosted,
+    ).kind,
     notFoundPathless: downCopy(new ApiError('x', { status: 404 }), hosted).kind,
     unauthenticated: downCopy(new ApiError('x', { status: 401 }), hosted).kind,
     forbidden: downCopy(new ApiError('x', { status: 403 }), hosted).kind,
@@ -426,6 +485,13 @@ describe('downCopy — the branch table, as a pure function', () => {
     expect(kindsFor(true)).toEqual({
       notFoundRecord: 'not_found',
       notFoundCollection: 'path_not_found',
+      notFoundRecordPart: 'record_part_not_found',
+      reasonRecordOnSubPath: 'not_found',
+      reasonSourceNotAllowed: 'record_part_not_found',
+      reasonRecordOnConceptPath: 'path_not_found',
+      reasonRecordPathless: 'path_not_found',
+      reasonDeadSession: 'path_not_found',
+      reasonUnrecognised: 'path_not_found',
       notFoundPathless: 'path_not_found',
       unauthenticated: 'auth',
       forbidden: 'auth',
@@ -442,6 +508,13 @@ describe('downCopy — the branch table, as a pure function', () => {
       // Deliberately NOT the `local` branch: the API answered, so "Backend Not
       // Running" would be false. A 404 is a 404 in both builds.
       notFoundCollection: 'path_not_found',
+      notFoundRecordPart: 'record_part_not_found',
+      reasonRecordOnSubPath: 'not_found',
+      reasonSourceNotAllowed: 'record_part_not_found',
+      reasonRecordOnConceptPath: 'path_not_found',
+      reasonRecordPathless: 'path_not_found',
+      reasonDeadSession: 'path_not_found',
+      reasonUnrecognised: 'path_not_found',
       notFoundPathless: 'path_not_found',
       unauthenticated: 'auth',
       forbidden: 'auth',
@@ -494,5 +567,413 @@ describe('both render sites guard the run command at build time', () => {
     expect(source).toContain('downCopy(error)');
     expect(source).toContain('DownTechnicalDetails');
     expect(source).not.toContain('The local ISAAC API is not responding');
+  });
+});
+
+/*
+ * A MISSING SUB-RESOURCE IS NOT A MISSING EXPERIMENT.
+ *
+ * `isRecordPath` was `/^\/experiments\/[^/]/` — unanchored — so it matched every
+ * sub-read `api.ts` builds under a record as well as the record itself (17 distinct
+ * suffixes, measured by the inventory block above; an earlier revision of this comment
+ * said EIGHTEEN, which matched no measurement and is withdrawn). Every 404 from any of
+ * them rendered the most definitive sentence this panel can say: "Record Not Found —
+ * this experiment id is not in the workspace".
+ *
+ * The backend had gone out of its way to say otherwise. `routes.py::_run_not_found`
+ * is a deliberately DIFFERENT body from `_not_found` because, in its own docstring,
+ * `run_not_found` means the record "exists and was read successfully and simply
+ * holds no run under that id", and collapsing the two "would tell a client to go
+ * looking in the wrong place". The client collapsed them anyway.
+ *
+ * MEASURED ON THE DEPLOYED APP, hosted commit `bd3effc` (`v0.0.100`), 2026-08-10:
+ * `GET /krish/api/experiments` lists `01KZM7HYJVQY1C0X3KFV805YT2`, and
+ * `GET /krish/api/experiments/01KZM7HYJVQY1C0X3KFV805YT2/runs/01BOGUS0000000000000000000`
+ * answers `404 {"error":"run_not_found","experiment_id":"01KZM7HYJVQY1C0X3KFV805YT2",
+ * "id":"01BOGUS0000000000000000000"}`. A real, existing, listed record.
+ *
+ * The reachable USER-FACING instance is Evidence, not Runs: `getEvidenceBundle`
+ * previews every cited source file in one `Promise.all` with no per-item catch, so a
+ * single `source_not_allowed` 404 rejected the whole bundle and `EvidenceExplorer`
+ * blamed the record's existence.
+ */
+/*
+ * THE SUB-READ INVENTORY, DERIVED FROM `api.ts` RATHER THAN RESTATED.
+ *
+ * Two tests below need "every sub-resource path `api.ts` builds under a record", and
+ * a hand-written list of them is exactly the artefact that rots: a sub-read added to
+ * the client would leave the list — and therefore both guards, and the label map they
+ * check — quietly describing yesterday's API. So the list is READ OUT OF `api.ts`.
+ *
+ * HOW. Every per-record path in that module is a single-line template literal of the
+ * form `` `/experiments/${enc(…)}…` ``, so those literals are collected and each is
+ * required to be either the bare record path or a sub-read. Measured at the time of
+ * writing: 21 literals → 2 bare + 17 distinct sub-read suffixes → 15 distinct first
+ * segments. Those counts are asserted, so adding a sub-read fails this file.
+ *
+ * WHAT THIS CANNOT SEE, stated precisely because the obvious reading of the previous
+ * paragraph is too generous. `unclassifiedLiterals` catches a literal that STARTS
+ * with `/experiments/` and then has an unexpected interior shape. It does NOT catch a
+ * per-record path assembled some other way — by concatenation, by a path helper, or
+ * across a wrapped multi-line literal — because such a path never appears as a
+ * literal beginning with `/experiments/` at all, and the count assertions would still
+ * hold. So this derivation is a guard against api.ts GAINING A SUB-READ IN THE
+ * ESTABLISHED SHAPE, which is the realistic drift; it is not a proof that the
+ * inventory is exhaustive. A refactor that changes how paths are built must revisit
+ * this block by hand.
+ */
+const API_SOURCE = readFileSync(resolve(__dirname, '..', 'lib/api.ts'), 'utf8');
+
+const experimentPathLiterals = [...API_SOURCE.matchAll(/`([^`\n]*)`/g)]
+  .map((m) => m[1])
+  .filter((lit) => lit.includes('/experiments/') && lit.includes('${'));
+
+const bareRecordLiterals: string[] = [];
+const subReadSuffixes = new Set<string>();
+const unclassifiedLiterals: string[] = [];
+for (const lit of experimentPathLiterals) {
+  if (/^\/experiments\/\$\{[^}]*\}$/.test(lit)) bareRecordLiterals.push(lit);
+  else {
+    const sub = /^\/experiments\/\$\{[^}]*\}\/(.+)$/.exec(lit);
+    if (sub) subReadSuffixes.add(sub[1]);
+    else unclassifiedLiterals.push(lit);
+  }
+}
+
+/** Every distinct suffix, with each `${…}` replaced by a concrete-looking segment. */
+const SUB_READ_SUFFIXES = [...subReadSuffixes]
+  .sort()
+  .map((suffix) => suffix.replace(/\$\{[^}]*\}/g, 'SEG-1'));
+
+/** The first segment below `/experiments/{id}` for each — the PART that was read. */
+const SUB_READ_SEGMENTS = [
+  ...new Set([...subReadSuffixes].map((s) => s.split(/[?#]/)[0].split('/')[0])),
+].sort();
+
+describe('the sub-read inventory this file derives from api.ts', () => {
+  it('classifies every per-record path literal, and finds the counts it expects', () => {
+    // An unexpected interior shape in one of these literals would silently shrink
+    // both guards below — see the limits paragraph above for what this misses.
+    expect(unclassifiedLiterals).toEqual([]);
+    expect(experimentPathLiterals.length).toBe(21);
+    expect(bareRecordLiterals.length).toBeGreaterThan(0);
+    expect(SUB_READ_SUFFIXES).toHaveLength(17);
+    expect(SUB_READ_SEGMENTS).toHaveLength(15);
+    // Spot-check the two shapes that are easiest to derive wrongly.
+    expect(SUB_READ_SUFFIXES).toContain('runs/SEG-1/check');
+    expect(SUB_READ_SUFFIXES).toContain('source-preview?source=SEG-1');
+    expect(SUB_READ_SEGMENTS).toContain('evidence-classification');
+  });
+});
+
+/*
+ * THE PART IS NAMED IN THE PRODUCT'S WORDS, NOT THE BACKEND'S PATH VOCABULARY.
+ *
+ * The first version of this panel rendered the raw URL segment into the sentence a
+ * scientist reads — "a read of “ingestion”", "a read of “evidence-classification”" —
+ * which is the "backend-sourced jargon on product screens" class `CLAUDE.md` §11
+ * records as still open. The remedy is `SUB_RESOURCE_LABELS`, and the objection to a
+ * hand-maintained map is real: it rots the moment `api.ts` gains a sub-read. THIS is
+ * the answer to that objection. The map is checked against the inventory derived
+ * above from `api.ts` itself, so a new sub-read fails CI instead of leaking a wire
+ * name into product copy.
+ */
+describe('SUB_RESOURCE_LABELS covers every sub-read api.ts builds', () => {
+  it('has an entry for each first segment, and no entry for anything else', () => {
+    expect(Object.keys(SUB_RESOURCE_LABELS).sort()).toEqual(SUB_READ_SEGMENTS);
+  });
+
+  it('names every part without leaking the wire segment or the path vocabulary', () => {
+    for (const suffix of SUB_READ_SUFFIXES) {
+      const segment = recordSubResource(`/experiments/EXP-1/${suffix}`)!;
+      const label = SUB_RESOURCE_LABELS[segment];
+      const lines = downCopy(
+        new ApiError('x', { status: 404, path: `/experiments/EXP-1/${suffix}` }),
+        true,
+      ).lines.join(' ');
+      expect(lines).toContain(label);
+      // The quoted-verbatim form is reserved for a segment this build does NOT know.
+      expect(lines).not.toContain(`“${segment}”`);
+      // Body-copy register (register 2 — sentence case, so no leading capital), and
+      // never a path fragment, a query parameter or a snake_case wire token.
+      expect(label).not.toMatch(/^[A-Z]/);
+      expect(label).not.toMatch(/[/?=_]/);
+    }
+  });
+
+  it('an UNRECOGNISED segment is quoted verbatim, never given an invented name', () => {
+    // A sub-read added to `api.ts` without an entry, or a path this client did not
+    // shape. Honest jargon beats a fabricated friendly name — and the test above is
+    // what keeps this fallback off the screens of real users.
+    const lines = downCopy(
+      new ApiError('x', { status: 404, path: '/experiments/EXP-1/not-a-real-part' }),
+      true,
+    ).lines.join(' ');
+    expect(lines).toContain('“not-a-real-part”');
+    expect(lines).toContain('does not establish that the experiment is missing');
+  });
+});
+
+describe('a 404 about part of a record never claims the record is missing', () => {
+  const at = (path: string, reason?: string) =>
+    new ApiError('Request failed (404).', { status: 404, path, reason });
+
+  /** The two sentences that assert the record does not exist. */
+  const assertsMissingRecord = (text: string) =>
+    /experiment id is not in the/i.test(text) || /may not have been created yet/i.test(text);
+
+  const bodyOf = (error: ApiError) => {
+    const view = render(<BackendDown error={error} />);
+    const text = view.container.querySelector('.fetch-state-body')!.textContent ?? '';
+    view.unmount();
+    return text;
+  };
+
+  it('THE REGRESSION: a run 404 does not claim the experiment is missing', () => {
+    const body = bodyOf(at('/experiments/EXP-1/runs/RUN-1', 'run_not_found'));
+    expect(assertsMissingRecord(body)).toBe(false);
+    expect(body).toContain('does not establish that the experiment is missing');
+    // It names the part that WAS read, from the path — in the product's words, and
+    // not by rendering the backend's `runs` path segment into the sentence.
+    expect(body).toContain('the measurement runs');
+    expect(body).not.toContain('“runs”');
+  });
+
+  it('THE REGRESSION: a source-preview 404 does not claim the experiment is missing', () => {
+    const error = at('/experiments/EXP-1/source-preview?source=outside.csv', 'source_not_allowed');
+    expect(assertsMissingRecord(bodyOf(error))).toBe(false);
+    const lines = downCopy(error, false).lines.join(' ');
+    // The query string is not mistaken for part of the segment. Asserted over the
+    // COPY, not the whole panel: Technical Details reports the full request path by
+    // design, and that row is pre-existing, correct, and credential-free.
+    expect(lines).toContain('a reference source file');
+    expect(lines).not.toContain('“source-preview”');
+    expect(lines).not.toContain('outside.csv');
+  });
+
+  it('no sub-read of a record can produce the missing-record claim from its PATH alone', () => {
+    // Every suffix `api.ts` builds under `/experiments/{id}`, derived from `api.ts`
+    // itself rather than restated here — see the inventory block above.
+    for (const suffix of SUB_READ_SUFFIXES) {
+      const copy = downCopy(at(`/experiments/EXP-1/${suffix}`), true);
+      expect(copy.kind).toBe('record_part_not_found');
+      expect(assertsMissingRecord(copy.lines.join(' '))).toBe(false);
+    }
+    // Guard the guard: the list above must be sub-reads, not the record itself.
+    expect(downCopy(at('/experiments/EXP-1'), true).kind).toBe('not_found');
+  });
+
+  /*
+   * THE CASE A PATH-BASED FIX SILENTLY BREAKS, which is why the reason is read at
+   * all. `api.getRecordBundle` (`api.ts:1136-1147`) awaits SEVEN experiment-scoped
+   * reads in ONE `Promise.all` — the record itself plus `/draft`, `/pending`,
+   * `/validate`, `/audit`, `/warnings`, `/evidence` — so six of the seven paths are
+   * sub-resource paths. When the experiment really is absent all seven 404 and the
+   * rejection that arrives is whichever landed first: a race. Narrowing the path
+   * predicate alone would make the copy for one underlying truth depend on that race.
+   * The reason does not.
+   *
+   * CORRECTION, kept visible rather than overwritten: an earlier revision of this
+   * comment cited `getEvidenceBundle` awaiting `getExperiment(id)` and every
+   * `getSourcePreview(id, file)` in one `Promise.all`. That was FALSE and is
+   * withdrawn — `getEvidenceBundle` is two SEQUENTIAL `Promise.all`s
+   * (`api.ts:1172-1180`), previews are fetched only after the first resolves, and on
+   * a genuinely absent experiment `getSourcePreview` is never called. The behaviour
+   * this test pins is unchanged; only the racing site named above is.
+   */
+  it('experiment_not_found on a SUB-resource path still says Record Not Found', () => {
+    const view = render(
+      <BackendDown
+        error={at('/experiments/EXP-1/source-preview?source=a.csv', 'experiment_not_found')}
+      />,
+    );
+    expect(view.getByText('Record Not Found')).toBeInTheDocument();
+    expect(
+      view.getByText(
+        'This experiment id is not in the local workspace — it may not have been created yet.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('a real missing record is still reported plainly — the fix hides no 404', () => {
+    for (const error of [
+      at('/experiments/EXP-1'), // no reason observed; the path names one record
+      at('/experiments/EXP-1', 'experiment_not_found'),
+      at('/experiments/EXP-1/runs', 'experiment_not_found'),
+    ]) {
+      const body = bodyOf(error);
+      expect(assertsMissingRecord(body)).toBe(true);
+    }
+  });
+
+  it('a dead worked-example session is not reported as a missing record', () => {
+    // `tutorial_scope` raises this BEFORE any record work, so it is evidence about
+    // the session and none at all about whether the record exists.
+    const body = bodyOf(at('/experiments/EXP-1', 'tutorial_session_not_found'));
+    expect(assertsMissingRecord(body)).toBe(false);
+    expect(body).toContain('answered HTTP 404 for this request');
+  });
+
+  /*
+   * THE SECOND ARM OF THE PART SENTENCE — unreachable through `api.ts`, exercised
+   * here so that "unreachable" is a claim about the client rather than about untested
+   * code. A reason arm can be satisfied with no path (`downCopy` is exported and
+   * pure); the copy must then say "one part of this experiment" and must NOT invent a
+   * segment to fill the gap.
+   */
+  it('names no part when the path carried none, and invents none', () => {
+    const copy = downCopy(new ApiError('x', { status: 404, reason: 'run_not_found' }), true);
+    expect(copy.kind).toBe('record_part_not_found');
+    const lines = copy.lines.join(' ');
+    expect(lines).toContain('a read of one part of this experiment');
+    expect(lines).not.toContain('“');
+    expect(lines).not.toContain('the measurement runs');
+    expect(assertsMissingRecord(lines)).toBe(false);
+  });
+
+  it('an unrecognised reason degrades to generic — never to a confident claim', () => {
+    const copy = downCopy(at('/experiments/EXP-1', 'some_future_reason'), true);
+    expect(copy.kind).toBe('path_not_found');
+    expect(assertsMissingRecord(copy.lines.join(' '))).toBe(false);
+  });
+
+  it('a pathless, reasonless 404 still lands generic', () => {
+    const copy = downCopy(new ApiError('x', { status: 404 }), true);
+    expect(copy.kind).toBe('path_not_found');
+    expect(assertsMissingRecord(copy.lines.join(' '))).toBe(false);
+  });
+
+  it('Retry is still offered on a sub-resource 404 when the caller supplies one', () => {
+    const view = render(
+      <BackendDown error={at('/experiments/EXP-1/runs/RUN-1', 'run_not_found')} onRetry={() => {}} />,
+    );
+    expect(view.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    // No unevidenced reload prompt, and no unactionable local remedy.
+    expect(view.queryByRole('button', { name: 'Reload' })).toBeNull();
+    expect(view.queryByText(RUN_COMMAND)).toBeNull();
+  });
+
+  /*
+   * POLARITY GUARD, asserted in BOTH directions because a test in this repo once
+   * shipped inverted and passed. `interceptedByEdge` must win over every 404 branch,
+   * including the two new reason-based ones: a sign-in page served with a 404 carries
+   * no ISAAC reason, and a reason must never be honoured from one.
+   */
+  it('an HTML-bodied 404 on a record path is STILL the auth branch, not either 404 branch', () => {
+    const html = (path: string, reason?: string) =>
+      new ApiError('x', {
+        status: 404,
+        path,
+        contentType: 'text/html; charset=utf-8',
+        htmlIntercept: true,
+        reason,
+      });
+    // The positive half: it lands in `auth`.
+    const view = render(<BackendDown error={html('/experiments/EXP-1')} />);
+    expect(view.getByText('Sign-In Required')).toBeInTheDocument();
+    expect(
+      view.getByText(/A sign-in page was returned in place of the ISAAC API/),
+    ).toBeInTheDocument();
+    // The negative half: neither 404 branch, and neither 404 branch's wording.
+    expect(view.queryByText('Record Not Found')).toBeNull();
+    expect(view.queryByText('Not Found')).toBeNull();
+    const body = view.container.querySelector('.fetch-state-body')!.textContent ?? '';
+    expect(assertsMissingRecord(body)).toBe(false);
+    expect(body).not.toContain('answered HTTP 404');
+
+    // And the intercept wins even when a reason field is somehow populated — on a
+    // record path, a sub-resource path, and for each reason the branches key on.
+    for (const path of ['/experiments/EXP-1', '/experiments/EXP-1/runs/RUN-1']) {
+      for (const reason of [undefined, 'experiment_not_found', 'run_not_found']) {
+        expect(downCopy(html(path, reason), true).kind).toBe('auth');
+      }
+    }
+  });
+});
+
+/*
+ * THE REASON WIDENS WHERE THE RECORD CLAIM IS ALLOWED, NOT WHAT IT IS ALLOWED TO
+ * DESCRIBE.
+ *
+ * "This experiment id is not in the workspace" is the most definitive sentence this
+ * panel can say, and `isRecordPath` exists because it was once said over a LIST read.
+ * Honouring `experiment_not_found` on a sub-resource path — which is the fix that
+ * makes the copy race-independent — must not also make it sayable on a path that
+ * names no experiment at all. Before the reason was plumbed through, a 404 on
+ * `/memory/concepts/{id}`, `/graph/status` or `/schema` could not reach that sentence
+ * by construction; the reason arm made it reachable, and this pins it shut again.
+ *
+ * LATENT, NOT LIVE. Every `_not_found(` call site in `routes.py` today is inside an
+ * `/experiments/{experiment_id}` handler, so no current backend response can carry
+ * this reason on one of those paths. That is a fact about the backend, not a property
+ * of this component, and it is exactly the kind of fact that changes without anyone
+ * revisiting the copy. `isRecordPath` is imported here so the boundary this asserts
+ * is the same predicate the component branches on.
+ */
+describe('experiment_not_found is honoured only under /experiments/{id}', () => {
+  const nonRecordPaths = [
+    '/memory/concepts/CONC-1',
+    '/graph/status',
+    '/schema',
+    '/experiments', // the collection read that started all of this
+    '/runtime/records',
+  ];
+
+  it('renders the record claim on the record path and on its parts', () => {
+    for (const path of ['/experiments/EXP-1', '/experiments/EXP-1/runs/RUN-1']) {
+      const copy = downCopy(
+        new ApiError('x', { status: 404, path, reason: 'experiment_not_found' }),
+        true,
+      );
+      expect(copy.kind).toBe('not_found');
+      expect(copy.lines.join(' ')).toContain('This experiment id is not in the workspace');
+    }
+  });
+
+  it('never renders it on a path that names no experiment', () => {
+    for (const path of nonRecordPaths) {
+      // Precondition: these really are outside the predicate the claim rests on.
+      expect(isRecordPath(path)).toBe(false);
+      expect(recordSubResource(path)).toBeUndefined();
+      const copy = downCopy(
+        new ApiError('x', { status: 404, path, reason: 'experiment_not_found' }),
+        true,
+      );
+      expect(copy.kind).toBe('path_not_found');
+      const lines = copy.lines.join(' ');
+      expect(lines).not.toMatch(/experiment id/i);
+      expect(lines).not.toMatch(/may not have been created yet/i);
+      expect(lines).toContain('answered HTTP 404 for this request');
+    }
+  });
+
+  /*
+   * THE ASYMMETRY WITH THE PART BRANCH, PINNED AND DISCLOSED RATHER THAN QUIETLY
+   * LEFT — because it is a residual of this slice, not something it fixed.
+   *
+   * `run_not_found` / `source_not_allowed` are NOT path-constrained the way
+   * `experiment_not_found` now is, so on one of these paths they still take the part
+   * branch and its pathless sentence ("a read of one part of this experiment"). That
+   * is deliberate for now, for one reason: the pathless sentence is the
+   * anti-fabrication guard kept above, and constraining these arms too would make it
+   * unreachable in principle and therefore dead.
+   *
+   * It is a WEAKER claim than the record branch's — it never says the experiment is
+   * absent — and it is unreachable from `routes.py`, where both reasons are raised
+   * only by handlers under `/experiments/{experiment_id}`. The invariant that
+   * actually matters is asserted first; the `kind` is asserted second so that
+   * narrowing these arms later is a LOUD change made on purpose, not a silent one.
+   */
+  it('a part-reason on those paths still refuses the missing-record claim', () => {
+    for (const path of nonRecordPaths) {
+      for (const reason of ['run_not_found', 'source_not_allowed']) {
+        const copy = downCopy(new ApiError('x', { status: 404, path, reason }), true);
+        const lines = copy.lines.join(' ');
+        expect(lines).not.toMatch(/experiment id is not in the/i);
+        expect(lines).not.toMatch(/may not have been created yet/i);
+        // Current, deliberate behaviour — see the comment above before changing it.
+        expect(copy.kind).toBe('record_part_not_found');
+      }
+    }
   });
 });

@@ -10332,7 +10332,7 @@
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
-        "sha256": "a943b33b81686fe8c0a8a3cfeb41584a32f3487f6032585ec8826ffaaae80e91"
+        "sha256": "005f365f4b7216506cfcec950878c5a4cc9c165736f4ee88b63dec3086505563"
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
@@ -10436,7 +10436,7 @@
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "bcb054e43f2df0a0ab647bcabb9adb9e59676447db75ae396fd5f5d92c64dd93"
+        "sha256": "7934df61e3c3d6b14a871ea9a7d9bb3c667564baf5b8ae2274c8a2567670eb6f"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "1e4f95b4f83a65f097bcbbc9e45db6486fc835a4815bca4cc3597d3a6fa4aa2f"
+        "sha256": "566b23f1d31266063afed9553819df075dae0b3add91b3b7620c93264e99cd7b"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "36f7d6424cd6c44bd09b24560f6643624a8852901a6bc4e6292e543fc0dd0f47"
+    "served_manifest_fingerprint": "78bebb5ee74046811c059423aa312a737468ddc977f36bd5a757a2c45be84de0"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
