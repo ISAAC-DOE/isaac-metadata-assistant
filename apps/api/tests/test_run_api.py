@@ -2160,6 +2160,129 @@ def test_the_overridable_addresses_are_derived_and_not_a_hand_written_list():
     }
 
 
+def test_omitting_limit_returns_every_run_and_paging_never_becomes_a_run_limit(
+    client, experiment_id
+):
+    """THE DEFAULT IS UNCHANGED, and that is the contract paging must not break.
+
+    Every existing caller reads the whole list. If `limit` silently defaulted to a
+    page, "this record has N runs" would quietly become "this record has PAGE_MAX
+    runs" on surfaces that never asked to page — the exact class of silent truncation
+    this repository's disclosure rules exist to prevent. So an omitted `limit` returns
+    everything, and `total` always reports how many EXIST rather than how many were
+    returned.
+    """
+    for _ in range(5):
+        _create_run(client, experiment_id)
+
+    body = client.get(f"/api/experiments/{experiment_id}/runs").json()
+    assert len(body["runs"]) == 5
+    assert body["total"] == 5
+    assert body["returned"] == 5
+    assert body["offset"] == 0
+    # `returned` is stated, not derived — a truncation bug must surface as a
+    # disagreement between the two rather than be invisible.
+    assert body["returned"] == len(body["runs"])
+
+
+def test_a_bounded_page_reports_the_true_total_and_walks_the_whole_list_in_order(
+    client, experiment_id
+):
+    """A PAGE MUST NOT BE ABLE TO MISREPRESENT THE LIST, in either direction.
+
+    Two failures are asserted against, because a paging implementation can be wrong
+    while looking right: reporting `total` as the page size (so a UI says "7 runs"
+    when there are 7 but shows 3 and calls it complete), and losing or repeating a run
+    across page boundaries. Walking every page and comparing the concatenation against
+    the unpaged read catches both, and catches an ordering change with them —
+    `sorted_runs` order is the contract, not an implementation detail.
+    """
+    for _ in range(7):
+        _create_run(client, experiment_id)
+
+    everything = client.get(f"/api/experiments/{experiment_id}/runs").json()
+    assert everything["total"] == 7
+
+    walked: list[str] = []
+    offset = 0
+    while True:
+        page = client.get(
+            f"/api/experiments/{experiment_id}/runs", params={"limit": 3, "offset": offset}
+        ).json()
+        assert page["total"] == 7, "a page must report how many EXIST, not how many it returned"
+        assert page["offset"] == offset
+        assert page["returned"] == len(page["runs"])
+        assert page["returned"] <= 3
+        if not page["runs"]:
+            break
+        walked.extend(r["id"] for r in page["runs"])
+        offset += 3
+
+    assert walked == [r["id"] for r in everything["runs"]], "paging lost, repeated or reordered a run"
+    assert len(walked) == len(set(walked)) == 7
+
+
+def test_an_offset_past_the_end_is_an_empty_page_not_an_error(client, experiment_id):
+    """CLAMPED, NOT REFUSED — and the distinction is a real race, not a nicety.
+
+    A "load more" issued after a concurrent delete shortened the list arrives with an
+    offset past the end. Refusing it turns an ordinary race into an error banner; the
+    honest answer is an empty page carrying the true `total`, from which the client can
+    see it has run off the end and recover without being told something broke.
+    """
+    for _ in range(2):
+        _create_run(client, experiment_id)
+
+    page = client.get(
+        f"/api/experiments/{experiment_id}/runs", params={"limit": 5, "offset": 99}
+    )
+    assert page.status_code == 200, page.text
+    body = page.json()
+    assert body["runs"] == []
+    assert body["returned"] == 0
+    assert body["total"] == 2, "the true count must survive an off-the-end page"
+    assert body["offset"] == 99
+
+
+def test_the_page_bounds_are_enforced_by_the_route_not_by_the_client(client, experiment_id):
+    """NEGATIVE CONTROLS on the query contract, each refused by the route itself.
+
+    A client cannot ask for an unbounded page, a zero-sized one, or a negative offset.
+    These are asserted as exact `422`s rather than "not 2xx": FastAPI's own validation
+    produces them, and a test that accepted any 4xx would keep passing if the bounds
+    were removed and something else happened to reject the request.
+    """
+    for bad in ({"limit": 0}, {"limit": -1}, {"limit": routes.RUN_PAGE_MAX + 1}, {"offset": -1}):
+        res = client.get(f"/api/experiments/{experiment_id}/runs", params=bad)
+        assert res.status_code == 422, (bad, res.status_code, res.text[:200])
+
+    # ...and the largest permitted page IS permitted, so the ceiling is a real bound
+    # rather than an off-by-one that refuses its own documented maximum.
+    ok = client.get(
+        f"/api/experiments/{experiment_id}/runs", params={"limit": routes.RUN_PAGE_MAX}
+    )
+    assert ok.status_code == 200, ok.text
+
+
+def test_a_paged_run_view_is_byte_identical_to_its_unpaged_self(client, experiment_id):
+    """PAGING CHANGES WHICH RUNS COME BACK AND NOTHING ELSE ABOUT THEM.
+
+    The run view carries inheritance resolution, `overridable`, versions and evidence.
+    If a paged read produced even a slightly different view — a resolution computed
+    against a differently-loaded experiment, say — then a scientist's screen would
+    depend on how they scrolled to it. Comparing the full objects, not selected keys,
+    is what makes that assertion total.
+    """
+    for _ in range(4):
+        _create_run(client, experiment_id)
+
+    full = client.get(f"/api/experiments/{experiment_id}/runs").json()["runs"]
+    paged = client.get(
+        f"/api/experiments/{experiment_id}/runs", params={"limit": 2, "offset": 2}
+    ).json()["runs"]
+    assert paged == full[2:4]
+
+
 def test_the_inherited_map_and_the_overridable_set_are_NOT_the_same_set(
     client, experiment_id
 ):

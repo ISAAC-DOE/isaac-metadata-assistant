@@ -2958,6 +2958,40 @@ RUN_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
 #: level — ``system.configuration.*``, ``timestamps.created_utc``, ``meta``,
 #: ``pending``, ``implicit``, ``links``, ``block_evidence`` — is not overridable until
 #: somebody decides, and it is never guessed into a level here.
+#: Largest page `GET /experiments/{id}/runs` will return in one response.
+#:
+#: A CEILING ON ONE RESPONSE, NOT A LIMIT ON HOW MANY RUNS A RECORD MAY HAVE. That
+#: distinction is the whole design: the route's own description promises there is no
+#: limit on runs, and paging must not quietly become one. `total` is always the count
+#: that EXIST, and a client may walk the whole list.
+#:
+#: WHY 200. Measured, not chosen for roundness — `docs/run-scale-measurements.md`
+#: records the envelope: ~100 runs load comfortably (~1.1 s), 250 is noticeable
+#: (~2.2 s), 500 is bad (~4 s, first long tasks). 200 sits inside the comfortable band
+#: with headroom, and is well below the point where the payload starts costing
+#: multiple seconds. It bounds the WORST case a single client request can ask for;
+#: the default page a UI actually requests is smaller and is the UI's choice.
+#:
+#: OMITTING `limit` STILL RETURNS EVERYTHING, deliberately. Every existing caller —
+#: and every existing test — reads the whole list, and silently truncating them to a
+#: page would turn "this record has 300 runs" into "this record has 200 runs" across
+#: surfaces that never opted in. Paging is something a client asks for.
+RUN_PAGE_MAX = 200
+
+_RUN_LIMIT_DESC = (
+    "Maximum runs to return, 1–200. OMIT to return every run: this parameter bounds "
+    "one response, and is never a limit on how many runs a record may have. `total` "
+    "always reports how many exist."
+)
+
+_RUN_OFFSET_DESC = (
+    "How many runs to skip, in canonical order. An offset past the end is CLAMPED to "
+    "an empty page rather than refused — that is what a 'load more' sends after a "
+    "concurrent delete shortened the list, and `total` tells the client it ran off "
+    "the end."
+)
+
+
 EXPERIMENT_OVERRIDABLE_ADDRESSES: frozenset[str] = frozenset(
     [
         ws.field_address(path)
@@ -3209,14 +3243,40 @@ def _apply_run_field(fields: dict, path: str, value, timestamp: str) -> bool:
     ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
 )
-def list_runs(scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response):
+def list_runs(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=RUN_PAGE_MAX, description=_RUN_LIMIT_DESC)] = None,
+    offset: Annotated[int, Query(ge=0, description=_RUN_OFFSET_DESC)] = 0,
+):
     exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
     response.headers["ETag"] = exp.etag()
+
+    ordered = exp.sorted_runs()
+    total = len(ordered)
+    # OFFSET IS CLAMPED, NOT REFUSED. An offset past the end is not a client error —
+    # it is what "load more" sends after a concurrent delete shortened the list — and
+    # the honest answer is an empty page with the true `total`, from which a client
+    # can see it has run off the end. Refusing would turn an ordinary race into an
+    # error banner.
+    window = ordered[offset:] if limit is None else ordered[offset : offset + limit]
+
     return {
-        "runs": [_run_view(exp, run) for run in exp.sorted_runs()],
+        "runs": [_run_view(exp, run) for run in window],
         "experiment_version": exp.version_token(),
+        # THE THREE NUMBERS A BOUNDED LIST CANNOT BE HONEST WITHOUT. `total` is the
+        # count of runs that EXIST, not the count returned, so a UI showing "50 of 500"
+        # is stating a measured fact rather than inferring completeness from a short
+        # page. `returned` is stated explicitly rather than left to be derived from the
+        # array's length, so a truncation bug shows up as a disagreement instead of
+        # being invisible. `offset` is echoed because a client that sent one and got a
+        # clamped window otherwise cannot tell which rows it holds.
+        "total": total,
+        "returned": len(window),
+        "offset": offset,
     }
 
 
