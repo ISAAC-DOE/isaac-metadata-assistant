@@ -101,6 +101,7 @@ import {
   scrollToBottom,
   scrollToTop,
 } from '../helpers/layout';
+import { hiddenTextMatchersFor, overflowMatchersFor } from '../layout-allowlist';
 import { expect, openRecord, test } from './own-session-fixtures';
 
 /** The subtree this file owns. Everything outside it belongs to another suite. */
@@ -260,10 +261,35 @@ async function cardsTooWide(page: Page): Promise<string[]> {
  * of a caller.
  */
 async function probeRuns(page: Page): Promise<Findings> {
-  const overflow = await findOverflowingRegions(page, []);
+  /*
+   * THE ALLOWANCE ARGUMENTS WERE `[]`, WHICH IS NOT "NO EXEMPTIONS NEEDED" — it is
+   * "override the repo's own allowlist with an empty one". That was harmless only for
+   * as long as the runs subtree contained no visually-hidden text, and it stopped
+   * being harmless the moment the inherited panel's override controls carried an
+   * `.sr-only` address in their accessible names: every one of them was reported as
+   * `scrollWidth 239 vs clientWidth 1` and as `[total-loss] … 1px visible of 239px`,
+   * at all six widths and at 200% zoom, drowning any real finding.
+   *
+   * That is the clip-rect pattern WORKING, not failing. `.sr-only` is the app-wide
+   * visually-hidden utility (`styles/base.css`, a 1px box with `clip: rect(0,0,0,0)`),
+   * and `layout-allowlist.ts` already carries `ALLOW-SR-ONLY` for `ANY_SURFACE` with
+   * its own evidence line — `overflowMatchersFor`'s docstring records that these
+   * carriers once produced 84 of 98 overflow findings across seven widths. The
+   * read-only width sweep and the statistics probe both exclude them and both
+   * SELF-CHECK the exclusion.
+   *
+   * So this is not a new exemption and not a loosening: it is this file adopting the
+   * allowlist every other scanner in the repository already uses, named by the same
+   * ids. `'record-detail'` is the surface these runs live on, so any surface-scoped
+   * entry is resolved against the right surface rather than being granted globally.
+   * The self-check below proves the exclusion did not swallow the probe.
+   */
+  const overflow = await findOverflowingRegions(page, overflowMatchersFor('record-detail'));
   const runsOverflow = await keepRunScoped(page, overflow.offenders);
 
-  const clipped = (await findClippedText(page, RUNS_ROOT, [])).filter((o) => o.text.trim() !== '');
+  const clipped = (
+    await findClippedText(page, RUNS_ROOT, hiddenTextMatchersFor('record-detail'))
+  ).filter((o) => o.text.trim() !== '');
 
   await scrollToTop(page);
   const obscuredTop = await findObscuredControls(page);
@@ -537,6 +563,118 @@ test.describe('run card — narrow widths', () => {
       `the document scrolls sideways at 320px: scrollWidth ${after.docScrollWidth} vs ` +
         `clientWidth ${after.docClientWidth}. This is the WCAG 1.4.10 reflow width.`
     ).toBeLessThanOrEqual(after.docClientWidth);
+  });
+
+  /**
+   * THE OVERRIDE FORM AT THE TWO NARROWEST WIDTHS — the densest state this card has.
+   *
+   * The sweep above measures the inherited panel AT REST: a path, a value, a
+   * provenance label and one or two buttons per row. Opening an override adds a
+   * label, a context sentence, a text input, a checkbox with a full sentence beside
+   * it, two buttons and a note — inside a row that already carries a 40-character
+   * official path. None of that existed when the widths above were last measured, and
+   * "the resting state fits" is not evidence about the open one.
+   *
+   * 390 and 320 only: those are the widths where a pixel costs something (320 is the
+   * WCAG 1.4.10 reflow width). The wider projects are covered by the sweep, and the
+   * form adds no wide-screen treatment of its own.
+   */
+  for (const width of [390, 320] as const) {
+    test(`@runs-layout the override form fits at ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 812 });
+      await twoOpenRuns(page);
+
+      const row = runCards(page)
+        .first()
+        .locator('[data-address="field:sample.composition.CuO2_mass_fraction"]');
+      // The LONGEST overridable path the canonical record carries — measured against
+      // the seed, not assumed, so this is the worst case rather than a typical one.
+      await pwExpect(row).toBeVisible();
+      await row.getByRole('button', { name: /Override for this run/ }).click();
+      await pwExpect(row.getByRole('textbox')).toBeVisible();
+      await row.getByRole('textbox').fill('0.4815162342');
+      await pwExpect(row.getByRole('checkbox')).toBeVisible();
+
+      const findings = await probeRuns(page);
+      await page.screenshot({
+        path: `${SHOT_DIR}/run-card-override-form-${width}.png`,
+        fullPage: true,
+      });
+
+      const failures = [
+        findings.overflow && `OVERFLOW with the override form open:\n${findings.overflow}`,
+        findings.clipped && `TEXT LOST with the override form open:\n${findings.clipped}`,
+        findings.obscured && `CONTROLS OBSCURED with the override form open:\n${findings.obscured}`,
+        findings.tooWide && `A RUN CARD DOES NOT FIT ITS CONTAINER:\n${findings.tooWide}`,
+      ].filter(Boolean);
+      expect(failures.join('\n\n'), `override form at ${width}px`).toBe('');
+
+      // The controls are not merely present: both are reachable and operable at this
+      // width, which is what a geometric probe cannot say on its own.
+      await pwExpect(row.getByRole('button', { name: 'Record override' })).toBeDisabled();
+      await row.getByRole('checkbox').check();
+      await pwExpect(row.getByRole('button', { name: 'Record override' })).toBeEnabled();
+      await pwExpect(row.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    });
+  }
+
+  /**
+   * THE PROBE'S OWN SELF-CHECK — added with the `.sr-only` allowance, because an
+   * exemption nobody re-verifies is indistinguishable from a probe that stopped
+   * working.
+   *
+   * `probeRuns` now passes `layout-allowlist.ts`'s app-wide matchers instead of `[]`,
+   * which is what stops the inherited panel's visually-hidden address carriers being
+   * reported as 239px of lost text at every width. This test proves the exemption is
+   * NARROW: a genuinely clipped element planted in the same subtree, with the same
+   * geometry but WITHOUT the `.sr-only` class, is still caught — and the `.sr-only`
+   * one still is not.
+   *
+   * Both are planted in the page and removed again; neither reaches the product.
+   */
+  test('@runs-layout the clipped-text probe still catches a real clip, and still ignores .sr-only', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    await twoOpenRuns(page);
+
+    // Clean to start with — otherwise the assertions below prove nothing.
+    expect((await probeRuns(page)).clipped, 'the surface must be clean before planting').toBe('');
+
+    const plant = async (className: string) =>
+      page.evaluate(
+        ({ root, cls }) => {
+          const host = document.querySelector(root);
+          if (!host) throw new Error(`${root} is not present`);
+          const el = document.createElement('span');
+          el.id = 'selfcheck-run-clip';
+          if (cls) el.className = cls;
+          el.textContent =
+            'A sentence far longer than one pixel, planted to prove the probe is awake.';
+          // The clip-rect geometry, applied by HAND so the two cases differ ONLY in
+          // whether the app's own visually-hidden class is present.
+          el.style.cssText =
+            'display:inline-block;width:1px;height:1px;overflow:hidden;white-space:nowrap;';
+          host.appendChild(el);
+        },
+        { root: RUNS_ROOT, cls: className }
+      );
+    const unplant = () =>
+      page.evaluate(() => document.getElementById('selfcheck-run-clip')?.remove());
+
+    await plant('');
+    const caught = await probeRuns(page);
+    await unplant();
+    expect(caught.clipped, 'a real clipped element must still be reported').toContain(
+      'selfcheck-run-clip'
+    );
+
+    await plant('sr-only');
+    const ignored = await probeRuns(page);
+    await unplant();
+    expect(ignored.clipped, 'the .sr-only clip-rect pattern must never be reported').not.toContain(
+      'selfcheck-run-clip'
+    );
   });
 });
 

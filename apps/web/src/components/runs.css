@@ -313,7 +313,39 @@
   gap: 6px;
 }
 
+/*
+ * ONE ROW = ONE RECORD-LEVEL ADDRESS, in one of two states, and the two are
+ * distinguishable WITHOUT COLOUR. Four independent signals carry the difference,
+ * and any single one of them identifies the state on its own:
+ *
+ *   1. the words — "Inherited from record" / "Overridden on this run";
+ *   2. the glyph beside them — the inheritance corner-arrow vs. the human
+ *      pencil (the repo's human motif, same family as `--src-userconf`);
+ *   3. the surface — an overridden row is RAISED onto the card's own background
+ *      and given a border; an inherited row has neither;
+ *   4. the value's weight — 600 on an overridden row, 400 on an inherited one.
+ *
+ * The tint is a fifth signal and is deliberately the least load-bearing: a
+ * monochrome rendering, a colour-blind reader and a high-contrast forced-colours
+ * mode all still get 1–4. (No LEFT or RIGHT accent border anywhere — the
+ * no-vertical-rail rule is system-wide and permanent, and `no-vertical-rail.test.ts`
+ * scans this file.)
+ */
 .run-inherited-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.run-inherited-row[data-state='overridden'] {
+  padding: 7px 9px;
+  background: var(--confirmed-bg);
+  border: 1px solid var(--confirmed-border);
+  border-radius: var(--radius-inner);
+}
+
+.run-inherited-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -336,10 +368,180 @@
   overflow-wrap: anywhere;
 }
 
+.run-inherited-row[data-state='overridden'] .run-inherited-value {
+  font-weight: 600;
+}
+
+/* `--text-slate`, NOT `--text-tertiary`. Both were written as tertiary first and
+   the axe scan in `e2e/mutation/run-overrides.spec.ts` caught the sibling below at
+   3.5:1 on `--surface`; this one sits on `--confirmed-bg`, which is darker still, so
+   it fails the same way for the same reason. Changed together rather than one at a
+   time, because fixing only the reported node leaves the identical defect standing
+   wherever the scan happened not to look. */
+.run-inherited-novalue {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-slate);
+}
+
 .run-inherited-state {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--cover-text);
+}
+
+.run-inherited-state[data-state='overridden'] {
+  color: var(--confirmed-text);
+  font-weight: 600;
+}
+
+/* The record's own value beside a run that has diverged from it. Context, never
+   a verdict: it says what the record holds, not which of the two is right. */
+.run-inherited-source {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+}
+
+.run-inherited-source-value,
+.run-inherited-path-inline {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.run-inherited-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* The override entry form and the revert confirmation share one treatment: both
+   are a step the reader opened deliberately, and both sit inside the row they
+   act on so the address they will write can never be misread. */
+.run-inherited-form,
+.run-inherited-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 9px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-inner);
+}
+
+.run-inherited-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.run-inherited-form-context,
+.run-inherited-confirm-text {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+}
+
+.run-inherited-form-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* The SECOND native checkbox in the app, and it gets the same treatment as the
+   first for the same reason: left at `accent-color: auto` it paints itself in the
+   VIEWER'S OS accent — crimson in a default Chromium — and tokens.css reserves
+   saturated red for the validation verdict. A red box on a confirmation control
+   reads as a failure marker, and the colour would differ per machine. Scoped to
+   this control, not a global `input` rule. Guarded by
+   native-control-accent.test.ts. */
+.run-inherited-form-confirm input {
+  margin-top: 1px;
+  flex: none;
+  accent-color: var(--action);
+}
+
+.run-inherited-form-actions,
+.run-inherited-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.run-inherited-form-revert-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  /* See the note above `.run-inherited-novalue`: `--text-tertiary` (#78838f) on
+     `--surface` measured 3.5:1 here — a REAL serious axe finding on this slice's own
+     copy, not an inherited one. `--text-slate` clears 4.5:1. */
+  color: var(--text-slate);
+}
+
+/* A refusal or a stale write. Glyph plus words, never the amber one. */
+.run-inherited-failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 9px;
+  background: var(--fail-bg);
+  border: 1px solid var(--fail-border);
+  border-radius: var(--radius-inner);
+  color: var(--fail-text);
+}
+
+.run-inherited-failure-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.run-inherited-failure-text {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.run-inherited-findings {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* Empty until this panel has something to report, and it takes no vertical space
+   while empty — the region exists in the tree from the start so an announcement
+   is not made against an element that has just appeared. */
+.run-inherited-outcome {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.run-inherited-outcome:empty {
+  margin: 0;
+}
+
+.run-inherited-actions .btn,
+.run-inherited-form-actions .btn,
+.run-inherited-confirm-actions .btn {
+  padding: 4px 10px;
+  font-size: 11.5px;
 }
 
 /* ---- conflict ----------------------------------------------------------- */

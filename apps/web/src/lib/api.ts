@@ -46,6 +46,8 @@ import type {
   ApiPendingResponse,
   ApiRunCheckResponse,
   ApiRunCreated,
+  ApiRunOverrideCleared,
+  ApiRunOverrideResponse,
   ApiRunResponse,
   ApiRunsResponse,
   ApiSchemaResponse,
@@ -825,6 +827,70 @@ export const api = {
       ...(runVersion ? { headers: { 'If-Match': `"${runVersion}"` } } : {}),
     });
     if (res.ok) return readJson<ApiRunResponse>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /*
+   * ---- Per-run overrides of inherited record-level values ----------------
+   *
+   * TWO WRITES, AND NEITHER OF THEM CONFIRMS ON THE READER'S BEHALF. Both
+   * operations refuse with `422 confirmation_required` unless the body carries
+   * `confirmed_by_user: true`, and both functions below take that flag as an
+   * ARGUMENT and send exactly what they were given. That is deliberately unlike
+   * `updateRun`/`editField`, which send `true` unconditionally because their only
+   * caller is a box the reader typed into: recording an override displaces a
+   * value the record supplied, and the contract makes it an explicitly confirmed
+   * act. Passing `true` is the CALLER's assertion that a confirmation gesture
+   * happened, and the screen is where that gesture lives.
+   *
+   * THE `If-Match` IS THE RUN'S, NOT THE RECORD'S — the same trap `updateRun`
+   * carries, and the route's own description spells it out. Guarded on
+   * truthiness exactly as every other write here: an empty token is sent as
+   * ABSENT (the server's 428, which is the honest refusal) rather than as
+   * `If-Match: ""`, which is a malformed token and would report a client bug as
+   * a precondition failure.
+   *
+   * A 412 MEANS THE OVERRIDE WAS NOT RECORDED. `mutationError` attaches the
+   * parsed body, so the screen can show the server's `current_version` and say
+   * so; it must never present a stale write as a success.
+   */
+
+  async setRunOverride(
+    experimentId: string,
+    runId: string,
+    body: { address: string; payload: unknown; confirmedByUser: boolean },
+    runVersion: string,
+  ): Promise<ApiRunOverrideResponse> {
+    const path = `/experiments/${enc(experimentId)}/runs/${enc(runId)}/overrides`;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify({
+        confirmed_by_user: body.confirmedByUser,
+        address: body.address,
+        payload: body.payload,
+      }),
+      ...(runVersion ? { headers: { 'If-Match': `"${runVersion}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiRunOverrideResponse>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  async clearRunOverride(
+    experimentId: string,
+    runId: string,
+    body: { address: string; confirmedByUser: boolean },
+    runVersion: string,
+  ): Promise<ApiRunOverrideCleared> {
+    const path = `/experiments/${enc(experimentId)}/runs/${enc(runId)}/overrides/clear`;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify({
+        confirmed_by_user: body.confirmedByUser,
+        address: body.address,
+      }),
+      ...(runVersion ? { headers: { 'If-Match': `"${runVersion}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiRunOverrideCleared>(res, path);
     throw await mutationError(res, path);
   },
 

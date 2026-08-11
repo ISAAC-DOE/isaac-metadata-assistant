@@ -35,9 +35,18 @@ export function RunsSection({ experimentId }: { experimentId: string }) {
         <h2 className="runs-title" id="runs-heading">
           Runs
         </h2>
+        {/*
+          THE SECOND HALF WAS TRUE AND IS NOW ONLY MOSTLY TRUE, so it is corrected
+          rather than left standing. It read "everything under Inherited from
+          Experiment is read from the experiment" — flat, with no exception — and a
+          run may now hold its own value at one of those addresses. The panel's own
+          rows say which are which; this sentence states the default and names the
+          exception instead of denying it.
+        */}
         <p className="runs-sub">
           One run per set of measurement conditions. Values entered here belong to this run
-          alone; everything under Inherited from Experiment is read from the experiment.
+          alone; everything under Inherited from the record is read live from the record,
+          unless this run overrides it.
         </p>
       </div>
 

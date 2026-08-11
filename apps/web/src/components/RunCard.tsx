@@ -9,11 +9,16 @@
  * demoting a path, because that line IS how a run is told apart from its
  * siblings.
  *
- * EXPANDED it is a short form over five run-level fields and a read-only panel
- * of what the run inherits from its experiment. The inherited panel is not
- * styled as a disabled version of the form: it has no controls at all, which is
- * the strongest available statement that those values are not this run's to
- * edit here.
+ * EXPANDED it is a short form over five run-level fields, plus a panel of what
+ * the run inherits from its record. THAT PANEL USED TO BE READ-ONLY and this
+ * header used to say so ("it has no controls at all, which is the strongest
+ * available statement that those values are not this run's to edit here"). It is
+ * no longer true and is not softened: a run may now record its own value at one
+ * inherited address, and revert to inheriting again. The panel is
+ * `RunInheritedPanel`, and its header states the four domain properties the UI
+ * has to stay faithful to — above all that nothing is copied down. Values in it
+ * are still not EDITED in place: an override is a separate, confirmed act with
+ * its own control, and the record's own value stays visible beside it.
  *
  * ACCESSIBILITY, the parts that are decisions rather than defaults:
  *   * A real accordion — `h3 > button[aria-expanded][aria-controls]` over a
@@ -35,12 +40,12 @@
 import './runs.css';
 import { useEffect, useId, useRef, useState } from 'react';
 import { StatusChip } from './StatusChip';
+import { RunInheritedPanel } from './RunInheritedPanel';
 import { Check, ChevronDown, ChevronRight, CircleAlert, RotateCcw, TriangleAlert } from './icons';
 import { api } from '../lib/api';
 import {
   RUN_FIELDS,
   envelopeText,
-  inheritedFieldRows,
   parseRunField,
   runConditionsSummary,
   runFilledCount,
@@ -185,7 +190,6 @@ export function RunCard({
 
   const conditions = runConditionsSummary(run);
   const filled = runFilledCount(run);
-  const inherited = inheritedFieldRows(run);
   const Chevron = expanded ? ChevronDown : ChevronRight;
 
   /*
@@ -459,38 +463,18 @@ export function RunCard({
             })}
           </div>
 
-          {inherited.length > 0 && (
-            <section className="run-inherited" aria-label="Values inherited from the experiment">
-              <p className="run-inherited-eyebrow">Inherited from Experiment</p>
-              {/*
-                THE SECOND SENTENCE USED TO BE FALSE FOR A ROW THIS LIST RENDERS.
-                `inheritedFieldRows` admits `state === 'overridden'`, whose payload is
-                the RUN's own value, and the row labels itself "Overridden by This
-                Run" — inside a panel that said, flatly, "read by every run. Change
-                them on the experiment, not here." Unreachable today (no HTTP route
-                reaches `set_run_override`, so `resolve_inherited` cannot report
-                `overridden` through this API), which is exactly why it was easy to
-                write and easy to miss: the copy was already wrong for the branch
-                that ships.
-              */}
-              <p className="run-inherited-note">
-                Entered once on the experiment and read by every run that does not override
-                them. Change an inherited value on the experiment, not here; a row marked
-                “Overridden by This Run” is this run's own value, not the experiment's.
-              </p>
-              <ul className="run-inherited-list">
-                {inherited.map((row) => (
-                  <li className="run-inherited-row" key={row.address}>
-                    <span className="run-inherited-path">{row.path}</span>
-                    <span className="run-inherited-value">{row.text}</span>
-                    <span className="run-inherited-state">
-                      {row.state === 'overridden' ? 'Overridden by This Run' : 'Inherited from Experiment'}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          {/*
+            THE INHERITED PANEL IS NO LONGER READ-ONLY, and the copy it used to carry
+            was already false for a row it could render. It said, flatly, "Change an
+            inherited value on the experiment, not here", while `inheritedFieldRows`
+            admitted `state === 'overridden'` — the run's OWN value — beside it. That
+            was unreachable when it was written (no HTTP route reached
+            `set_run_override`), which is exactly why it was easy to write and easy to
+            miss. Both routes exist now, so the panel drives them and says what they
+            actually do; see `RunInheritedPanel` for the four domain properties it has
+            to stay faithful to.
+          */}
+          <RunInheritedPanel experimentId={experimentId} run={run} onRun={onRun} />
 
           {autosave.status === 'conflict' && (
             <div className="run-conflict" role="alert">

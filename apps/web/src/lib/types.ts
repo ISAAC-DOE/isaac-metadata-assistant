@@ -1648,6 +1648,33 @@ export interface ApiRunResponse {
   run: ApiRunView;
 }
 
+/**
+ * What `POST …/runs/{id}/overrides` returns: the refreshed run, and WHEN the
+ * override was recorded.
+ *
+ * `recorded_utc` is the SERVER's clock and is the authoritative time of the act.
+ * It is returned only by this operation — the run read path publishes each
+ * address's `state`, `payload`, `inherited_payload` and `displaced_payload` and
+ * does NOT republish the recorded time — so a screen may show it for a write it
+ * just performed and must not claim it for an override it merely read back.
+ */
+export interface ApiRunOverrideResponse {
+  run: ApiRunView;
+  override: { address: string; recorded_utc: string };
+}
+
+/**
+ * What `POST …/runs/{id}/overrides/clear` returns.
+ *
+ * `cleared: false` is a SUCCESS, not a refusal: clearing an address that carries
+ * no override writes nothing and does not advance the run, which is what makes
+ * the operation safe to repeat or to retry after a dropped response.
+ */
+export interface ApiRunOverrideCleared {
+  run: ApiRunView;
+  cleared: boolean;
+}
+
 /** One entry of `blockers` / `errors` — see the note above on why this is a union. */
 export type ApiRunCheckFinding =
   | string
