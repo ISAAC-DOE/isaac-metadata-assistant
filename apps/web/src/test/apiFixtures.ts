@@ -285,6 +285,10 @@ export function runFixture(over: Partial<Record<string, unknown>> = {}) {
         state: 'inherited',
         payload: { value: 'Synthetic CuO powder', status: 'verified', evidence: [] },
         inherited_payload: { value: 'Synthetic CuO powder', status: 'verified', evidence: [] },
+        // The server answers this on every inherited row, and the panel withholds the
+        // Override control without it. `sample.material.name` IS in the backend's
+        // `EXPERIMENT_OVERRIDABLE_ADDRESSES`, so `true` is what the real response says.
+        overridable: true,
       },
     },
     ...over,

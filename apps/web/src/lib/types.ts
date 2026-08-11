@@ -1726,6 +1726,24 @@ export interface ApiRunInherited {
   inherited_payload: unknown;
   /** What an override displaced when it was recorded. */
   displaced_payload?: unknown;
+  /**
+   * THE SERVER'S OWN ANSWER to whether this run may record an override here.
+   *
+   * It is not derivable on this side and must not be re-derived: the key set of
+   * `inherited` is every experiment-level address, while the set the route accepts
+   * an override at is narrower (a `field:` must also be in the backend's extractor
+   * map). `field:system.domain` is in the first and not the second. A client that
+   * guessed would be keeping a second copy of a backend classification, free to
+   * drift from it silently.
+   *
+   * OPTIONAL IN THE TYPE, FAIL-CLOSED AT THE READ. A response without it is a
+   * server that cannot answer, and {@link runOverrides.overrideRows} treats that as
+   * "not overridable" rather than assuming yes — matching the fail-closed doctrine
+   * `EXPERIMENT_OVERRIDABLE_ADDRESSES` states for itself. It is optional only so a
+   * fixture or an older response is a type error nobody has to silence, never as
+   * licence to omit it.
+   */
+  overridable?: boolean;
 }
 
 export interface ApiRunView {

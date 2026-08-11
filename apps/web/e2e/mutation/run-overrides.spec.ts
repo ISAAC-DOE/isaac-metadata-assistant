@@ -321,28 +321,82 @@ test.describe('per-run overrides of inherited record values', () => {
     expect(afterSecond.version).toBe(afterFirst.version);
   });
 
-  test('an address that cannot hold an override is refused in the SERVER\'s own words', async ({
+  test('an address that cannot hold an override offers no control, and the API still refuses it', async ({
     page,
     request,
     session,
   }) => {
+    /*
+     * THIS TEST WAS REWRITTEN, AND THE OLD PREMISE IS WORTH RECORDING BECAUSE IT WAS
+     * THE DEFECT. It used to open the override form on `field:system.domain` and
+     * assert the refusal, under the comment "Reachable from a row the panel
+     * legitimately renders — no request tampering." That reachability was real, and it
+     * was the bug: the panel offered a scientist an "Override for this run" button
+     * whose ONLY possible outcome was `422 not_overridable`.
+     *
+     * The server now answers `overridable` on every inherited row, read from the same
+     * frozenset the override route gates on, so the panel withholds the control. The
+     * old assertions could only be restored by re-introducing the trap.
+     *
+     * SO THE COVERAGE MOVES RATHER THAN DISAPPEARING, and it splits in two, because
+     * the two halves are now observable in different places:
+     *   1. the UI no longer offers the impossible act — asserted here, against a row
+     *      that still renders its inherited value;
+     *   2. the SERVER still refuses it — asserted here too, by calling the route
+     *      directly. That half must not be dropped: withholding a control is a
+     *      truthfulness fix on the read side and is NOT a permission check, so the
+     *      enforcement has to keep being proven somewhere a client cannot influence.
+     */
     await openRunsSection(page, SEED.fresh);
     const card = await addAndExpand(page, 1);
 
-    // Reachable from a row the panel legitimately renders — no request tampering.
-    await recordOverride(card, NOT_OVERRIDABLE, 'something else');
-
     const target = row(card, NOT_OVERRIDABLE);
-    await expect(target).toContainText('This address cannot hold this override');
-    await expect(target).toContainText(NOT_OVERRIDABLE);
-    await expect(target).toContainText('Only a record-level value a run INHERITS can be overridden');
-    await expect(target).toContainText('Nothing was written');
-    // NOT a success, and not a generic failure.
-    await expect(outcome(card)).toHaveText('');
-    await expect(target).toHaveAttribute('data-state', 'inherited');
 
+    // The row is still THERE and still shows what the run resolves — withholding the
+    // control must not withhold the value, which is real and inherited.
+    await expect(target).toBeVisible();
+    await expect(target).toHaveAttribute('data-state', 'inherited');
+    await expect(target).toContainText('system.domain');
+
+    // ...and it offers no way to attempt the impossible act.
+    await expect(target.getByRole('button', { name: /Override for this run/ })).toHaveCount(0);
+    await expect(target.getByRole('button', { name: /Change this run's value/ })).toHaveCount(0);
+
+    // NEGATIVE CONTROL, IN THE SAME RENDER. Without this the assertions above would
+    // pass against a panel that rendered no controls at all — which is the regression
+    // this change could most plausibly have introduced.
+    await expect(
+      row(card, MATERIAL).getByRole('button', { name: /Override for this run/ }),
+    ).toHaveCount(1);
+
+    // THE ROUTE HAS NOT MOVED. A caller that ignores `overridable` entirely gets the
+    // same typed refusal it always did, in the server's own words.
     const runs = await readRuns(request, session, SEED.fresh);
-    expect(runs[0].states[NOT_OVERRIDABLE]).toBe('inherited');
+    const res = await request.post(
+      `${MUT_API_BASE}/experiments/${SEED.fresh}/runs/${runs[0].id}/overrides`,
+      {
+        // A STRONG QUOTED VALIDATOR — the quotes are required, and sending the bare
+        // token earns a typed `400 malformed_if_match` instead of the refusal under
+        // test, which would have passed this test for the wrong reason had it asserted
+        // only "not 2xx".
+        headers: { [TUTORIAL_SESSION_HEADER]: session, 'If-Match': `"${runs[0].version}"` },
+        data: {
+          address: NOT_OVERRIDABLE,
+          payload: { value: 'something else', status: 'verified', evidence: [] },
+          confirmed_by_user: true,
+        },
+      },
+    );
+    expect(res.status(), await res.text()).toBe(422);
+    const body = (await res.json()) as { error: string; address: string; message: string };
+    expect(body.error).toBe('not_overridable');
+    expect(body.address).toBe(NOT_OVERRIDABLE);
+    expect(body.message).toContain('Only a record-level value a run INHERITS can be overridden');
+
+    // Nothing was written: the run still inherits, and its version did not move.
+    const after = await readRuns(request, session, SEED.fresh);
+    expect(after[0].states[NOT_OVERRIDABLE]).toBe('inherited');
+    expect(after[0].version).toBe(runs[0].version);
   });
 
   test('a COMPARE-AND-SWAP loser is told the override was not recorded, and it was not', async ({

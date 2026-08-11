@@ -120,6 +120,24 @@ export interface OverrideRow {
   displacedText: string | null;
   /** True when the record's value has moved away from what the override displaced. */
   recordMovedSince: boolean;
+  /**
+   * THE SERVER'S ANSWER to whether this run may record an override at this address —
+   * read from the response, never computed here. See {@link ApiRunInherited.overridable}
+   * for why this side must not derive it.
+   *
+   * FAIL-CLOSED: a response that omits the flag yields `false`. That direction is
+   * chosen deliberately. Defaulting to `true` would restore exactly the defect this
+   * replaces — a control whose only outcome is `422 not_overridable` — whereas
+   * defaulting to `false` withholds a control that would have worked, which is
+   * recoverable and visible (the value still renders, read-only) rather than a
+   * scientist clicking into a guaranteed refusal.
+   *
+   * IT DOES NOT GOVERN REVERT. An already-`overridden` row keeps its Revert control
+   * whatever this says, and {@link OverrideRow} carries both so the panel can honour
+   * that. Reverting removes a recorded act; if the two ever disagreed, hiding Revert
+   * would strand a scientist with an override they could see and could not remove.
+   */
+  overridable: boolean;
   /** The whole resolution, for the payload builder's type reference. */
   resolution: ApiRunInherited;
 }
@@ -167,6 +185,9 @@ export function overrideRows(run: ApiRunView): OverrideRow[] {
         displacedText !== null &&
         recordText !== null &&
         displacedText !== recordText,
+      // `=== true`, not a truthiness test: absent must read as "the server did not
+      // say", and the fail-closed answer to that is `false`. See the field's doc.
+      overridable: resolution.overridable === true,
       resolution,
     });
   }

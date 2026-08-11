@@ -67,6 +67,11 @@ function runView(over: Partial<ApiRunView> = {}): ApiRunView {
         state: 'inherited',
         payload: envelope('Synthetic CuO powder'),
         inherited_payload: envelope('Synthetic CuO powder'),
+        // THE SERVER SENDS THIS ON EVERY ROW, so every fixture carries it. It is not
+        // decoration: the panel withholds the Override control on a row without it,
+        // and a fixture that omitted it would be modelling a response shape the
+        // backend no longer produces — quietly testing the wrong thing.
+        overridable: true,
       },
     },
     ...over,
@@ -84,6 +89,7 @@ function overriddenRun(value: string, over: Partial<ApiRunView> = {}): ApiRunVie
         payload: envelope(value),
         inherited_payload: envelope('Synthetic CuO powder'),
         displaced_payload: envelope('Synthetic CuO powder'),
+        overridable: true,
       },
     },
     ...over,
@@ -339,6 +345,7 @@ describe('a record-level value the record holds as a number', () => {
           state: 'inherited',
           payload: envelope(8),
           inherited_payload: envelope(8),
+          overridable: true,
         },
       },
     });
@@ -417,6 +424,7 @@ describe('an overridden value', () => {
             payload: envelope('Copper(I) Oxide'),
             inherited_payload: envelope('Cuprous Oxide'),
             displaced_payload: envelope('Synthetic CuO powder'),
+            overridable: true,
           },
         },
       }),
@@ -611,16 +619,30 @@ describe('a refused write', () => {
     '`block:tags`, spelt exactly as the run\'s `inherited` map spells its keys.';
 
   it('names the address that cannot hold an override, in the server\'s own words', async () => {
-    // `field:system.domain` IS reported under `inherited` and is NOT overridable —
-    // the run view's map is where the SPELLING is read and is neither necessary nor
-    // sufficient for membership. So this refusal is reachable from a row the panel
-    // legitimately renders, and it must not degrade to "could not be saved".
+    /*
+     * THIS FIXTURE DELIBERATELY MODELS A DISAGREEMENT, and the `overridable: true`
+     * below is the point rather than an oversight.
+     *
+     * `field:system.domain` IS reported under `inherited` and is NOT overridable, and
+     * the server now says so on the row — so the panel withholds the control and this
+     * refusal is no longer reachable by clicking. That is the fix
+     * (`renders no override control on a row the server marks not overridable`, below).
+     *
+     * The refusal RENDERING still has to be right, because the flag is a disclosure
+     * and not a gate: the route's 422 is unmoved, and a response where the flag and
+     * the route disagree — which cannot happen today, since both read one frozenset —
+     * must still produce the server's own typed words rather than "could not be
+     * saved". Setting the flag `true` here is the only way to reach that path from
+     * the UI, and pinning it is what stops the fix from quietly deleting the
+     * refusal's rendering along with the control.
+     */
     const domainRun = runView({
       inherited: {
         [DOMAIN]: {
           state: 'inherited',
           payload: envelope('materials'),
           inherited_payload: envelope('materials'),
+          overridable: true,
         },
       },
     });
@@ -643,6 +665,80 @@ describe('a refused write', () => {
     expect(text).toContain(DOMAIN);
     expect(text).toContain('Only a record-level value a run INHERITS can be overridden');
     expect(outcome()).toBe('');
+  });
+
+  it('renders no override control on a row the server marks not overridable', () => {
+    /*
+     * THE DEFECT THIS CLOSES, stated as the scientist met it: the panel rendered an
+     * "Override for this run" button beside `field:system.domain` whose ONLY possible
+     * outcome was `422 not_overridable`. A control with one outcome is not an
+     * affordance.
+     *
+     * NEGATIVE-CONTROLLED IN BOTH DIRECTIONS IN ONE RENDER. Asserting only the
+     * absence would pass against a panel that renders no controls at all — which is
+     * the regression a reader of this test most needs excluded — so the same mount
+     * carries an overridable row and asserts its control IS present.
+     */
+    mount(
+      runView({
+        inherited: {
+          [MATERIAL]: {
+            state: 'inherited',
+            payload: envelope('Synthetic CuO powder'),
+            inherited_payload: envelope('Synthetic CuO powder'),
+            overridable: true,
+          },
+          [DOMAIN]: {
+            state: 'inherited',
+            payload: envelope('materials'),
+            inherited_payload: envelope('materials'),
+            overridable: false,
+          },
+        },
+      }),
+    );
+
+    expect(
+      within(rowFor(DOMAIN)).queryByRole('button', { name: /Override for this run/ }),
+    ).toBeNull();
+    expect(
+      within(rowFor(MATERIAL)).getByRole('button', { name: /Override for this run/ }),
+    ).toBeInTheDocument();
+
+    // THE ROW SURVIVES, AND SO DOES ITS VALUE. Withholding the control must not
+    // withhold what the run actually resolves at that address — the value is real,
+    // inherited, and the reason the row exists.
+    expect(rowFor(DOMAIN)).not.toBeNull();
+    expect(within(rowFor(DOMAIN)).getByText('materials')).toBeInTheDocument();
+    expect(within(rowFor(DOMAIN)).getByText('system.domain')).toBeInTheDocument();
+  });
+
+  it('withholds the control when the server sends no answer at all', () => {
+    /*
+     * FAIL-CLOSED, pinned from the direction it could actually fail. A response
+     * missing `overridable` is a server that did not answer, and the two candidate
+     * defaults are not symmetric: defaulting to `true` restores the original defect
+     * (a control whose only outcome is a 422), while defaulting to `false` withholds
+     * a control that would have worked — visible, recoverable, and never a trap.
+     *
+     * This is the ONE place the omitted-flag shape is legitimate in a fixture.
+     * Everywhere else it would be modelling a response the backend does not produce.
+     */
+    mount(
+      runView({
+        inherited: {
+          [MATERIAL]: {
+            state: 'inherited',
+            payload: envelope('Synthetic CuO powder'),
+            inherited_payload: envelope('Synthetic CuO powder'),
+          },
+        },
+      }),
+    );
+    expect(
+      within(rowFor(MATERIAL)).queryByRole('button', { name: /Override for this run/ }),
+    ).toBeNull();
+    expect(within(rowFor(MATERIAL)).getByText('Synthetic CuO powder')).toBeInTheDocument();
   });
 
   it('shows the draft validator\'s OWN findings for a refused envelope', async () => {
@@ -959,6 +1055,7 @@ describe('a record value this row cannot render', () => {
           // path is `str`/`float` server-side — but `valueText` returns `null` for it
           // exactly as it does for absence, and the two are different statements.
           inherited_payload: envelope({ a: 1 }),
+          overridable: true,
         },
       },
     });

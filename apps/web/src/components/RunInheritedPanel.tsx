@@ -488,7 +488,26 @@ export function RunInheritedPanel({
             )}
 
             <div className="run-inherited-actions">
-              {editing !== row.address && (
+              {/*
+                THE OPEN TRIGGER IS GATED ON THE SERVER'S `overridable`, and this is the
+                one condition here that is not about local UI state. A row the route
+                will not accept an override at gets no control offering one — because a
+                control with exactly one possible outcome, `422 not_overridable`, is not
+                an affordance, it is a trap. `field:system.domain` is the live instance:
+                it is experiment-level (so it resolves, and its value is still shown
+                here) but it is not in the backend's extractor map (so it can never be
+                overridden).
+
+                THE ROW ITSELF IS NOT SUPPRESSED. What the record carries at that
+                address is real, inherited, and worth seeing; only the control that
+                could not work is withheld. Removing the row would hide a value the run
+                genuinely resolves.
+
+                REVERT IS DELIBERATELY NOT GATED ON IT — see the next block. The two
+                cannot disagree today, and if they ever did, the safe direction is to
+                keep the control that REMOVES a recorded act, not the one that adds one.
+              */}
+              {editing !== row.address && row.overridable && (
                 <button
                   type="button"
                   className="btn btn-secondary"
