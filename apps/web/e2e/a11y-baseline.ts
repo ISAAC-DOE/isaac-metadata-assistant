@@ -695,8 +695,90 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * also appear in `tokens.css` and in prose — including in this sentence. Three
        * reviewers have now re-opened this figure on that difference.
        */
-      'settings-explorer@desktop-1280x800': 48,
-      'settings-explorer@laptop-1024x768': { darwin: 49, linux: 48 },
+      /*
+       * ── RUN OVERRIDE ROUTES, 2026-08-10: THE LINUX COLUMN COMES BACK DOWN AT ALL
+       *    SEVEN WIDTHS, AND FOUR SCALARS HAVE TO SPLIT ───────────────────────
+       *
+       * linux only: desktop 48 -> 47, laptop 48 -> 47, tablet 63 -> 62, mobile
+       * 55 -> 54, zoom-200 58 -> 57, width-320 56 -> 54, width-390 56 -> 54.
+       * TRANSCRIBED FROM CI, run 31446324340, on `1eae5db`. All seven messages read
+       * IMPROVED and the job printed no `GREW`/`REGRESSED` line anywhere — so this is
+       * the two-way ratchet doing the half of its job that costs something, exactly as
+       * the header promises: "a stale number would re-admit the defect".
+       *
+       * WHY FOUR OF THEM SPLIT INSTEAD OF JUST MOVING. desktop, mobile, zoom-200 and
+       * width-320 were SCALARS, and a scalar asserts BOTH columns. No run has measured
+       * darwin at this commit, so lowering them would have written four darwin numbers
+       * that no run produced. The note further down this entry prescribes this exact
+       * case in advance — "split the entry into `{ darwin: n, linux: <measured> }` and
+       * do NOT change the darwin value to match: it was measured separately" — so every
+       * darwin figure here is the one the RUN VERTICAL SLICE A/B measured, carried
+       * forward untouched, and `A11Y_BASELINE_TOTAL_NODES.darwin` does not move.
+       *
+       * THE DARWIN COLUMN IS THEREFORE KNOWN-UNVERIFIED HERE, not known-correct. The
+       * cause below is a layout clip, and a layout clip has moved both platforms every
+       * time it has been measured, so darwin has very probably moved too. It is left
+       * alone anyway: a stale number that says where it came from can be corrected by
+       * the next darwin run, and a fresh number nobody measured cannot be caught at all.
+       *
+       * WHAT CAUSED IT, AND IT IS NOT AN ACCESSIBILITY FIX. Established from git, not
+       * from a browser:
+       *
+       *   · This branch changes NO frontend source whatsoever. `git diff --stat
+       *     origin/main..HEAD` touches `routes.py`, `workspace.py`, the snapshot, four
+       *     backend test files, `settings-api.test.tsx` and `apiFixtures.ts` — no
+       *     component, no CSS. `screens/ApiDocs.tsx` and `screens/screens.css`, which
+       *     are the whole of this screen, are byte-identical to `main`.
+       *   · It adds exactly TWO documented operations and removes none —
+       *     `POST …/runs/{run_id}/overrides` ("Override One Inherited Value on a Run")
+       *     and `POST …/runs/{run_id}/overrides/clear` ("Restore One Inherited Value on
+       *     a Run"). So the ONLY input to this screen that changed is the OpenAPI
+       *     document gaining two rows. `summary=` lines added 2, removed 0; the
+       *     contract is a strict superset, 45 operations -> 47.
+       *   · READ THE "five new operations" IN THE BLOCK ABOVE AS DATED, not as a claim
+       *     about this branch now. It was five against the base `b7792c1`; `main` has
+       *     since merged all five, so two is what is left over `main` — which is why
+       *     that block's +1 and this one's -1 are not in contradiction.
+       *   · The only contrast declarations removed anywhere in this range are
+       *     `.statusbar-pending` and `.statusbar-note`, which this screen does not
+       *     render. Nothing here got a better colour.
+       *
+       * So this is the clipped-scroll displacement the 2026-08-06 note below documents,
+       * running NEGATIVE for once: `.api-browser-list` is `overflow-y: auto` at
+       * `max-height: 520px`, 320px at the narrow breakpoint (`screens.css:2021` and
+       * `:2959`), over a list far taller. axe judges only the rows inside the box, and
+       * two new rows shift which rows those are. The displaced nodes are still painted,
+       * still reachable by scrolling and still failing — they are merely no longer
+       * JUDGED.
+       *
+       * WHY A NEW ROW SUBTRACTS HERE, when the 2026-08-06 note measured a new row
+       * ADDING. Rows are not worth the same. A GET row contributes TWO failing nodes:
+       * the `--verified-text` #2f7d78 method chip (4.2:1) and the `--text-tertiary`
+       * #78838f summary (3.85:1). A POST row contributes ONE — its chip is
+       * `--action-hover` #21568f on `--action-tint` #e8f0f8, which PASSES AA, and the
+       * corroboration is in this entry's own `foregrounds` list: both GET-row colours
+       * are recorded there and #21568f is not. Both new operations are POSTs tagged
+       * `Experiments` — tag rank 1 of 15 — so they insert HIGH in the list and push GET
+       * rows off the bottom of the clip. One GET out, one POST in is -2 + 1 = -1; two
+       * GETs out, two POSTs in is -4 + 2 = -2. That is exactly the observed -1 at five
+       * viewports and -2 at the two narrow ones, where the 320px box holds fewer rows.
+       *
+       * INFERRED, AND FLAGGED AS SUCH: that per-row arithmetic is read off the
+       * stylesheet and the `foregrounds` list, NOT re-measured in a browser — nobody
+       * repeated the 2026-08-06 A/B here, and which rows sit on the clip boundary at
+       * each width is unmeasured. What IS measured is the git evidence above and the
+       * seven CI numbers themselves; the arithmetic only has to explain them, and does.
+       *
+       * NOT A DEFECT WEARING AN IMPROVEMENT'S CLOTHES — checked deliberately, because
+       * a count that falls because content vanished is the one thing that must never be
+       * baselined. Nothing on this screen became hidden, collapsed, `display: none`,
+       * virtualised or conditionally unrendered: no frontend file changed, and no
+       * operation was removed from the contract. The scroll clip is PRE-EXISTING and
+       * unchanged, and its cost is a coverage limitation this file has recorded since
+       * 2026-08-06, not something this branch introduced.
+       */
+      'settings-explorer@desktop-1280x800': { darwin: 48, linux: 47 },
+      'settings-explorer@laptop-1024x768': { darwin: 49, linux: 47 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -727,7 +809,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // note above the desktop entry: the linux +1 is this branch's five new
       // operations shifting the scroll clip; the darwin +2 is a stale column,
       // A/B-measured as already 64 on `b7792c1`.
-      'settings-explorer@tablet-768x1024': { darwin: 64, linux: 63 },
+      'settings-explorer@tablet-768x1024': { darwin: 64, linux: 62 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -779,8 +861,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // tablet entry above; read that note, including its "darwin-measured only"
       // caveat. `zoom-200` and the two wide projects did NOT move: the new row
       // falls outside the measured window at those widths.
-      'settings-explorer@mobile-375x812': 55,
-      'settings-explorer@zoom-200': 58,
+      'settings-explorer@mobile-375x812': { darwin: 55, linux: 54 },
+      'settings-explorer@zoom-200': { darwin: 58, linux: 57 },
       'settings-privacy@desktop-1280x800': 8,
       'settings-privacy@laptop-1024x768': 8,
       'settings-privacy@tablet-768x1024': 8,
@@ -1065,8 +1147,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'settings-about@width-390': 14,
       'settings-api@width-320': 17,
       'settings-api@width-390': 17,
-      'settings-explorer@width-320': 56,
-      'settings-explorer@width-390': { darwin: 58, linux: 56 },
+      // linux 56 -> 54 on BOTH, 2026-08-10, CI run 31446324340. The two narrow widths
+      // move by 2 where the five wide ones move by 1 — see the RUN OVERRIDE ROUTES
+      // note above `settings-explorer@desktop-1280x800` for the cause (two new API
+      // operations shifting a 320px scroll clip) and for why `width-320` had to split
+      // rather than have its scalar lowered onto an unmeasured darwin.
+      'settings-explorer@width-320': { darwin: 56, linux: 54 },
+      'settings-explorer@width-390': { darwin: 58, linux: 54 },
       'settings-privacy@width-320': 7,
       'settings-privacy@width-390': 7,
       'settings@width-320': 15,
@@ -1650,8 +1737,36 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // arithmetic is a RECONCILIATION of a number the suite computed, not the source of
   // it: the first attempt at this constant wrote 2162 for linux and the
   // well-formedness test rejected it with the correct figure.
+  //
+  // ── 2026-08-10, RUN OVERRIDE ROUTES: linux 2161 -> 2152. darwin DOES NOT MOVE ──
+  //
+  // -9, entirely from the seven `settings-explorer` cells CI lowered on this branch
+  // (-1 desktop, -1 laptop, -1 tablet, -1 mobile, -1 zoom-200, -2 width-320,
+  // -2 width-390). See the note above `settings-explorer@desktop-1280x800` for what
+  // was measured and what is inferred.
+  //
+  // darwin stays 2162 BECAUSE NOT ONE DARWIN NUMBER CHANGED. All seven cells are now
+  // `{ darwin, linux }` pairs whose darwin side is the previously-measured figure
+  // carried forward untouched — four of them were scalars and had to SPLIT, since a
+  // scalar asserts both columns and no run has measured darwin at this commit. This
+  // is the case the entry note two-thirds up this file prescribes verbatim: "split
+  // the entry into `{ darwin: n, linux: <measured> }` and do NOT change the darwin
+  // value to match".
+  //
+  // THE PARAGRAPH DIRECTLY ABOVE IS NOW SUPERSEDED, and is left standing because
+  // deleting it would hide that the shape of this file changed. "SIX entries are
+  // per-platform and they net to +1" was true at `1eae5db`'s parent; there are now
+  // TEN and they net to +10, which is exactly 2162 - 2152:
+  //   `settings-explorer` desktop { 48, 47 } +1, laptop { 49, 47 } +2,
+  //   tablet { 64, 62 } +2, mobile { 55, 54 } +1, zoom-200 { 58, 57 } +1,
+  //   width-320 { 56, 54 } +2, width-390 { 58, 54 } +4 — against
+  //   `memory-graph@zoom-200` { 21, 22 } -1, `validator@zoom-200` -1 and
+  //   `load@width-390` { 1, 2 } -1.
+  // Reconciliation again, not derivation: 2152 is the reduction's own output, read
+  // by running the same per-platform sum `specs/a11y-axe.spec.ts` performs over the
+  // edited map. Re-derive it; do not trust this sentence.
   darwin: 2162,
-  linux: 2161,
+  linux: 2152,
 };
 
 /**
